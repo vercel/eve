@@ -24,6 +24,7 @@ import {
   unsetEnvVars,
 } from "./extension/subagents/agent/tools/registry_add.js";
 import { clearRegistryIndexCache } from "./extension/subagents/agent/tools/search_registry.js";
+import { productionRegistryAddTool } from "./remote/subagents/agent/tools/registry_add.js";
 
 const APP_ROOT = "/workspace/agent";
 const originalEveDev = process.env.EVE_DEV;
@@ -160,17 +161,12 @@ describe("resolveRegistryAddTool", () => {
   });
 
   it("resolves the deployed lifecycle with continuation arguments and outcomes", () => {
-    delete process.env.EVE_DEV;
-
-    const tool = resolveRegistryAddTool({
-      localEnabled: true,
-      deployed: {
-        authorize: () => true,
-        credentials: { kind: "pat" },
-        directory: ".",
-        repository: { owner: "acme", repo: "agent" },
-        targetBranch: "main",
-      },
+    const tool = productionRegistryAddTool({
+      authorize: () => true,
+      credentials: { kind: "pat" },
+      directory: ".",
+      repository: { owner: "acme", repo: "agent" },
+      targetBranch: "main",
     });
 
     expect(tool).toMatchObject({
@@ -239,8 +235,9 @@ describe("addLocalRegistryItem", () => {
     });
 
     expect(result.nextCommand).toBeUndefined();
-    expect(result.message).toContain("setup panel");
-    expect(result.message).toContain("do not ask the developer to run another command");
+    expect(result.message).toContain("has not been installed yet");
+    expect(result.message).toContain("opens after this reply");
+    expect(result.message).toContain("Do not ask the developer to run another command");
   });
 
   it("installs an exact item from a configured registry without restricting its address", async () => {

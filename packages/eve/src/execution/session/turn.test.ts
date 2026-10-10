@@ -4,6 +4,7 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
+import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { turnStep } from "#execution/session/turn-step.js";
@@ -105,6 +106,29 @@ const dispatchWork = stepWork<
 const routeWork = stepWork<Parameters<typeof routeDeliverToChildren>[0], RoutedDeliverResult>;
 
 describe("SessionExecution checkpoints", () => {
+  it("uses prepared cancellation and steering controls for the first step", async () => {
+    const control = createTurnControl();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          expect(input.abortSignal).toBe(control.cancellation.signal);
+          expect(input.steeringSignal).toBe(control.steering.signal);
+          return {
+            action: "done",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+
+    await createExecution({ inbox: idleInbox(), sessionState: state("") }).runTurn(undefined, {
+      control,
+    });
+
+    expect(turnStep).toHaveBeenCalledOnce();
+  });
+
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox = idleInbox();
     let signal: AbortSignal | undefined;
@@ -987,7 +1011,7 @@ describe("SessionExecution checkpoints", () => {
           action: "park",
           hasRunsToDispatch: false,
           pendingCoordinationCallIds: ["wait-call"],
-          pendingTaskToolCalls: [{ callId: "wait-call", kind: "task_wait" }],
+          pendingTaskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
           serializedContext: {},
           sessionState,
         })),
@@ -1011,7 +1035,7 @@ describe("SessionExecution checkpoints", () => {
       expect.anything(),
       expect.objectContaining({
         callId: "wait-call",
-        toolName: "task_wait",
+        toolName: "eve__task_wait",
         failed: true,
         startedAtMs: expect.any(Number),
         completedAtMs: expect.any(Number),
@@ -1255,7 +1279,7 @@ describe("SessionExecution checkpoints", () => {
           action: "park",
           hasRunsToDispatch: false,
           pendingCoordinationCallIds: ["wait-call"],
-          pendingTaskToolCalls: [{ callId: "wait-call", kind: "task_wait" }],
+          pendingTaskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
           serializedContext: {},
           sessionState,
         })),

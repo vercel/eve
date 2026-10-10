@@ -1,3 +1,4 @@
+import type { PromptQueueState } from "#channel/prompt-queue.js";
 import {
   githubContinuationToken,
   type GitHubCiEvent,
@@ -23,7 +24,7 @@ import {
  * null. The default `turn.started` handler fills them in once it checks out
  * the repository, which is why the fields are mutable.
  */
-export interface GitHubChannelState {
+export interface GitHubChannelState extends PromptQueueState {
   baseRef: string | null;
   baseSha: string | null;
   checkoutPath: string | null;

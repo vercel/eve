@@ -47,9 +47,8 @@ describe("development extensions", () => {
     expect(subagent.agent.tools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["edit_file", "search_models", "search_registry"]),
     );
-    expect(subagent.agent.dynamicTools.map((tool) => tool.slug)).toEqual(
-      expect.arrayContaining(["publish", "registry_add"]),
-    );
+    expect(subagent.agent.dynamicTools.map((tool) => tool.slug)).toContain("registry_add");
+    expect(subagent.agent.dynamicTools.map((tool) => tool.slug)).not.toContain("publish");
     expect(subagent.agent.dynamicInstructions).toHaveLength(1);
 
     const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
@@ -61,7 +60,9 @@ describe("development extensions", () => {
       manifest: compiled,
       moduleMapPath: "/virtual/source-test/.eve/compile/module-map.mjs",
     });
-    expect(generated).toContain("eve/self-modification?eve-mount=extensions%2Fself-modification");
+    expect(generated).toContain(
+      "eve/self-modification/local?eve-mount=extensions%2Fself-modification",
+    );
   });
 
   it("does not replace an authored self-modification mount", async () => {

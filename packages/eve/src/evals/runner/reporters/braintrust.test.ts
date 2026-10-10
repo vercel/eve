@@ -55,6 +55,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
           },
         ],
         toolCallCount: 1,
+        skillLoads: [],
         subagentCalls: [],
         subagentCallCount: 0,
         inputRequests: [],

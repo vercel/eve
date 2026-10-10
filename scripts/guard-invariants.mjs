@@ -393,7 +393,7 @@ const PROVIDED_TOOL_EXTRA_IMPORTS = new Set([
   "#tools/schema.js",
 ]);
 
-// `task_wait` and `task_cancel` belong to the session, not to authors: they
+// `eve__task_wait` and `eve__task_cancel` belong to the session, not to authors: they
 // take their model text from execution/tasks/render.ts directly.
 const PROVIDED_TASK_TOOL_FILES = new Set([
   "packages/eve/src/tools/provided/task-cancel.ts",
@@ -1223,10 +1223,6 @@ async function checkFrameworkActionIdentity() {
   for (const root of roots) {
     for await (const file of walkFiles(join(REPO_ROOT, root))) files.push(file);
   }
-  files.push({
-    absPath: join(REPO_ROOT, "packages/eve/src/execution/tools/connection-tools.ts"),
-    relPath: "packages/eve/src/execution/tools/connection-tools.ts",
-  });
   for (const { absPath, relPath } of files) {
     if (!absPath.endsWith(".ts") || absPath.endsWith(".test.ts")) continue;
     const source = await readFile(absPath, "utf8");

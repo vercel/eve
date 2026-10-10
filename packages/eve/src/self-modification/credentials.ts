@@ -1,4 +1,4 @@
-import type { GitHubCredentialProvider, ResolvedGitHubCredentials } from "./config.js";
+import type { GitHubCredentialProvider, ResolvedGitHubCredentials } from "./remote/config.js";
 
 export const SELF_MODIFICATION_GITHUB_TOKEN_ENV = "EVE_SELF_MODIFICATION_GITHUB_TOKEN";
 

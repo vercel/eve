@@ -178,7 +178,7 @@ A mount gives the extension's contributions a namespace. Updating the package up
 
 ### Install the package
 
-Install the extension with the package manager already used by the consumer's agent project. Fresh eve projects use pnpm:
+Install the extension with the package manager already used by the consumer's agent project. For example, in a pnpm project:
 
 ```bash
 pnpm add @acme/crm
@@ -197,6 +197,8 @@ export default crm({ apiKey: process.env.CRM_API_KEY! });
 Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
 
 The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their declared route paths, and schedules keep their cron expressions.
+
+Do not mount an extension under the name of one of the agent's connections. A [connection owns](/docs/connections) every name that starts with `<name>__`, so the compiler rejects the mounted tools and subagents. Nor can a mount be named `eve`: eve reserves that namespace for its [built-in tools](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill).
 
 For an extension with no configuration, mount its default export directly:
 

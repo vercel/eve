@@ -1,5 +1,144 @@
 # eve
 
+## 0.76.1
+
+### Patch Changes
+
+- fcbd479: A denied tool approval that carries `text` now passes that note to the model in the denial reason instead of dropping it.
+- 9626748: Use build-stamped package metadata in bundled runtimes so serverless functions can start without resolving `eve/package.json` at runtime.
+- 25b3f35: `/login chatgpt` now lists current subscription models such as `gpt-6-luna`, and the default `chatgpt()` model (`gpt-6-luna-fast`) works: eve sends it to Codex as `gpt-6-luna` on the priority service tier, since Codex rejects `-fast` model IDs.
+- 416e63e: Direct OpenAI and `chatgpt()` model calls now send a per-session `promptCacheKey`, which helps OpenAI route a session's calls to the cache holding its prompt prefix. `chatgpt()` calls also send it as the `session-id` header the Codex backend routes on. An authored `providerOptions.openai.promptCacheKey` still takes precedence.
+- b04acbb: On worlds without per-deployment routing, incompatible subagent sessions and workflow tool runs (including tasks) are now cancelled when their queue deliveries arrive, instead of attempting replay on the new eve version. Top-level sessions remain available for replacement or reset, and session timeout workflows continue to run.
+- b04acbb: Sessions whose workflow run cannot execute after an eve upgrade (a stranded session) are no longer accepted and left unanswered, and the local World and Postgres stop replaying and failing them with `CORRUPTED_EVENT_LOG`. eve treats every World other than Vercel as running one eve version at a time, so the next message through a channel address (Slack, `from(address).send()`) ends a stranded session and starts a fresh one. Sends by session ID throw `SessionStrandedError` (`ClientSessionStrandedError` in `eve/client`), and the eve HTTP channel returns `409 session_stranded`; `reset()` ends a stranded session while `clear()` refuses one, and recorded history stays readable with `stream({ follow: false })` or `follow=false` on the stream route. On Worlds other than Vercel, a retired session's own session timeout now ends it at its deadline, so a retired session no longer stays active forever when no message arrives.
+- cf72486: Agents whose OpenAI model is served by an endpoint without OpenAI web search, such as Amazon Bedrock through `createOpenAI({ baseURL })` or AI Gateway, now retry the step without `web_search` instead of failing every turn.
+
+## 0.76.0
+
+### Minor Changes
+
+- 8c55ea7: Skills now load through `eve__skill({ name })`, which every agent with a skill has in place of `load_skill`, and a skill with `deferred: true` (in `SKILL.md` frontmatter or on `defineSkill`, static or dynamic) leaves the system prompt and is found with `eve__search` instead.
+  
+  - The `load_skill` tool and the `eve/tools/load_skill` export are removed. Delete any `agent/tools/load_skill.ts` override or approval policy that names it; an authored `agent/tools/load_skill.ts` is now an ordinary tool.
+  - A skill load's `load-skill` action now carries the skill's `name`, and its `input` is the model's `{ name }` instead of `{ skill }`. Its result is a `load-skill-result` with the same `name` instead of a `tool-result` named `load_skill`. Its client message part has the `toolName` `eve__skill` instead of `eve:load-skill`, with the skill's name in `toolMetadata.eve.name`. Sessions recorded by earlier versions replay with `name` filled in from `input.skill`.
+  - Eval facts report skill loads in `skillLoads`, which `t.loadedSkill` reads. They no longer count toward `toolCallCount`, `usedNoTools`, or `maxToolCalls`.
+  - Skill names must use only ASCII letters, digits, underscores, and dashes, start with a letter or digit, and have at most 64 characters. The compiler rejects a static skill with another name, and eve skips a dynamic skill resolver that returns one.
+- 8c55ea7: An agent with deferred entries or connections now has `eve__search` to find tools marked `deferred: true`, agents marked `tool: "deferred"`, and every connection tool, and `eve__tool` to call them, without growing the model's tool list. An agent with skills has `eve__skill` to load them, and `eve__search` also finds deferred skills. An agent with none of these gets no catalog tools, so its tool list is unchanged apart from `load_skill` becoming `eve__skill`. They replace `connection_search` and `connection_execute`, and stream events, approvals, hooks, and traces now name each connection tool call `<connection>__<tool>`. `eve__search` never asks the user to sign in: it lists a connection that needs sign-in under the connection's own name, and `eve__tool` on that name, such as `eve__tool({ name: "linear" })`, asks the user to sign in. `eve__search` takes a required `query`; a query such as `linear__` searches only that connection's tools.
+  
+  Breaking changes:
+  
+  - The tools eve adds itself now live in the `eve` namespace: `task_wait` is `eve__task_wait`, `task_cancel` is `eve__task_cancel`, and `final_output`, the tool a session with an output schema calls to deliver its structured result, is `eve__reply`. The catalog tools are `eve__search`, `eve__tool`, and `eve__skill`. Update evals, approval policies, hooks, and channel code that match `task_wait`, `task_cancel`, or `final_output` by name. A turn held on `task_wait` when you upgrade stays held until the next message or a cancel.
+  - eve reserves the `eve` namespace. A tool, subagent, skill, connection, or extension mount named `eve` or starting with `eve__` now fails to build, or fails when the agent loads or a dynamic entry resolves; rename it. `search`, `execute`, `task_wait`, `task_cancel`, and `final_output` are ordinary names again.
+  - A connection owns its name and every name starting with `<name>__`. A tool, subagent, or connection under another connection's prefix is rejected at build time, and a dynamic one when it resolves.
+  - Dynamic tool map keys must be legal tool names: ASCII letters, digits, `_`, and `-`, starting with a letter, up to 64 characters.
+  - Connection approvals are keyed by `<connection>__<tool>` instead of a `[connection, tool]` pair, so saved "always approve" decisions for connection tools reset.
+  - A `connection_execute` call still waiting for approval when you upgrade fails when someone answers it, with "The tool "connection_execute" is no longer available, so the call didn't run."
+  - Eval tool-name helpers (`calledTool`, `notCalledTool`, `toolOrder`, and `requireToolCall`) now throw, saying what to assert instead, for `eve__tool` and `eve__skill`, whose calls are reported under the entry they reach and as skill loads, and for a retired eve tool name (`load_skill`, `task_wait`, `task_cancel`, `final_output`, `connection_search`, `connection_execute`) unless the root agent declares a tool by that name or has a dynamic tool resolver. Before, `notCalledTool` on one of these names always passed. `usedNoTools` and `maxToolCalls` count `eve__search` calls; skill loads no longer do.
+  - Removed: the `parentCallId` field on `tool-call` actions in `actions.requested` events, and the `agent.action.parent_call_id` span attribute. The subagent `parentCallId` on `session.started` invocation metadata is unchanged.
+- 2cc43ca: GitHub work moves out of `eve/extensions/code` into a new built-in extension, `eve/extensions/git`. The code extension used to tell every agent that "GitHub credentials are not available to ordinary `bash`" and to route GitHub work through its `gh` tool, which only works with Connect-brokered `github` config. Agents whose shell already has `gh` credentials were steered to a tool that could not authenticate.
+  
+  `git({})` adds the GitHub instructions and a `git__pr` skill that commits, pushes, and opens a draft with the shell's `gh pr create --draft`. `git({ github })` adds the Connect-brokered `git__gh` tool and switches `git__pr` to the signed-commit workflow. The tool and sandbox helpers are exported from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`.
+  
+  Deprecated: `code({ github })`. While it is set, the code extension still contributes `code__gh`, its GitHub instructions, and the signed-commit `code__pr` skill. Without it, `code({})` no longer contributes `code__gh`, `code__pr`, or any GitHub instructions; mount `eve/extensions/git` for the pull request skill. `gh` from `eve/extensions/code/tools` and the GitHub shell helpers from `eve/extensions/code/sandbox` still work but are deprecated.
+- 14f2af0: Add dynamic schedule updates for timing and complete payload replacement, with prepared-payload approval for model calls. Payload replacement makes the updating caller the new creator; custom schedule providers must implement `update`, and `preparePayload` now receives a `create` or `update` operation.
+- 0ef5c4c: `eve add channel/slack` now resumes interrupted setup, reopens workspace installation for existing connectors, fixes stale routes without detaching, and avoids sharing a Slack app with another project or creating one with a taken name. The `eve/setup` Slack provisioning API now takes a connector selection from `inspectSlackbotConnectors` rather than inspecting a second time; a failed Vercel create reports its original error instead of a misleading cleanup failure.
+
+### Patch Changes
+
+- 32aaf68: Accept create-session responses from remote agents on eve 0.66–0.68 (protocol 1). A newer parent no longer fails a call that the older remote already accepted and is running.
+- 8c55ea7: Catalog calls now read as what happened: `eve__search` shows `Search tools for “linear issues”` and then how much it found, a skill load shows `Load skill <name>` and then `Loaded skill <name>`, and a connection's sign-in entry shows `Sign in to Linear`. Linear activities, Chat SDK typing indicators, and ACP tool calls now show each call's label instead of its raw tool name, and `eve/client` tool parts carry that text as `toolMetadata.eve.label`.
+- 47f1f18: `grep` and `apply_patch` in `eve/extensions/code` now work in sandboxes whose workspace is not `/workspace`, such as `/app`. `apply_patch` no longer requires a git checkout: `root` is optional and defaults to the workspace root, and outside git it still reports whitespace problems the patch introduced. It also accepts unified-diff range headers such as `@@ -118,8 +118,8 @@ def second():`, using the function context to pick between identical blocks.
+- afe7058: `eve__tool` now runs a tool from the agent's tool list, other than eve's own catalog and task tools and tools a provider or client runs, instead of returning an error, so a model that routes a listed tool through it no longer wastes a step.
+- f8ea556: `webSearch({ provider: "native" })` uses the model vendor's own hosted search for AI Gateway models: OpenAI web search for OpenAI models, Anthropic web search for Anthropic models, and Google Search grounding for Gemini 3 and later, instead of Exa. Other Gateway models don't get `web_search` with this setting unless you set `fallback`, for example `webSearch({ provider: "native", fallback: "exa" })`. Gemini models before Gemini 3, including direct ones, no longer get Google Search, which made the model drop every other tool.
+- 73adcdf: Dynamic schedules now use Vercel's local scheduler and queue delivery under `vc dev`, so cron and one-time occurrences fire automatically. The local consumer loads only for Vercel-backed dynamic collections; standalone `eve dev` keeps its in-memory scheduling backend.
+- f15eaa6: Remove the stream-writer WebSocket default added in 0.73.0, which never took effect. Behavior is unchanged.
+- 192732a: Remote-agent create requests now report that work may have completed when a successful response has an incompatible protocol or unreadable body. These failures stop automatic workflow retries, and protocol mismatches include the remote session ID for checking the outcome.
+- c25caf3: Datadog Experiment reports now link each eval to its sampled runtime traces using Datadog-indexed IDs. Linked traces include classified structural spans and, when capture is enabled, turn-level task input and output; zero-duration Experiment spans are normalized to a positive duration. Canonical runtime spans remain unchanged.
+
+## 0.75.1
+
+### Patch Changes
+
+- 6189eea: Context compaction now calls its model the way a step does: it streams the summary, retries transient provider failures with the same policy, and counts the summary call's tokens and cost toward session usage limits. Automatic compaction reports that usage with the turn it ran in. Manual compaction runs between turns, so it counts toward session totals without being added to the next turn's usage.
+- 8c7bb64: Provider options, web search, and prompt caching now read one description of the resolved model. A dynamically selected model gets provider-specific options, such as OpenAI and Anthropic safety identifiers, for the model actually called rather than its catalog id.
+- 30c88ee: Configure 100% trace sampling when eve creates a Vercel project during `eve link`, `eve deploy`, or integration setup, so traces appear in Agent Runs. Existing projects keep their sampling settings, and `eve deploy --no-trace-sampling` still skips configuration.
+- eb06c04: The `/add` picker and `eve registry list` now load the full official registry, so instrumentation items (Braintrust, PostHog, Sentry, and others) appear again instead of being cut off after the first 100 entries.
+- 13059ba: Session stream requests now open the event stream while the tail index lookup is in flight, and the event stream reads its durable source only as fast as the client consumes it instead of buffering the whole history in memory.
+- ee4b14f: Generated Web Chat apps now render `ask_question` prompts with the shadcn `Questionnaire` component from `@shadcn/react`. Pick an option by clicking it or pressing its number, or type your own answer, then submit with Answer or Enter.
+- a4d38b3: Update eve's bundled Workflow SDK packages to the stable 5.2 release family.
+
+## 0.75.0
+
+### Minor Changes
+
+- 32af96d: Rename custom sandbox provider handle hooks from `onSessionStop()` and `onSessionDelete()` to `onSandboxStop()` and `onSandboxDelete()` so handle lifecycle names describe the sandbox resource they operate on.
+
+### Patch Changes
+
+- 84793ed: Schedule creation no longer accepts an initial state: schedules are created active by default (or completed if a one-time schedule is already past). Use the existing enable and disable operations to change a schedule's state after creation.
+- a3c2f40: Add explicitly authorized, session-scoped JSON tool stubs with argument matching and outcome sequences that continue across turns within the same session. Each rule specifies `outcome` or nonempty `outcomes`, with a JSON `response` in each outcome; eve's internal workflow recovery reuses recorded outcomes without consuming another entry.
+  
+  Rules use first-match-wins ordering and explicit slash-separated paths for local child tools. Grant replacement permission on individual `vercelOidc` subject entries or in a custom authenticator's result; existing sessions follow normal channel authentication.
+  
+  Invalid static tool paths and unsupported matcher features fail session creation. Unused rules produce eval warnings. Deployment handoffs use a new checkpoint version for all sessions, so sessions cannot hand off to deployments running an older version.
+- 20c1317: Keep a tool approval answered before a cancelled response resolved, instead of restoring it and resolving it again on the next message. An approved call the cancellation interrupts while it runs gets an interrupted result and is not run again, and a message sent with the answer is kept once.
+- 04d47bc: A typed reply now answers a tool approval or session-limit prompt proxied from a subagent, the same way it answers a subagent's `ctx.ask()` question. On text-only channels such as Linq, Twilio, and Linear, replying `approve` or `continue` resumes the subagent instead of reaching the parent model while the subagent stays parked. When a subagent raises several prompts at once, each reply answers the first open one.
+- bf82cfa: Keep conversation sessions available after a dynamic connection resolver fails, so a later message can retry once the dependency recovers.
+- 89704cb: When a registry item's setup needs a logged-in Vercel CLI, `/add` in `eve dev` now offers to run `vercel login` and then finishes setup without reinstalling the item. Items whose setup fails after their files are installed now show as "setup not finished" with the reason, instead of "Couldn't add". `eve add --non-interactive` reports a `vercel login` prerequisite (exit 2) instead of a raw `vercel connect` failure. eve now detects a logged-out Vercel CLI from `vercel whoami --format json`, so newer CLIs that print only "Logged out." are no longer misreported as a transient error. The self-modification agent no longer describes an item as added before its setup panel has run.
+- 6ab30a5: A subagent's tool approval now stays open on the parent until the subagent settles it. If the subagent's response policy refuses the person who answered, someone else can still answer it, by text or button, instead of the prompt disappearing while the subagent waits. The parent closes the prompt when it relays the subagent's own `input.resolved`, so channels such as Telegram and Discord clear its buttons.
+- 33a95cf: Invoke sandbox provider cleanup when a durable session completes, expires, or fails. Custom providers can implement `onSessionEnd()` to release session-owned resources directly from persisted state.
+- 1cfb212: Tool stubs can now throw an error immediately or mix errors and responses in an outcome sequence. Evals can assert expected tool failures and recovery without treating injected errors as broken stubs.
+
+## 0.74.0
+
+### Minor Changes
+
+- bc101b5: Add experimental `defineDynamicSchedules` with direct operation tools, optional `preparePayload` creation preparation, top-level per-operation approval, and creator-bound execution. Create approval receives prepared data and rejects changed results before writing; `ctx.session.schedule` exposes scheduled-turn provenance without auth attributes.
+
+### Patch Changes
+
+- 51648e3: Manual compaction now resolves step-scoped dynamic models before summarizing a session.
+- 880dd8b: Record offered tool definitions on GenAI chat spans and expose them to lifecycle handlers when input capture is enabled.
+- f528669: Settle tool calls when a model call is retried and remove unresolved tool parts when a turn ends.
+- 8751775: The experimental Vercel schedule provider includes Schedules SDK alpha.11 in the published package without adding a runtime dependency. Provider requests receive the operation's abort signal, and failed disable calls after inactive creation report that the schedule may remain active.
+- b9470fe: `Shift+Enter` now inserts a newline in the `eve dev` prompt in Warp, which sends a bare line feed for it. `Ctrl+J` inserts a newline too, instead of sending the message.
+- 8751775: Schedule subscriptions default to Vercel Schedules in production and process-local storage under `eve dev`, so an explicit `provider` is no longer required. Pass a provider to override the backend, or use `vercelScheduleProvider` from `eve/experimental/schedules/vercel` to customize the Vercel endpoint.
+- 0b5bb5b: Workflow tools in an `agents/<name>/` workspace member now compile with the workflow ID that the deployment registers, so calls no longer fail with "is not registered as a workflow in this deployment". Members can also import workflow and step modules from the shared root package, such as `lib/`, and `eve dev` rebuilds when shared modules imported from outside the agent directory change.
+
+## 0.73.0
+
+### Minor Changes
+
+- 9de88f7: Split self-modification into separate `eve/self-modification/local` and `eve/self-modification/remote` mounts, so `eve dev` no longer loads deployed sandbox dependencies. `eve/self-modification` remains an alias for the local mount and now rejects the `deployed` option; move that configuration to its own mount, for example `agent/extensions/self-modification-remote/extension.ts`, with the former `deployed` fields at the top level.
+
+### Patch Changes
+
+- a549cb6: Enable Workflow stream-writer WebSockets for eve's Vercel world. The upgraded SDK disposes released and aborted writer sessions, and falls back to HTTP when the server declines a WebSocket upgrade.
+- 83b97e6: Chat SDK channels now send a sign-in started in a shared thread to the person signing in, as an ephemeral message or a direct message, and show a link-free status in the thread. Adapters that support neither still post the existing "continue in a direct message" notice.
+- 7c60065: Discord button presses, selects, and modal submissions now answer as the Discord user who made them instead of anonymously, so requester-only and other approval response policies work on Discord. The new `onInputResponse` option on `discordChannel` chooses an answer's auth or drops it, and its context carries the presser's `defaultAuth`. Apps with a custom `onCommand` must also set `onInputResponse`; until they do, eve drops presses and logs a warning.
+- 90972b6: Start the first model call without waiting for session-title metadata persistence, while still completing the title write before the durable turn step finishes.
+- 933996c: `invokeTool` now accepts a `key`: calls from the same caller with the same key share one session id and keep their sandbox between calls, on Vercel Sandbox and just-bash. `mcpChannel({ tools: true })` advertises the `dev.eve/tool-sessions` extension, so MCP clients that declare it can join a tool session with `_meta["dev.eve/tool-session"]`. A forwarded caller's session also covers the verified forwarder, passed as `invokeTool`'s `forwardedBy` (`mcpChannel` passes the router its `auth` verified), so one user reached through two routers gets two sessions. Tool sessions need an authenticated caller: a keyed call from the anonymous principal `none()` gives is denied. On Vercel Sandbox, a tool session's saved filesystem expires a day after its last use, so the next call with the key starts a fresh sandbox; a deploy that changes the agent's sandbox definition also starts a fresh sandbox for each key.
+- 279e2b6: `mcpChannel({ skills: true })` serves the agent's skills as SEP-2640 skills under `skill://`, with each file's size and SHA-256 digest. Files are served byte for byte, except that a `SKILL.md` without conforming `name` and `description` frontmatter is served with generated frontmatter. Channel routes also get `listSkillFiles(skill)`, which lists a skill's files with their sizes, and `readSkill(skill, path?)`, which returns one skill file's bytes; `describe()` lists each skill's name and description.
+  
+  Production builds now ship skill files as eve-owned server assets and drop Nitro's default `server` asset entry, which bundled the app's `assets/` directory. An app that read `assets:server` storage in production finds it empty; eve reads only its own asset bases.
+- 866cb41: Tools published with `mcpChannel({ tools: true })` can now run as the user a trusted caller forwards. Set `trustedForwarders` on the channel to accept the `eve-forwarded-principal` header, and `forwardPrincipal: true` on a `defineMcpClientConnection` to send the turn's user to another eve agent. A channel without `trustedForwarders` refuses requests carrying the header with `403`. `invokeTool` also accepts an `initiator` option.
+- 282802a: Reduce new-session startup latency by overlapping session creation with timeout startup and first-turn cancellation and steering hook registration after inbox ownership is ready.
+- 64301d1: Remote evals now resolve Vercel deployments using the owner and project from the environment or local project link, allowing protected deployments owned by a different team than the CLI's current team. Ambient credentials are withheld when the deployment does not match the expected project.
+- f8bf204: Add the Sanity MCP integration to the registry. Use `eve add connection/sanity` to connect an existing Sanity account through Vercel Connect OAuth.
+- 0d6e2e2: `eve add` and `eve registry` now use `@shadcn/registry` instead of the full `shadcn` CLI package. The vendored registry bundle shrinks from 9.7 MB to 3.8 MB, and registry items install the same files, env vars, and dependencies as before.
+- 3c8919a: Slack `onInteraction` actions now include `triggerId`, so a button on a message can open a modal with `views.open`.
+- 17d5b11: When a turn waits on several questions or approvals, a typed reply now answers the first open one instead of none, so people can answer them one message at a time. Twilio, GitHub, Linear, and Chat SDK channels (including Linq and Photon) show one prompt at a time and post the next once it is answered. An approval raised alongside a workflow tool call such as `ask_question` is now requested after that call finishes, since it can't take effect before then.
+  
+  On Twilio, GitHub, and Linear, the built-in prompt queue spans the `input.requested`, `input.resolved`, and `approval.settled` handlers. If you override any one of them, override all three, or the built-in handlers will post prompts twice or stop posting later ones. If you render prompts yourself from `input.requested`, make `input.resolved` and `approval.settled` no-ops.
+- 7f559ac: The TUI now prints a connection sign-in URL on its own line and makes every wrapped row an OSC 8 hyperlink to the full URL, so Cmd-clicking the link opens the whole URL in a narrow terminal.
+- 17d5b11: Typing `approve` or `cancel` now answers a tool approval that has an `approval.response` policy. The policy checks the person who typed the reply, just as it checks someone who presses a button. Before, the reply reached the model as an ordinary message and the approval stayed pending.
+
+## 0.72.1
+
+### Patch Changes
+
+- c230e94: MCP connections now ask the user to sign in only when the server asks for it. When a connection has `auth` but no token yet, eve connects without an `Authorization` header, so servers that allow anonymous `initialize` and `tools/list` have their tools listed by `connection_search` and run by `connection_execute` with no prompt. Sign-in starts when a call returns HTTP `401` or an error result with a `_meta["mcp/www_authenticate"]` challenge, and the call runs again with the token once the user signs in. Servers that reject every request without a token behave as before, and connections that already have a token are unchanged.
+- e3c509f: `mockModel` responders see tool-result files again as `{ type: "file", data: { type: "data", data } }` parts in `toolResults[].output`. Since `ai@7.0.116`, they had received legacy `file-data` parts, so a scripted model that looked for an image from `toModelOutput` could miss it and keep calling the tool.
+
 ## 0.72.0
 
 ### Minor Changes

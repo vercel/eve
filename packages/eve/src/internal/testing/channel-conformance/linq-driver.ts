@@ -17,7 +17,8 @@ const SIGNING_SECRET = `whsec_${SIGNING_KEY.toString("base64")}`;
 const BASE_URL = "https://linq-conformance.invalid/api/partner";
 // Stands in for cdn.linqapp.com; `.invalid` never resolves, so nothing that bypasses the fake reaches the network.
 const CDN_HOST = "cdn.linq-conformance.invalid";
-const PERSON = "alice";
+// As on Linq, a handle's `id` is opaque; only `handle`, a phone number or email, can be messaged.
+const PERSON = { handle: "+15550100", id: "handle-alice" };
 let nextChat = 0;
 
 interface LinqPart {
@@ -64,7 +65,7 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
         direction: "inbound",
         id: `linq-inbound-${messageId}`,
         parts: [{ type: "text", value: text }, ...media],
-        sender_handle: { handle: PERSON, id: PERSON, is_me: false },
+        sender_handle: { ...PERSON, is_me: false },
       },
       event_type: "message.received",
     });
@@ -87,6 +88,7 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
 
   return {
     name: group ? "linq" : "linq-dm",
+    personId: PERSON.id,
     capabilities: ["attachments", "text-replies"],
     surface,
     createChannel(record) {
@@ -101,10 +103,20 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
           };
         }
         const bodyText = await request.text();
+        const body = bodyText === "" ? {} : (JSON.parse(bodyText) as { readonly to?: unknown });
+        // Starting a chat (`messages.create`) needs a handle Linq can reach.
+        if (Array.isArray(body.to) && body.to.some((to) => to !== PERSON.handle)) {
+          return {
+            body,
+            // Never delivered, so no reader takes it for a sent message.
+            method: `${request.method} ${url.pathname} (rejected)`,
+            response: Response.json({ error: "invalid recipient" }, { status: 400 }),
+          };
+        }
         outbound += 1;
         const id = `linq-outbound-${outbound}`;
         return {
-          body: bodyText === "" ? {} : JSON.parse(bodyText),
+          body,
           method: `${request.method} ${url.pathname}`,
           // The adapter reads the sent or edited message's id back to edit it later.
           response: { chat_id: chatId, id, message: { id } },
@@ -130,7 +142,7 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
     dispose() {
       restoreFetch?.();
     },
-    message: signedMessage,
+    message: (text, _person, files) => signedMessage(text, files),
     findOptions(call, prompt) {
       if (!call.method.endsWith("/messages") || !postedText(call)?.includes(prompt))
         return undefined;

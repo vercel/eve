@@ -1,19 +1,21 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
-import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
-import { HistoryStateKey } from "#context/keys.js";
+import { DynamicSkillManifestKey, HistoryStateKey } from "#context/keys.js";
+import { catalogAnnouncements } from "#execution/catalog/listing.js";
+import type { StepCatalog } from "#execution/catalog/step-catalog.js";
+import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
 import { taskSystemMessages } from "#execution/tasks/model-step.js";
-import { getPendingAnnouncements } from "#harness/announcements.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
 import {
   createFrameworkUserMessage,
   type HarnessModelMessage,
   type UserModelMessage,
 } from "#harness/messages.js";
-import { type AnthropicCacheMarker, applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
+import type { ModelProfile } from "#harness/model-profile.js";
+import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessSession } from "#harness/types.js";
 
 export type RequestMessages = ReturnType<typeof createCurrentMessages>;
 
@@ -28,7 +30,7 @@ export function requestMessages(
     readonly messages: readonly HarnessModelMessage[];
     readonly projectedMessages: readonly HarnessModelMessage[];
     readonly turnMessages: readonly UserModelMessage[];
-    readonly coordinationTools: HarnessToolMap;
+    readonly catalog: StepCatalog;
     readonly hidesHeldText: boolean;
     readonly pendingApprovalsNote: string | undefined;
   },
@@ -41,11 +43,12 @@ export function requestMessages(
   });
   if (ctx !== undefined) messages.addSystem(buildDynamicInstructionMessages(ctx));
   messages.addSystem(
-    taskSystemMessages(input.coordinationTools, { finalReplyOnly: input.hidesHeldText }),
+    taskSystemMessages(input.catalog.offersTasks, { finalReplyOnly: input.hidesHeldText }),
   );
+  const announced = ctx?.get(HistoryStateKey)?.announcements;
   messages.addAnnouncements({
-    availableSkills: ctx?.get(PendingSkillAnnouncementKey),
-    keyed: getPendingAnnouncements(ctx),
+    ...catalogAnnouncements(input.catalog, announced),
+    ...dynamicSkillAnnouncements(ctx?.get(DynamicSkillManifestKey), announced),
   });
   if (input.pendingApprovalsNote !== undefined) {
     messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });
@@ -57,7 +60,7 @@ export function requestMessages(
 export function modelInstructions(input: {
   readonly session: HarnessSession;
   readonly systemMessages: readonly SystemModelMessage[];
-  readonly marker: AnthropicCacheMarker | undefined;
+  readonly anthropicCache: ModelProfile["anthropicCache"];
   readonly extraSystemNote?: string;
 }): SystemModelMessage | string | undefined {
   const { session } = input;
@@ -72,7 +75,9 @@ export function modelInstructions(input: {
     : [];
   const instructions = [...extra, ...base, ...input.systemMessages];
   return mergeSystemInstructions(
-    input.marker ? applySystemCacheBreakpoint(instructions, input.marker) : instructions,
+    input.anthropicCache
+      ? applySystemCacheBreakpoint(instructions, input.anthropicCache)
+      : instructions,
   );
 }
 

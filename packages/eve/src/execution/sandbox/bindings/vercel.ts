@@ -50,8 +50,13 @@ import {
 } from "#execution/sandbox/bindings/vercel-options.js";
 import {
   isVercelSandboxMissingError,
+  isVercelSandboxNameConflictError,
+  isVercelSnapshotNotFoundError,
   isVercelSnapshotUnavailableError,
 } from "#execution/sandbox/bindings/vercel-errors.js";
+import { withToolSessionRetention } from "#execution/sandbox/bindings/vercel-tool-sessions.js";
+import { isToolSessionId } from "#execution/tool-session/id.js";
+import { withToolSessionSandboxes } from "#execution/tool-session/sandbox.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
   deleteUnusableVercelSandbox,
@@ -127,7 +132,11 @@ export function createVercelSandbox(
   ) {
     const artifact = requirePreparedVercelTemplate(artifactValue);
     const { mounts, ...runtimeOptions } = options ?? {};
-    const sessionCreateOptions = { ...createOptions, ...runtimeOptions };
+    const toolSession = isToolSessionId(context.session.id);
+    const authoredCreateOptions = { ...createOptions, ...runtimeOptions };
+    const sessionCreateOptions = toolSession
+      ? withToolSessionRetention(authoredCreateOptions)
+      : authoredCreateOptions;
     const tags = resolveVercelSandboxTags(sessionCreateOptions.tags, {
       sessionId: context.session.id,
     });
@@ -145,6 +154,8 @@ export function createVercelSandbox(
     try {
       session = await ensureSession(ensureSessionInput);
       session = await ensureUsableSession({
+        // Only an expired snapshot gives a tool session a fresh sandbox.
+        expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
         input: ensureSessionInput,
         loadDeleteSandboxModule,
         session,
@@ -193,7 +204,7 @@ export function createVercelSandbox(
     return handle;
   }
 
-  return {
+  const implementation: ReturnType<typeof createVercelSandbox> = {
     async prepare(context) {
       const seedFiles = providerResourceTargetFiles(context.resources);
       if (
@@ -253,6 +264,9 @@ export function createVercelSandbox(
       };
     },
   };
+  // `start` finds a session's sandbox by name, so keyed tool sessions can reuse it.
+  // A handle is only an SDK client, so a call that ends has nothing to free.
+  return withToolSessionSandboxes(implementation);
 }
 
 interface VercelSandboxTemplateRecord {
@@ -446,6 +460,7 @@ interface VercelSandboxSessionCreateResult {
 }
 
 async function ensureUsableSession(input: {
+  readonly expired: (error: unknown) => boolean;
   readonly input: EnsureSessionInput;
   readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly session: VercelSandboxSessionCreateResult;
@@ -454,16 +469,21 @@ async function ensureUsableSession(input: {
     await ensureVercelSandboxBaseRuntime(input.session.sandbox);
     return input.session;
   } catch (error) {
-    if (input.session.created || !isVercelSnapshotUnavailableError(error)) {
+    if (input.session.created || !input.expired(error)) {
       throw error;
     }
   }
 
-  await deleteUnusableVercelSandbox({
-    createOptions: input.input.createOptions,
-    loadDeleteSandboxModule: input.loadDeleteSandboxModule,
-    sandbox: input.session.sandbox,
-  });
+  try {
+    await deleteUnusableVercelSandbox({
+      createOptions: input.input.createOptions,
+      loadDeleteSandboxModule: input.loadDeleteSandboxModule,
+      sandbox: input.session.sandbox,
+    });
+  } catch (error) {
+    // Another instance that saw the same expiry deleted it first.
+    if (!isVercelSandboxMissingError(error)) throw error;
+  }
   const replacement = await ensureSession(input.input);
   await ensureVercelSandboxBaseRuntime(replacement.sandbox);
   return replacement;
@@ -488,13 +508,21 @@ async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSe
     createParams.tags = input.tags;
   }
 
-  return {
-    created: true,
-    sandbox: await input.createSandbox({
-      createOptions: createParams,
-      sandboxModule: input.sandboxModule,
-    }),
-  };
+  try {
+    return {
+      created: true,
+      sandbox: await input.createSandbox({
+        createOptions: createParams,
+        sandboxModule: input.sandboxModule,
+      }),
+    };
+  } catch (error) {
+    // Lookup-then-create is not atomic: another instance created the name first.
+    if (!isVercelSandboxNameConflictError(error)) throw error;
+    const winner = await getNamedVercelSandbox({ ...input, sandboxName });
+    if (winner === null) throw error;
+    return { created: false, sandbox: winner };
+  }
 }
 
 function createSessionCreateParams(
@@ -546,7 +574,7 @@ function createHandle(input: {
       createVercelInternalSandboxSession(sandbox),
       createVercelNetworkPolicySetter(sandbox),
     ),
-    async onSessionDelete(options) {
+    async onSandboxDelete(options) {
       await deleteVercelSandbox({
         createOptions: input.createOptions,
         loadDeleteSandboxModule: input.loadDeleteSandboxModule,
@@ -554,7 +582,7 @@ function createHandle(input: {
         signal: options?.abortSignal,
       });
     },
-    async onSessionStop() {
+    async onSandboxStop() {
       await stopVercelSandbox(sandbox);
     },
     async onRuntimeShutdown() {

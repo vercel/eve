@@ -5,6 +5,7 @@ import {
 import { listDevelopmentGenerationIds } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
 import { createWorld } from "#compiled/@workflow/world-local/index.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -297,9 +298,10 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       const run = await this.#world.runs.get(hook.runId, { resolveData: "none" });
       const availability = await this.#generationAvailability(run.deploymentId);
       if (availability.kind === "dormant" || availability.kind === "ineligible") {
-        throw new Error(
-          "Local Workflow run was not resumed. Start a new conversation, or restart eve dev with --resume to attempt recovery.",
-        );
+        throw new DevelopmentRunUnavailableError({
+          availability: availability.kind,
+          runId: hook.runId,
+        });
       }
       return hook;
     }

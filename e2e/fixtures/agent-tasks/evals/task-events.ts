@@ -7,7 +7,7 @@ import type {
 /**
  * Whether eve held the turn: the model ended a step with a reply while its
  * tasks worked, and the turn parked with `turn.waiting` instead of ending. A
- * `turn.waiting` after a `task_wait` call is the model waiting, not a hold.
+ * `turn.waiting` after a `eve__task_wait` call is the model waiting, not a hold.
  */
 export function heldTurn(events: readonly MessageStreamEvent[]): boolean {
   let replied = false;

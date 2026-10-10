@@ -83,7 +83,7 @@ function createHandle(marker: string) {
   return {
     sandbox: Object.freeze(session),
     async onRuntimeShutdown() {},
-    async onSessionDelete() {},
-    async onSessionStop() {},
+    async onSandboxDelete() {},
+    async onSandboxStop() {},
   };
 }

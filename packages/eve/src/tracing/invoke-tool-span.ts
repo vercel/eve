@@ -70,6 +70,7 @@ export async function withInvokeToolSpan(
     readonly auth: SessionAuthContext;
     readonly callId: string;
     readonly origin: InvokeToolTraceOrigin | undefined;
+    /** The call's own run id, never a tool session's: traces see each call as one run. */
     readonly sessionId: string;
     readonly toolName: string;
   },

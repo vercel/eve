@@ -151,7 +151,7 @@ chatSdkChannel({
 });
 ```
 
-Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and tool status on `actions.requested`.
+Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and on `actions.requested`, each call's [label](/docs/tools#label-tool-activity) or a readable form of its name. They leave out the model's own `eve__task_wait` and `eve__task_cancel` calls.
 
 ### Optional capabilities degrade gracefully
 
@@ -194,6 +194,33 @@ chatSdkChannel({
   }),
 });
 ```
+
+### Sign-ins
+
+When a tool needs a connection the person hasn't authorized, eve shows a sign-in prompt with the connection's link, code, or instructions. In a direct message it posts the prompt in the thread and edits it once the sign-in completes.
+
+Outside a direct message, the prompt is a credential, so eve sends it only to the person signing in. It uses the adapter's native ephemeral message where there is one and otherwise opens a direct message with them. The thread gets a status without the link, which eve edits once the sign-in completes.
+
+To find that person, eve matches the turn's `auth` principal to the author of the message you passed to `send`. Private delivery therefore needs both:
+
+- per-person `auth` on each `send`, so a principal names one person; and
+- the handler's `Thread` object as `thread`, rather than a thread id string, so eve sees who wrote the message.
+
+```ts
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, {
+    thread,
+    auth: {
+      authenticator: "slack",
+      principalType: "user",
+      principalId: message.author.userId,
+      attributes: {},
+    },
+  });
+});
+```
+
+Without both, including with the default `auth: null`, the thread only gets a notice to continue in a direct message, and the prompt isn't shown anywhere. The same happens when several people send as one principal (such as tenant auth), or when the adapter has neither ephemerals nor `openDM`.
 
 ### Proactive sessions
 

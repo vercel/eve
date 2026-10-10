@@ -149,6 +149,47 @@ describe("mockModel", () => {
     ]);
   });
 
+  it("preserves eve file content parts in streamed mock requests", async () => {
+    const requests: MockModelRequest[] = [];
+    const content = [
+      { type: "text" as const, text: "Rendered stripes:" },
+      {
+        type: "file" as const,
+        data: { type: "data" as const, data: "iVBORw0KGgo=" },
+        filename: "stripes.png",
+        mediaType: "image/png",
+      },
+    ];
+    const result = streamText({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "tool-call", toolCallId: "render-1", toolName: "render-stripes", input: {} },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "render-1",
+              toolName: "render-stripes",
+              output: { type: "content", value: content },
+            },
+          ],
+        },
+      ],
+      model: mockModel((request) => {
+        requests.push(request);
+        return "Received the image.";
+      }),
+    });
+
+    await expect(result.text).resolves.toBe("Received the image.");
+    expect(requests[0]!.toolResults[0]!.output).toEqual(content);
+  });
+
   it("gives responders tool-result files in the tagged file shape", async () => {
     const png = Buffer.from("\x89PNG\r\n\x1a\n", "latin1").toString("base64");
     const requests: MockModelRequest[] = [];

@@ -1,4 +1,4 @@
-import { generateText, type LanguageModel, type ModelMessage, type TelemetryOptions } from "ai";
+import type { ModelMessage } from "ai";
 
 import {
   COMPACTION_CHECKPOINT_MARKER,
@@ -11,8 +11,7 @@ import {
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { CompactionConfig } from "#harness/types.js";
 
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 
@@ -78,32 +77,11 @@ export function shouldCompact(
   );
 }
 
-/**
- * Resolves the model used to summarize older context during compaction.
- *
- * Reuses the active turn model when compaction should summarize with the same
- * reference, and resolves the authored compaction model only when configured.
- */
-export async function resolveCompactionModel(input: {
-  readonly compactionModelReference?: RuntimeModelReference;
-  readonly model: LanguageModel;
-  readonly modelReference: RuntimeModelReference;
-  readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
-}): Promise<{
-  readonly model: LanguageModel;
-  readonly providerOptions: Parameters<typeof generateText>[0]["providerOptions"];
-}> {
-  const reference = input.compactionModelReference ?? input.modelReference;
-  const model =
-    reference === input.modelReference ? input.model : await input.resolveModel(reference);
-
-  return {
-    model,
-    providerOptions: reference.providerOptions as Parameters<
-      typeof generateText
-    >[0]["providerOptions"],
-  };
-}
+/** Summarizes one compaction prompt with the compaction model, returning the summary text. */
+export type CompactionSummarizer = (prompt: {
+  readonly messages: ModelMessage[];
+  readonly system: string;
+}) => Promise<string>;
 
 /** Conversation regions and config handed to each compaction heuristic. */
 interface CompactionHeuristicInput {
@@ -197,12 +175,8 @@ function evaluateThreshold(
  */
 export async function compactMessages(
   messages: ModelMessage[],
-  model: LanguageModel,
   config: CompactionConfig,
-  providerOptions?: Parameters<typeof generateText>[0]["providerOptions"],
-  telemetry?: TelemetryOptions,
-  headers?: Record<string, string>,
-  abortSignal?: AbortSignal,
+  summarize: CompactionSummarizer,
   forceSummary = false,
   historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
@@ -247,25 +221,14 @@ export async function compactMessages(
       transcriptBudgetTokens: config.threshold,
     });
 
-    const result = await generateText({
-      abortSignal,
-      headers,
+    const summary = await summarize({
       messages: [createFrameworkUserMessage("context.compaction", summaryPrompt.prompt)],
-      model,
-      providerOptions,
       system: summaryPrompt.system,
-      telemetry: telemetry ? { ...telemetry, functionId: "eve.compaction" } : undefined,
     });
-
-    if (result.text.trim().length === 0) {
-      throw new Error(
-        `The compaction model returned an empty summary. Finish reason: ${result.finishReason}.`,
-      );
-    }
 
     const summaryHead: ModelMessage[] = [
       createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
-      { content: result.text, role: "assistant" },
+      { content: summary, role: "assistant" },
     ];
 
     // Prefer keeping the recent tail verbatim — surviving tool results are the

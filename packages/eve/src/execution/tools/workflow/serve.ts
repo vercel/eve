@@ -1,4 +1,8 @@
+import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import { toolStubOutput } from "#tool-stubs/output.js";
+import type { StubScope } from "#tool-stubs/types.js";
 import type { SessionContext } from "#context/session-context.js";
+import { callToolStubStep } from "#execution/tool-stubs/steps.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
 import { createRunUsageTally, type RunUsageTally } from "#execution/agent-sessions/usage.js";
@@ -375,8 +379,12 @@ async function executeServeBody(
 ): Promise<WorkflowToolRunOutcome> {
   let outcome: WorkflowToolRunOutcome;
   try {
-    const serve = resolveWorkflowEntryPoint<ServeEntryPoint>(input);
-    const output = await serve(() => calls.receive(), ctx);
+    const target = findStubTarget(input.agentContext.toolStubs, input.toolName);
+    const receive = () => calls.receive();
+    const output =
+      target === undefined
+        ? await resolveWorkflowEntryPoint<ServeEntryPoint>(input)(receive, ctx)
+        : await serveStub(target.scope, target.tool, receive, ctx);
     outcome = { output, status: "completed" };
   } catch (error) {
     outcome = toFailedOutcome(error, calls.runSignal);
@@ -428,4 +436,29 @@ function createPendingReceive(): PendingReceive {
     reject = rejectPromise;
   });
   return { promise, reject, resolve };
+}
+
+async function serveStub(
+  scope: StubScope,
+  tool: string,
+  receive: WorkflowServeReceive<JsonValue>,
+  ctx: ServeContext,
+): Promise<JsonValue> {
+  // reply() answers every received call. Reply before receiving the next call
+  // so each call consumes its own stub response.
+  while (true) {
+    const call = await receive();
+    if (call.abortSignal.aborted) continue;
+    const result = await callToolStubStep(scope, {
+      callId: stubCallId(ctx.session.id, ctx.session.turn.id, call.callId),
+      input: call.input,
+      tool,
+      persistent: true,
+    });
+    if (result.kind !== "stub")
+      throw new Error(
+        result.kind === "error" ? result.error : "Persistent stub configuration changed.",
+      );
+    ctx.reply(toolStubOutput(result.outcome));
+  }
 }

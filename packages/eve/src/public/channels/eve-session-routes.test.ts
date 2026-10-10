@@ -10,6 +10,7 @@ import { none } from "#public/channels/auth.js";
 import { eveChannel, type TrustedForwarders } from "#public/channels/eve.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 
 function route(
   method: "GET" | "POST",
@@ -475,6 +476,29 @@ describe("eve ID-addressed session routes", () => {
     await expect(response.json()).resolves.toEqual({
       code: "session_not_active",
       error: "The session is no longer active.",
+      ok: false,
+    });
+  });
+
+  it("returns a user-facing stranded conflict with structured diagnostic metadata", async () => {
+    const session = createFixedSession({
+      send: vi.fn().mockRejectedValue(new SessionStrandedError({ eveVersion: "0.1.0" })),
+    });
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        body: JSON.stringify({ message: "Alice follows up after the upgrade." }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      code: "session_stranded",
+      error: "This session is no longer available.",
+      eveVersion: "0.1.0",
       ok: false,
     });
   });

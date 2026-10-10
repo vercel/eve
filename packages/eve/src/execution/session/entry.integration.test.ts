@@ -4,7 +4,7 @@ import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
@@ -18,6 +18,7 @@ import {
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import { sessions } from "#public/server/index.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#internal/testing/event-id.js";
@@ -26,7 +27,12 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
-import { SessionTitleKey } from "#context/keys.js";
+import {
+  SessionTitleKey,
+  ScheduleIdKey,
+  ScheduleInstanceKey,
+  OccurrenceIdKey,
+} from "#context/keys.js";
 import {
   buildSerializedContext,
   captureEvents,
@@ -43,6 +49,105 @@ afterEach(() => {
 });
 
 describe("workflowEntry integration", () => {
+  it("preserves scheduled provenance in the first turn so unattended tools need no approval", async () => {
+    const executions: unknown[] = [];
+    const runtime = await createTestRuntime({
+      agent: { name: "scheduled-first-turn" },
+      modules: [
+        {
+          logicalPath: "tools/inspect_schedule.ts",
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Report this turn's schedule provenance.",
+              inputSchema: {},
+              approval: ({ session }) =>
+                session.schedule === undefined ? "user-approval" : "not-applicable",
+              execute: (_input, context) => {
+                executions.push(context.session.schedule);
+                return { inspected: true };
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use inspect_schedule exactly once." },
+          serializedContext: {
+            ...buildSerializedContext({ channelKind: "schedule" }),
+            [ScheduleIdKey.name]: "tasks",
+            [ScheduleInstanceKey.name]: "joke--id",
+            [OccurrenceIdKey.name]: "exec-1",
+            "eve.capabilities": { requestInput: false },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const events = await stream.nextTurn();
+        expect(filterEventsByType(events, "input.requested")).toHaveLength(0);
+        expect(filterEventsByType(events, "turn.failed")).toHaveLength(0);
+        expect(executions).toEqual([
+          { definition: "tasks", instance: "joke--id", occurrenceId: "exec-1" },
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+  it("registers first-turn abort hooks before a prewarmed session receives a message", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+          sessionTimeoutMs: false,
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(sessionCommandHookToken(run.runId)) },
+        );
+        let abortTokensBeforeMessage: string[] = [];
+        await vi.waitFor(async () => {
+          abortTokensBeforeMessage = (
+            await (await getWorld()).hooks.list({ runId: run.runId })
+          ).data
+            .map((hook) => hook.token)
+            .filter((token) => token.startsWith("abrt_"));
+          expect(abortTokensBeforeMessage).toHaveLength(2);
+        });
+
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "send",
+          payload: { message: "Say hello." },
+        });
+        await stream.nextTurn();
+
+        const abortTokensAfterTurn = (
+          await (await getWorld()).hooks.list({ runId: run.runId })
+        ).data
+          .map((hook) => hook.token)
+          .filter((token) => token.startsWith("abrt_"));
+        expect(abortTokensAfterTurn).toEqual(abortTokensBeforeMessage);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
     let initializedAuth: unknown;
@@ -68,7 +173,7 @@ describe("workflowEntry integration", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -86,8 +191,8 @@ describe("workflowEntry integration", () => {
           { runId: run.runId },
           { token: sessionInboxHookToken(sessionCommandHookToken(run.runId)) },
         );
-        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)], {
-          turnStarted: false,
+        await vi.waitFor(async () => {
+          await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)]);
         });
 
         const sessionRuntime = createWorkflowRuntime({
@@ -151,7 +256,7 @@ describe("workflowEntry integration", () => {
     });
     try {
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -186,7 +291,7 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-conversation";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -281,11 +386,140 @@ describe("workflowEntry integration", () => {
     expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
   });
 
+  it("parks a failed dynamic connection rehydration and accepts the next message", async () => {
+    let shouldFail = false;
+    const continuationToken = "http:workflow-entry-dynamic-connection-failure";
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-dynamic-connection-failure" },
+      modules: [
+        {
+          logicalPath: "connections/accounts.ts",
+          loadNamespace: async () => ({
+            default: defineDynamic({
+              events: {
+                "session.started": () => {
+                  if (shouldFail) throw new Error("account store unavailable");
+                  return null;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "first message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const inboxToken = sessionInboxHookToken(continuationToken);
+
+      try {
+        expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+
+        await waitForHook({ runId: run.runId }, { token: inboxToken });
+        shouldFail = true;
+        await resumeHook(inboxToken, {
+          kind: "send",
+          payload: { message: "failed message" },
+        });
+
+        const failedTurn = await stream.nextTurn();
+        expect(failedTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(failedTurn, "turn.failed")).toHaveLength(1);
+        expect(filterEventsByType(failedTurn, "session.failed")).toHaveLength(0);
+
+        shouldFail = false;
+        await resumeHook(inboxToken, {
+          kind: "send",
+          payload: { message: "recovered message" },
+        });
+
+        const recoveredTurn = await stream.nextTurn();
+        expect(recoveredTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(recoveredTurn, "session.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("parks a dynamic connection failure on the first message and accepts the next message", async () => {
+    let shouldFail = true;
+    const continuationToken = "http:workflow-entry-dynamic-connection-first-failure";
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-dynamic-connection-first-failure" },
+      modules: [
+        {
+          logicalPath: "connections/accounts.ts",
+          loadNamespace: async () => ({
+            default: defineDynamic({
+              events: {
+                "session.started": () => {
+                  if (shouldFail) throw new Error("account store unavailable");
+                  return null;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "first message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const inboxToken = sessionInboxHookToken(continuationToken);
+
+      try {
+        const failedTurn = await stream.nextTurn();
+        expect(failedTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(failedTurn, "turn.failed")).toHaveLength(1);
+        expect(filterEventsByType(failedTurn, "session.failed")).toHaveLength(0);
+
+        await waitForHook({ runId: run.runId }, { token: inboxToken });
+        shouldFail = false;
+        await resumeHook(inboxToken, {
+          kind: "send",
+          payload: { message: "recovered message" },
+        });
+
+        const recoveredTurn = await stream.nextTurn();
+        expect(recoveredTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(recoveredTurn, "turn.failed")).toHaveLength(0);
+        expect(filterEventsByType(recoveredTurn, "session.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("publishes the session ID as the waiting address for an ID-only session", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-id-only" } });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -315,7 +549,7 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-event-ids";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -401,7 +635,7 @@ describe("workflowEntry integration", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -448,7 +682,7 @@ describe("workflowEntry integration", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -514,7 +748,7 @@ describe("workflowEntry integration", () => {
     const childContinuationToken = "subagent:parent-session:call-1";
 
     await runtime.run(async () => {
-      const child = await start(workflowEntry, [
+      const child = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -614,7 +848,7 @@ describe("workflowEntry integration", () => {
     const firstCallerToken = "subagent:parent-session:call-1";
 
     await runtime.run(async () => {
-      const child = await start(workflowEntry, [
+      const child = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -973,7 +1207,7 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-hook-owner";
 
     await runtime.run(async () => {
-      const owner = await start(workflowEntry, [
+      const owner = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -993,7 +1227,7 @@ describe("workflowEntry integration", () => {
       const firstTurn = await ownerStream.nextTurn();
       expect(firstTurn.at(-1)?.type).toBe("session.waiting");
 
-      const contender = await start(workflowEntry, [
+      const contender = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -1041,7 +1275,7 @@ describe("workflowEntry integration", () => {
     } as const;
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -1400,7 +1634,7 @@ async function withHeldApprovalRun(
   };
   if (options.auth !== undefined) context.auth = options.auth;
   await runtime.run(async () => {
-    const run = await start(workflowEntry, [
+    const run = await startSessionOwner(workflowEntry, [
       {
         kind: "initial",
         ownerDeploymentId: "dpl_inline",

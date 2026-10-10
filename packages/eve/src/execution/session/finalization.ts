@@ -1,6 +1,10 @@
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
+import {
+  endSessionSandboxStep,
+  reportSessionSandboxCleanupFailureStep,
+} from "#execution/session/end-sandbox-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { liveTaskRuns, readTaskTable } from "#execution/tasks/table.js";
@@ -42,6 +46,21 @@ export async function finalizeSession(
     liveTaskRuns(readTaskTable(sessionState.snapshot?.session?.state)).length > 0
   ) {
     await terminateChildSessionsStep({ sessionState });
+  }
+  if (sessionState !== undefined) {
+    try {
+      await endSessionSandboxStep({
+        reason: outcome.kind === "done" ? "completed" : outcome.kind,
+        serializedContext,
+        sessionState,
+      });
+    } catch (error) {
+      await reportSessionSandboxCleanupFailureStep({
+        error: normalizeSerializableError(error),
+        outcome: outcome.kind,
+        sessionId: sessionState.sessionId,
+      }).catch(() => undefined);
+    }
   }
   const session = sessionState?.snapshot.session;
   const usage = session === undefined ? undefined : getSessionUsage(session);

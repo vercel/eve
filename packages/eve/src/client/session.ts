@@ -7,7 +7,7 @@ import {
   createEveSessionStreamRoutePath,
 } from "#protocol/routes.js";
 import { ClientAgentSession } from "#client/agent-session.js";
-import { ClientError } from "#client/client-error.js";
+import { ClientError, createClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
 import {
@@ -71,9 +71,9 @@ export class ClientSession {
   /** @internal */
   static async create<TOutput = unknown>(
     context: ClientSessionContext,
-    input: SendTurnInput<TOutput>,
+    input: SendTurnInput<TOutput> & CreateSessionOptions,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
-    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
+    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true, input.stubs);
     const { sessionId } = await readAcceptedMessage(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
@@ -382,7 +382,10 @@ async function postCreateSession(
   options: CreateSessionOptions,
 ): Promise<Response> {
   const headers = await context.resolveHeaders(options.headers);
+  const body = options.stubs === undefined ? undefined : JSON.stringify({ stubs: options.stubs });
+  if (body !== undefined) headers.set("content-type", "application/json");
   const response = await fetch(createClientUrl(context.host, EVE_SESSION_ROUTE_PATH), {
+    body,
     headers,
     method: "POST",
     redirect: context.redirect,
@@ -404,6 +407,7 @@ async function postTurn(
   path: string,
   input: SendTurnPayload,
   requireMessage: boolean,
+  stubs?: CreateSessionOptions["stubs"],
 ): Promise<Response> {
   const body = createMessageBody(input, requireMessage);
   if (body === null) {
@@ -413,6 +417,7 @@ async function postTurn(
         : "A session turn requires a non-empty message or inputResponses.",
     );
   }
+  if (stubs !== undefined) body.stubs = stubs;
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
@@ -425,7 +430,7 @@ async function postTurn(
   });
   if (!response.ok) {
     const responseBody = await response.text();
-    throw new ClientError(response.status, responseBody, response.headers);
+    throw createClientError(response.status, responseBody, response.headers);
   }
   return response;
 }

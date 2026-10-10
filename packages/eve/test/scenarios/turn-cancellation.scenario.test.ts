@@ -79,7 +79,7 @@ const model = mockModel((request) => {
   if (message.includes("Use workflow exactly once")) {
     // The workflow tool runs as a task: after its receipt, wait on it.
     if (request.toolResults.some((entry) => entry.name === "workflow")) {
-      return { toolCalls: [{ name: "task_wait", input: {} }] };
+      return { toolCalls: [{ name: "eve__task_wait", input: {} }] };
     }
     const localOnly = message.includes("local-sleeper only");
     return {

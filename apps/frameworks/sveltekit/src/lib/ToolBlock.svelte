@@ -23,7 +23,7 @@
   );
   let isOpen = $derived(userOpen ?? initiallyOpen);
 
-  let toolName = $derived(part.toolMetadata?.eve?.name ?? part.toolName);
+  let title = $derived(part.toolMetadata?.eve?.label ?? part.toolMetadata?.eve?.name ?? part.toolName);
   let stateLabel = $derived.by(() => {
     const labels: Record<string, string> = {
       "input-streaming": "Pending",
@@ -82,7 +82,7 @@
           d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
         />
       </svg>
-      <span class="text-sm font-medium">{toolName}</span>
+      <span class="text-sm font-medium">{title}</span>
       <span class="rounded-full bg-secondary px-2 py-0.5 text-xs {stateColor}">
         {stateLabel}
       </span>

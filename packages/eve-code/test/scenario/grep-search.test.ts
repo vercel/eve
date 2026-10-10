@@ -6,7 +6,7 @@ import {
   MAX_GREP_COMMAND_BYTES,
   MAX_GREP_LINE_BYTES,
   MAX_GREP_RETURN_BYTES,
-  assertWorkspacePath,
+  assertNoParentSegments,
   buildPosixGrepCommand,
   buildRipgrepCommand,
   buildSearchCommand,
@@ -116,14 +116,74 @@ test("search command prefers rg when it is on PATH", () => {
   assert.match(command, /else/u);
 });
 
-test("workspace path checks reject escapes before the sandbox runs", () => {
-  assert.equal(assertWorkspacePath("/workspace", undefined), "/workspace");
-  assert.equal(assertWorkspacePath("/workspace/src", "src"), "/workspace/src");
+test("parent-segment checks reject escapes before the sandbox runs", () => {
+  assert.equal(assertNoParentSegments("/workspace", undefined), "/workspace");
+  assert.equal(assertNoParentSegments("/app/src", "src"), "/app/src");
   assert.throws(
-    () => assertWorkspacePath("/etc/passwd", "/etc/passwd"),
-    /must stay under \/workspace/u,
+    () => assertNoParentSegments("/workspace/src", "../etc"),
+    /must not contain '\.\.'/u,
   );
-  assert.throws(() => assertWorkspacePath("/workspace/src", "../etc"), /must not contain '\.\.'/u);
+  assert.throws(() => assertNoParentSegments("/app/../etc"), /must not contain '\.\.'/u);
+});
+
+test("executeGrepSearch accepts absolute paths in a workspace rooted outside /workspace", async () => {
+  let command = "";
+  const result = await executeGrepSearch(
+    { pattern: "secret_key", path: "/app/dclm" },
+    {
+      resolvePath: (value) => (value.startsWith("/") ? value : value ? `/app/${value}` : "/app"),
+      async run(input) {
+        if (input.command.startsWith("realpath")) {
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: input.command.includes("/app/dclm") ? "/app/dclm\0" : "/app\0",
+          };
+        }
+        command = input.command;
+        return { exitCode: 0, stderr: "", stdout: "/app/dclm/README.md\n" };
+      },
+    },
+  );
+  assert.match(command, /'\/app\/dclm'/u);
+  assert.equal(result.path, "/app/dclm");
+  assert.equal(result.matchCount, 1);
+});
+
+test("executeGrepSearch defaults to the sandbox workspace root", async () => {
+  const searched: string[] = [];
+  await executeGrepSearch(
+    { pattern: "needle" },
+    {
+      resolvePath: (value) => (value ? `/app/${value}` : "/app"),
+      async run(input) {
+        if (input.command.startsWith("realpath"))
+          return { exitCode: 0, stderr: "", stdout: "/app\0" };
+        searched.push(input.command);
+        return { exitCode: 1, stderr: "", stdout: "" };
+      },
+    },
+  );
+  assert.match(searched[0] ?? "", /'\/app'/u);
+});
+
+test("executeGrepSearch rejects an absolute path outside the workspace", async () => {
+  await assert.rejects(
+    executeGrepSearch(
+      { pattern: "root", path: "/etc" },
+      {
+        resolvePath: (value) => (value.startsWith("/") ? value : "/app"),
+        async run({ command }) {
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: command.includes("/etc") ? "/etc\0" : "/app\0",
+          };
+        },
+      },
+    ),
+    /resolves outside the workspace \/app: \/etc/u,
+  );
 });
 
 test("processGrepOutput caps rows and drops zero-count files", () => {
@@ -301,7 +361,7 @@ test("executeGrepSearch rejects a symlink target whose realpath escapes the work
         },
       },
     ),
-    /resolves outside \/workspace/u,
+    /resolves outside the workspace \/workspace: \/etc/u,
   );
   assert.equal(runCount, 2);
 });

@@ -7,6 +7,7 @@ import type {
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import {
+  expectAgentToolExposure,
   expectBoolean,
   expectFunction,
   expectObjectRecord,
@@ -18,6 +19,9 @@ import {
 } from "#internal/authored-module.js";
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
+  ANTHROPIC_PROMPT_CACHE_TTLS,
+  type AgentPromptCacheDefinition,
+  type AnthropicPromptCacheTtl,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import {
@@ -118,7 +122,7 @@ export function normalizeAgentDefinition(
   }
 
   if (record.tool !== undefined) {
-    definition.tool = expectBoolean(record.tool, message);
+    definition.tool = expectAgentToolExposure(record.tool, message);
   }
 
   if (record.limits !== undefined) {
@@ -321,16 +325,45 @@ function normalizeAgentModelOptions(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["modelOptions"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["providerOptions"], message);
-  const providerOptions = record.providerOptions;
+  expectOnlyKnownKeys(record, ["promptCache", "providerOptions"], message);
+  const options: Mutable<NonNullable<NormalizedAgentDefinition["modelOptions"]>> = {};
 
-  if (providerOptions === undefined) {
-    return {};
+  if (record.providerOptions !== undefined) {
+    options.providerOptions = expectProviderOptions(record.providerOptions, message);
   }
 
-  return {
-    providerOptions: expectProviderOptions(providerOptions, message),
-  };
+  if (record.promptCache !== undefined) {
+    options.promptCache = normalizeAgentPromptCache(record.promptCache, message);
+  }
+
+  return options;
+}
+
+/** Validates an authored `modelOptions.promptCache` value. */
+export function normalizeAgentPromptCache(
+  value: unknown,
+  message: string,
+): AgentPromptCacheDefinition {
+  const record = expectObjectRecord(
+    value,
+    `${message} "modelOptions.promptCache" must be an object.`,
+  );
+  expectOnlyKnownKeys(record, ["anthropic"], `${message} In "modelOptions.promptCache":`);
+  if (record.anthropic === undefined) return {};
+
+  const anthropic = expectObjectRecord(
+    record.anthropic,
+    `${message} "modelOptions.promptCache.anthropic" must be an object.`,
+  );
+  expectOnlyKnownKeys(anthropic, ["ttl"], `${message} In "modelOptions.promptCache.anthropic":`);
+  const ttl = anthropic.ttl;
+  if (ttl === undefined) return { anthropic: {} };
+  if (!ANTHROPIC_PROMPT_CACHE_TTLS.includes(ttl as AnthropicPromptCacheTtl)) {
+    throw new Error(
+      `${message} "modelOptions.promptCache.anthropic.ttl" must be "5m" or "1h"; received ${JSON.stringify(ttl)}.`,
+    );
+  }
+  return { anthropic: { ttl: ttl as AnthropicPromptCacheTtl } };
 }
 
 function normalizeAgentCompactionDefinition(
@@ -425,11 +458,18 @@ export function normalizeInstructionsDefinition(
  */
 export function normalizeSkillDefinition(value: unknown, message: string): SkillDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["description", "files", "license", "markdown", "metadata"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["deferred", "description", "files", "license", "markdown", "metadata"],
+    message,
+  );
   const definition: Mutable<SkillDefinition> = {
     description: expectString(record.description, message),
     markdown: expectString(record.markdown, message),
   };
+  if (record.deferred !== undefined) {
+    definition.deferred = expectBoolean(record.deferred, message);
+  }
   const license = record.license;
   const metadata = getOptionalStringRecordProperty(record, "metadata", message);
 

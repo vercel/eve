@@ -77,6 +77,7 @@ interface CreateExecutionNodeStepInput {
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
+  readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
 }
@@ -119,6 +120,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
+    titleAttributeWrite: input.titleAttributeWrite,
   });
   if (instrumentation === undefined) return step;
   return async (session, stepInput) => {
@@ -264,6 +266,7 @@ function createRegisteredHarnessToolDefinition(input: {
         : undefined),
     approvalKey: def.approvalKey,
     behavior: input.behavior,
+    deferred: def.deferred,
     description: def.description,
     endsTurn: def.endsTurn,
     executeInput: def.executeInput,
@@ -272,7 +275,6 @@ function createRegisteredHarnessToolDefinition(input: {
       scope: def.name,
     }),
     frameworkTool: isFrameworkTool(def) || def.owner.kind === "framework",
-    frameworkAction: def.behavior?.presentation === "load-skill" ? "load-skill" : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,

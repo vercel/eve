@@ -574,7 +574,20 @@ describe("eveChannel — stream cursor", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(handler.getEventStream).toHaveBeenCalledWith({ startIndex });
+    expect(handler.getEventStream).toHaveBeenCalledWith({ follow: true, startIndex });
+  });
+
+  it("bounds a historical read at the durable tail and asks for it without following", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockResolvedValueOnce(41);
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?follow=false",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+    expect(handler.getEventStream).toHaveBeenCalledWith({ follow: false, startIndex: undefined });
   });
 
   it.each(["1.5", "1junk", "0x10", "1e2", ""])(
@@ -610,7 +623,20 @@ describe("eveChannel — stream cursor", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Session not found.", ok: false });
-    expect(handler.getEventStream).not.toHaveBeenCalled();
+  });
+
+  it("cancels the early-opened event stream when the tail lookup fails", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancelled = vi.fn();
+    handler.getEventStream.mockResolvedValueOnce(new ReadableStream({ cancel: cancelled }));
+    handler.getStreamTailIndex.mockRejectedValueOnce(
+      new WorkflowRunNotFoundError("test-session-id"),
+    );
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(404);
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
   });
 
   it("returns 503 when the session lookup fails transiently", async () => {
@@ -621,7 +647,6 @@ describe("eveChannel — stream cursor", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "Session stream unavailable.", ok: false });
-    expect(handler.getEventStream).not.toHaveBeenCalled();
   });
 
   it("reports the durable tail index when the request opts in", async () => {

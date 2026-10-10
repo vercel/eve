@@ -21,6 +21,7 @@ import {
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
+  attachSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
 import {
   type NitroArtifactsConfig,
@@ -270,6 +271,7 @@ async function buildRouteArgs(
   });
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
+  const agent = createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config));
   const args = attachRouteSessionCreator(
     attachHomeRouteMetadata(
       attachRouteChannelName(
@@ -277,7 +279,7 @@ async function buildRouteArgs(
           {
             attachSession,
             ...channelOperations,
-            ...createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config)),
+            ...agent.args,
             invokeTool: createRouteInvokeTool({
               agentName: bundle.agentName,
               config,
@@ -311,6 +313,7 @@ async function buildRouteArgs(
         requestId,
       }),
   );
+  attachSkillFileSource(args, agent.skillFiles);
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
   }

@@ -75,6 +75,7 @@ export function twilioDriver(): ChannelDriver {
 
   return {
     name: "twilio",
+    personId: PERSON,
     capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel: (record) =>
@@ -84,7 +85,7 @@ export function twilioDriver(): ChannelDriver {
         api: { fetch: recordingFetch(record, decode) },
         messaging: { from: TO },
       }),
-    message,
+    message: (text, _person, files) => message(text, files),
     findOptions(call, prompt) {
       if (call.method !== "Messages.json") return undefined;
       const body = call.body as { readonly Body?: unknown };

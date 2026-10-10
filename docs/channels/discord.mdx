@@ -94,6 +94,28 @@ Typing fires on `turn.started` and `actions.requested`, but only when a bot toke
 
 HITL renders as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session (paused awaiting input) resumes.
 
+A press, select, or modal submission answers as the Discord user who made it, with the same `defaultDiscordAuth` principal a command from them gets by default. Approval response policies compare against that principal. Approvals are requester-only by default, so only the person whose command asked can approve. `onInputResponse(ctx, interaction)` decides the answer's `auth`: return `{ auth }` to accept it, or `null` (or throw) to drop it and keep the request pending. `ctx.defaultAuth` is the presser's `defaultDiscordAuth`; it identifies them but doesn't authorize them by itself.
+
+If you customize `onCommand`, eve drops every press and submission until you also set `onInputResponse`, and logs a warning saying so. The default Discord principal wouldn't match the principals your `onCommand` returns, so a requester-only approval would refuse the requester. It would also let someone your `onCommand` turns away answer open approvals. Give both hooks the same mapping and gating:
+
+```ts
+import { discordChannel } from "eve/channels/discord";
+
+const auth = (interaction: { user: { id: string } }) => ({
+  auth: {
+    principalId: `user:${interaction.user.id}`,
+    principalType: "user" as const,
+    authenticator: "discord",
+    attributes: {},
+  },
+});
+
+export default discordChannel({
+  onCommand: (_ctx, interaction) => auth(interaction),
+  onInputResponse: (_ctx, interaction) => auth(interaction),
+});
+```
+
 ### Proactive sessions
 
 Start a session without an inbound interaction through `to(discord, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(discord, target).send(message, { auth })` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs a bot token, supplied by Connect or `DISCORD_BOT_TOKEN`.

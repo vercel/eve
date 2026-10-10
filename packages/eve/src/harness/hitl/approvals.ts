@@ -11,9 +11,11 @@ import { authorizationEventFields } from "#harness/authorization-event-fields.js
 import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import {
+  failedCall,
   resolveApprovalOutcome,
   resolveInputOutcome,
   TOOL_EXECUTION_DENIED_MESSAGE,
+  unavailableToolMessage,
   type ResolvedInputBatch,
 } from "#harness/input-request-resolution.js";
 import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
@@ -108,7 +110,12 @@ export function parkOnApprovals(
       ...committed,
       ...(snippet === undefined ? [] : [createFrameworkUserMessage("context.state", snippet)]),
     ],
-    events: [createInputRequestedEvent({ requests: input.requests, ...input.event })],
+    // The approvals can't settle before the step's tasks finish, so asking for them waits until
+    // then; `settle` asks once they have.
+    events:
+      input.tasks.length > 0
+        ? []
+        : [createInputRequestedEvent({ requests: input.requests, ...input.event })],
     turn,
   };
 }
@@ -211,6 +218,11 @@ export function answer(
     /** The delivery merged the queue in, so the queue empties. */
     readonly takeQueued: boolean;
     readonly approvalKey: (request: InputRequest) => string | undefined;
+    /**
+     * Whether the request's restored step has `eve__search`, which a call whose
+     * tool is gone can use to find another.
+     */
+    readonly searchable: (request: InputRequest) => boolean;
   },
 ): Answered {
   const { policy } = input;
@@ -251,13 +263,9 @@ export function answer(
     return done({ input: delivery, next: "continue" });
   }
 
-  const textBatch =
-    limit !== undefined
-      ? { requests: [limit.request] }
-      : answerable.length === 1
-        ? answerable[0]
-        : undefined;
-  const resolved = textBatch === undefined ? delivery : resolveTextInput(textBatch, delivery);
+  // The approval coordinator already answered a typed approval; see `resolveTypedApproval`.
+  const resolved =
+    limit === undefined ? delivery : resolveTextInput({ requests: [limit.request] }, delivery);
   const responses = canonicalize(resolved?.inputResponses ?? []);
   const byId = new Map(responses.map((response) => [response.requestId, response]));
   const answered = answerable.filter((step) =>
@@ -319,29 +327,45 @@ export function answer(
 
   const grants = new Set(turn.grants);
   const batches: ResolvedInputBatch[] = [];
-  const rejected: UnstampedMessageStreamEvent[] = [];
+  const results: UnstampedMessageStreamEvent[] = [];
+  const unavailable = new Set(
+    policy.audit.settlements
+      .filter((settlement) => settlement.outcome === "unavailable")
+      .map((settlement) => settlement.requestId),
+  );
   const suspended = turn.suspended.map((step) => {
     if (!answered.includes(step)) return step;
     let messages = step.messages;
     const approvedRequests: InputRequest[] = [];
     for (const request of step.requests) {
+      const { callId, toolName } = request.action;
+      if (unavailable.has(request.requestId)) {
+        const failed = failedCall({
+          callId,
+          message: unavailableToolMessage(toolName, input.searchable(request)),
+          toolName,
+        });
+        messages = withResult(messages, failed.part);
+        results.push(createActionResultEvent({ result: failed.result, ...step.event }));
+        continue;
+      }
       const { approved, reason, status } = resolveApprovalOutcome(byId.get(request.requestId));
       if (approved) {
-        grants.add(input.approvalKey(request) ?? request.action.toolName);
+        grants.add(input.approvalKey(request) ?? toolName);
         approvedRequests.push(request);
         continue;
       }
       messages = withResult(messages, {
         output: { reason, type: "execution-denied" },
-        toolCallId: request.action.callId,
-        toolName: request.action.toolName,
+        toolCallId: callId,
+        toolName,
         type: "tool-result",
       });
-      rejected.push(
+      results.push(
         createActionResultEvent({
           rejected: true,
           result: {
-            callId: request.action.callId,
+            callId,
             isError: true,
             kind: "tool-result",
             output: {
@@ -350,7 +374,7 @@ export function answer(
               message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
               tool: { result: "not_run" },
             },
-            toolName: request.action.toolName,
+            toolName,
           },
           ...step.event,
         }),
@@ -366,7 +390,7 @@ export function answer(
     const approved = [...(step.approved ?? []), ...approvedRequests];
     return { ...step, messages, requests: [], ...(approved.length > 0 && { approved }) };
   });
-  events.push(...batches.map(resolvedEvent), ...rejected);
+  events.push(...batches.map(resolvedEvent), ...results);
   turn = { ...turn, grants: [...grants], suspended };
   return done({
     consumedMessage: resolved?.messageConsumed,
@@ -454,7 +478,8 @@ function reportApprovalProgress(
     );
   }
   for (const settlement of audit.settlements) {
-    if (!isOpen(settlement.requestId)) continue;
+    // An unavailable request's candidate reported it failed, with the reason.
+    if (!isOpen(settlement.requestId) || settlement.outcome === "unavailable") continue;
     events.push(
       createApprovalSettledEvent({
         outcome: settlement.outcome === "allowed" ? "approved" : "cancelled",
@@ -511,16 +536,15 @@ export function grantedApprovalKeys(
 
 /**
  * The steps a delivery approves calls of, whose tools the calls run with: those it answers in
- * full, approving at least one call, or the only pending step a plain-text answer approves.
+ * full, approving at least one call.
  */
 export function approvingSteps(
   view: SessionView,
   stepInput: StepInput | undefined,
 ): readonly SuspendedStep[] {
   const pending = view.turn.suspended.filter((step) => step.requests.length > 0);
-  const resolved = pending.length === 1 ? resolveTextInput(pending[0]!, stepInput) : stepInput;
   const options = new Map(
-    (resolved?.inputResponses ?? []).map((response) => [response.requestId, response.optionId]),
+    (stepInput?.inputResponses ?? []).map((response) => [response.requestId, response.optionId]),
   );
   return pending.filter(
     (step) =>

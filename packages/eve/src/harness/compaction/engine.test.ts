@@ -1,26 +1,13 @@
 import type { ModelMessage } from "ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
-import {
-  compactMessages,
-  getInputTokenCount,
-  resolveCompactionModel,
-  shouldCompact,
-} from "#harness/compaction/engine.js";
+import { compactMessages, getInputTokenCount, shouldCompact } from "#harness/compaction/engine.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
-
-vi.mock("ai", () => ({
-  generateText: vi.fn(),
-}));
-
-afterEach(() => {
-  vi.clearAllMocks();
-});
 
 const config: CompactionConfig = {
   recentWindowSize: 2,
@@ -342,59 +329,6 @@ describe("shouldCompact", () => {
   });
 });
 
-describe("resolveCompactionModel", () => {
-  it("reuses the active model when compaction uses the same reference", async () => {
-    const model = {} as Parameters<typeof resolveCompactionModel>[0]["model"];
-    const resolveModel = vi.fn();
-
-    const result = await resolveCompactionModel({
-      model,
-      modelReference: { id: "main", providerOptions: { openai: { reasoning: { effort: "low" } } } },
-      resolveModel,
-    });
-
-    expect(result.model).toBe(model);
-    expect(result.providerOptions).toEqual({
-      openai: { reasoning: { effort: "low" } },
-    });
-    expect(resolveModel).not.toHaveBeenCalled();
-  });
-
-  it("resolves the authored compaction model when configured", async () => {
-    const model = {} as Parameters<typeof resolveCompactionModel>[0]["model"];
-    const summaryModel = {} as Parameters<typeof resolveCompactionModel>[0]["model"];
-    const resolveModel = vi.fn().mockResolvedValue(summaryModel);
-
-    const compactionModelReference = {
-      id: "summary",
-      providerOptions: {
-        anthropic: {
-          thinking: {
-            budget_tokens: 128,
-          },
-        },
-      },
-    } as Parameters<typeof resolveCompactionModel>[0]["compactionModelReference"];
-
-    const result = await resolveCompactionModel({
-      compactionModelReference,
-      model,
-      modelReference: { id: "main" },
-      resolveModel,
-    });
-
-    expect(result.model).toBe(summaryModel);
-    expect(result.providerOptions).toEqual({
-      anthropic: {
-        thinking: {
-          budget_tokens: 128,
-        },
-      },
-    });
-    expect(resolveModel).toHaveBeenCalledWith(compactionModelReference);
-  });
-});
-
 // --- compactMessages ---------------------------------------------------
 //
 // compactMessages escalates through heuristics before summarizing, and which
@@ -491,12 +425,8 @@ function expectWellFormedCompaction(result: ModelMessage[], threshold: number): 
 async function compact(
   messages: ModelMessage[],
   overrides: Partial<CompactionConfig> & { readonly summary?: string } = {},
-): Promise<{ result: ModelMessage[]; summarizer: ReturnType<typeof vi.mocked<never>> }> {
-  const { generateText } = await import("ai");
-  const summarizer = vi.mocked(generateText);
-  summarizer.mockResolvedValue({
-    text: overrides.summary ?? "checkpoint text",
-  } as Awaited<ReturnType<typeof generateText>>);
+): Promise<{ result: ModelMessage[]; summarizer: ReturnType<typeof summarizeWith> }> {
+  const summarizer = summarizeWith(overrides.summary ?? "checkpoint text");
 
   const compactionConfig: CompactionConfig = {
     lastKnownInputTokens: overrides.lastKnownInputTokens,
@@ -504,14 +434,16 @@ async function compact(
     recentWindowSize: overrides.recentWindowSize ?? 4,
     threshold: overrides.threshold ?? ROOMY,
   };
-  const result = await compactMessages(
-    messages,
-    {} as Parameters<typeof compactMessages>[1],
-    compactionConfig,
-  );
+  const result = await compactMessages(messages, compactionConfig, summarizer);
 
   expectWellFormedCompaction(result, compactionConfig.threshold);
-  return { result, summarizer: summarizer as ReturnType<typeof vi.mocked<never>> };
+  return { result, summarizer };
+}
+
+function summarizeWith(summary: string) {
+  return vi.fn(
+    async (_prompt: { readonly messages: ModelMessage[]; readonly system: string }) => summary,
+  );
 }
 
 describe("compactMessages: tool-result cap heuristic", () => {
@@ -582,42 +514,31 @@ describe("compactMessages: tool-result cap heuristic", () => {
     },
   );
   it("credits removed history against an explicit history-only token floor", async () => {
-    const { generateText } = await import("ai");
+    const summarize = summarizeWith("summary");
     const [call, resultMsg] = toolExchange({ callId: "large", payloadChars: 40_000 });
     const messages = [user("investigate"), call, resultMsg, user("continue")];
     const result = await compactMessages(
       messages,
-      {} as Parameters<typeof compactMessages>[1],
       { threshold: 10_000, recentWindowSize: 1 },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      summarize,
       false,
       15_000,
     );
-    expect(generateText).not.toHaveBeenCalled();
+    expect(summarize).not.toHaveBeenCalled();
     expect(estimateTokens(result)).toBeLessThan(2_000);
     expect(result.map((entry) => entry.role)).toEqual(messages.map((entry) => entry.role));
   });
 
   it("summarizes when a no-op cannot satisfy the explicit history-only token floor", async () => {
-    const { generateText } = await import("ai");
-    vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
-      ReturnType<typeof generateText>
-    >);
+    const summarize = summarizeWith("summary");
     await compactMessages(
       [user("earlier"), assistant("reply"), user("continue")],
-      {} as Parameters<typeof compactMessages>[1],
       { threshold: 2_000, recentWindowSize: 0 },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      summarize,
       false,
       8_000,
     );
-    expect(generateText).toHaveBeenCalledOnce();
+    expect(summarize).toHaveBeenCalledOnce();
   });
 
   it("caps oversized older tool results in place without calling the summarizer", async () => {
@@ -885,80 +806,18 @@ describe("compactMessages: tool-result cap heuristic", () => {
 });
 
 describe("compactMessages: forced summary", () => {
-  it("uses the model's default temperature when summarizing", async () => {
-    const { generateText } = await import("ai");
-    const summarizer = vi.mocked(generateText);
-    summarizer.mockResolvedValue({
-      text: "forced checkpoint",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    await compactMessages(
-      [user("old message"), assistant("old reply")],
-      {} as Parameters<typeof compactMessages>[1],
-      { recentWindowSize: 10, threshold: ROOMY },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true,
-    );
-
-    expect(summarizer).toHaveBeenCalledOnce();
-    expect(summarizer.mock.calls[0]?.[0]).not.toHaveProperty("temperature");
-  });
-
-  it.each(["", " \n\t"])(
-    "rejects a blank checkpoint without replacing history (%j)",
-    async (text) => {
-      const { generateText } = await import("ai");
-      vi.mocked(generateText).mockResolvedValue({
-        finishReason: "content-filter",
-        text,
-      } as Awaited<ReturnType<typeof generateText>>);
-      const messages = [
-        user("Keep the original request."),
-        assistant("Work is in progress."),
-        user("A scheduled report completed."),
-      ];
-      const original = structuredClone(messages);
-
-      await expect(
-        compactMessages(
-          messages,
-          {} as Parameters<typeof compactMessages>[1],
-          { recentWindowSize: 10, threshold: ROOMY },
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          true,
-        ),
-      ).rejects.toThrow(
-        "The compaction model returned an empty summary. Finish reason: content-filter.",
-      );
-      expect(messages).toEqual(original);
-    },
-  );
-
   it("summarizes the full conversation even when it is already under the threshold", async () => {
-    const { generateText } = await import("ai");
-    vi.mocked(generateText).mockResolvedValue({
-      text: "forced checkpoint",
-    } as Awaited<ReturnType<typeof generateText>>);
+    const summarize = summarizeWith("forced checkpoint");
     const messages = [user("old message"), assistant("old reply")];
 
     const result = await compactMessages(
       messages,
-      {} as Parameters<typeof compactMessages>[1],
       { recentWindowSize: 10, threshold: ROOMY },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      summarize,
       true,
     );
 
-    expect(generateText).toHaveBeenCalledOnce();
+    expect(summarize).toHaveBeenCalledOnce();
     expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
   });
 });
@@ -1150,37 +1009,5 @@ describe("compactMessages: summarization fallback", () => {
 
     expect(result.at(-1)).toEqual(user("latest question"));
     expect(result.filter((m) => m.content === "Continue.")).toHaveLength(0);
-  });
-
-  it("forwards model options to the summarization call", async () => {
-    const { generateText } = await import("ai");
-    vi.mocked(generateText).mockResolvedValue({
-      text: "summary",
-    } as Awaited<ReturnType<typeof generateText>>);
-
-    const messages = [user("old message"), assistant("old reply"), user("continue")];
-    const model = {} as Parameters<typeof compactMessages>[1];
-    const providerOptions = { anthropic: { thinking: { budget_tokens: 128 } } };
-    const headers = { "x-title": "My Agent" };
-    const abortController = new AbortController();
-
-    await compactMessages(
-      messages,
-      model,
-      { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN },
-      providerOptions,
-      undefined,
-      headers,
-      abortController.signal,
-    );
-
-    expect(generateText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        abortSignal: abortController.signal,
-        headers,
-        model,
-        providerOptions,
-      }),
-    );
   });
 });

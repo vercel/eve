@@ -67,6 +67,7 @@ describe("createChannelOperations", () => {
         turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
+      successor: expect.objectContaining({ title: "Support thread" }),
     });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "clear" },
@@ -97,6 +98,9 @@ describe("createChannelOperations", () => {
         turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
+      successor: expect.objectContaining({
+        adapter: { kind: "slack", state: { responder: "U_AUTHOR" } },
+      }),
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(2, {
       command: {
@@ -110,6 +114,9 @@ describe("createChannelOperations", () => {
         turnPolicy: undefined,
       },
       continuationToken: "slack:C1:T1",
+      successor: expect.objectContaining({
+        adapter: { kind: "slack", state: { responder: "U_APPROVER" } },
+      }),
     });
   });
 

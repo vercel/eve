@@ -7,6 +7,7 @@ import {
   type CompiledToolBindings,
   isInvocableCompiledTool,
 } from "#channel/tool-eligibility.js";
+import { isAnonymousPrincipal } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
@@ -14,6 +15,12 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { deriveToolSessionId, validateToolSessionKey } from "#execution/tool-session/id.js";
+import {
+  assertToolSessionSandboxSupport,
+  releaseToolSessionHandle,
+  ToolSessionSandboxUnsupportedError,
+} from "#execution/tool-session/sandbox.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   AuthorizationHookKey,
@@ -89,8 +96,12 @@ function ineligibility(
 }
 
 /**
- * Runs one tool outside a turn; see `InvokeToolFn` for the contract. Each call
- * gets a fresh session id, so nothing it opens is shared with another call.
+ * Runs one tool outside a turn; see `InvokeToolFn` for the contract. A call
+ * without a key gets a fresh session id, so nothing it opens is shared with
+ * another call. A keyed call derives its session id from the caller and key.
+ * Either way the session's authored state is call-scoped: tool sessions keep
+ * only their sandbox. An anonymous caller is denied a keyed call: with one
+ * shared principal, the key alone would name the session.
  */
 export async function invokeTool(
   runtime: InvokeToolRuntime,
@@ -110,15 +121,34 @@ export async function invokeTool(
     return failed(`Tool "${name}" cannot be invoked outside a conversation: ${ineligible}.`);
   }
 
+  const key = options.key;
+  const keyProblem = key === undefined ? undefined : validateToolSessionKey(key);
+  if (keyProblem !== undefined) return { message: keyProblem, status: "invalid-input" };
+  // `none()` gives every caller one principal, so a key would be a shared secret
+  // that opens the same sandbox to anyone who guesses it.
+  if (key !== undefined && isAnonymousPrincipal(options.auth)) {
+    return denied(
+      "Tool sessions need an authenticated caller: an anonymous caller cannot send a key. " +
+        "Call without a key for a one-off session.",
+    );
+  }
+
   const callId = `call_${createUlid()}`;
-  const sessionId = `call_session_${createUlid()}`;
+  // Each call is its own run in traces. A tool session id is stable per caller
+  // and key, so it only finds the sandbox: as a run or conversation id it would
+  // join calls days apart and show which calls came from the same caller.
+  const runSessionId = `call_session_${createUlid()}`;
+  const sessionId =
+    key === undefined
+      ? runSessionId
+      : deriveToolSessionId({ current: options.auth, forwardedBy: options.forwardedBy, key });
   return await withInvokeToolSpan(
     {
       agentName: runtime.agentName,
       auth: options.auth,
       callId,
       origin: runtime.origin,
-      sessionId,
+      sessionId: runSessionId,
       toolName: name,
     },
     (observer) =>
@@ -144,9 +174,13 @@ async function runInvocation(input: {
   }
   if (validated.kind === "invalid") return { message: validated.message, status: "invalid-input" };
 
-  const sandbox = await callSandbox(runtime, sessionId);
+  const sandbox =
+    options.key === undefined
+      ? await callSandbox(runtime, sessionId)
+      : await keyedSandbox(runtime, sessionId);
   const context = createCallContext({
     auth: options.auth,
+    initiator: options.initiator ?? options.auth,
     callId,
     callbackBaseUrl: runtime.callbackBaseUrl,
     sessionId,
@@ -166,16 +200,50 @@ async function runInvocation(input: {
     );
   } finally {
     await sandbox.release().catch((error: unknown) => {
-      logError(log, "failed to delete a call's sandbox", error, { sessionId, toolName: name });
+      logError(log, "failed to release a call's sandbox", error, { sessionId, toolName: name });
     });
   }
 }
 
+interface CallSandbox {
+  readonly access: SandboxAccess;
+  release(): Promise<void>;
+}
+
+/**
+ * A keyed session's sandbox: found or created on the first `ctx.getSandbox()`
+ * through the provider's `start`, which reopens it by session id, and kept
+ * after the call. Concurrent first calls in this process share one start.
+ * The call does not own the sandbox, so a failed start never deletes it, and
+ * release only lets go of this call's handle: an overlapping call keeps its
+ * own.
+ */
+async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
+  const inner = await ensureSandboxAccess({
+    compiledArtifactsSource: runtime.compiledArtifactsSource,
+    nodeId: runtime.nodeId,
+    ownsSandbox: false,
+    registry: runtime.sandboxRegistry,
+    sessionId,
+    state: null,
+  });
+  return {
+    access: {
+      ...inner,
+      async get() {
+        assertToolSessionSandboxSupport(runtime.sandboxRegistry);
+        return await inner.get();
+      },
+    },
+    async release() {
+      const handle = await inner.detach();
+      if (handle !== undefined) await releaseToolSessionHandle(runtime.sandboxRegistry, handle);
+    },
+  };
+}
+
 /** The call's sandbox: opened on the first `ctx.getSandbox()`, deleted after the call. */
-async function callSandbox(
-  runtime: InvokeToolRuntime,
-  sessionId: string,
-): Promise<{ readonly access: SandboxAccess; release(): Promise<void> }> {
+async function callSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const inner = await ensureSandboxAccess({
     compiledArtifactsSource: runtime.compiledArtifactsSource,
     nodeId: runtime.nodeId,
@@ -208,17 +276,18 @@ async function callSandbox(
 
 function createCallContext(input: {
   readonly auth: SessionAuthContext;
+  readonly initiator: SessionAuthContext;
   readonly callId: string;
   readonly callbackBaseUrl: string;
   readonly sessionId: string;
 }): ContextContainer {
   const context = new ContextContainer();
   context.set(AuthKey, input.auth);
-  context.set(InitiatorAuthKey, input.auth);
+  context.set(InitiatorAuthKey, input.initiator);
   context.set(SessionIdKey, input.sessionId);
   // No turn exists; the stand-in names the call, as sandbox setup outside a turn does.
   context.setVirtualContext(SessionKey, {
-    auth: { current: input.auth, initiator: input.auth },
+    auth: { current: input.auth, initiator: input.initiator },
     sessionId: input.sessionId,
     turn: { id: input.callId, sequence: 0 },
   });
@@ -291,7 +360,10 @@ async function runCall(input: {
     if (returned) {
       return failedFromError(error, definition.name, "tool output could not be serialized");
     }
-    if (isConnectionAuthorizationFailedError(error)) {
+    if (
+      isConnectionAuthorizationFailedError(error) ||
+      error instanceof ToolSessionSandboxUnsupportedError
+    ) {
       return failed(toErrorMessage(error));
     }
     return failedFromError(error, definition.name, "tool execution failed");

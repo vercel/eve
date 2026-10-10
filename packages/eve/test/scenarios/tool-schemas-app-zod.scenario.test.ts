@@ -72,7 +72,7 @@ export default defineAgent({
         { id: "authored", name: "tag_page", input: { id: "page-1", tags: { status: "done" } } },
       ] };
     }
-    return { toolCalls: [{ id: "final", name: "final_output", input: {
+    return { toolCalls: [{ id: "final", name: "eve__reply", input: {
       advertised: tools.find((tool) => tool.name === "file_pages")?.inputSchema,
       results: toolResults.map(({ id, isError, output }) => ({ id, isError, output })),
     } }] };

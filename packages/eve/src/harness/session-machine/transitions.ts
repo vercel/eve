@@ -1,4 +1,4 @@
-import type { ModelMessage, UserContent } from "ai";
+import type { ModelMessage, ToolCallPart, UserContent } from "ai";
 
 import type {
   SubagentAuthorizationEventHookPayload,
@@ -32,6 +32,7 @@ import {
   type InputResolution,
   type RuntimeIdentity,
   type RuntimeTraceContext,
+  type SessionPredecessor,
   type TaskCancelReason,
   type TaskStartedStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -54,6 +55,7 @@ import {
   activeTurnId,
   answeredCallIds,
   nextStepIndex,
+  runningTasks,
   turnPosition,
   type SessionView,
 } from "./view.js";
@@ -96,6 +98,8 @@ export function receive(
   view: SessionView,
   input: {
     readonly message?: string | UserContent;
+    /** The session this one replaced, when eve started it in place of a stranded one. */
+    readonly predecessor?: SessionPredecessor;
     readonly runtime?: RuntimeIdentity;
     readonly trace?: RuntimeTraceContext;
   },
@@ -104,7 +108,13 @@ export function receive(
   const turnId = activeTurnId(position);
   const events: UnstampedMessageStreamEvent[] = [];
   if (!position.sessionStarted) {
-    events.push(createSessionStartedEvent({ runtime: input.runtime, trace: input.trace }));
+    events.push(
+      createSessionStartedEvent({
+        predecessor: input.predecessor,
+        runtime: input.runtime,
+        trace: input.trace,
+      }),
+    );
   }
   if (position.turnId === "") {
     events.push(
@@ -268,12 +278,58 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       events.push(createActionResultEvent({ result, ...step.event }));
     }
   }
+  // A step that parked approvals beside its tasks asks for them once the tasks finish.
+  for (const step of steps) {
+    if (step.tasks.length === 0 || step.requests.length === 0) continue;
+    if (runningTasks(step).length > 0) continue;
+    if (step.requests.some((request) => request.requestId in view.projection.inputs)) continue;
+    events.push(createInputRequestedEvent({ requests: step.requests, ...step.event }));
+  }
   const complete = steps.filter(isComplete);
   return {
     commit: complete.flatMap((step) => step.messages),
     events,
     turn: { ...view.turn, suspended: steps.filter((step) => !complete.includes(step)) },
   } satisfies Transition;
+}
+
+/** A call a discarded model-call attempt announced without a result. */
+export interface DiscardedCall {
+  readonly callId: string;
+  readonly toolName: string;
+}
+
+/** What a discarded attempt's calls report: the replacement attempt re-requests what it needs. */
+const RETRIED_CALL_RESULT = {
+  code: "MODEL_CALL_ATTEMPT_RETRIED",
+  message: "The model call attempt was retried before this tool could run.",
+} as const;
+
+/**
+ * A model-call attempt failed and the step retries it. The calls the attempt announced never
+ * ran, so each settles as failed before the replacement attempt streams. Nothing reaches
+ * history: the discarded response was never committed.
+ */
+export function discardAttempt(
+  view: SessionView,
+  input: { readonly calls: readonly DiscardedCall[] },
+): Transition {
+  const coordinates = at(view.projection);
+  return unchanged(
+    view,
+    input.calls.map(({ callId, toolName }) =>
+      createActionResultEvent({
+        ...coordinates,
+        result: {
+          callId,
+          isError: true,
+          kind: "tool-result",
+          output: { ...RETRIED_CALL_RESULT },
+          toolName,
+        },
+      }),
+    ),
+  );
 }
 
 /**
@@ -323,27 +379,44 @@ function isComplete(step: SuspendedStep): boolean {
   return [...stepCallIds(step)].every((callId) => answered.has(callId));
 }
 
-/** Places a result right after the message that made its call. */
+/**
+ * Places a result right after the message that made its call, under the call's name: a call
+ * made through `eve__tool` or `eve__skill` keeps that name in history, whatever entry it ran.
+ */
 export function withResult(
   messages: readonly ModelMessage[],
-  part: ToolResultPart,
+  result: ToolResultPart,
 ): ModelMessage[] {
   const next = [...messages];
-  const asking = next.findIndex(
-    (message) =>
-      message.role === "assistant" &&
-      Array.isArray(message.content) &&
-      message.content.some(
-        (content) => content.type === "tool-call" && content.toolCallId === part.toolCallId,
-      ),
-  );
-  const following = next[asking + 1];
-  if (asking >= 0 && following?.role === "tool") {
-    next[asking + 1] = { ...following, content: [...following.content, part] };
+  const asking = findCall(next, result.toolCallId);
+  if (asking === undefined) {
+    next.push({ content: [result], role: "tool" });
+    return next;
+  }
+  const part = { ...result, toolName: asking.call.toolName };
+  const following = next[asking.index + 1];
+  if (following?.role === "tool") {
+    next[asking.index + 1] = { ...following, content: [...following.content, part] };
   } else {
-    next.splice(asking >= 0 ? asking + 1 : next.length, 0, { content: [part], role: "tool" });
+    next.splice(asking.index + 1, 0, { content: [part], role: "tool" });
   }
   return next;
+}
+
+/** The call with this id, and the index of the message that made it. */
+function findCall(
+  messages: readonly ModelMessage[],
+  callId: string,
+): { readonly call: ToolCallPart; readonly index: number } | undefined {
+  for (const [index, message] of messages.entries()) {
+    if (message.role !== "assistant" || typeof message.content === "string") continue;
+    const call = message.content.find(
+      (content): content is ToolCallPart =>
+        content.type === "tool-call" && content.toolCallId === callId,
+    );
+    if (call !== undefined) return { call, index };
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

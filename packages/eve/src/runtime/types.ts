@@ -31,7 +31,7 @@ import type {
   MarkdownSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import type { InternalAgentDefinition } from "#shared/agent-definition.js";
+import type { InternalAgentDefinition, AgentToolExposure } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
@@ -101,6 +101,8 @@ export type ResolvedScheduleDefinition = Readonly<
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly protocolVersionDiscovery?: boolean;
+  /** MCP only: send the turn's principals in `eve-forwarded-principal`. */
+  readonly forwardPrincipal?: boolean;
   readonly approval?: Approval;
   readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
@@ -274,7 +276,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
     Node & {
       kind: "subagent";
       name: string;
-      tool?: boolean;
+      tool?: AgentToolExposure;
     } & (
       | {
           description: string;
@@ -301,7 +303,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
       kind: "remote";
       name: string;
       path: string;
-      tool?: boolean;
+      tool?: AgentToolExposure;
       url: string;
     }
 >;

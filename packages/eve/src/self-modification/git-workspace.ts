@@ -8,11 +8,10 @@ type NetworkPolicySandboxSession = SandboxSession & {
 import { gitHubRemoteUrl } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
-import type { GitHubRepository } from "./config.js";
+import type { GitHubRepository } from "./remote/config.js";
 import { gitOutput, runGitCommand, withBrokeredGitHubCredential } from "./git.js";
 import { assertFullSha, assertGitRef } from "./identifiers.js";
 
-export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self-modification/extension.ts";
 const WORKSPACE_PATH = "/workspace";
 export const REPOSITORY_PATH = `${WORKSPACE_PATH}/repository`;
 const BASE_REF = "refs/eve-self-modification/base";

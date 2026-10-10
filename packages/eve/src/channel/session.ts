@@ -9,6 +9,7 @@ import type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
+  GetEventStreamOptions,
   ResetSessionResult,
   Runtime,
   SessionAuthContext,
@@ -39,12 +40,16 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
   readonly id: string;
-  /** Sends a message to this exact session ID without creating or following a replacement. */
+  /**
+   * Sends a message to this exact session ID without creating or following a
+   * replacement. Throws `SessionStrandedError` when the session's owner cannot
+   * execute here; nothing is delivered. Call {@link reset} to end it.
+   */
   send(
     message: string | UserContent,
     options: SessionSendOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Answers pending input requests on this exact session ID. */
+  /** Answers pending input requests on this exact session ID. Throws `SessionStrandedError` like {@link send}. */
   respond<const TResponses extends readonly InputResponse[]>(
     inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
@@ -57,7 +62,12 @@ export interface Session {
   clear(): Promise<ClearSessionResult>;
   /** Terminally retires this exact session ID. */
   reset(options?: { reason?: string }): Promise<ResetSessionResult>;
-  getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
+  /**
+   * Opens the recorded stream. Following it throws `SessionStrandedError`
+   * while its owner is stranded; `follow: false` reads recorded history up to
+   * the current tail without inspecting or changing the session.
+   */
+  getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<MessageStreamEvent>>;
   getStreamTailIndex(): Promise<number>;
 }
 
@@ -170,7 +180,7 @@ export function createSession(
         sessionId: id,
       });
     },
-    async getEventStream(options?: { startIndex?: number }) {
+    async getEventStream(options?: GetEventStreamOptions) {
       return runtime.getEventStream(id, options);
     },
     async getStreamTailIndex() {

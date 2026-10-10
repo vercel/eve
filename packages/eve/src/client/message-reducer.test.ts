@@ -267,7 +267,9 @@ describe("defaultMessageReducer", () => {
       state: "input-available",
       stepIndex: 0,
       toolCallId: "call_render",
-      toolMetadata: { eve: { inputRequest: undefined, kind: "tool-call", name: "render" } },
+      toolMetadata: {
+        eve: { inputRequest: undefined, kind: "tool-call", label: "Render", name: "render" },
+      },
       toolName: "render",
       type: "dynamic-tool",
     });
@@ -311,11 +313,47 @@ describe("defaultMessageReducer", () => {
       stepIndex: 0,
       toolCallId: "call_publish",
       toolMetadata: {
-        eve: { inputRequest: undefined, kind: "tool-call", name: "publish" },
+        eve: { inputRequest: undefined, kind: "tool-call", label: "Publish", name: "publish" },
       },
       toolName: "publish",
       type: "dynamic-tool",
     });
+  });
+
+  it("labels a tool part as its call reads, then as its completion label", () => {
+    const reducer = defaultMessageReducer();
+    const requested = reduceServerEvents(reducer, reducer.initial(), [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_search",
+            input: { query: "refunds" },
+            kind: "tool-call",
+            toolName: "find",
+          },
+        ],
+        presentation: { call_search: { label: "Search tools for “refunds”" } },
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+    const settled = reduceServerEvents(reducer, requested, [
+      createActionResultEvent({
+        presentation: { call_search: { label: "Searched tools for “refunds”, found 3" } },
+        result: { callId: "call_search", kind: "tool-result", output: {}, toolName: "find" },
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(findToolPart(requested, "call_search")?.toolMetadata?.eve?.label).toBe(
+      "Search tools for “refunds”",
+    );
+    expect(findToolPart(settled, "call_search")?.toolMetadata?.eve?.label).toBe(
+      "Searched tools for “refunds”, found 3",
+    );
   });
 
   it("removes an unfinished streamed tool input when the turn is cancelled", () => {
@@ -377,6 +415,135 @@ describe("defaultMessageReducer", () => {
         state: "done",
       },
     ]);
+  });
+
+  it("removes unresolved tool parts on every turn end and preserves terminal and approval states", () => {
+    const terminalEvents = [
+      createTurnCompletedEvent({
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+      createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+      createTurnFailedEvent({
+        code: "MODEL_FAILED",
+        message: "model failed",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ] as const;
+
+    for (const terminalEvent of terminalEvents) {
+      const reducer = defaultMessageReducer();
+      const data = reduceServerEvents(reducer, reducer.initial(), [
+        createActionInputAppendedEvent({
+          callId: "call_streaming",
+          inputTextDelta: "{",
+          sequence: 1,
+          stepIndex: 0,
+          toolName: "render",
+          turnId: "turn_1",
+        }),
+        createActionsRequestedEvent({
+          actions: [
+            {
+              callId: "call_available",
+              input: { title: "Pending" },
+              kind: "tool-call",
+              toolName: "render",
+            },
+            {
+              callId: "call_approval",
+              input: { title: "Approve" },
+              kind: "tool-call",
+              toolName: "render",
+            },
+            {
+              callId: "call_completed",
+              input: { title: "Done" },
+              kind: "tool-call",
+              toolName: "render",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createInputRequestedEvent({
+          requests: [
+            {
+              action: {
+                callId: "call_approval",
+                input: { title: "Approve" },
+                kind: "tool-call",
+                toolName: "render",
+              },
+              kind: "tool-approval",
+              prompt: "Approve?",
+              requestId: "approval_1",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createActionResultEvent({
+          result: {
+            callId: "call_completed",
+            kind: "tool-result",
+            output: { saved: true },
+            toolName: "render",
+          },
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        terminalEvent,
+      ]);
+
+      expect(findToolPart(data, "call_streaming")).toBeUndefined();
+      expect(findToolPart(data, "call_available")).toBeUndefined();
+      expect(findToolPart(data, "call_approval")).toMatchObject({ state: "approval-requested" });
+      expect(findToolPart(data, "call_completed")).toMatchObject({
+        output: { saved: true },
+        state: "output-available",
+      });
+    }
+  });
+
+  it("removes tool parts settled by a retried model-call attempt", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_abandoned",
+            input: { title: "Pending" },
+            kind: "tool-call",
+            toolName: "render",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createActionResultEvent({
+        result: {
+          callId: "call_abandoned",
+          isError: true,
+          kind: "tool-result",
+          output: {
+            code: "MODEL_CALL_ATTEMPT_RETRIED",
+            message: "The model call attempt was retried.",
+          },
+          toolName: "render",
+        },
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(findToolPart(data, "call_abandoned")).toBeUndefined();
   });
 
   it("does not create an assistant message when a turn fails before streaming", () => {
@@ -620,6 +787,7 @@ describe("defaultMessageReducer", () => {
             toolMetadata: {
               eve: {
                 kind: "tool-call",
+                label: "Get weather",
                 name: "get_weather",
                 inputRequest: undefined,
                 inputResponse: undefined,
@@ -680,6 +848,7 @@ describe("defaultMessageReducer", () => {
             toolMetadata: {
               eve: {
                 kind: "subagent-call",
+                label: "Research",
                 name: "research",
               },
             },
@@ -766,6 +935,7 @@ describe("defaultMessageReducer", () => {
             toolMetadata: {
               eve: {
                 kind: "tool-call",
+                label: "Bash",
                 name: "bash",
               },
             },
@@ -1010,6 +1180,7 @@ describe("defaultMessageReducer", () => {
                   requestId: "approval_1",
                 },
                 kind: "tool-call",
+                label: "Bash",
                 name: "bash",
               },
             },

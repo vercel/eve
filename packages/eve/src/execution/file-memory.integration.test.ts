@@ -1,9 +1,9 @@
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { describe, expect, it } from "vitest";
 
 import { workflowEntry } from "#execution/session/entry.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { start } from "#internal/workflow/runtime.js";
 import { fileMemory, inMemory } from "#public/memory/file/index.js";
 import { defineMemory } from "#public/memory/index.js";
 import { byPrincipal } from "#public/memory/scope.js";
@@ -78,7 +78,7 @@ describe("file memory integration", () => {
 });
 
 async function runTurn(input: { readonly message: string; readonly principalId: string }) {
-  const run = await start(workflowEntry, [
+  const run = await startSessionOwner(workflowEntry, [
     {
       kind: "initial",
       ownerDeploymentId: "dpl_inline",

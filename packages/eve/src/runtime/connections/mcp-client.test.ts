@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextStorage, ContextContainer } from "#context/container.js";
-import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import {
   ConnectionAuthorizationRequiredError,
   isConnectionAuthorizationFailedError,
@@ -179,6 +179,43 @@ describe("McpConnectionClient", () => {
       },
       expect.any(Object),
     );
+  });
+
+  it("with forwardPrincipal, sends the turn's user in a header that refuses redirects", async () => {
+    createMCPClient.mockResolvedValue({ close: vi.fn() });
+    await new McpConnectionClient(makeConnection({ forwardPrincipal: true })).connect();
+    const fetch: typeof globalThis.fetch = createMCPClient.mock.calls[0]![0].transport.fetch;
+    const sent = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
+    const send = (auth: SessionAuthContext | null) =>
+      contextStorage.run(ctxWithAuth(auth), () => fetch("https://mcp.example.com", {}));
+    try {
+      await send(userAuth("alice"));
+      const init = sent.mock.calls[0]![1]!;
+      const header = new Headers(init.headers).get("eve-forwarded-principal")!;
+      expect(JSON.parse(Buffer.from(header, "base64url").toString())).toEqual({
+        current: userAuth("alice"),
+      });
+      expect(init.redirect).toBe("error");
+
+      await send({ ...userAuth("anon"), principalType: "anonymous" });
+      expect(sent.mock.calls[1]![1]).toEqual({});
+
+      const delegated = ctxWithAuth(userAuth("alice"));
+      delegated.set(InitiatorAuthKey, userAuth("bob"));
+      await contextStorage.run(delegated, () => fetch("https://mcp.example.com", {}));
+      const delegatedHeader = new Headers(sent.mock.calls[2]![1]!.headers).get(
+        "eve-forwarded-principal",
+      )!;
+      expect(JSON.parse(Buffer.from(delegatedHeader, "base64url").toString())).toEqual({
+        current: userAuth("alice"),
+        initiator: userAuth("bob"),
+      });
+
+      const large = { ...userAuth("alice"), attributes: { blob: "a".repeat(16 * 1024) } };
+      await expect(send(large)).rejects.toThrow(/Connection "test" cannot forward.*16384-byte/u);
+    } finally {
+      sent.mockRestore();
+    }
   });
 
   it("creates an HTTP MCP client with resolved connection headers", async () => {

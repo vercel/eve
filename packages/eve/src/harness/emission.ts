@@ -25,6 +25,7 @@ import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
+  toActionResult,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
 import {
@@ -44,9 +45,8 @@ import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
-import { emitNestedToolActions } from "#harness/nested-actions.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
-import type { HarnessEmitFn, HarnessToolMap } from "#harness/types.js";
+import type { HarnessEmitFn, HarnessToolLookup } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 
 /**
@@ -71,7 +71,8 @@ interface StreamActionEmissionOptions {
    * as the reply.
    */
   readonly hidesHeldText?: boolean;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
+  readonly unsettledActionToolNames?: Map<string, string>;
 }
 
 /**
@@ -91,6 +92,11 @@ export async function emitStreamContent(
   const orderedEmitter = createOrderedStreamEmitter(emitFn);
   const providerActionBatch = createProviderStreamActionBatch({
     emitFn: orderedEmitter.emit,
+    onActionsEmitted: (actions) => {
+      for (const { request, toolName } of actions) {
+        options?.unsettledActionToolNames?.set(request.action.callId, toolName);
+      }
+    },
     state,
   });
   try {
@@ -161,8 +167,8 @@ async function consumeStreamContent(
     callId: string,
     toolName: string,
     inputTextDelta: string,
-  ): Promise<void> =>
-    emitFn(
+  ): Promise<void> => {
+    await emitFn(
       createActionInputAppendedEvent({
         callId,
         inputTextDelta,
@@ -172,8 +178,13 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
+    options?.unsettledActionToolNames?.set(callId, toolName);
+  };
 
-  const emitActionRequest = async (projection: RuntimeActionRequestProjection): Promise<void> => {
+  const emitActionRequest = async (
+    projection: RuntimeActionRequestProjection,
+    toolName: string,
+  ): Promise<void> => {
     const { action } = projection;
     if (emittedActionCallIds.has(action.callId)) {
       return;
@@ -194,6 +205,7 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
+    options?.unsettledActionToolNames?.set(action.callId, toolName);
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -226,7 +238,7 @@ async function consumeStreamContent(
     }
 
     actionInputs.set(resolved.request.action.callId, resolved.request.action.input);
-    providerActionBatch.observe(resolved.request);
+    providerActionBatch.observe(resolved.request, toolCall.toolName);
   };
 
   const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {
@@ -234,7 +246,6 @@ async function consumeStreamContent(
       return;
     }
     emittedActionResultCallIds.add(result.callId);
-    await emitNestedToolActions(emitFn, state, result.callId);
     const resultPresentation =
       result.isError === true
         ? undefined
@@ -247,12 +258,13 @@ async function consumeStreamContent(
     await emitFn(
       createActionResultEvent({
         presentation: resultPresentation,
-        result,
+        result: toActionResult(result, actionInputs.get(result.callId)),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
     );
+    options?.unsettledActionToolNames?.delete(result.callId);
   };
 
   const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
@@ -288,6 +300,7 @@ async function consumeStreamContent(
           toolCall,
           tools: options.tools,
         }),
+        toolCall.toolName,
       );
     } catch (error) {
       if (error instanceof TypeError) {

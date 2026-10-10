@@ -158,7 +158,9 @@ export default defineTool({
 });
 ```
 
-When a response is refused without starting a turn, the session returns to `session.waiting`. The client finishes the submission and keeps the approval prompt answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision. You can inspect `approval.candidate` events for the response policy's refusal reason.
+When the policy refuses a response, the approval stays pending and the turn stays held. The stream emits `approval.candidate` with `outcome: "pending"`, then `approval.candidate` with `outcome: "rejected"` and the policy's `reason`, then `turn.waiting` with `on: "input"` for the same `turnId`. It does not emit `session.waiting`, so a client that stops reading at a session boundary keeps reading through a refusal. The client finishes the submission and the approval prompt stays answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision.
+
+Every response a policy evaluates starts the same way, not only refusals. eve first records the response as an `approval.candidate` with `outcome: "pending"`, then runs the policy so slow policy work cannot lose the response. An allowed response then emits `approval.settled` and `input.resolved`. An approval without a `response` policy settles directly and emits no `approval.candidate`. A candidate can also end with `failed`, `timed-out`, or `stale`; inspect `approval.candidate` events for the reason.
 
 ### Skipping approval for schedule-dispatched turns
 
@@ -217,7 +219,9 @@ Approvals and questions share one protocol:
 3. The run parks durably, for as long as it takes. The turn stays open: the stream emits `turn.waiting`, and after the answer the turn resumes under the same `turnId`. That `turn.waiting` carries `on: "input"`, since a person must act.
 4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
 
-For `ctx.ask()` questions from tools, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message follows the session's `turnPolicy`. A steering message, the default, aborts the `ctx.abortSignal` of each `execute` workflow tool call the turn waits on, so a question such a call asked, such as `ask_question`'s, is withdrawn and resolves as `cancelled`. The model reads the message once those calls settle. Questions from subagents need a structured response.
+To tell the model why a call was denied, send `text` with the `cancel` response, for example `{ requestId, optionId: "cancel", text: "Only the three-pack." }`. The model receives the note quoted in the denial result, marked as written by the person who denied the call, who may not be the user. The note is also visible to anyone who can read the session stream, in `input.resolved`.
+
+For `ctx.ask()` questions from tools and prompts proxied from subagents, a follow-up message answers the first open request, as described in [Several requests at once](#several-requests-at-once). The message must match an option, or the question must allow free text. Otherwise the message follows the session's `turnPolicy`. A steering message, the default, aborts the `ctx.abortSignal` of each `execute` workflow tool call the turn waits on, so a question such a call asked, such as `ask_question`'s, is withdrawn and resolves as `cancelled`. The model reads the message once those calls settle.
 
 Each request includes a `kind` discriminator: `tool-approval`, `question`, or
 `session-limit`. Clients should use `kind` to choose behavior and presentation.
@@ -231,6 +235,16 @@ When a subagent requests input, eve emits the same `input.requested` event on it
 If a tool is approved by another user, only the approved call runs with that user's auth. Subsequent tool calls in the turn stay with the original owner.
 
 For approval requests, a follow-up message that doesn't match an option steers the turn instead of answering it. eve cancels the turn's pending approval, so the call doesn't run and `input.resolved` reports `outcome: "ignored"`, and the model reads the message next. This happens even when the message is sent with `turnPolicy: "queue"`, because a turn held on a person can't end until they act. Calls the person already approved in the same batch still run. A message from someone other than the person the turn serves waits until the turn ends. Cancelling the turn withdraws its approval: the call doesn't run, `input.resolved` reports `outcome: "cancelled"`, and a later answer to it approves nothing.
+
+### Several requests at once
+
+A turn can wait on more than one request, such as two `ctx.ask()` questions a workflow tool asks with `Promise.all`, or approvals for two tool calls the model made in one step. A follow-up message answers only the first open request: a [runtime limit](/docs/agent-config#runtime-limits) continuation prompt if one is open, and otherwise the request eve asked for first, in the order of its `input.requested` events.
+
+The message answers that request when it matches one of its options, or when the request accepts free text. Otherwise the message is not an answer and follows the rules above. To answer several requests by text, send one message per request.
+
+An approval for a tool call made in the same step as a workflow tool call, such as `ask_question`, is not requested until the workflow tool call finishes, because the approved call can't run before then. The person answers the question first, then sees the approval.
+
+Channels that show only text show one request at a time, in this order, and post the next once the current one is answered, so a reply answers the request the person sees. Twilio, GitHub, Linear, and Chat SDK channels work this way. Chat SDK can't tell whether an adapter shows buttons, so every Chat SDK channel shows requests one at a time, including Linq, Photon, and adapters with buttons. Native channels with buttons, such as Slack, show every open request so a person can press any of them, and a typed reply still answers the first.
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full event and resume contract that this builds on.
 

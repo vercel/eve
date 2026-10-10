@@ -67,6 +67,14 @@ Gateway, share that ID so their Gateway generations can be found together.
 Direct-provider calls do not receive the option. An authored `gateway.sessionId`
 takes precedence; AI Gateway hashes IDs longer than 256 characters.
 
+For direct OpenAI and `chatgpt()` model calls, eve sets
+`providerOptions.openai.promptCacheKey` to a SHA-256 hash of the session ID,
+which helps OpenAI route a session's calls to the cache that holds its prompt
+prefix. Each subagent session gets its own key. An authored
+`openai.promptCacheKey` takes precedence. `chatgpt()` calls also send the key
+in the `session-id` header, which the Codex backend uses for cache routing.
+Gateway-routed calls do not receive the option.
+
 ### Choose the model dynamically
 
 To select a model from the incoming prompt with an AI SDK decision model, use
@@ -143,6 +151,29 @@ the agent-level setting for that selection. Omitting it inherits the agent setti
 `"provider-default"` explicitly uses the provider's default.
 
 Run `eve set model --reasoning high` to update this field from the command line.
+
+## Prompt caching
+
+eve caches prompts automatically for AI Gateway models and for Anthropic models
+it recognizes by provider or model id. Set `modelOptions.promptCache` on a
+directly called model to mark an unrecognized model as Anthropic (such as a
+Bedrock application inference profile) or to use a 1-hour cache:
+
+```ts title="agent/agent.ts"
+import { bedrock } from "@ai-sdk/amazon-bedrock";
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: bedrock(process.env.BEDROCK_INFERENCE_PROFILE_ARN!),
+  modelContextWindowTokens: 200_000,
+  modelOptions: {
+    promptCache: { anthropic: { ttl: "1h" } }, // or { anthropic: {} } for the default 5m
+  },
+});
+```
+
+Not every Claude model supports a 1-hour cache. eve rejects `promptCache` on
+Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
@@ -358,14 +389,14 @@ it falls back to the World's default retention period.
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-| Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                               |
-| -------------- | ------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                             |
-| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                    |
-| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                               |
-| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data. |
-| `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                  |
-| `tool`         | `boolean`                             | `true`           | Exposes this agent to its parent model as a tool. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`.                                               |
+| Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                                                                                                          |
+| -------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                        |
+| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                                                |
+| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                          |
+| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data.                                                                            |
+| `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                             |
+| `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` keeps it out of the model's tool list; the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`. |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 

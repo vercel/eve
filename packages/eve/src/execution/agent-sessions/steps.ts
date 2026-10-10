@@ -1,4 +1,5 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -35,6 +36,7 @@ import {
 } from "#execution/agent-sessions/remote.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
+import { stubToolPath } from "#tool-stubs/target.js";
 
 const log = createLogger("execution.agent-sessions");
 
@@ -148,6 +150,7 @@ export async function sendAgentSessionMessageStep(
   const result = await dispatchWorkflowSessionCommand({
     command: {
       auth: input.auth.current,
+      schedule: context.schedule,
       caller: {
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
@@ -157,6 +160,11 @@ export async function sendAgentSessionMessageStep(
       payload: { message: input.message, outputSchema: input.outputSchema },
     },
     sessionId: address.sessionId,
+  }).catch((error: unknown) => {
+    if (!SessionStrandedError.is(error)) throw error;
+    throw new Error(`Agent "${address.name}" can no longer receive messages: ${error.message}`, {
+      cause: error,
+    });
   });
   if (result.status !== "accepted") {
     throw new Error(`Agent "${address.name}" can no longer receive messages; its session ended.`);
@@ -233,6 +241,7 @@ async function startLocalSession(
     action,
     auth: auth.current,
     capabilities: context.capabilities,
+    schedule: context.schedule,
     channelMetadata: context.channelMetadata,
     continuationKey: input.key,
     graph: bundle.graph,
@@ -254,8 +263,18 @@ async function startLocalSession(
     dynamicSubagentAgentConfig: target.dynamicSubagentAgentConfig,
     nodeId: action.nodeId,
   });
+  let childToolStubs = context.toolStubs;
+  if (childToolStubs !== undefined) {
+    childToolStubs = {
+      ...childToolStubs,
+      agentPath: stubToolPath(childToolStubs, action.name),
+    };
+  }
   await contextStorage.run(new ContextContainer({ localDevRequest: context.localDevRequest }), () =>
-    childRuntime.createSession(runInput),
+    childRuntime.createSession({
+      ...runInput,
+      toolStubs: childToolStubs,
+    }),
   );
   const owner = await waitForCommandHookOwner(sessionInboxHookToken(childContinuationToken));
   return { kind: "local", name: action.name, nodeId: action.nodeId, sessionId: owner.runId };

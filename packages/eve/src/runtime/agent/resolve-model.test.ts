@@ -47,6 +47,36 @@ describe("dynamic runtime model resolution", () => {
     expect(catalog.getByGatewayId).not.toHaveBeenCalled();
   });
 
+  it("carries prompt cache options on a direct provider selection", async () => {
+    const result = await resolveRuntimeModelSelection({
+      selection: {
+        model: createLanguageModel("amazon-bedrock", "application-inference-profile/abc"),
+        modelContextWindowTokens: 200_000,
+        modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+      },
+      durability: "live",
+      state: new ContextContainer(),
+    });
+
+    expect(result.reference.promptCache).toEqual({ anthropic: { ttl: "1h" } });
+  });
+
+  it("rejects prompt cache options on an AI Gateway selection", async () => {
+    const catalog = createCatalog();
+    await expect(
+      resolveRuntimeModelSelection({
+        catalog,
+        selection: {
+          model: "anthropic/claude-opus-5",
+          modelOptions: { promptCache: { anthropic: {} } },
+        },
+        durability: "durable",
+        state: new ContextContainer(),
+      }),
+    ).rejects.toThrow('modelOptions.promptCache for "anthropic/claude-opus-5"');
+    expect(catalog.getByGatewayId).not.toHaveBeenCalled();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();

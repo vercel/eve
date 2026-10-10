@@ -1,6 +1,7 @@
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
+import { deployedSelfModificationConfigSchema } from "../remote/config-schema.js";
 import { selfModificationConfigSchema } from "./config-schema.js";
 
 class StatefulCredentialProvider {
@@ -34,23 +35,27 @@ describe("self-modification extension config", () => {
     expect(() => selfModificationConfigSchema.parse(config)).toThrow();
   });
 
-  it("preserves application-supplied credential providers", async () => {
+  it("rejects the former deployed option with migration guidance", () => {
+    expect(() => selfModificationConfigSchema.parse({ deployed: {} })).toThrow(
+      "eve/self-modification/remote",
+    );
+  });
+
+  it("preserves application-supplied credential providers on the deployed mount", async () => {
     const credentials = new StatefulCredentialProvider("github-token");
-    const parsed = selfModificationConfigSchema.parse({
-      deployed: {
-        authorize: () => true,
-        credentials,
-        source: { git: { directory: ".", repository: "github.com/acme/agent" } },
-        target: { branch: "main" },
-      },
+    const parsed = deployedSelfModificationConfigSchema.parse({
+      authorize: () => true,
+      credentials,
+      source: { git: { directory: ".", repository: "github.com/acme/agent" } },
+      target: { branch: "main" },
     });
 
-    expect(parsed.deployed?.credentials).toBe(credentials);
-    if (parsed.deployed?.credentials === undefined || "pat" in parsed.deployed.credentials) {
+    expect(parsed.credentials).toBe(credentials);
+    if (parsed.credentials === undefined || "pat" in parsed.credentials) {
       throw new Error("Expected credential provider.");
     }
     await expect(
-      parsed.deployed.credentials.resolve({
+      parsed.credentials.resolve({
         capability: "publish",
         repository: { owner: "acme", repo: "agent" },
       }),

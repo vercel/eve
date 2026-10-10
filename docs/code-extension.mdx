@@ -3,7 +3,7 @@ title: "Code Extension"
 description: "Mount eve's coding extension, eve-code, and see its latest benchmark results against other coding agent harnesses."
 ---
 
-`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension contributes file-editing and search tools, an authenticated GitHub CLI tool, coding skills, a read-only worker subagent, and sandbox bootstrap helpers.
+`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension contributes file-editing and search tools, coding skills, a read-only worker subagent, and sandbox bootstrap helpers. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
 
 ## Benchmark results
 
@@ -50,15 +50,12 @@ import code from "eve/extensions/code";
 export default code({});
 ```
 
-`code({})` mounts the extension without GitHub or Vercel authentication. Add the options below when the agent needs them.
+`code({})` mounts the extension without Vercel authentication. Add the options below when the agent needs them.
 
 ## Configure the extension
 
 | Option                         | Required      | Effect                                                                                         |
 | ------------------------------ | ------------- | ---------------------------------------------------------------------------------------------- |
-| `github.connector`             | With `github` | Connector that mints a GitHub token                                                            |
-| `github.org`                   | With `github` | Organization whose repositories the `gh` tool can access                                       |
-| `github.broker`                | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules     |
 | `vercel.connector`             | With `vercel` | Connector that requests an app-subject Vercel token                                            |
 | `vercel.delivery`              | No            | `"firewall"` (default) or `"command"`                                                          |
 | `broker`                       | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
@@ -79,9 +76,33 @@ export default code({
 
 With firewall delivery, Vercel tokens never enter sandbox processes. Firewall delivery without a top-level `broker` requires a sandbox provider that exposes `setNetworkPolicy()`, and fails otherwise. Set `vercel.delivery: "command"` for providers without a mutable network policy.
 
+To use a personal access token or another credential provider, omit the connector and call `authenticateGitHub` or `authenticateVercel` from `eve/extensions/code/sandbox` in your own sandbox lifecycle. These helpers authenticate commands you run yourself; they do not configure the `gh` tool.
+
+## Publish with the git extension
+
+`eve/extensions/git` contributes the GitHub instructions and the `pr` skill. Mount it next to the code extension when the agent should open pull requests:
+
+```ts title="agent/extensions/git.ts"
+import git from "eve/extensions/git";
+
+export default git({});
+```
+
+`git({})` assumes the agent's shell already has GitHub credentials. The agent uses the `gh` and `git` CLIs in `bash`, and `git__pr` commits, pushes, and opens a draft with `gh pr create --draft`. No tool is added.
+
+Configure `github` to broker GitHub access through Connect instead. The extension then adds the authenticated `git__gh` tool, tells the agent to use it for every authenticated GitHub operation, and switches `git__pr` to `gh-signed-commit` for repositories that require verified signatures.
+
+| Option             | Required      | Effect                                                                                     |
+| ------------------ | ------------- | ------------------------------------------------------------------------------------------ |
+| `github.connector` | With `github` | Connector that mints a GitHub token                                                        |
+| `github.org`       | With `github` | Organization whose repositories the `gh` tool can access                                   |
+| `github.broker`    | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
+
 The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
 
-To use a personal access token or another credential provider, omit the connector and call `authenticateGitHub` or `authenticateVercel` from `eve/extensions/code/sandbox` in your own sandbox lifecycle. These helpers authenticate commands you run yourself; they do not configure the `gh` tool.
+### Migrate from `code({ github })`
+
+`code({ github })` is deprecated. While it is set, the code extension still contributes `code__gh`, its GitHub instructions, and the signed-commit `code__pr` skill. Without it, the code extension contributes no GitHub tool, instructions, or pull request skill. Move the `github` option to `git({ github })`, and import `gh` and the GitHub sandbox helpers from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`.
 
 ## Prepare the sandbox
 
@@ -101,7 +122,7 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-Preparation installs `gh`, wrappers for `gh`, `vc`, and `gh-signed-commit`, and TypeScript diagnostics. For repositories that require verified signatures, stage your changes and commit with `gh-signed-commit`.
+Preparation installs `gh`, wrappers for `gh`, `vc`, and `gh-signed-commit`, and TypeScript diagnostics. With the git extension's `github` configured, repositories that require verified signatures can use `gh-signed-commit` through the `gh` tool after staging changes.
 
 eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers. Upgrading eve alone does not rebuild an existing prepared environment.
 

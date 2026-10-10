@@ -25,6 +25,10 @@ import type {
   StepStartedStreamEvent,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { assertNotConnectionOwned } from "#connections/ownership.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
 import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
 import {
@@ -43,6 +47,8 @@ import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject } from "#shared/json.js";
 import { hasSchemaValidator } from "#tools/durable-schema.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 
 const log = createLogger("dynamic-tools");
@@ -61,11 +67,21 @@ function qualifyDynamicToolNames(
 
   const prefix =
     resolver.extensionNamespace === undefined ? "" : `${resolver.extensionNamespace}__`;
-  return keys.map((entryKey) => ({
-    entry: entries[entryKey]!,
-    entryKey,
-    name: `${prefix}${entryKey}`,
-  }));
+  return keys.map((entryKey) => {
+    const name = `${prefix}${entryKey}`;
+    if (!TOOL_SLUG_PATTERN.test(name)) {
+      throw new Error(
+        `Dynamic tool resolver "${resolver.logicalPath}" returned illegal tool name "${name}". ${TOOL_SLUG_RULE}`,
+      );
+    }
+    const reservation = eveNamespaceReservation(name);
+    if (reservation !== undefined) {
+      throw new Error(
+        `Dynamic tool resolver "${resolver.logicalPath}" returned the reserved tool name "${name}". ${reservation}; rename the map key.`,
+      );
+    }
+    return { entry: entries[entryKey]!, entryKey, name };
+  });
 }
 
 function durableKeyForEvent(
@@ -316,6 +332,7 @@ function createMetadata(input: {
 }): CurrentDynamicToolMetadata {
   return {
     availableInSubagents: input.entry.availableInSubagents,
+    deferred: input.entry.deferred,
     callbacks: validateDurableDynamicToolCallbacks(input.name, input.entry, {
       sessionId: input.sessionId,
       scope: input.scope,
@@ -344,6 +361,24 @@ function readDynamicEndsTurn(name: string, endsTurn: DynamicToolEntry["endsTurn"
   return endsTurn === true;
 }
 
+/**
+ * The agent's workflow tools and agents. They run after the model step, so a
+ * dynamic tool, which runs in it, cannot take their names. A static subagent
+ * hidden with `tool: false` or `disableTool()` can be wrapped by one.
+ */
+function workflowToolNames(ctx: AlsContext): ReadonlySet<string> {
+  const bundle = ctx.get(BundleKey);
+  if (bundle === undefined) return new Set();
+  const { subagentRegistry, toolRegistry } = bundle;
+  return new Set([
+    ...[...toolRegistry.toolsByName.values()]
+      .filter(({ prepared }) => workflowIdForHandling(prepared.behavior?.handling) !== undefined)
+      .map(({ prepared }) => prepared.name),
+    ...subagentRegistry.preparedTools.map((tool) => tool.name),
+    ...subagentRegistry.dynamicResolvers.map((resolver) => resolver.name),
+  ]);
+}
+
 interface ResolvedDynamicToolEvent {
   readonly metadata: readonly CurrentDynamicToolMetadata[];
 }
@@ -366,6 +401,21 @@ async function resolveToolsFromEvent(
         if (rawResult === null || rawResult === undefined) return null;
         const { entries, isSingle } = readDynamicToolResult(resolver, rawResult);
         const named = qualifyDynamicToolNames(resolver, isSingle, entries);
+        const connectionNames = ctx.get(ConnectionRegistryKey)?.getConnectionNames() ?? [];
+        const workflowNames = workflowToolNames(ctx);
+        for (const { name } of named) {
+          assertNotConnectionOwned({
+            connectionNames,
+            name,
+            remedy: "Rename the map key.",
+            subject: "Dynamic tool",
+          });
+          if (workflowNames.has(name)) {
+            throw new Error(
+              `Dynamic tool "${name}" from resolver "${resolver.logicalPath}" collides with the workflow tool or agent "${name}". Rename the map key.`,
+            );
+          }
+        }
         return {
           metadata: named.map(({ name, entryKey, entry }) =>
             createMetadata({ entry, entryKey, name, resolver, sessionId, scope }),

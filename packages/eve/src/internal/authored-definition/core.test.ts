@@ -99,6 +99,24 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"compaction.model" does not support defineDynamic');
   });
 
+  it("accepts Anthropic prompt cache options", () => {
+    const definition = normalizeAgentDefinition(
+      { model: "openai/gpt-5.5", modelOptions: { promptCache: { anthropic: { ttl: "1h" } } } },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.modelOptions).toEqual({ promptCache: { anthropic: { ttl: "1h" } } });
+  });
+
+  it("rejects an unsupported Anthropic prompt cache TTL", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.5", modelOptions: { promptCache: { anthropic: { ttl: "24h" } } } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"modelOptions.promptCache.anthropic.ttl" must be "5m" or "1h"; received "24h".');
+  });
+
   it("rejects unsupported reasoning effort", () => {
     expect(() =>
       normalizeAgentDefinition(

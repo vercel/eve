@@ -101,7 +101,7 @@ const TemplateCard = ({
       prefetch={true}
     >
       <h2 className="text-gray-1000 text-heading-16">{entry.title}</h2>
-      <p className="mt-2 line-clamp-2 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
+      <p className="mt-2 line-clamp-3 max-w-[90%] text-balance text-[14px] leading-[1.3] text-gray-800">
         {entry.description}
       </p>
       <ul aria-label="Integrations" className="mt-auto flex items-center gap-2 pt-4">

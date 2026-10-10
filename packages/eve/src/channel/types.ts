@@ -16,6 +16,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
+import type { StubScope } from "#tool-stubs/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -42,7 +43,10 @@ export type CompactSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
 
-/** Result of queueing a manual context clear for a session. */
+/**
+ * Result of queueing a manual context clear for a session. A stranded session
+ * cannot run the clear, so it throws `SessionStrandedError` instead.
+ */
 export type ClearSessionResult =
   | { readonly status: "accepted"; readonly sessionId: string }
   | { readonly status: "no_active_session" };
@@ -191,6 +195,7 @@ export type SessionCommand =
       /** Initial workflow title when delivering to a prewarmed session. */
       readonly title?: string;
       readonly kind: "send";
+      readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
@@ -231,6 +236,11 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
   readonly continuationToken: string;
+  /**
+   * Fresh creation inputs for a send. Used only when the address's owner is
+   * stranded: the runtime ends it and starts this successor in its place.
+   */
+  readonly successor?: RunInput;
 }
 
 export interface DispatchSessionInput<TCommand extends SessionCommand = SessionCommand> {
@@ -249,6 +259,7 @@ export interface DispatchSessionInput<TCommand extends SessionCommand = SessionC
  * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
+  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   /** Initial workflow title; ignored once session initialization has run. */
   readonly title?: string;
   readonly auth?: SessionAuthContext | null;
@@ -333,7 +344,10 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
-/** Responder-specific lifecycle event forwarded from a delegated child. */
+/**
+ * Lifecycle event forwarded from a delegated child: responder and sign-in progress, and the
+ * resolution of its requests. The parent relays it unchanged.
+ */
 export type SubagentAuthorizationEvent = Extract<
   UnstampedMessageStreamEvent,
   {
@@ -341,7 +355,8 @@ export type SubagentAuthorizationEvent = Extract<
       | "approval.candidate"
       | "approval.settled"
       | "authorization.required"
-      | "authorization.completed";
+      | "authorization.completed"
+      | "input.resolved";
   }
 >;
 
@@ -424,6 +439,16 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /**
+   * @internal Set by the server after it authorizes tool stubs.
+   * Local subagents match rules qualified by their full path, such as researcher/list_tasks.
+   * The root session tracks positions per rule; subagent sessions at the same path
+   * share those positions. Unprefixed rules apply only to root tools.
+   * Remote agents do not receive these stubs.
+   */
+  readonly toolStubs?: StubScope;
+  /** Server-supplied provenance inherited by locally delegated scheduled work. */
+  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly adapter: ChannelAdapter<any>;
   /**
    * Registered channel name for root sessions started from an authored
@@ -579,10 +604,20 @@ export interface Runtime {
    */
   createSession(input: RunInput): Promise<RunHandle>;
 
+  /**
+   * Sends a command to whichever session owns a continuation address. When
+   * that owner is stranded, a send with a `successor` ends it and is accepted
+   * by the successor; a send without one, or a `clear`, throws
+   * `SessionStrandedError`, and a `reset` ends it.
+   */
   dispatchContinuation<TCommand extends SessionCommand>(
     input: DispatchContinuationInput<TCommand>,
   ): Promise<SessionCommandResult<TCommand>>;
 
+  /**
+   * Sends a command to one exact session. A send or `clear` to a stranded
+   * session throws `SessionStrandedError`; a `reset` ends it.
+   */
   dispatchSession<TCommand extends SessionCommand>(
     input: DispatchSessionInput<TCommand>,
   ): Promise<SessionCommandResult<TCommand>>;
@@ -605,6 +640,10 @@ export interface Runtime {
    * first event to yield. Negative values read relative to the current tail.
    * The framework HTTP session-stream route forwards the `startIndex` query
    * parameter unchanged.
+   *
+   * A following read throws `SessionStrandedError` when the session's owner
+   * cannot execute here. A historical read (`follow: false`) never inspects
+   * or changes the session's lifecycle.
    */
   getEventStream(
     sessionId: string,
@@ -630,4 +669,10 @@ export interface GetEventStreamOptions {
    * (replay the entire stream).
    */
   readonly startIndex?: number;
+  /**
+   * Whether to keep following events recorded after the read opens. When
+   * `false`, the stream ends at the durable tail observed when it opens, and
+   * it stays readable while the session is stranded. Defaults to `true`.
+   */
+  readonly follow?: boolean;
 }

@@ -38,6 +38,28 @@ export function readSessionEventStream(
   );
 }
 
+/**
+ * Reads one session's recorded events up to the durable tail observed when
+ * the read opens, then ends. Negative `startIndex` values count back from
+ * that tail.
+ */
+export function readSessionEventHistory(
+  sessionId: string,
+  startIndex?: number,
+): ReadableStream<MessageStreamEvent> {
+  const events = streamSessionEvents(sessionId, { follow: false, startIndex });
+  return new ReadableStream<MessageStreamEvent>({
+    async pull(controller) {
+      const next = await events.next();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+    async cancel() {
+      await events.return(undefined);
+    },
+  });
+}
+
 /** Returns the index of the last durably recorded event, or `-1` before the first. */
 export async function readSessionStreamTailIndex(sessionId: string): Promise<number> {
   // The readable is never consumed; cancel it so the unread source does not linger.

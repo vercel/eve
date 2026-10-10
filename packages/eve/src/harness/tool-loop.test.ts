@@ -4,6 +4,7 @@ import {
   jsonSchema,
   type LanguageModel,
   type ModelMessage,
+  streamText,
   ToolLoopAgent,
   type UserContent,
 } from "ai";
@@ -57,7 +58,8 @@ import {
   modelFacingAuthorizationOutput,
   requestAuthorization,
 } from "#harness/authorization.js";
-import { sessionView } from "#harness/session-machine/commit.js";
+import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
+import { requireSignIn } from "#harness/hitl/approvals.js";
 import { createAuthorizationRequiredEvent } from "#protocol/message.js";
 import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
@@ -69,8 +71,6 @@ import {
   withPublished,
   withParkedStep,
 } from "#internal/testing/session-machine.js";
-import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
-import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages } from "#harness/model-call/response.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -102,6 +102,7 @@ vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async ()
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
   ToolLoopAgent: vi.fn(),
+  streamText: vi.fn(),
   gateway: {
     tools: {
       exaSearch: vi.fn(() => ({})),
@@ -246,17 +247,27 @@ vi.mock("#harness/compaction/engine.js", () => ({
   compactMessages: vi.fn(),
   estimateTokens: vi.fn().mockReturnValue(5000),
   getInputTokenCount: vi.fn().mockReturnValue(5000),
-  resolveCompactionModel: vi.fn(
-    async ({ compactionModelReference, model, modelReference, resolveModel }) => ({
-      model:
-        compactionModelReference === undefined
-          ? model
-          : ((await resolveModel(compactionModelReference)) as LanguageModel),
-      providerOptions: (compactionModelReference ?? modelReference).providerOptions,
-    }),
-  ),
   shouldCompact: vi.fn().mockReturnValue(false),
 }));
+
+/** Compacts to `messages` through one summary call, which {@link summaryCall} reads. */
+function mockCompaction(messages: ModelMessage[]): void {
+  vi.mocked(streamText).mockReturnValue({
+    finishReason: Promise.resolve("stop"),
+    fullStream: (async function* () {})(),
+    providerMetadata: Promise.resolve(undefined),
+    text: Promise.resolve("summary"),
+    usage: Promise.resolve({ inputTokens: 10, outputTokens: 2 }),
+  } as never);
+  vi.mocked(compactMessages).mockImplementation(async (_messages, _config, summarize) => {
+    await summarize({ messages: [], system: "" });
+    return messages;
+  });
+}
+
+function summaryCall(): Parameters<typeof streamText>[0] | undefined {
+  return vi.mocked(streamText).mock.calls[0]?.[0];
+}
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -486,10 +497,6 @@ function getMockResponseMessages(result: Record<string, unknown>): Record<string
     : [];
 }
 
-function createMockGenerateResult(result: Record<string, unknown>): Record<string, unknown> {
-  return { ...result, responseMessages: getMockResponseMessages(result) };
-}
-
 async function* createExplicitMockFullStream(
   parts: readonly Record<string, unknown>[],
 ): AsyncIterable<Record<string, unknown>> {
@@ -635,12 +642,6 @@ function setupMockAgent(result: Record<string, unknown>): void {
   ) {
     const { onStepEnd } = settings;
 
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      await invokeMockStepStart(settings, options);
-      if (onStepEnd) await onStepEnd(result);
-      return createMockGenerateResult(result);
-    });
-
     this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       await invokeMockStepStart(settings, options);
       const mockResult = createMockStreamResult(result);
@@ -667,11 +668,6 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
       throw new Error("ToolLoopAgent mock exhausted its scripted results.");
     }
     const { onStepEnd } = settings;
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      await invokeMockStepStart(settings, options);
-      if (onStepEnd) await onStepEnd(result);
-      return createMockGenerateResult(result);
-    });
     this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       await invokeMockStepStart(settings, options);
       const mockResult = createMockStreamResult(result);
@@ -691,7 +687,7 @@ function finalOutputResult(text: string, structured: unknown): Record<string, un
     finishReason: "stop",
     response: { messages: [{ content: text, role: "assistant" }] },
     text,
-    toolCalls: [{ input: structured, toolCallId: "final-output-1", toolName: "final_output" }],
+    toolCalls: [{ input: structured, toolCallId: "final-output-1", toolName: "eve__reply" }],
     toolResults: [],
   };
 }
@@ -880,7 +876,6 @@ function setupMockAgentError(error: Error): void {
     this: Record<string, unknown>,
     _settings: MockAgentSettings,
   ) {
-    this.generate = vi.fn().mockRejectedValue(error);
     this.stream = vi.fn().mockRejectedValue(error);
     return this as unknown as ToolLoopAgent;
   } as unknown as MockAgentConstructor);
@@ -1292,9 +1287,9 @@ describe("createToolLoopHarness", () => {
     );
 
     const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
+      stream: ReturnType<typeof vi.fn>;
     };
-    expect(agent.generate.mock.calls[0]?.[0].messages).toEqual([
+    expect(agent.stream.mock.calls[0]?.[0].messages).toEqual([
       { content: [{ text: "Previous reply", type: "text" }], role: "assistant" },
       { content: "Continue", kind: "user" as const, role: "user" },
     ]);
@@ -1385,7 +1380,9 @@ describe("createToolLoopHarness", () => {
         stepNumber: 0,
         steps: [],
       });
-      expect(prepared.providerOptions).toEqual({ openai: { parallelToolCalls: false } });
+      expect(prepared.providerOptions).toEqual({
+        openai: { parallelToolCalls: false, promptCacheKey: expect.any(String) },
+      });
       expect(dispatchDynamicModelEvent).toHaveBeenCalledTimes(1);
       expect(resolveModel).not.toHaveBeenCalled();
       expect(result.session.agent.modelReference).toEqual({
@@ -1705,8 +1702,9 @@ describe("createToolLoopHarness", () => {
     expect(runtimeWait(parked.session.state)?.tasks).toEqual([
       expect.objectContaining({ callId: "delegate-1", kind: "workflow-task" }),
     ]);
-    expect(openRequestIds(parked.session).size > 0).toBe(true);
-    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+    // The approval can't settle before the workflow task finishes, so asking waits until then.
+    expect(parkedSteps(parked.session).some((step) => step.requests.length > 0)).toBe(true);
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(0);
     expect(
       parked.session.history.flatMap((message) =>
         Array.isArray(message.content)
@@ -1735,6 +1733,7 @@ describe("createToolLoopHarness", () => {
     expect(JSON.stringify(parkedSteps(reparked.session)[0]?.messages)).toContain("delegated-done");
     expect(JSON.stringify(reparked.session.history)).not.toContain("delegated-done");
     expect(reparked.held).toEqual({ kind: "request" });
+    expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("turn.waiting");
   });
 
@@ -1748,13 +1747,13 @@ describe("createToolLoopHarness", () => {
     const waitToolCall = {
       input: {},
       toolCallId: "wait-1",
-      toolName: "task_wait",
+      toolName: "eve__task_wait",
       type: "tool-call" as const,
     };
     const invalidCancelToolCall = {
       input: "not an object",
       toolCallId: "cancel-1",
-      toolName: "task_cancel",
+      toolName: "eve__task_cancel",
       type: "tool-call" as const,
     };
     const assistantContent = [
@@ -2391,7 +2390,7 @@ describe("createToolLoopHarness", () => {
     ]);
     expect(result.session.outputSchema).toBeUndefined();
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({
-      tools: expect.objectContaining({ final_output: expect.anything() }),
+      tools: expect.objectContaining({ eve__reply: expect.anything() }),
     });
   });
 
@@ -2412,7 +2411,7 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent).mock.calls).toHaveLength(1);
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).not.toMatchObject({
-      tools: expect.objectContaining({ final_output: expect.anything() }),
+      tools: expect.objectContaining({ eve__reply: expect.anything() }),
     });
   });
 
@@ -2435,7 +2434,7 @@ describe("createToolLoopHarness", () => {
               {
                 type: "tool-call",
                 toolCallId: "final-output-1",
-                toolName: "final_output",
+                toolName: "eve__reply",
                 input: { title: "Done" },
               },
             ],
@@ -2450,7 +2449,7 @@ describe("createToolLoopHarness", () => {
       text: "",
       toolCalls: [
         { input: {}, toolCallId: "add-1", toolName: "add" },
-        { input: { title: "Done" }, toolCallId: "final-output-1", toolName: "final_output" },
+        { input: { title: "Done" }, toolCallId: "final-output-1", toolName: "eve__reply" },
       ],
       toolResults: [{ toolCallId: "add-1", toolName: "add", output: "42" }],
     });
@@ -3320,7 +3319,7 @@ describe("createToolLoopHarness", () => {
     },
   );
 
-  it("throws a distinct content-filter error on the non-streaming path without reissue", async () => {
+  it("throws a distinct content-filter error without reissue", async () => {
     setupMockAgent({
       finishReason: "content-filter",
       providerMetadata: { gateway: { generationId: "gen_filtered" } },
@@ -4001,146 +4000,6 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("continues the tool loop when load_skill fails during local tool execution", async () => {
-    setupMockAgent({
-      content: [
-        {
-          input: { skill: "missing-demo-skill" },
-          toolCallId: "call-load-skill",
-          toolName: "load_skill",
-          type: "tool-call",
-        },
-      ],
-      finishReason: "tool-calls",
-      fullStreamParts: [
-        {
-          input: { skill: "missing-demo-skill" },
-          toolCallId: "call-load-skill",
-          toolName: "load_skill",
-          type: "tool-call",
-        },
-        {
-          error: new Error(
-            'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
-          ),
-          input: { skill: "missing-demo-skill" },
-          toolCallId: "call-load-skill",
-          toolName: "load_skill",
-          type: "tool-error",
-        },
-        { finishReason: "tool-calls", type: "finish-step" },
-      ],
-      response: {
-        messages: [
-          {
-            content: [
-              {
-                input: { skill: "missing-demo-skill" },
-                toolCallId: "call-load-skill",
-                toolName: "load_skill",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      text: "",
-      toolCalls: [
-        {
-          input: { skill: "missing-demo-skill" },
-          toolCallId: "call-load-skill",
-          toolName: "load_skill",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const config = createTestConfig(emit, {
-      tools: new Map([
-        [
-          "load_skill",
-          {
-            description: "Load a skill.",
-            execute: vi.fn(),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "load_skill",
-          },
-        ],
-      ]),
-    });
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "test-model" },
-        system: "You are a test assistant.",
-        tools: [
-          {
-            description: "Load a skill.",
-            inputSchema: { type: "object" },
-            name: "load_skill",
-          },
-        ],
-      },
-    });
-
-    const result = await createToolLoopHarness(config)(session, {
-      message: "Use the missing demo skill.",
-    });
-
-    expect(typeof result.next).toBe("function");
-    expect(events.find((event) => event.type === "action.result")?.data).toEqual({
-      error: {
-        code: "ACTION_RESULT_FAILED",
-        message:
-          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
-      },
-      result: {
-        callId: "call-load-skill",
-        isError: true,
-        kind: "tool-result",
-        output:
-          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
-        toolName: "load_skill",
-      },
-      sequence: 0,
-      stepIndex: 0,
-      status: "failed",
-      turnId: "turn_0",
-    });
-    expect(result.session.history.slice(-2)).toEqual([
-      {
-        content: [
-          {
-            input: { skill: "missing-demo-skill" },
-            toolCallId: "call-load-skill",
-            toolName: "load_skill",
-            type: "tool-call",
-          },
-        ],
-        role: "assistant",
-      },
-      {
-        content: [
-          {
-            output: {
-              type: "error-text",
-              value:
-                'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
-            },
-            toolCallId: "call-load-skill",
-            toolName: "load_skill",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-    ]);
-    expect(events.some((event) => event.type === "turn.failed")).toBe(false);
-    expect(events.some((event) => event.type === "session.failed")).toBe(false);
-  });
-
   it("prefers toolResults over response messages when the stream omits the result", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
@@ -4276,7 +4135,6 @@ describe("createToolLoopHarness", () => {
     });
     vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
       this.stream = streamMock;
-      this.generate = streamMock;
       return this;
     } as MockAgentConstructor);
 
@@ -4316,7 +4174,7 @@ describe("createToolLoopHarness", () => {
       settings: MockAgentSettings,
     ) {
       const { onStepEnd, prepareStep } = settings;
-      this.generate = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
+      this.stream = modelCallMock.mockImplementation(async (options: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
             context: undefined,
@@ -4332,9 +4190,8 @@ describe("createToolLoopHarness", () => {
         if (onStepEnd) {
           void Promise.resolve().then(() => onStepEnd(success));
         }
-        return createMockGenerateResult(success);
+        return createMockStreamResult(success);
       });
-      this.stream = vi.fn();
       return this;
     } as MockAgentConstructor);
 
@@ -4490,7 +4347,6 @@ describe("createToolLoopHarness", () => {
     const streamMock = vi.fn();
     vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
       this.stream = streamMock;
-      this.generate = streamMock;
       return this;
     } as MockAgentConstructor);
 
@@ -4907,18 +4763,6 @@ describe("createToolLoopHarness", () => {
           // upstream rejection arrives. Mirror that ordering in the
           // mock so the test can assert step.started is emitted
           // exactly once across the original + retry attempts.
-          this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-            if (prepareStep) {
-              await prepareStep({
-                messages: options.messages,
-                steps: [],
-                stepNumber: 0,
-                model: {},
-                context: undefined,
-              });
-            }
-            throw input.failure;
-          });
           this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
             if (prepareStep) {
               await prepareStep({
@@ -4932,19 +4776,6 @@ describe("createToolLoopHarness", () => {
             throw input.failure;
           });
         } else {
-          this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-            if (prepareStep) {
-              await prepareStep({
-                messages: options.messages,
-                steps: [],
-                stepNumber: 0,
-                model: {},
-                context: undefined,
-              });
-            }
-            if (onStepEnd) await onStepEnd(input.successResult);
-            return input.successResult;
-          });
           this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
             if (prepareStep) {
               await prepareStep({
@@ -5307,6 +5138,71 @@ describe("createToolLoopHarness", () => {
           message: "disabling unsupported provider tool(s); retrying step once",
         }),
       );
+    });
+
+    it("retries without web search when an OpenAI-compatible endpoint rejects its include value", async () => {
+      // An OpenAI-compatible endpoint (Bedrock Mantle) that rejects every request carrying
+      // OpenAI web search.
+      const body = {
+        error: {
+          message:
+            "Invalid value: 'web_search_call.action.sources'. Supported values are: 'reasoning.encrypted_content'.",
+          param: "include",
+        },
+      };
+      const rejection = Object.assign(new Error(body.error.message), {
+        data: body,
+        isRetryable: false,
+        name: "AI_APICallError",
+        responseBody: JSON.stringify(body),
+        statusCode: 400,
+      });
+      const successResult = {
+        finishReason: "stop",
+        response: { messages: [{ content: "ok", role: "assistant" }] },
+        text: "ok",
+        toolCalls: [],
+        toolResults: [],
+      };
+      vi.mocked(ToolLoopAgent).mockImplementation(function (
+        this: Record<string, unknown>,
+        settings: MockAgentSettings & { tools: Record<string, unknown> },
+      ) {
+        const { tools } = settings;
+        this.stream = vi.fn().mockImplementation(async () => {
+          if (tools.web_search !== undefined) throw rejection;
+          void Promise.resolve().then(() => settings.onStepEnd?.(successResult));
+          return createMockStreamResult(successResult);
+        });
+        return this as unknown as ToolLoopAgent;
+      } as unknown as MockAgentConstructor);
+
+      const model = { modelId: "gpt-5.6-sol", provider: "openai.responses" } as LanguageModel;
+      const session = createTestSession({
+        agent: {
+          modelReference: { id: "gpt-5.6-sol" },
+          system: "You are a test assistant.",
+          tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
+        },
+      });
+      const runStep = createToolLoopHarness({
+        handleEvent: createEventCollector().emit,
+        resolveModel: vi.fn().mockResolvedValue(model),
+        tools: new Map([
+          [
+            "web_search",
+            { description: "Web search.", inputSchema: jsonSchema({}), name: "web_search" },
+          ],
+        ]),
+      });
+
+      const result = await runStep(session, { message: "Hi" });
+
+      expect(result.next).toBeNull();
+      const toolsPerCall = vi
+        .mocked(ToolLoopAgent)
+        .mock.calls.map(([settings]) => Object.keys(settings.tools as object));
+      expect(toolsPerCall).toEqual([["web_search"], []]);
     });
 
     it("falls through to terminal cascade when recovery retry also fails", async () => {
@@ -7806,14 +7702,14 @@ describe("createToolLoopHarness", () => {
   });
 
   it("consumes text approval shortcuts without appending them as user messages", async () => {
-    const generateCalls: unknown[] = [];
+    const streamCalls: unknown[] = [];
 
     vi.mocked(ToolLoopAgent).mockImplementation(function (
       this: Record<string, unknown>,
       settings: MockAgentSettings,
     ) {
       const { onStepEnd, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
+      this.stream = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
           await prepareStep({
             messages: input.messages,
@@ -7823,7 +7719,7 @@ describe("createToolLoopHarness", () => {
             context: undefined,
           });
         }
-        generateCalls.push(input.messages);
+        streamCalls.push(input.messages);
         const result = {
           finishReason: "stop",
           response: { messages: [{ content: "Approved.", role: "assistant" }] },
@@ -7832,7 +7728,7 @@ describe("createToolLoopHarness", () => {
           toolResults: [],
         };
         if (onStepEnd) await onStepEnd(result);
-        return createMockGenerateResult(result);
+        return createMockStreamResult(result);
       });
       return this as unknown as ToolLoopAgent;
     } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
@@ -7909,7 +7805,7 @@ describe("createToolLoopHarness", () => {
     await createToolLoopHarness(config)(session, { message: "approve" });
 
     // The answer runs the call; the model reads its result, never the text that approved it.
-    expect(generateCalls[0]).toEqual([
+    expect(streamCalls[0]).toEqual([
       {
         content: expect.stringContaining("[Pending approvals]"),
         kind: "context.state",
@@ -7940,9 +7836,79 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  // Alice's turn waits on two approvals and on Bob signing in to statuspage.
+  async function parkedOnApprovalsAndSignIn(): Promise<HarnessSession> {
+    const approval = (requestId: string, callId: string) => ({
+      action: { callId, input: {}, kind: "tool-call" as const, toolName: "guarded_echo" },
+      allowFreeform: false,
+      display: "confirmation" as const,
+      kind: "tool-approval" as const,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve tool call: guarded_echo",
+      requestId,
+    });
+    const parked = parkedOnApproval({
+      requests: [approval("approval-1", "call-1"), approval("approval-2", "call-2")],
+      responseMessages: [],
+      session: createTestSession(),
+    });
+    const signIn = requireSignIn(sessionView(storedProjection(parked.state), parked.state), {
+      challenges: [
+        {
+          attemptId: "attempt-statuspage",
+          challenge: { url: "https://idp.example/authorize" },
+          hookUrl: "https://app.example/eve/v1/connections/statuspage/callback",
+          name: "statuspage",
+        },
+      ],
+    });
+    return withPublished(await applyTransition(parked, signIn, async () => {}), signIn.events);
+  }
+
+  it("answers a typed approval without withdrawing the turn's pending sign-ins", async () => {
+    const session = await parkedOnApprovalsAndSignIn();
+    const { emit, events } = createEventCollector();
+
+    const result = await createToolLoopHarness(createTestConfig(emit))(session, {
+      message: "approve",
+    });
+
+    expect(events.filter((event) => event.type === "authorization.completed")).toEqual([]);
+    const view = sessionView(storedProjection(result.session.state), result.session.state);
+    expect(view.signIns.map((challenge) => challenge.name)).toEqual(["statuspage"]);
+    // The answer to the first approval waits for the second, as a press would.
+    expect(view.turn.queued?.inputResponses).toEqual([
+      { optionId: "approve", requestId: "approval-1" },
+    ]);
+  });
+
+  it("withdraws the turn's pending sign-ins when a new message steers it", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Sure.", role: "assistant" }] },
+      text: "Sure.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(await parkedOnApprovalsAndSignIn(), {
+      message: "Actually, can you check the weather first?",
+    });
+
+    expect(
+      events
+        .filter((event) => event.type === "authorization.completed")
+        .map((event) => [event.data.name, event.data.outcome]),
+    ).toEqual([["statuspage", "declined"]]);
+  });
+
   it("emits compaction.requested and compaction.completed when compaction triggers", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
-    vi.mocked(compactMessages).mockResolvedValue([
+    mockCompaction([
       createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
       { content: "summary", role: "assistant" },
       createUserMessage("user", "recent message"),
@@ -8018,8 +7984,9 @@ describe("createToolLoopHarness", () => {
       stepIndex: 0,
       turnId: "turn_0",
     });
-    expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({
+    expect(summaryCall()?.providerOptions).toEqual({
       openai: {
+        promptCacheKey: expect.any(String),
         safetyIdentifier: invocationOwnerKey(auth),
         store: false,
       },
@@ -8028,7 +7995,7 @@ describe("createToolLoopHarness", () => {
 
   it("groups Gateway compaction under the forwarded trace conversation", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
-    vi.mocked(compactMessages).mockResolvedValue([
+    mockCompaction([
       createFrameworkUserMessage("context.compaction", "Summary"),
       { content: "summary", role: "assistant" },
     ]);
@@ -8049,7 +8016,7 @@ describe("createToolLoopHarness", () => {
 
     await contextStorage.run(ctx, () => createToolLoopHarness(config)(session, { message: "Hi" }));
 
-    expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({
+    expect(summaryCall()?.providerOptions).toEqual({
       gateway: { sessionId: "forwarded-conversation" },
     });
   });
@@ -8223,6 +8190,61 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("resolves a step-scoped dynamic model before manual compaction", async () => {
+    const compactedHistory: HarnessModelMessage[] = [
+      createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
+      { content: "summary", role: "assistant" },
+    ];
+    vi.mocked(compactMessages).mockResolvedValue(compactedHistory);
+
+    const selectedModel = new MockLanguageModelV3({
+      modelId: "gpt-5",
+      provider: "openai.chat",
+    });
+    const dispatchDynamicModelEvent: NonNullable<
+      ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
+    > = vi.fn(async ({ ctx, event }) => {
+      expect(event.type).toBe("step.started");
+      ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+        model: selectedModel,
+        reference: {
+          contextWindowTokens: 200_000,
+          id: "openai/gpt-5",
+        },
+      });
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig(emit, {
+        compactOnly: true,
+        dispatchDynamicModelEvent,
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        dynamicModel: true,
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
+      history: [
+        { content: "old message", kind: "user" as const, role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+    });
+    const ctx = new ContextContainer();
+
+    const result = await contextStorage.run(ctx, () => runStep(session));
+
+    expect(result.next).toBeNull();
+    expect(result.session.history).toEqual(compactedHistory);
+    expect(dispatchDynamicModelEvent).toHaveBeenCalledOnce();
+    expect(getCompatibilityEventTypes(events)).toEqual([
+      "compaction.requested",
+      "compaction.completed",
+      "session.waiting",
+    ]);
+  });
+
   it("returns an empty session to its waiting boundary after manual compaction", async () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
@@ -8259,13 +8281,13 @@ describe("createToolLoopHarness", () => {
       history: [{ content: "old message", kind: "user" as const, role: "user" }],
     });
     const ctx = new ContextContainer();
-    ctx.set(HistoryStateKey, { availableSkills: "old message" });
+    ctx.set(HistoryStateKey, { announcements: { skills: "old message" } });
     const result = await contextStorage.run(ctx, () => runStep(session));
 
     expect(result.next).toBeNull();
     // Only the lifecycle the step published joins the session.
     expect({ ...result.session, state: session.state }).toEqual(session);
-    expect(ctx.get(HistoryStateKey)).toEqual({ availableSkills: "old message" });
+    expect(ctx.get(HistoryStateKey)).toEqual({ announcements: { skills: "old message" } });
     expect(getCompatibilityEventTypes(events)).toEqual(["compaction.requested", "session.waiting"]);
     expect(ToolLoopAgent).not.toHaveBeenCalled();
     expect(logs.records).toContainEqual(
@@ -8301,7 +8323,7 @@ describe("createToolLoopHarness", () => {
 
   it("uses the authored compaction model when one is configured", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
-    vi.mocked(compactMessages).mockResolvedValue([
+    mockCompaction([
       createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
       { content: "summary", role: "assistant" },
       createUserMessage("user", "recent message"),
@@ -8348,19 +8370,21 @@ describe("createToolLoopHarness", () => {
       { content: "old reply", role: "assistant" },
       { content: "Hi", kind: "user" as const, role: "user" },
     ]);
-    expect(call?.[1]).toMatchObject({
+    expect(summaryCall()?.model).toMatchObject({
       modelId: "summary-model",
       provider: "openai",
     });
-    expect(call?.[2]).toEqual(
+    expect(call?.[1]).toEqual(
       expect.objectContaining({
         recentWindowSize: 10,
         threshold: expect.any(Number),
       }),
     );
-    expect(call?.[2].threshold).toBeLessThan(100_000);
-    expect(call?.[2].threshold).toBeGreaterThan(99_000);
-    expect(call?.[3]).toBeUndefined();
+    expect(call?.[1].threshold).toBeLessThan(100_000);
+    expect(call?.[1].threshold).toBeGreaterThan(99_000);
+    expect(summaryCall()?.providerOptions).toEqual({
+      openai: { promptCacheKey: expect.any(String) },
+    });
   });
 
   it("emits reasoning.completed when reasoning text is available", async () => {
@@ -8584,9 +8608,9 @@ describe("createToolLoopHarness", () => {
     // Verify the model received the continuation user message, not the
     // trailing assistant.
     const instance = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value as {
-      generate: ReturnType<typeof vi.fn>;
+      stream: ReturnType<typeof vi.fn>;
     };
-    const modelMessages = instance.generate.mock.calls[0]?.[0] as {
+    const modelMessages = instance.stream.mock.calls[0]?.[0] as {
       messages: Array<{ role: string; content: unknown }>;
     };
     expect(modelMessages.messages.at(-1)).toEqual({
@@ -8633,9 +8657,9 @@ describe("createToolLoopHarness", () => {
           | PromptAgentSettings
           | undefined;
         const instance = vi.mocked(ToolLoopAgent).mock.results[index]?.value as
-          | { generate: ReturnType<typeof vi.fn> }
+          | { stream: ReturnType<typeof vi.fn> }
           | undefined;
-        const call = instance?.generate.mock.calls[0]?.[0] as
+        const call = instance?.stream.mock.calls[0]?.[0] as
           | { messages: CapturedModelCall["messages"] }
           | undefined;
         if (settings === undefined || call === undefined) {
@@ -8797,20 +8821,6 @@ describe("createToolLoopHarness", () => {
         "You are a test assistant.",
         "You are a test assistant.",
         "You are a test assistant.",
-      ]);
-      expect(firstPrompt.tools).toEqual([
-        {
-          description: "Adds numbers",
-          inputSchema: { type: "object" },
-          name: "add",
-          providerOptions: undefined,
-        },
-        {
-          description: "Looks up a saved result",
-          inputSchema: { type: "object" },
-          name: "lookup",
-          providerOptions: undefined,
-        },
       ]);
       expect(modelCalls.map((call) => call.tools)).toEqual([
         firstPrompt.tools,
@@ -9102,7 +9112,65 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("none path: direct OpenAI instance gets no caching changes", async () => {
+    it("declared Anthropic cache: marks an opaque Bedrock profile with the authored TTL", async () => {
+      setupStopResult();
+      const config: ToolLoopHarnessConfig = {
+        resolveModel: vi.fn().mockResolvedValue({
+          provider: "amazon-bedrock",
+          modelId: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+          specificationVersion: "v3",
+        } as unknown as LanguageModel),
+        tools: new Map([
+          [
+            "add",
+            {
+              description: "Adds numbers",
+              execute: vi.fn(),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "add",
+            },
+          ],
+        ]),
+      };
+      const runStep = createToolLoopHarness(config);
+      const session = createTestSession();
+      await runStep(
+        {
+          ...session,
+          agent: {
+            ...session.agent,
+            modelReference: {
+              id: "bedrock-profile",
+              promptCache: { anthropic: { ttl: "1h" } },
+            },
+          },
+        },
+        { message: "c" },
+      );
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+      const prepareStep = getPrepareStep<
+        Array<{ role: string; content: string; providerOptions?: unknown }>,
+        { messages?: Array<{ providerOptions?: unknown }> }
+      >(agentCall?.prepareStep);
+      const result = await prepareStep({
+        messages: [{ role: "user", content: "c" }],
+        stepNumber: 0,
+        steps: [],
+        model: agentCall?.model,
+        context: undefined,
+      });
+      const hourMarker = {
+        anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+        bedrock: { cachePoint: { type: "default", ttl: "1h" } },
+      };
+
+      expect(result.messages?.[0]?.providerOptions).toEqual(hourMarker);
+      const tools = agentCall?.tools as Record<string, { providerOptions?: unknown }>;
+      expect(Object.values(tools).at(-1)?.providerOptions).toEqual(hourMarker);
+    });
+
+    it("none path: direct OpenAI instance gets only a prompt cache key", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
         resolveModel: vi.fn().mockResolvedValue({
@@ -9137,7 +9205,9 @@ describe("createToolLoopHarness", () => {
         model: agentCall?.model,
         context: undefined,
       });
-      expect(stepResult.providerOptions).toBeUndefined();
+      expect(stepResult.providerOptions).toEqual({
+        openai: { promptCacheKey: expect.any(String) },
+      });
       expect(agentCall?.providerOptions).toBeUndefined();
       const toolsPassed = agentCall?.tools as Record<
         string,
@@ -9417,7 +9487,7 @@ describe("createToolLoopHarness", () => {
 
     it("derives compaction attribution from the compaction model", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
-      vi.mocked(compactMessages).mockResolvedValueOnce([
+      mockCompaction([
         createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
         { content: "summary", role: "assistant" },
       ]);
@@ -9459,8 +9529,7 @@ describe("createToolLoopHarness", () => {
 
         const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
         expect(agentCall?.headers).toBeUndefined();
-        const compactCall = vi.mocked(compactMessages).mock.calls[0];
-        expect(compactCall?.[5]).toEqual({
+        expect(summaryCall()?.headers).toEqual({
           "x-title": "Weather Agent",
           "http-referer": "https://my-agent.vercel.app",
           "user-agent": expect.stringMatching(/^eve\/.+/),
@@ -9663,7 +9732,7 @@ describe("createToolLoopHarness", () => {
 
     it("keeps compaction telemetry metadata-only on a rejected trace", async () => {
       vi.mocked(shouldCompact).mockReturnValueOnce(true);
-      vi.mocked(compactMessages).mockResolvedValueOnce([
+      mockCompaction([
         createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
         { content: "summary", role: "assistant" },
       ]);
@@ -9686,7 +9755,8 @@ describe("createToolLoopHarness", () => {
 
       await runStep(createTestSession(), { message: "private" });
 
-      expect(vi.mocked(compactMessages).mock.calls[0]?.[4]).toMatchObject({
+      expect(summaryCall()?.telemetry).toMatchObject({
+        functionId: "eve.compaction",
         isEnabled: true,
         recordInputs: false,
         recordOutputs: false,
@@ -10451,18 +10521,15 @@ describe("createToolLoopHarness", () => {
       expect(historyRef.size).toBe(imageBytes.byteLength);
       expect(historyRef.path).toMatch(/^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/);
 
-      // --- Invariant 3: the mocked ToolLoopAgent.generate saw hydrated bytes.
+      // --- Invariant 3: the mocked ToolLoopAgent.stream saw hydrated bytes.
       //
-      // The mock constructor ran once; grab the generate spy (no `emit`
-      // was passed on the config, so the harness takes the non-streaming
-      // branch) and verify the messages it received had `data: Buffer`
-      // for the FilePart.
+      // The mock constructor ran once; grab the stream spy and verify the
+      // messages it received had `data: Buffer` for the FilePart.
       const mockInstance = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-        generate: ReturnType<typeof vi.fn>;
         stream: ReturnType<typeof vi.fn>;
       };
       expect(mockInstance).toBeDefined();
-      const modelCall = mockInstance.generate.mock.calls[0]?.[0] as {
+      const modelCall = mockInstance.stream.mock.calls[0]?.[0] as {
         messages: Array<{
           content: Array<{ type: string; data?: unknown; mediaType?: string }>;
         }>;
@@ -10544,8 +10611,7 @@ describe("createToolLoopHarness", () => {
         .mock.results.slice(1)
         .map(
           (result) =>
-            (result.value as { generate: ReturnType<typeof vi.fn> }).generate.mock
-              .calls[0]?.[0] as {
+            (result.value as { stream: ReturnType<typeof vi.fn> }).stream.mock.calls[0]?.[0] as {
               messages: ModelMessage[];
             },
         );
@@ -10624,9 +10690,9 @@ describe("createToolLoopHarness", () => {
       expect(sandbox.writes).toHaveLength(1);
       expect(JSON.stringify(result.session.history)).not.toContain(base64);
       const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as
-        | { generate: ReturnType<typeof vi.fn> }
+        | { stream: ReturnType<typeof vi.fn> }
         | undefined;
-      const modelCall = agent?.generate.mock.calls[0]?.[0] as { messages: ModelMessage[] };
+      const modelCall = agent?.stream.mock.calls[0]?.[0] as { messages: ModelMessage[] };
       expect(JSON.stringify(modelCall.messages)).toContain(base64);
     });
 
@@ -10677,10 +10743,9 @@ describe("createToolLoopHarness", () => {
       // The model-facing content swapped the non-inlinable FilePart
       // for a TextPart naming the sandbox path.
       const mockInstance = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-        generate: ReturnType<typeof vi.fn>;
         stream: ReturnType<typeof vi.fn>;
       };
-      const modelCall = mockInstance.generate.mock.calls[0]?.[0] as {
+      const modelCall = mockInstance.stream.mock.calls[0]?.[0] as {
         messages: Array<{
           content: Array<{ type: string; text?: string; data?: unknown }>;
         }>;
@@ -10708,10 +10773,9 @@ describe("createToolLoopHarness", () => {
         instructions: unknown;
       };
       const instance = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value as {
-        generate: ReturnType<typeof vi.fn>;
         stream: ReturnType<typeof vi.fn>;
       };
-      const call = (instance.generate.mock.calls[0]?.[0] ?? instance.stream.mock.calls[0]?.[0]) as {
+      const call = instance.stream.mock.calls[0]?.[0] as {
         messages: Array<{ role: string; content: unknown }>;
       };
       return { instructions: settings.instructions, messages: call.messages };
@@ -10881,287 +10945,6 @@ describe("createToolLoopHarness", () => {
         kind: "user" as const,
         role: "user",
       });
-    });
-
-    it.each(
-      ["plain", "client context", "compaction", "projected history"].flatMap((scenario) =>
-        [false, true].map((changed) => ({ scenario, changed })),
-      ),
-    )(
-      "persists framework context across durable steps ($scenario, changed: $changed)",
-      async ({ scenario, changed }) => {
-        const withClientContext = scenario === "client context";
-        if (scenario === "compaction") {
-          vi.mocked(shouldCompact).mockReturnValueOnce(true);
-          vi.mocked(compactMessages).mockImplementationOnce(async (messages) => messages.slice(2));
-        }
-        const toolCall = {
-          type: "tool-call" as const,
-          toolCallId: "cache-call",
-          toolName: "add",
-          input: { a: 20, b: 22 },
-        };
-        const toolResult = {
-          type: "tool-result" as const,
-          toolCallId: "cache-call",
-          toolName: "add",
-          output: "42",
-        };
-        setupMockAgent({
-          finishReason: "tool-calls",
-          response: {
-            messages: [
-              { role: "assistant", content: [toolCall] },
-              { role: "tool", content: [toolResult] },
-            ],
-          },
-          text: "",
-          toolCalls: [toolCall],
-          toolResults: [{ ...toolResult, input: toolCall.input }],
-        });
-        const announcement = "Available skills\n- policy: Tenant policy";
-        const ctx = new ContextContainer();
-        ctx.set(PendingSkillAnnouncementKey, announcement);
-        const runStep = createToolLoopHarness(
-          createTestConfig(undefined, {
-            historyProjector:
-              scenario === "projected history"
-                ? ({ messages }) =>
-                    messages.filter((message) => message.content !== "Previous answer")
-                : undefined,
-          }),
-        );
-        const initial = withOpenTurn(
-          createTestSession({
-            history: [
-              { role: "user", content: "Previous request", kind: "user" as const },
-              { role: "assistant", content: "Previous answer" },
-            ],
-          }),
-          { sequence: 1, stepIndex: 0, turnId: "turn_1" },
-        );
-        const input = { context: ["Current channel context"], message: "Add 20 and 22." };
-        const first = await contextStorage.run(ctx, () =>
-          runStep(
-            initial,
-            withClientContext ? attachClientContext(input, ["Client context"]) : input,
-          ),
-        );
-        expect(first.next).toBe(runStep);
-        const firstPrompt = structuredClone(getLastAgentSettings().messages);
-        expect(first.session.history).toContainEqual({
-          role: "user",
-          content: announcement,
-          kind: "context.state",
-        });
-        const nextState = changed
-          ? "Available skills\n- policy: Tenant policy\n- billing: Billing policy"
-          : announcement;
-        const nextContext = await deserializeContext(
-          JSON.parse(JSON.stringify(serializeContext(ctx))),
-        );
-        nextContext.set(PendingSkillAnnouncementKey, nextState);
-        setupMockAgent(defaultModelResult());
-        const restored = JSON.parse(JSON.stringify(first.session)) as HarnessSession;
-        await contextStorage.run(nextContext, () => runStep(restored));
-        const nextPrompt = getLastAgentSettings().messages;
-        expect(nextPrompt.slice(0, firstPrompt.length)).toEqual(firstPrompt);
-        expect(nextPrompt.filter((message) => message.content === announcement)).toHaveLength(1);
-        expect(nextContext.get(HistoryStateKey)).toMatchObject({ availableSkills: nextState });
-        if (changed) {
-          expect(nextPrompt.at(-1)).toEqual({
-            role: "user",
-            content: nextState,
-            kind: "context.state",
-          });
-        } else {
-          expect(nextPrompt.at(-1)?.role).toBe("tool");
-        }
-      },
-    );
-
-    it("does not advance history state when the model call fails", async () => {
-      const logs = captureLogRecords();
-      const ctx = new ContextContainer();
-      ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
-      const { emit } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig(emit));
-      setupMockAgentError(new Error("Model unavailable"));
-
-      const failed = await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "Check progress." }),
-      );
-      expect(ctx.get(HistoryStateKey)).toBeUndefined();
-      expect(failed.session.history).not.toContainEqual({
-        kind: "user" as const,
-        role: "user",
-        content: "Available skills\n- policy: Tenant policy",
-      });
-
-      setupMockAgent(defaultModelResult());
-      const retried = await contextStorage.run(ctx, () =>
-        runStep(failed.session, { message: "Try again." }),
-      );
-      expect(retried.session.history).toContainEqual({
-        role: "user",
-        content: "Available skills\n- policy: Tenant policy",
-        kind: "context.state",
-      });
-      expect(ctx.get(HistoryStateKey)).toEqual({
-        availableSkills: "Available skills\n- policy: Tenant policy",
-      });
-      expect(logs.records).toContainEqual(
-        expect.objectContaining({
-          level: "error",
-          message: "model call failed — parking session for retry by the user",
-        }),
-      );
-    });
-
-    it("does not advance history state when recording the step result fails", async () => {
-      const ctx = new ContextContainer();
-      ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
-      const failure = new Error("Failed to finish the turn");
-      const runStep = createToolLoopHarness(
-        createTestConfig(async (event) => {
-          if (event.type === "session.waiting") throw failure;
-        }),
-      );
-      setupMockAgent(defaultModelResult());
-
-      await expect(
-        contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Check progress." })),
-      ).rejects.toBe(failure);
-      expect(getLastAgentSettings().messages).toContainEqual({
-        role: "user",
-        content: "Available skills\n- policy: Tenant policy",
-        kind: "context.state",
-      });
-      expect(ctx.get(HistoryStateKey)).toBeUndefined();
-    });
-
-    it("retains completed compaction when the next model call fails", async () => {
-      const logs = captureLogRecords();
-      const announcement = "Available skills\n- policy: Tenant policy";
-      const ctx = new ContextContainer();
-      ctx.set(PendingSkillAnnouncementKey, announcement);
-      ctx.set(HistoryStateKey, { availableSkills: announcement });
-      const session = createTestSession({
-        compaction: {
-          recentWindowSize: 10,
-          threshold: 100_000,
-          lastKnownInputTokens: 50_000,
-          lastKnownPromptMessageCount: 1,
-        },
-        history: [{ role: "user", content: announcement, kind: "user" as const }],
-      });
-      const { emit } = createEventCollector();
-      const runStep = createToolLoopHarness(
-        createTestConfig(emit, {
-          resolveModel: vi.fn().mockResolvedValue({ modelId: "test-model", provider: "openai" }),
-        }),
-      );
-      vi.mocked(shouldCompact).mockReturnValueOnce(true);
-      vi.mocked(compactMessages).mockResolvedValueOnce([
-        createFrameworkUserMessage("context.compaction", "Conversation summary"),
-      ]);
-      setupMockAgentError(new Error("Model unavailable"));
-
-      const failed = await contextStorage.run(ctx, () =>
-        runStep(session, { message: "Continue." }),
-      );
-      expect(failed.session.history).toEqual([
-        createFrameworkUserMessage("context.compaction", "Conversation summary"),
-      ]);
-      expect(ctx.get(HistoryStateKey)).toBeUndefined();
-      expect(failed.session.compaction).not.toHaveProperty("lastKnownInputTokens");
-      expect(failed.session.compaction).not.toHaveProperty("lastKnownPromptMessageCount");
-
-      setupMockAgent(defaultModelResult());
-      const restoredContext = await deserializeContext(
-        JSON.parse(JSON.stringify(serializeContext(ctx))),
-      );
-      restoredContext.set(PendingSkillAnnouncementKey, announcement);
-      const restoredSession = JSON.parse(JSON.stringify(failed.session)) as HarnessSession;
-      const retried = await contextStorage.run(restoredContext, () =>
-        runStep(restoredSession, { message: "Try again." }),
-      );
-      expect(
-        retried.session.history.filter((message) => message.content === announcement),
-      ).toHaveLength(1);
-      expect(restoredContext.get(HistoryStateKey)).toEqual({ availableSkills: announcement });
-      expect(logs.records).toContainEqual(
-        expect.objectContaining({
-          level: "error",
-          message: "model call failed — parking session for retry by the user",
-        }),
-      );
-    });
-
-    it.each(["clear", "manual compaction", "automatic compaction"])(
-      "reannounces unchanged context after %s replaces history",
-      async (replacement) => {
-        const ctx = new ContextContainer();
-        const availableSkills = "Available skills\n- policy: Tenant policy";
-        ctx.set(PendingSkillAnnouncementKey, availableSkills);
-        const runStep = createToolLoopHarness(createTestConfig());
-        setupMockAgent(defaultModelResult());
-        const first = await contextStorage.run(ctx, () =>
-          runStep(createTestSession(), { message: "Check progress." }),
-        );
-        const expectedState = { availableSkills };
-        expect(ctx.get(HistoryStateKey)).toEqual(expectedState);
-
-        vi.mocked(compactMessages).mockResolvedValue([
-          createFrameworkUserMessage("context.compaction", "Conversation summary"),
-        ]);
-        let session = first.session;
-        if (replacement === "automatic compaction") {
-          vi.mocked(shouldCompact).mockReturnValueOnce(true);
-        } else {
-          const replaceHistory = createToolLoopHarness(
-            createTestConfig(undefined, {
-              clearOnly: replacement === "clear",
-              compactOnly: replacement === "manual compaction",
-            }),
-          );
-          session = (await contextStorage.run(ctx, () => replaceHistory(session))).session;
-          expect(ctx.get(HistoryStateKey)).toBeUndefined();
-        }
-
-        setupMockAgent(defaultModelResult());
-        const next = await contextStorage.run(ctx, () =>
-          runStep(session, { message: "Continue." }),
-        );
-        for (const content of Object.values(expectedState)) {
-          expect(
-            next.session.history.filter((message) => message.content === content),
-          ).toHaveLength(1);
-        }
-        expect(ctx.get(HistoryStateKey)).toEqual(expectedState);
-      },
-    );
-
-    it("skips empty skill announcements without rewriting earlier history", async () => {
-      const ctx = new ContextContainer();
-      ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
-      const runStep = createToolLoopHarness(createTestConfig());
-      setupMockAgent(defaultModelResult());
-      const first = await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "Check the policy." }),
-      );
-      ctx.set(PendingSkillAnnouncementKey, "");
-      setupMockAgent(defaultModelResult());
-      const next = await contextStorage.run(ctx, () =>
-        runStep(first.session, { message: "Continue." }),
-      );
-      expect(next.session.history.slice(0, first.session.history.length)).toEqual(
-        first.session.history,
-      );
-      expect(getLastAgentSettings().messages).toEqual([
-        ...first.session.history,
-        { kind: "user" as const, role: "user", content: "Continue." },
-      ]);
     });
 
     it("keeps ephemeral client context out of compaction and its token baseline", async () => {

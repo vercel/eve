@@ -291,34 +291,87 @@ describe("discordChannel() inbound route", () => {
     );
   });
 
-  it("acknowledges HITL button clicks with a deferred update", async () => {
+  describe("answering a HITL press", () => {
     const { privateKey, publicKeyHex } = testKeys();
-    const components = renderInputRequestComponents({
-      action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
-      kind: "question",
-      options: [{ id: "approve", label: "Approve" }],
-      prompt: "Approve?",
-      requestId: "call_1",
-    });
-    const customId = (components[0] as { components: Array<{ custom_id: string }> }).components[0]!
-      .custom_id;
-    const body = JSON.stringify({
-      application_id: "APP1",
-      channel_id: "C01",
-      data: { component_type: 2, custom_id: customId },
-      id: "I02",
-      message: { id: "M01" },
-      token: "tok2",
-      type: 3,
-      user: { id: "U01", username: "ada" },
-      version: 1,
-    });
-    const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
+    const customId = (
+      renderInputRequestComponents({
+        action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+        kind: "question",
+        options: [{ id: "approve", label: "Approve" }],
+        prompt: "Approve?",
+        requestId: "call_1",
+      })[0] as { components: Array<{ custom_id: string }> }
+    ).components[0]!.custom_id;
+    /** A press of Approve in guild G01, as Discord sends it: the presser on `member`. */
+    const press = (userId: string) =>
+      signedRequest({
+        body: JSON.stringify({
+          application_id: "APP1",
+          channel_id: "C01",
+          data: { component_type: 2, custom_id: customId },
+          guild_id: "G01",
+          id: `I-${userId}`,
+          member: { user: { id: userId, username: userId } },
+          message: { id: "M01" },
+          token: "tok2",
+          type: 3,
+          version: 1,
+        }),
+        privateKey,
+      });
+    const answered = (principalId: string) =>
+      expect.objectContaining({
+        auth: expect.objectContaining({ principalId }),
+        inputResponses: [{ optionId: "approve", requestId: "call_1" }],
+      });
 
-    const { response } = await firePost(channel, signedRequest({ body, privateKey }));
+    it("answers as the guild member who pressed", async () => {
+      const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ type: 6 });
+      const { response, send } = await firePost(channel, press("U01"));
+
+      await expect(response.json()).resolves.toEqual({ type: 6 });
+      expect(send).toHaveBeenCalledWith("C01:M01", answered("discord:G01:U01"));
+    });
+
+    it("lets onInputResponse accept a press with ctx.defaultAuth or drop it", async () => {
+      const channel = discordChannel({
+        credentials: { publicKey: publicKeyHex },
+        onInputResponse: (ctx, interaction) =>
+          interaction.user.id === "U01" ? { auth: ctx.defaultAuth } : null,
+      });
+
+      const accepted = await firePost(channel, press("U01"));
+      const dropped = await firePost(channel, press("U02"));
+
+      expect(accepted.send).toHaveBeenCalledWith("C01:M01", answered("discord:G01:U01"));
+      expect(dropped.send).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {
+        name: "onInputResponse throws",
+        config: {
+          onInputResponse: () => {
+            throw new Error("policy lookup failed");
+          },
+        },
+        log: { level: "error", message: "input response handler failed" },
+      },
+      {
+        name: "onCommand is custom and onInputResponse isn't",
+        config: { onCommand: () => ({ auth: null }) },
+        log: { level: "warn", message: expect.stringContaining("set onInputResponse") },
+      },
+    ])("drops a press when $name", async ({ config, log }) => {
+      const logs = captureLogRecords();
+      const channel = discordChannel({ credentials: { publicKey: publicKeyHex }, ...config });
+
+      const { send } = await firePost(channel, press("U01"));
+
+      expect(send).not.toHaveBeenCalled();
+      expect(logs.records).toContainEqual(expect.objectContaining(log));
+    });
   });
 
   it("opens and resolves freeform HITL modals", async () => {
@@ -388,6 +441,7 @@ describe("discordChannel() inbound route", () => {
     expect(submit.send).toHaveBeenCalledWith(
       "C01:M01",
       expect.objectContaining({
+        auth: expect.objectContaining({ principalId: "discord:U01" }),
         inputResponses: [{ requestId: "call_1", text: "freeform answer" }],
       }),
     );
@@ -583,15 +637,11 @@ describe("defaultDiscordAuth", () => {
   it("derives guild-scoped user auth", () => {
     const auth = defaultDiscordAuth({
       applicationId: "APP1",
-      attachments: [],
       channelId: "C01",
-      commandName: "ask",
       guildId: "G01",
       id: "I01",
-      options: [],
       raw: {},
       token: "tok",
-      type: 2,
       user: { id: "U01", isBot: false, username: "ada" },
     });
 

@@ -1,7 +1,9 @@
 import type { ModelMessage, ToolSet, TypedToolError, TypedToolResult } from "ai";
 
-import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
+import type { RuntimeActionResult, RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
+import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
   authorizationPendingAsJsonObject,
@@ -102,6 +104,26 @@ export function createRuntimeToolResultFromToolError(
 }
 
 /**
+ * The action result a call's tool result reports. A skill load reports the
+ * `load-skill-result` of the skill its `input` names, as its call reports a
+ * `load-skill` action.
+ */
+export function toActionResult(
+  result: RuntimeToolResultActionResult,
+  input: unknown,
+): RuntimeActionResult {
+  const skill = result.toolName === SKILL_ENTRY_NAME ? skillTarget(input) : undefined;
+  if (skill === undefined) return result;
+  return {
+    callId: result.callId,
+    isError: result.isError,
+    kind: "load-skill-result",
+    name: skill,
+    output: result.output,
+  };
+}
+
+/**
  * Builds the inline tool-result message part that repairs model history after a
  * local tool execution error.
  */
@@ -125,15 +147,17 @@ export function createToolResultMessagePartFromToolError(
  */
 export function createRuntimeToolResultFromMessagePart(
   part: ToolResultPart,
+  /** The entry the result's call ran, which history names after the catalog tool for a call made through one. */
+  toolName: string,
 ): RuntimeToolResultActionResult {
   return createRuntimeToolResultFromValue({
     callId: part.toolCallId,
     output: toolResultOutputToJsonValue({
       output: part.output,
       toolCallId: part.toolCallId,
-      toolName: part.toolName,
+      toolName,
     }),
-    toolName: part.toolName,
+    toolName,
     isError: isToolResultError(part.output),
   });
 }

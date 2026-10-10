@@ -5,6 +5,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -34,7 +35,10 @@ function withState(
 }
 
 function stubAccessor() {
-  return { get: () => undefined, set: () => {} } as any;
+  const accessor = { get: () => undefined, set: () => {} } as any;
+  // A step enters its projection before it publishes.
+  enterSessionProjection(accessor, undefined);
+  return accessor;
 }
 
 const stubAlsContext = (() => {
@@ -436,7 +440,7 @@ describe("linearChannel default event handlers", () => {
       variables: {
         input: {
           agentSessionId: "agent_session_1",
-          content: { action: "search", parameter: "{}", type: "action" },
+          content: { action: "Search", parameter: "{}", type: "action" },
           ephemeral: true,
         },
       },

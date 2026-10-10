@@ -5,6 +5,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -54,6 +55,12 @@ function callEvent(
   ctx: any,
 ): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
+}
+
+/** Delivers `event` as a session publishes it: the handler runs, then the session records it. */
+async function publishEvent(adapter: ChannelAdapter, event: UnstampedMessageStreamEvent, ctx: any) {
+  await callEvent(adapter, event, ctx);
+  recordPublishedEvent(ctx.ctx, event);
 }
 
 function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
@@ -667,7 +674,7 @@ describe("twilioChannel() default event handlers", () => {
     });
   });
 
-  it("input.requested sends a batch of approvals as one SMS, since one reply answers them all", async () => {
+  it("sends a batch of approvals one SMS at a time, since a reply answers only the one it sees", async () => {
     const bodies: string[] = [];
     const fetchMock: typeof fetch = async (_input, init) => {
       bodies.push(new URLSearchParams(String(init?.body)).get("Body") ?? "");
@@ -685,8 +692,12 @@ describe("twilioChannel() default event handlers", () => {
       ),
       { from: "+15551234567", lastCallSid: null, lastMessageSid: "SM123", to: "+15557654321" },
     );
+    const accessor = stubAccessor();
+    const ctx = buildAdapterContext(adapter, accessor);
+    // The channel reads the session's record of what it published.
+    enterSessionProjection(accessor, undefined);
 
-    await callEvent(
+    await publishEvent(
       adapter,
       makeEvent("input.requested", {
         requests: [
@@ -719,16 +730,43 @@ describe("twilioChannel() default event handlers", () => {
         stepIndex: 0,
         turnId: "t1",
       }),
-      buildAdapterContext(adapter, stubAccessor()),
+      ctx,
+    );
+    expect(bodies).toEqual([
+      "Approve Deploy release?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
+    ]);
+
+    await publishEvent(
+      adapter,
+      makeEvent("approval.settled", {
+        outcome: "approved",
+        requestId: "approval_1",
+        responderPrincipalId: "twilio:+15551234567",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    expect(bodies.at(-1)).toBe(
+      "Approve Rotate keys?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
     );
 
-    expect(bodies).toEqual([
-      [
-        "Approve Deploy release?\n\n1. Approve\n2. Cancel",
-        "Approve Rotate keys?\n\n1. Approve\n2. Cancel",
-        "Reply with a number to choose. Your reply answers each of these.",
-      ].join("\n\n"),
-    ]);
+    // The batch resolving later reports both requests again; nothing more is sent.
+    await publishEvent(
+      adapter,
+      makeEvent("input.resolved", {
+        resolutions: [
+          { kind: "tool-approval", outcome: "approved", requestId: "approval_1" },
+          { kind: "tool-approval", outcome: "approved", requestId: "approval_2" },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    expect(bodies).toHaveLength(2);
   });
 
   it("receive starts a phone-pair session with an explicit continuation token", async () => {

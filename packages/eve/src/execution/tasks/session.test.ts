@@ -60,7 +60,7 @@ describe("answerTaskCancel", () => {
 
     await answerTaskCancel(cursor, {
       callId: "cancel-call",
-      kind: "task_cancel",
+      kind: "eve__task_cancel",
       taskId: research.taskId,
     });
 
@@ -224,7 +224,8 @@ function withQuestion(session: DurableSession, runId: string): DurableSession {
           event: REQUEST_EVENT,
           kind: "question",
           runId,
-          workflowAsk: { control: `${runId}-control`, question: {} },
+          workflowAsk: { control: `${runId}-control` },
+          reply: {},
         },
       ],
     ],

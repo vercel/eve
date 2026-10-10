@@ -21,7 +21,7 @@ describe("metadata titles", () => {
     expect(metadataTitle(siteTitle)).toEqual({ absolute: siteTitle });
     expect(pageTitleMetadata(siteTitle)).toEqual({
       title: { absolute: siteTitle },
-      openGraph: { title: siteTitle },
+      openGraph: { siteName: "eve", title: siteTitle },
       twitter: { title: siteTitle },
     });
   });

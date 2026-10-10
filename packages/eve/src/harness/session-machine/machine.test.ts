@@ -24,7 +24,7 @@ import {
   requireSignIn,
   type ResponsePolicyPass,
 } from "#harness/hitl/approvals.js";
-import { deliver } from "#harness/hitl/delivery.js";
+import { deliver, resolveTypedApproval } from "#harness/hitl/delivery.js";
 import { applyTransition, sessionView, type Transition } from "./commit.js";
 import { saveProjection } from "./current.js";
 import {
@@ -139,11 +139,14 @@ const noPolicy = (stepInput?: StepInput): ResponsePolicyPass => ({
 /** Answers through `deliver` and `answer`, as the tool loop does with no response policy. */
 async function respond(machine: Machine, input: StepInput) {
   const delivered = deliver(machine.view(), input, { takeQueued: true });
+  // The intake answers a typed approval before the policy pass, as a press.
+  const typed = resolveTypedApproval(machine.view(), delivered.input);
   return machine.apply(
     answer(machine.view(), {
       approvalKey: () => undefined,
-      delivery: delivered.input,
-      policy: noPolicy(delivered.input),
+      delivery: typed,
+      policy: noPolicy(typed),
+      searchable: () => false,
       takeQueued: delivered.takeQueued,
     }),
   );
@@ -533,6 +536,7 @@ describe("answers", () => {
         approvalKey: (request) => `deploy:${String(request.action.input.service)}`,
         delivery: { inputResponses: [{ optionId: "approve", requestId: "approval-call-1" }] },
         policy: noPolicy(),
+        searchable: () => false,
         takeQueued: false,
       }),
     );

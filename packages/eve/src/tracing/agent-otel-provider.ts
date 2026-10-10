@@ -20,6 +20,7 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
+  genAiToolDefinitionsAttribute,
   textContentAttribute,
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
@@ -39,6 +40,10 @@ import {
   setGenAiUsage,
 } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
+import {
+  rememberTurnInputMessages,
+  rememberTurnOutputMessages,
+} from "#tracing/agent-otel-turn-state.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
 import {
@@ -357,7 +362,9 @@ export function createAgentOtelInstrumentation(
     }
   };
 
-  const onModelCallStarted = (event: InstrumentationModelCallStartedEvent): void => {
+  const onModelCallStarted = (
+    event: InstrumentationModelCallStartedEvent,
+  ): void | PromiseLike<void> => {
     const attempt = steps.get(event.scope);
     if (attempt === undefined) return;
     attempt.span.setAttribute("agent.model.id", event.model.modelId);
@@ -381,17 +388,25 @@ export function createAgentOtelInstrumentation(
       },
       attempt.context,
     );
+    let inputMessagesAttribute: string | undefined;
     if (recordInputs && event.input !== undefined) {
-      const genAiMessages = genAiInputMessagesAttribute(event.input.messages);
-      if (genAiMessages !== undefined) span.setAttribute("gen_ai.input.messages", genAiMessages);
+      inputMessagesAttribute = genAiInputMessagesAttribute(event.input.messages);
+      if (inputMessagesAttribute !== undefined) {
+        span.setAttribute("gen_ai.input.messages", inputMessagesAttribute);
+      }
       const genAiSystem = genAiSystemInstructionsAttribute(event.input.instructions);
       if (genAiSystem !== undefined) {
         span.setAttribute("gen_ai.system_instructions", genAiSystem);
+      }
+      const toolDefinitions = genAiToolDefinitionsAttribute(event.input.tools);
+      if (toolDefinitions !== undefined) {
+        span.setAttribute("gen_ai.tool.definitions", toolDefinitions);
       }
     }
     const state = { context: trace.setSpan(attempt.context, span), span };
     getExecutionContexts(event.scope).set(event.idempotencyKey, state.context);
     getSpanStates(modelSpans, event.scope).set(event.idempotencyKey, state);
+    return rememberTurnInputMessages(input.stateStore, event.scope, inputMessagesAttribute);
   };
 
   const onModelCallTerminal = async (
@@ -424,6 +439,7 @@ export function createAgentOtelInstrumentation(
         const outputMessages = genAiOutputMessagesAttribute(content, event.finishReason);
         if (outputMessages !== undefined) {
           state.span.setAttribute("gen_ai.output.messages", outputMessages);
+          await rememberTurnOutputMessages(input.stateStore, event.scope, outputMessages);
         }
         const reasoning = textContentAttribute(
           content

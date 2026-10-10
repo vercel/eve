@@ -176,3 +176,27 @@ describe("invokeTool trace ownership", () => {
     expect(processor.activeTraceIds().size).toBe(0);
   });
 });
+
+describe("invokeTool trace identity", () => {
+  const identity = (span: ReadableSpan) => ({
+    conversation: span.attributes["gen_ai.conversation.id"],
+    run: span.attributes["agent.run.id"],
+  });
+
+  it("gives each keyed call its own run and conversation, never the tool session id", async () => {
+    await invokeTool(runtime, "lookup", {}, { auth: alice, key: "desk" });
+    await invokeTool(runtime, "lookup", {}, { auth: alice, key: "desk" });
+
+    const [first, second] = exporter
+      .getFinishedSpans()
+      .filter((span) => span.name === "execute_tool lookup")
+      .map(identity);
+    expect(first!.run).toMatch(/^call_session_/u);
+    expect(first!.conversation).toBe(first!.run);
+    expect(second!.run).toMatch(/^call_session_/u);
+    expect(second!.run).not.toBe(first!.run);
+    expect(second!.conversation).not.toBe(first!.conversation);
+    const recorded = JSON.stringify(exporter.getFinishedSpans().map((span) => span.attributes));
+    expect(recorded).not.toContain("tool_session_");
+  });
+});

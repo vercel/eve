@@ -152,6 +152,7 @@ describe("nextKey", () => {
   it("decodes Shift+Enter as a newline while a bare Enter still submits", () => {
     expect(nextKey("\x1b[27;2;13~")).toEqual({ key: { type: "newline" }, consumed: 10 });
     expect(nextKey("\x1b[13;2u")).toEqual({ key: { type: "newline" }, consumed: 7 });
+    expect(nextKey("\n")).toEqual({ key: { type: "newline" }, consumed: 1 });
     expect(nextKey("\r")).toEqual({ key: { type: "enter" }, consumed: 1 });
   });
 

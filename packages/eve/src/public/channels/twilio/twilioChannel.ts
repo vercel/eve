@@ -1,3 +1,4 @@
+import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
@@ -67,7 +68,7 @@ interface TwilioChannelContext extends TwilioContext {
 export interface TwilioEventContext extends TwilioChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable state for the phone-number conversation. */
-export interface TwilioChannelState {
+export interface TwilioChannelState extends PromptQueueState {
   /** Caller / sender phone number. */
   from: string | null;
   /** Twilio number or sender that received the latest session-starting webhook. */
@@ -164,6 +165,8 @@ export interface TwilioChannelEvents {
   readonly "message.completed"?: TwilioEventHandler<"message.completed">;
   readonly "message.appended"?: TwilioEventHandler<"message.appended">;
   readonly "input.requested"?: TwilioEventHandler<"input.requested">;
+  readonly "input.resolved"?: TwilioEventHandler<"input.resolved">;
+  readonly "approval.settled"?: TwilioEventHandler<"approval.settled">;
   readonly "turn.failed"?: TwilioEventHandler<"turn.failed">;
   readonly "turn.completed"?: TwilioEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: TwilioEventHandler<"turn.cancelled">;

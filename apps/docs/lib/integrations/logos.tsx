@@ -60,23 +60,6 @@ export const webLogo = (props: LogoProps) => (
   </svg>
 );
 
-const BuzzLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 466 309" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <defs>
-      <mask id="buzz-logo-mask">
-        <circle cx="91.7" cy="154.5" fill="white" r="91.7" />
-        <circle cx="374.3" cy="154.5" fill="white" r="91.7" />
-        <rect fill="white" height="309" rx="34" width="210" x="128" />
-        <ellipse cx="193.3" cy="84.4" fill="black" rx="27" ry="27" />
-        <ellipse cx="276" cy="84.4" fill="black" rx="27" ry="27" />
-        <rect fill="black" height="38.3" rx="5" width="136.9" x="166.3" y="157.2" />
-        <rect fill="black" height="37.6" rx="5" width="136.2" x="166.9" y="235.1" />
-      </mask>
-    </defs>
-    <rect fill="currentColor" height="309" mask="url(#buzz-logo-mask)" width="466" />
-  </svg>
-);
-
 const browserUseLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -810,7 +793,6 @@ const shopifyLogo = (props: LogoProps) => (
 export const logos = {
   eve: eveLogo,
   web: webLogo,
-  buzz: BuzzLogo,
   "browser-use": browserUseLogo,
   github: githubLogo,
   slack: slackLogo,

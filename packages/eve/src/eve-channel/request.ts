@@ -1,3 +1,4 @@
+import { parseToolStubs } from "#tool-stubs/rules.js";
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type {
@@ -7,6 +8,7 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
+import { strandedSessionResponse } from "#eve-channel/support.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
@@ -114,6 +116,16 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     context,
     outputSchema,
   };
+  if (payload.stubs !== undefined) {
+    try {
+      result.stubs = parseToolStubs(payload.stubs);
+    } catch (error) {
+      return Response.json(
+        { ok: false, error: error instanceof Error ? error.message : "Invalid tool stubs." },
+        { status: 400 },
+      );
+    }
+  }
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
@@ -136,6 +148,12 @@ export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
   const { payload } = splitLegacyTaskFields(input);
+  if (Object.hasOwn(payload, "stubs")) {
+    return Response.json(
+      { ok: false, error: "Tool stubs are fixed at session creation." },
+      { status: 400 },
+    );
+  }
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -280,14 +298,24 @@ export async function createSessionStreamResponse(
 ): Promise<Response> {
   const startIndex = parseStartIndex(request);
   if (startIndex instanceof Response) return startIndex;
-  const includeTailIndex = parseIncludeTailIndex(request);
+  const follow = parseFollow(request);
+  const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // The event stream opens its durable source lazily, so an unknown or
-    // unreachable session would otherwise answer 200 and then fail mid-body.
-    // Resolving the tail first surfaces that before any bytes are committed.
-    const tailIndex = await session.getStreamTailIndex();
-    const events = await session.getEventStream({ startIndex });
+    // Resolve the tail before committing a response; otherwise an unknown or
+    // unreachable session would answer 200 and fail mid-body. Open the event
+    // stream alongside the tail lookup to avoid an extra round trip.
+    const eventsPromise = session.getEventStream({ follow, startIndex });
+    // Handled below; this keeps an early rejection from being reported as unhandled.
+    eventsPromise.catch(() => {});
+    let tailIndex: number;
+    try {
+      tailIndex = await session.getStreamTailIndex();
+    } catch (error) {
+      void eventsPromise.then((events) => events.cancel()).catch(() => {});
+      throw error;
+    }
+    const events = await eventsPromise;
     const controlVersion =
       new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
       EVE_STREAM_CONTROL_VERSION
@@ -314,6 +342,8 @@ export async function createSessionStreamResponse(
       { headers },
     );
   } catch (error) {
+    const stranded = strandedSessionResponse(error);
+    if (stranded !== undefined) return stranded;
     const notFound = isMissingWorkflowRunError(error);
     return Response.json(
       { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
@@ -583,6 +613,12 @@ function toClientContextMessage(content: string): string {
 export function parseIncludeTailIndex(request: Request): boolean {
   const raw = new URL(request.url).searchParams.get("includeTailIndex");
   return raw === "1" || raw === "true";
+}
+
+/** `follow=false` (or `0`) bounds the read at the durable tail; following is the default. */
+function parseFollow(request: Request): boolean {
+  const raw = new URL(request.url).searchParams.get("follow");
+  return raw !== "0" && raw !== "false";
 }
 
 export function parseStartIndex(request: Request): number | undefined | Response {

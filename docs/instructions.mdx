@@ -62,11 +62,11 @@ A flat `agent/instructions.md` (or `.ts`) at the agent root and the directory ca
 
 Instructions and [skills](./skills) both feed text into the model's context. The difference is timing:
 
-|                          | Loaded                                             | Use for                                                  |
-| ------------------------ | -------------------------------------------------- | -------------------------------------------------------- |
-| System-role instructions | Outside history on every model call                | Permanent identity and standing rules                    |
-| User-role instructions   | Once at their static or dynamic lifecycle boundary | Application context that belongs in conversation history |
-| `agent/skills/*`         | On demand, when the model calls `load_skill`       | Optional procedures that should not bloat every turn     |
+|                          | Loaded                                                | Use for                                                  |
+| ------------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
+| System-role instructions | Outside history on every model call                   | Permanent identity and standing rules                    |
+| User-role instructions   | Once at their static or dynamic lifecycle boundary    | Application context that belongs in conversation history |
+| `agent/skills/*`         | On demand, when the model loads one with `eve__skill` | Optional procedures that should not bloat every turn     |
 
 Keep instructions short and stable. Long or situational procedures belong in [skills](./skills), where they only enter context when the request calls for them.
 
@@ -80,7 +80,7 @@ A dynamic system result applies at its lifecycle scope. A dynamic user result is
 
 The `messages` snapshot passed to a `session.started` resolver includes static user instructions. A `turn.started` resolver additionally sees user instructions produced at `session.started`. Other dynamic capability resolvers keep their existing snapshots.
 
-See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior.
+See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior. To give a session that replaced a [stranded session](./concepts/execution-model-and-durability#what-a-replacement-session-receives) the earlier conversation, read its stream with `sessions.attach()` and `transcriptReducer()` in a `session.started` user-role instruction.
 
 ## History controls and prompt caching
 

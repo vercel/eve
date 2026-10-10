@@ -22,9 +22,10 @@ type RecoveryCall = (options: {
  * Recovers a failed model call, each recovery at most once and within the current step, so the
  * reissue suppresses a second `step.started`:
  *
- * 1. AI Gateway rejected a provider-specific tool a fallback provider can't serve ("tool type 'X'
- *    is not supported"): the call is reissued without it, and a system note tells the model which
- *    capability went away. Only known provider tools are dropped, never an authored one.
+ * 1. The host rejected a provider-specific tool it can't serve (an AI Gateway fallback provider,
+ *    or an OpenAI-compatible endpoint without OpenAI web search): the call is reissued without
+ *    it, and a system note tells the model which capability went away. Only known provider tools
+ *    are dropped, never an authored one.
  * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
  *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
  *    recovery removed.

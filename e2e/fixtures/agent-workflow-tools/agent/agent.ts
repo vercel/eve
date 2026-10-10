@@ -1,5 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { latestTaskResult } from "@eve-e2e/config/mock-script";
+import { CALL_TOOL, SEARCH_TOOL, SKILL_TOOL } from "@eve-e2e/config/catalog-tools";
+import { latestTaskResult, outputOf, playScript } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
@@ -18,16 +19,24 @@ const HOOK_SCENARIO_CALLS = {
 } as const;
 
 /**
- * public-catalog lists its tools without sign-in: run its public tool, then its
- * protected one, which asks the user to sign in and resumes once they have.
+ * public-catalog lists its tools without sign-in: connect it, which needs no
+ * sign-in, run its public tool, then its protected one, which asks the user to
+ * sign in and resumes once they have.
  */
 function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
   const call = (id: string, tool: string) => ({
     id,
-    name: "connection_execute",
-    input: { connection: "public-catalog", tool, input: {} },
+    name: CALL_TOOL,
+    input: { name: `public-catalog__${tool}`, input: {} },
   });
   const byId = new Map(request.toolResults.map((entry) => [entry.id, entry]));
+  if (!byId.has("public-catalog-connect")) {
+    return {
+      toolCalls: [
+        { id: "public-catalog-connect", name: CALL_TOOL, input: { name: "public-catalog" } },
+      ],
+    };
+  }
   if (!byId.has("public-catalog-items")) {
     return { toolCalls: [call("public-catalog-items", "list_items")] };
   }
@@ -49,7 +58,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     const skillCallId = auditing ? "audit-policy" : "initial-policy";
     if (!request.toolResults.some((entry) => entry.id === skillCallId)) {
       return {
-        toolCalls: [{ id: skillCallId, name: "load_skill", input: { skill: "delegation-policy" } }],
+        toolCalls: [{ id: skillCallId, name: SKILL_TOOL, input: { name: "delegation-policy" } }],
       };
     }
     const mode = (/SUBAGENT-HOOKS:(direct|background|waiting)/u.exec(hookScenario)?.[1] ??
@@ -68,7 +77,9 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     if (call === undefined) return { toolCalls: [{ name: tool, input }] };
     // An agent call or task returned a receipt; its result arrives in a <task_result> message.
     if (mode === "direct") {
-      return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
+      return (
+        latestTaskResult(request, tool) ?? { toolCalls: [{ name: "eve__task_wait", input: {} }] }
+      );
     }
     // Ends the step with text while the task works, which holds the turn. The
     // step takes a few seconds, so the task's helper most likely opens while it
@@ -87,50 +98,28 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     return respondToPublicCatalog(request);
   }
   const message =
-    [...request.userMessages]
-      .reverse()
-      .find((entry) => entry.startsWith("WORKFLOW-") || entry.includes("private-catalog")) ?? "";
+    [...request.userMessages].reverse().find((entry) => entry.startsWith("WORKFLOW-")) ?? "";
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
-  if (message.includes("private-catalog")) {
-    const search = [...request.toolResults]
-      .reverse()
-      .find((entry) => entry.name === "connection_search");
-    if (search === undefined) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_search",
-            input: { connection: "private-catalog", query: "items" },
-          },
-        ],
-      };
-    }
-    // A plain search reports the connection as requiring sign-in; `signIn` asks the user.
-    if (JSON.stringify(search.output).includes('"requiresSignIn":true')) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_search",
-            input: { connection: "private-catalog", query: "items", signIn: true },
-          },
-        ],
-      };
-    }
-    const execute = request.toolResults.find((entry) => entry.name === "connection_execute");
-    if (execute === undefined) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_execute",
-            input: { connection: "private-catalog", tool: "list_items", input: {} },
-          },
-        ],
-      };
-    }
-    return JSON.stringify(execute.output);
+  if (message.startsWith("WORKFLOW-CATALOG-SIGN-IN")) {
+    // A plain search finds the catalog as its sign-in entry; executing it asks
+    // the user. Sign-in drops that interrupted call from history, so the script
+    // makes it again once the turn resumes, then searches and calls a tool.
+    return playScript(
+      request,
+      [
+        { id: "catalog-search", name: SEARCH_TOOL, input: () => ({ query: "private-catalog" }) },
+        { id: "catalog-sign-in", name: CALL_TOOL, input: () => ({ name: "private-catalog" }) },
+        { id: "catalog-tools", name: SEARCH_TOOL, input: () => ({ query: "private-catalog__" }) },
+        {
+          id: "catalog-items",
+          name: CALL_TOOL,
+          input: () => ({ name: "private-catalog__list_items" }),
+        },
+      ],
+      (finished) => outputOf(finished, "catalog-items"),
+    );
   }
-
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);
   if (stepAuth !== null) {
     const result = request.toolResults.find((entry) => entry.name === "authorize_service");

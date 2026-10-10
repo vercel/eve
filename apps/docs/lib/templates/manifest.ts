@@ -1,5 +1,5 @@
-// Curation manifest for the templates gallery. Repository content is resolved
-// from this manifest during docs development and production builds.
+// Curation manifest for the templates gallery and detail pages. Repository
+// content is resolved from this manifest during docs development and production builds.
 
 export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing";
 
@@ -34,6 +34,8 @@ export interface TemplateGitHubSource {
 export interface TemplateManifestEntry {
   slug: string;
   title: string;
+  /** Hide from the gallery while keeping the detail page available. */
+  unlisted?: boolean;
   description: string;
   descriptionLink?: { text: string; href: string };
   demoHref?: string;
@@ -51,7 +53,7 @@ export interface TemplateManifestEntry {
 export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-chat-template",
-    title: "Chat",
+    title: "Web Chat Agent",
     setupPrompt:
       "Set up the eve chat template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -78,59 +80,82 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
-    slug: "eve-llm-council-template",
-    title: "LLM council",
+    slug: "eve-slack-agent",
+    title: "Slack Assistant",
     setupPrompt:
-      "Set up the LLM council template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+      "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
-      "A Next.js LLM council that sends one prompt to four models in parallel, streams their answers, and asks a judge model for a concise answer with per-model agreement scores.",
-    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template",
-    category: "Example",
-    model: "anthropic/claude-opus-5",
-    integrations: ["Web chat"],
+      "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
       repo: "eve",
       ref: "main",
-      pathPrefix: "apps/templates/eve-llm-council-template",
+      pathPrefix: "apps/templates/eve-slack-agent-template",
     },
-    files: [
-      "agent/agent.ts",
-      "agent/channels/eve.ts",
-      "agent/instructions.md",
-      "agent/lib/schemas.ts",
-      "agent/subagents/claude/agent.ts",
-      "agent/subagents/grok/agent.ts",
-      "agent/subagents/kimi/agent.ts",
-      "agent/subagents/openai/agent.ts",
-    ],
-  },
-  {
-    slug: "eve-design-template",
-    title: "Design",
-    setupPrompt:
-      "Set up the eve design agent template in my current workspace using https://github.com/vercel-labs/eve-design-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README and BOOTSTRAP.md to configure it. Preserve the existing project if the workspace is not empty, tell me about any required environment variables or manual setup steps, and do not approve or publish the design corpus for me.",
-    description:
-      "A Slack design collaborator that answers from a reviewed, versioned corpus of your organization's approved design guidance.",
-    sourceHref: "https://github.com/vercel-labs/eve-design-template/tree/main",
-    category: "Collaboration",
-    model: "anthropic/claude-sonnet-4.6",
-    integrations: ["Slack"],
-    source: "Vercel Templates",
-    github: { owner: "vercel-labs", repo: "eve-design-template", ref: "main" },
     files: [
       "agent/agent.ts",
       "agent/channels/slack.ts",
       "agent/instructions.md",
-      "agent/sandbox/sandbox.ts",
-      "agent/skills/design-knowledge/SKILL.md",
-      "agent/tools/agent.ts",
-      "agent/tools/bash.ts",
-      "agent/tools/todo.ts",
-      "agent/tools/web_fetch.ts",
-      "agent/tools/web_search.ts",
-      "agent/tools/write_file.ts",
+      "agent/skills/plan_a_trip.md",
+      "agent/tools/get_weather.ts",
+    ],
+  },
+  {
+    slug: "eve-software-factory-template",
+    title: "Software Factory",
+    setupPrompt:
+      "I want to build a software factory with the eve framework, using the Foreman template. Read the setup instructions at https://ask-foreman.dev/docs/getting-started and follow them. They cover deploying the template, connecting GitHub and Linear, running it locally, and how the pipeline works overall.",
+    description:
+      "Foreman, a software factory that takes tasks from GitHub and Linear, runs each through classifier, analyst, implementer, and reviewer stations, and delivers a reviewed draft pull request on your repository.",
+    sourceHref: "https://github.com/vercel-labs/eve-software-factory-template/tree/main",
+    category: "Collaboration",
+    model: "openai/gpt-5.6-terra-fast",
+    integrations: ["GitHub", "Linear"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-software-factory-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/github.ts",
+      "agent/channels/linear.ts",
+      "agent/extensions/github.ts",
+      "agent/instructions.ts",
+      "agent/lib/github/approval.ts",
+      "agent/lib/trust.ts",
+      "agent/subagents/analyst/agent.ts",
+      "agent/subagents/classifier/agent.ts",
+      "agent/subagents/implementer/agent.ts",
+      "agent/subagents/implementer/tools/push_branch.ts",
+      "agent/subagents/reviewer/agent.ts",
+    ],
+  },
+  {
+    slug: "marketing-team-eve-template",
+    title: "Marketing Team Coordinator",
+    setupPrompt:
+      "I want to build a team of marketing agents with the eve framework, using the marketing team template. Read the setup instructions at https://agent-resources.dev/marketing-team-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+    description:
+      "A team of marketing agents: a lead routes work to specialists for positioning, long-form content, social, SEO, and email, publishing through Notion, Typefully, and Resend.",
+    sourceHref: "https://github.com/vercel-labs/marketing-team-eve-template/tree/main",
+    category: "Marketing",
+    model: "anthropic/claude-opus-5",
+    integrations: ["Web chat", "Slack", "Notion", "Resend", "Typefully"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "marketing-team-eve-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/connections/notion.ts",
+      "agent/instructions.md",
+      "agent/subagents/content-marketer/agent.ts",
+      "agent/subagents/email/agent.ts",
+      "agent/subagents/product-marketer/agent.ts",
+      "agent/subagents/seo/agent.ts",
+      "agent/subagents/social-media-coordinator/agent.ts",
     ],
   },
   {
@@ -160,34 +185,8 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
-    slug: "eve-slack-agent",
-    title: "Slack",
-    setupPrompt:
-      "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
-    description:
-      "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
-    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template",
-    category: "Collaboration",
-    model: "anthropic/claude-sonnet-5",
-    integrations: ["Slack"],
-    source: "Vercel Templates",
-    github: {
-      owner: "vercel",
-      repo: "eve",
-      ref: "main",
-      pathPrefix: "apps/templates/eve-slack-agent-template",
-    },
-    files: [
-      "agent/agent.ts",
-      "agent/channels/slack.ts",
-      "agent/instructions.md",
-      "agent/skills/plan_a_trip.md",
-      "agent/tools/get_weather.ts",
-    ],
-  },
-  {
     slug: "kody-eve-template",
-    title: "GitHub maintainer",
+    title: "GitHub Project Maintainer",
     setupPrompt:
       "I want to build a GitHub maintainer agent with the eve framework, using the Kody template. Read the setup instructions at https://agent-resources.dev/kody-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
     description:
@@ -213,36 +212,35 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
-    slug: "eve-software-factory-template",
-    title: "Software factory",
+    slug: "typefully-eve-template",
+    title: "Social Media Manager",
     setupPrompt:
-      "I want to build a software factory with the eve framework, using the Foreman template. Read the setup instructions at https://ask-foreman.dev/docs/getting-started and follow them. They cover deploying the template, connecting GitHub and Linear, running it locally, and how the pipeline works overall.",
+      "I want to build a Slack agent with the eve framework, using the Typefully social media agent template. Read the setup instructions at https://agent-resources.dev/typefully-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
     description:
-      "Foreman, a software factory that takes tasks from GitHub and Linear, runs each through classifier, analyst, implementer, and reviewer stations, and delivers a reviewed draft pull request on your repository.",
-    sourceHref: "https://github.com/vercel-labs/eve-software-factory-template/tree/main",
-    category: "Collaboration",
-    model: "openai/gpt-5.6-terra-fast",
-    integrations: ["GitHub", "Linear"],
+      "A Slack-based social media agent that drafts posts and threads for X, LinkedIn, Threads, Bluesky, and Mastodon through Typefully, manages the publishing queue, and pulls briefs from Notion.",
+    sourceHref: "https://github.com/vercel-labs/typefully-eve-template/tree/main",
+    category: "Marketing",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack", "Typefully", "Notion"],
     source: "Vercel Templates",
-    github: { owner: "vercel-labs", repo: "eve-software-factory-template", ref: "main" },
+    github: { owner: "vercel-labs", repo: "typefully-eve-template", ref: "main" },
     files: [
       "agent/agent.ts",
-      "agent/channels/github.ts",
-      "agent/channels/linear.ts",
-      "agent/extensions/github.ts",
-      "agent/instructions.ts",
-      "agent/lib/github/approval.ts",
-      "agent/lib/trust.ts",
-      "agent/subagents/analyst/agent.ts",
-      "agent/subagents/classifier/agent.ts",
-      "agent/subagents/implementer/agent.ts",
-      "agent/subagents/implementer/tools/push_branch.ts",
+      "agent/channels/slack.ts",
+      "agent/connections/notion.ts",
+      "agent/connections/typefully.ts",
+      "agent/instructions.md",
+      "agent/sandbox.ts",
+      "agent/schedules/weekly-analytics.ts",
+      "agent/skills/x-style/SKILL.md",
+      "agent/subagents/researcher/agent.ts",
       "agent/subagents/reviewer/agent.ts",
+      "agent/tools/lint_against_style.ts",
     ],
   },
   {
     slug: "eve-sre-agent-template",
-    title: "Incident response",
+    title: "Incident Investigation Assistant",
     setupPrompt:
       "I want to set up sre, an incident response agent built with the eve framework. Read the setup instructions at https://github.com/vercel-labs/eve-sre-agent-template/blob/main/docs/setup-for-agents.md and follow them. They cover creating and linking the Vercel project, connecting Slack, GitHub, Datadog, and Vercel, deploying the agent, and verifying it in Slack.",
     description:
@@ -269,33 +267,8 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
-    slug: "marketing-team-eve-template",
-    title: "Marketing team",
-    setupPrompt:
-      "I want to build a team of marketing agents with the eve framework, using the marketing team template. Read the setup instructions at https://agent-resources.dev/marketing-team-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
-    description:
-      "A team of marketing agents: a lead routes work to specialists for positioning, long-form content, social, SEO, and email, publishing through Notion, Typefully, and Resend.",
-    sourceHref: "https://github.com/vercel-labs/marketing-team-eve-template/tree/main",
-    category: "Marketing",
-    model: "anthropic/claude-opus-5",
-    integrations: ["Web chat", "Slack", "Notion", "Resend", "Typefully"],
-    source: "Vercel Templates",
-    github: { owner: "vercel-labs", repo: "marketing-team-eve-template", ref: "main" },
-    files: [
-      "agent/agent.ts",
-      "agent/channels/slack.ts",
-      "agent/connections/notion.ts",
-      "agent/instructions.md",
-      "agent/subagents/content-marketer/agent.ts",
-      "agent/subagents/email/agent.ts",
-      "agent/subagents/product-marketer/agent.ts",
-      "agent/subagents/seo/agent.ts",
-      "agent/subagents/social-media-coordinator/agent.ts",
-    ],
-  },
-  {
     slug: "sanity-copilot-eve-template",
-    title: "Sanity copilot",
+    title: "Sanity Content Assistant",
     setupPrompt:
       "I want to build a Slack agent with the eve framework, using the Sanity copilot template. Read the setup instructions at https://agent-resources.dev/sanity-copilot-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
     description:
@@ -320,35 +293,65 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
-    slug: "typefully-eve-template",
-    title: "Social media",
+    slug: "eve-design-template",
+    title: "Company Design Assistant",
     setupPrompt:
-      "I want to build a Slack agent with the eve framework, using the Typefully social media agent template. Read the setup instructions at https://agent-resources.dev/typefully-eve-template.md and follow them. They will cover deploying the template, building with eve, how everything works overall, and more.",
+      "Set up the eve design agent template in my current workspace using https://github.com/vercel-labs/eve-design-template/tree/main as the source. Copy the project files, install its dependencies, and follow the repository README and BOOTSTRAP.md to configure it. Preserve the existing project if the workspace is not empty, tell me about any required environment variables or manual setup steps, and do not approve or publish the design corpus for me.",
     description:
-      "A Slack-based social media agent that drafts posts and threads for X, LinkedIn, Threads, Bluesky, and Mastodon through Typefully, manages the publishing queue, and pulls briefs from Notion.",
-    sourceHref: "https://github.com/vercel-labs/typefully-eve-template/tree/main",
-    category: "Marketing",
-    model: "anthropic/claude-sonnet-5",
-    integrations: ["Slack", "Typefully", "Notion"],
+      "A Slack design collaborator that answers from a reviewed, versioned corpus of your organization's approved design guidance.",
+    sourceHref: "https://github.com/vercel-labs/eve-design-template/tree/main",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-4.6",
+    integrations: ["Slack"],
     source: "Vercel Templates",
-    github: { owner: "vercel-labs", repo: "typefully-eve-template", ref: "main" },
+    github: { owner: "vercel-labs", repo: "eve-design-template", ref: "main" },
     files: [
       "agent/agent.ts",
       "agent/channels/slack.ts",
-      "agent/connections/notion.ts",
-      "agent/connections/typefully.ts",
       "agent/instructions.md",
-      "agent/sandbox.ts",
-      "agent/schedules/weekly-analytics.ts",
-      "agent/skills/x-style/SKILL.md",
-      "agent/subagents/researcher/agent.ts",
-      "agent/subagents/reviewer/agent.ts",
-      "agent/tools/lint_against_style.ts",
+      "agent/sandbox/sandbox.ts",
+      "agent/skills/design-knowledge/SKILL.md",
+      "agent/tools/agent.ts",
+      "agent/tools/bash.ts",
+      "agent/tools/web_fetch.ts",
+      "agent/tools/web_search.ts",
+      "agent/tools/write_file.ts",
+    ],
+  },
+  {
+    slug: "eve-llm-council-template",
+    title: "Council of Agents",
+    unlisted: true,
+    setupPrompt:
+      "Set up the LLM council template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+    description:
+      "A Next.js LLM council that sends one prompt to four models in parallel, streams their answers, and asks a judge model for a concise answer with per-model agreement scores.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-llm-council-template",
+    category: "Example",
+    model: "anthropic/claude-opus-5",
+    integrations: ["Web chat"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-llm-council-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/instructions.md",
+      "agent/lib/schemas.ts",
+      "agent/subagents/claude/agent.ts",
+      "agent/subagents/grok/agent.ts",
+      "agent/subagents/kimi/agent.ts",
+      "agent/subagents/openai/agent.ts",
     ],
   },
   {
     slug: "mux-video-agent",
-    title: "Mux video",
+    title: "Video Production Assistant",
+    unlisted: true,
     setupPrompt:
       "Set up the Mux Video Agent template in my current workspace using https://github.com/muxinc/mux-video-agent as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Mux credentials, AI Gateway setup, and manual deployment steps.",
     description:
@@ -375,6 +378,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "weather-agent-fixture",
     title: "Weather",
+    unlisted: true,
     setupPrompt:
       "Set up the eve weather agent in my current workspace using https://github.com/vercel/eve/tree/main/apps/fixtures/weather-agent as the source. Copy that fixture into a standalone project, install its dependencies, and make any minimal changes needed to run it outside the eve monorepo. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
