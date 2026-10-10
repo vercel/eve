@@ -872,6 +872,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   >({
     kindHint: "slack",
     turnPolicy: config.turnPolicy,
+    uploadPolicy: config.uploadPolicy,
     state: {
       channelId: null as string | null,
       threadTs: null as string | null,
