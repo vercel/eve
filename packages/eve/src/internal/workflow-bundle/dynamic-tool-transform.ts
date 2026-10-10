@@ -51,6 +51,7 @@ interface CallbackInfo {
   readonly isGenerator: boolean;
   readonly isReference: boolean;
   readonly nestedScopes: readonly ScopeEntry[];
+  readonly paramNames: readonly string[];
   readonly params: string;
   readonly phase: CallbackPhase;
   readonly propertyName: CallbackPropertyName;
@@ -237,6 +238,7 @@ function collectToolCallbacks(
       isGenerator: false,
       isReference: false,
       nestedScopes,
+      paramNames: [],
       params: "",
       phase: propertyName,
       propertyName,
@@ -293,6 +295,7 @@ function collectCallbackProperty(
       isGenerator: value.generator === true,
       isReference: false,
       nestedScopes,
+      paramNames: extractParamNames(value),
       params: extractFnParams(source, value),
       phase,
       propertyName,
@@ -310,6 +313,7 @@ function collectCallbackProperty(
       isGenerator: false,
       isReference: true,
       nestedScopes,
+      paramNames: ["__args"],
       params: "...__args",
       phase,
       propertyName,
@@ -329,9 +333,8 @@ function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { c
       ...scope.params,
       ...scope.vars,
     ]);
-    const callbackParamNames = extractCallbackParamNames(callback.params);
     const allVars = dedupeShadowed(candidateVars).filter(
-      (name) => !callbackParamNames.has(name) && referencedNames.has(name),
+      (name) => !callback.paramNames.includes(name) && referencedNames.has(name),
     );
     const closure = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
     const safePhase = callback.phase.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
@@ -435,50 +438,4 @@ function extractFnBody(source: string, fn: AstNode): string {
   return fn.type === "ArrowFunctionExpression" && body.type !== "BlockStatement"
     ? `{ return ${raw}; }`
     : raw;
-}
-
-function splitParamsTopLevel(raw: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let index = 0; index < raw.length; index++) {
-    const character = raw[index]!;
-    if (character === "<" || character === "(" || character === "[" || character === "{") {
-      depth++;
-    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
-      depth--;
-    } else if (character === "," && depth === 0) {
-      parts.push(raw.slice(start, index));
-      start = index + 1;
-    }
-  }
-  parts.push(raw.slice(start));
-  return parts;
-}
-
-function extractParamBindingName(parameter: string): string {
-  const trimmed = parameter.trim();
-  let depth = 0;
-  for (let index = 0; index < trimmed.length; index++) {
-    const character = trimmed[index]!;
-    if (character === "<" || character === "(" || character === "[" || character === "{") {
-      depth++;
-    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
-      depth--;
-    } else if (depth === 0 && (character === ":" || character === "=")) {
-      return trimmed.slice(0, index).trim();
-    }
-  }
-  return trimmed;
-}
-
-function extractCallbackParamNames(params: string): Set<string> {
-  const names: string[] = [];
-  if (!params) return new Set();
-  for (const parameter of splitParamsTopLevel(params)) {
-    const binding = extractParamBindingName(parameter);
-    if (binding.startsWith("...")) names.push(binding.slice(3));
-    else names.push(binding);
-  }
-  return new Set(names);
 }
