@@ -151,13 +151,6 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: true, registry: true, gallery: true },
   },
   {
-    slug: "tanstack",
-    name: "Web Chat (TanStack Start)",
-    kind: "channel",
-    tagline: "Embed a first-party web chat UI in a TanStack Start app.",
-    surfaces: { scaffoldable: false, registry: true, gallery: false },
-  },
-  {
     slug: "buzz",
     name: "Buzz",
     kind: "channel",

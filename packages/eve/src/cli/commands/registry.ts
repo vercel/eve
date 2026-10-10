@@ -7,8 +7,18 @@ import {
 } from "#compiled/shadcn-registry/index.js";
 import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import {
+  headlessAsker,
+  InteractionRequired,
+  interactiveAsker,
+  InvalidAnswerError,
+  withAnswers,
+  withPolicy,
+} from "#setup/ask.js";
+import type { WebChatFramework } from "#setup/integrations/web/framework.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
+import { setupQuestionToWire } from "#setup/setup-question-wire.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
@@ -36,12 +46,12 @@ import {
   type RegistrySearchPresentationSection,
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
-import { serializeHeadlessSetupEvent } from "./setup-headless.js";
+import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
   prepareWebChatProjectRoot,
   prepareWebRegistryProject,
   readRegistryConfig,
-  type WebChatFramework,
+  resolveWebChatFramework,
 } from "./registry-project.js";
 export { runRegistryAddCommand } from "./registry-add-command.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
@@ -156,10 +166,76 @@ function itemAddress(item: string): string {
     : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
-const WEB_CHAT_FRAMEWORKS = new Map<string, WebChatFramework>([
-  [itemAddress("channel/web"), "next"],
-  [itemAddress("channel/tanstack"), "tanstack"],
-]);
+/** The registry item that carries each Web Chat framework's files. */
+const WEB_CHAT_ITEMS: Readonly<Record<WebChatFramework, string>> = {
+  next: "channel/web",
+  tanstack: "channel/web-tanstack",
+};
+
+/**
+ * Asks which framework Web Chat uses with the same answer rules as setup
+ * questions. Returns `false` when cancelled and `undefined` after reporting a
+ * headless blocker.
+ */
+async function askWebChatFramework(
+  logger: RegistryCommandLogger,
+  appRoot: string,
+  item: string,
+  options: RunAddCommandOptions,
+  dependencies: AddCommandDependencies,
+): Promise<WebChatFramework | false | undefined> {
+  const nonInteractive = options.nonInteractive === true;
+  const canPrompt =
+    options.setupAuthorized === true ||
+    (
+      dependencies.hasInteractiveTerminal ?? defaultAddCommandDependencies.hasInteractiveTerminal!
+    )();
+  // Without a terminal, keep the recommended framework so scripted installs never stall.
+  const assume = options.yes === true || (!nonInteractive && !canPrompt);
+  const base =
+    nonInteractive || assume
+      ? headlessAsker()
+      : interactiveAsker(
+          options.prompter ??
+            dependencies.createPrompter?.() ??
+            defaultAddCommandDependencies.createPrompter!(),
+        );
+  const asker = withAnswers(options.answers ?? {})(assume ? withPolicy("assume")(base) : base);
+  try {
+    return await resolveWebChatFramework(appRoot, asker, options.answers);
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return false;
+    if (
+      !nonInteractive ||
+      !(error instanceof InteractionRequired || error instanceof InvalidAnswerError)
+    ) {
+      throw error;
+    }
+    const question = setupQuestionToWire(error.question);
+    logger.error(
+      serializeHeadlessSetupEvent({
+        version: 1,
+        type: "blocked",
+        item,
+        installed: false,
+        completedItems: [],
+        status: "input_required",
+        question,
+        ...(error instanceof InvalidAnswerError
+          ? { issue: { code: "invalid_answer" as const, message: error.message } }
+          : {}),
+        next: headlessSetupContinuation({
+          item,
+          installed: false,
+          answers: options.answers,
+          question,
+        }),
+      }),
+    );
+    process.exitCode = 2;
+    return undefined;
+  }
+}
 
 function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
   if (requiredVersion === undefined) return;
@@ -467,9 +543,17 @@ export async function runAddCommand(
   };
   return runRegistryAction(logger, appRoot, async () => {
     const address = itemAddress(item);
-    const webChatFramework = WEB_CHAT_FRAMEWORKS.get(address);
+    let webChatFramework: WebChatFramework | undefined;
+    // Setup reads the framework from the installed files, so only installs ask.
+    if (address === itemAddress(WEB_CHAT_ITEMS.next) && options.skipInstall !== true) {
+      const framework = await askWebChatFramework(logger, appRoot, item, options, dependencies);
+      if (framework === false || framework === undefined) return framework;
+      webChatFramework = framework;
+    }
+    const installAddress =
+      webChatFramework === undefined ? address : itemAddress(WEB_CHAT_ITEMS[webChatFramework]);
     const projectRoot =
-      options.skipInstall !== true && webChatFramework !== undefined
+      webChatFramework !== undefined
         ? await prepareWebChatProjectRoot(appRoot, webChatFramework)
         : appRoot;
     const config = await readEveRegistryConfig(appRoot);
@@ -488,7 +572,7 @@ export async function runAddCommand(
     }
     const registryItemResult = await resolveRegistryItemForAdd(
       logger,
-      async () => (await getRegistryItems([address], { config }))[0],
+      async () => (await getRegistryItems([installAddress], { config }))[0],
       () => printAddSuggestions(logger, appRoot, item),
     );
     if (!registryItemResult.found) return;
@@ -537,7 +621,7 @@ export async function runAddCommand(
       nonInteractive: options.nonInteractive,
       logger,
       install: async () => {
-        await addRegistryItems([address], {
+        await addRegistryItems([installAddress], {
           config,
           cwd: projectRoot,
           overwrite: options.overwrite,

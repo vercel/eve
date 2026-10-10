@@ -10,7 +10,6 @@ import {
 } from "./self-modification/setup.js";
 import { SHOPIFY_SETUP } from "./shopify/setup.js";
 import { SLACK_SETUP } from "./slack/setup.js";
-import { TANSTACK_SETUP } from "./tanstack/setup.js";
 import { TEAMS_SETUP } from "./teams/setup.js";
 import type { SetupIntegration } from "./types.js";
 import { WEB_SETUP } from "./web/setup.js";
@@ -18,7 +17,6 @@ import { WEB_SETUP } from "./web/setup.js";
 /** Built-in registry setup integrations in canonical picker order. */
 const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   WEB_SETUP,
-  TANSTACK_SETUP,
   FILE_MEMORY_SETUP,
   SLACK_SETUP,
   DISCORD_SETUP,

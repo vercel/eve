@@ -36,12 +36,6 @@ describe("setup integrations", () => {
       label: "File memory",
     });
   });
-  it("registers the TanStack Start Web Chat setup", () => {
-    expect(setupIntegration("tanstack")).toMatchObject({
-      kind: "tanstack",
-      label: "Web Chat (TanStack Start)",
-    });
-  });
   it("registers Shopify and self-modification setup variants", () => {
     expect(setupIntegration("shopify")).toMatchObject({ kind: "shopify", label: "Shopify" });
     expect(setupIntegration("self-modification")).toMatchObject({

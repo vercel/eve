@@ -9,7 +9,17 @@ import {
 } from "#compiled/jsonc-parser/index.js";
 import type { RegistryConfig, RegistrySource } from "#compiled/shadcn-registry/index.js";
 import { resolveEveProjectContext } from "#internal/project-context.js";
-import { WEB_APP_TEMPLATE_FILES } from "#setup/scaffold/create/web-template.js";
+import type { Asker } from "#setup/ask.js";
+import {
+  detectWebChatFramework,
+  WEB_CHAT_FRAMEWORK_LABELS,
+  WEB_FRAMEWORK_QUESTION,
+  type WebChatFramework,
+} from "#setup/integrations/web/framework.js";
+import {
+  WEB_APP_TANSTACK_TEMPLATE_FILES,
+  WEB_APP_TEMPLATE_FILES,
+} from "#setup/scaffold/create/web-template.js";
 
 interface RegistryPackage {
   path: string;
@@ -86,18 +96,37 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
 }
 
 /** Dev and build commands that run the Web Chat app in `apps/web`, by host framework. */
-const WEB_CHAT_SCRIPTS = {
+const WEB_CHAT_SCRIPTS: Readonly<Record<WebChatFramework, Readonly<Record<string, string>>>> = {
   next: { "dev:web": "next dev apps/web", "build:web": "next build apps/web" },
   tanstack: { "dev:web": "vite dev apps/web", "build:web": "vite build apps/web" },
-} as const;
-
-/** Host framework of a Web Chat registry item. */
-export type WebChatFramework = keyof typeof WEB_CHAT_SCRIPTS;
+};
 
 function isWebChatScriptDefault(name: string, command: string): boolean {
-  return Object.values(WEB_CHAT_SCRIPTS).some(
-    (scripts) => (scripts as Record<string, string>)[name] === command,
-  );
+  return Object.values(WEB_CHAT_SCRIPTS).some((scripts) => scripts[name] === command);
+}
+
+/**
+ * Picks the framework `eve add channel/web` installs, before it writes any file.
+ * An app already in `apps/web` decides; an explicit answer that conflicts fails.
+ */
+export async function resolveWebChatFramework(
+  appRoot: string,
+  asker: Asker,
+  answers: Readonly<Record<string, unknown>> = {},
+): Promise<WebChatFramework> {
+  const project = await resolveEveProjectContext(appRoot);
+  if (project.kind === "workspace") {
+    throw new Error("Web Chat setup requires a selected workspace agent.");
+  }
+  const existing = await detectWebChatFramework(join(project.environmentRoot, "apps", "web"));
+  if (existing !== undefined && !(WEB_FRAMEWORK_QUESTION.key in answers)) return existing;
+  const framework = await asker.ask(WEB_FRAMEWORK_QUESTION);
+  if (existing !== undefined && framework !== existing) {
+    throw new Error(
+      `apps/web already contains a ${WEB_CHAT_FRAMEWORK_LABELS[existing]} app. Remove apps/web to switch Web Chat to ${WEB_CHAT_FRAMEWORK_LABELS[framework]}, or answer ${WEB_FRAMEWORK_QUESTION.key}="${existing}".`,
+    );
+  }
+  return framework;
 }
 
 /** Resolves and prepares the root package that owns Web Chat. */
@@ -152,32 +181,10 @@ interface WebRegistryTsconfigTemplate {
   exclude: string[];
 }
 
-/** Mirrors `apps/docs/registry/channel/tanstack/tsconfig.json`; runtime cannot read the docs app. */
-const TANSTACK_WEB_TSCONFIG: WebRegistryTsconfigTemplate = {
-  compilerOptions: {
-    target: "ES2022",
-    lib: ["dom", "dom.iterable", "esnext"],
-    skipLibCheck: true,
-    strict: true,
-    noEmit: true,
-    esModuleInterop: true,
-    module: "esnext",
-    moduleResolution: "Bundler",
-    resolveJsonModule: true,
-    isolatedModules: true,
-    jsx: "react-jsx",
-    types: ["vite/client"],
-    paths: { "@/*": ["./*"] },
-  },
-  include: ["**/*.ts", "**/*.tsx"],
-  exclude: ["node_modules", ".output", ".vercel"],
+const WEB_REGISTRY_TSCONFIG_SOURCES: Readonly<Record<WebChatFramework, string>> = {
+  next: WEB_APP_TEMPLATE_FILES["tsconfig.json"],
+  tanstack: WEB_APP_TANSTACK_TEMPLATE_FILES["tsconfig.json"],
 };
-
-function webRegistryTsconfigTemplate(framework: WebChatFramework): WebRegistryTsconfigTemplate {
-  return framework === "next"
-    ? (JSON.parse(WEB_APP_TEMPLATE_FILES["tsconfig.json"]) as WebRegistryTsconfigTemplate)
-    : TANSTACK_WEB_TSCONFIG;
-}
 
 export function addWebRegistryTsconfig(
   source: string,
@@ -199,7 +206,9 @@ export function addWebRegistryTsconfig(
     include?: string[];
     exclude?: string[];
   };
-  const template = webRegistryTsconfigTemplate(framework);
+  const template = JSON.parse(
+    WEB_REGISTRY_TSCONFIG_SOURCES[framework],
+  ) as WebRegistryTsconfigTemplate;
   const configuredAlias = document.compilerOptions?.paths?.["@/*"];
   if (
     configuredAlias !== undefined &&

@@ -30,6 +30,7 @@ const {
   resolveInstalledPackageInfo,
   unlink,
   searchRegistries,
+  stat,
   writeFile,
 } = vi.hoisted(() => ({
   addRegistryItems: vi.fn(),
@@ -46,6 +47,7 @@ const {
   resolveInstalledPackageInfo: vi.fn(() => ({ name: "eve", version: "0.27.8" })),
   unlink: vi.fn(),
   searchRegistries: vi.fn(),
+  stat: vi.fn(),
   writeFile: vi.fn(),
 }));
 
@@ -60,7 +62,7 @@ vi.mock("#internal/project-context.js", () => ({ resolveEveProjectContext }));
 vi.mock("./registry-pnpm-build-policy-flow.js", () => ({ prepareDeclaredPnpmBuildPolicy }));
 vi.mock("#setup/scaffold/workspace-root.js", () => ({ applyPackageManagerWorkspaceConfiguration }));
 vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
-vi.mock("node:fs/promises", () => ({ readFile, unlink, writeFile }));
+vi.mock("node:fs/promises", () => ({ readFile, stat, unlink, writeFile }));
 
 function createLogger(): RegistryCommandLogger & { errors: string[]; logs: string[] } {
   const errors: string[] = [];
@@ -88,6 +90,7 @@ describe("registry commands", () => {
       kind: "standalone",
     }));
     getRegistryItems.mockResolvedValue([]);
+    stat.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
     readFile.mockResolvedValue(
       JSON.stringify({
         name: "project",
@@ -551,17 +554,17 @@ describe("registry commands", () => {
     expect(logger.errors).toEqual([]);
   });
 
-  it("installs the TanStack Start Web Chat at the project root with its own setup", async () => {
+  it("installs the TanStack Start files when Web Chat is answered with TanStack Start", async () => {
     const logger = createLogger();
     const prepareWebRegistryProject = vi.fn(async () => {});
     const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     getRegistryItems.mockResolvedValue([
       {
-        name: "channel/tanstack",
+        name: "channel/web-tanstack",
         type: "registry:item",
         meta: {
           eve: {
-            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "tanstack"] }],
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
           },
         },
       },
@@ -570,8 +573,8 @@ describe("registry commands", () => {
     await runAddCommand(
       logger,
       "/project",
-      "channel/tanstack",
-      { yes: true },
+      "channel/web",
+      { nonInteractive: true, answers: { "web-framework": "tanstack" } },
       { loadSetupCommandRunner: async () => runSetupCommand, prepareWebRegistryProject },
     );
 
@@ -581,22 +584,69 @@ describe("registry commands", () => {
       "utf8",
     );
     expect(prepareWebRegistryProject).toHaveBeenCalledWith("/project", "tanstack");
-    expect(prepareWebRegistryProject.mock.invocationCallOrder[0]).toBeLessThan(
-      addRegistryItems.mock.invocationCallOrder[0]!,
+    expect(getRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/web-tanstack.json"],
+      expect.any(Object),
     );
-    expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/channel/tanstack.json"], {
-      config: expect.any(Object),
-      cwd: "/project",
-      overwrite: undefined,
-      silent: undefined,
-    });
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/web-tanstack.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
     expect(runSetupCommand).toHaveBeenCalledWith(
       "/project",
+      expect.objectContaining({ args: expect.arrayContaining(["integration", "setup", "web"]) }),
+      "channel/web",
       expect.any(Object),
-      "channel/tanstack",
-      expect.objectContaining({ prompter: expect.any(Object) }),
     );
     expect(logger.errors).toEqual([]);
+  });
+
+  it("asks for the Web Chat framework before writing anything in a headless install", async () => {
+    const logger = createLogger();
+
+    await runAddCommand(logger, "/project", "channel/web", { nonInteractive: true });
+
+    expect(logger.errors.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        type: "blocked",
+        item: "channel/web",
+        installed: false,
+        status: "input_required",
+        question: expect.objectContaining({ key: "web-framework" }),
+        next: {
+          command: "eve",
+          args: [
+            "add",
+            "channel/web",
+            "--non-interactive",
+            "--answer",
+            "web-framework=<JSON value>",
+          ],
+        },
+      }),
+    ]);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("refuses to install a second Web Chat framework over an existing app", async () => {
+    const logger = createLogger();
+    stat.mockImplementation(async (path: string) => {
+      if (path === "/project/apps/web/next.config.ts") return {};
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    });
+
+    await runAddCommand(logger, "/project", "channel/web", {
+      nonInteractive: true,
+      answers: { "web-framework": "tanstack" },
+    });
+
+    expect(logger.errors).toEqual([
+      'apps/web already contains a Next.js app. Remove apps/web to switch Web Chat to TanStack Start, or answer web-framework="next".',
+    ]);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
   });
 
   it("surfaces required deployment in non-interactive completion", async () => {

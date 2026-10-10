@@ -32,18 +32,18 @@ function dependencyRecord(specifiers: readonly string[]): Record<string, string>
   );
 }
 
-/** The `channel/tanstack` item as `eve add` installs it, in Vercel services hosting. */
+/** The `channel/web-tanstack` item as `eve add channel/web` installs it, in Vercel services hosting. */
 async function createChannelTanStackDescriptor(): Promise<ScenarioAppDescriptor> {
   const registry = JSON.parse(await readFile(join(REGISTRY_ROOT, "registry.json"), "utf8")) as {
     readonly items: readonly RegistryItem[];
   };
-  const item = registry.items.find((candidate) => candidate.name === "channel/tanstack");
+  const item = registry.items.find((candidate) => candidate.name === "channel/web-tanstack");
   if (item === undefined || item.files.length === 0) {
-    throw new Error("apps/docs/registry.json must define channel/tanstack with files.");
+    throw new Error("apps/docs/registry.json must define channel/web-tanstack with files.");
   }
 
   const files: Record<string, string> = {
-    // Written by `eve integration setup tanstack`, not the registry item.
+    // Written by `eve integration setup web`, not the registry item.
     [`${WEB_ROOT}/app/eve-agent.ts`]:
       "export const WEB_CHAT_AGENT: string | undefined = undefined;\n",
     "pnpm-workspace.yaml": "minimumReleaseAge: 0\n",
@@ -59,7 +59,7 @@ async function createChannelTanStackDescriptor(): Promise<ScenarioAppDescriptor>
     },
     files,
     installDependencies: true,
-    name: "channel-tanstack",
+    name: "channel-web-tanstack",
   };
 }
 
@@ -73,7 +73,7 @@ async function readBuiltCss(appRoot: string): Promise<string> {
   return sources.join("\n");
 }
 
-describe("registry channel/tanstack", () => {
+describe("registry channel/web-tanstack", () => {
   it("builds and typechecks the installed TanStack Start Web Chat app", async () => {
     const app = await scenarioApp(await createChannelTanStackDescriptor());
 

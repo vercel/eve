@@ -2067,20 +2067,21 @@
       ]
     },
     {
-      "name": "channel/tanstack",
+      "name": "channel/web-tanstack",
       "type": "registry:item",
       "title": "Web Chat (TanStack Start)",
-      "description": "Add the built-in TanStack Start Web Chat channel to an eve agent.",
+      "description": "The TanStack Start variant of channel/web. Install it with eve add channel/web and choose TanStack Start.",
       "meta": {
         "eve": {
           "setup": {
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "setup", "tanstack"]
+            "args": ["integration", "setup", "web"]
           },
           "docs": "/docs/guides/frontend/tanstack",
-          "implementation": "native"
+          "implementation": "native",
+          "hidden": true
         }
       },
       "dependencies": [
@@ -2134,7 +2135,7 @@
           "target": "apps/web/app/_components/agent-message.tsx"
         },
         {
-          "path": "registry/channel/tanstack/app/fonts.css",
+          "path": "registry/channel/web-tanstack/app/fonts.css",
           "type": "registry:file",
           "target": "apps/web/app/fonts.css"
         },
@@ -2144,37 +2145,37 @@
           "target": "apps/web/app/globals.css"
         },
         {
-          "path": "registry/channel/tanstack/app/router.tsx",
+          "path": "registry/channel/web-tanstack/app/router.tsx",
           "type": "registry:file",
           "target": "apps/web/app/router.tsx"
         },
         {
-          "path": "registry/channel/tanstack/app/routes/__root.tsx",
+          "path": "registry/channel/web-tanstack/app/routes/__root.tsx",
           "type": "registry:file",
           "target": "apps/web/app/routes/__root.tsx"
         },
         {
-          "path": "registry/channel/tanstack/app/routes/index.tsx",
+          "path": "registry/channel/web-tanstack/app/routes/index.tsx",
           "type": "registry:file",
           "target": "apps/web/app/routes/index.tsx"
         },
         {
-          "path": "registry/channel/tanstack/app/routes/s.session-id.tsx",
+          "path": "registry/channel/web-tanstack/app/routes/s.session-id.tsx",
           "type": "registry:file",
           "target": "apps/web/app/routes/s.$sessionId.tsx"
         },
         {
-          "path": "registry/channel/tanstack/app/routes/s.index.tsx",
+          "path": "registry/channel/web-tanstack/app/routes/s.index.tsx",
           "type": "registry:file",
           "target": "apps/web/app/routes/s.index.tsx"
         },
         {
-          "path": "registry/channel/tanstack/app/start.ts",
+          "path": "registry/channel/web-tanstack/app/start.ts",
           "type": "registry:file",
           "target": "apps/web/app/start.ts"
         },
         {
-          "path": "registry/channel/tanstack/components.json",
+          "path": "registry/channel/web-tanstack/components.json",
           "type": "registry:file",
           "target": "apps/web/components.json"
         },
@@ -2309,12 +2310,12 @@
           "target": "apps/web/public/icon.svg"
         },
         {
-          "path": "registry/channel/tanstack/tsconfig.json",
+          "path": "registry/channel/web-tanstack/tsconfig.json",
           "type": "registry:file",
           "target": "apps/web/tsconfig.json"
         },
         {
-          "path": "registry/channel/tanstack/vite.config.ts",
+          "path": "registry/channel/web-tanstack/vite.config.ts",
           "type": "registry:file",
           "target": "apps/web/vite.config.ts"
         }

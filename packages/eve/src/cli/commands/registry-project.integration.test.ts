@@ -74,30 +74,6 @@ describe("prepareWebRegistryProject", () => {
       exclude: ["node_modules", ".output", ".vercel"],
     });
   });
-
-  it("keeps the TanStack Start tsconfig in sync with the channel/tanstack registry item", async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-registry-web-project-"));
-    const tsconfigPath = join(workspaceRoot, "apps", "web", "tsconfig.json");
-    await mkdir(join(workspaceRoot, "apps", "web"), { recursive: true });
-    await writeFile(tsconfigPath, "{}\n");
-    const registryTsconfig = parseJsonc(
-      await readFile(
-        new URL(
-          "../../../../../apps/docs/registry/channel/tanstack/tsconfig.json",
-          import.meta.url,
-        ),
-        "utf8",
-      ),
-    ) as Record<string, unknown>;
-
-    await prepareWebRegistryProject(workspaceRoot, "tanstack");
-
-    expect(parseJsonc(await readFile(tsconfigPath, "utf8"))).toEqual({
-      compilerOptions: registryTsconfig.compilerOptions,
-      include: registryTsconfig.include,
-      exclude: registryTsconfig.exclude,
-    });
-  });
 });
 
 describe("prepareWebChatProjectRoot", () => {

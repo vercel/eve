@@ -13,10 +13,18 @@ description: "Run an eve agent and a TanStack Start app as one project with the 
 
 ## Add the generated Web Chat app
 
-For a standalone agent, install the generated TanStack Start Web Chat app:
+Run the Web Chat installer and choose **TanStack Start** when it asks which framework to use:
 
 ```bash
-eve add channel/tanstack
+eve add channel/web
+```
+
+In automation, answer the framework and hosting questions up front:
+
+```bash
+eve add channel/web --non-interactive \
+  --answer 'web-framework="tanstack"' \
+  --answer 'web-hosting="vercel"'
 ```
 
 The installer creates a TanStack Start app under `apps/web/` and adds the `dev:web` and `build:web` scripts. It asks how to deploy it:
@@ -24,7 +32,9 @@ The installer creates a TanStack Start app under `apps/web/` and adds the `dev:w
 - **Vercel services** (recommended) deploys Web Chat and the agent as separate services. Run both locally with `pnpm dev:all`; you don't need to link a Vercel project to do that.
 - **TanStack Start** hosts the agent in the TanStack Start app through `eveTanStack()`. Run it with `pnpm dev:web`. The app lives in `apps/web/` while its dependencies are in the project root `package.json`, so a Vercel deploy from the project root doesn't build it. Choose **Vercel services** to deploy Web Chat on Vercel.
 
-Rerun `eve add channel/tanstack --skip-install` with the other choice to switch modes; the installer removes the `vercel.ts` and scripts it wrote for the previous one. Install either `channel/web` or `channel/tanstack` in a project, not both: the second install leaves the first app's files in `apps/web/`.
+Rerun `eve add channel/web --skip-install` with the other choice to switch modes; the installer removes the `vercel.ts` and scripts it wrote for the previous one. When `apps/web/` already contains a Web Chat app, the installer keeps that app's framework and stops if you answer a different one. To switch between Next.js and TanStack Start, remove `apps/web/` first.
+
+Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
 
 The chat has the same URL-addressed durable sessions as the [Next.js Web Chat](./nextjs#use-the-generated-web-chat-routes): `/`, `/s`, and `/s/$sessionId`. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
 

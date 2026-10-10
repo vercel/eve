@@ -21,7 +21,8 @@ export default eveChannel({
 ## Web Chat with Sign in with Vercel
 
 Run `eve add channel/web`, or select **Web Chat** from the terminal UI's channel
-picker. Choose a hosting layout, then **Sign in with Vercel**. Setup uses a
+picker. Choose **Next.js**, a hosting layout, then **Sign in with Vercel**. Sign
+in with Vercel is available only for the Next.js Web Chat app. Setup uses a
 linked Vercel project and creates a Vercel App that only members of that
 project's team can sign in to.
 
@@ -56,6 +57,7 @@ For automation, supply the setup answers explicitly:
 
 ```bash
 eve add channel/web --non-interactive \
+  --answer 'web-framework="next"' \
   --answer 'web-hosting="vercel"' \
   --answer 'web-authentication="vercel"'
 ```
