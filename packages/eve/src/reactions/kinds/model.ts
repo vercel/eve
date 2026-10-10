@@ -63,7 +63,8 @@ export async function loadModelReaction(bundle: CompiledBundle): Promise<Reactio
         throw new DynamicModelSelectionError(error);
       }
     },
-    failure: "throw",
+    // A failed selection fails the model call that needs it, not the commit that ran it: a commit
+    // before the turn's input, say, may have nothing to choose from yet.
     id: MODEL_REACTION_ID,
     kind: "model",
     label: dynamicModel.logicalPath,
@@ -80,11 +81,12 @@ export async function loadModelReaction(bundle: CompiledBundle): Promise<Reactio
   };
 }
 
-/** The model the next call uses: the dynamic agent's, or the static one. */
+/** The model the next call uses: the dynamic agent's, or the static one. Throws a failed selection. */
 export function getEffectiveModelSelection(
   ctx: Pick<ContextReader, "get">,
 ): LiveDynamicModelSelection | null {
   const slot = readReactionsState(ctx).slots[MODEL_REACTION_ID];
+  if (slot?.error !== undefined) throw new DynamicModelSelectionError(new Error(slot.error));
   if (slot !== undefined && slot.value !== null) {
     const live = readLive(ctx, MODEL_REACTION_ID, slot);
     return (
@@ -98,5 +100,9 @@ export function getEffectiveModelSelection(
 }
 
 export function effectiveModelId(ctx: ContextContainer): string | undefined {
-  return getEffectiveModelSelection(ctx)?.reference.id;
+  try {
+    return getEffectiveModelSelection(ctx)?.reference.id;
+  } catch {
+    return undefined;
+  }
 }

@@ -278,6 +278,7 @@ function withdraw(
   const had = previous !== undefined && previous.value !== null;
   writeSlot(ctx, reaction.id, {
     digest: failed.digest,
+    error: toErrorMessage(error),
     since: had ? failed.line : (previous?.since ?? failed.line),
     value: null,
     ...(failed.revision === undefined ? {} : { revision: failed.revision }),

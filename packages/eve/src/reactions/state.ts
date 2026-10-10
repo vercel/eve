@@ -23,6 +23,8 @@ export interface Slot {
   readonly since: number;
   /** The runtime revision that resolved it. */
   readonly revision?: string;
+  /** Why the slot's reaction failed, when its contribution is withdrawn. */
+  readonly error?: string;
 }
 
 export interface ReactionsState {
