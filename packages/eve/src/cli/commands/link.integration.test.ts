@@ -214,6 +214,37 @@ describe("runLinkCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  test("links a workspace root non-interactively", async () => {
+    const projectRoot = await createWorkspaceProject();
+    const logger = new TestLogger();
+    const linkDeps: NonInteractiveLinkDependencies = {
+      isEveProject,
+      runVercel: vi.fn(async () => true),
+      runVercelEnvPull: vi.fn(async () => true),
+      resolveTeam: vi.fn(async () => "acme"),
+      resolveProjectByNameOrId: vi.fn(async () => null),
+      readProjectLink: vi.fn(async () => undefined),
+    };
+
+    await runLinkCommand(
+      logger,
+      projectRoot,
+      {
+        createPrompter: () => createFakePrompter().prompter,
+        hasInteractiveTerminal: () => false,
+        nonInteractiveLinkDeps: linkDeps,
+      },
+      { nonInteractive: true, project: "my-workspace" },
+    );
+
+    expect(logger.errors).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
+    expect(linkDeps.runVercel).toHaveBeenCalledWith(
+      ["link", "--project", "my-workspace", "--yes"],
+      { cwd: projectRoot, nonInteractive: true },
+    );
+  });
+
   test("refuses without an interactive terminal", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
