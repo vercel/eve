@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "catalog:",
+    "@ai-sdk/provider-utils": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@vercel/otel": "catalog:",
     "eve": "workspace:*"

@@ -34,7 +34,7 @@ test("fixture judge adapts Gateway Responses into decision answers", async (t) =
   });
 
   const result = await e2eJudgeModel().doDecide({
-    state: { response: "Hello Alice" },
+    state: [{ type: "json", value: { response: "Hello Alice" } }],
     questions: {
       accurate: { type: "boolean", instructions: "Greets Alice" },
       clarity: {
