@@ -165,7 +165,9 @@ During compaction, eve excludes recalled records from the summarizer, keeps the
 latest value for each keyed record plus every unkeyed record, and then calls
 `recall["compaction.completed"]` against the new checkpoint. This keeps
 provider content attributable and prevents a summary from turning it into
-ordinary conversation history. If raw superseded records exceed 512 entries or
+ordinary conversation history. During a turn, eve places those recalled records
+before the turn's latest user message, as it does at turn start; between turns
+they follow the checkpoint. If raw superseded records exceed 512 entries or
 256 KiB, eve canonicalizes them without waiting for the normal token threshold;
 this changes session history only, not the provider's store.
 
