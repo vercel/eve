@@ -1,6 +1,7 @@
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CALL_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
@@ -14,11 +15,11 @@ import type { DurableStepResult, TurnStepPayload } from "#execution/session/turn
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/candidates.js";
 import { CallbackBaseUrlKey, setPendingAuthorization } from "#harness/authorization.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { suspendedSteps } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -29,11 +30,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
-import type {
-  ResolvedDynamicConnectionResolver,
-  ResolvedDynamicToolResolver,
-} from "#runtime/types.js";
-import connectionTools from "#tools/framework/connection-tools.js";
+import type { ResolvedDynamicConnectionResolver } from "#runtime/types.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 import type { ApprovalResponseContext } from "#approval/definition.js";
 
@@ -61,8 +58,10 @@ const usage = {
   outputTokens: { reasoning: undefined, text: 1, total: 1 },
 };
 const sessionId = "turn-connection-approval";
+const TOOL_GONE_RESULT =
+  'The tool "notes__saveNote" is no longer available, so the call didn\'t run. If the task still needs it, find an available tool with eve__search and make a new call.';
 
-/** A model step that saves notes through `connection_execute`, or replies when `callId` is omitted. */
+/** A model step that saves notes through `execute`, or replies when `callId` is omitted. */
 function modelResponse(callId?: string | readonly string[], connection = "notes") {
   const callIds = callId === undefined ? [] : typeof callId === "string" ? [callId] : callId;
   return {
@@ -73,10 +72,9 @@ function modelResponse(callId?: string | readonly string[], connection = "notes"
           ? callIds.map((toolCallId) => ({
               type: "tool-call" as const,
               toolCallId,
-              toolName: "connection_execute",
+              toolName: CALL_TOOL_NAME,
               input: JSON.stringify({
-                connection,
-                tool: "saveNote",
+                name: `${connection}__saveNote`,
                 input: { body: { note: "hello" } },
               }),
             }))
@@ -111,9 +109,10 @@ function setup(
       : { status: "allowed" as const };
   });
   const policyTurns: string[] = [];
-  let removed = false;
+  let connection: "available" | "failing" | "removed" = "available";
   const resolver = vi.fn((event: unknown) => {
-    if (removed) return {};
+    if (connection === "failing") throw new Error("The notes directory is unreachable.");
+    if (connection === "removed") return {};
     const sequence = (event as { data: { sequence?: number } }).data.sequence ?? 0;
     return {
       [(variation === "name" || variation === "unapproved-name") && sequence > 0
@@ -125,6 +124,7 @@ function setup(
             : "https://notes.example.com",
         instanceKey: variation === "destination" ? `turn-${sequence}` : undefined,
         description: "Save notes",
+        headers: { "X-Caller": (ctx) => ctx.session.auth.current?.principalId ?? "none" },
         spec: {
           openapi: "3.0.0",
           info: { title: "Notes", version: "1.0.0" },
@@ -178,16 +178,6 @@ function setup(
       sourceKind: "module",
     },
   ];
-  const dynamicToolResolvers: ResolvedDynamicToolResolver[] = [
-    {
-      eventNames: ["step.started"],
-      events: connectionTools.events as ResolvedDynamicToolResolver["events"],
-      logicalPath: "tools/connection_tools.ts",
-      slug: "connection_tools",
-      sourceId: "eve:connection-tools",
-      sourceKind: "module",
-    },
-  ];
   const adapter = { kind: "test" };
   const turnAgent = {
     id: "notes-agent",
@@ -200,7 +190,8 @@ function setup(
   const resolvedAgent: Partial<CompiledBundle["resolvedAgent"]> = {
     connections: [],
     dynamicConnectionResolvers,
-    dynamicToolResolvers,
+    dynamicSkillResolvers: [],
+    dynamicToolResolvers: [],
   };
   const sandboxRegistry: {
     sandbox: CompiledBundle["graph"]["root"]["sandboxRegistry"]["sandbox"] | null;
@@ -301,8 +292,13 @@ function setup(
     response,
     step,
     policyTurns,
-    removeConnection() {
-      removed = true;
+    /** The session state as last committed. */
+    state() {
+      return readDurableSession(snapshot.sessionState).state;
+    },
+    /** What the connection's resolver does from now on. */
+    setConnection(state: typeof connection) {
+      connection = state;
     },
     updateSession(update: (session: HarnessSession) => HarnessSession) {
       snapshot = {
@@ -350,10 +346,7 @@ describe("turn connection approval restoration", () => {
     );
     expect(requests.length).toBeGreaterThanOrEqual(2);
     const [first, ...later] = requests;
-    expect(first!.tools.map((tool) => tool.name).sort()).toEqual([
-      "connection_execute",
-      "connection_search",
-    ]);
+    expect(first!.tools.map((tool) => tool.name)).toEqual([SEARCH_TOOL_NAME, CALL_TOOL_NAME]);
     const system = (request: (typeof requests)[number]) =>
       request.prompt.filter((message) => message.role === "system");
     for (const request of later) {
@@ -379,13 +372,13 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's notes." }] },
     });
     const parked = await fixture.step();
-    const requests = getPendingInputBatches(readDurableSession(parked.sessionState).state).flatMap(
+    const requests = suspendedSteps(readDurableSession(parked.sessionState).state).flatMap(
       (batch) => batch.requests,
     );
     await fixture.step({
       delivery: {
         kind: "deliver",
-        auth: bob,
+        auth: alice,
         payloads: [
           {
             inputResponses: requests.map((request) => ({
@@ -396,7 +389,6 @@ describe("turn connection approval restoration", () => {
         ],
       },
     });
-    await fixture.step();
     // A missing pin can't prove the connection is unchanged, so that call fails
     // rather than re-pinning to whatever the connection resolves to now.
     const failed = fixture.events.flatMap((event) =>
@@ -411,66 +403,130 @@ describe("turn connection approval restoration", () => {
     expect(fixture.fetch).toHaveBeenCalledTimes(50);
   });
 
-  it("fails an approved call whose connection is gone without a response policy", async () => {
+  it("fails an approved call whose connection is gone, and the session continues", async () => {
     const fixture = setup("turn.started", false, "request-only");
     await fixture.step({
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
-    fixture.removeConnection();
-    await fixture.step({
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
+    fixture.setConnection("removed");
+    const resumed = await fixture.step({
       delivery: {
         kind: "deliver",
-        auth: bob,
+        auth: alice,
         payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
       },
     });
-    await fixture.step();
+
     expect(fixture.fetch).not.toHaveBeenCalled();
-    expect(fixture.events).toContainEqual(
-      expect.objectContaining({
-        type: "action.result",
-        data: expect.objectContaining({
-          status: "failed",
-          result: expect.objectContaining({
-            callId: request.action.callId,
-            output: expect.stringContaining('Connection "notes" is not available'),
-          }),
-        }),
-      }),
+    const failed = fixture.events.findIndex(
+      (event) =>
+        event.type === "action.result" &&
+        event.data.status === "failed" &&
+        (event.data.result as { callId: string }).callId === request.action.callId,
     );
+    expect(fixture.events[failed]?.data.result).toMatchObject({ output: TOOL_GONE_RESULT });
+    // The model reads the failure as the call's result, and the turn completes.
+    expect(JSON.stringify(fixture.doStream.mock.calls.at(-1)![0])).toContain(
+      "is no longer available, so the call didn't run",
+    );
+    expect(fixture.events.slice(failed).map((event) => event.type)).toContain("turn.completed");
+    expect(suspendedSteps(readDurableSession(resumed.sessionState).state)).toEqual([]);
   });
 
-  it("leaves the request pending when its connection can no longer be reconstructed", async () => {
-    const fixture = setup();
-    await fixture.step({
-      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
+  describe("a connection with a response policy, while its request waits", () => {
+    /** Parks Alice's note for approval and returns its request. */
+    async function parkNote(fixture: ReturnType<typeof setup>) {
+      await fixture.step({
+        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
+      });
+      const parked = await fixture.step();
+      return suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
+    }
+
+    /** Delivers Bob's approval, then runs until the session waits again. */
+    async function approveAsBob(fixture: ReturnType<typeof setup>, requestId: string) {
+      let result = await fixture.step({
+        delivery: {
+          kind: "deliver",
+          auth: bob,
+          payloads: [{ inputResponses: [{ requestId, optionId: "approve" }] }],
+        },
+      });
+      while (result.action === "continue") result = await fixture.step();
+      return readDurableSession(result.sessionState).state;
+    }
+
+    it("settles the request as unavailable when the connection is gone", async () => {
+      const fixture = setup();
+      const request = await parkNote(fixture);
+      fixture.setConnection("removed");
+
+      const state = await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.response).not.toHaveBeenCalled();
+      expect(fixture.fetch).not.toHaveBeenCalled();
+      expect(fixture.events).toContainEqual(
+        expect.objectContaining({
+          type: "approval.candidate",
+          data: expect.objectContaining({
+            outcome: "failed",
+            reason: "The tool this approval was for is no longer available, so the call won't run.",
+            requestId: request.requestId,
+            responderPrincipalId: "bob",
+          }),
+        }),
+      );
+      expect(fixture.events).toContainEqual(
+        expect.objectContaining({
+          type: "input.resolved",
+          data: expect.objectContaining({
+            resolutions: [
+              expect.objectContaining({ outcome: "denied", requestId: request.requestId }),
+            ],
+          }),
+        }),
+      );
+      // The model reads the failure under its own eve__tool call.
+      expect(modelToolResult(fixture, request.action.callId)).toEqual(
+        expect.objectContaining({
+          output: { type: "error-text", value: TOOL_GONE_RESULT },
+          toolName: CALL_TOOL_NAME,
+        }),
+      );
+      expect(suspendedSteps(state)).toEqual([]);
+      expect(fixture.events.at(-1)?.type).toBe("session.waiting");
+      expect(fixture.events.map((event) => event.type)).toContain("turn.completed");
     });
-    const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
-    fixture.removeConnection();
-    await fixture.step({
-      delivery: {
-        kind: "deliver",
-        auth: bob,
-        payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
-      },
+
+    it("keeps the request pending while the connection's resolver fails, and a retried approval runs it", async () => {
+      const fixture = setup();
+      const request = await parkNote(fixture);
+      fixture.setConnection("failing");
+      const before = fixture.events.length;
+
+      // The step restores its connections before it reads the approval, so the
+      // failure fails the turn, parks the session, and commits nothing.
+      await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.events.slice(before).map((event) => event.type)).toEqual([
+        "step.failed",
+        "turn.failed",
+        "session.waiting",
+      ]);
+      expect(suspendedSteps(fixture.state())[0]!.requests[0]!.requestId).toBe(request.requestId);
+      expect(getApprovalAuditState(fixture.state()).candidateHistory).toEqual([]);
+      expect(fixture.response).not.toHaveBeenCalled();
+      expect(fixture.fetch).not.toHaveBeenCalled();
+
+      fixture.setConnection("available");
+      const approved = await approveAsBob(fixture, request.requestId);
+
+      expect(fixture.response).toHaveBeenCalledOnce();
+      expect(fixture.fetch).toHaveBeenCalledOnce();
+      expect(suspendedSteps(approved)).toEqual([]);
     });
-    clearDurableDynamicCallbacks(sessionId);
-    const refused = await fixture.step();
-    expect(fixture.response).not.toHaveBeenCalled();
-    expect(fixture.fetch).not.toHaveBeenCalled();
-    const state = readDurableSession(refused.sessionState).state;
-    expect(getPendingInputBatches(state)[0]!.requests[0]!.requestId).toBe(request.requestId);
-    expect(getApprovalAuditState(state).candidateHistory).toEqual([
-      expect.objectContaining({
-        status: "rejected",
-        reason: expect.stringContaining("cannot replay its approvalResponse callback"),
-      }),
-    ]);
   });
 
   it("names the responder, not the requester, on a candidate's sign-in events", async () => {
@@ -494,8 +550,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
 
     const signInStart = fixture.events.length;
     await fixture.step({
@@ -553,7 +608,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
     });
     const parked = await fixture.step();
-    const batch = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!;
+    const batch = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!;
     const request = batch.requests[0]!;
     const ingested = await fixture.step({
       delivery: {
@@ -601,11 +656,10 @@ describe("turn connection approval restoration", () => {
         ],
       },
     });
-    expect(fixture.policyTurns).toEqual([batch.event!.turnId]);
+    expect(fixture.policyTurns).toEqual([batch.event.turnId]);
     expect(fixture.response).toHaveBeenCalledOnce();
     expect(fixture.fetch).toHaveBeenCalledOnce();
-    // The approval held its turn, so the responder's sign-in resumes it
-    // without starting another.
+    // The approval held its turn, so the responder's sign-in resumes it without starting another.
     const events = fixture.events.slice(start);
     expect(events.some((event) => event.type === "authorization.completed")).toBe(true);
     expect(events.filter((event) => event.type === "turn.started")).toHaveLength(0);
@@ -619,9 +673,9 @@ describe("turn connection approval restoration", () => {
         delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
       });
       const parked = await fixture.step();
-      const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
+      const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
-      expect(request.action.toolName).toBe("connection_execute");
+      expect(request.action.toolName).toBe("notes__saveNote");
       expect(request.prompt).toBe("Approve Notes: Save note?");
       expect(
         fixture.events.flatMap((event) =>
@@ -649,38 +703,18 @@ describe("turn connection approval restoration", () => {
         getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
       ).toEqual([expect.objectContaining({ outcome: "allowed", requestId: request.requestId })]);
       expect(fixture.fetch).toHaveBeenCalledOnce();
-      expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
+      // Bob approved Alice's call, so the approved request goes out as Bob.
+      expect(callerHeader(fixture.fetch.mock.calls[0])).toBe("bob");
+      expect(suspendedSteps(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
-      // The approval held its turn, so approving it resumes the same turn.
       expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
-      // The connection call is reported as a nested action of the approved call.
-      const nestedCallId = `${request.action.callId}:1`;
       expect(fixture.events).toContainEqual(
         expect.objectContaining({
-          type: "actions.requested",
-          data: expect.objectContaining({
-            actions: [
-              expect.objectContaining({
-                callId: nestedCallId,
-                parentCallId: request.action.callId,
-                toolName: "notes__saveNote",
-              }),
-            ],
-          }),
-        }),
-      );
-      const results = fixture.events.filter((event) => event.type === "action.result");
-      const resultCallIds = results.map(
-        (event) => (event.data.result as { callId: string }).callId,
-      );
-      expect(resultCallIds.indexOf(nestedCallId)).toBeLessThan(
-        resultCallIds.indexOf(request.action.callId),
-      );
-      expect(results[resultCallIds.indexOf(nestedCallId)]).toEqual(
-        expect.objectContaining({
+          type: "action.result",
           data: expect.objectContaining({
             status: "completed",
             result: expect.objectContaining({
+              callId: request.action.callId,
               output: { body: { saved: true }, status: 200, statusText: "" },
               toolName: "notes__saveNote",
             }),
@@ -696,8 +730,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     await fixture.step({
       delivery: {
         kind: "deliver",
@@ -723,8 +756,7 @@ describe("turn connection approval restoration", () => {
       delivery: { kind: "deliver", payloads: [{ message: "Save hello in notes." }] },
     });
     const parked = await fixture.step();
-    const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-      .requests[0]!;
+    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
     await fixture.step({
       delivery: {
         kind: "deliver",
@@ -738,3 +770,21 @@ describe("turn connection approval restoration", () => {
     expect(fixture.fetch).toHaveBeenCalledOnce();
   });
 });
+
+/** The result the model read back for `callId` on its latest request. */
+function modelToolResult(fixture: ReturnType<typeof setup>, callId: string): unknown {
+  const [options] = fixture.doStream.mock.calls.at(-1)! as [
+    { prompt: { content: unknown; role: string }[] },
+  ];
+  return options.prompt
+    .flatMap((message) =>
+      message.role === "tool" ? (message.content as { toolCallId: string }[]) : [],
+    )
+    .find((part) => part.toolCallId === callId);
+}
+
+function callerHeader(call: readonly unknown[] | undefined): string | null {
+  const [input, init] = (call ?? []) as [Request | string | URL, RequestInit | undefined];
+  const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
+  return headers.get("x-caller");
+}

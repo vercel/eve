@@ -36,15 +36,21 @@ export default defineEval({
   },
 });
 
+/**
+ * Models group the follow-up commands differently: `tail`, `kill`, and the exit
+ * read may share one call or take three. Every later call must finish, one must
+ * show a progress line, and the last one must end with the exit code.
+ */
 function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
-  const [started, observed, stopped] = outputs;
+  const [started, ...followUps] = outputs;
+  const exitCode = followUps.at(-1)?.stdout?.trim().split("\n").at(-1);
   return (
     started?.status === "running" &&
     started.stdout?.includes("indexed batch 1") === true &&
-    observed?.status === "completed" &&
-    /indexed batch \d+/u.test(observed.stdout ?? "") &&
-    stopped?.status === "completed" &&
-    stopped.stdout?.trim() === "143"
+    followUps.length > 0 &&
+    followUps.every((output) => output.status === "completed") &&
+    followUps.some((output) => /indexed batch \d+/u.test(output.stdout ?? "")) &&
+    exitCode === "143"
   );
 }
 

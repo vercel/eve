@@ -1,5 +1,5 @@
 import { defineEval } from "eve/evals";
-import { expectCacheReuse, expectHealthyTurn } from "../cache-checks";
+import { expectCacheReuse, expectHealthyTurn } from "@eve-e2e/config/cache-checks";
 import { EVENT_OVERVIEW } from "../event-overview";
 import { purchasingSheets } from "../purchasing-sheets";
 

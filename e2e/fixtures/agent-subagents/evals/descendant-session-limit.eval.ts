@@ -35,7 +35,7 @@ export default defineEval({
     await t.require(
       continueRequest.requestId,
       satisfies(
-        (requestId: string) => !requestId.startsWith(`${rootSessionId}:limit:`),
+        (requestId: string) => !new RegExp(`^${rootSessionId}:\\d+:limit:`, "u").test(requestId),
         "continuation request belongs to a descendant session",
       ),
     );

@@ -6,7 +6,7 @@ import { taskStarts } from "./task-events";
 /**
  * While the researcher looks into EMEA, Alice corrects the region. The model
  * either corrects the running task by calling the researcher again with its
- * taskId, or stops it with task_cancel and asks again; either way the answer
+ * taskId, or stops it with eve__task_cancel and asks again; either way the answer
  * is about APAC.
  */
 export default defineEval({
@@ -34,7 +34,7 @@ export default defineEval({
           (call) => call.taskId === first.data.taskId && call.callId !== first.data.callId,
         );
         const cancelled = turn.toolCalls.some(
-          (call) => call.name === "task_cancel" && call.input.taskId === first.data.taskId,
+          (call) => call.name === "eve__task_cancel" && call.input.taskId === first.data.taskId,
         );
         return corrected || cancelled;
       },

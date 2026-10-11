@@ -1,7 +1,8 @@
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { HandoffWorkflowEntryInput } from "#execution/session/entry-input.js";
 import type { RunCreatedEventRequest } from "@workflow/world";
 import { assert, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { dehydrateWorkflowArguments, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -18,6 +19,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
+import { SESSION_PROJECTION_STATE_KEY, storedProjection } from "#harness/session-machine/view.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 
 const HANDOFF_LOG = "[eve:execution.handoff]";
@@ -28,7 +30,7 @@ describe("workflowEntry integration", () => {
       const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "handoff-validation" } });
       await runtime.run(async () => {
-        const anchor = await start(workflowEntry, [
+        const anchor = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_a",
@@ -60,18 +62,13 @@ describe("workflowEntry integration", () => {
               candidateId = runId;
               const session = args[0].checkpoint.sessionState.snapshot.session;
               Object.assign(session, {
+                // Input the source still holds is pending work the target refuses.
                 state: {
                   ...session.state,
-                  "eve.workflowTool": {
-                    version: 4,
-                    runs: [
-                      {
-                        callId: "call",
-                        toolName: "research",
-                        origin: { turnId: "turn", stepIndex: 0 },
-                        address: { runId: "run", hookToken: 42 },
-                      },
-                    ],
+                  "eve.harness.turnState": {
+                    grants: [],
+                    queued: { message: "Alice asks for a summary." },
+                    suspended: [],
                   },
                 },
               });
@@ -182,7 +179,7 @@ describe("workflowEntry integration", () => {
       const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "handoff-checkpoint-version" } });
       await runtime.run(async () => {
-        const anchor = await start(workflowEntry, [
+        const anchor = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_a",
@@ -364,7 +361,7 @@ describe("workflowEntry integration", () => {
       const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "handoff-eve-066-owner" } });
       await runtime.run(async () => {
-        const anchor = await start(workflowEntry, [
+        const anchor = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_a",
@@ -466,7 +463,7 @@ describe("workflowEntry integration", () => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
 
       await runtime.run(async () => {
-        const anchor = await start(workflowEntry, [
+        const anchor = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_a",
@@ -569,7 +566,7 @@ describe("workflowEntry integration", () => {
       const continuationToken = "http:workflow-entry-handoff-alias";
 
       await runtime.run(async () => {
-        const anchor = await start(workflowEntry, [
+        const anchor = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_a",
@@ -677,7 +674,7 @@ describe("workflowEntry integration", () => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-busy" } });
 
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_a",
@@ -724,6 +721,25 @@ describe("workflowEntry integration", () => {
 });
 
 /** The handoff input an eve 0.66 owner sends, per a captured checkpoint version 8. */
+/** The idle session's lifecycle as an eve 0.66 owner kept it: an emission position. */
+function eve066LifecycleState(state: Record<string, unknown> | undefined) {
+  const projection = storedProjection(state);
+  const {
+    [SESSION_PROJECTION_STATE_KEY]: _projection,
+    "eve.harness.turnState": _turnState,
+    ...rest
+  } = state ?? {};
+  return {
+    ...rest,
+    "eve.harness.emission": {
+      sequence: projection.nextSequence,
+      sessionStarted: projection.started === true,
+      stepIndex: 0,
+      turnId: "",
+    },
+  };
+}
+
 function toEve066HandoffInput(input: HandoffWorkflowEntryInput): unknown {
   const { checkpoint, handoffVersion: _handoffVersion, ...fields } = input;
   const { history, serializedContext, sessionState, ...checkpointFields } = checkpoint;
@@ -746,7 +762,7 @@ function toEve066HandoffInput(input: HandoffWorkflowEntryInput): unknown {
             ...sessionState.snapshot.session,
             history,
             state: {
-              ...sessionState.snapshot.session.state,
+              ...eve066LifecycleState(sessionState.snapshot.session.state),
               // A finished subagent the old owner kept resumable; its run no longer exists.
               "eve.agent.handles": {
                 handles: [

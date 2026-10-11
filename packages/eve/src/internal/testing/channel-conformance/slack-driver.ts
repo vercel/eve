@@ -4,17 +4,24 @@ import { slackChannel } from "#public/channels/slack/index.js";
 import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import {
   type ChannelDriver,
+  type Person,
   type Surface,
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
   linkTargets,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 
 const SIGNING_SECRET = "slack-conformance-secret";
 const PERSON = "U_ALICE";
 const BOT = "U_EVE";
+const PEOPLE = {
+  alice: { id: PERSON, name: "alice" },
+  bob: { id: "U_BOB", name: "bob" },
+} as const;
 let nextChannel = 0;
 const TEAM = "T01";
 
@@ -85,8 +92,31 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     });
   }
 
+  /** Files a person uploaded, by the `url_private` Slack downloads each from. */
+  const uploads = new Map<string, SentFile>();
+  function slackFile(file: SentFile) {
+    const id = `F${uploads.size + 1}`;
+    const url = `https://files.slack.com/files-pri/${TEAM}-${id}/${file.name}`;
+    uploads.set(url, file);
+    return {
+      id,
+      mimetype: file.mediaType,
+      name: file.name,
+      size: file.bytes.length,
+      url_private: url,
+    };
+  }
+
   async function decode(request: Request): Promise<PlatformCall> {
-    const method = new URL(request.url).pathname.split("/").at(-1)!;
+    const url = new URL(request.url);
+    if (url.hostname === "files.slack.com") {
+      return {
+        body: {},
+        method: `GET ${url.pathname}`,
+        response: serveFile(uploads.get(url.href)),
+      };
+    }
+    const method = url.pathname.split("/").at(-1)!;
     const body = decodeSlackApiBody(await request.text(), request.headers.get("content-type"));
     const ts = nextTs();
     return {
@@ -107,14 +137,17 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: dm ? "slack-dm" : "slack",
-    capabilities: ["buttons", "text-replies"],
+    personId: PERSON,
+    capabilities: dm
+      ? ["attachments", "buttons", "text-replies"]
+      : ["attachments", "another-person", "buttons", "text-replies"],
     surface,
     createChannel: (record) =>
       slackChannel({
         api: { fetch: recordingFetch(record, decode) },
         credentials: { botToken: "xoxb-conformance", signingSecret: SIGNING_SECRET },
       }),
-    message: (text) => {
+    message: (text, person, files = []) => {
       const ts = threadStarted ? nextTs() : threadTs;
       const thread = threadStarted ? { thread_ts: threadTs } : {};
       threadStarted = true;
@@ -123,15 +156,22 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
       const event = dm
         ? { channel_type: "im", text, type: "message" }
         : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
+      // A message with uploads is a `file_share` in a DM; a mention carries its files as is.
+      const shared: Record<string, unknown> = {};
+      if (files.length > 0) {
+        shared.files = files.map(slackFile);
+        if (dm) shared.subtype = "file_share";
+      }
       return signed(
         JSON.stringify({
           event: {
             ...thread,
             ...event,
+            ...shared,
             channel: CHANNEL,
             event_ts: ts,
             ts,
-            user: PERSON,
+            user: PEOPLE[person].id,
           },
           // Slack names the installation that received the event, which is how eve knows its
           // own bot user, e.g. to strip that mention from a typed answer.
@@ -171,15 +211,16 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
       };
     },
     personShownAs: [`<@${PERSON}>`],
-    press: (option) => {
+    press: (option, person: Person) => {
       const { action, blocks, messageTs } = option.handle as PressHandle;
+      const { id, name } = PEOPLE[person];
       const payload = {
         actions: [action],
         channel: { id: CHANNEL },
         message: { blocks, thread_ts: threadTs, ts: messageTs },
         team: { id: TEAM },
         type: "block_actions",
-        user: { id: PERSON, name: "alice", team_id: TEAM, username: "alice" },
+        user: { id, name, team_id: TEAM, username: name },
       };
       return signed(
         new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),

@@ -79,7 +79,7 @@ const model = mockModel((request) => {
   if (message.includes("Use workflow exactly once")) {
     // The workflow tool runs as a task: after its receipt, wait on it.
     if (request.toolResults.some((entry) => entry.name === "workflow")) {
-      return { toolCalls: [{ name: "task_wait", input: {} }] };
+      return { toolCalls: [{ name: "eve__task_wait", input: {} }] };
     }
     const localOnly = message.includes("local-sleeper only");
     return {
@@ -301,7 +301,9 @@ describe("turn cancellation descendant cascade", () => {
         );
         expect(tasks).toHaveLength(1);
         expect(requests).toHaveLength(1);
-        expect(requests[0]?.requestId.startsWith(`${response.sessionId}:limit:`)).toBe(true);
+        expect(requests[0]?.requestId).toMatch(
+          new RegExp(`^${response.sessionId}:\\d+:limit:`, "u"),
+        );
 
         const requestId = requests[0]?.requestId;
         if (requestId === undefined) throw new Error("Root limit prompt has no request id.");

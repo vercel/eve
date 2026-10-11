@@ -16,6 +16,7 @@ export interface PreparedAuthoredRuntimeModules {
   readonly authoredWorkflowModules: AuthoredWorkflowModules;
   readonly instrumentation: PreparedAuthoredRuntimeInstrumentation;
   readonly moduleMapCode: string;
+  readonly sourceModules: readonly string[];
   /** Identity of authored sources shared by the workflow driver and step registrations. */
   readonly workflowSourceFingerprint: string | undefined;
 }
@@ -29,6 +30,7 @@ export async function prepareAuthoredRuntimeModules(input: {
   const {
     authoredWorkflowModules,
     code: moduleMapCode,
+    sourceModules,
     workflowSourceFingerprint,
   } = await bundleAuthoredModuleMapForGeneration(input);
   const layout = resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot });
@@ -43,5 +45,11 @@ export async function prepareAuthoredRuntimeModules(input: {
   );
   const instrumentation = { kind: "directory", moduleCodeBySlot } as const;
 
-  return { authoredWorkflowModules, instrumentation, moduleMapCode, workflowSourceFingerprint };
+  return {
+    authoredWorkflowModules,
+    instrumentation,
+    moduleMapCode,
+    sourceModules,
+    workflowSourceFingerprint,
+  };
 }

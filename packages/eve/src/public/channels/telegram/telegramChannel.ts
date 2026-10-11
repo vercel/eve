@@ -252,6 +252,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
   >({
     kindHint: "telegram",
     turnPolicy: config.turnPolicy,
+    uploadPolicy: config.uploadPolicy,
     state: initialTelegramState(config.botUsername),
     ...telegramInstrumentation,
     fetchFile: createTelegramFetchFile({

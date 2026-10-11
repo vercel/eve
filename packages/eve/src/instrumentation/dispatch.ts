@@ -18,7 +18,7 @@ import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
 import type {
   CreateInstrumentationHooksOptions,
-  InstrumentationActionFailedEvent,
+  InstrumentationToolCallFailedEvent,
   InstrumentationDispatchGroups,
   InstrumentationEvent,
   InstrumentationEventHandler,
@@ -90,7 +90,7 @@ export function createInstrumentationDispatcher(
             ...failure,
             idempotencyKey: action.idempotencyKey,
             scope: action.scope,
-            type: "action.failed",
+            type: "tool.call.failed",
           });
         }
       }
@@ -154,7 +154,13 @@ export function createInstrumentationDispatcher(
       }
     };
 
-    return { capturesContent, capturesInputs, capturesOutputs, forTrace, publish };
+    return {
+      capturesContent,
+      capturesInputs,
+      capturesOutputs,
+      forTrace,
+      publish,
+    };
   }
 
   let loggedUnboundPublish = false;
@@ -307,7 +313,7 @@ async function withTimeout(
   }
 }
 
-/** Model and SDK tool children are scoped to an attempt; durable pairs are not. */
+/** Model calls are attempt-scoped; tool calls and input waits can outlive an attempt. */
 function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
   if (
     event.type === "channel.delivery.started" ||
@@ -325,12 +331,10 @@ function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
     return { sessionId: event.sessionId, turnId: event.turnId };
   }
   if (!("scope" in event)) return {};
-  if (event.type.startsWith("action.") || event.type.startsWith("input.")) {
+  if (event.type.startsWith("tool.call.") || event.type.startsWith("input.")) {
     return { sessionId: event.scope.sessionId, turnId: event.scope.turnId };
   }
-  return event.type.startsWith("model.call.") ||
-    event.type.startsWith("tool.call.") ||
-    event.type.startsWith("step.attempt.")
+  return event.type.startsWith("model.call.") || event.type.startsWith("step.attempt.")
     ? { attemptId: event.scope.attemptId }
     : {};
 }
@@ -354,7 +358,7 @@ function terminalActionFailure(
     | InstrumentationSessionSettledEvent
     | InstrumentationTurnFailedEvent
     | InstrumentationTurnSettledEvent,
-): Pick<InstrumentationActionFailedEvent, "error" | "errorCode" | "outcome"> {
+): Pick<InstrumentationToolCallFailedEvent, "error" | "errorCode" | "outcome"> {
   if (event.type === "session.failed" || event.type === "turn.failed") {
     return { error: event.error, outcome: "failed" };
   }

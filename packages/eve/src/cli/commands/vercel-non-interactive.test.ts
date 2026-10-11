@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { configureTraceSampling } from "#setup/vercel-trace-sampling.js";
 
 import {
   runNonInteractiveLink,
   type NonInteractiveLinkDependencies,
 } from "./vercel-non-interactive.js";
+
+vi.mock("#setup/vercel-trace-sampling.js", () => ({ configureTraceSampling: vi.fn() }));
 
 class TestLogger {
   readonly errors: string[] = [];
@@ -34,6 +38,7 @@ function dependencies(): NonInteractiveLinkDependencies {
 }
 
 afterEach(() => {
+  vi.clearAllMocks();
   process.exitCode = undefined;
 });
 
@@ -47,6 +52,7 @@ describe("runNonInteractiveLink", () => {
       appRoot: "/agent",
       options: { nonInteractive: true },
       dependencies: deps,
+      prompter: createFakePrompter().prompter,
     });
 
     expect(logger.errors).toEqual([
@@ -63,8 +69,9 @@ describe("runNonInteractiveLink", () => {
     await runNonInteractiveLink({
       logger,
       appRoot: "/agent",
-      options: { nonInteractive: true, project: "wayfinder", team: "acme" },
+      options: { nonInteractive: true, project: "wayfinder", team: "acme", traceSampling: false },
       dependencies: deps,
+      prompter: createFakePrompter().prompter,
     });
 
     expect(deps.runVercel).toHaveBeenCalledWith(
@@ -74,17 +81,18 @@ describe("runNonInteractiveLink", () => {
     expect(deps.runVercelEnvPull).toHaveBeenCalledWith("/agent", undefined, undefined, true);
     expect(logger.logs).toEqual(["Project linked."]);
     expect(deps.resolveProjectByNameOrId).not.toHaveBeenCalled();
+    expect(configureTraceSampling).not.toHaveBeenCalled();
   });
-  test("reports a newly created project after checking the link scope", async () => {
+  test("configures sampling for a newly created project after checking the link scope", async () => {
     const deps = dependencies();
-    const onCreatedProject = vi.fn(async () => {});
+    const { prompter } = createFakePrompter();
 
     await runNonInteractiveLink({
       logger: new TestLogger(),
       appRoot: "/agent",
       options: { nonInteractive: true, project: "wayfinder", team: "acme" },
       dependencies: deps,
-      onCreatedProject,
+      prompter,
     });
 
     expect(deps.resolveTeam).toHaveBeenCalledWith("/agent", "acme");
@@ -92,37 +100,37 @@ describe("runNonInteractiveLink", () => {
     expect(vi.mocked(deps.resolveProjectByNameOrId).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(deps.runVercel).mock.invocationCallOrder[0]!,
     );
-    expect(onCreatedProject).toHaveBeenCalledWith({
-      orgId: "team_a",
-      projectId: "prj_new",
-      projectName: "wayfinder",
-    });
+    expect(configureTraceSampling).toHaveBeenCalledWith(
+      {
+        orgId: "team_a",
+        projectId: "prj_new",
+        projectName: "wayfinder",
+      },
+      prompter,
+    );
   });
-  test("does not report an existing project as created", async () => {
+  test("does not configure sampling for an existing project", async () => {
     const deps = dependencies();
     vi.mocked(deps.resolveProjectByNameOrId).mockResolvedValue({
       projectId: "prj_existing",
       projectName: "wayfinder",
     });
-    const onCreatedProject = vi.fn(async () => {});
 
     await runNonInteractiveLink({
       logger: new TestLogger(),
       appRoot: "/agent",
       options: { nonInteractive: true, project: "wayfinder" },
       dependencies: deps,
-      onCreatedProject,
+      prompter: createFakePrompter().prompter,
     });
 
-    expect(onCreatedProject).not.toHaveBeenCalled();
+    expect(configureTraceSampling).not.toHaveBeenCalled();
     expect(deps.readProjectLink).not.toHaveBeenCalled();
   });
 
   test("links without configuring sampling if the scoped existence check fails", async () => {
     const deps = dependencies();
     vi.mocked(deps.resolveProjectByNameOrId).mockRejectedValue(new Error("Access denied"));
-    const onCreatedProject = vi.fn(async () => {});
-    const onProjectCreationUnknown = vi.fn();
 
     await expect(
       runNonInteractiveLink({
@@ -130,21 +138,17 @@ describe("runNonInteractiveLink", () => {
         appRoot: "/agent",
         options: { nonInteractive: true, project: "wayfinder" },
         dependencies: deps,
-        onCreatedProject,
-        onProjectCreationUnknown,
+        prompter: createFakePrompter().prompter,
       }),
     ).resolves.toBe(true);
 
     expect(deps.runVercel).toHaveBeenCalled();
-    expect(onCreatedProject).not.toHaveBeenCalled();
-    expect(onProjectCreationUnknown).toHaveBeenCalledOnce();
+    expect(configureTraceSampling).not.toHaveBeenCalled();
   });
 
   test("continues linking when project metadata is unavailable for sampling", async () => {
     const deps = dependencies();
     vi.mocked(deps.readProjectLink).mockResolvedValue(undefined);
-    const onCreatedProject = vi.fn(async () => {});
-    const onProjectCreationUnknown = vi.fn();
 
     await expect(
       runNonInteractiveLink({
@@ -152,13 +156,11 @@ describe("runNonInteractiveLink", () => {
         appRoot: "/agent",
         options: { nonInteractive: true, project: "wayfinder" },
         dependencies: deps,
-        onCreatedProject,
-        onProjectCreationUnknown,
+        prompter: createFakePrompter().prompter,
       }),
     ).resolves.toBe(true);
 
     expect(deps.runVercelEnvPull).toHaveBeenCalled();
-    expect(onCreatedProject).not.toHaveBeenCalled();
-    expect(onProjectCreationUnknown).toHaveBeenCalledOnce();
+    expect(configureTraceSampling).not.toHaveBeenCalled();
   });
 });

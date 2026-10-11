@@ -1,11 +1,11 @@
 import type { LanguageModel } from "ai";
+import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -32,6 +32,7 @@ import {
   resolveWebSearchActivityLabel,
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
+import type { ToolLoopHarnessConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
@@ -72,9 +73,11 @@ interface CreateExecutionNodeStepInput {
     readonly sequence: number;
     readonly turnId: string;
   }) => Promise<void>;
+  readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
+  readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
 }
@@ -107,6 +110,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     prepareApprovalTurn: input.prepareApprovalTurn,
+    signInCompletions: input.signInCompletions,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,
@@ -116,6 +120,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
+    titleAttributeWrite: input.titleAttributeWrite,
   });
   if (instrumentation === undefined) return step;
   return async (session, stepInput) => {
@@ -261,6 +266,7 @@ function createRegisteredHarnessToolDefinition(input: {
         : undefined),
     approvalKey: def.approvalKey,
     behavior: input.behavior,
+    deferred: def.deferred,
     description: def.description,
     endsTurn: def.endsTurn,
     executeInput: def.executeInput,
@@ -268,10 +274,7 @@ function createRegisteredHarnessToolDefinition(input: {
       rawExecute,
       scope: def.name,
     }),
-    frameworkAction:
-      def.owner.kind === "framework" && def.name === LOAD_SKILL_TOOL_NAME
-        ? "load-skill"
-        : undefined,
+    frameworkTool: isFrameworkTool(def) || def.owner.kind === "framework",
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,

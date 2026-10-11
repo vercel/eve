@@ -1,19 +1,15 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { CALL_TOOL, SEARCH_TOOL } from "@eve-e2e/config/catalog-tools";
+import { callTool, outputOf, playScript, type ScriptedCall } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
-/** Whether eve announced `name` in its connection listing. */
+/** Whether eve announced `name` in its catalog listing. */
 function announced({ messages }: MockModelRequest, name: string): boolean {
   return messages.some(
     (message) => message.role === "user" && message.text.includes(`- ${name}: `),
   );
 }
-
-const kennelCall = (id: string, tool: string, input: Record<string, unknown>) => ({
-  id,
-  input: { connection: "kennel", tool, input },
-  name: "connection_execute",
-});
 
 const BISCUIT_VISIT = {
   petId: 4217,
@@ -21,87 +17,96 @@ const BISCUIT_VISIT = {
   contacts: [{ name: "Alice", phone: "555-0100" }],
 };
 
-/** Walks every kennel result shape, retrying the misshapen call from its signature. */
-function kennelResponse({ toolResults }: MockModelRequest): MockModelResponse | string {
-  const byId = new Map(toolResults.map((result) => [result.id, result]));
-  if (!byId.has("kennel-bad-input")) {
-    return {
-      toolCalls: [
-        kennelCall("kennel-find", "find_pet", { name: "Biscuit" }),
-        kennelCall("kennel-feedings", "list_feedings", { petId: 4217 }),
-        kennelCall("kennel-photo", "pet_photo", { petId: 4217 }),
-        kennelCall("kennel-discharge", "discharge_pet", { petId: 4217 }),
-        kennelCall("kennel-bad-input", "book_visit", {
-          petId: "4217",
-          visit: { kind: "bath" },
-        }),
-        kennelCall("kennel-unknown", "find_pets", { name: "Biscuit" }),
-      ],
-    };
-  }
-  if (!byId.has("kennel-book")) {
-    const error = byId.get("kennel-bad-input");
-    return error?.isError === true && JSON.stringify(error.output).includes("book_visit(input:")
-      ? { toolCalls: [kennelCall("kennel-book", "book_visit", BISCUIT_VISIT)] }
-      : "KENNEL_SIGNATURE_MISSING";
-  }
-  const photo = byId.get("kennel-photo")?.output;
-  const imageParts = Array.isArray(photo)
-    ? photo.filter((part) => JSON.stringify(part).includes('"image/png"')).length
-    : 0;
-  return `KENNEL_MCP_DONE photo-image-parts=${imageParts}`;
+const KENNEL_CALLS: readonly ScriptedCall[] = [
+  callTool("kennel-find", "kennel__find_pet", { name: "Biscuit" }),
+  callTool("kennel-feedings", "kennel__list_feedings", { petId: 4217 }),
+  callTool("kennel-photo", "kennel__pet_photo", { petId: 4217 }),
+  callTool("kennel-discharge", "kennel__discharge_pet", { petId: 4217 }),
+  callTool("kennel-bad-input", "kennel__book_visit", { petId: "4217", visit: { kind: "bath" } }),
+  callTool("kennel-unknown", "kennel__find_pets"),
+  {
+    id: "kennel-book",
+    // Corrects the misshapen booking from the signature its error returned.
+    input: (request) => ({
+      input: outputOf(request, "kennel-bad-input").includes("Signature: kennel__book_visit(")
+        ? BISCUIT_VISIT
+        : {},
+      name: "kennel__book_visit",
+    }),
+    name: CALL_TOOL,
+  },
+];
+
+/** Calls each kennel tool, then reports the photo's image parts and the suggested name. */
+function kennelResponse(request: MockModelRequest): MockModelResponse | string {
+  return playScript(request, KENNEL_CALLS, (finished) => {
+    const photo = finished.toolResults.find((result) => result.id === "kennel-photo")?.output;
+    const imageParts = Array.isArray(photo)
+      ? photo.filter((part) => JSON.stringify(part).includes('"image/png"')).length
+      : 0;
+    const suggested = outputOf(finished, "kennel-unknown").includes(
+      "Closest tools: kennel__find_pet",
+    );
+    return `KENNEL_MCP_DONE photo-image-parts=${imageParts} suggestion=${suggested ? "yes" : "no"}`;
+  });
 }
 
-const config = e2eAgentConfig({
-  mock: (request) => {
-    const { lastUserMessage, toolResults } = request;
-    if (lastUserMessage?.includes("KENNEL_MCP_E2E")) return kennelResponse(request);
-    if (lastUserMessage?.includes("DYNAMIC_MCP_CONNECTION_E2E")) {
-      return announced(request, "dynamic-mcp")
-        ? "DYNAMIC_MCP_CONNECTION_FOUND"
-        : "DYNAMIC_MCP_CONNECTION_MISSING";
-    }
-    if (lastUserMessage?.includes("PETSTORE_EXECUTE_E2E")) {
-      const result = toolResults.find((entry) => entry.name === "connection_execute");
-      if (result === undefined) {
-        return {
-          toolCalls: [
-            {
-              id: "petstore-inventory",
-              input: { connection: "petstore", tool: "getInventory", input: {} },
-              name: "connection_execute",
-            },
-          ],
-        };
-      }
-      return result.isError ? "inventory failed" : "inventory received";
-    }
-    if (!lastUserMessage?.includes("DYNAMIC_CONNECTION_E2E")) {
-      return `Mock reply: ${lastUserMessage ?? ""}`;
-    }
-    if (toolResults.some((result) => result.name === "connection_search")) {
-      return "DYNAMIC_CONNECTION_FOUND";
-    }
-    if (announced(request, "dynamic-catalog")) {
-      return {
-        toolCalls: [
-          {
-            id: "dynamic-connection-search",
-            input: { connection: "dynamic-catalog", query: "status" },
-            name: "connection_search",
-          },
-        ],
-      };
-    }
-    return "DYNAMIC_CONNECTION_MISSING";
-  },
-});
+function respond(request: MockModelRequest): MockModelResponse | string {
+  const message = request.lastUserMessage ?? "";
+  if (message.includes("DYNAMIC_MCP_CONNECTION_E2E")) {
+    return announced(request, "dynamic-mcp")
+      ? "DYNAMIC_MCP_CONNECTION_FOUND"
+      : "DYNAMIC_MCP_CONNECTION_MISSING";
+  }
+  if (message.includes("DYNAMIC_CONNECTION_E2E")) {
+    if (!announced(request, "dynamic-catalog")) return "DYNAMIC_CONNECTION_MISSING";
+    return playScript(
+      request,
+      [
+        {
+          id: "dynamic-search",
+          input: () => ({ query: "dynamic-catalog__" }),
+          name: SEARCH_TOOL,
+        },
+      ],
+      (finished) =>
+        outputOf(finished, "dynamic-search").includes('"tool":"dynamic-catalog__getStatus"')
+          ? "DYNAMIC_CONNECTION_FOUND"
+          : "DYNAMIC_CONNECTION_MISSING",
+    );
+  }
+  if (message.includes("PETSTORE_EXECUTE_E2E")) {
+    return playScript(
+      request,
+      [
+        {
+          id: "petstore-search",
+          input: () => ({ query: "petstore__" }),
+          name: SEARCH_TOOL,
+        },
+        callTool("petstore-inventory", "petstore__getInventory", {}),
+      ],
+      (finished) =>
+        outputOf(finished, "petstore-inventory").includes('"available":7')
+          ? "inventory received"
+          : "inventory failed",
+    );
+  }
+  if (message.includes("PETSTORE_APPROVAL_E2E")) {
+    return playScript(
+      request,
+      [callTool("approval-inventory", "petstore-approval__getInventory")],
+      (finished) =>
+        outputOf(finished, "approval-inventory").includes('"available":7')
+          ? "inventory received"
+          : "inventory failed",
+    );
+  }
+  if (message.includes("KENNEL_MCP_E2E")) return kennelResponse(request);
+  return `Mock reply: ${message}`;
+}
 
 export default defineAgent({
-  ...config,
-  // Measure Anthropic cache reuse through its native provider (see connection-cache.eval.ts).
-  ...(typeof config.model === "string" && config.model.startsWith("anthropic/")
-    ? { modelOptions: { providerOptions: { gateway: { only: ["anthropic"] } } } }
-    : {}),
+  ...e2eAgentConfig({ mock: respond }),
   reasoning: "high",
 });

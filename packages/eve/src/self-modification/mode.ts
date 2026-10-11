@@ -1,11 +1,11 @@
 import type { ResolvedSelfModificationConfig } from "./config.js";
 
-type SelfModificationMode = "local" | "disabled" | "deployed";
+/** Local self-modification runs only inside the development runtime. */
+export function isLocalSelfModificationEnabled(config: ResolvedSelfModificationConfig): boolean {
+  return process.env.EVE_DEV === "1" && config.localEnabled;
+}
 
-/** Resolves the mutually exclusive local or deployed editing mode. */
-export function resolveSelfModificationMode(
-  config: ResolvedSelfModificationConfig,
-): SelfModificationMode {
-  if (process.env.EVE_DEV === "1") return config.localEnabled ? "local" : "disabled";
-  return config.deployed === undefined ? "disabled" : "deployed";
+/** Deployed self-modification is offered only outside the development runtime. */
+export function isDeployedRuntime(): boolean {
+  return process.env.EVE_DEV !== "1";
 }

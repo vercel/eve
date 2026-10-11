@@ -15,6 +15,7 @@ import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
+import { maxBytesOf } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { attachInputText } from "#internal/input-text.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -27,6 +28,7 @@ import type {
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
+  fetchSlackThreadWindow,
   slackContinuationToken,
   type SlackBotToken,
   type SlackHandle,
@@ -484,6 +486,12 @@ export interface SlackInteractionAction {
    */
   readonly messageTs?: string;
   /**
+   * Slack `trigger_id` of the click. Pass it to `views.open` (for example
+   * through `ctx.slack.request`) to open a modal from a message button. Slack
+   * accepts it for about 3 seconds, so call `views.open` first in the handler.
+   */
+  readonly triggerId?: string;
+  /**
    * Display label of the clicked widget: `text.text` for buttons,
    * `selected_option.text.text` for radio/static_select. Renders the
    * "answered" card without re-fetching the original request.
@@ -826,6 +834,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const slackFetchFile = createSlackFetchFile({
     api,
     botToken: config.credentials?.botToken,
+    maxBytes: maxBytesOf(uploadPolicy),
   });
   const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const rendering = composeSlackRenderers(config.renderers ?? [], {
@@ -864,6 +873,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   >({
     kindHint: "slack",
     turnPolicy: config.turnPolicy,
+    uploadPolicy: config.uploadPolicy,
     state: {
       channelId: null as string | null,
       threadTs: null as string | null,
@@ -1447,6 +1457,10 @@ async function deliverSlackMessage(input: {
         : await loadThreadContextMessages(thread, message, input.threadContext);
     const threadContext = formatSlackThreadContext(priorMessages);
     const fileParts = await collectInboundFileParts({
+      botUserId: input.botUserId,
+      fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
+      // A DM can mention the app too, but every DM message brings its own files.
+      isMentioned: input.kind === "app_mention",
       mention: message,
       thread,
       policy: input.uploadPolicy,

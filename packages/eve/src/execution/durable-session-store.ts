@@ -1,4 +1,3 @@
-import { getHarnessEmissionState, type HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { hasProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
@@ -6,8 +5,9 @@ import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 
-/** Explicit checkpoint contract shared by deployment handoffs. */
-export const DURABLE_SESSION_VERSION = 2;
+import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
+
+export { DURABLE_SESSION_VERSION, readDurableSession } from "#execution/durable-session-read.js";
 
 /**
  * Serializable handle to a durable session.
@@ -17,10 +17,8 @@ export const DURABLE_SESSION_VERSION = 2;
  * hook continuation token,
  * `hasProxyInputRequests` (a closed-contract short-circuit that lets
  * the owner skip a per-delivery proxy-routing step when no
- * descendant subagent is active), and `emissionState` (so workflow-body
- * framework steps can stamp protocol events
- * with `{ turnId, sequence, stepIndex }` without reading the full
- * durable session). Turn steps return state transitions to the owning
+ * descendant subagent is active). Turn coordinates come from the stored
+ * projection in the serialized context. Turn steps return state transitions to the owning
  * `SessionStateCursor`; policy-only turn outcomes never carry snapshots.
  */
 export interface DurableSessionState {
@@ -28,7 +26,6 @@ export interface DurableSessionState {
   readonly sessionId: string;
   readonly continuationToken: string;
   readonly hasProxyInputRequests: boolean;
-  readonly emissionState: HarnessEmissionState;
   readonly snapshot: DurableSessionSnapshot;
 }
 
@@ -74,14 +71,6 @@ export interface DurableSessionSnapshot {
   readonly session: DurableSession;
 }
 
-/** Reads only the embedded checkpoint; no stream or migration fallback exists. */
-export function readDurableSession(state: DurableSessionState): DurableSession {
-  if (state.version !== DURABLE_SESSION_VERSION || state.snapshot?.session === undefined) {
-    throw new Error("Unsupported session checkpoint. Start a new session on this deployment.");
-  }
-  return state.snapshot.session;
-}
-
 /**
  * Creates the projected {@link DurableSessionState} with the current
  * snapshot embedded in the Workflow step result.
@@ -111,7 +100,6 @@ export function replaceDurableSessionSnapshot(input: {
 function projectDurableSessionState(session: DurableSession): DurableSessionState {
   return {
     continuationToken: session.continuationToken,
-    emissionState: getHarnessEmissionState(session.state),
     hasProxyInputRequests: hasProxyInputRequests(session.state),
     sessionId: session.sessionId,
     version: DURABLE_SESSION_VERSION,

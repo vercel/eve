@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { type Experimental_EvaluationModel as EvaluationModel } from "ai";
+import { type Experimental_DecisionModel as DecisionModel } from "ai";
 
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
@@ -17,7 +17,7 @@ import type {
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 
-import { DEFAULT_EVALUATION_MODEL, evaluate } from "#ai/evaluate.js";
+import { DEFAULT_DECISION_MODEL, decide } from "#ai/decide.js";
 
 type AutoModelSelection =
   | PublicAgentStaticModelDefinition
@@ -37,9 +37,9 @@ type AutoOption =
 interface AutoConfig<
   T extends Readonly<Record<string, AutoOption>> = Readonly<Record<string, AutoOption>>,
 > {
-  /** Evaluation model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
-  readonly model?: EvaluationModel;
-  /** Model selection to use when evaluation fails. */
+  /** Decision model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
+  readonly model?: DecisionModel;
+  /** Model selection to use when decision fails. */
   readonly fallback?: AutoModelSelection;
   readonly options: T;
 }
@@ -115,7 +115,7 @@ function turnId(event: unknown): string {
   return event.data.turnId;
 }
 
-function routingState(ctx: DynamicResolveContext): Parameters<typeof evaluate>[0]["state"] {
+function routingState(ctx: DynamicResolveContext): Parameters<typeof decide>[0]["state"] {
   const messages: { role: string; text: string }[] = [];
   let characters = 0;
 
@@ -146,7 +146,7 @@ function routingState(ctx: DynamicResolveContext): Parameters<typeof evaluate>[0
   return { messages };
 }
 
-/** Select a language model from the current prompt with an AI SDK evaluation model. */
+/** Select a language model from the current prompt with an AI SDK decision model. */
 export function auto<const T extends Readonly<Record<string, AutoOption>>>(
   config: AutoConfig<T>,
 ): DynamicSentinel<PublicAgentDynamicModelResult> {
@@ -168,11 +168,11 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
     )
   ) {
     throw new Error(
-      "auto requires descriptions or { model, description, reasoning? } option entries and, when provided, a valid evaluation model and fallback model.",
+      "auto requires descriptions or { model, description, reasoning? } option entries and, when provided, a valid decision model and fallback model.",
     );
   }
 
-  const evaluationModel = config.model ?? DEFAULT_EVALUATION_MODEL;
+  const decisionModel = config.model ?? DEFAULT_DECISION_MODEL;
   const options = Object.entries(config.options).map(([key, option]) => ({
     key,
     model: typeof option === "string" ? key : option.model,
@@ -196,7 +196,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
-        evaluationModel: modelIdentity(evaluationModel),
+        decisionModel: modelIdentity(decisionModel),
         fallback: config.fallback === undefined ? null : selectionIdentity(config.fallback),
         options: options.map(({ key, model, description, reasoning }) => ({
           key,
@@ -208,7 +208,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
     )
     .digest("hex");
   const selection = new ContextKey<{ turnId: string; model: string }>(
-    `eve.experimental.evaluate.model.${fingerprint}`,
+    `eve.experimental.decide.model.${fingerprint}`,
   );
 
   return defineDynamic({
@@ -220,11 +220,11 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
         const previous = state.get(selection);
         if (previous?.turnId === currentTurnId) return models.get(previous.model)!;
 
-        const stateForEvaluation = routingState(ctx);
+        const stateForDecision = routingState(ctx);
         try {
-          const result = await evaluate({
-            model: evaluationModel,
-            state: stateForEvaluation,
+          const result = await decide({
+            model: decisionModel,
+            state: stateForDecision,
             questions: {
               route: {
                 type: "choice",
@@ -243,7 +243,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
         } catch (error) {
           ctx.abortSignal?.throwIfAborted();
           if (config.fallback === undefined) throw error;
-          log.warn("model evaluation failed; using fallback", {
+          log.warn("model decision failed; using fallback", {
             error: formatError(error),
             fallback: selectionLogIdentity(config.fallback),
             turnId: currentTurnId,

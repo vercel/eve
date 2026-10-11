@@ -81,11 +81,14 @@ describe("runIntegrationSetupCommand", () => {
     );
     const resolveVercelProject =
       vi.mocked(runIntegrationSetup).mock.calls[0]?.[1].resolveVercelProject;
-    await resolveVercelProject?.("GitHub");
+    await resolveVercelProject?.("Web Chat sign-in");
     expect(ensureVercelProject).toHaveBeenCalledWith({
       appRoot: "/project",
       prompter: fake.prompter,
       signal: undefined,
+      teamRequirement: expect.objectContaining({
+        permissions: expect.objectContaining({ oauth2Application: ["create", "update"] }),
+      }),
     });
     expect(output.errors).toEqual([]);
   });

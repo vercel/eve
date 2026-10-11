@@ -1,3 +1,6 @@
+import { sessionView } from "#harness/session-machine/commit.js";
+import { routeAnswer, hold, receiveRelayedAnswer } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -26,20 +29,15 @@ import {
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
-import { createTurnWaitingOnInputEvent, routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   sendWorkflowAskAnswers,
   toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
-import {
-  createInputResolvedEvent,
-  createMessageReceivedEvent,
-  type InputResolution,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
 
@@ -94,13 +92,13 @@ async function routeProxiedDeliver(
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
-  // Only a person's own message may answer or skip a pending question.
+  // Only a person's own message may answer a pending prompt by text.
   const resolveMessage =
     !hasDelegatedSessionContext(serializedContext) && sourceDelivery.caller === undefined;
-  // Every payload routes against the same state, so a `ctx.ask()` question
-  // resolved by an earlier payload is hidden from later ones; its run takes
-  // one answer, and later messages must reach the parent instead.
-  const resolvedQuestions = new Set<string>();
+  // Every payload routes against the same state, so a request a `ctx.ask()`
+  // answer or typed reply resolved in an earlier payload is hidden from later
+  // ones; it takes one answer, and later messages must reach the parent instead.
+  const resolvedRequests = new Set<string>();
   // A message that answers a question is still the person's turn in the
   // conversation, so the stream records it with its delivery ids.
   const answerMessages: UnstampedMessageStreamEvent[] = [];
@@ -108,7 +106,7 @@ async function routeProxiedDeliver(
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
-      allowRoute: (requestId) => !resolvedQuestions.has(requestId),
+      allowRoute: (requestId) => !resolvedRequests.has(requestId),
       payload,
       resolveMessage,
       state: durableSession.state,
@@ -117,14 +115,13 @@ async function routeProxiedDeliver(
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
-      if (forChild.workflowAsk !== undefined) {
-        for (const { requestId } of forChild.resolved.resolutions) resolvedQuestions.add(requestId);
+      if (forChild.workflowAsk !== undefined || forChild.message !== undefined) {
+        for (const { requestId } of forChild.payload.inputResponses)
+          resolvedRequests.add(requestId);
       }
       if (forChild.message !== undefined) {
         const { sequence, turnId } = forChild.resolved.event;
-        answerMessages.push(
-          createMessageReceivedEvent({ message: forChild.message, sequence, turnId }),
-        );
+        answerMessages.push(receiveRelayedAnswer({ message: forChild.message, sequence, turnId }));
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
           if (metadata.payloadIndex === sourcePayloadIndex) {
             answerDeliveryIds.push(metadata.deliveryId);
@@ -169,7 +166,7 @@ async function routeProxiedDeliver(
   }
 
   let retired = false;
-  const resolvedEvents: UnstampedMessageStreamEvent[] = [];
+  const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
   for (const child of children.values()) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
@@ -206,25 +203,29 @@ async function routeProxiedDeliver(
         );
       }
     }
-    if (child.resolutions.size > 0) {
-      resolvedEvents.push(
-        createInputResolvedEvent({ resolutions: [...child.resolutions.values()], ...child.event }),
-      );
-    }
+    answered.push({ event: child.event, resolutions: [...child.resolutions.values()] });
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, [...child.resolutions.keys()]);
     retired = true;
   }
-  // Answers that leave requests pending, and nothing for the turn itself, keep
-  // the open turn held, so it parks again as after a partial approval answer.
+  const view = sessionView(storedProjection(durableSession.state), durableSession.state);
+  const resolvedEvents = [...routeAnswer(view, { children: answered }).events];
+  // Answers that leave other requests pending, and nothing for the turn itself, keep the
+  // open turn held, so it parks again as after a partial approval answer. A forwarded approval
+  // stays open until its child settles it, but it no longer waits on the person.
+  const forwarded = new Set(
+    [...children.values()].flatMap((child) =>
+      child.payloads.flatMap((payload) => (payload.inputResponses ?? []).map((r) => r.requestId)),
+    ),
+  );
   if (
-    resolvedEvents.length > 0 &&
+    children.size > 0 &&
     parentPayloads.size === 0 &&
     parentAction === undefined &&
-    getProxyInputRequests(durableSession.state).size > 0
+    [...getProxyInputRequests(durableSession.state).keys()].some((id) => !forwarded.has(id))
   ) {
-    resolvedEvents.push(createTurnWaitingOnInputEvent(durableSession));
+    resolvedEvents.push(...hold(view, { on: "input" }).events);
   }
 
   let published: PublishedSessionEvents = {

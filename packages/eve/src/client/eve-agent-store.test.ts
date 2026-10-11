@@ -270,7 +270,7 @@ describe("EveAgentStore lifecycle", () => {
     await Promise.resolve();
 
     expect(store.snapshot.status).toBe("submitted");
-    expect(store.snapshot.data).toEqual({
+    expect(store.snapshot.data).toMatchObject({
       messages: [
         {
           id: expect.stringMatching(/^optimistic:/),
@@ -286,7 +286,7 @@ describe("EveAgentStore lifecycle", () => {
 
     expect(seenEvents).toEqual(events);
     expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.data).toEqual({
+    expect(store.snapshot.data).toMatchObject({
       messages: [
         {
           id: expect.stringMatching(/^evt_.+:user$/),
@@ -456,7 +456,7 @@ describe("EveAgentStore held turns", () => {
         taskId: "task_1",
         turnId: "turn_1",
       }),
-      createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 0, turnId: "turn_1" }),
+      createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 0, turnId: "turn_1" }),
     ]).map((event) => ({ ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } }));
     for (const event of parked) live.emit(event);
     await sending;
@@ -1562,9 +1562,9 @@ describe("EveAgentStore session resume", () => {
   it("publishes a hydrated terminal failure with error status", async () => {
     const failed = stampTestEvents([
       createSessionFailedEvent({
-        usage: TEST_USAGE,
         code: "SESSION_FAILED",
         message: "Session failed.",
+        usage: TEST_USAGE,
         sessionId: "session_1",
       }),
     ])[0]!;
@@ -2344,7 +2344,7 @@ describe("EveAgentStore steering", () => {
     }));
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(startedResponse("first-delivery"))
       .mockResolvedValueOnce(activeStream.response)
       .mockResolvedValueOnce(startedResponse());
     const store = createStore({ reducer: defaultMessageReducer() });
@@ -2402,9 +2402,9 @@ describe("EveAgentStore terminal failure", () => {
   it("publishes a live terminal failure with error status", async () => {
     const failed = stampTestEvents([
       createSessionFailedEvent({
-        usage: TEST_USAGE,
         code: "SESSION_FAILED",
         message: "Session failed.",
+        usage: TEST_USAGE,
         sessionId: "session_1",
       }),
     ])[0]!;

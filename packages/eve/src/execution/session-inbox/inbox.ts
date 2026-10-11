@@ -13,7 +13,14 @@ export interface AuthorizationCallbackPayload {
   readonly payloads: DeliverPayload[];
 }
 
+/** The runtime sends this command; channel request bodies cannot supply it. */
+export interface SessionFailurePayload {
+  readonly kind: "session-failure";
+  readonly error: string;
+}
+
 export type SessionInboxPayload =
+  | SessionFailurePayload
   | HookPayload
   | SessionCommand
   | WorkflowToolRunMessage
@@ -66,7 +73,12 @@ export interface SessionInboxHandle extends SessionInbox {
 }
 
 export function isInterrupt(value: SessionInboxPayload): boolean {
-  return value.kind === "cancel" || value.kind === "reset" || value.kind === "session-timeout";
+  return (
+    value.kind === "cancel" ||
+    value.kind === "reset" ||
+    value.kind === "session-timeout" ||
+    value.kind === "session-failure"
+  );
 }
 
 /**

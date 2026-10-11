@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   ...titleMetadata,
   description,
   alternates: canonicalAlternates(canonicalRoutes.integrations),
-  openGraph: titleMetadata.openGraph,
+  openGraph: { ...titleMetadata.openGraph, url: canonicalRoutes.integrations },
   twitter: {
     ...titleMetadata.twitter,
     card: "summary_large_image",

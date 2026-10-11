@@ -2,6 +2,7 @@ import { resolveModelEndpointStatus } from "#internal/resolve-model-endpoint-sta
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { ConnectedModel } from "#shared/model-connection.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { parseChatGptFastModelId } from "#shared/chatgpt-model.js";
 import { measureLoginStage, withLoginProgress } from "./model-login-progress.js";
 import { availableHelperModels } from "#internal/model-auth/available-models.js";
 import { fetchGatewayCatalog } from "../boxes/select-model.js";
@@ -115,7 +116,8 @@ async function applyConnection(
           )
         : []);
     let id = defaultId;
-    if (!available.includes(id)) {
+    const catalogId = helper === "chatgpt" ? parseChatGptFastModelId(id).slug : id;
+    if (!available.includes(catalogId)) {
       if (available.length === 0)
         throw new Error(
           "No models are available for this connection. Choose another connection with /login.",

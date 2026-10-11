@@ -298,7 +298,7 @@ describe("just-bash sandbox file API", () => {
       path: "persisted.txt",
     });
 
-    await firstHandle.onSessionStop();
+    await firstHandle.onSandboxStop();
 
     expect(state).toMatchObject({ version: 2 });
     await expect(

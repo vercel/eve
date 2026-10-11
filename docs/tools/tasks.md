@@ -31,7 +31,7 @@ Defining none of the three, or more than one, throws when the tool is defined.
 | `execute` workflow tool, including `sleep` and `ask_question`           | Tool call; the turn waits | The tool result                                   | Aborts the call's `abortSignal`   |
 | `task` workflow tool, including `agentRouter()` and the `workflow` tool | Task                      | A receipt, then a `task.result` message           | Nothing                           |
 | `serve` workflow tool, including every agent tool                       | Resumable task            | A receipt, then a `task.result` message per reply | Nothing                           |
-| `task_wait`                                                             | Wait inside the turn      | Which tasks settled                               | Ends the wait                     |
+| `eve__task_wait`                                                        | Wait inside the turn      | Which tasks settled                               | Ends the wait                     |
 | Plain and MCP tools                                                     | Inside the model step     | The tool result                                   | Applied at the next step boundary |
 
 Waiting alone doesn't need a task. A question, a `sleep`, or an approval inside an `execute` call
@@ -97,7 +97,7 @@ conversation should continue while the review runs.
 A workflow tool body receives its signals from its context or, in a `serve` body, from each call
 `receive()` resolves:
 
-- **`abortSignal`** aborts when the call's work should stop: by `task_cancel`, `session.cancel()`,
+- **`abortSignal`** aborts when the call's work should stop: by `eve__task_cancel`, `session.cancel()`,
   a cancelled or failed turn, or the end of the session, and, for an `execute` call, by a steering
   message that arrives while the turn waits on it. `execute` and `task` bodies read it as
   `ctx.abortSignal`. In a `serve` body, each call from `receive()` carries its own `abortSignal`;
@@ -134,12 +134,12 @@ provided `sleep` tool races its timer against the signal.
 
 ## What the model sees
 
-eve adds `task_wait`, `task_cancel`, and a short system prompt block that explains tasks whenever
+eve adds `eve__task_wait`, `eve__task_cancel`, and a short system prompt block that explains tasks whenever
 the agent has an agent tool or a `task` or `serve` workflow tool. The block tells the model to call
-`task_wait` when it has nothing to say until a result arrives, and to reply when the person should
+`eve__task_wait` when it has nothing to say until a result arrives, and to reply when the person should
 hear from it first, such as a confirmation that work is underway. In a child session or a
 schedule's session, where only the final reply reaches the caller, it tells the model to call
-`task_wait` instead of replying while tasks work.
+`eve__task_wait` instead of replying while tasks work.
 
 **Receipts.** A call that starts a task returns a receipt as its tool result. Task ids are the tool
 name and six characters. A resumable task's receipt tells the model how to reach it again, and a
@@ -152,7 +152,7 @@ Sent to task researcher-7k2m9q. Its reply will arrive in a <task_result> message
 ```
 
 **Results.** Each result arrives once, as a `<task_result>` block in a `task.result` message that
-eve appends at the next step boundary, right after `task_wait` returns, or when a held turn
+eve appends at the next step boundary, right after `eve__task_wait` returns, or when a held turn
 resumes. The body is the tool's `toModelOutput` projection of the output, or the error message for
 a failed call. All results in one message share a budget of 50 KB and 2,000 lines, after which the
 text is cut and marked `[truncated]`.
@@ -161,7 +161,7 @@ text is cut and marked `[truncated]`.
 <task_result id="deploy-4hd8sa" tool="deploy" status="completed">{"url":"https://…"}</task_result>
 ```
 
-**`task_wait({ timeoutSeconds? })`** controls when the model replies. The model should call it
+**`eve__task_wait({ timeoutSeconds? })`** controls when the model replies. The model should call it
 sparingly, only when it deliberately wants to withhold a message from the user while waiting for
 a task result. Tasks keep running and their results reach the model without this call; the model
 can reply now if the user should hear from it.
@@ -175,9 +175,9 @@ model reads which tasks settled and which are still working, for example:
 deploy-4hd8sa completed; its result follows. 1 task is still working: researcher-7k2m9q.
 ```
 
-**`task_cancel({ taskId })`** stops a task's current work and says so. A resumable task's answer
+**`eve__task_cancel({ taskId })`** stops a task's current work and says so. A resumable task's answer
 also tells the model how to give it new work. When the task has no work to stop, because it already
-finished or is an idle resumable task, `task_cancel` says that instead:
+finished or is an idle resumable task, `eve__task_cancel` says that instead:
 
 ```text
 Stopped deploy-4hd8sa; it won't report back.
@@ -201,22 +201,22 @@ lists the working tasks and the 10 most recently used idle resumable tasks. The 
 
 **Errors.** Two error codes are specific to tasks:
 
-| Code             | When                                                                               |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `UNKNOWN_TASK`   | A call's `taskId` names no unfinished resumable task that the same tool started    |
-| `UNKNOWN_TASK`   | `task_cancel`'s `taskId` names no task; a finished or idle one has no work to stop |
-| `TOO_MANY_TASKS` | A call would start a task, or make an idle one work, while 32 tasks are working    |
+| Code             | When                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `UNKNOWN_TASK`   | A call's `taskId` names no unfinished resumable task that the same tool started         |
+| `UNKNOWN_TASK`   | `eve__task_cancel`'s `taskId` names no task; a finished or idle one has no work to stop |
+| `TOO_MANY_TASKS` | A call would start a task, or make an idle one work, while 32 tasks are working         |
 
-A `final_output` call made while tasks are working returns an error that names them.
+An `eve__reply` call made while tasks are working returns an error that names them.
 
 ## Turns wait for their tasks
 
 No turn ends while any task is working. When the model ends a turn early, eve waits as
-`task_wait` does: it parks until one of the tasks settles or the turn's own caller steers it,
+`eve__task_wait` does: it parks until one of the tasks settles or the turn's own caller steers it,
 appends the results, and calls the model again in the same turn. No result ever starts a turn on
 its own. An idle resumable task isn't working, so it doesn't hold the turn.
 
-A held turn stays open. Each time it parks, when eve holds it or when `task_wait` has no result
+A held turn stays open. Each time it parks, when eve holds it or when `eve__task_wait` has no result
 yet, the stream emits `turn.waiting` with the turn's `turnId`. The next `step.started` for the
 same `turnId` means the turn resumed, and `session.waiting` comes only after the turn ends. The
 model's text before the wait depends on the session:
@@ -240,14 +240,14 @@ ordinary reply, then post the reply after the results as another message. Slack 
 turn's tasks in a live [task card](/docs/channels/slack#task-card).
 
 A steering message from the turn's own caller, one sent with `turnPolicy: "steer"`, the default,
-ends a `task_wait` and aborts the `abortSignal` of any `execute` call the turn waits on, but it
+ends an `eve__task_wait` and aborts the `abortSignal` of any `execute` call the turn waits on, but it
 never interrupts a task. The model reads the message and decides whether to keep each task,
-correct an agent by calling it again with its `taskId`, or stop a task with `task_cancel`. A
+correct an agent by calling it again with its `taskId`, or stop a task with `eve__task_cancel`. A
 `"queue"` message, or a message from another caller, waits for the turn to end.
 
 ## Cancel a task
 
-- **`task_cancel`** stops one task's current work.
+- **`eve__task_cancel`** stops one task's current work.
 - **`session.cancel()`** cancels the turn, the `execute` calls it waits on, and every working task
   in the session.
 - **A failed turn** cancels every working task.
@@ -263,12 +263,12 @@ same `taskId` continues where it left off. A `serve` body that doesn't return to
 
 ## Stream events
 
-| Event           | When                                                                                  | Data                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`                     | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                                  |
-| `task.settled`  | A reply, return, failure, or cancel settles one call                                  | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output`, `error`, or `cancel` |
-| `agent.started` | A workflow run, including an agent tool's, opens a session with an agent              | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                            |
-| `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, a sign-in, or an approval | `turnId`, `sequence`, and `on`: `"input"` when a person must act, otherwise `"tasks"`      |
+| Event           | When                                                                                        | Data                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`                           | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                                  |
+| `task.settled`  | A reply, return, failure, or cancel settles one call                                        | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output`, `error`, or `cancel` |
+| `agent.started` | A workflow run, including an agent tool's, opens a session with an agent                    | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                            |
+| `turn.waiting`  | An open turn parks on its tasks, an `eve__task_wait`, a question, a sign-in, or an approval | `turnId`, `sequence`, and `on`: `"input"` when a person must act, otherwise `"tasks"`      |
 
 `task.started` and `task.settled` come once each per call, and `(taskId, callId)` identifies the
 call. Both carry that call's `turnId`, which for a resumable task's later call can be a later turn
@@ -276,7 +276,7 @@ than the one that started the task, and the task's tool `name` and `kind`. `kind
 an agent tool's call and `"tool"` otherwise. Events recorded by earlier eve versions omit `name`
 and `kind` on `task.settled`; match those to their `task.started` by `callId`. `status` is `"completed"`, `"failed"`, or `"cancelled"`. A completed call carries
 `output`, a failed call carries `error`, and a cancelled call carries `cancel.reason`:
-`"task_cancel"` when the model called `task_cancel`, `"turn_cancelled"` when someone cancelled
+`"task_cancel"` when the model called `eve__task_cancel`, `"turn_cancelled"` when someone cancelled
 the turn, or the working tasks between turns, or `"turn_ended"` when the turn ended, such as by
 failing, while the task still worked. `cancel` is absent when the task's run stopped on its own, and on events recorded by
 earlier eve versions.
@@ -284,9 +284,9 @@ earlier eve versions.
 when an `execute` call opened it. Results reach the model as a message in its history, not as a
 stream event, so read outcomes from `task.settled`. An `input.requested`,
 `authorization.required`, or `authorization.completed` event from a task's run carries its
-`taskId`. Hooks subscribe to the same events. The stream also carries the model's `task_wait` and
-`task_cancel` calls as ordinary `actions.requested` tool calls, so evals can assert on them. The
-`eve dev` terminal UI and Slack typing indicators leave those calls out; the terminal UI shows each
+`taskId`. Hooks subscribe to the same events. The stream also carries the model's `eve__task_wait` and
+`eve__task_cancel` calls as ordinary `actions.requested` tool calls, so evals can assert on them. The
+`eve dev` terminal UI, channel activity such as Slack's status line, and ACP clients leave those calls out; the terminal UI shows each
 task's start and end instead. See
 [Sessions, runs, and streaming](/docs/concepts/sessions-runs-and-streaming#task-events) and
 [Follow a subagent](/docs/guides/client/streaming#follow-a-subagent).
@@ -294,12 +294,12 @@ task's start and end instead. See
 ## Ownership and limits
 
 - **Ownership.** Tasks belong to the session's open turn, not to the caller that started them. A
-  session has at most one open turn, so `task_wait`, `task_cancel`, task results, and the `[Tasks]`
+  session has at most one open turn, so `eve__task_wait`, `eve__task_cancel`, task results, and the `[Tasks]`
   note cover every task in the session. Any later turn can continue an idle resumable task by its
   `taskId`, and that call runs with its own caller's auth. Only the turn's own caller steers it;
   anonymous callers share one identity.
   eve doesn't check which caller started a task: in a session with several people, such as a
-  shared Slack thread, the model working for one person can continue or `task_cancel` a task
+  shared Slack thread, the model working for one person can continue or `eve__task_cancel` a task
   another person started. A continued `serve` task keeps the state its body built for earlier
   calls, so [key per-caller data on the principal](/docs/tools/workflows#resumable-tasks-serve)
   and enforce per-person access inside the tool.

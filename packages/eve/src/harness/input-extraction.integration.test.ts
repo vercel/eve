@@ -66,7 +66,12 @@ describe("AI SDK 7 automatic approval extraction", () => {
     expect(step.content).toContainEqual(
       expect.objectContaining({ isAutomatic: true, type: "tool-approval-request" }),
     );
-    expect(extractToolApprovalInputRequests({ content: step.content })).toEqual([]);
+    expect(
+      extractToolApprovalInputRequests({
+        tools: new Map(),
+        content: step.content,
+      }),
+    ).toEqual([]);
   });
 
   it("keeps automatic denial records out of the human input queue", async () => {
@@ -83,14 +88,24 @@ describe("AI SDK 7 automatic approval extraction", () => {
         type: "tool-approval-response",
       }),
     );
-    expect(extractToolApprovalInputRequests({ content: step.content })).toEqual([]);
+    expect(
+      extractToolApprovalInputRequests({
+        tools: new Map(),
+        content: step.content,
+      }),
+    ).toEqual([]);
   });
 
   it("continues to queue unresolved user approval requests", async () => {
     const { execute, step } = await generateToolCall("user-approval");
 
     expect(execute).not.toHaveBeenCalled();
-    expect(extractToolApprovalInputRequests({ content: step.content })).toEqual([
+    expect(
+      extractToolApprovalInputRequests({
+        tools: new Map(),
+        content: step.content,
+      }),
+    ).toEqual([
       expect.objectContaining({
         action: expect.objectContaining({ callId: "call-1", toolName: "bash" }),
         requestId: expect.any(String),

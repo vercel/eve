@@ -136,6 +136,8 @@ function createLoadOptions(
   return {
     binding,
     loadNamespace: createCompiledBindingNamespaceLoader({
+      // An extension package build has no application to own Workflow ids.
+      appRoot: undefined,
       bindings: { [source.sourceId]: binding },
       registries: [],
     }),

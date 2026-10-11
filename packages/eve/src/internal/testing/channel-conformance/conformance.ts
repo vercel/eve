@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   type ContractRule,
-  type HitlRule,
-  hitlContract,
+  type ContractRuleName,
+  channelContract,
+  channelContractSections,
 } from "#internal/testing/channel-conformance/contract.js";
 import {
   type ChannelCapability,
@@ -19,11 +20,13 @@ import { discordDriver } from "#internal/testing/channel-conformance/discord-dri
 import { githubDriver } from "#internal/testing/channel-conformance/github-driver.js";
 import { linearDriver } from "#internal/testing/channel-conformance/linear-driver.js";
 import { linqDriver } from "#internal/testing/channel-conformance/linq-driver.js";
+import { photonDriver } from "#internal/testing/channel-conformance/photon-driver.js";
 import { slackDriver } from "#internal/testing/channel-conformance/slack-driver.js";
 import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.js";
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
 import { tuiDriver } from "#internal/testing/channel-conformance/tui-driver.js";
 import { twilioDriver } from "#internal/testing/channel-conformance/twilio-driver.js";
+import { webChatDriver } from "#internal/testing/channel-conformance/web-chat-driver.js";
 
 export interface BrokenCell {
   readonly reason: string;
@@ -49,7 +52,10 @@ const answeredPromptRules = {
     cleared: "answering a question by text clears its buttons",
     named: "answering a question by text names who answered on the question",
   },
-} as const satisfies Record<string, { readonly cleared: HitlRule; readonly named: HitlRule }>;
+} as const satisfies Record<
+  string,
+  { readonly cleared: ContractRuleName; readonly named: ContractRuleName }
+>;
 
 type AnsweredPrompt = keyof typeof answeredPromptRules;
 
@@ -57,7 +63,7 @@ type AnsweredPrompt = keyof typeof answeredPromptRules;
 function staleAnsweredPrompts(
   reason: string,
   groups: readonly AnsweredPrompt[],
-): Partial<Record<HitlRule, BrokenCell>> {
+): Partial<Record<ContractRuleName, BrokenCell>> {
   return Object.fromEntries(
     groups
       .flatMap((group) => Object.values(answeredPromptRules[group]))
@@ -75,7 +81,7 @@ function staleAnsweredPrompts(
 function unnamedAnsweredPrompts(
   reason: string,
   groups: readonly AnsweredPrompt[],
-): Partial<Record<HitlRule, BrokenCell>> {
+): Partial<Record<ContractRuleName, BrokenCell>> {
   return Object.fromEntries(
     groups.map((group) => [
       answeredPromptRules[group].named,
@@ -91,23 +97,17 @@ interface ConformanceChannel {
    * whose behavior varies by conversation; the shared column covers the rest.
    */
   readonly dm?: true;
-  readonly broken?: Partial<Record<HitlRule, BrokenCell>>;
+  readonly broken?: Partial<Record<ContractRuleName, BrokenCell>>;
   /** Rules this client deliberately doesn't offer, with why, beyond what its capabilities rule out. */
-  readonly unsupported?: Partial<Record<HitlRule, string>>;
+  readonly unsupported?: Partial<Record<ContractRuleName, string>>;
 }
-
-/** A message sent during a budget prompt is queued, and every later message queues behind it. */
-const QUEUED_BUDGET_REPLY = {
-  "query sent during budget prompt answered after budget approval": {
-    reason: "eve coalesces the queued reply with the later approve, which then matches no option",
-    symptom: /Timed out waiting for a reply to "Carol wants the review by Friday\."/u,
-  },
-} satisfies Partial<Record<HitlRule, BrokenCell>>;
 
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
 /** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
-function noSignInRenderer(...rules: HitlRule[]): Partial<Record<HitlRule, BrokenCell>> {
+function noSignInRenderer(
+  ...rules: ContractRuleName[]
+): Partial<Record<ContractRuleName, BrokenCell>> {
   return Object.fromEntries(
     rules.map((rule) => [
       rule,
@@ -116,21 +116,11 @@ function noSignInRenderer(...rules: HitlRule[]): Partial<Record<HitlRule, Broken
   );
 }
 
-/** Budget prompts in `rules` never show; see each caller for why. */
-function budgetPromptNotShown(
-  reason: string,
-  ...rules: HitlRule[]
-): Partial<Record<HitlRule, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      { reason, symptom: /Timed out waiting for one of the questions \["This session has hit/u },
-    ]),
-  );
-}
-
-/** Chat SDK's default sign-in, outside a DM, points the person at a DM it never sends. */
-const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
+/**
+ * Linq's group sign-in can't reach the person privately: its `openDM` needs a phone
+ * handle, and a message names its sender only by the handle's opaque id.
+ */
+const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
   [
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -138,11 +128,12 @@ const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
   ].map((rule) => [
     rule,
     {
-      reason: "outside a DM the bot says to continue in a direct message but never sends one",
+      reason:
+        "Linq's openDM needs the person's phone handle, but a message names its sender by an opaque handle id, so the bot can only say to continue in a direct message",
       symptom: SIGN_IN_NOT_SHOWN,
     },
   ]),
-) satisfies Partial<Record<HitlRule, BrokenCell>>;
+) satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
@@ -154,16 +145,10 @@ const CHAT_SDK_BROKEN = {
     "questionPress",
     "questionText",
   ]),
-  ...QUEUED_BUDGET_REPLY,
 };
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...budgetPromptNotShown(
-    "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
-    "running out of budget opens budget prompt",
-    "pressing approve on budget prompt allows agent to continue",
-  ),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -172,34 +157,26 @@ const DISCORD_BROKEN = {
   ),
 };
 
+const DISCORD_UNSUPPORTED = {
+  "a file sent earlier in the conversation is still there on a later message":
+    "each slash command starts its own session, so no later message shares one with the file",
+} satisfies Partial<Record<ContractRuleName, string>>;
+
 const SLACK_BROKEN = {
-  ...QUEUED_BUDGET_REPLY,
-  "a sign-in without a link shows its instructions": {
-    reason: "Slack sends the private sign-in prompt only for a challenge with a URL",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
   ...staleAnsweredPrompts(
     "only the button interaction handler edits a question; a typed answer leaves it",
     ["questionText"],
   ),
-  "approving by text names who approved on the approval": {
-    reason: "the card loses its buttons after a typed approval but doesn't say who approved",
-    symptom: /the answered prompt never names who answered/,
+  "text replies answer two pending approvals one at a time, in the order shown": {
+    reason:
+      "one card shows every approval a step raises, so a typed reply can't say which it answers",
+    symptom: /were shown in one message, so a typed reply can't say which it answers/,
   },
-} satisfies Partial<Record<HitlRule, BrokenCell>>;
+} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 const TEAMS_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
-  ...QUEUED_BUDGET_REPLY,
-  "a sign-in shows its confirmation code": {
-    reason: "the Teams sign-in card omits the challenge's user code",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
-  "a sign-in without a link shows its instructions": {
-    reason: "the Teams sign-in card omits the challenge's instructions",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
-} satisfies Partial<Record<HitlRule, BrokenCell>>;
+} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 /** The sign-in prompt, link included, goes to the whole thread. */
 const SIGN_IN_LINK_POSTED_TO_THREAD = {
@@ -207,7 +184,7 @@ const SIGN_IN_LINK_POSTED_TO_THREAD = {
     reason: "the sign-in prompt, link included, is posted to the whole thread",
     symptom: /a message everyone sees carried the sign-in (link|code)/u,
   },
-} satisfies Partial<Record<HitlRule, BrokenCell>>;
+} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 const TELEGRAM_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
@@ -216,17 +193,20 @@ const TELEGRAM_BROKEN = {
     "questionPress",
     "questionText",
   ]),
-  ...QUEUED_BUDGET_REPLY,
 };
 
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
+const TUI_TYPED_REPLIES =
+  "each open request has its own drawer, and typing a message dismisses them all";
 const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nobody else to tell";
+const WEB_CHAT_SINGLE_PERSON =
+  "one person answers in their own browser tab; there's nobody else to tell";
 
 /**
- * Every first-party channel's and client's place in the HITL contract, keyed by
- * the directory whose `hitl-conformance.integration.test.ts` runs it. Each cell is
- * one of:
+ * Every first-party channel's and client's place in the channel contract, keyed by
+ * the directory whose `conformance.integration.test.ts` runs it (`web-chat`
+ * runs from `test/browser`, since it needs a browser). Each cell is one of:
  *
  * - must pass;
  * - not supported: the platform lacks a capability the rule requires, or the
@@ -235,19 +215,22 @@ const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nob
  *   the rule fails with the recorded `symptom`, so a fix or an unrelated
  *   failure (such as harness breakage) both turn it red.
  */
-const hitlConformance = {
-  "chat-sdk": [
-    { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
-    { driver: chatSdkTextDriver, broken: QUEUED_BUDGET_REPLY },
-  ],
+const channelConformance = {
+  "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
-  discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
-  "discord-dm": [{ dm: true, driver: () => discordDriver("private"), broken: DISCORD_BROKEN }],
+  discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
+  "discord-dm": [
+    {
+      dm: true,
+      driver: () => discordDriver("private"),
+      broken: DISCORD_BROKEN,
+      unsupported: DISCORD_UNSUPPORTED,
+    },
+  ],
   github: [
     {
       driver: githubDriver,
       broken: {
-        ...QUEUED_BUDGET_REPLY,
         ...noSignInRenderer(
           "a sign-in without a link shows its instructions",
           "completing a sign-in tells the person it succeeded",
@@ -260,7 +243,6 @@ const hitlConformance = {
     {
       driver: linearDriver,
       broken: {
-        ...QUEUED_BUDGET_REPLY,
         "only the person signing in sees the sign-in link and code": {
           reason:
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
@@ -269,8 +251,9 @@ const hitlConformance = {
       },
     },
   ],
-  linq: [{ driver: linqDriver, broken: { ...QUEUED_BUDGET_REPLY, ...SIGN_IN_ONLY_IN_DMS } }],
-  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), broken: QUEUED_BUDGET_REPLY }],
+  linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
+  photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   teams: [{ driver: teamsDriver, broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINK_POSTED_TO_THREAD } }],
@@ -280,18 +263,6 @@ const hitlConformance = {
   tui: [
     {
       driver: tuiDriver,
-      broken: {
-        ...QUEUED_BUDGET_REPLY,
-        "a sign-in names the service and shows its sign-in link": {
-          reason: "the TUI labels a sign-in with the tool name, not the challenge's displayName",
-          symptom: /Timed out waiting for the bot to show Calendar/u,
-        },
-        ...budgetPromptNotShown(
-          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
-          "pressing stop on budget prompt halts work, next message asks again",
-          "reply of stop on budget prompt halts work, next message asks again",
-        ),
-      },
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question's drawer closes, so nothing is left to press",
@@ -299,24 +270,39 @@ const hitlConformance = {
         "a text reply of cancel stops the gated tool without running it": TUI_TYPED_APPROVAL,
         "approving by text clears the approval's buttons": TUI_TYPED_APPROVAL,
         "approving by text names who approved on the approval": TUI_TYPED_APPROVAL,
+        "a message while an approval is pending cancels it, so typing approve afterwards runs nothing and the next message gets a reply":
+          TUI_TYPED_APPROVAL,
+        "pressing Approve on an approval a message cancelled runs nothing": TUI_TYPED_APPROVAL,
+        "the requester typing approve on a requester-only approval runs the tool":
+          TUI_TYPED_APPROVAL,
         "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,
         "pressing an option names who answered on the question": TUI_SINGLE_PERSON,
         "answering a question by text names who answered on the question": TUI_SINGLE_PERSON,
+        "text replies answer two pending questions one at a time, in the order shown":
+          TUI_TYPED_REPLIES,
+        "text replies answer two pending approvals one at a time, in the order shown":
+          TUI_TYPED_APPROVAL,
+        "text replies answer a question and an approval raised together, in the order shown":
+          TUI_TYPED_APPROVAL,
       },
     },
   ],
-  twilio: [
+  twilio: [{ driver: twilioDriver }],
+  "web-chat": [
     {
-      driver: twilioDriver,
-      broken: {
-        ...QUEUED_BUDGET_REPLY,
-        ...noSignInRenderer(
-          "a sign-in names the service and shows its sign-in link",
-          "a sign-in shows its confirmation code",
-          "a sign-in without a link shows its instructions",
-          "completing a sign-in tells the person it succeeded",
-          "message after ignored sign-in tells user it was cancelled",
-        ),
+      driver: webChatDriver,
+      unsupported: {
+        "a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works":
+          "the browser sends a file's bytes with the message, so there is no download to fail",
+        "pressing an option of an answered question sends it to the agent as new input":
+          "an answered question disables its options, so nothing is left to press",
+        "pressing Approve names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
+        "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
+        "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
+        "answering a question by text names who answered on the question": WEB_CHAT_SINGLE_PERSON,
+        // Flaky rather than failing, so it can't be recorded as broken: see the reason.
+        "text replies answer two pending approvals one at a time, in the order shown":
+          "a reply sent while approvals wait goes out as a steering message, which sometimes restarts the turn instead of answering",
       },
     },
   ],
@@ -335,15 +321,17 @@ type Cell =
   | { readonly kind: "broken"; readonly broken: BrokenCell };
 
 const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
+  attachments: "files a person can send",
+  "another-person": "second person who can act",
   buttons: "buttons a person can press",
   "text-replies": "plain-text replies",
 };
 
-function variesByConversation(rule: (typeof hitlContract)[number]): boolean {
+function variesByConversation(rule: (typeof channelContract)[number]): boolean {
   return (rule as ContractRule).variesByConversation === true;
 }
 
-function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]): Cell {
+function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number]): Cell {
   if (entry.dm === true && !variesByConversation(rule)) {
     return {
       kind: "unsupported",
@@ -371,16 +359,16 @@ function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]):
 }
 
 /**
- * Declares the HITL contract cells for one channel directory. Each channel gets
+ * Declares the channel contract cells for one channel directory. Each channel gets
  * its own test file because conversations can't overlap within a process, and
  * separate files let vitest run channels in parallel workers.
  */
-export function describeHitlConformance(channel: keyof typeof hitlConformance): void {
-  const entries: readonly ConformanceChannel[] = hitlConformance[channel];
+export function describeChannelConformance(channel: keyof typeof channelConformance): void {
+  const entries: readonly ConformanceChannel[] = channelConformance[channel];
   describe.each(entries.map((entry) => ({ entry, name: entry.driver().name })))(
-    "$name HITL contract",
+    "$name channel contract",
     ({ entry }) => {
-      for (const rule of hitlContract) {
+      for (const rule of channelContract) {
         const cell = cellOf(entry, rule);
         const { agent } = rule as ContractRule;
         const run = (options?: { readonly waitTimeoutMs: number }) =>
@@ -411,19 +399,20 @@ const MATRIX_SYMBOLS = { broken: "❌", pass: "✅", unsupported: "—" } as con
  * suite holds each cell to what this table says, so the rendered matrix is
  * current whenever the suite passes.
  */
-export function renderHitlConformanceMatrix(): string {
-  const all = Object.values(hitlConformance).flatMap(
+export function renderConformanceMatrix(): string {
+  const all = Object.values(channelConformance).flatMap(
     (group): readonly ConformanceChannel[] => group,
   );
   const nameOf = (entry: ConformanceChannel) => entry.driver().name;
   const dmOf = (entry: ConformanceChannel) =>
     all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`);
-  // The TUI, then Chat SDK's bridges, then channels with a DM column, then the
-  // rest. Each DM column sits right after its channel's shared-thread column.
+  // The TUI and web chat, then Chat SDK's bridges, then channels with a DM column,
+  // then the rest. Each DM column sits right after its channel's shared-thread column.
   const group = (entry: ConformanceChannel) => {
     if (nameOf(entry) === "tui") return 0;
-    if (nameOf(entry).startsWith("chat-sdk")) return 1;
-    return dmOf(entry).length > 0 ? 2 : 3;
+    if (nameOf(entry) === "web chat") return 1;
+    if (nameOf(entry).startsWith("chat-sdk")) return 2;
+    return dmOf(entry).length > 0 ? 3 : 4;
   };
   const entries = all
     .filter((entry) => entry.dm !== true)
@@ -435,7 +424,7 @@ export function renderHitlConformanceMatrix(): string {
   // sharing a cause links to the same note. Plain anchors rather than Markdown
   // footnotes, which GitHub renders with links back up to every citing cell.
   const notes = new Map<string, number>();
-  const shown = (entry: ConformanceChannel, rule: (typeof hitlContract)[number]) => {
+  const shown = (entry: ConformanceChannel, rule: (typeof channelContract)[number]) => {
     // A DM column leaves blank what only the shared-thread column runs.
     if (entry.dm === true && !variesByConversation(rule)) return "";
     const cell = cellOf(entry, rule);
@@ -445,15 +434,23 @@ export function renderHitlConformanceMatrix(): string {
     const index = notes.get(note)!;
     return `${MATRIX_SYMBOLS[cell.kind]}<sup>[${index}](#note-${index})</sup>`;
   };
-  const rows = hitlContract.map((rule) =>
-    row([
-      // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
-      escape(rule.rule).replaceAll(" ", "\u00a0"),
-      ...entries.map((entry) => shown(entry, rule)),
-    ]),
-  );
+  // One table per section, each repeating the column header so it reads on its own.
+  const tables = channelContractSections.flatMap((section) => [
+    `## ${section.title}`,
+    "",
+    row(["Rule", ...entries.map((entry) => `\`${nameOf(entry)}\``)]),
+    row(["---", ...entries.map(() => ":---:")]),
+    ...section.rules.map((rule) =>
+      row([
+        // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
+        escape(rule.rule).replaceAll(" ", "\u00a0"),
+        ...entries.map((entry) => shown(entry, rule)),
+      ]),
+    ),
+    "",
+  ]);
   return [
-    "# HITL conformance matrix",
+    "# Channel conformance matrix",
     "",
     "<!-- Generated from conformance.ts by matrix.test.ts. Do not edit by hand. -->",
     "",
@@ -468,10 +465,7 @@ export function renderHitlConformanceMatrix(): string {
     "",
     "✅ passes · ❌ broken · — not supported",
     "",
-    row(["Rule", ...entries.map((entry) => `\`${nameOf(entry)}\``)]),
-    row(["---", ...entries.map(() => ":---:")]),
-    ...rows,
-    "",
+    ...tables,
     "## Notes",
     "",
     ...[...notes].map(([note, index]) => `${index}. <a id="note-${index}"></a>${note}`),

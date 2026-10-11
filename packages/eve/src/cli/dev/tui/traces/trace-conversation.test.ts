@@ -58,8 +58,8 @@ function weatherTurn(): LocalTraceSpan[] {
     "gen_ai.request.model": "claude-test",
     "gen_ai.input.messages": messages,
     "ai.response.text": "Let me check.",
-    "agent.usage.input_tokens": 6200,
-    "agent.usage.output_tokens": 50,
+    "gen_ai.usage.input_tokens": 6200,
+    "gen_ai.usage.output_tokens": 50,
   });
   const action = span("d".repeat(16), "agent.action", 2100, 2400, turn.spanId, {
     "agent.action.name": "get_weather",
@@ -158,7 +158,7 @@ describe("buildConversationItems", () => {
       },
     }));
     const parentAction = span("e".repeat(16), "agent.action", 5900, 6000, parent[0]!.spanId, {
-      "agent.action.call_id": "call-7",
+      "gen_ai.tool.call.id": "call-7",
       "agent.action.kind": "subagent-call",
       "agent.action.name": "echo-marker",
       "agent.turn.id": "turn_0",
@@ -238,8 +238,9 @@ describe("buildConversationItems", () => {
       ]),
       "ai.response.text": "Dispatching.",
     });
-    const parentAction = span("e".repeat(16), "agent.action", 20, 30, step1.spanId, {
-      "agent.action.call_id": "call-1",
+    const parentAction = span("e".repeat(16), "execute_tool echo-marker", 20, 30, step1.spanId, {
+      "gen_ai.operation.name": "execute_tool",
+      "gen_ai.tool.call.id": "call-1",
       "agent.action.kind": "subagent-call",
       "agent.action.name": "echo-marker",
       "agent.turn.id": "turn_0",
@@ -313,15 +314,15 @@ describe("buildConversationItems", () => {
     expect(items[0]?.error).toBe(true);
   });
 
-  it("keeps model spans that carry only token usage", () => {
+  it("keeps model spans that carry only standard token usage", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
       "gen_ai.input.messages": JSON.stringify([
         { parts: [{ content: "hi", type: "text" }], role: "user" },
       ]),
-      "agent.usage.input_tokens": 100,
-      "agent.usage.output_tokens": 10,
+      "gen_ai.usage.input_tokens": 100,
+      "gen_ai.usage.output_tokens": 10,
     });
     const items = buildConversationItems(trace([turn, step, model]));
     expect(items.map((item) => item.kind)).toEqual(["assistant"]);
@@ -335,7 +336,7 @@ describe("buildConversationItems", () => {
       "gen_ai.input.messages": JSON.stringify([
         { parts: [{ content: "hi", type: "text" }], role: "user" },
       ]),
-      "agent.usage.input_tokens": 10,
+      "gen_ai.usage.input_tokens": 10,
     });
     const action = span(
       "d".repeat(16),
@@ -425,7 +426,7 @@ describe("renderConversationItem", () => {
         { parts: [{ content: "hi", type: "text" }], role: "user" },
       ]),
       "ai.response.text": "reply",
-      "agent.usage.input_tokens": 100,
+      "gen_ai.usage.input_tokens": 100,
     });
     const assistant = buildConversationItems(trace([turn, step, model])).find(
       (item) => item.kind === "assistant",

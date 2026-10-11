@@ -48,9 +48,9 @@ export interface EveEvalToolCallMatchOptions {
 }
 
 /**
- * Constraints applied to a `load_skill` call by `t.loadedSkill`. Identical to
- * {@link EveEvalToolCallMatchOptions} without `input`, which the helper fixes to
- * the loaded skill id.
+ * Constraints applied to a skill load by `t.loadedSkill`. Identical to
+ * {@link EveEvalToolCallMatchOptions} without `input`, since the skill name is
+ * the whole input.
  */
 export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "input">;
 
@@ -129,11 +129,12 @@ export function matchesValue(matcher: unknown, value: unknown): boolean {
 }
 
 /**
- * Returns true when one derived tool call satisfies the `input`/`output`/
- * lifecycle constraints (the `count` option is the caller's concern).
+ * Returns true when one derived tool call or skill load satisfies the
+ * `input`/`output`/lifecycle constraints (the `count` option is the caller's
+ * concern).
  */
 export function toolCallMatches(
-  call: EveEvalToolCall,
+  call: Pick<EveEvalToolCall, "output" | "status"> & { readonly input?: JsonObject },
   options: EveEvalToolCallMatchOptions,
 ): boolean {
   if (options.input !== undefined && !matchesValue(options.input, call.input)) return false;

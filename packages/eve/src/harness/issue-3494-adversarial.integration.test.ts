@@ -5,14 +5,15 @@ import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/candidates.js";
 import { setPendingAuthorization } from "#harness/authorization.js";
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
+import { runtimeWait, storedProjection, suspendedSteps } from "#harness/session-machine/view.js";
+import { openInputs } from "#protocol/session-projection.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
@@ -21,7 +22,7 @@ import { always } from "#tools/approval/policies.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import { createTurnStartedEvent } from "#protocol/message.js";
+import { createAuthorizationRequiredEvent, createTurnStartedEvent } from "#protocol/message.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
@@ -146,6 +147,7 @@ function fixture(
     workflowId: "diagnostic-workflow",
   });
   const restoredTurns: string[] = [];
+  const recorder = createProjectionRecorder();
   const harness = createToolLoopHarness({
     prepareApprovalTurn: async (event) => {
       const ctx = new ContextContainer();
@@ -175,13 +177,14 @@ function fixture(
     resolveModel: async () => model,
     handleEvent: async (event) => {
       events.push(event);
+      recorder.record(event);
     },
   });
   async function step(input?: StepInput): Promise<StepResult> {
     const before = events.length;
     const beforeCalls = modelCalls;
-    const emission = getHarnessEmissionState(session.state);
-    const ctx = new ContextContainer();
+    const emission = recorder.position;
+    const ctx = recorder.enter(new ContextContainer());
     ctx.set(SessionKey, {
       sessionId: session.sessionId,
       auth: { current: null, initiator: null },
@@ -196,9 +199,9 @@ function fixture(
       next: typeof result.next === "function" ? "continue" : result.next,
       settledTurn: result.settledTurn,
       historyLastRole: session.history.at(-1)?.role,
-      emission: getHarnessEmissionState(session.state),
-      deferred: session.state?.["eve.runtime.deferredStepInput"],
-      pending: getPendingInputBatches(session.state).map((batch) => ({
+      emission: recorder.position,
+      deferred: suspendedSteps(session.state) && session.state?.["eve.harness.turnState"],
+      pending: suspendedSteps(session.state).map((batch) => ({
         owner: batch.event,
         requests: batch.requests.map((r) => ({
           id: r.requestId,
@@ -221,6 +224,7 @@ function fixture(
   reports.push(report);
   return {
     script,
+    prompts,
     restoredTurns,
     executions,
     events,
@@ -229,14 +233,21 @@ function fixture(
     get session() {
       return session;
     },
+    record(event: UnstampedMessageStreamEvent) {
+      events.push(event);
+      recorder.record(event);
+    },
     updateSession(update: (session: HarnessSession) => HarnessSession) {
       session = update(session);
     },
-    pending: () => getPendingInputBatches(session.state).flatMap((b) => b.requests),
+    // What the session asks and still awaits: approvals and the budget prompt.
+    pending: () =>
+      openInputs(storedProjection(session.state))
+        .filter((input) => input.callId === undefined && input.taskId === undefined)
+        .map((input) => input.request),
     async gate(...names: string[]) {
       script.push(calls(...names));
-      const parked = await drive({ message: `Prepare ${names.join(" and ")}.` });
-      expect(parked.held).toEqual({ kind: "request" });
+      await drive({ message: `Prepare ${names.join(" and ")}.` });
       expect(this.pending().filter((r) => r.kind === "tool-approval")).toHaveLength(names.length);
       expect(executions).toHaveLength(0);
     },
@@ -246,8 +257,8 @@ function fixture(
       return { inputResponses: [{ requestId: request.requestId, optionId }] };
     },
     async finishRuntime() {
-      const batch = getPendingCoordinationBatch(session.state);
-      if (!batch) throw new Error("Expected actual pending coordination batch");
+      const batch = runtimeWait(session.state);
+      if (!batch) throw new Error("Expected calls the runtime runs");
       return drive({
         runtimeActionResults: batch.tasks.map((r) => ({
           kind: "tool-result" as const,
@@ -265,6 +276,30 @@ it("completes a plain tool turn without any pending input [control]", async () =
   f.script.push(calls("read"), "FINAL");
   expect((await f.drive({ message: "Read the status." })).settledTurn?.output).toBe("FINAL");
 });
+
+// A final output written beside calls whose results the model hasn't read can't end the turn:
+// the model reads their results and its answer's rejection, then answers again.
+for (const beside of ["workflow", "gateA"] as const) {
+  it(`asks for the final output again once a ${beside} call beside it settles`, async () => {
+    const schema = {
+      properties: { title: { type: "string" } },
+      required: ["title"],
+      type: "object",
+    };
+    const f = fixture(`final-output-beside-${beside}`, false, undefined, schema);
+    f.script.push([{ toolName: beside }, { toolName: REPLY_TOOL_NAME, input: { title: "Early" } }]);
+    await f.drive({ message: "Run it, then report." });
+    f.script.push([{ toolName: REPLY_TOOL_NAME, input: { title: "Done" } }]);
+    const result =
+      beside === "workflow" ? await f.finishRuntime() : await f.drive(f.respond("gateA"));
+
+    expect(result.settledTurn?.output).toEqual({ title: "Done" });
+    expect(suspendedSteps(f.session.state)).toEqual([]);
+    const rereads = JSON.stringify(f.prompts.at(-1));
+    expect(rereads).toContain(beside === "workflow" ? "runtime-RESULT" : "gateA-RESULT");
+    expect(rereads).toContain("Your reply wasn't delivered");
+  });
+}
 
 it("finishes after resolving the only approval [control]", async () => {
   const f = fixture("control-resolve-all");
@@ -367,12 +402,33 @@ it("keeps a message waiting behind a budget prompt and runs it after the grant",
 
   const waitingStart = f.events.length;
   expect((await f.drive({ message: "Also say goodbye." })).held).toEqual({ kind: "request" });
-  // The prompt still holds the turn; the message is announced when it runs.
-  expect(f.events.slice(waitingStart).map((event) => event.type)).toEqual(["turn.waiting"]);
+  // The message is received into a turn that holds on the prompt; the grant resumes it.
+  expect(f.events.slice(waitingStart).map((event) => event.type)).toEqual([
+    "turn.started",
+    "message.received",
+    "turn.waiting",
+  ]);
   expect(f.pending().map((r) => r.kind)).toEqual(["session-limit"]);
 
   f.script.push(calls("read"), "FINAL");
   await f.drive(f.respond("session_limit_continuation", "continue"));
+  expect(f.executions).toEqual(["read"]);
+  expect(
+    f.events
+      .filter((event) => event.type === "message.received")
+      .map((event) => event.data.message),
+  ).toEqual(["Say hello.", "Read the status.", "Also say goodbye."]);
+});
+
+it("runs a message waiting behind a budget prompt after a typed approval", async () => {
+  const f = fixture("message-behind-session-limit-text", false, 1);
+  f.script.push("Initial text.");
+  await f.drive({ message: "Say hello." });
+  await f.drive({ message: "Read the status." });
+  expect((await f.drive({ message: "Also say goodbye." })).held).toEqual({ kind: "request" });
+
+  f.script.push(calls("read"), "FINAL");
+  await f.drive({ message: "approve" });
   expect(f.executions).toEqual(["read"]);
   expect(
     f.events
@@ -437,12 +493,25 @@ it("runs an approved call and cancels the rest when a partial approval is steere
   const parked = await f.drive({ message: "Prepare gateA and gateB." });
   expect(parked.held).toEqual({ kind: "request" });
   const partialStart = f.events.length;
-  const partial = await f.drive(f.respond("gateA"));
-  // The partial answer leaves gateB open, so the turn stays held on it.
+  // An HTTP answer is attributed: the approval settles, but its batch waits for gateB.
+  const partial = await f.drive({
+    attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      },
+      response,
+    })),
+  });
   expect(partial.held).toEqual({ kind: "request" });
-  expect(f.events.slice(partialStart).map((event) => event.type)).toEqual(["turn.waiting"]);
+  expect(f.events.slice(partialStart).map((event) => event.type)).toEqual([
+    "approval.settled",
+    "turn.waiting",
+  ]);
   expect(f.executions).toEqual([]);
-  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateA", "gateB"]);
 
   f.script.push("FINAL", "FINAL");
   const result = await f.drive({ message: "Skip gateB for now." });
@@ -454,6 +523,12 @@ it("runs an approved call and cancels the rest when a partial approval is steere
       .flatMap((event) => event.data.resolutions)
       .map((resolution) => resolution.outcome),
   ).toEqual(["approved", "ignored"]);
+  // The settled answer still counted, so the message reaches the model as sent.
+  expect(
+    f.events
+      .filter((event) => event.type === "message.received")
+      .map((event) => event.data.message),
+  ).toEqual(["Prepare gateA and gateB.", "Skip gateB for now."]);
   expect(result.settledTurn?.output).toBe("FINAL");
 });
 
@@ -534,6 +609,7 @@ it("keeps the turn held while a responder signs in, and fails the sign-in on exp
   const challenges = [
     {
       candidateId: candidate.candidateId,
+      attemptId: "notes-attempt",
       name: "notes",
       hookUrl: "https://example.com/callback",
       challenge: { url: "https://example.com/sign-in" },
@@ -550,6 +626,16 @@ it("keeps the turn held while a responder signs in, and fails the sign-in on exp
       { challenges },
     ),
   }));
+  f.record(
+    createAuthorizationRequiredEvent({
+      attemptId: "notes-attempt",
+      candidateId: candidate.candidateId,
+      name: "notes",
+      description: "Connect notes",
+      webhookUrl: "https://example.com/callback",
+      ...suspendedSteps(f.session.state)[0]!.event,
+    }),
+  );
   const start = f.events.length;
   expect((await f.drive()).held).toEqual({ kind: "request" });
   expect(f.events.slice(start).map((event) => event.type)).toEqual(["turn.waiting"]);

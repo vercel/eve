@@ -22,7 +22,7 @@ vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),
 }));
 vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
-  createiMessageAdapter: vi.fn(),
+  createiMessageAdapter: vi.fn(() => ({})),
 }));
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
 

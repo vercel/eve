@@ -255,6 +255,14 @@ function renderInlineToken(token: Token, options: InlineOptions): string {
   }
 }
 
+/**
+ * Wraps `label` in an OSC 8 hyperlink to `href`, underlined. Terminals
+ * without OSC 8 show the plain label. Unsafe hrefs return the label as-is.
+ */
+export function renderHyperlink(label: string, href: string): string {
+  return renderLink(label, href);
+}
+
 function renderLink(label: string, href: string, restoreUnderline = false): string {
   if (!isSafeLinkUrl(href)) return label;
   const restore = restoreUnderline ? ansi.underline : "";

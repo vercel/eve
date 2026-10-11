@@ -67,7 +67,13 @@ Each route receives these operation surfaces:
 - `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID.
 - `to(channel, target).send(message, options)` hands work to another authored channel.
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
-- `describe()` returns the agent's name, description, and the compiled tools a caller can run outside a turn, with their JSON schemas, sorted by name. It carries no paths, config, or other inspection detail, so a channel can publish it to its callers. Tools that need a turn (framework tools, workflow and provider tools, tools without `execute`) and tools added by dynamic resolvers or subagents are left out.
+- `describe()` returns the agent's name, description, the compiled tools a caller can run outside a turn, with their JSON schemas, and the compiled skills, each with its `name` and `description`, sorted by name. It reads the compiled manifest only, never a skill file, and carries no other paths, config, or inspection detail, so a channel can publish it to its callers. Tools that need a turn (framework tools, workflow and provider tools, tools without `execute`) and tools and skills added by dynamic resolvers or subagents are left out.
+- `invokeTool(name, input, { auth, key })` runs one of those tools as `auth`, outside any conversation: no model, turn, or workflow run. Authored state starts from its initial value and is not kept. Without `key`, each call gets its own session, and a sandbox the tool opens is deleted when the call ends. With `key` (1 to 512 characters), calls from the same `auth` principal with the same key share a session id and a sandbox, which is kept between calls; this needs Vercel Sandbox or just-bash, and an authenticated `auth` (a keyed call from the anonymous principal is `denied`); see [MCP tool sessions](./mcp#tool-sessions). When a trusted forwarder asserted `auth`, pass the principal your route verified as `forwardedBy`: it is part of the session, so one user reached through two forwarders gets two sessions. It resolves to `completed` with the tool's output, or to `invalid-input`, `denied`, `failed`, `approval-required` when the tool's approval policy asks a person (the tool did not run), or `authorization-required` with the connections the tool needs a sign-in to.
+
+  A direct call doesn't go through the AI SDK, so AI SDK telemetry integrations never see it. Conversation tool calls do: an integration that an `agent/instrumentation/*.ts` module registers with `registerTelemetry()` from `ai` receives `onToolExecutionStart` and `onToolExecutionEnd` for each of them. A direct call is traced by eve itself instead. It gets an `execute_tool` span under the caller's trace and emits `tool.call.started` and `tool.call.completed` to instrumentation. Over MCP, the caller's trace comes from the request's `_meta` trace context (see [Trace context](./mcp#trace-context)).
+
+- `listSkillFiles(skill)` resolves to the skill's regular files, each with its `path` under the skill root and its `size` in bytes, sorted by path. It rejects a skill the agent does not have.
+- `readSkill(skill, path?)` resolves to one skill file's raw bytes as a `Uint8Array`; decode text yourself, for example with `new TextDecoder().decode(bytes)`. `path` is relative to the skill root, such as `references/api.md`, and defaults to the skill's `SKILL.md`. It rejects absolute paths, paths with `.`, `..`, or empty segments, files the skill does not list, and files over 512 KiB.
 
 Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and
@@ -110,6 +116,15 @@ await source.reset({ reason: "Start over" });
 const currentSession = await resolveSession(threadId);
 ```
 
+When the session at an address is
+[stranded](../concepts/execution-model-and-durability#stranded-sessions) because another eve version
+built it, `send()` ends that session and starts a fresh one. The message becomes the fresh
+session's first turn, and the fresh session can read recent text from the earlier conversation;
+see [What a replacement session receives](../concepts/execution-model-and-durability#what-a-replacement-session-receives). Concurrent sends to the same stranded address still
+produce one fresh session. A `respond()` call, or a `deliver()` that includes input responses,
+carries answers a fresh session has no request for, so it throws `SessionStrandedError` and leaves
+the stranded session in place.
+
 `Session` is fixed: every call targets exactly one durable ID. It never creates,
 follows, or resolves a replacement.
 
@@ -123,6 +138,23 @@ await session.compact();
 await session.clear();
 await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
+```
+
+For a stranded session, `Session.send()`, `Session.respond()`, and a following
+`Session.getEventStream()` throw `SessionStrandedError` from `eve/channels` and deliver nothing.
+`getEventStream({ follow: false })` still reads the recorded history up to the current tail without
+changing the session. `error.owner.eveVersion` names the eve release that built the session when it recorded one. Call
+`reset()` to end the stranded session, then start a new one:
+
+```ts
+import { SessionStrandedError } from "eve/channels";
+
+try {
+  await attachSession(sessionId).send(text, { auth });
+} catch (error) {
+  if (!SessionStrandedError.is(error)) throw error;
+  await attachSession(sessionId).reset({ reason: "Session was stranded by an upgrade" });
+}
 ```
 
 `respond()` accepts exact response literals directly. If responses have already
@@ -518,11 +550,31 @@ defineChannel({
 });
 ```
 
-If `fetchFile` throws, eve replaces that attachment with a model-visible error note and continues the turn. Built-in channels include safe details such as the upstream HTTP status. Custom channel errors use a generic note, while eve keeps the original error in operator logs.
+If `fetchFile` throws, eve replaces that attachment with a model-visible note and continues the turn. To tell the model why, throw `attachmentError` from `eve/channels`:
 
-The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
+```ts
+import { attachmentError } from "eve/channels";
 
-The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
+async function fetchUpload(url: string) {
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (response.status === 413) {
+    throw attachmentError("The file is over 100 MB. Ask for a smaller file.");
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+```
+
+The model then reads `Attachment report.pdf could not be retrieved: The file is over 100 MB. Ask for a smaller file.` The message reaches the model as written, so keep it to details the person can act on, such as a size limit or a missing permission, and never include URLs, tokens, or upstream response text. Pass the original error as `attachmentError(message, { cause })` to keep it in operator logs. Any other error that `fetchFile` throws becomes a generic note, and eve keeps the original error in operator logs.
+
+`fetchFile` receives the channel's `state` and the `session` the attachment arrived in as its second argument, so a resolver can check a file against the session's caller in `session.auth`.
+
+The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. A string with a URL scheme, such as `https://...` or `myapp-file:abc`, is handled the same way. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`.
+
+Return bytes to stage the file to the sandbox. Return `null` when the URL is not one your channel resolves: eve then downloads a public `https:` URL itself, with the 25 MB default size cap and a 30-second timeout, and refuses private or reserved addresses. It downloads at most 10 URLs per message, one at a time. Any other URL, or a download that fails, reaches the model as a note. The model provider never fetches an attachment, so a link that expires or needs credentials can't fail later model calls.
+
+Set `uploadPolicy` on `defineChannel` to cap what eve stages for the channel, for example `uploadPolicy: { maxBytes: 10 * 1024 * 1024, allowedMediaTypes: ["image/*", "application/pdf"] }`. eve checks every staged file against it, on the final bytes and the media type they prove, including URLs it downloads itself. A file that breaks the policy reaches the model as a note. Without `uploadPolicy`, eve checks only what your `fetchFile` enforces, and its own downloads stop at 25 MB.
+
+The framework handles staging bytes to the sandbox, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
 ## What to read next
 

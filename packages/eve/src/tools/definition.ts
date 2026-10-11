@@ -33,6 +33,11 @@ export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
 interface ToolDefinitionBase {
   /** Whether delegated agent sessions receive this tool. Defaults to `true`. */
   readonly availableInSubagents?: boolean;
+  /**
+   * Keeps this tool out of the model's tool list. The model finds it with
+   * `eve__search` and calls it with `eve__tool`. Defaults to `false`.
+   */
+  readonly deferred?: boolean;
   readonly description: string;
 }
 

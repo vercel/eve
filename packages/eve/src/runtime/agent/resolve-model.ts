@@ -3,7 +3,10 @@ import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ContextAccessor } from "#context/key.js";
 import { RuntimeModelMetadataCacheKey, type CachedModelMetadata } from "#context/keys.js";
-import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import {
+  normalizeAgentDefinition,
+  normalizeAgentPromptCache,
+} from "#internal/authored-definition/core.js";
 import {
   formatLanguageModelGatewayId,
   isRuntimeLanguageModel,
@@ -164,11 +167,19 @@ export async function resolveRuntimeModelSelection(input: {
     selection.modelOptions?.providerOptions === undefined
       ? undefined
       : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
+  const promptCache =
+    selection.modelOptions?.promptCache === undefined
+      ? undefined
+      : normalizeAgentPromptCache(
+          selection.modelOptions.promptCache,
+          "Dynamic model resolver returned an invalid selection.",
+        );
 
   const selectedModel = selection.model;
   const catalog = input.catalog ?? runtimeModelCatalogForState(input.state);
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
+    if (promptCache !== undefined) throw gatewayPromptCacheError(id);
     const metadata = await resolveSelectionMetadata({
       cacheKey: `gateway:${id}`,
       catalog,
@@ -197,6 +208,9 @@ export async function resolveRuntimeModelSelection(input: {
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
   const topLevelProvider = selectedModel.provider.split(".")[0]!;
+  if (promptCache !== undefined && topLevelProvider === "gateway") {
+    throw gatewayPromptCacheError(formattedId);
+  }
   const metadata = await resolveSelectionMetadata({
     cacheKey:
       topLevelProvider === "gateway"
@@ -218,10 +232,17 @@ export async function resolveRuntimeModelSelection(input: {
       id: metadata.resolvedModelId,
       contextWindowTokens: metadata.contextWindowTokens,
       maxOutputTokens: metadata.maxOutputTokens,
+      promptCache,
       providerOptions,
       reasoning: selection.reasoning,
     },
   };
+}
+
+function gatewayPromptCacheError(modelId: string): Error {
+  return new Error(
+    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies only to models eve calls directly; Gateway manages its own prompt caching through providerOptions.gateway.caching.`,
+  );
 }
 
 const runtimeModelCatalogsByState = new WeakMap<ContextAccessor, RuntimeModelCatalog>();

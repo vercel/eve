@@ -1,3 +1,4 @@
+import { readSerializedSessionSchedule } from "#context/session-schedule.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
@@ -11,6 +12,11 @@ import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session/timeout.js";
+import {
+  createSessionTimeoutControl,
+  type SessionTimeoutControl,
+} from "#execution/session/timeout-control.js";
+import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
@@ -20,6 +26,7 @@ import {
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
 import {
+  recordSessionOwnerStep,
   signalSessionOwnerActivationStep,
   stopUntrackedChildSessionsStep,
   validateSessionCheckpointStep,
@@ -76,8 +83,74 @@ function stampSessionIdentity(
   };
 }
 
+interface OwnedInitialSession {
+  readonly kind: "owned";
+  readonly timeoutControl: SessionTimeoutControl | undefined;
+  readonly turnControl: TurnControl;
+  dispose(): Promise<void>;
+}
+
+type InitialOwnerPreparation = OwnedInitialSession | { readonly kind: "alias-conflict" };
+
+async function prepareInitialOwner(
+  inbox: SessionInboxHandle,
+  input: {
+    readonly continuationToken: string;
+    readonly deadline: Date | undefined;
+    readonly sessionId: string;
+  },
+): Promise<InitialOwnerPreparation> {
+  const [stableClaim, aliasClaim] = await Promise.allSettled([
+    inbox.claimSessionHook(sessionCommandHookToken(input.sessionId)),
+    input.continuationToken === ""
+      ? Promise.resolve()
+      : inbox.claimSessionHook(input.continuationToken),
+  ]);
+  if (stableClaim.status === "rejected") throw stableClaim.reason;
+  if (aliasClaim.status === "rejected") {
+    if (isHookConflictError(aliasClaim.reason)) return { kind: "alias-conflict" };
+    throw aliasClaim.reason;
+  }
+
+  const turnControl = createTurnControl();
+  const timeoutControl =
+    input.deadline === undefined
+      ? undefined
+      : createSessionTimeoutControl({ deadline: input.deadline, sessionId: input.sessionId });
+  const owner: OwnedInitialSession = {
+    kind: "owned",
+    timeoutControl,
+    turnControl,
+    async dispose() {
+      turnControl.dispose();
+      await timeoutControl?.dispose();
+    },
+  };
+  // The session loop joins this startup. Handling the promise here prevents a
+  // rejection from becoming unhandled if another boot branch fails first.
+  void timeoutControl?.start().catch(() => {});
+  return owner;
+}
+
+function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
+  if (result.status === "rejected") throw result.reason;
+  return result.value;
+}
+
+async function disposeInitialBoot(
+  inbox: SessionInboxHandle,
+  owner: OwnedInitialSession | undefined,
+): Promise<void> {
+  const [ownerDisposal, inboxDisposal] = await Promise.allSettled([
+    owner?.dispose(),
+    inbox.dispose(),
+  ]);
+  if (ownerDisposal.status === "rejected") throw ownerDisposal.reason;
+  if (inboxDisposal.status === "rejected") throw inboxDisposal.reason;
+}
+
 /** Returns `undefined` when a competing continuation owner already exists. */
-async function bootInitialOwner(
+export async function bootInitialOwner(
   input: InitialWorkflowEntryInput,
   sessionId: string,
 ): Promise<BootOutcome | undefined> {
@@ -86,71 +159,80 @@ async function bootInitialOwner(
   const inbox = createSessionInbox(sessionId);
   const { workflowStartedAt } = getWorkflowMetadata();
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
+  const deadline = sessionTimeoutDeadline(sessionTimeoutMs, workflowStartedAt.getTime());
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
     source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
+  let owner: OwnedInitialSession | undefined;
   try {
-    const [sessionCreation, stableClaim, aliasClaim, callerResolution] = await Promise.allSettled([
-      createSessionStep({
-        compiledArtifactsSource: serializedBundle.source,
-        continuationToken,
-        dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
-          | DynamicSubagentAgentConfig
-          | undefined,
-        inheritedLimits: input.limits,
-        nodeId: serializedBundle.nodeId,
-        outputSchema: input.input.outputSchema,
-        rootSessionId: readRootSessionId(serializedContext),
-        sessionId,
-      }),
-      inbox.claimSessionHook(sessionCommandHookToken(sessionId)),
-      continuationToken === "" ? Promise.resolve() : inbox.claimSessionHook(continuationToken),
-      hasDelegatedSessionContext(serializedContext)
-        ? resolveInitialTurnCallerStep({ serializedContext })
-        : Promise.resolve(undefined),
+    const sessionCreationPromise = createSessionStep({
+      compiledArtifactsSource: serializedBundle.source,
+      continuationToken,
+      dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
+        | DynamicSubagentAgentConfig
+        | undefined,
+      inheritedLimits: input.limits,
+      nodeId: serializedBundle.nodeId,
+      outputSchema: input.input.outputSchema,
+      rootSessionId: readRootSessionId(serializedContext),
+      sessionId,
+    });
+    const ownerPreparationPromise = prepareInitialOwner(inbox, {
+      continuationToken,
+      deadline,
+      sessionId,
+    });
+    const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
+      ? resolveInitialTurnCallerStep({ serializedContext })
+      : Promise.resolve(undefined);
+    const [sessionCreation, ownerPreparation, callerResolution] = await Promise.allSettled([
+      sessionCreationPromise,
+      ownerPreparationPromise,
+      callerResolutionPromise,
     ]);
-    if (sessionCreation.status === "rejected") throw sessionCreation.reason;
-    if (stableClaim.status === "rejected") throw stableClaim.reason;
-    if (aliasClaim.status === "rejected") {
-      if (!isHookConflictError(aliasClaim.reason)) throw aliasClaim.reason;
+    if (ownerPreparation.status === "fulfilled" && ownerPreparation.value.kind === "owned") {
+      owner = ownerPreparation.value;
+    }
+    const created = unwrapSettled(sessionCreation);
+    const prepared = unwrapSettled(ownerPreparation);
+    if (prepared.kind === "alias-conflict") {
       if (input.continuationConflictCommand !== undefined) {
         await settleContinuationConflictStep({
           command: input.continuationConflictCommand,
           continuationToken,
         });
       }
-      await inbox.dispose();
+      await disposeInitialBoot(inbox, owner);
       return undefined;
     }
-    if (callerResolution.status === "rejected") throw callerResolution.reason;
+    const caller = unwrapSettled(callerResolution);
     return {
       inbox,
       session: {
         anchor: { kind: "self" },
-        caller: callerResolution.value,
+        caller,
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
-        history: sessionCreation.value.history,
+        history: created.history,
         start:
           input.input.message === undefined
             ? { kind: "first-message" }
             : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
+        initialTurnControl: prepared.turnControl,
         retention: input.retention,
         serializedContext,
         sessionId,
-        sessionState: sessionCreation.value.state,
+        sessionState: created.state,
+        sessionTimeoutControl: prepared.timeoutControl,
         sessionTimeoutMs,
-        sessionTimeoutDeadline: sessionTimeoutDeadline(
-          sessionTimeoutMs,
-          workflowStartedAt.getTime(),
-        ),
+        sessionTimeoutDeadline: deadline,
         sessionWritable,
       },
     };
   } catch (error) {
-    await inbox.dispose();
+    await disposeInitialBoot(inbox, owner);
     return await failSession({
       error,
       serializedContext,
@@ -184,6 +266,7 @@ async function bootHandoffOwner(
     }
     ({ checkpoint, childRunIdsToStop } = migration);
     serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
+    await recordSessionOwnerStep({ sessionId });
     await inbox.claimSessionHooks(
       sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState }),
     );
@@ -202,7 +285,12 @@ async function bootHandoffOwner(
   if (childRunIdsToStop.length > 0) {
     await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
   }
-  const compaction = input.reason === "compaction";
+  const deadline =
+    input.reason === "compaction"
+      ? input.sessionTimeoutDeadline
+      : sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now());
+  const timeoutControl =
+    deadline === undefined ? undefined : createSessionTimeoutControl({ deadline, sessionId });
   return {
     inbox,
     session: {
@@ -217,11 +305,10 @@ async function bootHandoffOwner(
       serializedContext,
       sessionId,
       sessionState: checkpoint.sessionState,
+      sessionTimeoutControl: timeoutControl,
       sessionTimeoutMs: checkpoint.sessionTimeoutMs,
       // A deployment handoff renews the configured lifetime; compaction keeps the deadline.
-      sessionTimeoutDeadline: compaction
-        ? input.sessionTimeoutDeadline
-        : sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now()),
+      sessionTimeoutDeadline: deadline,
       sessionWritable: input.sessionWritable,
     },
   };
@@ -233,6 +320,7 @@ function createInitialDelivery(
 ): DeliverHookPayload | undefined {
   if (input.input.message === undefined) return undefined;
   return {
+    schedule: readSerializedSessionSchedule(serializedContext),
     deliveryMetadata:
       serializedContext["eve.channelDelivery"] === undefined
         ? undefined

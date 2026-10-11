@@ -1,6 +1,7 @@
 import type { SessionContext } from "#context/session-context.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
+import { readSessionSchedule } from "#context/session-schedule.js";
 import { loadContext } from "#context/container.js";
 import { DynamicSkillSandboxKey, SandboxKey, SessionKey } from "#context/keys.js";
 
@@ -20,6 +21,8 @@ export function buildCallbackContext(): SessionContext {
       auth: session.auth,
       turn: session.turn,
       parent: session.parent,
+      schedule: readSessionSchedule(ctx),
+      predecessor: session.predecessor,
     },
 
     getSandbox(environment?: SandboxEnvironmentIdentity): Promise<RuntimeSandboxSession> {

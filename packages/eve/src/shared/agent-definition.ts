@@ -13,7 +13,35 @@ import {
  */
 export interface AgentModelOptionsDefinition {
   readonly providerOptions?: Record<string, JsonObject>;
+  /** Prompt-cache breakpoints eve places for this model. */
+  readonly promptCache?: AgentPromptCacheDefinition;
 }
+
+/**
+ * Prompt-cache breakpoints eve places for a model it calls directly. AI Gateway models cache
+ * through `providerOptions.gateway.caching` instead and reject this option.
+ */
+export interface AgentPromptCacheDefinition {
+  /**
+   * Places Anthropic cache breakpoints on every call. eve already does this for Anthropic models
+   * it recognizes by provider or model id; set it for one it can't, such as a Bedrock application
+   * inference profile, or to change the cache lifetime.
+   */
+  readonly anthropic?: AgentAnthropicPromptCacheDefinition;
+}
+
+export interface AgentAnthropicPromptCacheDefinition {
+  /**
+   * How long each breakpoint's cache entry lives: `"5m"` (the default) or `"1h"`. A 1-hour write
+   * costs more than a 5-minute one, so `"1h"` pays off when turns often land between five minutes
+   * and an hour apart. Only some Claude models accept a 1-hour TTL.
+   */
+  readonly ttl?: AnthropicPromptCacheTtl;
+}
+
+export type AnthropicPromptCacheTtl = "5m" | "1h";
+
+export const ANTHROPIC_PROMPT_CACHE_TTLS: readonly AnthropicPromptCacheTtl[] = ["5m", "1h"];
 
 /**
  * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
@@ -48,6 +76,7 @@ export type InternalAgentModelDefinition = {
   maxOutputTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
+  promptCache?: AgentPromptCacheDefinition;
 };
 
 /**
@@ -296,6 +325,13 @@ export interface AgentWorkflowDefinition {
 }
 
 /**
+ * How eve exposes an agent to its parent model: `true` as a tool in the
+ * model's tool list, `"deferred"` as a catalog entry the model finds with
+ * `eve__search` and calls with `eve__tool`, and `false` not at all.
+ */
+export type AgentToolExposure = boolean | "deferred";
+
+/**
  * Compiled-side agent definition. Carries a `name` because the compiler
  * stamps the path-derived `agentId` onto every compiled agent node.
  */
@@ -309,7 +345,7 @@ export type InternalAgentDefinition = {
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
-  tool?: boolean;
+  tool?: AgentToolExposure;
   limits?: AgentLimitsDefinition;
 };
 
@@ -350,13 +386,15 @@ type PublicAgentDefinitionBase = {
    */
   readonly limits?: AgentLimitsDefinition;
   /**
-   * Whether eve exposes this agent to its parent model as a tool. On the root
+   * How eve exposes this agent to its parent model. `true` lists it as a
+   * tool, `"deferred"` makes it a catalog entry the model finds with `eve__search`
+   * and calls with `eve__tool`, and `false` hides it from the model. On the root
    * agent, this controls the built-in `agent` tool. Defaults to `true`.
    *
    * A subagent with this set to `false` remains callable through `ctx.agent()`
    * in workflow tools.
    */
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
 };
 
 /**

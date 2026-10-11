@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
+  defineDynamic,
   defineInteractiveAuthorization,
   defineMcpClientConnection,
   type McpClientConnectionDefinition,
@@ -24,9 +25,8 @@ import {
  * Three env vars gate participation:
  *
  *  - `EVE_TEST_MCP_STUB_USER_AUTH` must be `"1"`. Without it the
- *    connection is inert (`auth` is omitted), so other smokes
- *    booting agent-tui-client see no extra behavior. The stub MCP URL
- *    still falls back to a sentinel that fails fast on first use.
+ *    connection is absent, so other smokes booting agent-tui-client
+ *    cannot discover or call a stub server they did not start.
  *  - `EVE_TEST_MCP_STUB_URL` points at the in-process stub MCP
  *    server the smoke starts up.
  *  - `EVE_TEST_OAUTH_EMULATOR_URL` points at the
@@ -71,6 +71,7 @@ const pendingTokenExchanges = new Map<string, Promise<string>>();
 const principalTokens = new Map<string, string>();
 
 const definition: McpClientConnectionDefinition = {
+  instanceKey: "oauth-smoke",
   url,
   description:
     "Smoke-test stub MCP behind a real OAuth 2.1 + PKCE flow against the @emulators/microsoft IdP. Exposes the same echo_marker tool as stub-mcp.",
@@ -160,7 +161,11 @@ if (userAuthEnabled) {
   });
 }
 
-export default defineMcpClientConnection(definition);
+export default defineDynamic({
+  events: {
+    "session.started": () => (userAuthEnabled ? defineMcpClientConnection(definition) : null),
+  },
+});
 
 async function exchangeAuthorizationCode(input: {
   readonly callbackUrl: string;

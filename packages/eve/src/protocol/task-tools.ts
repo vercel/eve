@@ -1,16 +1,16 @@
 import type { ActionResultStreamEvent } from "#protocol/message.js";
 
-export const TASK_WAIT_TOOL_NAME = "task_wait";
-export const TASK_CANCEL_TOOL_NAME = "task_cancel";
+export const TASK_WAIT_TOOL_NAME = "eve__task_wait";
+export const TASK_CANCEL_TOOL_NAME = "eve__task_cancel";
 
-/** The task tools' names; authored tools cannot use them. */
+/** The task tools' names. */
 export const TASK_TOOL_NAMES: readonly string[] = [TASK_WAIT_TOOL_NAME, TASK_CANCEL_TOOL_NAME];
 
 /**
  * Whether a tool call is the model managing its own tasks. The stream keeps
  * these calls so evals and traces can see them, but activity surfaces hide
  * them: people see the tasks, not the model waiting on or stopping them. The
- * names are reserved, so no authored tool matches.
+ * `eve` namespace is reserved, so no authored tool matches.
  */
 export function isTaskControlTool(toolName: string): boolean {
   return TASK_TOOL_NAMES.includes(toolName);

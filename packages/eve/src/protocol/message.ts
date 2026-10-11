@@ -5,6 +5,7 @@ import {
   hasInternalRefScheme,
   isSerializedUrlFilePart,
 } from "#internal/attachments/url-refs.js";
+import { getKnownByteLength } from "#internal/attachments/data.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
 import {
@@ -118,6 +119,18 @@ export interface SubagentSessionInvocationMetadata {
 }
 
 /**
+ * The session this one replaced. Present on a session eve started in place of
+ * one whose deployment was retired, when the next ordinary channel message
+ * arrived before the earlier session timed out. This session has its own id,
+ * stream, auth, and state, and starts with no history from its predecessor;
+ * read the predecessor with `sessions.attach(sessionId)` from `eve/server`.
+ */
+export interface SessionPredecessor {
+  /** Id of the session this one replaced. Its recorded history stays readable. */
+  readonly sessionId: string;
+}
+
+/**
  * Runtime identity metadata attached to the `session.started` event.
  *
  * The server populates this at run time so remote eval processes and
@@ -176,6 +189,8 @@ export type HandleMessageRequestBody =
 export interface SessionStartedStreamEvent {
   data: {
     invocation?: SubagentSessionInvocationMetadata;
+    /** Present when this session replaced one that could no longer run. */
+    predecessor?: SessionPredecessor;
     runtime?: RuntimeIdentity;
     trace?: RuntimeTraceContext;
   };
@@ -287,6 +302,12 @@ export interface ApprovalSettledStreamEvent {
  */
 export interface InputRequestedStreamEvent {
   data: {
+    /**
+     * The call a relayed request serves: the task or workflow call whose run, or whose child
+     * session, asks. The request retains its origin coordinates. Absent for the
+     * session's own requests, whose approvals name their call in `request.action`.
+     */
+    callId?: string;
     requests: readonly InputRequest[];
     sequence: number;
     stepIndex: number;
@@ -453,7 +474,7 @@ export interface TaskSettledStreamEvent {
 }
 
 /**
- * Why the session cancelled a task call: the model called `task_cancel`,
+ * Why the session cancelled a task call: the model called `eve__task_cancel`,
  * someone cancelled the turn (or, between turns, the tasks still working), or
  * the turn ended while the task still worked.
  */
@@ -932,6 +953,7 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
  */
 export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
+  readonly predecessor?: SessionPredecessor;
   readonly runtime?: RuntimeIdentity;
   readonly trace?: RuntimeTraceContext;
 }): SessionStartedStreamEvent {
@@ -939,6 +961,10 @@ export function createSessionStartedEvent(input?: {
 
   if (input?.invocation !== undefined) {
     data.invocation = input.invocation;
+  }
+
+  if (input?.predecessor !== undefined) {
+    data.predecessor = input.predecessor;
   }
 
   if (input?.runtime !== undefined) {
@@ -1067,12 +1093,16 @@ function projectFileLikePart(
     return tagged;
   }
 
-  const size = byteLengthOf(data);
-  if (size !== undefined) {
-    return createProjectedFilePart({ filename, mediaType, size });
+  const link = clientUrlFragment(data);
+  if (link.url !== undefined) {
+    return createProjectedFilePart({ filename, mediaType, ...link });
   }
-
-  return createProjectedFilePart({ filename, mediaType, ...clientUrlFragment(data) });
+  // Inline payloads report their size only: this event is stored with the
+  // session stream, which must not keep attachment bytes.
+  const size = getKnownByteLength(data);
+  return size === null
+    ? createProjectedFilePart({ filename, mediaType })
+    : createProjectedFilePart({ filename, mediaType, size });
 }
 
 function projectTaggedFileData(
@@ -1166,10 +1196,6 @@ function clientUrlFragment(data: unknown): { readonly url?: string } {
     return {};
   }
 
-  if (data.startsWith("data:")) {
-    return { url: data };
-  }
-
   try {
     const url = new URL(data);
     return isClientResolvableUrl(url) ? { url: url.href } : {};
@@ -1179,7 +1205,7 @@ function clientUrlFragment(data: unknown): { readonly url?: string } {
 }
 
 function isClientResolvableUrl(url: URL): boolean {
-  return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:";
+  return url.protocol === "http:" || url.protocol === "https:";
 }
 
 function basenameOf(path: string): string {
@@ -1358,6 +1384,7 @@ export function createApprovalSettledEvent(
  * Creates the `input.requested` event for one pending HITL batch.
  */
 export function createInputRequestedEvent(input: {
+  readonly callId?: string;
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1370,6 +1397,7 @@ export function createInputRequestedEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.callId !== undefined) data.callId = input.callId;
   if (input.taskId !== undefined) data.taskId = input.taskId;
   return { data, type: "input.requested" };
 }
@@ -1892,7 +1920,11 @@ export function stampMessageStreamEvent(
   event: UnstampedMessageStreamEvent,
   deliveryIds?: readonly string[],
 ): MessageStreamEvent {
-  const meta: { at: string; id: string; deliveryIds?: readonly string[] } = {
+  const meta: {
+    at: string;
+    id: string;
+    deliveryIds?: readonly string[];
+  } = {
     at: new Date().toISOString(),
     id: createEventId(),
   };
@@ -1914,6 +1946,7 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
   readonly error?: ActionResultError;
   readonly status: ActionResultStatus;
 } {
+  const outputError = readActionResultOutputError(result.output);
   if (result.isError === true) {
     return {
       error: buildActionResultError(result),
@@ -1921,7 +1954,6 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
     };
   }
 
-  const outputError = readActionResultOutputError(result.output);
   if (outputError !== undefined) {
     return {
       error: outputError,

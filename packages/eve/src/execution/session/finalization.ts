@@ -1,6 +1,10 @@
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
+import {
+  endSessionSandboxStep,
+  reportSessionSandboxCleanupFailureStep,
+} from "#execution/session/end-sandbox-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { liveTaskRuns, readTaskTable } from "#execution/tasks/table.js";
@@ -8,6 +12,7 @@ import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { getSessionUsage, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
@@ -42,12 +47,28 @@ export async function finalizeSession(
   ) {
     await terminateChildSessionsStep({ sessionState });
   }
+  if (sessionState !== undefined) {
+    try {
+      await endSessionSandboxStep({
+        reason: outcome.kind === "done" ? "completed" : outcome.kind,
+        serializedContext,
+        sessionState,
+      });
+    } catch (error) {
+      await reportSessionSandboxCleanupFailureStep({
+        error: normalizeSerializableError(error),
+        outcome: outcome.kind,
+        sessionId: sessionState.sessionId,
+      }).catch(() => undefined);
+    }
+  }
   const session = sessionState?.snapshot.session;
   const usage = session === undefined ? undefined : getSessionUsage(session);
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
       serializedContext,
+      turn: lastPublishedTurn(session?.state),
       usage,
     });
   } else if (outcome.kind === "failed") {
@@ -125,4 +146,13 @@ function settledResult(
     case "failed":
       return { isError: true, output: normalizeSerializableError(outcome.error), ...usage };
   }
+}
+
+function lastPublishedTurn(state: import("#harness/types.js").SessionStateMap | undefined) {
+  const turns = Object.values(storedProjection(state).turns);
+  const turn = turns.reduce<(typeof turns)[number] | undefined>(
+    (last, next) => (last === undefined || next.sequence > last.sequence ? next : last),
+    undefined,
+  );
+  return turn === undefined ? undefined : { id: turn.turnId, sequence: turn.sequence };
 }

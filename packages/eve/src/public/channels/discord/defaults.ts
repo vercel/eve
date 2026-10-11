@@ -6,7 +6,10 @@ import {
   DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
   splitDiscordMessageContent,
 } from "#public/channels/discord/api.js";
-import type { DiscordCommandInteraction } from "#public/channels/discord/inbound.js";
+import type {
+  DiscordCommandInteraction,
+  DiscordInteractionBase,
+} from "#public/channels/discord/inbound.js";
 import { renderInputRequestComponents } from "#public/channels/discord/hitl.js";
 import type {
   DiscordChannelEvents,
@@ -17,13 +20,14 @@ import type {
 const log = createLogger("discord.defaults");
 
 /**
- * Builds the default {@link SessionAuthContext} for a Discord command
- * interaction: authenticator `discord-interaction`, guild-scoped
- * issuer/principalId when invoked in a guild (else user-scoped), and
- * `principalType` `service` for bot actors or `user` otherwise. Copies the
- * channel, interaction, user, guild, and member-nick attributes.
+ * Builds the default {@link SessionAuthContext} for the user behind a Discord
+ * interaction (a command, button press, select, or modal submission):
+ * authenticator `discord-interaction`, guild-scoped issuer/principalId when
+ * invoked in a guild (else user-scoped), and `principalType` `service` for bot
+ * actors or `user` otherwise. Copies the channel, interaction, user, guild,
+ * and member-nick attributes.
  */
-export function defaultDiscordAuth(interaction: DiscordCommandInteraction): SessionAuthContext {
+export function defaultDiscordAuth(interaction: DiscordInteractionBase): SessionAuthContext {
   const attributes: Record<string, string> = {
     channel_id: interaction.channelId,
     interaction_id: interaction.id,

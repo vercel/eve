@@ -2,6 +2,8 @@ import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
 
+export type SandboxSessionEndReason = "completed" | "expired" | "failed";
+
 export interface SandboxSessionState {
   readonly providerName: string;
   readonly state: SandboxPreparedArtifact;

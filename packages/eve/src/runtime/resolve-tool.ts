@@ -1,4 +1,5 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
+import { isFrameworkTool, frameworkTool } from "#tools/provided/framework-tool.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
@@ -26,9 +27,10 @@ export async function resolveToolDefinition(
   owner: AgentSourceOwner,
 ): Promise<ResolvedToolDefinition> {
   if (!definition.hasExecute) {
-    return {
+    const resolved: ResolvedToolDefinition = {
       availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
+      deferred: definition.deferred,
       description: definition.description,
       inputSchema: toInputSchema(definition.inputSchema),
       logicalPath: definition.logicalPath,
@@ -38,6 +40,9 @@ export async function resolveToolDefinition(
       sourceId: definition.sourceId,
       sourceKind: "module",
     };
+    return definition.behavior?.handling?.kind === "provider-tool"
+      ? frameworkTool(resolved)
+      : resolved;
   }
   try {
     const resolvedExportValue = await loadResolvedModuleExport({
@@ -77,9 +82,10 @@ export async function resolveToolDefinition(
         ? undefined
         : (input: unknown) => createWorkflowProgramExecuteInput(workflowProgram, input);
 
-    return {
+    const resolved: ResolvedToolDefinition = {
       availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
+      deferred: definition.deferred,
       description: definition.description,
       execute,
       executeInput,
@@ -93,6 +99,7 @@ export async function resolveToolDefinition(
       sourceKind: "module",
       ...extractOptionalHooks(resolvedRecord, definition),
     };
+    return isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
       throw error;

@@ -22,21 +22,24 @@ export interface NoReplyToolInput {
  * channels and schedules post nothing. Only root sessions receive it.
  */
 export function noReply(): ToolDefinition<NoReplyToolInput, string> {
-  return defineTool<NoReplyToolInput, string>({
-    availableInSubagents: false,
-    description: NO_REPLY_TOOL_DESCRIPTION,
-    endsTurn: true,
-    execute: () => "No reply was sent.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        reason: {
-          type: "string",
-          description:
-            "Why no reply is needed. Kept in the session history and traces; never sent.",
+  return frameworkTool(
+    defineTool<NoReplyToolInput, string>({
+      availableInSubagents: false,
+      description: NO_REPLY_TOOL_DESCRIPTION,
+      endsTurn: true,
+      execute: () => "No reply was sent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            description:
+              "Why no reply is needed. Kept in the session history and traces; never sent.",
+          },
         },
+        additionalProperties: false,
       },
-      additionalProperties: false,
-    },
-  });
+    }),
+  );
 }
+import { frameworkTool } from "./framework-tool.js";

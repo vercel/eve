@@ -24,7 +24,6 @@ describe("migrateSessionCheckpoint", () => {
         },
         sessionState: {
           continuationToken: "",
-          emissionState: { sessionStarted: true, sequence: 1, stepIndex: 0, turnId: "" },
           hasProxyInputRequests: false,
           sessionId: "session-1",
           snapshot: {
@@ -33,7 +32,19 @@ describe("migrateSessionCheckpoint", () => {
               continuationToken: "",
               sandboxState: { session: null },
               sessionId: "session-1",
-              state: { "eve.harness.requestEnvelopeTokens": 2483.5 },
+              state: {
+                "eve.harness.requestEnvelopeTokens": 2483.5,
+                "eve.harness.sessionProjection": {
+                  started: true,
+                  nextSequence: 1,
+                  turns: {},
+                  inputs: {},
+                  calls: {},
+                  tasks: {},
+                  authorizations: {},
+                  candidates: {},
+                },
+              },
             },
           },
           version: 2,
@@ -62,12 +73,110 @@ describe("migrateSessionCheckpoint", () => {
     });
   });
 
+  it("upgrades an idle v11 checkpoint without losing position, grants, or application state", () => {
+    const result = migrateSessionCheckpoint(
+      v11Checkpoint({
+        "app.counter": 4,
+        "eve.harness.emission": { sessionStarted: true, sequence: 3, stepIndex: 0, turnId: "" },
+        "eve.runtime.hitl.approvedTools": ["deploy:api"],
+      }),
+    );
+    expect(result).toMatchObject({
+      kind: "current",
+      checkpoint: {
+        version: SESSION_CHECKPOINT_VERSION,
+        history: [{ role: "user", kind: "user", content: "Alice asks for a report." }],
+        sessionState: {
+          version: 2,
+          snapshot: {
+            session: {
+              state: {
+                "app.counter": 4,
+                "eve.harness.sessionProjection": {
+                  started: true,
+                  nextSequence: 3,
+                  turns: {},
+                  inputs: {},
+                  calls: {},
+                  tasks: {},
+                  authorizations: {},
+                  candidates: {},
+                },
+                "eve.harness.turnState": { grants: ["deploy:api"], suspended: [] },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (result.kind !== "current") throw new Error(result.detail);
+    expect(result.checkpoint.sessionState).not.toHaveProperty("emissionState");
+    expect(result.checkpoint.sessionState.snapshot.session.state).not.toHaveProperty(
+      "eve.harness.emission",
+    );
+    expect(result.checkpoint.sessionState.snapshot.session.state).not.toHaveProperty(
+      "eve.runtime.hitl.approvedTools",
+    );
+  });
+
+  it.each([
+    { "eve.runtime.pendingInputBatches": [{ requests: [] }] },
+    { "eve.runtime.pendingAuthorization": { challenges: [{}] } },
+    { "eve.runtime.pendingCoordinationBatch": { tasks: [] } },
+    { "eve.runtime.deferredStepInput": { message: "Bob asks for a follow-up." } },
+    { "eve.runtime.proxyInputRequests": { child: {} } },
+    {
+      "eve.harness.emission": { sessionStarted: true, sequence: 1, stepIndex: 0, turnId: "turn_1" },
+    },
+    { "eve.runtime.pendingInputBatches": "malformed" },
+    { "eve.runtime.hitl.approvedTools": [7] },
+    { "eve.runtime.hitl.approvalState": { activeCandidates: { alice: {} } } },
+    {
+      "eve.workflowTool": {
+        version: 4,
+        runs: [
+          {
+            callId: "call",
+            toolName: "report",
+            origin: { turnId: "turn_0", stepIndex: 0 },
+            address: { runId: "run", hookToken: "hook" },
+          },
+        ],
+      },
+    },
+  ])(
+    "refuses v11 pending or malformed state without changing the owner's checkpoint (%j)",
+    (state) => {
+      const checkpoint = v11Checkpoint(state);
+      const before = structuredClone(checkpoint);
+      expect(migrateSessionCheckpoint(checkpoint)).toMatchObject({ kind: "incompatible" });
+      expect(checkpoint).toEqual(before);
+    },
+  );
+
   it.each([7, SESSION_CHECKPOINT_VERSION + 1])("refuses checkpoint version %s", (version) => {
     expect(migrateSessionCheckpoint({ ...eve066Checkpoint(), version })).toMatchObject({
       kind: "incompatible",
     });
   });
 });
+
+function v11Checkpoint(state: Record<string, unknown>) {
+  return {
+    version: 11,
+    serializedContext: {},
+    history: [{ role: "user", kind: "user", content: "Alice asks for a report." }],
+    sessionTimeoutMs: false,
+    sessionState: {
+      version: 2,
+      sessionId: "session-1",
+      continuationToken: "token",
+      hasProxyInputRequests: false,
+      emissionState: { sessionStarted: true, sequence: 3, stepIndex: 0, turnId: "" },
+      snapshot: { session: { sessionId: "session-1", continuationToken: "token", state } },
+    },
+  };
+}
 
 const CALLBACK = {
   callId: "call-0",

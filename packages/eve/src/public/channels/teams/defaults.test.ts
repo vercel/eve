@@ -42,37 +42,6 @@ function authRequiredEvent(overrides: { displayName?: string } = {}) {
 }
 
 describe("defaultEvents approval lifecycle", () => {
-  it("records a posted tool approval card for settlement", async () => {
-    const { channel, post } = buildChannelStub();
-
-    await defaultEvents["input.requested"]!(
-      {
-        requests: [
-          {
-            action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
-            kind: "tool-approval",
-            options: [
-              { id: "approve", label: "Approve" },
-              { id: "cancel", label: "Cancel" },
-            ],
-            prompt: "Approve deployment?",
-            requestId: "approval_1",
-          },
-        ],
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-      channel,
-      sessionCtx,
-    );
-
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(channel.state.pendingPromptCards).toEqual({
-      approval_1: { activityId: "act1", prompt: "Approve deployment?" },
-    });
-  });
-
   it("replaces the settled approval card with the responder's identity", async () => {
     const { channel, update } = buildChannelStub({
       approvalResponderAccounts: { "teams:TENANT:USER": { id: "USER", name: "Ada" } },

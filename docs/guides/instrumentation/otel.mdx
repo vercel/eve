@@ -126,6 +126,10 @@ The resolver receives the channel, session, final model input, step, and turn.
 Keys beginning with `eve.` are reserved. Content excluded by
 `otel({ tracePolicy })` is not available to the resolver.
 
+Authored values appear under `ai.settings.context.*`. Framework channel, session,
+step, turn, and version identifiers use structural span attributes instead of
+runtime-context copies. `ai.settings.context.eve.environment` remains available.
+
 ## Trace topology
 
 OpenTelemetry destinations receive the following trace topology for an ordinary
@@ -135,8 +139,7 @@ agent turn:
 invoke_agent <agent>
   └── agent.step
         ├── chat <model>
-        └── agent.action
-              └── execute_tool <tool>
+        └── execute_tool <tool>
 ```
 
 Each root agent turn starts a new trace. If eve receives a local caller's trace
@@ -145,6 +148,14 @@ child of the dispatch span and has a different span ID. Without caller trace
 context, the first subagent turn starts a new trace. Later turns in the child
 session start new traces. They do not use the original dispatch span as their
 parent.
+
+Use `gen_ai.tool.call.id` to correlate tool and approval spans. Tool failures use
+`error.type`. These attributes replace the duplicate `agent.action.call_id` and
+`agent.action.error.code` fields without changing trace schema version 4.
+
+Model and activation spans record token counts under `gen_ai.usage.*`, without
+duplicate `agent.usage.*` token fields. Step and tool spans retain `agent.usage.*`.
+Cost values remain unchanged.
 
 A remote child starts a separate trace with a root `invoke_agent` span. Its first
 turn links to the caller with `eve.link.type=agent.dispatch`. The receiving

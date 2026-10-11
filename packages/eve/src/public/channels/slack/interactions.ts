@@ -129,6 +129,7 @@ export function parseBlockActionsPayload(
       blockId: a.block_id != null ? String(a.block_id) : undefined,
       selectedOptionValue: extractSelectedOptionValue(a),
       messageTs: message?.ts,
+      triggerId: typeof rawBody.trigger_id === "string" ? rawBody.trigger_id : undefined,
       label: extractActionLabel(a),
       user,
     })),
@@ -158,6 +159,7 @@ function parseSharedBlockActionsPayload(
       blockId: action.blockId,
       selectedOptionValue: action.selectedOptionValue,
       messageTs: body.messageTs,
+      triggerId: body.triggerId,
       label: action.label,
       user: {
         id: action.user?.id ?? body.userId,

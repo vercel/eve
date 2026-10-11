@@ -121,6 +121,38 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
     });
   });
 
+  it("forwards only the resolutions of requests its parent leaves to it", async () => {
+    resumeHookMock.mockClear();
+    const at = { sequence: 2, stepIndex: 1, turnId: "turn-hitl" };
+    const approval = {
+      kind: "tool-approval" as const,
+      outcome: "approved" as const,
+      requestId: "a",
+    };
+    const question = { kind: "question" as const, outcome: "answered" as const, requestId: "q" };
+
+    await callAdapterEventHandler(
+      SUBAGENT_ADAPTER,
+      { data: { ...at, resolutions: [question] }, type: "input.resolved" },
+      makeContext(),
+    );
+    expect(resumeHookMock).not.toHaveBeenCalled();
+
+    await callAdapterEventHandler(
+      SUBAGENT_ADAPTER,
+      { data: { ...at, resolutions: [question, approval] }, type: "input.resolved" },
+      makeContext(),
+    );
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: { data: { ...at, resolutions: [approval] }, type: "input.resolved" },
+      kind: "subagent-authorization-event",
+      subagentName: "linear",
+    });
+  });
+
   it("skips forwarding when the adapter state is invalid", async () => {
     resumeHookMock.mockClear();
     const base = makeContext();

@@ -1,6 +1,7 @@
 import { diffWriteDetail, type ToolDetailLine } from "./line-diff.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { displayName, displayTitle } from "#shared/display-name.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
@@ -64,7 +65,7 @@ interface BuiltinToolCopy {
 /** Copy shared by the full presenters and their preparing placeholders. */
 const WRITE_FILE_VERB = "Write";
 const DELEGATE_VERB = "Delegate";
-const FINAL_OUTPUT_TITLE = "Return final output";
+const REPLY_TITLE = "Reply";
 
 /**
  * Builtin tools whose calls read as one verb plus one argument. Runs group
@@ -93,26 +94,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "command",
     pluralNoun: "commands",
   },
-  connection_execute: {
-    verb: "Call",
-    pastVerb: "Called",
-    argKey: "",
-    extractItem: (input) => {
-      const connection = salientArg(input, "connection");
-      const tool = salientArg(input, "tool");
-      return connection === undefined || tool === undefined ? undefined : `${connection}.${tool}`;
-    },
-    singularNoun: "connection tool",
-    pluralNoun: "connection tools",
-  },
-  connection_search: {
-    verb: "Search",
-    pastVerb: "Searched",
-    argKey: "query",
-    extractItem: (input) => salientArg(input, "connection"),
-    singularNoun: "tool search",
-    pluralNoun: "tool searches",
-  },
   glob: {
     verb: "Glob",
     pastVerb: "Globbed",
@@ -126,13 +107,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     argKey: "pattern",
     singularNoun: "pattern",
     pluralNoun: "patterns",
-  },
-  load_skill: {
-    verb: "Load",
-    pastVerb: "Loaded",
-    argKey: "skill",
-    singularNoun: "skill",
-    pluralNoun: "skills",
   },
   read_file: {
     verb: "Read",
@@ -245,10 +219,10 @@ export function presentTool(
       summarizeResult: () => undefined,
     };
   }
-  if (baseName === "final_output") {
+  if (baseName === REPLY_TOOL_NAME) {
     // Structured-output terminal signal: its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
-    return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
+    return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
 
   const copy = BUILTIN_TOOL_COPY[baseName];
@@ -352,8 +326,8 @@ export function presentPreparingTool(
   context?: ToolPresentationContext,
 ): ToolPresentation {
   const baseName = toolBaseName(toolName);
-  if (baseName === "final_output") {
-    return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
+  if (baseName === REPLY_TOOL_NAME) {
+    return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
   if (context?.isSubagent === true) {
     // A named subagent's tool carries the delegation target in its name —

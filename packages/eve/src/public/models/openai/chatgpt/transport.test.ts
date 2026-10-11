@@ -29,6 +29,30 @@ describe("Codex direct transport", () => {
     expect(requests[0]?.headers.get("originator")).toBe("eve");
   });
 
+  it("mirrors the prompt cache key into the session-id header Codex routes cache affinity on", async () => {
+    const requests: RecordedRequest[] = [];
+    const codexFetch = createCodexFetch({
+      broker: fakeBroker([{ token: "access-token" }, { token: "access-token" }]),
+      codexApiEndpoint: CODEX_ENDPOINT,
+      fetch: createRecordingFetch(requests),
+    });
+
+    await codexFetch("https://api.openai.com/v1/responses", {
+      body: JSON.stringify({ prompt_cache_key: "session-key", stream: true }),
+      method: "POST",
+    });
+    await codexFetch("https://api.openai.com/v1/responses", {
+      body: JSON.stringify({ prompt_cache_key: "session-key", stream: true }),
+      headers: { "session-id": "authored" },
+      method: "POST",
+    });
+
+    expect(requests.map((request) => request.headers.get("session-id"))).toEqual([
+      "session-key",
+      "authored",
+    ]);
+  });
+
   it("refreshes through the broker and replays one string-body request after 401", async () => {
     const requests: RecordedRequest[] = [];
     const broker = fakeBroker([{ token: "stale-token" }, { token: "fresh-token" }]);

@@ -2,7 +2,9 @@ import type { JsonObject } from "#shared/json.js";
 import type { DurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 
 interface DynamicToolMetadataBase {
+  readonly frameworkTool?: boolean;
   readonly availableInSubagents?: boolean;
+  readonly deferred?: boolean;
   readonly name: string;
   readonly description: string;
   readonly endsTurn?: boolean;

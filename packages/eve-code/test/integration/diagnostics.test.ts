@@ -12,6 +12,9 @@ test("reports git and supported-file syntax diagnostics", async () => {
   const commands: string[] = [];
   const sandbox = commandSandbox(async ({ command }) => {
     commands.push(command);
+    if (command.includes("rev-parse --is-inside-work-tree")) {
+      return { exitCode: 0, stdout: "true\n", stderr: "" };
+    }
     if (command.includes("diff --check")) {
       return { exitCode: 2, stdout: "", stderr: "src/file.ts: trailing whitespace" };
     }
@@ -35,7 +38,7 @@ test("reports git and supported-file syntax diagnostics", async () => {
   const diagnostics = await runPostEditDiagnostics({
     changedPaths: ["src/file.ts", "README.md"],
     deletedPaths: ["old.ts"],
-    repoRoot: "/workspace/eve",
+    patchRoot: "/workspace/eve",
     sandbox,
   });
 
@@ -54,12 +57,49 @@ test("reports git and supported-file syntax diagnostics", async () => {
   assert.equal(commands.filter((command) => command.includes("README.md")).length, 1);
 });
 
+for (const [name, probe] of [
+  ["outside a git checkout", { exitCode: 128, stdout: "", stderr: "fatal: not a git repository" }],
+  ["inside a .git directory or bare repository", { exitCode: 0, stdout: "false\n", stderr: "" }],
+] as const) {
+  test(`checks whitespace in updated files ${name}`, async () => {
+    const commands: string[] = [];
+    const sandbox = commandSandbox(
+      async ({ command }) => {
+        commands.push(command);
+        return command.includes("rev-parse") ? probe : { exitCode: 0, stdout: "", stderr: "" };
+      },
+      "worker",
+      { "/app/README.md": "# Title \nkept  \nnew line \n" },
+    );
+
+    const diagnostics = await runPostEditDiagnostics({
+      changedPaths: ["README.md"],
+      deletedPaths: [],
+      patchRoot: "/app",
+      previousContents: new Map([["README.md", "# Title\nkept  \n"]]),
+      sandbox,
+    });
+
+    assert.deepEqual(diagnostics, [
+      {
+        check: "whitespace",
+        path: "README.md",
+        message: "line 1: trailing whitespace\nline 3: trailing whitespace",
+      },
+    ]);
+    assert.equal(
+      commands.some((command) => command.includes("diff --check")),
+      false,
+    );
+  });
+}
+
 test("skips TypeScript diagnostics when the worker is not installed", async () => {
   const sandbox = commandSandbox(async () => ({ exitCode: 0, stdout: "", stderr: "" }), null);
   assert.deepEqual(
     await runTypeScriptDiagnostics({
       paths: ["src/file.ts"],
-      repoRoot: "/workspace/eve",
+      patchRoot: "/workspace/eve",
       sandbox,
     }),
     [],
@@ -73,7 +113,7 @@ test("reports diagnostic runner failures without failing a committed edit", asyn
   const diagnostics = await runPostEditDiagnostics({
     changedPaths: ["src/file.js"],
     deletedPaths: [],
-    repoRoot: "/workspace/eve",
+    patchRoot: "/workspace/eve",
     sandbox,
   });
   assert.deepEqual(diagnostics, [
@@ -89,6 +129,7 @@ test("reports diagnostic runner failures without failing a committed edit", asyn
 function commandSandbox(
   run: SandboxSession["run"],
   worker: string | null = "worker",
+  files: Readonly<Record<string, string>> = {},
 ): SandboxSession {
   return {
     run,
@@ -96,7 +137,7 @@ function commandSandbox(
       return `/workspace/${path}`;
     },
     async readTextFile({ path }) {
-      return path.endsWith("diagnostics.cjs") ? worker : null;
+      return path.endsWith("diagnostics.cjs") ? worker : (files[path] ?? null);
     },
     async removePath() {},
     async spawn() {

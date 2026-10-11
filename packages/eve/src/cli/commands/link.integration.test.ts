@@ -10,8 +10,15 @@ import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
 import type { LinkFlowDeps } from "#setup/flows/link.js";
 import { isEveProject } from "#setup/scaffold/index.js";
+import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 
 import { runLinkCommand, type LinkCliLogger } from "./link.js";
+import type { NonInteractiveLinkDependencies } from "./vercel-non-interactive.js";
+
+vi.mock("#internal/model-auth/vercel-cli.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/model-auth/vercel-cli.js")>()),
+  readVercelCliToken: vi.fn(),
+}));
 
 class TestLogger implements LinkCliLogger {
   readonly errors: string[] = [];
@@ -115,10 +122,70 @@ function createFlowDeps(): Partial<LinkFlowDeps> {
 }
 
 afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
   process.exitCode = undefined;
 });
 
 describe("runLinkCommand", () => {
+  test.each([
+    { existing: false, expectedRequests: 1 },
+    { existing: true, expectedRequests: 0 },
+    { existing: "unknown", expectedRequests: 0 },
+  ])(
+    "non-interactive link configures sampling only for a new project: $existing",
+    async ({ existing, expectedRequests }) => {
+      const projectRoot = await createAgentProject();
+      const logger = new TestLogger();
+      const fake = createFakePrompter();
+      const lookup = vi.fn<NonInteractiveLinkDependencies["resolveProjectByNameOrId"]>();
+      if (existing === "unknown") lookup.mockRejectedValue(new Error("Access denied"));
+      else
+        lookup.mockResolvedValue(
+          existing ? { projectId: "prj_existing", projectName: "my-agent" } : null,
+        );
+      const linkDeps: NonInteractiveLinkDependencies = {
+        isEveProject,
+        runVercel: vi.fn(async () => true),
+        runVercelEnvPull: vi.fn(async () => true),
+        resolveTeam: vi.fn(async () => "acme"),
+        resolveProjectByNameOrId: lookup,
+        readProjectLink: vi.fn(async () => ({
+          orgId: "team_123",
+          projectId: "prj_new",
+          projectName: "my-agent",
+        })),
+      };
+      vi.mocked(readVercelCliToken).mockResolvedValue("vercel-token");
+      const fetch = vi.fn(async () => new Response(null, { status: 200 }));
+      vi.stubGlobal("fetch", fetch);
+
+      await runLinkCommand(
+        logger,
+        projectRoot,
+        {
+          createPrompter: () => fake.prompter,
+          hasInteractiveTerminal: () => false,
+          nonInteractiveLinkDeps: linkDeps,
+        },
+        { nonInteractive: true, project: "my-agent", team: "acme" },
+      );
+
+      expect(logger.errors).toEqual([]);
+      expect(logger.logs).toContain("Project linked.");
+      expect(fetch).toHaveBeenCalledTimes(expectedRequests);
+      if (expectedRequests > 0) {
+        expect(fetch).toHaveBeenCalledWith(
+          "https://api.vercel.com/v1/drains/tracing/config?projectId=prj_new&teamId=team_123",
+          expect.objectContaining({
+            method: "PUT",
+            body: JSON.stringify({ enabled: true, sampling: [{ type: "head_sampling", rate: 1 }] }),
+          }),
+        );
+      }
+    },
+  );
+
   test("refuses a directory without an eve agent", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-empty-"));
     const logger = new TestLogger();

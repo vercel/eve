@@ -1,3 +1,4 @@
+import { promptQueueEvents } from "#channel/prompt-queue.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
@@ -9,8 +10,11 @@ import {
 } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
+import type { InputRequest } from "#shared/input.js";
 import type {
   LinearChannelEvents,
+  LinearEventContext,
   LinearInboundResult,
   LinearSessionContext,
 } from "#public/channels/linear/linearChannel.js";
@@ -64,6 +68,15 @@ interface LinearDefaultEventOptions {
 
 /** Built-in Linear event handlers for Agent Activity progress, replies, HITL, and errors. */
 export function createDefaultEvents(options: LinearDefaultEventOptions = {}): LinearChannelEvents {
+  async function showPrompt(channel: LinearEventContext, request: InputRequest): Promise<void> {
+    await postActivity(
+      channel,
+      options,
+      { body: renderLinearInputRequests([request]), type: "elicitation" },
+      linearInputRequestSignal([request]),
+    );
+  }
+
   return {
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
@@ -98,14 +111,15 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
 
-      if (event.actions.length === 0) return;
-      if (event.actions.length > 1) {
+      const actions = visibleActions(event.actions);
+      if (actions.length === 0) return;
+      if (actions.length > 1) {
         await postActivity(
           channel,
           options,
           {
             action: "Running",
-            parameter: event.actions.map(actionLabel).join(", "),
+            parameter: actions.map((action) => actionLabel(action, event.presentation)).join(", "),
             type: "action",
           },
           {
@@ -115,12 +129,12 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
 
-      for (const action of event.actions) {
+      for (const action of actions) {
         await postActivity(
           channel,
           options,
           {
-            action: actionLabel(action),
+            action: actionLabel(action, event.presentation),
             parameter: actionParameter(action),
             type: "action",
           },
@@ -131,18 +145,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       }
     },
 
-    async "input.requested"(event, channel, _ctx) {
-      const signal = linearInputRequestSignal(event.requests);
-      await postActivity(
-        channel,
-        options,
-        {
-          body: renderLinearInputRequests(event.requests),
-          type: "elicitation",
-        },
-        signal,
-      );
-    },
+    // A reply can only answer the elicitation it sees, so they post one at a time.
+    ...promptQueueEvents(showPrompt),
 
     async "authorization.required"(event, channel, ctx) {
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
@@ -307,10 +311,6 @@ function firstNonEmptyLine(text: string): string | undefined {
     if (trimmed.length > 0) return trimmed;
   }
   return undefined;
-}
-
-function actionLabel(action: { readonly kind: string; readonly toolName?: string }): string {
-  return action.kind === "tool-call" && action.toolName ? action.toolName : action.kind;
 }
 
 function actionParameter(action: {

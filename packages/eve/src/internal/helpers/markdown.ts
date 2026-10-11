@@ -178,6 +178,14 @@ function applyOptionalSkillFrontmatter(
   if (metadata !== undefined) {
     rawDefinition.metadata = metadata;
   }
+
+  const deferred = frontmatter.deferred;
+  if (deferred !== undefined && deferred !== null) {
+    if (typeof deferred !== "boolean") {
+      throw new Error('Expected "deferred" frontmatter to be true or false.');
+    }
+    rawDefinition.deferred = deferred;
+  }
 }
 
 function toOptionalString(value: unknown, fieldName: string): string | undefined {

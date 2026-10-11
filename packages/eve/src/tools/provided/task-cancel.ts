@@ -10,8 +10,9 @@ export interface TaskCancelInput {
   readonly taskId: string;
 }
 
-/** `task_cancel`, offered to agents that can start tasks; the session answers each call. */
+/** `eve__task_cancel`, offered to agents that can start tasks; the session answers each call. */
 export const taskCancelTool: HarnessToolDefinition = {
+  frameworkTool: true,
   description: TASK_CANCEL_DESCRIPTION,
   frameworkAction: "task-cancel",
   inputSchema: defineJsonSchema<TaskCancelInput>({

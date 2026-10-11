@@ -12,6 +12,14 @@ const RECORDING_DISABLED = {
   recordErrors: false,
 } satisfies DatadogReporterConfig;
 
+const SAMPLED_TRACE_CONTEXT = {
+  traceId: "0123456789abcdef0123456789abcdef",
+  spanId: "0123456789abcdef",
+  traceFlags: 1,
+  sessionId: "session-123",
+  primary: true,
+};
+
 function makeTarget(kind: "local" | "remote" = "local"): EveEvalTarget {
   return {
     capabilities: { devRoutes: kind === "local" },
@@ -283,7 +291,54 @@ describe("Datadog", () => {
       expect.objectContaining({ label: "eve_reasoning_block_count", value: 0 }),
     ]);
     expect(submittedSpan).not.toHaveProperty("metadata.eveAssertionScores");
+    expect(submittedSpan).not.toHaveProperty("metadata.experimentRuntimeTraceLinks");
   });
+
+  it("uses a positive duration for evals completed within the same millisecond", async () => {
+    const { config, experiment } = makeConfig(RECORDING_DISABLED);
+    const reporter = Datadog(config);
+    const evaluation = makeEval();
+    const result = makeEvalResult({
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await reporter.onRunStart([evaluation], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 1 }));
+  });
+
+  it.each(["failed", "waiting"] as const)(
+    "records runtime trace links for %s evals",
+    async (status) => {
+      const { config, experiment } = makeConfig(RECORDING_DISABLED);
+      const reporter = Datadog(config);
+      const result = makeEvalResult({
+        result: {
+          ...makeEvalResult().result,
+          status,
+          traceContexts: [SAMPLED_TRACE_CONTEXT],
+        },
+      });
+
+      await reporter.onRunStart([makeEval()], makeTarget());
+      await reporter.onEvalComplete(result);
+
+      expect(experiment.submitSpan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            experimentRuntimeTraceLinks: [
+              expect.objectContaining({
+                relation: "experiment_runtime",
+                primary: true,
+              }),
+            ],
+          }),
+        }),
+      );
+    },
+  );
 
   it("redacts target URL secrets and omits execution errors when recordErrors is disabled", async () => {
     const { client, config, experiment } = makeConfig({ recordInputs: false, recordErrors: false });
@@ -429,10 +484,15 @@ describe("Datadog", () => {
     ]);
   });
 
-  it("records inputs, outputs, and expected outputs in a shared dataset by default", async () => {
+  it("records inputs, outputs, expected outputs, and runtime links in a shared dataset by default", async () => {
     const { client, config, datasets, experiment, lines } = makeConfig({ experimentName: "run-1" });
     const reporter = Datadog(config);
-    const result = makeEvalResult();
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [SAMPLED_TRACE_CONTEXT],
+      },
+    });
 
     await reporter.onRunStart([makeEval()], makeTarget());
     await reporter.onEvalComplete(result);
@@ -470,6 +530,14 @@ describe("Datadog", () => {
         output: "actual output",
         expectedOutput: "helpful onboarding answer",
         datasetRecordId: "record-1",
+        metadata: expect.objectContaining({
+          experimentRuntimeTraceLinks: [
+            expect.objectContaining({
+              traceId: "c6a8d65cb7d45f2cbbcd2b8e57bdd074",
+              spanId: "81985529216486895",
+            }),
+          ],
+        }),
       }),
     );
     expect(lines.join("\n")).toContain(

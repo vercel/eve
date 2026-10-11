@@ -32,7 +32,7 @@ export default defineEval({
     turn.event("turn.started", { count: 1 });
     turn.event("turn.completed", { count: 1 });
     turn.eventsSatisfy("the held turn resumes under its own id", staysInOneTurn);
-    turn.notCalledTool("task_wait");
+    turn.notCalledTool("eve__task_wait");
     t.check(turn.message, includes(/^WORKFLOW-STAGE-RESULT \{.*"plan":"deploy api"/u)).label(
       "the turn's result is the final reply",
     );

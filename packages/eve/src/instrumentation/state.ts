@@ -29,6 +29,7 @@ export interface InstrumentationStateOwner {
 
 type InstrumentationStateMap = Readonly<Record<string, InstrumentationStateRecord>>;
 interface InstrumentationActionState {
+  readonly toolCall?: import("#instrumentation/lifecycle.js").InstrumentationToolCallStartedEvent;
   readonly scope: InstrumentationAttemptScope;
 }
 type InstrumentationActionStateMap = Readonly<Record<string, InstrumentationActionState>>;
@@ -36,8 +37,8 @@ type InstrumentationScopeMap = Readonly<Record<string, InstrumentationAttemptSco
 
 /**
  * Provider state lives in serialized Workflow context, not in the harness, so a
- * value staged by `action.started` in one process is still there when
- * `action.completed` runs in another.
+ * value staged by `tool.call.started` in one process is still there when
+ * `tool.call.completed` runs in another.
  */
 const InstrumentationStateKey = new ContextKey<InstrumentationStateMap>(
   SERIALIZED_INSTRUMENTATION_STATE_KEYS.providerState,
@@ -191,10 +192,11 @@ function releaseMatchingInstrumentationState(
 export function rememberInstrumentationActionScope(
   idempotencyKey: string,
   scope: InstrumentationAttemptScope,
+  toolCall?: InstrumentationActionState["toolCall"],
 ): void {
   writeContextKey(InstrumentationActionStateKey, (state) => ({
     ...state,
-    [idempotencyKey]: { scope },
+    [idempotencyKey]: { scope, toolCall },
   }));
 }
 
@@ -224,6 +226,7 @@ export function takeInstrumentationInputScope(
 }
 
 interface InstrumentationActionCorrelation {
+  readonly toolCall?: InstrumentationActionState["toolCall"];
   readonly idempotencyKey: string;
   readonly scope: InstrumentationAttemptScope;
 }
@@ -237,7 +240,8 @@ export function findInstrumentationActionScopeForCall(
   for (const candidate of Object.values(actions)) {
     const idempotencyKey = `action:${sessionId}:${candidate.scope.turnId}:${callId}`;
     const action = actions[idempotencyKey];
-    if (action !== undefined) return { idempotencyKey, scope: action.scope };
+    if (action !== undefined)
+      return { idempotencyKey, scope: action.scope, toolCall: action.toolCall };
   }
   return undefined;
 }
@@ -266,7 +270,11 @@ export function takeInstrumentationActionScopes(
         action.scope.sessionId === sessionId &&
         (turnId === undefined || action.scope.turnId === turnId),
     )
-    .map(([idempotencyKey, action]) => ({ idempotencyKey, scope: action.scope }));
+    .map(([idempotencyKey, action]) => ({
+      idempotencyKey,
+      scope: action.scope,
+      toolCall: action.toolCall,
+    }));
   if (correlations.length === 0) return [];
   const keys = new Set(correlations.map((correlation) => correlation.idempotencyKey));
   writeContextKey(InstrumentationActionStateKey, (state) => {
@@ -375,7 +383,10 @@ function deserializeActionStates(data: unknown): InstrumentationActionStateMap {
       !Array.isArray(record["scope"])
         ? (record["scope"] as InstrumentationAttemptScope)
         : (value as InstrumentationAttemptScope);
-    actions[idempotencyKey] = { scope };
+    actions[idempotencyKey] = {
+      scope,
+      toolCall: record.toolCall as InstrumentationActionState["toolCall"],
+    };
   }
   return actions;
 }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { followStreamIterable, openStreamBody } from "./open-stream.js";
+import { ClientSessionStrandedError } from "#client/client-error.js";
 import type { StreamReconnectPolicy } from "#client/types.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
@@ -44,6 +45,29 @@ describe("openStreamBody", () => {
 
     expect(cancel).toHaveBeenCalledOnce();
     expect(signal?.aborted).toBe(true);
+  });
+
+  it("stops reconnecting when a stranded stream returns an actionable conflict", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        {
+          code: "session_stranded",
+          eveVersion: "0.0.1",
+          error: "Reset this session to continue.",
+        },
+        { status: 409 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const stream = followStreamIterable({
+      host: "https://agent.example",
+      path: "/eve/v1/session/session_1/stream",
+      resolveHeaders: async () => new Headers(),
+      startIndex: 0,
+      keepAlive: true,
+    });
+    await expect(stream.next()).rejects.toThrow(ClientSessionStrandedError);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("advertises support for versioned stream controls", async () => {
@@ -103,6 +127,30 @@ describe("openStreamBody", () => {
 });
 
 describe("followStreamIterable", () => {
+  it("finishes a live follow when reset publishes a terminal event", async () => {
+    const event = {
+      type: "session.failed",
+      data: { code: "session_stranded", message: "Start a new session.", sessionId: "session_1" },
+    };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify(event) + "\n", {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const stream = followStreamIterable({
+      host: "https://agent.example",
+      path: "/eve/v1/session/session_1/stream",
+      resolveHeaders: async () => new Headers(),
+      startIndex: 0,
+      keepAlive: true,
+    });
+    await expect(stream.next()).resolves.toMatchObject({ done: false, value: event });
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("honors explicit idle retry limits even while following continuously", async () => {
     const fetchMock = vi.fn(
       async () =>

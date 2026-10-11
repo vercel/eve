@@ -48,7 +48,7 @@ export async function cancelWorkingTasks(
 
 export async function answerTaskCancel(
   cursor: SessionStateCursor,
-  call: Extract<TaskToolCall, { readonly kind: "task_cancel" }>,
+  call: Extract<TaskToolCall, { readonly kind: typeof TASK_CANCEL_TOOL_NAME }>,
 ): Promise<RuntimeActionResult> {
   const result = taskCancelResult(sessionTaskTable(cursor), call.taskId);
   if (result === undefined) {

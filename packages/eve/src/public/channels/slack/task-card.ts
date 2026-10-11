@@ -56,7 +56,7 @@ interface SlackTaskObject {
  * eve's default task card: a `task_card` block for one task, or a `plan` block
  * for several, and no card for a turn that started none. A settled task shows
  * one line about how it ended and how long it took. A task the model cancelled
- * with `task_cancel` shows as done, since it no longer needed the work; a
+ * with `eve__task_cancel` shows as done, since it no longer needed the work; a
  * failed task, or one stopped any other way, shows as an error.
  */
 export function renderDefaultSlackTaskCard(view: TaskCardView): SlackTaskCard | null {
@@ -138,7 +138,7 @@ function shownDuration(ms: number): string | undefined {
   return Number.isFinite(ms) && ms >= MIN_SHOWN_DURATION_MS ? formatDuration(ms) : undefined;
 }
 
-/** A task stopped before it finished for any reason but the model's own `task_cancel`. */
+/** A task stopped before it finished for any reason but the model's own `eve__task_cancel`. */
 function isInterrupted(task: TaskCardTask): boolean {
   return task.status === "cancelled" && task.cancelReason !== "task_cancel";
 }

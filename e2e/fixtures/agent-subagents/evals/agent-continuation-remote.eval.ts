@@ -9,7 +9,7 @@ import { continueKeeperAcrossTurns } from "./agent-continuation.shared";
  */
 export default defineEval({
   description:
-    "A remote agent task is continued by taskId across turns and after task_cancel with its conversation intact.",
+    "A remote agent task is continued by taskId across turns and after eve__task_cancel with its conversation intact.",
   timeoutMs: 120_000,
   async test(t) {
     await continueKeeperAcrossTurns(t, "remote-loopback");

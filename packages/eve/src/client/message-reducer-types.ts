@@ -227,13 +227,18 @@ export type EveDynamicToolPart = {
  * classifies the action (`"tool-call"`, `"subagent-call"`, `"load-skill"`, or
  * `"unknown"`), `eve.name` is the resolved action name, and `eve.inputRequest`
  * and `eve.inputResponse` store the HITL prompt and submitted response when the
- * call required approval.
+ * call required approval. `eve.label` is how the call reads to people, the same
+ * text eve's channels and terminal UI show: the tool's label, or a readable form
+ * of its name, replaced by its completion label once it settles. The default
+ * reducer always sets it; it is optional only for parts persisted by older eve
+ * versions.
  */
 export interface EveMessageToolMetadata {
   readonly eve?: {
     readonly inputRequest?: EveMessageInputRequest;
     readonly inputResponse?: InputResponse;
     readonly kind: "load-skill" | "subagent-call" | "tool-call" | "unknown";
+    readonly label?: string;
     readonly name: string;
   };
 }

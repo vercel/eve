@@ -1,7 +1,7 @@
 /**
  * Conversation view for the `/traces` viewer: the same trace, re-told as a
  * flow of user messages, assistant replies, and tool calls instead of a
- * latency waterfall. Activation and action spans provide the user and tool
+ * latency waterfall. Activation and tool spans provide the user and tool
  * cards directly; model response spans provide assistant cards.
  */
 
@@ -12,6 +12,7 @@ import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js"
 import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
 import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
 import { localTraceSpanCostUsd } from "#tracing/local-trace-summary.js";
+import { traceStringAttribute } from "#tracing/local-trace-operations.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -59,7 +60,7 @@ export interface ConversationSubagent {
 /** Max rendered lines for one collapsed card payload (args, result, or text). */
 const CARD_PAYLOAD_LINES = 3;
 
-/** Builds the conversation flow from eve's activation, model, and action spans. */
+/** Builds the conversation flow from eve's activation, model, and tool spans. */
 export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const byId = new Map(trace.spans.map((span) => [span.spanId, span]));
   const subagents = new Map<string, ConversationSubagent>();
@@ -114,9 +115,9 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
     if (isModelSpan(span)) {
       const text = stringAttribute(span, "ai.response.text");
       const reasoning = stringAttribute(span, "ai.response.reasoning");
-      const hasUsage =
-        numberAttribute(span, "agent.usage.input_tokens") !== undefined ||
-        numberAttribute(span, "agent.usage.output_tokens") !== undefined;
+      const inputTokens = numberAttribute(span, "gen_ai.usage.input_tokens");
+      const outputTokens = numberAttribute(span, "gen_ai.usage.output_tokens");
+      const hasUsage = inputTokens !== undefined || outputTokens !== undefined;
       const hasToolCalls = span.attributes["ai.response.tool_calls"] !== undefined;
       const isEmpty =
         (text === undefined || text.trim().length === 0) &&
@@ -131,9 +132,9 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
           costUsd: stepCostUsd(span, byId),
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
-          inputTokens: numberAttribute(span, "agent.usage.input_tokens"),
+          inputTokens,
           model: stringAttribute(span, "gen_ai.request.model"),
-          outputTokens: numberAttribute(span, "agent.usage.output_tokens"),
+          outputTokens,
           reasoning,
           span,
           subagent,
@@ -165,14 +166,21 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
       }
       continue;
     }
-    if (span.name === "agent.action") {
+    if (
+      span.attributes["gen_ai.operation.name"] === "execute_tool" ||
+      span.name === "agent.action"
+    ) {
       entries.push({
         item: {
           kind: "tool",
           args: stringAttribute(span, "gen_ai.tool.call.arguments"),
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
-          name: stripTerminalControls(stringAttribute(span, "agent.action.name") ?? "action"),
+          name: stripTerminalControls(
+            stringAttribute(span, "gen_ai.tool.name") ??
+              stringAttribute(span, "agent.action.name") ??
+              "tool",
+          ),
           result: unwrapJsonString(stringAttribute(span, "gen_ai.tool.call.result")),
           span,
           subagent,
@@ -238,7 +246,7 @@ function turnSubagent(
     };
   }
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
-  if (parent === undefined || parent.name !== "agent.action") return undefined;
+  if (parent === undefined) return undefined;
   const kind = stringAttribute(parent, "agent.action.kind");
   if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
   const parentTurnId = stringAttribute(parent, "agent.turn.id");
@@ -246,7 +254,7 @@ function turnSubagent(
   const name = stringAttribute(parent, "agent.action.name");
   return {
     name: name === undefined ? undefined : stripTerminalControls(name),
-    parentCallId: stringAttribute(parent, "agent.action.call_id"),
+    parentCallId: traceStringAttribute(parent, "gen_ai.tool.call.id"),
     parentTurnId,
   };
 }

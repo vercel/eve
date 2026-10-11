@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionStateMap } from "#harness/types.js";
+import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import {
@@ -9,7 +9,9 @@ import {
   type ProxyInputRequest,
 } from "#harness/proxy-input-requests.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { createInputRequestedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import type { InputRequest } from "#shared/input.js";
+import { withPublished } from "#internal/testing/session-machine.js";
 import {
   accumulateTurnUsage,
   getTurnUsageState,
@@ -72,10 +74,12 @@ describe("settleCancelledTurnStep", () => {
   ])(
     "reports only what the session spent since its caller's last report (reports usage: $reportUsage)",
     async ({ reportUsage, reported, nextSettled }) => {
-      const base = createTestSessionState({
-        emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn_2" },
-        sessionId: "reviewer-session",
-      });
+      const base = createTestSessionState(
+        {
+          sessionId: "reviewer-session",
+        },
+        { sequence: 1, stepIndex: 0, turnId: "turn_2" },
+      );
       // The reviewer's first turn spent 100 tokens and settled, reporting them.
       const settled = takeSessionUsageDelta(spend(base.snapshot.session, 100, "turn_1")).session;
       // Its next turn spent 50 more before Alice cancelled it.
@@ -97,17 +101,19 @@ describe("settleCancelledTurnStep", () => {
   );
 
   it("withdraws every request the session relays before it reports the turn cancelled", async () => {
-    const base = createTestSessionState({
-      emissionState: { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn_1" },
-      sessionId: "support-session",
-    });
+    const base = createTestSessionState(
+      {
+        sessionId: "support-session",
+      },
+      { sequence: 3, stepIndex: 1, turnId: "turn_1" },
+    );
     // Alice's turn relays a question from Bob's deploy task and an approval
     // from the reviewer subagent when she cancels it.
     const state = relay(
       relay(base.snapshot.session.state, "deploy-run-ask-1", {
         kind: "question",
         runId: "deploy-run",
-        workflowAsk: { control: "deploy-run-control", question: {} },
+        workflowAsk: { control: "deploy-run-control" },
       }),
       "reviewer-approval-1",
       { kind: "tool-approval" },
@@ -136,23 +142,33 @@ describe("settleCancelledTurnStep", () => {
   });
 });
 
+/** Relays a child's request: the session publishes it, then keeps its route. */
 function relay(
   state: SessionStateMap | undefined,
   requestId: string,
   route: Pick<ProxyInputRequest, "kind" | "runId" | "workflowAsk">,
 ): SessionStateMap | undefined {
+  const event = { sequence: 2, stepIndex: 0, turnId: "turn_1" };
+  const request: InputRequest = {
+    action: { callId: `${requestId}-call`, input: {}, kind: "tool-call", toolName: "deploy" },
+    kind: route.kind,
+    prompt: "Approve deploy?",
+    requestId,
+  };
+  const published = withPublished({ ...openSession, state }, [
+    createInputRequestedEvent({ callId: `${requestId}-served`, requests: [request], ...event }),
+  ]);
   return upsertProxyInputRequestState({
-    entries: [
-      [
-        requestId,
-        {
-          ...route,
-          childContinuationToken: requestId,
-          event: { sequence: 2, stepIndex: 0, turnId: "turn_1" },
-        },
-      ],
-    ],
+    entries: [[requestId, { ...route, childContinuationToken: requestId, event }]],
     forChildContinuationToken: requestId,
-    state,
+    state: published.state,
   });
 }
+
+const openSession: HarnessSession = {
+  agent: { dynamicModel: true, system: "", tools: [] },
+  compaction: { recentWindowSize: 10, threshold: 100_000 },
+  continuationToken: "test-token",
+  history: [],
+  sessionId: "support-session",
+};

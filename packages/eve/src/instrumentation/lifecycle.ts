@@ -51,6 +51,7 @@ export interface InstrumentationUsage {
 export interface InstrumentationModelInput {
   readonly instructions?: unknown;
   readonly messages: readonly unknown[];
+  readonly tools?: readonly unknown[];
 }
 
 /**
@@ -83,23 +84,12 @@ export type InstrumentationContentPart =
     };
 
 /**
- * What eve dispatched an action as. The model sees every action as a tool, so
- * this is the only thing that separates a subagent or remote-agent call from an
- * ordinary tool in a trace.
- */
-export type InstrumentationActionKind =
-  | "load-skill"
-  | "remote-agent-call"
-  | "subagent-call"
-  | "tool-call";
-
-/**
- * How one action ended.
+ * How one tool call ended.
  *
  * `type` survives a provider that declined content, so whether the tool errored
  * is answerable without seeing what it returned.
  */
-export type InstrumentationActionOutput =
+export type InstrumentationToolOutput =
   | { readonly type: "result"; readonly output?: unknown }
   | { readonly type: "error"; readonly error?: unknown };
 
@@ -461,9 +451,19 @@ export type InstrumentationModelCallTerminalEvent =
   | InstrumentationModelCallCompletedEvent
   | InstrumentationModelCallFailedEvent;
 
-export type InstrumentationToolOutput = InstrumentationActionOutput;
+/** How eve runs the tool call. */
+export type InstrumentationToolCallKind =
+  | "load-skill"
+  | "remote-agent-call"
+  | "subagent-call"
+  | "tool-call";
 
 export interface InstrumentationToolCallStartedEvent {
+  /** Durable dispatch metadata, when this call is owned by eve's tool loop. */
+  readonly kind?: InstrumentationToolCallKind;
+  readonly isWorkflowTool?: boolean;
+  readonly frameworkTool?: boolean;
+  readonly startedAtMs?: number;
   readonly type: "tool.call.started";
   readonly callId: string;
   readonly idempotencyKey: string;
@@ -473,6 +473,10 @@ export interface InstrumentationToolCallStartedEvent {
 }
 
 export interface InstrumentationToolCallCompletedEvent {
+  readonly outcome?: InstrumentationToolCallOutcome;
+  readonly usage?: InstrumentationUsage;
+  readonly acceptedAtMs?: number;
+  readonly completedAtMs?: number;
   readonly type: "tool.call.completed";
   /** How long the tool's `execute` ran, in milliseconds, when the publisher measured it. */
   readonly durationMs?: number;
@@ -482,6 +486,11 @@ export interface InstrumentationToolCallCompletedEvent {
 }
 
 export interface InstrumentationToolCallFailedEvent {
+  readonly outcome?: Exclude<InstrumentationToolCallOutcome, "completed">;
+  readonly usage?: InstrumentationUsage;
+  readonly acceptedAtMs?: number;
+  readonly errorCode?: string;
+  readonly completedAtMs?: number;
   readonly type: "tool.call.failed";
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
@@ -493,56 +502,12 @@ export type InstrumentationToolCallTerminalEvent =
   | InstrumentationToolCallCompletedEvent
   | InstrumentationToolCallFailedEvent;
 
-/**
- * One thing the agent did on the model's behalf. `kind` is what separates a
- * subagent or remote-agent call from an ordinary tool; `name` is the name the
- * model called, which is the tool name for every kind.
- */
-export interface InstrumentationActionStartedEvent {
-  readonly type: "action.started";
-  readonly callId: string;
-  readonly idempotencyKey: string;
-  /** Content. Absent unless this provider's trace policy records this direction. */
-  readonly input?: unknown;
-  /** Whether this action owns a durable workflow body. */
-  readonly isWorkflowTool?: boolean;
-  readonly kind: InstrumentationActionKind;
-  readonly name: string;
-  readonly scope: InstrumentationAttemptScope;
-}
-
-export type InstrumentationActionOutcome =
+export type InstrumentationToolCallOutcome =
   | "abandoned"
   | "cancelled"
   | "completed"
   | "failed"
   | "rejected";
-
-export interface InstrumentationActionCompletedEvent {
-  readonly type: "action.completed";
-  readonly acceptedAtMs?: number;
-  readonly idempotencyKey: string;
-  readonly outcome: "completed";
-  readonly output: InstrumentationActionOutput;
-  readonly scope: InstrumentationAttemptScope;
-  readonly usage?: InstrumentationUsage;
-}
-
-export interface InstrumentationActionFailedEvent {
-  readonly type: "action.failed";
-  readonly acceptedAtMs?: number;
-  /** Content. Absent unless this provider's trace policy records this direction. */
-  readonly error?: unknown;
-  readonly errorCode?: string;
-  readonly idempotencyKey: string;
-  readonly outcome: Exclude<InstrumentationActionOutcome, "completed">;
-  readonly scope: InstrumentationAttemptScope;
-  readonly usage?: InstrumentationUsage;
-}
-
-export type InstrumentationActionTerminalEvent =
-  | InstrumentationActionCompletedEvent
-  | InstrumentationActionFailedEvent;
 
 /** The second argument to every handler. */
 export interface InstrumentationHandlerContext {
@@ -593,9 +558,6 @@ export interface InstrumentationProviderDefinition {
     readonly "session.failed"?: InstrumentationEventHandler<InstrumentationSessionFailedEvent>;
     readonly "session.started"?: InstrumentationEventHandler<InstrumentationSessionStartedEvent>;
     readonly "session.waiting"?: InstrumentationEventHandler<InstrumentationSessionSettledEvent>;
-    readonly "action.started"?: InstrumentationEventHandler<InstrumentationActionStartedEvent>;
-    readonly "action.completed"?: InstrumentationEventHandler<InstrumentationActionCompletedEvent>;
-    readonly "action.failed"?: InstrumentationEventHandler<InstrumentationActionFailedEvent>;
     readonly "tool.call.started"?: InstrumentationEventHandler<InstrumentationToolCallStartedEvent>;
     readonly "tool.call.completed"?: InstrumentationEventHandler<InstrumentationToolCallCompletedEvent>;
     readonly "tool.call.failed"?: InstrumentationEventHandler<InstrumentationToolCallFailedEvent>;
@@ -630,8 +592,6 @@ export type InstrumentationCorrelatedEvent =
   | InstrumentationChannelDeliveryTerminalEvent
   | InstrumentationInputRequestedEvent
   | InstrumentationInputResolvedEvent
-  | InstrumentationActionStartedEvent
-  | InstrumentationActionTerminalEvent
   | memory.InstrumentationMemoryOperationStartedEvent
   | memory.InstrumentationMemoryOperationTerminalEvent
   | InstrumentationModelCallStartedEvent
@@ -662,6 +622,13 @@ export type InstrumentationExecutionOperation =
       readonly idempotencyKey: string;
       readonly scope: InstrumentationAttemptScope;
       readonly type: "tool.call";
+      readonly callId?: string;
+      readonly toolName?: string;
+      readonly input?: unknown;
+      readonly frameworkTool?: boolean;
+      readonly startedAtMs?: number;
+      readonly completedAtMs?: number;
+      readonly failed?: boolean;
     }
   | {
       readonly idempotencyKey: string;

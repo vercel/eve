@@ -32,9 +32,11 @@ function setupSelectRequest<T extends PrompterValue>(
     message: string;
     options: SetupSelectRequest["options"];
     description?: string;
+    helpText?: string;
     metadata?: SetupSelectRequest["metadata"];
   } = { message: opts.message, options };
   if (opts.description !== undefined) base.description = opts.description;
+  if (opts.helpText !== undefined) base.helpText = opts.helpText;
   if (opts.metadata !== undefined) base.metadata = opts.metadata;
   const withContext = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;

@@ -1,4 +1,5 @@
 import {
+  expectAgentToolExposure,
   expectBoolean,
   expectFunction,
   expectObjectRecord,
@@ -8,13 +9,14 @@ import {
 } from "#internal/authored-module.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 export interface DynamicRemoteAgentConfig {
   readonly credentialsStepId?: string;
   readonly description: string;
   readonly forwardPrincipal?: boolean;
   readonly path: string;
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
   readonly url: string;
 }
 
@@ -50,7 +52,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     description: string;
     forwardPrincipal?: boolean;
     path: string;
-    tool?: boolean;
+    tool?: AgentToolExposure;
     url: string;
   } = {
     description: expectString(record.description, message),
@@ -65,7 +67,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     config.forwardPrincipal = expectBoolean(record.forwardPrincipal, message);
   }
   if (record.tool !== undefined) {
-    config.tool = expectBoolean(record.tool, message);
+    config.tool = expectAgentToolExposure(record.tool, message);
   }
 
   return config;

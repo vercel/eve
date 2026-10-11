@@ -151,7 +151,7 @@ chatSdkChannel({
 });
 ```
 
-Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and tool status on `actions.requested`.
+Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and on `actions.requested`, each call's [label](/docs/tools#label-tool-activity) or a readable form of its name. They leave out the model's own `eve__task_wait` and `eve__task_cancel` calls.
 
 ### Optional capabilities degrade gracefully
 
@@ -195,6 +195,33 @@ chatSdkChannel({
 });
 ```
 
+### Sign-ins
+
+When a tool needs a connection the person hasn't authorized, eve shows a sign-in prompt with the connection's link, code, or instructions. In a direct message it posts the prompt in the thread and edits it once the sign-in completes.
+
+Outside a direct message, the prompt is a credential, so eve sends it only to the person signing in. It uses the adapter's native ephemeral message where there is one and otherwise opens a direct message with them. The thread gets a status without the link, which eve edits once the sign-in completes.
+
+To find that person, eve matches the turn's `auth` principal to the author of the message you passed to `send`. Private delivery therefore needs both:
+
+- per-person `auth` on each `send`, so a principal names one person; and
+- the handler's `Thread` object as `thread`, rather than a thread id string, so eve sees who wrote the message.
+
+```ts
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, {
+    thread,
+    auth: {
+      authenticator: "slack",
+      principalType: "user",
+      principalId: message.author.userId,
+      attributes: {},
+    },
+  });
+});
+```
+
+Without both, including with the default `auth: null`, the thread only gets a notice to continue in a direct message, and the prompt isn't shown anywhere. The same happens when several people send as one principal (such as tenant auth), or when the adapter has neither ephemerals nor `openDM`.
+
 ### Proactive sessions
 
 Start a session without an inbound webhook through `to(channel, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(channel, target).send(message, { auth })` from another channel. The target is a serialized Chat SDK thread, or `{ threadId, adapterName }` when you only have a provider-native thread id:
@@ -208,7 +235,7 @@ await to(channel, { adapterName: "resend", threadId: "resend:user@example.com" }
 
 ### Attachments
 
-`send` takes plain text or an AI SDK `UserContent` array. To forward a Chat SDK message's attachments, convert it with `messageToUserContent`, which returns `message.text` when there are no attachments and a `UserContent` array (text plus one file part per attachment URL) when there are:
+`send` takes plain text or an AI SDK `UserContent` array. To forward a Chat SDK message's attachments, convert it with `messageToUserContent`. It returns `message.text` when there are no attachments, and a `UserContent` array (the text plus one part per attachment) when there are:
 
 ```ts
 import { messageToUserContent } from "eve/channels/chat-sdk";
@@ -217,6 +244,8 @@ bot.onNewMention(async (thread, message) => {
   await send(messageToUserContent(message), { thread });
 });
 ```
+
+When the adapter can download an attachment (it sets `fetchData`, as the Slack, Google Chat, WhatsApp, and Twilio adapters do), eve downloads it with the adapter's credentials when the turn runs, not in the webhook, and passes the bytes. Platform file URLs usually need those credentials, so the model provider couldn't open them. eve rebuilds the download with the adapter's `rehydrateAttachment`; an adapter without one can't download after the webhook returns, so its files reach the agent as a short note. A failed download, or a file over 25 MB, also becomes a note. An attachment with only a URL is downloaded by eve when the URL is public `https:`; otherwise it becomes a note.
 
 See [File uploads](./custom#file-uploads) for how eve stages remote file URLs before the model call.
 

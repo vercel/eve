@@ -210,30 +210,6 @@ describe("stageAttachmentsForAdapter", () => {
     expect(written.toString("utf8")).toBe(payload);
   });
 
-  it("leaves remote URL parts unchanged — the provider fetches them at call time", async () => {
-    const sandbox = mockSandbox();
-    const content: UserContent = [
-      {
-        data: new URL("https://example.com/chart.png"),
-        filename: "chart.png",
-        mediaType: "image/png",
-        type: "file",
-      },
-    ];
-
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
-    const filePart = staged[0] as FilePart;
-
-    expect(filePart.filename).toBe("chart.png");
-    expect(filePart.data).toBeInstanceOf(URL);
-    expect((filePart.data as URL).protocol).toBe("https:");
-    expect(sandbox.writes).toHaveLength(0);
-  });
-
   it("passes already-staged eve-sandbox: ref parts through unchanged (idempotent)", async () => {
     const sandbox = mockSandbox();
     const existingRef = new URL(

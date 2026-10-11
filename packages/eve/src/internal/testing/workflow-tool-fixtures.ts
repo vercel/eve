@@ -258,3 +258,13 @@ export async function receiveDelegatedResultWorkflow(token: string): Promise<unk
   using result = createHook<unknown>({ token });
   return await result;
 }
+
+export async function reportCallerWorkflow(_input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return { caller: ctx.session.auth.current?.principalId ?? null };
+}
+
+export async function failingServeWorkflow(): Promise<never> {
+  "use workflow";
+  throw new Error("Live serve workflow must not execute.");
+}

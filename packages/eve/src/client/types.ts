@@ -9,6 +9,7 @@ import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ToolStub } from "#tool-stubs/types.js";
 export type { HealthResult } from "#client/health-schema.js";
 
 export type {
@@ -110,6 +111,11 @@ export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutpu
 
 /** Request options for creating a conversation session before its first turn. */
 export interface CreateSessionOptions {
+  /**
+   * Tool stubs stay fixed for this session and its local subagents.
+   * The server must authorize their use.
+   */
+  readonly stubs?: readonly ToolStub[];
   /** Abort signal for cancelling the creation request. */
   readonly signal?: AbortSignal;
   /** Additional headers for this request only. */

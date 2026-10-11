@@ -1,7 +1,8 @@
-import { chatSdkChannel } from "#public/channels/chat-sdk/index.js";
+import { chatSdkChannel, messageToUserContent } from "#public/channels/chat-sdk/index.js";
 import {
   type Adapter,
   type AdapterPostableMessage,
+  type Attachment,
   BaseFormatConverter,
   type ChatInstance,
   Message,
@@ -10,24 +11,29 @@ import {
   parseMarkdown,
   toPlainText,
 } from "#compiled/chat/index.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type Surface,
   numberedOptions,
   linkTargets,
+  type SentFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const ADAPTER = "conformance";
 const PERSON = { fullName: "Alice", isBot: false, isMe: false, userId: "alice", userName: "alice" };
-/** The signed-in person a real integration would attach from its own user directory. */
-const PERSON_AUTH = {
-  attributes: {},
-  authenticator: "conformance",
-  principalId: "alice",
-  principalType: "user",
-};
+const PEOPLE = {
+  alice: PERSON,
+  bob: { fullName: "Bob", isBot: false, isMe: false, userId: "bob", userName: "bob" },
+} as const;
+
+/** The auth an app derives from a Chat SDK user, as the docs' `resolveInputAuth` example does. */
+function userAuth(userId: string): SessionAuthContext {
+  return { attributes: {}, authenticator: ADAPTER, principalId: userId, principalType: "user" };
+}
 let nextThread = 0;
 
 interface CardNode {
@@ -39,13 +45,24 @@ interface CardNode {
   readonly value?: string;
 }
 
+interface InboundFile extends Pick<SentFile, "mediaType" | "name"> {
+  readonly url: string;
+}
+
 type Inbound =
-  | { readonly kind: "message"; readonly text: string }
+  | {
+      readonly kind: "message";
+      readonly person: Person;
+      readonly text: string;
+      /** Files on the message, as the platform lists them: a URL to each, not its bytes. */
+      readonly files?: readonly InboundFile[];
+    }
   | {
       readonly kind: "action";
       readonly actionId: string;
       /** The posted message holding the pressed button. */
       readonly messageId: string;
+      readonly person: Person;
       readonly value?: string;
     };
 
@@ -82,7 +99,10 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
   });
   return {
     ...driver,
-    capabilities: ["buttons", "text-replies"],
+    capabilities:
+      surface === "private"
+        ? ["attachments", "buttons", "text-replies"]
+        : ["attachments", "another-person", "buttons", "text-replies"],
     surface,
     findOptions(call, prompt) {
       if (!isPost(call)) return undefined;
@@ -96,17 +116,19 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
       return {
         id: messageIdOf(call),
         links: linkTargets(card),
+        onlyPerson: isPersonDirectMessage(call),
         options: buttonsOf(call),
         text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
       };
     },
     personShownAs: [PERSON.fullName, PERSON.userName],
-    press(option) {
+    press(option, person: Person) {
       const { button, messageId } = option.handle as PressHandle;
       return driver.inbound({
         actionId: button.id!,
         kind: "action",
         messageId,
+        person,
         value: button.value,
       });
     },
@@ -114,11 +136,9 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
 }
 
 /**
- * The same bridge behind a text-only adapter, as Photon iMessage's behaves:
- * every post reaches the person as the `chat` package's default plain-text
- * rendering, so a card shows only its fallback text and has nothing to press.
- * Photon's real adapter sends over gRPC, so this is the closest in-process
- * stand-in; it covers eve's bridge and the SDK fallback, not Photon itself.
+ * The same bridge behind a text-only adapter: every post reaches the person as
+ * the `chat` package's default plain-text rendering, so a card shows only its
+ * fallback text and has nothing to press.
  */
 export function chatSdkTextDriver(): ChannelDriver {
   const converter = new PlainTextConverter();
@@ -129,7 +149,7 @@ export function chatSdkTextDriver(): ChannelDriver {
   });
   return {
     ...driver,
-    capabilities: ["text-replies"],
+    capabilities: ["attachments", "text-replies"],
     surface: "private",
     findOptions(call, prompt) {
       if (!isPost(call) || typeof call.body !== "string" || !call.body.includes(prompt)) {
@@ -163,6 +183,8 @@ function chatSdkDriverWith(input: {
   nextThread += 1;
   const threadId = `${ADAPTER}:D${nextThread}`;
   let sequence = 0;
+  /** Files a person sent, by the URL the platform lists each under. */
+  const uploads = new Map<string, SentFile>();
 
   function inbound(body: Inbound): Request {
     return new Request(`https://agent.example.com/eve/v1/${ADAPTER}`, {
@@ -174,13 +196,22 @@ function chatSdkDriverWith(input: {
 
   return {
     name: input.name,
+    personId: PERSON.userId,
     inbound,
     createChannel(record) {
       const dm = input.surface === "private";
-      const adapter = fakeAdapter(threadId, record, () => (sequence += 1), input.render, dm);
+      const adapter = fakeAdapter({
+        dm,
+        nextId: () => (sequence += 1),
+        record,
+        render: input.render,
+        threadId,
+        uploads,
+      });
       const bridge = chatSdkChannel({
         adapters: { [ADAPTER]: adapter },
         concurrency: "concurrent",
+        resolveInputAuth: (event) => userAuth(event.user.userId),
         routes: { [ADAPTER]: `/eve/v1/${ADAPTER}` },
         state: createMemoryState() as StateAdapter,
         streaming: false,
@@ -188,22 +219,44 @@ function chatSdkDriverWith(input: {
       });
       if (dm) {
         bridge.bot.onDirectMessage(async (thread, message) => {
-          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+          await bridge.send(messageToUserContent(message), {
+            auth: userAuth(message.author.userId),
+            context: [],
+            thread,
+          });
         });
       } else {
         // The wiring docs/channels/chat-sdk.mdx shows: a mention starts the session, and
         // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();
-          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+          await bridge.send(messageToUserContent(message), {
+            auth: userAuth(message.author.userId),
+            context: [],
+            thread,
+          });
         });
         bridge.bot.onSubscribedMessage(async (thread, message) => {
-          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+          await bridge.send(messageToUserContent(message), {
+            auth: userAuth(message.author.userId),
+            context: [],
+            thread,
+          });
         });
       }
       return bridge.channel;
     },
-    message: (text) => inbound({ kind: "message", text }),
+    message: (text, person, files = []) =>
+      inbound({
+        files: files.map((file) => {
+          const url = `https://files.conformance.example/${uploads.size + 1}/${encodeURIComponent(file.name)}`;
+          uploads.set(url, file);
+          return { mediaType: file.mediaType, name: file.name, url };
+        }),
+        kind: "message",
+        person,
+        text,
+      }),
     postedText(call: PlatformCall) {
       if (!isPost(call)) return undefined;
       const posted = call.body as AdapterPostableMessage;
@@ -219,18 +272,49 @@ function isPost(call: PlatformCall): boolean {
   return call.method === "postMessage" || call.method === "editMessage";
 }
 
-function fakeAdapter(
-  threadId: string,
-  record: (call: PlatformCall) => void,
-  nextId: () => number,
-  render: (posted: AdapterPostableMessage) => unknown,
-  dm: boolean,
-): Adapter {
+/** The DM thread the bot opens with the person, beside the conversation's own thread. */
+const PERSON_DM_THREAD = `${ADAPTER}:direct-message:${PERSON.userId}`;
+
+function isPersonDirectMessage(call: PlatformCall): boolean {
+  const { threadId } = call.response as { readonly threadId?: string };
+  return threadId === PERSON_DM_THREAD;
+}
+
+function fakeAdapter({
+  dm,
+  nextId,
+  record,
+  render,
+  threadId,
+  uploads,
+}: {
+  readonly dm: boolean;
+  readonly nextId: () => number;
+  readonly record: (call: PlatformCall) => void;
+  readonly render: (posted: AdapterPostableMessage) => unknown;
+  readonly threadId: string;
+  readonly uploads: ReadonlyMap<string, SentFile>;
+}): Adapter {
+  /** Downloads a file as an adapter's `fetchData` does: with its own auth, failing on a refusal. */
+  async function fetchData(url: string): Promise<Buffer> {
+    const file = uploads.get(url);
+    record({ body: {}, method: `GET ${url}`, response: {} });
+    if (file === undefined || file.downloadable === false) {
+      throw new Error(`Failed to fetch file: 403 Forbidden`);
+    }
+    return Buffer.from(file.bytes);
+  }
+
   const visibility = dm ? ("private" as const) : ("workspace" as const);
   let chat: ChatInstance | null = null;
   const self = {
     name: ADAPTER,
     userName: "eve",
+    // As Slack's adapter does, so the channel can rebuild a download after the queue.
+    rehydrateAttachment(attachment: Attachment): Attachment {
+      const { url } = attachment;
+      return url === undefined ? attachment : { ...attachment, fetchData: () => fetchData(url) };
+    },
     async initialize(instance: ChatInstance) {
       chat = instance;
     },
@@ -245,7 +329,7 @@ function fakeAdapter(
             messageId: body.messageId,
             raw: body,
             threadId,
-            user: PERSON,
+            user: PEOPLE[body.person],
             value: body.value,
           },
           options,
@@ -255,7 +339,7 @@ function fakeAdapter(
           adapter,
           threadId,
           // A person mentions the bot to start a channel thread; Chat routes the rest by subscription.
-          inboundMessage(threadId, id, body.text, !dm),
+          inboundMessage(threadId, id, body.text, !dm, PEOPLE[body.person], body.files, fetchData),
           options,
         );
       }
@@ -276,13 +360,27 @@ function fakeAdapter(
       isDM: dm,
       metadata: {},
     }),
+    // No native ephemerals, as on Discord or Linq: `postEphemeral` falls back to a DM.
+    // Only the person signing in can be reached, so a sign-in sent to anyone else fails its cells.
+    async openDM(userId: string) {
+      if (userId !== PERSON.userId) throw new Error(`no direct message with ${userId}`);
+      return PERSON_DM_THREAD;
+    },
     async postMessage(id: string, posted: AdapterPostableMessage) {
       const messageId = `posted-${nextId()}`;
-      record({ body: render(posted), method: "postMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "postMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async editMessage(id: string, messageId: string, posted: AdapterPostableMessage) {
-      record({ body: render(posted), method: "editMessage", response: { id: messageId } });
+      record({
+        body: render(posted),
+        method: "editMessage",
+        response: { id: messageId, threadId: id },
+      });
       return { id: messageId, raw: posted, threadId: id };
     },
     async addReaction() {},
@@ -295,10 +393,25 @@ function fakeAdapter(
   return adapter;
 }
 
-function inboundMessage(threadId: string, id: string, text: string, isMention = false): Message {
+function inboundMessage(
+  threadId: string,
+  id: string,
+  text: string,
+  isMention = false,
+  author: (typeof PEOPLE)[Person] = PERSON,
+  files: readonly InboundFile[] = [],
+  fetchData?: (url: string) => Promise<Buffer>,
+): Message {
   return new Message({
-    attachments: [],
-    author: PERSON,
+    attachments: files.map((file) => ({
+      fetchData: fetchData && (() => fetchData(file.url)),
+      mimeType: file.mediaType,
+      name: file.name,
+      type: file.mediaType.startsWith("image/") ? ("image" as const) : ("file" as const),
+      // Private to the platform, as Slack's or Teams' are: only `fetchData` can download it.
+      url: file.url,
+    })),
+    author,
     formatted: parseMarkdown(text),
     id,
     isMention,

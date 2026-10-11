@@ -39,14 +39,12 @@ import type {
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
-import { withdrawProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import {
-  createTaskSettledEvent,
-  type TaskCancelReason,
-  type TaskSettledStreamEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
@@ -74,7 +72,7 @@ async function applyTaskRunMessage(
     return { serializedContext: input.serializedContext, sessionState: input.sessionState };
   }
   let table = readTaskTable(session.state);
-  const events: TaskSettledStreamEvent[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
   let withdrawn: readonly UnstampedMessageStreamEvent[] = [];
   switch (message.kind) {
     case "started": {
@@ -89,7 +87,7 @@ async function applyTaskRunMessage(
       const record = findTask(table, taskId);
       const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
       table = settled.table;
-      events.push(...taskSettledEvents(record, settled.settled, outcome));
+      events.push(...taskSettledEvents(session, record, settled.settled, outcome));
       break;
     }
     case "usage":
@@ -100,13 +98,13 @@ async function applyTaskRunMessage(
       const outcome = toOutcome(message);
       const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
-      events.push(...taskSettledEvents(record, settled.settled, outcome));
+      events.push(...taskSettledEvents(session, record, settled.settled, outcome));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      // Nobody can answer what a finished run relayed, so channels must stop offering it.
-      ({ events: withdrawn, session } = withdrawProxyInputRequests(
-        session,
-        (_requestId, route) => route.runId === message.from.runId,
-      ));
+      // Nobody can answer what a finished run relayed, so channels stop offering it.
+      withdrawn = finishRun(viewOf(session), {
+        requestIds: runRequestIds(session, message.from.runId),
+        taskId,
+      }).events;
       break;
     }
   }
@@ -141,67 +139,39 @@ async function cancelTasks(
 ): Promise<PublishedSessionEvents> {
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
-  const events: TaskSettledStreamEvent[] = [];
-  const stoppedRunIds = new Set<string>();
+  const events: UnstampedMessageStreamEvent[] = [];
+  const view = viewOf(session);
+  const withdrawn: UnstampedMessageStreamEvent[] = [];
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
     table = cancelled.table;
-    events.push(...taskSettledEvents(record, cancelled.settled, outcome));
+    events.push(...taskSettledEvents(session, record, cancelled.settled, outcome));
     if (cancelled.send === undefined) continue;
-    if (record?.resumable === false) stoppedRunIds.add(cancelled.send.run.runId);
+    // A `task()` run's cancel settles what it relayed; a `serve()` run withdraws its own.
+    if (record?.resumable === false) {
+      const requestIds = runRequestIds(session, cancelled.send.run.runId);
+      withdrawn.push(...finishRun(view, { requestIds, taskId }).events);
+    }
     await sendTaskRunCommands(cancelled.send);
   }
-  const withdrawn = withdrawProxyInputRequests(
-    session,
-    (_requestId, route) => route.runId !== undefined && stoppedRunIds.has(route.runId),
-  );
   const relayed = await relaySessionEvents(
-    { ...input, sessionState: saveTable(input.sessionState, withdrawn.session, table) },
-    withdrawn.events,
+    { ...input, sessionState: saveTable(input.sessionState, session, table) },
+    withdrawn,
   );
   return await publishSessionEvents({ ...input, ...relayed }, events);
 }
 
 /** The `task.settled` events for a task's settled calls; calls only settle on a known task. */
 function taskSettledEvents(
+  session: DurableSession,
   record: TaskRecord | undefined,
-  settled: readonly TaskCall[],
+  calls: readonly TaskCall[],
   outcome: TaskOutcome,
-): TaskSettledStreamEvent[] {
+): readonly UnstampedMessageStreamEvent[] {
   if (record === undefined) return [];
-  return settled.map((call) => taskSettledEvent(record, call, outcome));
-}
-
-function taskSettledEvent(
-  record: TaskRecord,
-  call: TaskCall,
-  outcome: TaskOutcome,
-): TaskSettledStreamEvent {
-  const base = {
-    callId: call.callId,
-    kind: record.kind,
-    name: record.name,
-    taskId: record.id,
-    turnId: call.turnId,
-  };
-  switch (outcome.status) {
-    case "completed":
-      return createTaskSettledEvent({ ...base, output: outcome.output, status: "completed" });
-    case "failed":
-      return createTaskSettledEvent({
-        ...base,
-        error: { message: outcome.error },
-        status: "failed",
-      });
-    case "cancelled":
-      return createTaskSettledEvent(
-        outcome.reason === undefined
-          ? { ...base, status: "cancelled" }
-          : { ...base, cancel: { reason: outcome.reason }, status: "cancelled" },
-      );
-  }
+  return settleTask(viewOf(session), { calls, outcome, task: record }).events;
 }
 
 /**
@@ -260,6 +230,17 @@ function countTaskRunUsage(
     session: countRunUsage(session, message.usage, run.usage),
     table: recordTaskRunUsage(table, taskId, message.usage),
   };
+}
+
+/** The requests a run relayed: its own questions and those of the sessions it opened. */
+function runRequestIds(session: DurableSession, runId: string): readonly string[] {
+  return [...getProxyInputRequests(session.state)]
+    .filter(([, route]) => route.runId === runId)
+    .map(([requestId]) => requestId);
+}
+
+function viewOf(session: DurableSession) {
+  return sessionView(storedProjection(session.state), session.state);
 }
 
 function saveTable(

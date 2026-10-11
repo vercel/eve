@@ -39,6 +39,48 @@ describe("createSessionTimeoutControl", () => {
     });
   });
 
+  it("shares in-progress startup across concurrent start calls", async () => {
+    let resolveStartup!: (value: { runId: string }) => void;
+    vi.mocked(startSessionTimeoutStep).mockReturnValue(
+      new Promise((resolve) => {
+        resolveStartup = resolve;
+      }),
+    );
+    const control = createSessionTimeoutControl({
+      deadline: new Date("2026-02-01T00:00:00.000Z"),
+      sessionId: "wrun_1",
+    });
+
+    const first = control.start();
+    const second = control.start();
+    expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
+    resolveStartup({ runId: "timer-run" });
+    await Promise.all([first, second]);
+
+    expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
+  });
+
+  it("waits for in-progress startup before cancelling", async () => {
+    let resolveStartup!: (value: { runId: string }) => void;
+    vi.mocked(startSessionTimeoutStep).mockReturnValue(
+      new Promise((resolve) => {
+        resolveStartup = resolve;
+      }),
+    );
+    const control = createSessionTimeoutControl({
+      deadline: new Date("2026-02-01T00:00:00.000Z"),
+      sessionId: "wrun_1",
+    });
+
+    const startup = control.start();
+    const disposal = control.dispose();
+    expect(cancelSessionTimeoutStep).not.toHaveBeenCalled();
+    resolveStartup({ runId: "timer-run" });
+    await Promise.all([startup, disposal]);
+
+    expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timer-run" });
+  });
+
   it("cancels the active timer when the session settles", async () => {
     vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
     const control = createSessionTimeoutControl({
@@ -64,8 +106,10 @@ describe("createSessionTimeoutControl", () => {
     });
 
     await expect(control.start()).rejects.toBe(failure);
+    await expect(control.start()).rejects.toBe(failure);
     await control.dispose();
 
+    expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
     expect(cancelSessionTimeoutStep).not.toHaveBeenCalled();
   });
 });

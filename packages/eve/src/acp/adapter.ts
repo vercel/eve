@@ -14,10 +14,19 @@ import {
   type PromptResponse,
   type SessionUpdate,
   type ToolCall,
+  type ToolCallStatus,
 } from "#compiled/@agentclientprotocol/sdk/index.js";
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { ActionPresentationByCallId, HandleMessageStreamEvent } from "#protocol/message.js";
+import {
+  callStatus,
+  foldSession,
+  initialSessionProjection,
+  type SessionCallStatus,
+  type SessionProjection,
+} from "#protocol/session-projection.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
@@ -56,8 +65,21 @@ interface AdapterClient {
 interface AcpSession {
   client?: AdapterClientSession;
   active?: ActivePrompt;
+  /** The session's lifecycle, folded from every event it streams. */
+  projection: SessionProjection;
   readonly tools: Map<string, ToolCall>;
 }
+
+/** ACP v1 has no statuses for denied or stopped calls, so they report `failed`. */
+const ACP_TOOL_STATUS: Record<SessionCallStatus | "interrupted", ToolCallStatus> = {
+  running: "in_progress",
+  "awaiting-input": "pending",
+  completed: "completed",
+  failed: "failed",
+  rejected: "failed",
+  cancelled: "failed",
+  interrupted: "failed",
+};
 
 /** Configuration for translating one ACP client connection to an eve server. */
 export interface EveAcpAdapterOptions {
@@ -140,6 +162,7 @@ export class EveAcpAdapter {
 
     const sessionId = randomUUID();
     this.#sessions.set(sessionId, {
+      projection: initialSessionProjection(),
       tools: new Map(),
     });
     return { sessionId };
@@ -230,7 +253,10 @@ export class EveAcpAdapter {
           throw RequestError.requestCancelled({ sessionId: params.sessionId });
         }
         if (cancelled || active.cancelRequested) return { stopReason: "cancelled" };
-        if (failure !== undefined) throw eveFailure(failure);
+        if (failure !== undefined) {
+          await this.#failRunningCalls(params.sessionId, session, client);
+          throw eveFailure(failure);
+        }
         if (unsupportedEvent !== undefined) throw unsupportedEvent;
         if (inputRequests.length === 0) return { stopReason: "end_turn" };
 
@@ -332,6 +358,78 @@ export class EveAcpAdapter {
     event: HandleMessageStreamEvent,
     client: AgentContext,
   ): Promise<void> {
+    const before = session.projection;
+    session.projection = foldSession(before, event);
+    await this.#projectContent(sessionId, session, event, client);
+    // A call's status is the projection's: a task call runs until its task settles, and a
+    // stopped or denied call ends when the stream says so.
+    // `tool_call` already announced the calls an `actions.requested` adds. Only an announced
+    // call gets updates: an approval reaches the client through its permission request.
+    if (event.type === "actions.requested") return;
+    const updated = new Set<string>();
+    const { calls, tasks, turns } = session.projection;
+    if (calls !== before.calls || tasks !== before.tasks || turns !== before.turns) {
+      for (const callId of Object.keys(calls)) {
+        if (!session.tools.has(callId)) continue;
+        const status = callStatus(session.projection, callId);
+        if (status === undefined || status === callStatus(before, callId)) continue;
+        updated.add(callId);
+        await notifyUpdate(client, sessionId, {
+          sessionUpdate: "tool_call_update",
+          toolCallId: callId,
+          status: ACP_TOOL_STATUS[status],
+          ...callOutput(event, callId),
+          ...resultTitle(event, callId),
+        });
+      }
+    }
+    // A result reports its content even when its call had already settled, such as the reason
+    // for a denial that `input.resolved` decided first.
+    const resultCallId =
+      event.type === "action.result"
+        ? event.data.result.callId
+        : event.type === "task.settled"
+          ? event.data.callId
+          : undefined;
+    if (resultCallId === undefined || updated.has(resultCallId)) return;
+    if (!session.tools.has(resultCallId)) return;
+    const output = callOutput(event, resultCallId);
+    const status = callStatus(session.projection, resultCallId);
+    if (!("content" in output) || status === undefined) return;
+    await notifyUpdate(client, sessionId, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: resultCallId,
+      status: ACP_TOOL_STATUS[status],
+      ...output,
+      ...resultTitle(event, resultCallId),
+    });
+  }
+
+  /**
+   * A failed turn's server cancels the tasks it left running only after the response ends, so
+   * their calls end with the turn here.
+   */
+  async #failRunningCalls(
+    sessionId: string,
+    session: AcpSession,
+    client: AgentContext,
+  ): Promise<void> {
+    for (const callId of session.tools.keys()) {
+      if (callStatus(session.projection, callId) !== "running") continue;
+      await notifyUpdate(client, sessionId, {
+        sessionUpdate: "tool_call_update",
+        toolCallId: callId,
+        status: ACP_TOOL_STATUS.failed,
+      });
+    }
+  }
+
+  async #projectContent(
+    sessionId: string,
+    session: AcpSession,
+    event: HandleMessageStreamEvent,
+    client: AgentContext,
+  ): Promise<void> {
     switch (event.type) {
       case "message.appended":
         await notifyUpdate(client, sessionId, {
@@ -348,26 +446,12 @@ export class EveAcpAdapter {
         });
         return;
       case "actions.requested":
-        for (const action of event.data.actions) {
-          const toolCall = toolCallForAction(action);
+        for (const action of visibleActions(event.data.actions)) {
+          const toolCall = toolCallForAction(action, event.data.presentation);
           session.tools.set(action.callId, toolCall);
           await notifyUpdate(client, sessionId, { sessionUpdate: "tool_call", ...toolCall });
         }
         return;
-      case "action.result": {
-        const result = event.data.result;
-        const status = event.data.status !== "completed" || result.isError ? "failed" : "completed";
-        await notifyUpdate(client, sessionId, {
-          sessionUpdate: "tool_call_update",
-          toolCallId: result.callId,
-          status,
-          content: [
-            { type: "content", content: { type: "text", text: stringifyOutput(result.output) } },
-          ],
-          rawOutput: result.output,
-        });
-        return;
-      }
       default:
         return;
     }
@@ -490,16 +574,13 @@ function promptContent(params: PromptRequest): Array<{ type: "text"; text: strin
   return content;
 }
 
-function toolCallForAction(action: RuntimeActionRequest): ToolCall {
-  const title =
-    action.kind === "tool-call" || action.kind === "workflow-tool-call"
-      ? action.toolName
-      : action.kind === "load-skill"
-        ? "Load skill"
-        : action.name;
+function toolCallForAction(
+  action: RuntimeActionRequest,
+  presentation?: ActionPresentationByCallId,
+): ToolCall {
   return {
     toolCallId: action.callId,
-    title,
+    title: actionLabel(action, presentation),
     kind: "other",
     status: "pending",
     rawInput: action.input,
@@ -559,4 +640,33 @@ function acpRequestError(error: unknown): RequestError {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** A result's completion label retitles its call, such as a search reporting what it found. */
+function resultTitle(event: HandleMessageStreamEvent, callId: string): { title?: string } {
+  const label =
+    event.type === "action.result" ? event.data.presentation?.[callId]?.label : undefined;
+  return label === undefined ? {} : { title: label };
+}
+
+/** The output an event carries for a call, if it reports one. */
+function callOutput(event: HandleMessageStreamEvent, callId: string) {
+  const output =
+    event.type === "action.result" && event.data.result.callId === callId
+      ? event.data.result.output
+      : event.type === "task.settled" && event.data.callId === callId
+        ? event.data.output !== undefined
+          ? event.data.output
+          : event.data.error?.message
+        : undefined;
+  if (output === undefined) return {};
+  return {
+    content: [
+      {
+        type: "content" as const,
+        content: { type: "text" as const, text: stringifyOutput(output) },
+      },
+    ],
+    rawOutput: output,
+  };
 }

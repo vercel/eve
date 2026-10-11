@@ -3,7 +3,7 @@
 import { track } from "@vercel/analytics";
 import { Button } from "@vercel/geistdocs/components/button";
 import Link from "next/link";
-import type { JSX, ReactNode } from "react";
+import type { ComponentProps, JSX, ReactNode } from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
 import { githubLogo, linearLogo, notionLogo, slackLogo } from "@/lib/integrations/logos";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,9 @@ interface Agent {
   logo: ReactNode;
   prompt: string;
 }
+
+// Button's props have no `prefetch`, so the link component sets it.
+const PrefetchLink = (props: ComponentProps<typeof Link>) => <Link {...props} prefetch={true} />;
 
 const AGENTS: Agent[] = [
   {
@@ -54,30 +57,31 @@ export function CTA(): JSX.Element {
           <div className="relative flex w-full max-w-[520px] flex-col items-center">
             <AgentCard agent={AGENTS[1]} className="relative z-10 shadow-lg" />
             <div className="relative z-30 mt-1 flex gap-2">
-              <Button asChild size="lg" className="w-fit rounded-full text-base">
-                <a
-                  href="https://vercel.com/new/agent"
-                  onClick={() =>
-                    track(analyticsEvents.vercelAgentCreationOpened, {
-                      source: "home_footer",
-                    })
-                  }
-                >
-                  Create agent on Vercel
-                </a>
+              <Button
+                className="w-fit rounded-full text-base"
+                href="https://vercel.com/new/agent"
+                onClick={() =>
+                  track(analyticsEvents.vercelAgentCreationOpened, {
+                    source: "home_footer",
+                  })
+                }
+                size="large"
+              >
+                Create agent on Vercel
               </Button>
-              <Button asChild size="lg" className="w-fit rounded-full text-base" variant="outline">
-                <Link
-                  href="/docs/guides/deployment/overview"
-                  onClick={() =>
-                    track(analyticsEvents.gettingStartedOpened, {
-                      source: "home_footer",
-                    })
-                  }
-                  prefetch={true}
-                >
-                  Learn about self-hosting
-                </Link>
+              <Button
+                className="w-fit rounded-full text-base"
+                Component={PrefetchLink}
+                href="/docs/guides/deployment/overview"
+                onClick={() =>
+                  track(analyticsEvents.gettingStartedOpened, {
+                    source: "home_footer",
+                  })
+                }
+                size="large"
+                variant="secondary"
+              >
+                Learn about self-hosting
               </Button>
             </div>
           </div>

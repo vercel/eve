@@ -117,11 +117,14 @@ const ASK_QUESTION_OUTPUT_SCHEMA = defineJsonSchema<AskQuestionOutput>({
  * message that does not answer the question withdraws it.
  */
 export function askQuestion(): WorkflowExecuteToolDefinition<AskQuestionInput, AskQuestionOutput> {
-  return defineWorkflowTool({
-    description: ASK_QUESTION_TOOL_DESCRIPTION,
-    execute: executeAskQuestionTool,
-    inputSchema: ASK_QUESTION_INPUT_SCHEMA,
-    outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
-    toModelOutput: toInterruptibleModelOutput,
-  });
+  return frameworkTool(
+    defineWorkflowTool({
+      description: ASK_QUESTION_TOOL_DESCRIPTION,
+      execute: executeAskQuestionTool,
+      inputSchema: ASK_QUESTION_INPUT_SCHEMA,
+      outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
+      toModelOutput: toInterruptibleModelOutput,
+    }),
+  );
 }
+import { frameworkTool } from "./framework-tool.js";

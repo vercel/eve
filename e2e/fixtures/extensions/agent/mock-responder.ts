@@ -1,11 +1,17 @@
+import { loadSkills } from "@eve-e2e/config/mock-script";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const GIZMO_INSTRUCTIONS_TOKEN = "gizmo-instructions-ok-7K2M";
 const JAVASCRIPT_INSTRUCTIONS_TOKEN = "javascript-instructions-ok-9P4R";
 const LAYOUT_TOOL = "gizmo__gizmo_layout";
 
+const SKILL_LOAD_DIRECTIVE = "SKILL-LOAD";
+
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
+  if (message.startsWith(SKILL_LOAD_DIRECTIVE)) {
+    return loadSkills(request, message.slice(SKILL_LOAD_DIRECTIVE.length).trim().split(/\s+/u));
+  }
   if (message.includes("Report both extension instruction tokens")) {
     const instructions = request.messages
       .filter((entry) => entry.role === "system")

@@ -35,6 +35,8 @@ import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const getHookByTokenMock = vi.fn();
 const world = {
+  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
+  capabilities: { deploymentAffinity: true },
   getDeploymentId: vi.fn(async () => "dpl_current"),
 };
 const getRunMock = vi.fn();
@@ -143,7 +145,7 @@ describe("session owner starts", () => {
       startSessionOwnerStep({
         activationToken: "owner-1:handoff",
         anchorRunId: "anchor-1",
-        checkpoint: {} as never,
+        checkpoint: { serializedContext: {} } as never,
         delivery: { kind: "deliver", payloads: [] },
         targetDeploymentId: "latest",
       }),
@@ -188,7 +190,11 @@ describe("session owner starts", () => {
           sessionId: "anchor-1",
         }),
       ],
-      { deploymentId: "deployment-b" },
+      {
+        deploymentId: "deployment-b",
+        allowReservedAttributes: true,
+        attributes: { "$eve.version": resolveInstalledPackageInfo().version },
+      },
     );
   });
 });
@@ -229,7 +235,6 @@ describe("createWorkflowRuntime command dispatch", () => {
       payload: { message: "hello" },
       requestId: "req_deliver",
     });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it.each(["pending", "running", "completed", "failed", "cancelled"])(
@@ -267,7 +272,6 @@ describe("createWorkflowRuntime command dispatch", () => {
         kind: "clear",
       },
     );
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("does not report an accepted command as missing when metadata hydration fails", async () => {
@@ -310,7 +314,6 @@ describe("createWorkflowRuntime command dispatch", () => {
         payload: { message: "hello" },
       },
     );
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("acknowledges the exact delivery accepted by the session inbox", async () => {
@@ -382,7 +385,6 @@ describe("createWorkflowRuntime command dispatch", () => {
         turnId: "turn-2",
       },
     );
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("maps missing and terminal targets to 'no_active_turn'", async () => {
@@ -425,9 +427,11 @@ describe("createWorkflowRuntime command dispatch", () => {
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
-    getHookByTokenMock.mockImplementation(async (token: string) => {
-      throw new HookNotFoundError(token);
-    });
+    getHookByTokenMock
+      .mockResolvedValueOnce(currentSessionHook(sessionInboxHookToken("eve:token"), "session-1"))
+      .mockImplementation(async (token: string) => {
+        throw new HookNotFoundError(token);
+      });
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -592,6 +596,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.title": "hello",
           "$eve.trigger": "http",
           "$eve.type": "session",
+          "$eve.version": resolveInstalledPackageInfo().version,
         },
         deploymentId: "dpl_current",
       },
@@ -763,6 +768,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.title": "hello",
           "$eve.trigger": "http",
           "$eve.type": "session",
+          "$eve.version": resolveInstalledPackageInfo().version,
         },
         deploymentId: "dpl_current",
       },
@@ -808,6 +814,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "subagent",
         "$eve.type": "subagent",
+        "$eve.version": resolveInstalledPackageInfo().version,
       },
       deploymentId: "dpl_current",
     });
@@ -833,6 +840,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.title": "hello",
         "$eve.trigger": "http",
         "$eve.type": "session",
+        "$eve.version": resolveInstalledPackageInfo().version,
       },
       deploymentId: "dpl_current",
     });

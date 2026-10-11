@@ -7,6 +7,7 @@ import type {
   AssertionSeverity,
   EveEvalTaskResult,
 } from "#evals/types.js";
+import type { TargetTools } from "#evals/target.js";
 import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
 export type AssertionOutcome = AssertionEvaluation;
@@ -45,6 +46,13 @@ interface MutableEntry {
 export class AssertionCollector {
   readonly #entries: MutableEntry[] = [];
   readonly #pending: Promise<void>[] = [];
+
+  /** The target's root agent tools, which tool-name assertions are checked against. */
+  readonly tools: TargetTools | undefined;
+
+  constructor(tools?: TargetTools) {
+    this.tools = tools;
+  }
 
   /** Whether the eval has already recorded an assertion. */
   get hasEntries(): boolean {

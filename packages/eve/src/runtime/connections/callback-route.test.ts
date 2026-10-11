@@ -7,6 +7,9 @@ import { handleConnectionCallbackRequest } from "#execution/connections/callback
 const resumeHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+  getHookByToken: async (token: string) => ({ runId: "owner", specVersion: 6, token }),
+  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
+  getWorld: async () => ({ capabilities: { deploymentAffinity: true } }),
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
 }));
 

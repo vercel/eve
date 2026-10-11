@@ -34,7 +34,9 @@ const InputSchema = z.object({
   path: z
     .string()
     .optional()
-    .describe("Directory or file under /workspace. Defaults to /workspace. Narrow this first."),
+    .describe(
+      "Directory or file inside the workspace. Defaults to the workspace root. Narrow this first.",
+    ),
   pattern: z.string().min(1).describe("Regex or literal to search for."),
 });
 

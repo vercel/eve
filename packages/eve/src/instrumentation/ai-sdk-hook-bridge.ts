@@ -9,9 +9,7 @@ import type {
   InstrumentationModelCallCompletedEvent,
   InstrumentationModelCallStartedEvent,
   InstrumentationOperationRef,
-  InstrumentationToolCallCompletedEvent,
   InstrumentationToolCallStartedEvent,
-  InstrumentationToolOutput,
   InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import {
@@ -32,6 +30,8 @@ interface AttemptState {
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
   readonly toolKeys: Map<string, string>;
+  readonly toolCalls: Map<string, InstrumentationToolCallStartedEvent>;
+  readonly isFrameworkTool?: (name: string) => boolean;
   operation?: InstrumentationOperationRef;
   // Only the number is kept: it disambiguates call identities within an attempt.
   stepNumber?: number;
@@ -48,6 +48,7 @@ export function createAiSdkHookBridge(
   hooks: InstrumentationHooks,
   runInContext: InstrumentationContextRunner = directRunInContext,
   runtimeContext?: Readonly<Record<string, unknown>>,
+  isFrameworkTool?: (name: string) => boolean,
 ): Telemetry {
   const state: AttemptState = {
     capturesInputs: hooks.capturesInputs ?? hooks.capturesContent,
@@ -61,6 +62,8 @@ export function createAiSdkHookBridge(
         : undefined,
     scope,
     toolKeys: new Map(),
+    toolCalls: new Map(),
+    isFrameworkTool,
   };
   const nextModelCallKey = (stepNumber: number): string => {
     const callIndex = state.modelCallIndexes.get(stepNumber) ?? 0;
@@ -133,7 +136,7 @@ export function createAiSdkHookBridge(
         }),
       );
     },
-    async onToolExecutionStart(event) {
+    onToolExecutionStart(event) {
       const key = toolCallIdempotencyKey(
         state.scope,
         event.toolCall.toolCallId,
@@ -141,21 +144,20 @@ export function createAiSdkHookBridge(
       );
       state.toolKeys.set(event.toolCall.toolCallId, key);
       const started = toToolCallStarted(state, key, event);
-      await hooks.publish(started);
+      state.toolCalls.set(event.toolCall.toolCallId, started);
     },
     executeTool({ toolCallId, execute }) {
-      const key = state.toolKeys.get(toolCallId);
-      return key === undefined
+      const started = state.toolCalls.get(toolCallId);
+      return started === undefined
         ? execute()
-        : runInContext({ idempotencyKey: key, scope, type: "tool.call" }, execute);
+        : runInContext({ ...started, type: "tool.call" }, execute);
     },
-    async onToolExecutionEnd(event) {
+    onToolExecutionEnd(event) {
       const toolCallId = event.toolCall.toolCallId;
       const key = state.toolKeys.get(toolCallId);
       if (key === undefined) return;
       state.toolKeys.delete(toolCallId);
-      const completed = toToolCallCompleted(state, key, event);
-      await hooks.publish(completed);
+      state.toolCalls.delete(toolCallId);
     },
     async onAbort(event) {
       await failOpenOperations(event.reason);
@@ -172,14 +174,10 @@ export function createAiSdkHookBridge(
         hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "model.call.failed" })),
       );
     }
-    for (const idempotencyKey of state.toolKeys.values()) {
-      pending.push(
-        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" })),
-      );
-    }
     state.modelKeys.clear();
     state.modelCallStartEvents.clear();
     state.toolKeys.clear();
+    state.toolCalls.clear();
     await Promise.all(pending);
   }
 }
@@ -210,6 +208,7 @@ function toModelCallStarted(
       ? Object.freeze({
           instructions: source.instructions,
           messages: Object.freeze([...source.messages]),
+          tools: source.tools === undefined ? undefined : Object.freeze([...source.tools]),
         })
       : undefined,
     model: Object.freeze({ modelId: source.modelId, provider: source.provider }),
@@ -304,38 +303,12 @@ function toToolCallStarted(
 ): InstrumentationToolCallStartedEvent {
   return Object.freeze({
     callId: source.toolCall.toolCallId,
+    frameworkTool: state.isFrameworkTool?.(source.toolCall.toolName) === true,
     idempotencyKey,
     input: state.capturesInputs ? source.toolCall.input : undefined,
     scope: state.scope,
     toolName: source.toolCall.toolName,
+    startedAtMs: Date.now(),
     type: "tool.call.started",
   });
-}
-
-function toToolCallCompleted(
-  state: AttemptState,
-  idempotencyKey: string,
-  source: TelemetryEvent<"onToolExecutionEnd">,
-): InstrumentationToolCallCompletedEvent {
-  return Object.freeze({
-    durationMs: source.toolExecutionMs,
-    idempotencyKey,
-    output: toToolOutput(source.toolOutput, state.capturesOutputs),
-    scope: state.scope,
-    type: "tool.call.completed",
-  });
-}
-
-function toToolOutput(
-  toolOutput: TelemetryEvent<"onToolExecutionEnd">["toolOutput"],
-  capturesContent: boolean,
-): InstrumentationToolOutput {
-  if (toolOutput.type === "tool-result") {
-    return Object.freeze(
-      capturesContent ? { output: toolOutput.output, type: "result" } : { type: "result" },
-    );
-  }
-  return Object.freeze(
-    capturesContent ? { error: toolOutput.error, type: "error" } : { type: "error" },
-  );
 }

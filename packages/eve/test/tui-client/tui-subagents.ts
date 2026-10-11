@@ -72,7 +72,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
 
   const finalSnapshot = screen.snapshot();
   // The model's own task bookkeeping never reaches the transcript.
-  for (const internal of ["task_wait", "task_cancel", "<task_result"]) {
+  for (const internal of ["eve__task_wait", "eve__task_cancel", "<task_result"]) {
     if (finalSnapshot.includes(internal)) {
       throw new Error(`Final screen shows internal task text "${internal}":\n${finalSnapshot}`);
     }

@@ -6,7 +6,7 @@ import {
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
-import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/send-input.js";
+import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import type {
   CancelTurnResult,
@@ -38,7 +38,9 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
 
 /**
  * Dynamic handle for whichever durable session currently owns one channel-local address.
- * Only {@link send} may create a session when the address is unowned.
+ * Only {@link send} may create a session: when the address is unowned, or in
+ * place of a stranded session that another eve version built. Sends to a session whose
+ * owner is only unavailable throw `SessionStrandedError` and deliver nothing.
  */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
@@ -91,7 +93,7 @@ export function createChannelAddress<TState = undefined>(input: {
         kind: "send" as const,
         payload: {
           ...payload,
-          message: serializeUrlFilePartsInMessage(payload.message),
+          message: serializeFilePartsInMessage(payload.message),
         },
         requestId: metadata.requestId,
         turnPolicy:
@@ -101,27 +103,6 @@ export function createChannelAddress<TState = undefined>(input: {
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
-      const dispatch = async (): Promise<Session | undefined> => {
-        const result = await input.runtime.dispatchContinuation({
-          command,
-          continuationToken: namespacedToken,
-        });
-        return result.status === "accepted"
-          ? createSession(result.sessionId, input.runtime, {
-              ...metadata,
-              turnPolicy: input.turnPolicy,
-            })
-          : undefined;
-      };
-
-      const existing = await dispatch();
-      if (existing !== undefined) return existing;
-      if (payload.inputResponses && payload.inputResponses.length > 0) {
-        throw new Error(
-          "Cannot deliver inputResponses — the target session was not found via continuation token.",
-        );
-      }
-
       const state = (options as { readonly state?: TState }).state;
       const adapter =
         state === undefined
@@ -142,18 +123,28 @@ export function createChannelAddress<TState = undefined>(input: {
         initiatorAuth: options.initiatorAuth,
         input: {
           context: payload.context,
-          message: serializeUrlFilePartsInMessage(payload.message) ?? "",
+          message: serializeFilePartsInMessage(payload.message) ?? "",
           outputSchema: payload.outputSchema,
           state: payload.state,
         },
         requestId: metadata.requestId,
         title: options.title,
       };
-      const handle = await input.runtime.createSession(runInput);
-      return createSession(handle.sessionId, input.runtime, {
-        ...metadata,
-        turnPolicy: input.turnPolicy,
+      const toSession = (sessionId: string) =>
+        createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
+
+      const result = await input.runtime.dispatchContinuation({
+        command,
+        continuationToken: namespacedToken,
+        successor: runInput,
       });
+      if (result.status === "accepted") return toSession(result.sessionId);
+      if (payload.inputResponses && payload.inputResponses.length > 0) {
+        throw new Error(
+          "Cannot deliver inputResponses — the target session was not found via continuation token.",
+        );
+      }
+      return toSession((await input.runtime.createSession(runInput)).sessionId);
     },
     async send(message, options) {
       return await this.deliver({ message }, options);

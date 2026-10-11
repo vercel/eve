@@ -4,12 +4,17 @@ import {
   type RenderedOption,
   recordingFetch,
   linkTargets,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 import { linearChannel } from "#public/channels/linear/index.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 
 const SECRET = "linear-conformance-secret";
 let nextConversation = 0;
+
+// Anyone in the workspace can reply in an issue's agent session.
+const PEOPLE = { alice: "user_1", bob: "user_2" } as const;
 
 /** Drives Linear Agent Session webhooks and Agent Activity GraphQL mutations. */
 export function linearDriver(): ChannelDriver {
@@ -41,7 +46,26 @@ export function linearDriver(): ChannelDriver {
     });
   }
 
+  /** Files a person uploaded, by the `uploads.linear.app` URL their Markdown links to. */
+  const uploads = new Map<string, SentFile>();
+  /** A person's words with each file inlined as Linear writes an upload: an image or a link. */
+  function withUploads(text: string, files: readonly SentFile[]): string {
+    const links = files.map((file) => {
+      const url = `https://uploads.linear.app/conformance/${uploads.size + 1}/${file.name}`;
+      uploads.set(url, file);
+      return `${file.mediaType.startsWith("image/") ? "!" : ""}[${file.name}](${url})`;
+    });
+    return [text, ...links].join("\n\n");
+  }
+
   async function decode(request: Request): Promise<PlatformCall> {
+    if (new URL(request.url).hostname === "uploads.linear.app") {
+      return {
+        body: {},
+        method: `GET ${request.url}`,
+        response: serveFile(uploads.get(request.url)),
+      };
+    }
     const body = JSON.parse(await request.text()) as {
       readonly query?: string;
       readonly variables?: unknown;
@@ -63,7 +87,8 @@ export function linearDriver(): ChannelDriver {
 
   return {
     name: "linear",
-    capabilities: ["text-replies"],
+    personId: PEOPLE.alice,
+    capabilities: ["another-person", "attachments", "text-replies"],
     // An agent session lives on an issue the whole workspace can see.
     surface: "shared",
     createChannel: (record) =>
@@ -71,12 +96,14 @@ export function linearDriver(): ChannelDriver {
         api: { fetch: recordingFetch(record, decode) },
         credentials: { accessToken: "linear-token", webhookSecret: SECRET },
       }),
-    message: (text) => {
+    message: (words, person, files = []) => {
+      const text = withUploads(words, files);
+      const user = PEOPLE[person];
       if (delivery === 0) {
         return webhook({
           action: "created",
           agentSession: {
-            creator: { id: "user_1" },
+            creator: { id: user },
             id: sessionId,
             issue: { id: issueId, identifier: issueIdentifier, title: "Conformance test" },
             issueId,
@@ -90,8 +117,8 @@ export function linearDriver(): ChannelDriver {
         agentActivity: {
           content: { body: text, type: "prompt" },
           id: `prompt-${delivery}`,
-          user: { id: "user_1" },
-          userId: "user_1",
+          user: { id: user },
+          userId: user,
         },
       });
     },

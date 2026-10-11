@@ -1,4 +1,23 @@
-import { getWorld } from "#internal/workflow/runtime.js";
+import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { getWorld, start, type WorkflowFunction } from "#internal/workflow/runtime.js";
+
+/**
+ * Starts a session owner run stamped with the running eve version, as
+ * `createSession` does. Ingress on single-deployment Worlds treats an owner
+ * without the stamp as stranded, so a bare `start` would never accept input.
+ */
+export async function startSessionOwner<TArgs extends unknown[], TResult>(
+  workflow: WorkflowFunction<TArgs, TResult>,
+  args: TArgs,
+) {
+  return await start(workflow, args, {
+    allowReservedAttributes: true,
+    attributes: {
+      [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+    },
+  });
+}
 
 interface WorkflowRunLike {
   readonly runId: string;

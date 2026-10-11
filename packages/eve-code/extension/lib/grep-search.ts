@@ -1,4 +1,5 @@
 import { shellQuote } from "./shell.ts";
+import { resolveInWorkspace, type WorkspaceSandbox } from "./workspace-root.ts";
 
 const DEFAULT_GREP_LIMIT = 50;
 export const MAX_GREP_LIMIT = 200;
@@ -31,14 +32,6 @@ export interface GrepSearchResult {
   readonly truncated: boolean;
 }
 
-interface GrepSandbox {
-  resolvePath(path: string): string;
-  run(input: {
-    abortSignal?: AbortSignal;
-    command: string;
-  }): PromiseLike<{ exitCode: number; stderr: string; stdout: string }>;
-}
-
 interface GrepToolInput {
   readonly context?: number;
   readonly glob?: string;
@@ -65,14 +58,13 @@ export function effectiveLimit(limit: number | undefined): number {
   return Math.min(Math.max(1, limit ?? DEFAULT_GREP_LIMIT), MAX_GREP_LIMIT);
 }
 
-export function assertWorkspacePath(resolved: string, requested?: string): string {
-  if (requested !== undefined && requested.split(/[\\/]/u).includes("..")) {
-    throw new Error("grep path must not contain '..'");
-  }
-  if (resolved !== "/workspace" && !resolved.startsWith("/workspace/")) {
-    throw new Error(`grep path must stay under /workspace: ${resolved}`);
-  }
-  if (resolved.split("/").includes("..")) {
+// Containment is enforced on real paths in executeGrepSearch; the workspace
+// root differs by provider (/workspace, /app, ...), so no literal prefix here.
+export function assertNoParentSegments(resolved: string, requested?: string): string {
+  if (
+    (requested !== undefined && requested.split(/[\\/]/u).includes("..")) ||
+    resolved.split("/").includes("..")
+  ) {
     throw new Error("grep path must not contain '..'");
   }
   return resolved;
@@ -80,18 +72,16 @@ export function assertWorkspacePath(resolved: string, requested?: string): strin
 
 export async function executeGrepSearch(
   input: GrepToolInput,
-  sandbox: GrepSandbox,
+  sandbox: WorkspaceSandbox,
   abortSignal?: AbortSignal,
 ): Promise<GrepSearchResult> {
-  const path = assertWorkspacePath(sandbox.resolvePath(input.path ?? "/workspace"), input.path);
-  const workspaceRealPath = await sandboxRealPath(
+  const path = assertNoParentSegments(sandbox.resolvePath(input.path ?? ""), input.path);
+  const { path: searchRealPath } = await resolveInWorkspace(
     sandbox,
-    sandbox.resolvePath(""),
-    "sandbox workspace",
+    path,
+    "grep path",
     abortSignal,
   );
-  const searchRealPath = await sandboxRealPath(sandbox, path, "grep path", abortSignal);
-  assertRealPathWithinWorkspace(searchRealPath, workspaceRealPath);
 
   const outputMode = effectiveOutputMode(input.outputMode);
   const limit = effectiveLimit(input.limit);
@@ -124,35 +114,6 @@ export async function executeGrepSearch(
     path,
     stdout: commandOutput.value,
   });
-}
-
-async function sandboxRealPath(
-  sandbox: GrepSandbox,
-  path: string,
-  label: string,
-  abortSignal?: AbortSignal,
-): Promise<string> {
-  const result = await sandbox.run({
-    abortSignal,
-    command: `realpath -z -- ${shellQuote(path)}`,
-  });
-  if (result.exitCode !== 0) {
-    const detail = result.stderr.trim() || result.stdout.trim() || "no command output";
-    throw new Error(
-      `${label} could not be resolved: ${truncateUtf8(detail, MAX_GREP_LINE_BYTES).value}`,
-    );
-  }
-  const realPath = result.stdout.endsWith("\0") ? result.stdout.slice(0, -1) : result.stdout;
-  if (realPath.length === 0 || realPath.includes("\0")) {
-    throw new Error(`${label} returned an invalid realpath`);
-  }
-  return realPath;
-}
-
-function assertRealPathWithinWorkspace(realPath: string, workspaceRealPath: string): void {
-  if (realPath !== workspaceRealPath && !realPath.startsWith(`${workspaceRealPath}/`)) {
-    throw new Error(`grep path resolves outside /workspace: ${realPath}`);
-  }
 }
 
 export function buildSearchCommand(input: GrepCommandInput): string {

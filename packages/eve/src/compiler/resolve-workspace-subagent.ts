@@ -49,6 +49,7 @@ export async function resolveWorkspaceSubagentDefinition(input: {
       binding,
       kind: "agent config",
       loadNamespace: createCompiledBindingNamespaceLoader({
+        appRoot: project.appRoot,
         bindings: { [configSource.sourceId]: binding },
         registries: input.registries,
       }),

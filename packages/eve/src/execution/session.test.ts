@@ -107,7 +107,7 @@ describe("createSession", () => {
       continuationToken: "root-token",
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent({
-        availableSkills: [{ description: "Research topics.", name: "research" }],
+        listedSkills: [{ description: "Research topics.", name: "research" }],
       }),
     });
 

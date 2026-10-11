@@ -8,9 +8,17 @@ import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
+import {
+  endSessionSandboxStep,
+  reportSessionSandboxCleanupFailureStep,
+} from "#execution/session/end-sandbox-step.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: vi.fn(),
+}));
+vi.mock("#execution/session/end-sandbox-step.js", () => ({
+  endSessionSandboxStep: vi.fn(),
+  reportSessionSandboxCleanupFailureStep: vi.fn(async () => {}),
 }));
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
@@ -69,6 +77,50 @@ function sessionWithTaskRun() {
 }
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("session finalization", () => {
+  it.each([
+    { outcome: { kind: "expired" as const }, reason: "expired" },
+    { outcome: { kind: "failed" as const, error: new Error("failed") }, reason: "failed" },
+    {
+      outcome: {
+        kind: "done" as const,
+        action: { kind: "done" as const, output: "done" },
+      },
+      reason: "completed",
+    },
+  ])("ends the sandbox when the session is $reason", async ({ outcome, reason }) => {
+    const sessionState = sessionWithUnreportedUsage();
+    await finalizeSession(outcome, {
+      caller: undefined,
+      cursor: { serializedContext: { key: "value" }, sessionState },
+      sessionWritable: new WritableStream(),
+    });
+
+    expect(endSessionSandboxStep).toHaveBeenCalledExactlyOnceWith({
+      reason,
+      serializedContext: { key: "value" },
+      sessionState,
+    });
+  });
+
+  it("preserves the terminal outcome when sandbox cleanup fails", async () => {
+    vi.mocked(endSessionSandboxStep).mockRejectedValueOnce(new Error("cleanup failed"));
+
+    await expect(
+      finalizeSession(
+        { kind: "expired" },
+        {
+          caller: undefined,
+          cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+          sessionWritable: new WritableStream(),
+        },
+      ),
+    ).resolves.toMatchObject({ isError: false });
+    expect(reportSessionSandboxCleanupFailureStep).toHaveBeenCalledOnce();
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
+  });
+});
 
 describe("session finalization with an unsettled caller", () => {
   it.each([

@@ -37,6 +37,9 @@ export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 /** Stable route pattern for resetting one exact session ID. */
 export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
+/** Stable route pattern for eval tool-stub verification. */
+export const EVE_SESSION_STUBS_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stubs`;
+
 /** Stable event-stream route pattern for one exact session ID. */
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
@@ -182,4 +185,9 @@ export function createEveCallbackRoutePath(token: string): string {
 /** Builds the capability path used to answer one remote child turn. */
 export function createEveTaskInputRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
+}
+
+/** Builds the tool-stub verification route for one session. */
+export function createEveSessionStubsRoutePath(sessionId: string): string {
+  return `${createEveSessionRoutePath(sessionId)}/stubs`;
 }

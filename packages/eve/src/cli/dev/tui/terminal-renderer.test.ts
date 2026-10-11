@@ -439,9 +439,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("line one");
     input.send("\x1b[27;2;13~"); // Shift+Enter (xterm modifyOtherKeys)
     input.type("line two");
+    input.send("\n"); // Shift+Enter in Warp, or Ctrl+J (#4404)
+    input.type("line three");
     input.enter();
 
-    expect(await prompt).toBe("line one\nline two");
+    expect(await prompt).toBe("line one\nline two\nline three");
     renderer.shutdown();
   });
 
@@ -3837,7 +3839,7 @@ describe("TerminalRenderer conversation", () => {
       stamped(createTaskStartedEvent(call)),
       stamped(
         createActionsRequestedEvent({
-          actions: [{ callId: "wait_1", input: {}, kind: "tool-call", toolName: "task_wait" }],
+          actions: [{ callId: "wait_1", input: {}, kind: "tool-call", toolName: "eve__task_wait" }],
           sequence: 2,
           stepIndex: 1,
           turnId: "turn_1",
@@ -3857,7 +3859,7 @@ describe("TerminalRenderer conversation", () => {
     expect(during).not.toContain("Waiting for");
     expect(during).not.toContain("↑");
     expect(during).not.toContain("↓");
-    expect(during).not.toContain("task_wait");
+    expect(during).not.toContain("eve__task_wait");
 
     const approval = renderer.readToolApproval({
       approvalId: "approval_1",

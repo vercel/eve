@@ -3,14 +3,48 @@ import { MobileDocsBar } from "@vercel/geistdocs/mobile-docs-bar";
 import { createDocsPage, createPageActions } from "@vercel/geistdocs/pages/docs";
 import type { MDXComponents } from "mdx/types";
 import { EditOnGithubAction } from "@/components/geistdocs/edit-on-github";
+import { JsonLd } from "@/components/geistdocs/json-ld";
 import { getMDXComponents } from "@/components/geistdocs/mdx-components";
 import { canonicalAlternates } from "@/lib/geistdocs/canonical";
 import { config } from "@/lib/geistdocs/config";
+import { defaultLanguage } from "@/lib/geistdocs/languages";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { resolveDocsPageTitle } from "@/lib/geistdocs/page-title";
 import { geistdocsSource } from "@/lib/geistdocs/source";
+import { docsArticleStructuredData, docsBreadcrumbs } from "@/lib/geistdocs/structured-data";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
+
+type DocsPageEntry = NonNullable<ReturnType<typeof geistdocsSource.source.getPage>>;
+
+const resolveTitle = (page: DocsPageEntry, lang: string): string => {
+  const title = resolveDocsPageTitle({
+    pageTitle: page.data.title,
+    pageUrl: page.url,
+    tree: geistdocsSource.source.getPageTree(lang),
+  });
+  if (!title) throw new Error(`Missing title for docs page ${page.url}`);
+  return title;
+};
+
+const DocsStructuredData = ({ page }: { page: DocsPageEntry }) => {
+  const lang = page.locale ?? defaultLanguage;
+  const title = resolveTitle(page, lang);
+  const pathname = getPublicPath(page.url, config.basePath);
+  const data = docsArticleStructuredData({
+    breadcrumbs: docsBreadcrumbs({
+      pageUrl: pathname,
+      title,
+      tree: geistdocsSource.source.getPageTree(lang),
+    }),
+    description: page.data.description,
+    image: staticOgImage,
+    lang,
+    pathname,
+    title,
+  });
+  return <JsonLd data={data} />;
+};
 
 const docsPage = createDocsPage({
   config,
@@ -24,25 +58,19 @@ const docsPage = createDocsPage({
     return getMDXComponents(components);
   },
   metadata: ({ metadata, page, params }) => {
-    const title = resolveDocsPageTitle({
-      pageTitle: page.data.title,
-      pageUrl: page.url,
-      tree: geistdocsSource.source.getPageTree(params.lang),
-    });
-    if (!title) throw new Error(`Missing title for docs page ${page.url}`);
-    const titleMetadata = pageTitleMetadata(title);
+    const titleMetadata = pageTitleMetadata(resolveTitle(page, params.lang));
+    const pathname = getPublicPath(page.url, config.basePath);
 
     return {
       ...metadata,
       ...titleMetadata,
       metadataBase: new URL(getSiteOrigin()),
-      alternates: canonicalAlternates(
-        getPublicPath(page.url, config.basePath),
-        metadata.alternates,
-      ),
+      alternates: canonicalAlternates(pathname, metadata.alternates),
       openGraph: {
         ...metadata.openGraph,
         ...titleMetadata.openGraph,
+        type: "article",
+        url: pathname,
         // Override with the static OG image for now. To restore dynamic per-page
         // OG generation, swap the line below back to:
         // images: geistdocsSource.getPageImage(page).url,
@@ -60,7 +88,12 @@ const docsPage = createDocsPage({
   tableOfContentPopover: {
     enabled: false,
   },
-  renderTop: ({ data }) => <MobileDocsBar toc={data.toc} />,
+  renderTop: ({ data, page }) => (
+    <>
+      <DocsStructuredData page={page} />
+      <MobileDocsBar toc={data.toc} />
+    </>
+  ),
 });
 
 export default docsPage.Page;

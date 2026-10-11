@@ -2,6 +2,10 @@ import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/b
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
+import {
+  createEveScheduleQueueTrigger,
+  EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+} from "#internal/schedules/consumer-route.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
@@ -22,6 +26,7 @@ export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
 export function createEveVercelOptions(input: {
   agentName: string;
   enabled: boolean;
+  hasVercelScheduleCollections?: boolean;
   publicRoutePrefix?: string;
   workspaceMember?: boolean;
 }) {
@@ -60,6 +65,14 @@ export function createEveVercelOptions(input: {
         experimentalTriggers: [createEveWorkflowQueueTrigger(input.agentName)],
         environment,
       },
+      // The consumer only exists when a collection stores its schedules in Vercel Schedules.
+      ...(input.hasVercelScheduleCollections === true && {
+        [EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH]: {
+          maxDuration: "max" as const,
+          experimentalTriggers: [createEveScheduleQueueTrigger(input.agentName)],
+          environment,
+        },
+      }),
     },
   };
 }

@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { renderSelfModificationConfig } from "./setup.js";
+import { DEPLOYED_SELF_MODIFICATION_CONFIG_PATH, renderSelfModificationConfig } from "./setup.js";
 
 const runFile = promisify(execFile);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -81,6 +81,7 @@ describe("packed package consumption", () => {
     await access(join(packageRoot, "dist/src/self-modification/config.js"));
     await access(join(packageRoot, "dist/src/self-modification/sandbox.js"));
     await access(join(packageRoot, "dist/src/self-modification/setup.js"));
+    await access(join(packageRoot, "dist/src/self-modification/remote/extension.js"));
     await Promise.all([
       access(
         join(
@@ -163,7 +164,7 @@ describe("packed package consumption", () => {
     await writeAppFile(appRoot, "agent/instructions.md", "You are a test agent.\n");
     await writeAppFile(
       appRoot,
-      "agent/extensions/self-modification/extension.ts",
+      DEPLOYED_SELF_MODIFICATION_CONFIG_PATH,
       renderSelfModificationConfig({
         branch: "main",
         channelNames: [],
@@ -201,6 +202,22 @@ if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent
 `,
     );
     await run("node", ["verify-development-extension.mjs"], appRoot);
+    await writeAppFile(
+      appRoot,
+      "verify-remote-extension.mjs",
+      `import assert from "node:assert/strict";
+import { discoverAgent } from "./node_modules/eve/dist/src/discover/discover-agent.js";
+import { compileAgentManifest } from "./node_modules/eve/dist/src/compiler/normalize-manifest.js";
+
+const discovered = await discoverAgent({ appRoot: process.cwd(), agentRoot: process.cwd() + "/agent" });
+assert.deepEqual(discovered.diagnostics.filter((entry) => entry.severity === "error"), []);
+const compiled = await compileAgentManifest(discovered.manifest);
+assert.deepEqual(compiled.subagents.map((entry) => entry.name), ["self-modification-remote__agent"]);
+const slugs = compiled.subagents[0].agent.dynamicTools.map((tool) => tool.slug);
+assert.ok(slugs.includes("publish") && slugs.includes("registry_add"));
+`,
+    );
+    await run("node", ["verify-remote-extension.mjs"], appRoot);
     const build = await run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], appRoot);
     const output = `${build.stdout}\n${build.stderr}`;
     if (output.includes("Could not resolve '#shared/")) {

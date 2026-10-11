@@ -36,7 +36,14 @@ export function authoringExperiment(options: {
       revision: options.revision,
       treatment: options.treatment,
     }),
-    agentOptions: { verbose: options.verbose ?? false },
+    agentOptions: {
+      cliPackage:
+        options.benchmark.harness === "Claude Code"
+          ? "@anthropic-ai/claude-code@2.1.292"
+          : undefined,
+      ...options.benchmark.agentOptions,
+      verbose: options.verbose ?? false,
+    },
   };
 }
 

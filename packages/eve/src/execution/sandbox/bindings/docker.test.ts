@@ -34,7 +34,7 @@ describe("Docker sandbox deletion", () => {
     });
     vi.mocked(run).mockClear();
 
-    await handle.onSessionDelete();
+    await handle.onSandboxDelete();
 
     expect(run).toHaveBeenNthCalledWith(1, ["stop", "-t", "0", "container-id-1"]);
     expect(run).toHaveBeenNthCalledWith(2, ["rm", "-f", "container-id-1"]);
@@ -68,7 +68,7 @@ describe("Docker sandbox deletion", () => {
       appRoot: "/tmp/eve-app",
       sandboxName: "session-key",
     });
-    await oldHandle.onSessionDelete();
+    await oldHandle.onSandboxDelete();
     containerId = "container-id-2";
     await provider.openSession({
       appRoot: "/tmp/eve-app",

@@ -7,7 +7,8 @@ import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { createInputRequestedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { withPublished } from "#internal/testing/session-machine.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
@@ -88,7 +89,8 @@ it("relays a withdrawn workflow question's input.resolved to the stream and its 
       [
         "ask-1",
         {
-          workflowAsk: { control: "control", question: {} },
+          workflowAsk: { control: "control" },
+          reply: {},
           runId: "run-1",
           childContinuationToken: "ask-1",
           event: { sequence: 1, stepIndex: 0, turnId: "turn-1" },
@@ -97,7 +99,22 @@ it("relays a withdrawn workflow question's input.resolved to the stream and its 
       ],
     ],
     forChildContinuationToken: "ask-1",
-    session: base.snapshot.session as HarnessSession,
+    session: withPublished(base.snapshot.session as HarnessSession, [
+      createInputRequestedEvent({
+        callId: "call-1",
+        requests: [
+          {
+            action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "research" },
+            kind: "question",
+            prompt: "Which region should Alice's report cover?",
+            requestId: "ask-1",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+    ]),
   });
 
   await runtime.run(async () => {

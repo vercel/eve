@@ -1,21 +1,11 @@
 import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  emitTurnEpilogue,
-  emitTurnPreamble,
-  emitStreamContent,
-  getHarnessEmissionState,
-  type HarnessEmissionState,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
+import { emitStreamContent } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveWebSearchActivityLabel } from "#harness/provider-tool-schemas.js";
-import {
-  getTurnClientContextState,
-  setTurnClientContextState,
-} from "#harness/turn-client-context.js";
-import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
+import type { HarnessEmitFn } from "#harness/types.js";
 
 async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextStreamPart<ToolSet>> {
   for (const part of parts) {
@@ -23,7 +13,7 @@ async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextSt
   }
 }
 
-const EMISSION_STATE: HarnessEmissionState = {
+const EMISSION_STATE: TurnPosition = {
   sequence: 0,
   sessionStarted: true,
   stepIndex: 0,
@@ -33,184 +23,6 @@ const EMISSION_STATE: HarnessEmissionState = {
 function createEmitStub(): HarnessEmitFn {
   return vi.fn(async () => {});
 }
-
-function createSession(state?: Record<string, unknown>): HarnessSession {
-  return {
-    agent: {
-      modelReference: { id: "test-model" },
-      system: "test",
-      tools: [],
-    },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
-    continuationToken: "http:test",
-    history: [],
-    sessionId: "sess-test",
-    state,
-  };
-}
-
-describe("emitTurnEpilogue", () => {
-  it("passes settled history with turn.completed", async () => {
-    const emit = createEmitStub();
-    const history = [{ content: "settled reply", role: "assistant" as const }];
-
-    await emitTurnEpilogue(emit, EMISSION_STATE, history, {
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-    });
-
-    expect(emit).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ type: "turn.completed" }),
-      history,
-    );
-  });
-});
-
-describe("getHarnessEmissionState", () => {
-  it("returns defaults when no state exists", () => {
-    expect(getHarnessEmissionState(createSession().state)).toEqual({
-      sessionStarted: false,
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "",
-    });
-  });
-
-  it("returns defaults when state key is missing", () => {
-    expect(getHarnessEmissionState(createSession({ other: "value" }).state)).toEqual({
-      sessionStarted: false,
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "",
-    });
-  });
-
-  it("reads persisted emission state", () => {
-    const session = createSession({
-      "eve.harness.emission": {
-        sessionStarted: true,
-        sequence: 3,
-        stepIndex: 1,
-        turnId: "turn_3",
-      },
-    });
-
-    expect(getHarnessEmissionState(session.state)).toEqual({
-      sessionStarted: true,
-      sequence: 3,
-      stepIndex: 1,
-      turnId: "turn_3",
-    });
-  });
-});
-
-describe("setHarnessEmissionState", () => {
-  it("writes emission state to the session", () => {
-    const session = createSession();
-    const state: HarnessEmissionState = {
-      sessionStarted: true,
-      sequence: 2,
-      stepIndex: 0,
-      turnId: "turn_2",
-    };
-
-    const updated = setHarnessEmissionState(session, state);
-
-    expect(getHarnessEmissionState(updated.state)).toEqual(state);
-  });
-
-  it("preserves existing session state keys", () => {
-    const session = createSession({ "other.key": "preserved" });
-    const state: HarnessEmissionState = {
-      sessionStarted: true,
-      sequence: 1,
-      stepIndex: 0,
-      turnId: "turn_1",
-    };
-
-    const updated = setHarnessEmissionState(session, state);
-
-    expect(updated.state?.["other.key"]).toBe("preserved");
-    expect(getHarnessEmissionState(updated.state)).toEqual(state);
-  });
-
-  it("round-trips through get after set", () => {
-    const state: HarnessEmissionState = {
-      sessionStarted: true,
-      sequence: 5,
-      stepIndex: 2,
-      turnId: "turn_5",
-    };
-
-    const session = setHarnessEmissionState(createSession(), state);
-    const retrieved = getHarnessEmissionState(session.state);
-
-    expect(retrieved).toEqual(state);
-  });
-
-  it("clears client context when the emission state moves between turns", () => {
-    const turnId = "turn_5";
-    const session = setTurnClientContextState(createSession(), {
-      insertionIndex: 0,
-      messages: ["current page"],
-      turnId,
-    });
-
-    const updated = setHarnessEmissionState(session, {
-      sequence: 6,
-      sessionStarted: true,
-      stepIndex: 0,
-      turnId: "",
-    });
-
-    expect(getTurnClientContextState(updated.state, turnId)).toBeUndefined();
-  });
-});
-
-describe("emitTurnPreamble", () => {
-  it("keeps participant messages visible", async () => {
-    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
-
-    await emitTurnPreamble(
-      async (event) => {
-        events.push(event);
-      },
-      { message: "Start the work" },
-      { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
-      [],
-    );
-
-    expect(events.map((event) => event.type)).toEqual(["turn.started", "message.received"]);
-  });
-
-  it("attaches one trace context to the session and turn start events", async () => {
-    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
-    const trace = {
-      spanId: "0123456789abcdef",
-      traceFlags: 1,
-      traceId: "0123456789abcdef0123456789abcdef",
-    };
-
-    await emitTurnPreamble(
-      async (event) => {
-        events.push(event);
-      },
-      { message: "hello" },
-      { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
-      [{ role: "user", content: "hello" }],
-      undefined,
-      trace,
-    );
-
-    expect(events.slice(0, 2)).toEqual([
-      { data: { trace }, type: "session.started" },
-      { data: { sequence: 0, trace, turnId: "turn_0" }, type: "turn.started" },
-    ]);
-  });
-});
 
 describe("emitStreamContent empty delivery", () => {
   it("reduces 368 saturated deltas to eight bounded dispatches", async () => {

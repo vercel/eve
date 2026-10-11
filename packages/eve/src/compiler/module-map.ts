@@ -160,6 +160,7 @@ export async function createProgrammaticCompiledModuleMap(
       scope.mounts.map((mount) => [mount.mountId, mount.mountSourceId]),
     );
     const loadNamespace = createCompiledBindingNamespaceLoader({
+      appRoot: manifest.appRoot,
       bindings,
       registries,
       mountSourceId: (binding) => mountSourceIds.get(bindingMountId(binding) ?? ""),

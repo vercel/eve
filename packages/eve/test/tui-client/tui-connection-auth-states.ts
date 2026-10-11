@@ -174,14 +174,14 @@ void (async () => {
     input.type("turn 1, drive stub-mcp through required → authorized");
     input.enter();
 
-    await screen.waitForText("● stub-mcp · authorization", 10_000);
+    await screen.waitForText("● Stub-mcp · authorization", 10_000);
     console.log(theme.muted("[states] stub-mcp section header rendered"));
 
     await waitForCondition(
       () => {
         const snap = screen.snapshot();
         return (
-          snap.includes("URL: https://example.com/authorize/stub-mcp") &&
+          snap.includes("https://example.com/authorize/stub-mcp") &&
           snap.includes("Code: STUB-1234") &&
           snap.includes("Visit the URL above")
         );
@@ -210,7 +210,7 @@ void (async () => {
         return (
           snap.includes("Authorization complete") &&
           !snap.includes("Authorization required for stub-mcp") &&
-          !snap.includes("URL: https://example.com/authorize/stub-mcp") &&
+          !snap.includes("https://example.com/authorize/stub-mcp") &&
           !snap.includes("Code: STUB-1234") &&
           !snap.includes("Visit the URL above")
         );
@@ -232,7 +232,7 @@ void (async () => {
     input.type("turn 2, drive other-mcp through required → failed");
     input.enter();
 
-    await screen.waitForText("● other-mcp · authorization", 10_000);
+    await screen.waitForText("● Other-mcp · authorization", 10_000);
     console.log(theme.muted("[states] other-mcp section header rendered"));
     server.emit(secondCallbackTurn);
 
@@ -259,12 +259,13 @@ void (async () => {
   } catch (error) {
     input.ctrlC();
     input.ctrlC();
-    await runPromise.catch(() => undefined);
+    // A runner stuck mid-turn may ignore Ctrl+C; don't let that mask the failure.
+    await Promise.race([runPromise.catch(() => undefined), sleep(2_000)]);
     throw error;
   }
 })().catch((error: unknown) => {
   console.error(theme.danger("\n[tui] tui-connection-auth-states smoke test failed:"), error);
-  process.exitCode = 1;
+  process.exit(1);
 });
 
 async function waitForCondition(

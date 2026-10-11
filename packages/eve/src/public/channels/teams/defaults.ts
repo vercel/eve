@@ -166,9 +166,20 @@ export const defaultEvents: TeamsChannelEvents = {
   async "authorization.required"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
     const url = event.authorization?.url;
-    const text = url
-      ? `Authorization required for ${displayName}: ${url}`
-      : `Authorization required for ${displayName}.`;
+    const instructions = event.authorization?.instructions;
+    const userCode = event.authorization?.userCode;
+    const codeHint = userCode
+      ? `If ${displayName} asks for a confirmation code, enter ${userCode}.`
+      : undefined;
+    const text = [
+      url
+        ? `Authorization required for ${displayName}: ${url}`
+        : `Authorization required for ${displayName}.`,
+      instructions,
+      codeHint,
+    ]
+      .filter(Boolean)
+      .join(" ");
     const posted = await channel.thread.post({
       attachments: [
         {
@@ -197,6 +208,9 @@ export const defaultEvents: TeamsChannelEvents = {
                 type: "TextBlock",
                 wrap: true,
               },
+              ...[instructions, codeHint]
+                .filter((line): line is string => Boolean(line))
+                .map((line) => ({ text: line, type: "TextBlock", wrap: true })),
             ],
             type: "AdaptiveCard",
             version: channel.adaptiveCardVersion,

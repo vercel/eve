@@ -1,11 +1,15 @@
+import { telegramContinuationToken } from "#public/channels/telegram/api.js";
 import { telegramChannel } from "#public/channels/telegram/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type RenderedOption,
   type Surface,
   recordingFetch,
   linkTargets,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const SECRET = "telegram-conformance-secret";
@@ -67,6 +71,10 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
     ? { id: -nextChatId, title: "Release crew", type: "supergroup" }
     : { id: nextChatId, type: "private" };
   const PERSON = { first_name: "Alice", id: nextChatId, is_bot: false } as const;
+  const PEOPLE = {
+    alice: PERSON,
+    bob: { first_name: "Bob", id: nextChatId + 500_000, is_bot: false },
+  } as const;
   let updateId = 0;
   let messageId = 0;
   /** The bot's latest message, which a person in a group replies to so the bot hears them. */
@@ -99,9 +107,48 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
     });
   }
 
+  /** Files a person sent, by the `file_id` the bot fetches each with. */
+  const uploads = new Map<string, SentFile>();
+  /** A person's files as Telegram attaches them: an image as a photo, anything else as a document. */
+  function attached(files: readonly SentFile[]): Record<string, unknown> {
+    const [file] = files;
+    if (file === undefined) return {};
+    const fileId = `file_${uploads.size + 1}`;
+    uploads.set(fileId, file);
+    return file.mediaType.startsWith("image/")
+      ? { photo: [{ file_id: fileId, file_size: file.bytes.length, height: 1, width: 1 }] }
+      : {
+          document: {
+            file_id: fileId,
+            file_name: file.name,
+            file_size: file.bytes.length,
+            mime_type: file.mediaType,
+          },
+        };
+  }
+
   async function decode(request: Request): Promise<PlatformCall> {
-    const method = new URL(request.url).pathname.split("/").at(-1)!;
+    const url = new URL(request.url);
+    // A download from Telegram's file endpoint, `/file/bot<token>/<file_id>`.
+    if (url.pathname.startsWith("/file/")) {
+      const fileId = url.pathname.split("/").at(-1)!;
+      // Telegram serves files as `application/octet-stream`, whatever they are (#1217).
+      return {
+        body: {},
+        method: `GET ${url.pathname}`,
+        response: serveFile(uploads.get(fileId), "application/octet-stream"),
+      };
+    }
+    const method = url.pathname.split("/").at(-1)!;
     const text = await request.text();
+    if (method === "getFile") {
+      const { file_id } = JSON.parse(text) as { readonly file_id: string };
+      return {
+        body: { file_id },
+        method,
+        response: { ok: true, result: { file_id, file_path: file_id } },
+      };
+    }
     messageId += 1;
     if (method === "sendMessage") lastBotMessage = messageId;
     return {
@@ -113,7 +160,10 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
-    capabilities: ["buttons", "text-replies"],
+    personId: String(PERSON.id),
+    capabilities: !group
+      ? ["attachments", "buttons", "text-replies"]
+      : ["attachments", "another-person", "buttons", "text-replies"],
     surface,
     createChannel: (record) =>
       telegramChannel({
@@ -121,16 +171,22 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
         botUsername: BOT.username,
         credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
       }),
-    message: (text) =>
-      update({
-        message: {
-          chat: CHAT,
-          date: 0,
-          from: PERSON,
-          message_id: 1000 + updateId,
-          ...addressed(text),
-        },
-      }),
+    message: (text, person, files = []) => {
+      const message: Record<string, unknown> = {
+        chat: CHAT,
+        date: 0,
+        from: PEOPLE[person],
+        message_id: 1000 + updateId,
+        ...addressed(text),
+      };
+      if (files.length > 0) {
+        // A message with a file carries its words as the file's caption.
+        message.caption = message.text;
+        delete message.text;
+        Object.assign(message, attached(files));
+      }
+      return update({ message });
+    },
     findOptions(call, prompt) {
       const body = call.body as MessageBody;
       if (call.method !== "sendMessage" || body.text?.includes(prompt) !== true) return undefined;
@@ -149,12 +205,17 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
       };
     },
     personShownAs: [PERSON.first_name],
-    press: (option) => {
+    // A reply to the bot's message continues the session that posted it.
+    nextAddress: () =>
+      group && lastBotMessage !== undefined
+        ? telegramContinuationToken({ chatId: CHAT.id, conversationId: lastBotMessage })
+        : undefined,
+    press: (option, person: Person) => {
       const { data, messageId } = option.handle as PressHandle;
       return update({
         callback_query: {
           data,
-          from: PERSON,
+          from: PEOPLE[person],
           id: `callback-${updateId}`,
           message: { chat: CHAT, date: 0, message_id: messageId },
         },

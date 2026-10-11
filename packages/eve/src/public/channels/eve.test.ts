@@ -1,6 +1,7 @@
 import type { FilePart, UserContent } from "ai";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import { describe, expect, it, vi } from "vitest";
+import { WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -487,6 +488,25 @@ describe("eveChannel — events", () => {
     });
   });
 
+  it("hands staging its fetchFile and the upload policy it holds every file to", async () => {
+    const fetchFile = vi.fn(async (url: string) =>
+      url.startsWith("https://uploads.example.com/") ? Buffer.from("ok") : null,
+    );
+    const adapter = getEveAdapter({
+      auth: none(),
+      fetchFile,
+      uploadPolicy: { allowedMediaTypes: ["image/*"], maxBytes: 4 },
+    });
+
+    await expect(adapter.fetchFile!("https://uploads.example.com/a")).resolves.toEqual(
+      Buffer.from("ok"),
+    );
+    await expect(adapter.fetchFile!("https://elsewhere.example.com/a")).resolves.toBeNull();
+    expect(adapter.uploadPolicy).toEqual({ allowedMediaTypes: ["image/*"], maxBytes: 4 });
+    // Without either option the channel keeps the framework's HTTP adapter.
+    expect(getEveAdapter({ auth: none() }).kind).toBe("http");
+  });
+
   it("passes configured event handlers through with session context", async () => {
     const observed: string[] = [];
     const adapter = getEveAdapter({
@@ -573,7 +593,20 @@ describe("eveChannel — stream cursor", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(handler.getEventStream).toHaveBeenCalledWith({ startIndex });
+    expect(handler.getEventStream).toHaveBeenCalledWith({ follow: true, startIndex });
+  });
+
+  it("bounds a historical read at the durable tail and asks for it without following", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockResolvedValueOnce(41);
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?follow=false",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+    expect(handler.getEventStream).toHaveBeenCalledWith({ follow: false, startIndex: undefined });
   });
 
   it.each(["1.5", "1junk", "0x10", "1e2", ""])(
@@ -589,14 +622,50 @@ describe("eveChannel — stream cursor", () => {
     },
   );
 
-  it("omits the tail index by default without paying for the lookup", async () => {
+  it("resolves the tail index by default without returning it", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
-    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
+    expect(handler.getStreamTailIndex).toHaveBeenCalledOnce();
+  });
+
+  it("returns 404 for an unknown session in follow mode", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockRejectedValueOnce(
+      new WorkflowRunNotFoundError("test-session-id"),
+    );
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Session not found.", ok: false });
+  });
+
+  it("cancels the early-opened event stream when the tail lookup fails", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancelled = vi.fn();
+    handler.getEventStream.mockResolvedValueOnce(new ReadableStream({ cancel: cancelled }));
+    handler.getStreamTailIndex.mockRejectedValueOnce(
+      new WorkflowRunNotFoundError("test-session-id"),
+    );
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(404);
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+  });
+
+  it("returns 503 when the session lookup fails transiently", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockRejectedValueOnce(new Error("stream lookup failed"));
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Session stream unavailable.", ok: false });
   });
 
   it("reports the durable tail index when the request opts in", async () => {

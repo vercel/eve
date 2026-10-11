@@ -1,5 +1,5 @@
+import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { describe, expect, it } from "vitest";
-import { start } from "#internal/workflow/runtime.js";
 
 import { workflowEntry } from "#execution/session/entry.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -48,7 +48,7 @@ describe("AppHarness", () => {
 
     const outputs = await Promise.all([
       runtimeA.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -62,7 +62,7 @@ describe("AppHarness", () => {
         return await readFirstTurnReply(run);
       }),
       runtimeB.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",

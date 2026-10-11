@@ -391,6 +391,35 @@ interface SlackBinding {
   readonly slack: SlackHandle;
 }
 
+/** Replies {@link SlackThread.refresh} loads: the thread's first page. */
+export const THREAD_REFRESH_LIMIT = 50;
+/** Replies per page when paging to a message. */
+const WINDOW_PAGE_SIZE = 200;
+/** Pages read before giving up on reaching a message: 1000 replies. */
+const WINDOW_MAX_PAGES = 5;
+
+type ThreadWindowFetcher = (
+  latest: string,
+  size: number,
+) => Promise<readonly SlackThreadMessage[] | undefined>;
+
+const threadWindowFetchers = new WeakMap<SlackThread, ThreadWindowFetcher>();
+
+/**
+ * Fetches the last `size` messages of a thread up to and including the one at
+ * `latest`, oldest first, without touching {@link SlackThread.recentMessages}.
+ * Slack returns replies oldest first, so this pages forward to `latest`.
+ * Returns `undefined` when `latest` sits more than 1000 replies in, or for a
+ * thread {@link buildSlackBinding} didn't build.
+ */
+export async function fetchSlackThreadWindow(
+  thread: SlackThread,
+  latest: string,
+  size: number,
+): Promise<readonly SlackThreadMessage[] | undefined> {
+  return await threadWindowFetchers.get(thread)?.(latest, size);
+}
+
 /**
  * Constructs the `{ thread, slack }` pair.
  *
@@ -458,7 +487,7 @@ export function buildSlackBinding(input: {
         const response = await fetchSlackThreadReplies({
           ...apiOptions,
           channel: input.channelId,
-          limit: 50,
+          limit: THREAD_REFRESH_LIMIT,
           ts: currentThreadTs,
         });
         messages = (response.messages as Record<string, unknown>[]).map((raw) =>
@@ -479,6 +508,37 @@ export function buildSlackBinding(input: {
     });
     refreshInFlight = refresh;
     return refresh;
+  }
+
+  async function fetchWindow(
+    latest: string,
+    size: number,
+  ): Promise<readonly SlackThreadMessage[] | undefined> {
+    if (!input.channelId || !currentThreadTs) return undefined;
+    let window: Record<string, unknown>[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < WINDOW_MAX_PAGES; page += 1) {
+      const response = await fetchSlackThreadReplies({
+        ...apiOptions,
+        channel: input.channelId,
+        cursor,
+        inclusive: true,
+        latest,
+        limit: WINDOW_PAGE_SIZE,
+        ts: currentThreadTs,
+      });
+      window = [...window, ...(response.messages as Record<string, unknown>[])].slice(-size);
+      cursor = response.nextCursor;
+      if (cursor === undefined || cursor === "") {
+        return window.map((raw) =>
+          parseThreadMessage(raw, currentThreadTs, {
+            appId: input.appId,
+            botUserId: input.botUserId,
+          }),
+        );
+      }
+    }
+    return undefined;
   }
 
   const thread: SlackThread = {
@@ -591,6 +651,7 @@ export function buildSlackBinding(input: {
     uploadFiles,
   };
 
+  threadWindowFetchers.set(thread, fetchWindow);
   return { thread, slack };
 }
 

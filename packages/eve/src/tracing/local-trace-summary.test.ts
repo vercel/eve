@@ -39,8 +39,8 @@ describe("summarizeLocalTrace", () => {
         name: "ai.streamText.doStream",
         attributes: {
           "gen_ai.operation.name": "chat",
-          "agent.usage.input_tokens": 1000,
-          "agent.usage.output_tokens": 100,
+          "gen_ai.usage.input_tokens": 1000,
+          "gen_ai.usage.output_tokens": 100,
           "gen_ai.request.model": "gpt-5",
         },
       }),

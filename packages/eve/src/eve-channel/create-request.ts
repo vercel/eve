@@ -3,8 +3,10 @@ import type { UserContent } from "ai";
 import type { SessionCallback, SessionCapabilities } from "#channel/types.js";
 import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ToolStub } from "#tool-stubs/types.js";
 
 export interface ParsedCreateBody {
+  stubs?: readonly ToolStub[];
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message?: string | UserContent;

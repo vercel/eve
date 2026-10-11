@@ -1,5 +1,5 @@
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
+import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ClientAgentSession } from "#client/agent-session.js";
@@ -51,6 +51,22 @@ export interface EveEvalToolCall {
 }
 
 /**
+ * One skill load extracted from the captured stream, pairing the `load-skill`
+ * request with its matching `load-skill-result`.
+ */
+export interface EveEvalSkillLoad {
+  /** The loaded skill's name. */
+  readonly skill: string;
+  /** The skill's instructions; `undefined` when the load never resolved. */
+  readonly output: JsonValue | undefined;
+  readonly status: EveEvalActionStatus;
+  /** Zero-based index of the turn the load happened in. */
+  readonly turnIndex: number;
+  /** Owning session id, when the runner knows it. */
+  readonly sessionId?: string;
+}
+
+/**
  * One call to an agent task extracted from the captured stream: its
  * `task.started`, joined with its `task.settled` and the task's
  * `agent.started`.
@@ -80,6 +96,7 @@ export interface EveEvalSubagentCall {
 export interface EveEvalDerivedFacts {
   readonly toolCalls: readonly EveEvalToolCall[];
   readonly toolCallCount: number;
+  readonly skillLoads: readonly EveEvalSkillLoad[];
   readonly subagentCalls: readonly EveEvalSubagentCall[];
   readonly subagentCallCount: number;
   /** Every HITL input request raised during the run (`input.requested`). */
@@ -244,7 +261,7 @@ export interface EveEvalAssertions {
   parked(): AssertionHandle;
   messageIncludes(token: string | RegExp): AssertionHandle;
   calledTool(name: string, options?: EveEvalToolCallMatchOptions): AssertionHandle;
-  /** Sugar for `calledTool("load_skill", { input: { skill }, ... })`. */
+  /** Asserts a completed load of `skill`, constrained like `calledTool`. */
   loadedSkill(skill: string, options?: EveEvalSkillLoadMatchOptions): AssertionHandle;
   notCalledTool(name: string): AssertionHandle;
   /** Asserts that tool requests appeared in order, allowing unrelated requests between them. */
@@ -392,14 +409,15 @@ export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions 
 // Judge (LLM-as-judge)
 // ---------------------------------------------------------------------------
 
-/** Evaluation settings used only for scoring, independently of the agent under test. */
+/** Decision settings used only for scoring, independently of the agent under test. */
 export interface EveEvalJudgeConfig {
-  /** Evaluation model ID or instance. Defaults to the model used by `eve/ai` evaluate. */
-  readonly model?: EvaluationModel;
-  readonly modelOptions?: AgentModelOptionsDefinition;
+  /** Decision model ID or instance. Defaults to the model used by `eve/ai` decide. */
+  readonly model?: DecisionModel;
+  /** Judge calls carry provider options only; eve places no prompt-cache breakpoints on them. */
+  readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
 }
 
-/** JSON content accepted as evaluation state, instructions, or rubric descriptions. */
+/** JSON content accepted as decision state, instructions, or rubric descriptions. */
 export type JudgeInput = string | JsonObject | readonly JsonValue[];
 
 /** A boolean judgment, ordered rubric, or categorical judgment with an expected option. */
@@ -426,7 +444,7 @@ export type JudgeQuestionConstraint<Q extends JudgeQuestion> = Q extends { type:
   ? { readonly expected: NoInfer<Extract<keyof Q["criteria"], string>> }
   : unknown;
 
-/** Named judgments evaluated together against one shared state. */
+/** Named judgments decided together against one shared state. */
 export interface JudgeBatch<Questions extends Record<string, JudgeQuestion>> {
   /** Replaces the default `{ input, output }` state when supplied. */
   readonly state?: JudgeInput;
@@ -557,7 +575,7 @@ interface EveEvalBase {
   /**
    * Judge model for this eval's `t.judge(...)` assertions. Optional: when
    * omitted, judge assertions fall back to the `judge` declared in
-   * `evals.config.ts`, then the shared evaluation default. Only used for
+   * `evals.config.ts`, then the shared decision default. Only used for
    * scoring; never changes the agent under test.
    */
   readonly judge?: EveEvalJudgeConfig;
@@ -684,7 +702,7 @@ export interface EveEvalConfigInput<TContext = unknown> {
   teardown?(context: TContext | undefined): void | Promise<void>;
   /**
    * Default judge model for `t.judge(...)` assertions across every eval.
-   * Optional: omission uses the shared evaluation default. Individual evals
+   * Optional: omission uses the shared decision default. Individual evals
    * may override it with their own `judge`. Only ever used for scoring.
    */
   readonly judge?: EveEvalJudgeConfig;

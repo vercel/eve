@@ -1,9 +1,9 @@
 import { petstoreHeaders } from "./petstore";
 
 /**
- * A fixture-owned MCP server whose tools cover each shape of MCP result that
- * `connection_execute` returns: structured content, JSON text, images, and
- * tool errors, plus a nested input the model has to build from a signature.
+ * A fixture-owned MCP server whose tools cover each shape of MCP result a
+ * connection tool returns: structured content, JSON text, images, and tool
+ * errors, plus a nested input the model has to build from a signature.
  */
 export const KENNEL_TOOLS = [
   {

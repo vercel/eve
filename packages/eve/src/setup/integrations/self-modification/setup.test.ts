@@ -33,6 +33,7 @@ function operations(config?: string): SelfModificationSetupOperations & {
     })),
     findOrCreateConnector: vi.fn(async () => "github/selfmod-acme-agents"),
     readConfig: vi.fn(async () => config),
+    readLocalConfig: vi.fn(async () => config),
     writeConfig: vi.fn(async () => {}),
   };
 }
@@ -155,6 +156,9 @@ describe("self-modification integration setup", () => {
     });
     expect(deps.installScaffoldDependencies).toHaveBeenCalledWith(
       expect.objectContaining({ changed: true, projectPath: "/project" }),
+    );
+    expect(effects.writeConfig).toHaveBeenCalledWith(
+      expect.stringContaining('import selfModification from "eve/self-modification/remote"'),
     );
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('repository: "github.com/acme/agents"'),

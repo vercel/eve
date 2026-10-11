@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { z } from "zod";
-import { expectCacheReuse, expectHealthyTurn } from "../cache-checks";
+import { expectCacheReuse, expectHealthyTurn } from "@eve-e2e/config/cache-checks";
 import { EVENT_OVERVIEW } from "../event-overview";
 import { purchasingSheets } from "../purchasing-sheets";
 
@@ -47,7 +47,7 @@ function expectFiveReviewers(started: EveEvalTurn) {
     .filter((event) => event.type === "actions.requested")
     .flatMap(({ data }) =>
       data.actions
-        .filter((action) => action.kind === "tool-call" && action.toolName === "reviewer")
+        .filter((action) => action.kind === "subagent-call" && action.subagentName === "reviewer")
         .map(() => `${data.turnId}:${data.stepIndex}`),
     );
   assert.equal(launchSteps.length, 5, "five reviewer requests");
@@ -56,7 +56,11 @@ function expectFiveReviewers(started: EveEvalTurn) {
 
 function expectReviewSummary(turn: EveEvalTurn) {
   assert(turn.message?.trim(), "parent reports the completed reviews");
-  turn.event("step.completed", { data: { finishReason: "stop" }, count: 1 });
+  // The task prompt lets the parent tell the person the reviews have started before the summary.
+  turn.event("step.completed", {
+    data: { finishReason: "stop" },
+    count: (count) => count === 1 || count === 2,
+  });
   turn.notEvent("compaction.completed");
 }
 

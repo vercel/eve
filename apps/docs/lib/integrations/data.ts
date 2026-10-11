@@ -406,6 +406,7 @@ export default linearChannel({
       "next.js",
       "svelte",
       "sveltekit",
+      "tanstack",
       "nuxt",
       "vue",
       "react",
@@ -416,7 +417,7 @@ export default linearChannel({
 eve add channel/web
 \`\`\`
 
-To wire it up by hand instead — including into a Svelte or Nuxt app you already have — install the framework:
+To wire it up by hand instead — including into a Svelte, Nuxt, or TanStack Start app you already have — install the framework:
 
 \`\`\`bash
 npm install eve@latest
@@ -430,50 +431,15 @@ import { eveChannel } from "eve/channels/eve";
 export default eveChannel();
 \`\`\`
 
-Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client. Next.js, Nuxt, and Svelte each have an integration that mounts those routes on your app's own origin, so there's no CORS to configure and no URL env var to keep in sync:
+Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client. Next.js, Nuxt, Svelte, and TanStack Start each have an integration that mounts those routes on your app's own origin, so there's no CORS to configure and no URL env var to keep in sync:
 
 - **Next.js.** Wrap \`next.config.ts\` with \`withEve()\` from \`eve/next\`, then call \`useEveAgent()\` from \`eve/react\`. See the [Next.js guide](/docs/guides/frontend/nextjs).
 - **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
 - **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
+- **TanStack Start.** Add the \`eveTanStack()\` Vite plugin to \`vite.config.ts\` next to \`nitro()\`, then call \`useEveAgent()\` from \`eve/react\`. See the [TanStack Start guide](/docs/guides/frontend/tanstack).
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`host\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
-    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), and [SvelteKit](/docs/guides/frontend/sveltekit).`,
-  },
-  buzz: {
-    logo: "buzz",
-    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-buzz-acp-adapter#readme",
-    badge: "ACP",
-    keywords: ["chat", "messaging", "desktop", "acp", "nostr", "agents"],
-    install: `Install [Buzz Desktop](https://buzz.xyz), then install eve's compatibility adapter globally:
-
-\`\`\`bash
-npm install --global @eve/buzz-acp-adapter
-\`\`\`
-
-The adapter must be installed globally because Buzz uses it whenever it interfaces with eve.`,
-    quickStart: `From an eve application directory, run the interactive installer:
-
-\`\`\`bash
-eve-buzz-acp-adapter install
-\`\`\`
-
-You can also provide a local application or deployed URL explicitly:
-
-\`\`\`bash
-eve-buzz-acp-adapter install ./path/to/eve-app
-eve-buzz-acp-adapter install https://agent.example.com
-\`\`\`
-
-The installer registers **eve** as a custom harness with Buzz.`,
-    configure: `Reopen Buzz, then create or edit an agent:
-
-1. Enter an **Agent name** and, optionally, **Agent instructions** for Buzz-specific behavior.
-2. Under **AI configuration**, choose **Customize for this agent**.
-3. Set **Agent harness** to **eve**. Buzz currently requires a **Model** value but does not prefill one for custom harnesses.
-4. Open **Advanced**. Leave **Who can talk to this agent** on its default owner-only selection. For a local application, set **Parallelism** to \`1\` and add any credentials that the application does not already load from an env file, such as \`AI_GATEWAY_API_KEY\`.
-5. Save the agent and start it.
-
-Accepted senders share one eve identity and its capabilities.`,
+    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed, and enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend/overview), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -2201,6 +2167,42 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "payments", "settlements", "oauth", "connect"],
     authModes: ["user"],
+  },
+  sanity: {
+    logo: "sanity",
+    docsHref: "https://www.sanity.io/docs/ai/mcp-server",
+    keywords: ["mcp", "cms", "content", "groq", "schemas", "releases", "oauth", "connect"],
+    authModes: ["user"],
+    connectors: { user: { uid: "sanity/sanity", service: "sanity", name: "sanity" } },
+    quickStart: `Create \`agent/connections/sanity.ts\`:
+
+\`\`\`ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.sanity.io",
+  protocolVersionDiscovery: false,
+  description:
+    "Sanity: query content with GROQ, edit documents, inspect schemas, and manage releases.",
+  auth: connect("sanity/sanity"),
+});
+\`\`\`
+
+Sanity requires the \`initialize\` handshake, so keep \`protocolVersionDiscovery: false\`. See [MCP protocol discovery](/docs/connections/mcp#configure-protocol-discovery).
+
+Each authenticated user authorizes their Sanity account in the browser before the first tool call.`,
+    configure: `Link your project, register the MCP connector, and pull OIDC locally:
+
+\`\`\`bash
+vercel link
+vercel connect create sanity --name sanity --connection-method mcp
+vercel env pull
+\`\`\`
+
+The MCP method registers the OAuth client automatically. Sign in with a Sanity account that has access to the projects and datasets your agent needs, and copy the returned connector UID into \`connect()\`.
+
+The MCP server can edit and publish content; use [tool filters and approval gates](/docs/connections/mcp#tool-filters) to control these actions.`,
   },
   sentry: {
     logo: "sentry",

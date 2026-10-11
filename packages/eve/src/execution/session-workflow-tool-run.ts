@@ -150,12 +150,5 @@ async function handleWorkflowToolRunWithdraw(
 }
 
 function createWorkflowAskRoute(ask: WorkflowToolAskRequest): WorkflowAskRoute {
-  const { allowFreeform, options } = ask.request;
-  return {
-    control: ask.control,
-    question: {
-      ...(allowFreeform !== undefined && { allowFreeform }),
-      ...(options !== undefined && { options: [...options] }),
-    },
-  };
+  return { control: ask.control };
 }

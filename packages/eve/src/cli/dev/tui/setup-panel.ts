@@ -42,6 +42,7 @@ interface SetupQuestionPanelBase {
 }
 
 interface SetupSelectPanelBase extends SetupQuestionPanelBase {
+  helpText?: string;
   options: readonly SetupPanelOption[];
   searchAction?: SearchActionOption;
   select: SelectState;
@@ -883,6 +884,15 @@ export function renderSelectQuestion(
 
   if (!renderedTrailingTaskAction) {
     appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
+  }
+
+  if (state.helpText) {
+    rows.push("");
+    for (const paragraph of state.helpText.split("\n")) {
+      for (const line of wrapVisibleLine(paragraph, Math.max(1, width - 4))) {
+        rows.push(`  ${c.dim(line)}`);
+      }
+    }
   }
 
   if (state.error !== undefined) {

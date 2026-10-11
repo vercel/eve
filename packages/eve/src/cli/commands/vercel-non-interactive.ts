@@ -1,8 +1,10 @@
 import { runVercelEnvPull } from "#setup/run-vercel-link.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 import { runVercel } from "#setup/primitives/index.js";
-import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
+import { readProjectLink } from "#setup/project-resolution.js";
 import { resolveProjectByNameOrId, resolveTeam } from "#setup/vercel-project.js";
+import type { Prompter } from "#setup/prompter.js";
+import { configureTraceSampling } from "#setup/vercel-trace-sampling.js";
 
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 
@@ -43,10 +45,9 @@ export function isNonInteractiveProjectCommand(options: VercelProjectCliOptions)
 export async function runNonInteractiveLink(input: {
   logger: VercelNonInteractiveLogger;
   appRoot: string;
-  options: VercelProjectCliOptions;
+  options: VercelProjectCliOptions & { traceSampling?: boolean };
+  prompter: Pick<Prompter, "log">;
   dependencies?: NonInteractiveLinkDependencies;
-  onCreatedProject?: (link: VercelProjectReference) => Promise<void>;
-  onProjectCreationUnknown?: () => void;
 }): Promise<boolean> {
   const { appRoot, logger, options } = input;
   const dependencies = input.dependencies ?? defaultDependencies;
@@ -62,7 +63,7 @@ export async function runNonInteractiveLink(input: {
   }
 
   let existing: boolean | undefined;
-  if (input.onCreatedProject !== undefined) {
+  if (options.traceSampling !== false) {
     try {
       existing =
         (await dependencies.resolveProjectByNameOrId(
@@ -85,13 +86,9 @@ export async function runNonInteractiveLink(input: {
     process.exitCode = 1;
     return false;
   }
-  if (existing === false && input.onCreatedProject !== undefined) {
+  if (existing === false) {
     const link = await dependencies.readProjectLink(appRoot).catch(() => undefined);
-    if (link !== undefined) await input.onCreatedProject(link);
-    else input.onProjectCreationUnknown?.();
-  }
-  if (existing === undefined && input.onCreatedProject !== undefined) {
-    input.onProjectCreationUnknown?.();
+    if (link !== undefined) await configureTraceSampling(link, input.prompter);
   }
   if (!(await dependencies.runVercelEnvPull(appRoot, undefined, undefined, true))) {
     logger.error("Vercel project linked, but pulling environment variables did not complete.");

@@ -1,7 +1,7 @@
-import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
+import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
-import { evaluate } from "#ai/evaluate.js";
+import { decide } from "#ai/decide.js";
 import { parseJsonValue, type JsonObject } from "#shared/json.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
@@ -12,8 +12,8 @@ const DEFAULT_CLEAR_DESCRIPTION = "The action is routine and low impact.";
 const DEFAULT_CAUTION_DESCRIPTION = "The action is dangerous or its important effects are unclear.";
 
 export interface AutoApprovalOptions {
-  /** Evaluation model instance or ID. Defaults to TypeSafe Jev. */
-  readonly model?: EvaluationModel;
+  /** Decision model instance or ID. Defaults to TypeSafe Jev. */
+  readonly model?: DecisionModel;
   /** Instructions used to classify the exact tool call. */
   readonly instructions?: string;
   /** Descriptions of the fixed approval outcomes. */
@@ -24,7 +24,7 @@ export interface AutoApprovalOptions {
 }
 
 async function autoApproval(
-  evaluationModel: EvaluationModel,
+  decisionModel: DecisionModel,
   options: AutoApprovalOptions,
   context: ApprovalContext,
 ): Promise<"approved" | "user-approval"> {
@@ -35,8 +35,8 @@ async function autoApproval(
       return "user-approval";
     }
     const abortSignal = AbortSignal.any([context.abortSignal, AbortSignal.timeout(30_000)]);
-    const result = await evaluate({
-      model: evaluationModel,
+    const result = await decide({
+      model: decisionModel,
       state: {
         action: {
           input,
@@ -79,16 +79,16 @@ function onceApproval(
 }
 
 /**
- * Returns an `approval` callback that asks an AI SDK evaluation model whether
+ * Returns an `approval` callback that asks an AI SDK decision model whether
  * the exact tool call presents concrete security danger. Defaults to TypeSafe Jev.
- * Unavailable or invalid evaluations require user approval.
+ * Unavailable or invalid decisions require user approval.
  */
 export function auto<TInput = unknown>(options: AutoApprovalOptions = {}): ApprovalPolicy<TInput> {
-  const evaluationModel = options.model ?? "typesafe-ai/jev";
+  const decisionModel = options.model ?? "typesafe-ai/jev";
   const callback = (_closure: JsonObject, context: ApprovalContext) =>
-    autoApproval(evaluationModel, options, context);
+    autoApproval(decisionModel, options, context);
   return stampDurableDynamicCallback(
-    (context) => autoApproval(evaluationModel, options, context as ApprovalContext),
+    (context) => autoApproval(decisionModel, options, context as ApprovalContext),
     { callback, closure: {} },
   ) as ApprovalPolicy<TInput>;
 }

@@ -3,12 +3,11 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import {
-  actionLabel,
   reviewingResults,
   waitingOnTasks,
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
+import { actionLabel, visibleActions } from "#shared/action-label.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -304,16 +303,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   // Calls in one step stream in one at a time, so the step keeps its first
-  // label, or the model's narration, and counts the rest. Calls a tool makes
-  // on the model's behalf, such as a connection tool, belong to their parent.
+  // label, or the model's narration, and counts the rest.
   async "actions.requested"(event, channel, _ctx) {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
-    const actions = event.actions.filter(
-      (action) =>
-        action.kind !== "tool-call" ||
-        (!isTaskControlTool(action.toolName) && action.parentCallId === undefined),
-    );
+    const actions = visibleActions(event.actions);
     if (!narration && actions.length === 0) return;
     const stream = stepStream(channel.state, event.turnId, event.stepIndex);
     const calls =
@@ -442,7 +436,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // The challenge is user-specific: the sign-in link (and device code)
     // must only ever be visible to the person who started the sign-in, never posted into
     // the shared thread.
-    if (recipientUserId && challengeUrl) {
+    const instructions = event.authorization?.instructions;
+    if (recipientUserId && (challengeUrl || instructions)) {
       const { channelId, threadTs } = channel.state;
       // The turn's own sign-in holds it, so the prompt can cancel that turn.
       const cancel =
@@ -452,6 +447,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
       const prompt = {
         cancel,
         displayName,
+        instructions,
         url: challengeUrl,
         userCode: event.authorization?.userCode,
       };

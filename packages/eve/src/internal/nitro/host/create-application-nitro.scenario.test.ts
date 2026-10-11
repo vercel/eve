@@ -86,6 +86,7 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
         dev: input.dev ?? false,
         handlers: [],
         publicAssets: [],
+        serverAssets: [],
         rootDir: "/tmp/weather-agent",
         virtual: {},
       },
@@ -442,6 +443,22 @@ describe("application Nitro creation", () => {
       rootDir: preparedHost.appRoot,
       scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
     });
+  });
+
+  it("pins Nitro's rolldown builder so a host app's Vite config is never built as eve", async () => {
+    const { createDevelopmentApplicationNitro, createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = await createPreparedHost();
+
+    createNitroMock.mockResolvedValueOnce(createNitroStub().nitro);
+    await createDevelopmentApplicationNitro(preparedHost);
+    createNitroMock.mockResolvedValueOnce(createNitroStub().nitro);
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+
+    expect(createNitroMock.mock.calls.map(([config]) => config.builder)).toEqual([
+      "rolldown",
+      "rolldown",
+    ]);
   });
 
   it("keeps Nitro dev watch off authored app sources", async () => {

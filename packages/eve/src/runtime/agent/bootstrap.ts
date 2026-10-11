@@ -39,7 +39,8 @@ export type RuntimeDynamicModelReference = Readonly<
  * Minimal runtime-owned agent shape prepared for one harness turn.
  */
 interface RuntimeTurnAgentBase {
-  readonly availableSkills?: readonly AvailableSkillDescription[];
+  /** The skills the system prompt lists: every authored skill that isn't deferred. */
+  readonly listedSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
   readonly initialMessages?: readonly HarnessModelMessage[];
@@ -97,10 +98,9 @@ export function createResolvedRuntimeTurnAgent(input: {
     throw new Error("Expected a path-derived agent id while resolving agent resources.");
   }
   const base: RuntimeTurnAgentBase = {
-    availableSkills: agent.skills.map((skill) => ({
-      description: skill.description,
-      name: skill.name,
-    })),
+    listedSkills: agent.skills
+      .filter((skill) => skill.deferred !== true)
+      .map((skill) => ({ description: skill.description, name: skill.name })),
     id,
     initialMessages: agent.instructions
       .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)

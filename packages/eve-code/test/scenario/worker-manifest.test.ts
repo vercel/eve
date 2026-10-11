@@ -59,6 +59,8 @@ test("built worker keeps explicit read tools without shell or write capabilities
       diagnostics.filter((item) => item.severity === "error"),
       [],
     );
+    assert.ok(manifest.dynamicSkills.some((entry) => entry.slug === "code__pr"));
+    assert.ok(manifest.dynamicInstructions.some((entry) => entry.slug === "code__github"));
     const worker = manifest.subagents.find((item) => item.name === "code__worker");
     assert.ok(worker);
     assert.equal(worker.configResolver, undefined);
@@ -71,10 +73,6 @@ test("built worker keeps explicit read tools without shell or write capabilities
     assert.deepEqual(toolNames, ["glob", "grep", "read_file"]);
     for (const tool of worker.agent.tools) assert.equal(tool.hasExecute, true);
     assert.deepEqual(worker.agent.connections, []);
-    assert.deepEqual(
-      worker.agent.dynamicTools.map((tool) => tool.slug),
-      ["connection_tools"],
-    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

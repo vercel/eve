@@ -23,21 +23,32 @@ export async function runPostEditDiagnostics(input: {
   readonly addedPaths?: readonly string[];
   readonly changedPaths: readonly string[];
   readonly deletedPaths: readonly string[];
-  readonly repoRoot: string;
+  readonly patchRoot: string;
+  /** Content each written path had before the patch; null or absent for new files. */
+  readonly previousContents?: ReadonlyMap<string, string | null>;
   readonly sandbox: DiagnosticsSandbox;
 }): Promise<PostEditDiagnostic[]> {
   const allPaths = [...new Set([...input.changedPaths, ...input.deletedPaths])];
   const diagnostics: PostEditDiagnostic[] = [];
+  let inWorkTree = false;
   if (allPaths.length > 0) {
     try {
-      const result = await input.sandbox.run({
-        command: `git -C ${shellQuote(input.repoRoot)} diff --check -- ${allPaths.map(shellQuote).join(" ")}`,
+      const root = shellQuote(input.patchRoot);
+      const probe = await input.sandbox.run({
+        command: `git -C ${root} rev-parse --is-inside-work-tree`,
       });
-      if (result.exitCode !== 0) {
-        diagnostics.push({
-          check: "git-diff",
-          message: boundedDiagnostic(result.stderr || result.stdout || "git diff --check failed"),
+      // Exit 0 with "false" means a .git directory or a bare repository.
+      inWorkTree = probe.exitCode === 0 && probe.stdout.trim() === "true";
+      if (inWorkTree) {
+        const result = await input.sandbox.run({
+          command: `git -C ${root} diff --check -- ${allPaths.map(shellQuote).join(" ")}`,
         });
+        if (result.exitCode !== 0) {
+          diagnostics.push({
+            check: "git-diff",
+            message: boundedDiagnostic(result.stderr || result.stdout || "git diff --check failed"),
+          });
+        }
       }
     } catch (error) {
       diagnostics.push({
@@ -47,11 +58,14 @@ export async function runPostEditDiagnostics(input: {
     }
   }
 
-  for (const path of input.addedPaths ?? []) {
+  // git diff --check covers edits to tracked files; without it, check every
+  // written file so updates to existing files are not skipped.
+  const whitespacePaths = inWorkTree ? (input.addedPaths ?? []) : input.changedPaths;
+  for (const path of whitespacePaths) {
     try {
-      const content = await input.sandbox.readTextFile({ path: `${input.repoRoot}/${path}` });
+      const content = await input.sandbox.readTextFile({ path: `${input.patchRoot}/${path}` });
       if (content === null) continue;
-      const issues = whitespaceIssues(content);
+      const issues = whitespaceIssues(content, input.previousContents?.get(path));
       if (issues.length > 0) {
         diagnostics.push({ check: "whitespace", path, message: issues.join("\n") });
       }
@@ -59,7 +73,7 @@ export async function runPostEditDiagnostics(input: {
       diagnostics.push({
         check: "whitespace",
         path,
-        message: `Could not inspect added file: ${errorMessage(error)}`,
+        message: `Could not inspect written file: ${errorMessage(error)}`,
       });
     }
   }
@@ -67,7 +81,7 @@ export async function runPostEditDiagnostics(input: {
   for (let index = 0; index < input.changedPaths.length; index += 8) {
     const syntaxResults = await Promise.all(
       input.changedPaths.slice(index, index + 8).map(async (path) => {
-        const command = syntaxCommand(input.repoRoot, path);
+        const command = syntaxCommand(input.patchRoot, path);
         if (command === null) return null;
         try {
           const result = await input.sandbox.run({ command });
@@ -91,7 +105,7 @@ export async function runPostEditDiagnostics(input: {
   diagnostics.push(
     ...(await runTypeScriptDiagnostics({
       paths: input.changedPaths,
-      repoRoot: input.repoRoot,
+      patchRoot: input.patchRoot,
       sandbox: input.sandbox,
     })),
   );
@@ -105,7 +119,7 @@ export async function runPostEditDiagnostics(input: {
  */
 export async function runTypeScriptDiagnostics(input: {
   readonly paths: readonly string[];
-  readonly repoRoot: string;
+  readonly patchRoot: string;
   readonly sandbox: DiagnosticsSandbox;
 }): Promise<PostEditDiagnostic[]> {
   const typePaths = input.paths.filter(isTypeScriptPath);
@@ -120,7 +134,7 @@ export async function runTypeScriptDiagnostics(input: {
         const request = Buffer.from(
           JSON.stringify({
             filePath: path,
-            repoRoot: input.repoRoot,
+            patchRoot: input.patchRoot,
             typescriptPath: tooling.typescriptModule,
           }),
           "utf8",
@@ -197,8 +211,8 @@ function isTypeScriptPath(path: string): boolean {
   return /\.(?:cts|mts|ts|tsx)$/u.test(path);
 }
 
-function syntaxCommand(repoRoot: string, path: string): string | null {
-  const quoted = shellQuote(`${repoRoot}/${path}`);
+function syntaxCommand(patchRoot: string, path: string): string | null {
+  const quoted = shellQuote(`${patchRoot}/${path}`);
   switch (extname(path).toLowerCase()) {
     case ".cjs":
     case ".js":
@@ -231,9 +245,13 @@ function boundedDiagnostic(value: string): string {
   return omitted > 0 ? `[${omitted} earlier lines omitted]\n${kept.join("\n")}` : kept.join("\n");
 }
 
-function whitespaceIssues(content: string): string[] {
+// A line already present before the patch (same text, anywhere in the file) is
+// not reported, so edits to files with existing whitespace stay quiet.
+function whitespaceIssues(content: string, previous?: string | null): string[] {
+  const existing = new Set(previous?.split(/\r?\n/u) ?? []);
   const issues: string[] = [];
   for (const [index, line] of content.split(/\r?\n/u).entries()) {
+    if (existing.has(line)) continue;
     if (/^(?:<<<<<<<|=======|>>>>>>>)(?: |$)/u.test(line)) {
       issues.push(`line ${index + 1}: unresolved conflict marker`);
     } else if (/[\t ]+$/u.test(line)) {

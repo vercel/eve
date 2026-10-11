@@ -49,7 +49,8 @@ export function AgentChat({
     resume: sessionId !== undefined,
     onSessionChange(session) {
       if (sessionId === undefined && session !== undefined) {
-        // Next patches window.history to navigate, which would detach the active stream.
+        // Framework routers (Next.js, TanStack Router) patch window.history; navigating
+        // through them would remount this route and detach the active stream.
         History.prototype.replaceState.call(
           window.history,
           window.history.state,
@@ -78,6 +79,11 @@ export function AgentChat({
   // Answers are accepted while work runs; the server's settlement closes each request.
   const canRespond = (requestId: string) =>
     !isResuming && agent.data.inputs[requestId]?.status === "open";
+  // A tool call can ask several questions at once, and its message part holds only the latest.
+  const questionsFor = (callId: string) =>
+    Object.values(agent.data.inputs).filter(
+      (input) => input.request.kind === "question" && input.request.action.callId === callId,
+    );
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -161,6 +167,7 @@ export function AgentChat({
                   }
                   key={message.id}
                   message={message}
+                  questionsFor={questionsFor}
                   onInputResponses={(inputResponses) => {
                     setCancellationError(undefined);
                     return agent.respond(inputResponses);

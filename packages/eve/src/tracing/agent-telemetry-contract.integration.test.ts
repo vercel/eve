@@ -48,6 +48,12 @@ import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.j
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { createInstrumentationHandleEvent } from "#instrumentation/native-events.js";
+import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
+import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
+import { taskWaitTool } from "#tools/provided/task-wait.js";
+import { taskCancelTool } from "#tools/provided/task-cancel.js";
+import { jsonSchema } from "ai";
 
 const traceContext = (agentName: string, audience: "public" | "private") => ({
   agentName,
@@ -126,6 +132,235 @@ function scopeFor(sessionId: string, audience: "public" | "private"): Instrument
 }
 
 describe("exported agent telemetry contract", () => {
+  it.each([
+    {
+      tool: taskWaitTool,
+      input: { timeoutSeconds: 30 },
+      duration: 25_000,
+      replacement: true,
+      failed: false,
+    },
+    {
+      tool: taskWaitTool,
+      input: { timeoutSeconds: 0 },
+      duration: 0,
+      replacement: false,
+      failed: false,
+    },
+    {
+      tool: taskCancelTool,
+      input: { taskId: "research" },
+      duration: 0,
+      replacement: false,
+      failed: false,
+    },
+    { tool: taskWaitTool, input: {}, duration: 10_000, replacement: true, failed: true },
+  ])(
+    "exports $tool.name with its original duration (replacement=$replacement, failed=$failed)",
+    async ({ tool, input, duration, replacement, failed }) => {
+      vi.stubEnv("VERCEL_ENV", "preview");
+      const first = createRuntime();
+      let runtime = first;
+      let ctx = contextFor("public");
+      const scope = scopeFor("parent", "public");
+      const startedAtMs = Date.now();
+      const completedAtMs = startedAtMs + duration;
+      try {
+        await contextStorage.run(ctx, async () => {
+          const binding = bindInstrumentationRuntime(first, ctx, {
+            agentName: "parent",
+            rootSessionId: "parent",
+            sessionId: "parent",
+          })!;
+          await binding.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+          const emit = createInstrumentationHandleEvent({
+            sessionId: "parent",
+            hooks: first.hooks.forTrace!(traceContext("parent", "public")),
+            handleEvent: async () => {},
+            getAttemptScope: () => scope,
+          })!;
+          const action = createPresentedRuntimeActionRequestFromToolCall({
+            toolCall: { type: "tool-call", input, toolCallId: "control", toolName: tool.name },
+            tools: new Map([[tool.name, tool]]),
+          }).action;
+          await emit(
+            createActionsRequestedEvent({
+              actions: [action],
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
+        });
+        if (replacement) {
+          ctx = await deserializeContext(serializeContext(ctx));
+          runtime = createRuntime();
+        }
+        await contextStorage.run(ctx, async () => {
+          const binding = bindInstrumentationRuntime(runtime, ctx, {
+            agentName: "parent",
+            rootSessionId: "parent",
+            sessionId: "parent",
+          })!;
+          await binding.instrumentTaskToolCall({
+            callId: "control",
+            toolName: tool.name as "eve__task_wait" | "eve__task_cancel",
+            startedAtMs,
+            completedAtMs,
+            input,
+            output: "Alice's research finished.",
+            failed,
+          });
+          const emit = createInstrumentationHandleEvent({
+            sessionId: "parent",
+            hooks: runtime.hooks.forTrace!(traceContext("parent", "public")),
+            handleEvent: async () => {},
+          })!;
+          await emit(
+            createActionResultEvent({
+              result: {
+                callId: "control",
+                kind: "tool-result",
+                toolName: tool.name,
+                output: "Alice's research finished.",
+              },
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
+        });
+        const spans = runtime.exporter.getFinishedSpans();
+        const action = spans.find((span) => span.name === `execute_tool ${tool.name}`)!;
+        const execution = spans.find((span) => span.name === `execute_tool ${tool.name}`)!;
+        expect(execution).toBeDefined();
+        expect(spans.filter((span) => span.name === execution.name)).toHaveLength(1);
+        expect(execution.attributes["agent.tool.is_framework"]).toBe(true);
+        expect(action.attributes).not.toHaveProperty("agent.action.origin");
+        expect(action.attributes).not.toHaveProperty("agent.framework.action");
+        expect(execution.startTime).toEqual([
+          Math.floor(startedAtMs / 1_000),
+          (startedAtMs % 1_000) * 1_000_000,
+        ]);
+        expect(execution.duration).toEqual([
+          Math.floor(duration / 1_000),
+          (duration % 1_000) * 1_000_000,
+        ]);
+        expect(execution.status.code).toBe(failed ? 2 : 0);
+        expect(
+          runtime.metadata.getFinishedSpans().find((span) => span.name === execution.name)
+            ?.attributes,
+        ).toMatchObject({
+          "agent.tool.is_framework": true,
+        });
+      } finally {
+        vi.unstubAllEnvs();
+        await first.shutdown();
+        if (runtime !== first) await runtime.shutdown();
+      }
+    },
+  );
+
+  it.each(["subagent-call", "remote-agent-call"] as const)(
+    "exports deferred %s as a caller with a tool child after worker replacement",
+    async (kind) => {
+      vi.stubEnv("VERCEL_ENV", "preview");
+      const first = createRuntime();
+      const second = createRuntime();
+      const ctx = contextFor("public");
+      const scope = scopeFor("parent", "public");
+      try {
+        await contextStorage.run(ctx, async () => {
+          await bindInstrumentationRuntime(first, ctx, {
+            agentName: "parent",
+            rootSessionId: "parent",
+            sessionId: "parent",
+          })!.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+          const action = createPresentedRuntimeActionRequestFromToolCall({
+            toolCall: {
+              type: "tool-call",
+              input: { message: "Review Alice's draft." },
+              toolCallId: "review",
+              toolName: "reviewer",
+            },
+            tools: new Map([
+              [
+                "reviewer",
+                {
+                  name: "reviewer",
+                  frameworkTool: true,
+                  description: "Review drafts.",
+                  inputSchema: jsonSchema({ type: "object" }),
+                  workflowId: "review-workflow",
+                  behavior: {
+                    availability: [],
+                    handling: {
+                      kind: "dispatch",
+                      target:
+                        kind === "subagent-call"
+                          ? { kind, nodeId: "reviewer-node", subagentName: "reviewer" }
+                          : { kind, nodeId: "reviewer-node", remoteAgentName: "reviewer" },
+                    },
+                  },
+                },
+              ],
+            ]),
+          }).action;
+          await createInstrumentationHandleEvent({
+            sessionId: "parent",
+            hooks: first.hooks.forTrace!(traceContext("parent", "public")),
+            handleEvent: async () => {},
+            getAttemptScope: () => scope,
+            isFrameworkTool: () => true,
+          })!(
+            createActionsRequestedEvent({
+              actions: [action],
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
+        });
+        const restored = await deserializeContext(serializeContext(ctx));
+        await contextStorage.run(restored, async () => {
+          await createInstrumentationHandleEvent({
+            sessionId: "parent",
+            hooks: second.hooks.forTrace!(traceContext("parent", "public")),
+            handleEvent: async () => {},
+          })!(
+            createActionResultEvent({
+              result: {
+                callId: "review",
+                kind: "tool-result",
+                toolName: "reviewer",
+                output: "Looks ready.",
+              },
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            }),
+          );
+        });
+        const spans = second.exporter.getFinishedSpans();
+        const action = spans.find((span) => span.name === "execute_tool reviewer")!;
+        expect(action.attributes).toMatchObject({
+          "agent.action.kind": kind,
+          "agent.invocation.role": "caller",
+          "gen_ai.agent.name": "reviewer",
+        });
+        expect(spans.filter((span) => span.name === "execute_tool reviewer")).toHaveLength(1);
+        expect(
+          spans.find((span) => span.name === "execute_tool reviewer")?.attributes[
+            "agent.tool.is_framework"
+          ],
+        ).toBe(true);
+      } finally {
+        vi.unstubAllEnvs();
+        await first.shutdown();
+        await second.shutdown();
+      }
+    },
+  );
   it("preserves explicit trace-session identity on every remote and local-child span", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     const runtime = { ...createRuntime(), memoryOperations: true };
@@ -175,20 +410,12 @@ describe("exported agent telemetry contract", () => {
               const toolKey = toolCallIdempotencyKey(scope, "tool", 0);
               const modelKey = modelCallIdempotencyKey(scope, 0, 0);
               await hooks.publish({
-                type: "action.started",
+                type: "tool.call.started",
                 idempotencyKey: actionKey,
                 scope,
                 callId: "tool",
-                name: "inspect",
-                kind: "tool-call",
-                input: {},
-              });
-              await hooks.publish({
-                type: "tool.call.started",
-                idempotencyKey: toolKey,
-                scope,
-                callId: "tool",
                 toolName: "inspect",
+                kind: "tool-call",
                 input: {},
               });
               await hooks.publish({
@@ -228,14 +455,19 @@ describe("exported agent telemetry contract", () => {
                   outcome: "approved",
                   response: {},
                 });
+                await runtime.runInContext(
+                  {
+                    type: "tool.call",
+                    idempotencyKey: toolKey,
+                    scope,
+                    callId: "tool",
+                    toolName: "inspect",
+                    input: {},
+                  },
+                  () => Promise.resolve({}),
+                );
                 await hooks.publish({
                   type: "tool.call.completed",
-                  idempotencyKey: toolKey,
-                  scope,
-                  output: { type: "result", output: {} },
-                });
-                await hooks.publish({
-                  type: "action.completed",
                   idempotencyKey: actionKey,
                   scope,
                   outcome: "completed",
@@ -282,7 +514,6 @@ describe("exported agent telemetry contract", () => {
             "agent.step",
             "chat test",
             "execute_tool inspect",
-            "agent.action",
             "agent.approval",
             "search_memory",
           ].sort(),
@@ -478,14 +709,6 @@ describe("exported agent telemetry contract", () => {
           input: { secret: "private input" },
           isWorkflowTool: true,
           kind: "tool-call",
-          name: "coordinate",
-          scope,
-          type: "action.started",
-        });
-        await hooks.publish({
-          callId: "workflow",
-          idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
-          input: { secret: "private input" },
           toolName: "coordinate",
           scope,
           type: "tool.call.started",
@@ -590,18 +813,23 @@ describe("exported agent telemetry contract", () => {
         });
       });
       await contextStorage.run(parent, async () => {
-        await hooks.publish({
-          idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
-          output: { type: "result", output: "private output" },
-          scope,
-          type: "tool.call.completed",
-        });
+        await runtime.runInContext(
+          {
+            type: "tool.call",
+            idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
+            scope,
+            callId: "workflow",
+            toolName: "coordinate",
+            input: { secret: "private input" },
+          },
+          () => Promise.resolve("private output"),
+        );
         await hooks.publish({
           idempotencyKey: actionKey,
           outcome: "completed",
           output: { type: "result", output: "private output" },
           scope,
-          type: "action.completed",
+          type: "tool.call.completed",
         });
         await hooks.publish({
           idempotencyKey: attemptIdempotencyKey(scope),
@@ -730,7 +958,8 @@ describe("exported agent telemetry contract", () => {
       expect(new TextDecoder().decode(bytes)).not.toContain("auth-only-secret");
       const workflow = parsed.find(
         (span) =>
-          span.name === "agent.action" && span.attributes["agent.action.call_id"] === "workflow",
+          span.attributes["gen_ai.operation.name"] === "execute_tool" &&
+          span.attributes["gen_ai.tool.call.id"] === "workflow",
       )!;
       const activation = parsed.find(
         (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),
@@ -751,8 +980,6 @@ describe("exported agent telemetry contract", () => {
         "agent.run.id": "child",
         "gen_ai.usage.input_tokens": 10,
         "gen_ai.usage.output_tokens": 5,
-        "agent.usage.input_tokens": 10,
-        "agent.usage.output_tokens": 5,
       });
       expect(normalizeTraceForest(parsed, exported)).toEqual([
         "conversation original-conversation",
@@ -760,9 +987,8 @@ describe("exported agent telemetry contract", () => {
         "  invoked from external via channel.request",
         "  invoke_agent parent",
         "    agent.step",
-        "      agent.action coordinate",
+        "      execute_tool coordinate",
         "        agent.approval approved",
-        "        execute_tool coordinate",
         "        invoke_agent child",
         "          agent.step",
         "            chat test",

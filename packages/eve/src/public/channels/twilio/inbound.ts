@@ -1,3 +1,5 @@
+import type { UserContent } from "ai";
+
 import {
   parseTwilioWebhookBody,
   type TwilioMediaPayload,
@@ -69,6 +71,24 @@ export function parseTwilioTextMessage(params: URLSearchParams): TwilioTextMessa
     raw: payload.raw,
     to: payload.to,
   };
+}
+
+/**
+ * The model-visible content of an inbound message: its body, plus one file part
+ * per MMS media URL, which the channel's `fetchFile` downloads with the
+ * account's credentials.
+ */
+export function twilioMessageContent(message: TwilioTextMessage): string | UserContent {
+  const media = message.media ?? [];
+  if (media.length === 0) return message.body;
+  const files = media.map((item) => ({
+    data: new URL(item.url),
+    mediaType: item.contentType ?? "application/octet-stream",
+    type: "file" as const,
+  }));
+  return message.body.trim().length > 0
+    ? [{ text: message.body, type: "text" as const }, ...files]
+    : files;
 }
 
 /** Parses Twilio's incoming-call webhook fields into Eve's voice payload. */

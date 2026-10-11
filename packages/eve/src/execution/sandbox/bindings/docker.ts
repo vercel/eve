@@ -178,14 +178,14 @@ export function createDockerSandboxProvider(
     );
     return {
       sandbox: session,
-      async onSessionDelete() {
+      async onSandboxDelete() {
         await stopDockerContainerIfRunning(cli, containerIdentity);
         expectDockerSuccess(
           await cli.run(["rm", "-f", containerIdentity]),
           `delete sandbox session container "${containerName}"`,
         );
       },
-      async onSessionStop() {
+      async onSandboxStop() {
         await stopDockerContainerIfRunning(cli, containerIdentity);
       },
       async onRuntimeShutdown() {

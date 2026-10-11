@@ -183,9 +183,7 @@ export class ConversationTranscript {
           !childToolIds.has(part.toolCallId) &&
           !isPanelRoutedTool(part.toolName),
       );
-      const states = new Map(
-        tools.map((part) => [part, toolState(part, conversation, working, false)]),
-      );
+      const states = new Map(tools.map((part) => [part, toolState(part, conversation, working)]));
       const activeSteps = activeToolSteps(states);
 
       for (const [index, part] of message.parts.entries()) {
@@ -392,7 +390,7 @@ export class ConversationTranscript {
         order += 1;
         if (!isToolCallRow(part) || isTaskControlTool(part.toolName)) continue;
         const childTask = childTasks.get(part.toolCallId);
-        const state = toolState(part, child, running, childTask?.call.status === "working");
+        const state = toolState(part, child, running);
         const id = `subagent:${record.callId}:tool:${part.toolCallId}`;
         const block = this.#memoize(id, [part, state.status, record.name], () => {
           const context = this.#presentationContext(part.toolCallId, part, state, options, {
@@ -552,8 +550,8 @@ export class ConversationTranscript {
       const terminalMessage = authorizationTerminalMessage(state);
       return {
         kind: "connection-auth",
-        title: `${stripTerminalControls(part.name)} · authorization · ${state}`,
-        body: formatAuthorization(part, terminalMessage),
+        title: `${stripTerminalControls(part.displayName)} · authorization · ${state}`,
+        ...formatAuthorization(part, terminalMessage),
         preformatted: true,
         live: terminalMessage === undefined,
       };

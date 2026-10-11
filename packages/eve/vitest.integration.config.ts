@@ -36,7 +36,7 @@ export default defineConfig({
       "**/node_modules/**",
       "test/scenarios/**",
       // Channel conformance checks platform protocol, not the OS, and is slowest on Windows runners.
-      ...(process.platform === "win32" ? ["**/hitl-conformance*.integration.test.ts"] : []),
+      ...(process.platform === "win32" ? ["**/conformance*.integration.test.ts"] : []),
     ],
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
     include: ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"],

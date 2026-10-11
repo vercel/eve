@@ -801,6 +801,35 @@ describe("executeTask", () => {
     ]);
   });
 
+  it("fails with an authoring error when an eval requires eve__tool", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("done", "turn_1"),
+          turnCompleted("turn_1"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const turn = await t.send("run");
+        turn.requireToolCall("eve__tool");
+      }, "execute-tool"),
+    });
+
+    expect(String(outcome.error)).toContain(
+      "Calls through eve__tool are reported under the entry's name",
+    );
+    expect(outcome.assertions).toEqual([]);
+  });
+
   it("captures an explicit skip without an execution error", async () => {
     const outcome = await executeTask({
       client: new Client({ host: target.url }),

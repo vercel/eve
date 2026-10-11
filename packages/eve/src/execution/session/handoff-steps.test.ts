@@ -156,7 +156,6 @@ function createCheckpoint(): SessionCheckpoint {
     serializedContext: {},
     sessionState: createTestSessionState({
       continuationToken: "channel:current",
-      emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
       hasProxyInputRequests: false,
       sessionId: "session-1",
     }),

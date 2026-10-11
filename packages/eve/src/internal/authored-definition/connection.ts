@@ -18,6 +18,7 @@ const KNOWN_TOP_LEVEL_KEYS = [
   "approval",
   "auth",
   "description",
+  "forwardPrincipal",
   "headers",
   "instanceKey",
   "protocolVersionDiscovery",
@@ -100,6 +101,13 @@ export function normalizeMcpClientConnectionDefinition(
       throw new Error(`${message} "protocolVersionDiscovery" must be a boolean.`);
     }
     result.protocolVersionDiscovery = record.protocolVersionDiscovery;
+  }
+
+  if (record.forwardPrincipal !== undefined) {
+    if (typeof record.forwardPrincipal !== "boolean") {
+      throw new Error(`${message} "forwardPrincipal" must be a boolean.`);
+    }
+    result.forwardPrincipal = record.forwardPrincipal;
   }
 
   if (record.instanceKey !== undefined) {

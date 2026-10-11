@@ -57,16 +57,16 @@ describe("createRuntimeToolResultFromToolError", () => {
       createRuntimeToolResultFromToolError({
         error: new Error('No skill named "demo"'),
         input: { skill: "demo" },
-        toolCallId: "call_load_skill",
-        toolName: "load_skill",
+        toolCallId: "call_lookup",
+        toolName: "lookup",
         type: "tool-error",
       }),
     ).toEqual({
-      callId: "call_load_skill",
+      callId: "call_lookup",
       isError: true,
       kind: "tool-result",
       output: 'No skill named "demo"',
-      toolName: "load_skill",
+      toolName: "lookup",
     });
   });
 });

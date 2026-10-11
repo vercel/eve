@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+export const siteName = "eve";
 export const siteTitle = "eve – build AI agents that you own";
 const siteTitleTemplate = "%s – eve";
 
@@ -19,14 +20,14 @@ export const metadataTitle = (title: string): NonNullable<Metadata["title"]> =>
 export const pageTitleMetadata = (
   title: string,
 ): {
-  openGraph: { title: string };
+  openGraph: { siteName: string; title: string };
   title: NonNullable<Metadata["title"]>;
   twitter: { title: string };
 } => {
   const resolvedTitle = formatPageTitle(title);
   return {
     title: metadataTitle(title),
-    openGraph: { title: resolvedTitle },
+    openGraph: { siteName, title: resolvedTitle },
     twitter: { title: resolvedTitle },
   };
 };

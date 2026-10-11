@@ -8,13 +8,18 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createAttachSessionFn, type Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
+import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
 import { defineWorkflowTool } from "#public/tools/index.js";
-import { askDayAndTimeWorkflow } from "#internal/testing/channel-conformance/two-questions-workflow.js";
+import {
+  askDayAndTimeWorkflow,
+  askRetroDayWorkflow,
+} from "#internal/testing/channel-conformance/question-workflows.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
@@ -89,6 +94,10 @@ export function linkTargets(value: unknown): string[] {
  * capability a driver lacks is skipped for that channel as "not supported".
  */
 export type ChannelCapability =
+  /** A person can send a file, such as an image or a PDF, with a message. */
+  | "attachments"
+  /** Someone besides the person who started the conversation can act in it. */
+  | "another-person"
   /** A person can press a rendered choice. */
   | "buttons"
   /** A person can send a plain-text message to the conversation. */
@@ -108,7 +117,7 @@ export type Surface =
   | "private";
 
 /**
- * Teaches the HITL conformance suite to speak one channel's platform protocol.
+ * Teaches the channel conformance suite to speak one channel's platform protocol.
  *
  * Drivers translate only between platform wire formats and conversation
  * actions. They never read session state, so they keep working across changes
@@ -116,6 +125,8 @@ export type Surface =
  */
 export interface ChannelDriver {
   readonly name: string;
+  /** The platform's id for Alice, which the principal eve derives for her must name. */
+  readonly personId: string;
   readonly capabilities: readonly ChannelCapability[];
   readonly surface: Surface;
   /**
@@ -125,8 +136,12 @@ export interface ChannelDriver {
   createChannel(record: (call: PlatformCall) => void): unknown;
   /** Undoes anything `createChannel` installed outside the channel, such as a global `fetch`. */
   dispose?(): void;
-  /** A webhook request carrying a person's message. */
-  message(text: string): Request;
+  /**
+   * A webhook request carrying `person`'s message, with `files` attached if
+   * given. Drivers with the `another-person` capability must send as `"bob"`
+   * when asked.
+   */
+  message(text: string, person: Person, files?: readonly SentFile[]): Request;
   /**
    * The options a person can see in one outbound call that posts the question:
    * `undefined` when the call isn't the question, `[]` when it shows no options.
@@ -134,8 +149,11 @@ export interface ChannelDriver {
    * request metadata.
    */
   findOptions(call: PlatformCall, prompt: string): readonly RenderedOption[] | undefined;
-  /** A webhook request pressing a rendered option. */
-  press(option: RenderedOption): Request;
+  /**
+   * A webhook request in which `person` presses a rendered option. Drivers
+   * with the `another-person` capability must press as `"bob"` when asked.
+   */
+  press(option: RenderedOption, person: Person): Request;
   /** Text the bot posted in one outbound call, if any. */
   postedText(call: PlatformCall): string | undefined;
   /**
@@ -147,12 +165,37 @@ export interface ChannelDriver {
   shownMessage?(call: PlatformCall): ShownMessage | undefined;
   /** How the person driving the conversation appears in the platform's text, in any form. */
   readonly personShownAs?: readonly string[];
+  /**
+   * The address a person's next message continues, when it continues one the
+   * bot claimed, such as the Telegram message it replies to. The harness waits
+   * for the session to claim it before sending.
+   */
+  nextAddress?(): string | undefined;
+}
+
+/**
+ * Who acts in a conversation: Alice starts it and asks for every request; Bob
+ * is someone else in it, and needs the `another-person` capability.
+ */
+export type Person = "alice" | "bob";
+
+/**
+ * A file a person sends, as the platform holds it. A driver serves its bytes
+ * from the fake platform the way the real one would, including its download
+ * headers, so the channel's real download code runs.
+ */
+export interface SentFile {
+  readonly name: string;
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+  /** When false, the platform refuses the download, as it would for a missing scope or a remote file. */
+  readonly downloadable?: boolean;
 }
 
 /** What a person can do and see in one channel conversation. Contract rules use only this. */
 export interface ChannelConversation {
-  /** The person sends a plain-text message. */
-  say(text: string): Promise<void>;
+  /** `person`, Alice unless given, sends a plain-text message, with `files` attached if given. */
+  say(text: string, person?: Person, files?: readonly SentFile[]): Promise<void>;
   /** Waits for the bot to post `prompt` with choices, returning them. */
   waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
   /**
@@ -164,26 +207,27 @@ export interface ChannelConversation {
     choose: (prompt: string, options: readonly RenderedOption[]) => RenderedOption,
   ): Promise<void>;
   /**
-   * Waits until the turn holds for `prompt`, whether or not the client shows it
-   * yet. A client may show several pending requests one at a time.
+   * Types the reply `replies` gives for each of its prompts, in the order the
+   * client shows them. Two prompts shown in one message fail the conversation:
+   * a typed reply couldn't say which one it answers.
    */
-  waitForRequest(prompt: string): Promise<void>;
-  /** The person presses one rendered choice. */
-  press(option: RenderedOption): Promise<void>;
+  replyToEach(replies: Readonly<Record<string, string>>): Promise<void>;
+  /** `person`, Alice unless given, presses one rendered choice. */
+  press(option: RenderedOption, person?: Person): Promise<void>;
   /** Waits until `tool` returns, as visible in the bot's reply, and returns its output. */
   waitForToolResult(tool: string): Promise<unknown>;
   /** Waits until the bot replies to input that carried `text`, however the channel framed it. */
   waitForReplyTo(text: string): Promise<void>;
   /** How many test-model replies, plain or reporting a tool result, the bot has shown. */
-  replyCount(): number;
+  replyCount(): Promise<number>;
   /** Waits for the bot to show a test-model reply, plain or reporting a tool result. */
   waitForReply(): Promise<void>;
   /** Waits for the bot to show text matching `pattern`, returning the text that matched. */
   waitForShown(pattern: string | RegExp): Promise<string>;
   /** Everything the bot has shown that everyone in the conversation sees, joined. */
-  sharedText(): string;
+  sharedText(): Promise<string>;
   /** Every choice the bot's messages let a person press now, newest message first. */
-  shownOptions(): readonly RenderedOption[];
+  shownOptions(): Promise<readonly RenderedOption[]>;
   /** Waits for the turn to hold for a sign-in, however the channel shows it. */
   waitForSignIn(): Promise<void>;
   /**
@@ -202,10 +246,18 @@ export interface ChannelConversation {
    * Rules read it once an answer has settled, by which point the bot has had
    * every chance to update it.
    */
-  shownPrompt(prompt: string): ShownMessage;
+  shownPrompt(prompt: string): Promise<ShownMessage>;
   /** How the person appears in the platform's text, in any form. */
   readonly personShownAs: readonly string[];
+  /** Alice's id on the platform, or as the client authenticates her. */
+  readonly personId: string;
   runsOf(tool: CountedTool): number;
+  /**
+   * The caller each run of `tool` saw, in order, as one string per principal,
+   * or `null` for no caller. Equal strings are the same principal. Each is JSON
+   * that begins with the principal id.
+   */
+  callersOf(tool: typeof PLAIN_TOOL): readonly (string | null)[];
 }
 
 /**
@@ -226,23 +278,27 @@ export interface ClientDriver {
 
 /** A running client, as a person sees and uses it. */
 export interface ClientView {
-  /** The person sends a plain-text message. */
-  say(text: string): Promise<void>;
+  /** `person` sends a plain-text message, with `files` attached if given. */
+  say(text: string, person: Person, files?: readonly SentFile[]): Promise<void>;
   /**
    * Waits for the client to show one of `prompts`, returning which one and its
    * choices. A client may show several pending requests one at a time.
    */
   waitForQuestion(prompts: readonly string[]): Promise<ShownQuestion>;
-  /** The person presses one shown choice. */
-  press(option: RenderedOption): Promise<void>;
+  /** `person` presses one shown choice. */
+  press(option: RenderedOption, person: Person): Promise<void>;
   /** The bot replies the client shows now. */
-  replies(): readonly string[];
+  replies(): readonly string[] | Promise<readonly string[]>;
   /** The message that asked `prompt` as it stands now; see {@link ChannelConversation.shownPrompt}. */
-  shownPrompt?(prompt: string): ShownMessage;
+  shownPrompt?(prompt: string): ShownMessage | Promise<ShownMessage>;
   /** How the person appears in the client's text, in any form. */
   readonly personShownAs?: readonly string[];
+  /** Alice's id on the platform; a client authenticates her as {@link CLIENT_PERSON}. */
+  readonly personId?: string;
+  /** See {@link ChannelDriver.nextAddress}. */
+  nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
-  shown(): readonly ShownText[];
+  shown(): readonly ShownText[] | Promise<readonly ShownText[]>;
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -253,6 +309,8 @@ export interface ClientView {
 export interface ShownQuestion {
   readonly options: readonly RenderedOption[];
   readonly prompt: string;
+  /** Other prompts it was asked for that the same message shows. */
+  readonly alongside?: readonly string[];
 }
 
 /**
@@ -280,7 +338,20 @@ export const GATED_TOOL = "deploy_release";
 /** A second always-gated tool, so two approvals can be pending at once. */
 export const SECOND_GATED_TOOL = "publish_notes";
 
-export type GatedTool = typeof GATED_TOOL | typeof SECOND_GATED_TOOL;
+/**
+ * An always-gated tool whose response policy lets only the person who asked
+ * for the call approve or cancel it.
+ */
+export const REQUESTER_GATED_TOOL = "release_hotfix";
+
+/** An always-gated tool whose response policy lets anyone approve or cancel the call. */
+export const OPEN_GATED_TOOL = "roll_back_release";
+
+export type GatedTool =
+  | typeof GATED_TOOL
+  | typeof SECOND_GATED_TOOL
+  | typeof REQUESTER_GATED_TOOL
+  | typeof OPEN_GATED_TOOL;
 
 /** The test agent's plain tool: it runs without asking anyone. */
 export const PLAIN_TOOL = "look_up_notes";
@@ -329,10 +400,27 @@ export interface ConversationOptions {
 /** The test agent's tool that asks {@link DAY_PROMPT} and {@link TIME_PROMPT} at once. */
 export const TWO_QUESTIONS_TOOL = "plan_review";
 
+/** The test agent's tool that asks {@link RETRO_PROMPT}, which takes no free text. */
+export const RETRO_DAY_TOOL = "pick_retro_day";
+
 /** What a person sees once a tool call settles. */
 export type ToolOutcome =
   | { readonly kind: "ran"; readonly output: unknown }
   | { readonly kind: "denied" };
+
+/**
+ * The platform's answer to a download of `file`: its bytes under
+ * `contentType` (the platform's header, which can differ from the file's own
+ * type), or a refusal when the file isn't downloadable.
+ */
+export function serveFile(file: SentFile | undefined, contentType = file?.mediaType): Response {
+  if (file === undefined || file.downloadable === false) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  return new Response(new Uint8Array(file.bytes), {
+    headers: { "content-type": contentType ?? "application/octet-stream" },
+  });
+}
 
 /** A `fetch` for an HTTP platform API: `decode` turns each request into a call and its answer. */
 export function recordingFetch(
@@ -342,7 +430,8 @@ export function recordingFetch(
   return async (input, init) => {
     const call = await decode(new Request(input, init));
     record(call);
-    return Response.json(call.response);
+    // A file download answers with bytes, not JSON.
+    return call.response instanceof Response ? call.response : Response.json(call.response);
   };
 }
 
@@ -420,8 +509,8 @@ function webhookView(
   const promptsFrom = new Map<string, number>();
 
   return {
-    say: (text) => post(driver.message(text)),
-    press: (option) => post(driver.press(option)),
+    say: (text, person, files) => post(driver.message(text, person, files)),
+    press: (option, person) => post(driver.press(option, person)),
     waitForQuestion: (prompts) =>
       wait(
         `one of the questions ${JSON.stringify(prompts)}`,
@@ -434,7 +523,10 @@ function webhookView(
               // After a prompt is asked, an optionless match is an edit of the answered message.
               if (promptsFrom.has(prompt) && options.length === 0) continue;
               promptsFrom.set(prompt, index + 1);
-              return { options, prompt };
+              const alongside = prompts.filter(
+                (other) => other !== prompt && driver.findOptions(call, other) !== undefined,
+              );
+              return { alongside, options, prompt };
             }
           }
           return undefined;
@@ -456,6 +548,8 @@ function webhookView(
         .at(-1)!;
     },
     personShownAs: driver.personShownAs ?? [],
+    personId: driver.personId,
+    nextAddress: driver.nextAddress?.bind(driver),
     shown: () =>
       calls.flatMap((call) => {
         const shown = driver.shownMessage?.(call);
@@ -513,8 +607,11 @@ async function converse(
 ): Promise<void> {
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
+  const callers: (string | null)[] = [];
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
+    [REQUESTER_GATED_TOOL]: 0,
+    [OPEN_GATED_TOOL]: 0,
     [SECOND_GATED_TOOL]: 0,
     [PLAIN_TOOL]: 0,
     read_calendar: 0,
@@ -557,15 +654,16 @@ async function converse(
   }
 
   const runtime = await createTestRuntime({
-    agent: { limits: options.limits, name: `${label}-hitl-conformance` },
+    agent: { limits: options.limits, name: `${label}-conformance` },
     modules: [
       {
         logicalPath: `tools/${PLAIN_TOOL}.ts`,
         loadNamespace: async () => ({
           default: defineTool({
             description: `Looks up meeting notes. Only call when asked to use ${PLAIN_TOOL}.`,
-            execute: async () => {
+            execute: async (_input, ctx) => {
               runs[PLAIN_TOOL] += 1;
+              callers.push(callerKey(ctx.session.auth.current));
               return { notes: "Bob's review notes" };
             },
             inputSchema: z.object({}),
@@ -586,6 +684,38 @@ async function converse(
         runs[SECOND_GATED_TOOL] += 1;
         return { published: true };
       }),
+      gatedTool(
+        REQUESTER_GATED_TOOL,
+        "Releases a hotfix.",
+        () => {
+          runs[REQUESTER_GATED_TOOL] += 1;
+          return { released: true };
+        },
+        // The requester-only policy from docs/tools/human-in-the-loop.md.
+        ({ request, response }) =>
+          request.principal !== null && samePrincipal(response.principal, request.principal)
+            ? { status: "allowed" }
+            : { reason: "Only the person who asked can respond.", status: "rejected" },
+      ),
+      gatedTool(
+        OPEN_GATED_TOOL,
+        "Rolls back a release.",
+        () => {
+          runs[OPEN_GATED_TOOL] += 1;
+          return { rolledBack: true };
+        },
+        () => ({ status: "allowed" }),
+      ),
+      {
+        logicalPath: `tools/${RETRO_DAY_TOOL}.ts`,
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: `Schedules a retro. Only call when asked to use ${RETRO_DAY_TOOL}.`,
+            execute: askRetroDayWorkflow,
+            inputSchema: z.object({}),
+          }),
+        }),
+      },
       {
         logicalPath: `tools/${TWO_QUESTIONS_TOOL}.ts`,
         loadNamespace: async () => ({
@@ -649,6 +779,9 @@ async function converse(
           },
           attachSession,
           describe: unsupported("describe"),
+          invokeTool: unsupported("invokeTool"),
+          listSkillFiles: unsupported("listSkillFiles"),
+          readSkill: unsupported("readSkill"),
           params,
           requestIp: null,
           to: unsupported("to"),
@@ -678,8 +811,8 @@ async function converse(
     const replyWait = <T>(label: string, select: (reply: string) => T | undefined) =>
       wait(
         label,
-        () => {
-          for (const reply of view.replies()) {
+        async () => {
+          for (const reply of await view.replies()) {
             const selected = select(reply);
             if (selected !== undefined) return selected;
           }
@@ -687,17 +820,21 @@ async function converse(
         },
         view.describe,
       );
-    const replyCount = () =>
-      view.replies().filter((reply) => isMockReplyTo(reply, "") || reply.startsWith("Used "))
-        .length;
+    const replyCount = async () =>
+      (await view.replies()).filter(
+        (reply) => isMockReplyTo(reply, "") || reply.startsWith("Used "),
+      ).length;
     let signInsCompleted = 0;
 
     const conversation: ChannelConversation = {
-      async say(text) {
+      async say(text, person = "alice", files) {
         await waitForStepsToFinish([...sessions.values()], wait);
-        await view.say(text);
+        // A step can be done before its aliases are claimed; see waitForAddress.
+        const address = view.nextAddress?.();
+        if (address !== undefined) await waitForAddress(address);
+        await view.say(text, person, files);
       },
-      press: (option) => view.press(option),
+      press: (option, person = "alice") => view.press(option, person),
       async waitForQuestion(prompt) {
         const { options } = await view.waitForQuestion([prompt]);
         await holdForInput(prompt);
@@ -708,11 +845,27 @@ async function converse(
         while (remaining.length > 0) {
           const { options, prompt } = await view.waitForQuestion(remaining);
           await holdForInput(prompt);
-          await view.press(choose(prompt, options));
+          await view.press(choose(prompt, options), "alice");
           remaining.splice(remaining.indexOf(prompt), 1);
         }
       },
-      waitForRequest: (prompt) => holdForInput(prompt),
+      async replyToEach(replies) {
+        const remaining = Object.keys(replies);
+        while (remaining.length > 0) {
+          const { alongside = [], prompt } = await view.waitForQuestion(remaining);
+          if (alongside.length > 0) {
+            throw new Error(
+              `${JSON.stringify([prompt, ...alongside])} were shown in one message, so a typed reply can't say which it answers.`,
+            );
+          }
+          await holdForInput(prompt);
+          await conversation.say(replies[prompt]!);
+          // A person reads the bot's next prompt before typing again; replies sent faster
+          // join one delivery, which answers nothing.
+          await settledFor(prompt);
+          remaining.splice(remaining.indexOf(prompt), 1);
+        }
+      },
       waitForToolResult: (tool) =>
         replyWait(`${tool} to return`, (reply) => readMockToolReply(reply, tool)),
       waitForReplyTo: (message) =>
@@ -727,27 +880,25 @@ async function converse(
         }),
       replyCount,
       waitForReply: async () =>
-        void (await wait("a reply", () => (replyCount() > 0 ? true : undefined), view.describe)),
+        void (await wait(
+          "a reply",
+          async () => ((await replyCount()) > 0 ? true : undefined),
+          view.describe,
+        )),
       waitForShown: (pattern) =>
         wait(
           `the bot to show ${String(pattern)}`,
-          () =>
-            view
-              .shown()
+          async () =>
+            (await view.shown())
               .map(({ text }) => text)
               .find((text) =>
                 typeof pattern === "string" ? text.includes(pattern) : pattern.test(text),
               ),
           view.describe,
         ),
-      shownOptions: () =>
-        view
-          .shown()
-          .toReversed()
-          .flatMap(({ options }) => options),
-      sharedText: () =>
-        view
-          .shown()
+      shownOptions: async () => (await view.shown()).toReversed().flatMap(({ options }) => options),
+      sharedText: async () =>
+        (await view.shown())
           .filter((shown) => !shown.onlyPerson)
           .map(({ text }) => text)
           .join("\n"),
@@ -772,12 +923,14 @@ async function converse(
         await deliverSignInCallback(callbackUrl);
       },
       runsOf: (tool) => runs[tool],
+      callersOf: () => callers,
       waitForRest: () => waitForRest([...sessions.values()], wait),
-      shownPrompt(prompt) {
+      async shownPrompt(prompt) {
         if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
-        return view.shownPrompt(prompt);
+        return await view.shownPrompt(prompt);
       },
       personShownAs: view.personShownAs ?? [],
+      personId: view.personId ?? CLIENT_PERSON.principalId,
     };
 
     /**
@@ -818,6 +971,20 @@ async function converse(
       );
     }
 
+    /** Waits until the session settled the request that asked `prompt`. */
+    async function settledFor(prompt: string): Promise<void> {
+      await wait(
+        `the session to settle "${prompt}"`,
+        async () => {
+          for (const session of sessions.values()) {
+            if (await settles(session, prompt)) return true;
+          }
+          return undefined;
+        },
+        () => "",
+      );
+    }
+
     // The test file's workflow world closes after its last test, so a session
     // still writing then fails with an unhandled rejection.
     const settle = async () => {
@@ -849,8 +1016,11 @@ async function cancelUntilResting(session: Session): Promise<void> {
   while (Date.now() < deadline) {
     await session.cancel();
     const tail = await session.getStreamTailIndex();
-    const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-    last = (await reader.read().finally(() => reader.cancel())).value?.type;
+    // An empty stream has nothing to read, and reading it waits for its first event.
+    if (tail >= 0) {
+      const reader = (await session.getEventStream({ startIndex: tail })).getReader();
+      last = (await reader.read().finally(() => reader.cancel())).value?.type;
+    }
     running = await runningSteps(session);
     if (last === "session.waiting" && running.length === 0) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -934,6 +1104,35 @@ const asks = (prompt: string) => (event: MessageStreamEvent) =>
   event.type === "input.requested" &&
   event.data.requests.some((request) => request.prompt === prompt);
 
+/** Whether `session` settled the request that asked `prompt`, answered or withdrawn. */
+async function settles(session: Session, prompt: string): Promise<boolean> {
+  const tail = await session.getStreamTailIndex();
+  if (tail < 0) return false;
+  const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
+  const requestIds = new Set<string>();
+  try {
+    for (let index = 0; index <= tail; index += 1) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.type === "input.requested") {
+        for (const request of value.data.requests) {
+          if (request.prompt === prompt) requestIds.add(request.requestId);
+        }
+      } else if (value.type === "approval.settled" && requestIds.has(value.data.requestId)) {
+        return true;
+      } else if (
+        value.type === "input.resolved" &&
+        value.data.resolutions.some((resolution) => requestIds.has(resolution.requestId))
+      ) {
+        return true;
+      }
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return false;
+}
+
 /** Whether an event asks the person to sign in. */
 const isSignIn = (event: MessageStreamEvent) => event.type === "authorization.required";
 
@@ -973,18 +1172,38 @@ async function holdsFor(
   return held;
 }
 
-function gatedTool(name: GatedTool, description: string, execute: () => unknown) {
+function gatedTool(
+  name: GatedTool,
+  description: string,
+  execute: () => unknown,
+  response?: ApprovalResponsePolicy,
+) {
   return {
     logicalPath: `tools/${name}.ts`,
     loadNamespace: async () => ({
       default: defineTool({
-        approval: always(),
+        approval: response === undefined ? always() : { request: always(), response },
         description: `${description} Only call when asked to use ${name}.`,
         execute: async () => execute(),
         inputSchema: z.object({ release: z.string().optional() }),
       }),
     }),
   };
+}
+
+function callerKey(auth: SessionAuthContext | null): string | null {
+  if (auth === null) return null;
+  // The id first, so a truncated assertion message still shows who it was.
+  return JSON.stringify([auth.principalId, auth.principalType, auth.authenticator, auth.issuer]);
+}
+
+function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {
+  return (
+    a.authenticator === b.authenticator &&
+    a.issuer === b.issuer &&
+    a.principalType === b.principalType &&
+    a.principalId === b.principalId
+  );
 }
 
 function findRoute(channel: CompiledChannel, request: Request) {
@@ -1013,7 +1232,7 @@ function matchPath(pattern: string, pathname: string): Record<string, string> | 
 
 function unsupported(name: string): () => never {
   return () => {
-    throw new Error(`The HITL conformance harness does not provide ctx.${name}.`);
+    throw new Error(`The channel conformance harness does not provide ctx.${name}.`);
   };
 }
 

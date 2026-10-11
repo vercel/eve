@@ -40,8 +40,8 @@ describe("defineInstrumentation", () => {
   it("infers terminal handler events from union-typed discriminants", () => {
     const provider = defineInstrumentation({
       events: {
-        "action.completed": (event) => void [event.acceptedAtMs, event.outcome, event.usage],
-        "action.failed": (event) => void [event.acceptedAtMs, event.errorCode, event.outcome],
+        "tool.call.completed": (event) => void [event.acceptedAtMs, event.outcome, event.usage],
+        "tool.call.failed": (event) => void [event.acceptedAtMs, event.errorCode, event.outcome],
         "session.completed": (event) => void event.sessionId,
         "step.attempt.completed": (event) => void event.scope,
         "turn.failed": (event) => void event.error,
@@ -49,6 +49,12 @@ describe("defineInstrumentation", () => {
     });
 
     expect(isInstrumentationProvider(provider)).toBe(true);
+    defineInstrumentation({
+      events: {
+        // @ts-expect-error Action hooks were replaced by tool.call hooks.
+        "action.started": () => {},
+      },
+    });
   });
 
   it("exposes durable input request and resolution events", () => {
