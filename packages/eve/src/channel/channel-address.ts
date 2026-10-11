@@ -6,7 +6,7 @@ import {
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
-import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/send-input.js";
+import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import type {
   CancelTurnResult,
@@ -93,7 +93,7 @@ export function createChannelAddress<TState = undefined>(input: {
         kind: "send" as const,
         payload: {
           ...payload,
-          message: serializeUrlFilePartsInMessage(payload.message),
+          message: serializeFilePartsInMessage(payload.message),
         },
         requestId: metadata.requestId,
         turnPolicy:
@@ -123,7 +123,7 @@ export function createChannelAddress<TState = undefined>(input: {
         initiatorAuth: options.initiatorAuth,
         input: {
           context: payload.context,
-          message: serializeUrlFilePartsInMessage(payload.message) ?? "",
+          message: serializeFilePartsInMessage(payload.message) ?? "",
           outputSchema: payload.outputSchema,
           state: payload.state,
         },

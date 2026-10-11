@@ -42,7 +42,8 @@ import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-err
 const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
 export const JUST_BASH_PROVIDER_NAME = "just-bash";
 
-type JustBashPreparedArtifact = { readonly templateRootPath: string };
+// Holds the template key, not its path: the build and runtime app roots can differ.
+type JustBashPreparedArtifact = { readonly templateKey: string };
 type JustBashSessionState = {
   readonly generation: string;
   readonly rootPath: string;
@@ -70,16 +71,16 @@ export function createJustBashSandboxProvider(
   // can reuse it. The roots are local files, so there is nothing to sweep.
   const implementation: ReturnType<typeof createJustBashSandboxProvider> = {
     async prepare(context) {
-      const templateIdentity = createSandboxProviderIdentity({
+      const templateKey = createSandboxProviderIdentity({
         ...environmentIdentity,
         resources: sandboxProviderResourceIdentity(context.resources),
         sourceRevision: context.sourceRevision,
       }).slice(0, 24);
-      const templateRootPath = resolveTemplateRootPath(context.storagePath, templateIdentity);
+      const templateRootPath = resolveTemplateRootPath(context.storagePath, templateKey);
       if (await pathExists(templateRootPath)) {
         await touchDirectory(templateRootPath);
         context.log?.("reusing cached template filesystem");
-        return { templateRootPath };
+        return { templateKey };
       }
 
       const temporaryTemplateRootPath = `${templateRootPath}.${randomUUID()}.tmp`;
@@ -88,7 +89,7 @@ export function createJustBashSandboxProvider(
         autoInstall,
         host: context.host,
         rootPath: temporaryTemplateRootPath,
-        sessionKey: `prepare-${templateIdentity}`,
+        sessionKey: `prepare-${templateKey}`,
         storagePath: context.storagePath,
       });
       const templateSession = buildSandboxSession(
@@ -112,14 +113,14 @@ export function createJustBashSandboxProvider(
           await rename(temporaryTemplateRootPath, templateRootPath);
           published = true;
         } catch (error) {
-          if (await pathExists(templateRootPath)) return { templateRootPath };
+          if (await pathExists(templateRootPath)) return { templateKey };
           throw error;
         }
       } finally {
         await templateSandbox.dispose();
         if (!published) await rm(temporaryTemplateRootPath, { force: true, recursive: true });
       }
-      return { templateRootPath };
+      return { templateKey };
     },
     async resume(context, artifactValue, stateValue) {
       const artifact = requirePreparedJustBashArtifact(artifactValue);
@@ -137,7 +138,10 @@ export function createJustBashSandboxProvider(
     async start(context, _openOptions, artifactValue) {
       const artifact = requirePreparedJustBashArtifact(artifactValue);
       const rootPath = sessionRootPath(context, artifact);
-      await ensureSessionRoot(artifact, rootPath);
+      await ensureSessionRoot(
+        resolveTemplateRootPath(context.storagePath, artifact.templateKey),
+        rootPath,
+      );
       return {
         handle: await openHandle(context, rootPath, options),
         state: {
@@ -167,18 +171,15 @@ function sessionRootPath(
   );
 }
 
-async function ensureSessionRoot(
-  artifact: JustBashPreparedArtifact,
-  sessionRootPath: string,
-): Promise<void> {
+async function ensureSessionRoot(templateRootPath: string, sessionRootPath: string): Promise<void> {
   if (await pathExists(sessionRootPath)) return;
-  if (!(await pathExists(artifact.templateRootPath))) {
+  if (!(await pathExists(templateRootPath))) {
     throw new SandboxTemplateNotProvisionedError({
       providerName: JUST_BASH_PROVIDER_NAME,
-      templateKey: artifact.templateRootPath,
+      templateKey: templateRootPath,
     });
   }
-  await copyDirectoryAtomically(artifact.templateRootPath, sessionRootPath);
+  await copyDirectoryAtomically(templateRootPath, sessionRootPath);
 }
 
 async function openHandle(
@@ -248,10 +249,10 @@ export async function pruneJustBashSandboxTemplates(input: {
 function requirePreparedJustBashArtifact(
   artifact: SandboxPreparedArtifact,
 ): JustBashPreparedArtifact {
-  if (!isSandboxPreparedArtifactRecord(artifact) || typeof artifact.templateRootPath !== "string") {
+  if (!isSandboxPreparedArtifactRecord(artifact) || typeof artifact.templateKey !== "string") {
     throw new Error("Invalid prepared just-bash artifact.");
   }
-  return { templateRootPath: artifact.templateRootPath };
+  return { templateKey: artifact.templateKey };
 }
 
 function requireJustBashSessionState(state: SandboxPreparedArtifact): JustBashSessionState {

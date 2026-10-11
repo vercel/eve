@@ -151,6 +151,7 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 
   async "turn.failed"(event, channel, _ctx) {
+    if (event.terminal) return;
     const hint = formatErrorHint(event);
     const errorId = extractErrorId(event.details);
     await channel.thread.post(

@@ -8,6 +8,7 @@ export {
   PUT,
   SessionStrandedError,
   WS,
+  attachmentError,
   createWebSocketUpgradeServer,
   defineChannel,
   disableRoute,

@@ -73,6 +73,11 @@ const INSTRUMENTATION_ALIAS_PATHS = {
 const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
 const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 
+// Nitro picks the Vite builder when the app root has a `vite.config` that calls
+// `nitro(`, which is the case when a TanStack Start host shares its root with
+// the agent. eve bundles its own runtime and never builds through the host's Vite.
+const EVE_NITRO_BUILDER = "rolldown";
+
 const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
   "docker",
   ...Object.keys(OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME),
@@ -740,6 +745,7 @@ export async function createDevelopmentApplicationNitro(
   const nitro = await createNitro(
     {
       _cli: { command: "dev" },
+      builder: EVE_NITRO_BUILDER,
       buildDir: nitroBuildDir,
       dev: true,
       features: { websocket: true },
@@ -826,6 +832,7 @@ export async function createProductionApplicationNitro(
   });
   const nitro = await createNitro({
     _cli: { command: "build" },
+    builder: EVE_NITRO_BUILDER,
     buildDir: options.buildDir,
     dev: false,
     features: {

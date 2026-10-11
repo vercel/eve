@@ -137,7 +137,7 @@ describe("isSandboxRefUrl", () => {
   });
 
   it("returns false for a URL with a different scheme", () => {
-    expect(isSandboxRefUrl(new URL("eve-attachment:?v=1&p=e30"))).toBe(false);
+    expect(isSandboxRefUrl(new URL("https://example.com/a.png"))).toBe(false);
     expect(isSandboxRefUrl(new URL("https://example.com/a"))).toBe(false);
     expect(isSandboxRefUrl(new URL("data:text/plain;base64,Zm9v"))).toBe(false);
   });

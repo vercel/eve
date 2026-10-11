@@ -82,6 +82,9 @@ import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-ste
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 
 type LegacyStepPayload =
   | DeliverHookPayload
@@ -122,6 +125,12 @@ const REQUEST_EVENT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+
+// Real by default; a test hands a session a mock sandbox with `mockResolvedValueOnce`.
+vi.mock("#execution/sandbox/ensure.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#execution/sandbox/ensure.js")>();
+  return { ...actual, ensureSandboxAccess: vi.fn(actual.ensureSandboxAccess) };
+});
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
 /** When set, `bindSessionInstrumentation` binds this runtime instead of the global one. */
@@ -278,6 +287,9 @@ function createTurnStepTestBundle(modelCallsPerStep?: number) {
 
 const threadContextAdapter: ChannelAdapter = {
   kind: "thread-context",
+  async fetchFile() {
+    return Buffer.from("diagram-bytes");
+  },
   deliver(payload: DeliverPayload, adapterCtx: ChannelAdapterContext) {
     if (typeof payload.message === "string" && payload.message.startsWith("seed:")) {
       adapterCtx.ctx.set(ThreadKey, payload.message.slice(5));
@@ -2043,39 +2055,19 @@ describe("turnStep", () => {
     ]);
   });
 
-  it("preserves a cancelled turn message that carries an attachment", async () => {
+  // #3419: a cancellation at step entry lands before the framework providers exist.
+  it("stages the attachment of a turn cancelled before its first model call", async () => {
     const session = createStubSession();
     installSessionStoreMocks([session]);
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
-      },
-      compiledArtifactsSource: {},
-      graph: {
-        nodesByNodeId: new Map(),
-        root: {
-          sandboxRegistry: { sandbox: null },
-          turnAgent: TestTurnAgent,
-        },
-      },
-      moduleMap: { nodes: {} },
-      hookRegistry: createRuntimeHookRegistry([]),
-      resolvedAgent: { config: {} },
-      subagentRegistry: {},
-      toolRegistry: {},
-      turnAgent: TestTurnAgent,
-    } as never);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (): Promise<StepResult> => {
-        throw new TurnCancelledError();
-      };
-    });
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle());
+    const sandbox = mockSandbox({ id: "sbx_cancelled" });
+    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce(sandbox.access as never);
+    const controller = new AbortController();
+    controller.abort(new TurnCancelledError());
 
     const result = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "attach:look at this" }],
-      },
+      abortSignal: controller.signal,
+      input: { kind: "deliver", payloads: [{ message: "attach:look at this" }] },
       sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState: createStubSessionState(),
@@ -2086,12 +2078,15 @@ describe("turnStep", () => {
       {
         content: [
           { text: "thread=unset; user=look at this", type: "text" },
-          expect.objectContaining({ filename: "diagram.png", type: "file" }),
+          expect.objectContaining({ data: expect.any(URL), type: "file" }),
         ],
         kind: "user",
         role: "user",
       },
     ]);
+    const [, file] = result.history[0]!.content as [unknown, { data: URL }];
+    expect(isSandboxRefUrl(file.data)).toBe(true);
+    expect(sandbox.writes).toHaveLength(1);
   });
 
   it("prepares the session trace boundary before instrumenting a first-turn delivery", async () => {

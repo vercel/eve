@@ -292,6 +292,8 @@ const channelConformance = {
     {
       driver: webChatDriver,
       unsupported: {
+        "a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works":
+          "the browser sends a file's bytes with the message, so there is no download to fail",
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question disables its options, so nothing is left to press",
         "pressing Approve names who approved on the approval": WEB_CHAT_SINGLE_PERSON,

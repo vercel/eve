@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readStampedPackageVersion } from "#internal/application/stamped-package-version.js";
@@ -24,7 +24,8 @@ interface PackageLocation {
 }
 
 function resolveCurrentModulePath(): string {
-  if (typeof __filename === "string") {
+  // In ESM this can read a global, such as the "[eval]" Node sets under `node -e`.
+  if (typeof __filename === "string" && isAbsolute(__filename)) {
     return __filename;
   }
 

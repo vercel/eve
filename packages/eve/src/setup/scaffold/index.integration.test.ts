@@ -915,6 +915,8 @@ describe("hasVercelHostFramework", () => {
     ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }],
     ["Nuxt nightly", { "nuxt-nightly": "3.0.0-27575307.749db41" }],
     ["SvelteKit", { "@sveltejs/kit": "2.60.0" }],
+    ["TanStack Start (React)", { "@tanstack/react-start": "1.168.60" }],
+    ["TanStack Start (Solid)", { "@tanstack/solid-start": "1.168.60" }],
   ])("recognizes %s as the root Vercel framework", async (_label, dependencies) => {
     const projectRoot = await createTempDir();
     await writeFile(
@@ -997,6 +999,8 @@ describe("resolveVercelHostFrameworkPreset", () => {
     ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
     ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
     ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+    ["TanStack Start (React)", { "@tanstack/react-start": "1.168.60" }, "tanstack-start"],
+    ["TanStack Start (Solid)", { "@tanstack/solid-start": "1.168.60" }, "tanstack-start"],
   ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
     const projectRoot = await createTempDir();
     await writeFile(

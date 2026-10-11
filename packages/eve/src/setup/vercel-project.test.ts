@@ -802,6 +802,7 @@ describe("linkProject", () => {
   it.each([
     { framework: "nuxtjs", importSpecifier: "eve/nuxt" },
     { framework: "sveltekit", importSpecifier: "eve/sveltekit" },
+    { framework: "tanstack-start", importSpecifier: "eve/tanstack" },
   ])("keeps a detected $framework project when $importSpecifier is present", async (testCase) => {
     mockedCaptureVercel
       .mockResolvedValueOnce(

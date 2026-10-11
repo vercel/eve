@@ -5,6 +5,7 @@ import {
   hasInternalRefScheme,
   isSerializedUrlFilePart,
 } from "#internal/attachments/url-refs.js";
+import { getKnownByteLength } from "#internal/attachments/data.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
 import {
@@ -668,6 +669,12 @@ export interface TurnFailedStreamEvent {
     details?: JsonObject;
     message: string;
     sequence: number;
+    /**
+     * `true` when the failure ends the session and `session.failed` follows;
+     * `false` when `session.waiting` follows and the next message can retry.
+     * Absent on events from eve versions before it was added.
+     */
+    terminal?: boolean;
     turnId: string;
   };
   type: "turn.failed";
@@ -1092,12 +1099,16 @@ function projectFileLikePart(
     return tagged;
   }
 
-  const size = byteLengthOf(data);
-  if (size !== undefined) {
-    return createProjectedFilePart({ filename, mediaType, size });
+  const link = clientUrlFragment(data);
+  if (link.url !== undefined) {
+    return createProjectedFilePart({ filename, mediaType, ...link });
   }
-
-  return createProjectedFilePart({ filename, mediaType, ...clientUrlFragment(data) });
+  // Inline payloads report their size only: this event is stored with the
+  // session stream, which must not keep attachment bytes.
+  const size = getKnownByteLength(data);
+  return size === null
+    ? createProjectedFilePart({ filename, mediaType })
+    : createProjectedFilePart({ filename, mediaType, size });
 }
 
 function projectTaggedFileData(
@@ -1191,10 +1202,6 @@ function clientUrlFragment(data: unknown): { readonly url?: string } {
     return {};
   }
 
-  if (data.startsWith("data:")) {
-    return { url: data };
-  }
-
   try {
     const url = new URL(data);
     return isClientResolvableUrl(url) ? { url: url.href } : {};
@@ -1204,7 +1211,7 @@ function clientUrlFragment(data: unknown): { readonly url?: string } {
 }
 
 function isClientResolvableUrl(url: URL): boolean {
-  return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:";
+  return url.protocol === "http:" || url.protocol === "https:";
 }
 
 function basenameOf(path: string): string {
@@ -1768,6 +1775,7 @@ export function createTurnFailedEvent(input: {
   readonly details?: JsonObject;
   readonly message: string;
   readonly sequence: number;
+  readonly terminal: boolean;
   readonly turnId: string;
 }): TurnFailedStreamEvent {
   return {
@@ -1776,6 +1784,7 @@ export function createTurnFailedEvent(input: {
       details: input.details,
       message: input.message,
       sequence: input.sequence,
+      terminal: input.terminal,
       turnId: input.turnId,
     },
     type: "turn.failed",

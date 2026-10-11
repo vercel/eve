@@ -1,9 +1,7 @@
 import { defineAgent } from "#public/index.js";
 
-// Epoch 36 re-declares the reasoning level type to exclude the AI SDK's new `max`
-// level, so a subagent that sets a reasoning level keeps compiling.
+// Epoch 35 `turn.failed` events had no `terminal`; epoch 36 adds it as optional.
 export default defineAgent({
   description: "Summarize a customer's open support tickets.",
   model: "anthropic/claude-sonnet-5",
-  reasoning: "high",
 });

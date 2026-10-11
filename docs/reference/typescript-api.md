@@ -152,7 +152,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/evals/reporters`                                                             | `Braintrust`, `JUnit`, `EvalReporter`                                                                                          |
 | `eve/evals/loaders`                                                               | `loadJson`, `loadYaml`                                                                                                         |
 | `eve/react`, `eve/vue`, `eve/svelte`                                              | `useEveAgent`                                                                                                                  |
-| `eve/next`, `eve/nuxt`, `eve/sveltekit`                                           | framework bundler plugins                                                                                                      |
+| `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                                      |
 | [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, response errors                                                      |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                             |
 

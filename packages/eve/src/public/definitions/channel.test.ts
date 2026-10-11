@@ -53,6 +53,18 @@ describe("defineChannel", () => {
     expect(channel.cors).toBeUndefined();
   });
 
+  it("carries a merged upload policy on the adapter", () => {
+    const adapter = getAdapter(
+      defineChannel({
+        routes: [POST("/x", async () => new Response("ok"))],
+        uploadPolicy: { maxBytes: 1024 },
+      }),
+    );
+
+    expect(adapter.kind).not.toBe("http");
+    expect(adapter.uploadPolicy).toEqual({ allowedMediaTypes: "*", maxBytes: 1024 });
+  });
+
   it("normalizes channel CORS options", () => {
     const channel = defineChannel({
       cors: {

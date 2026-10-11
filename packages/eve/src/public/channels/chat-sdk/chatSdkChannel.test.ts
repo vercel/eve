@@ -6,11 +6,14 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { sessionView } from "#harness/session-machine/commit.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
+import { fail } from "#harness/session-machine/transitions.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { initialSessionProjection } from "#protocol/session-projection.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import {
   chatSdkChannel,
@@ -428,6 +431,33 @@ describe("chatSdkChannel", () => {
     expect(adapter.posted).toEqual([
       {
         message: { markdown: "done" },
+        threadId: THREAD_ID,
+      },
+    ]);
+  });
+
+  it("posts only a restart notice when a failed turn ends the session", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), { thread: serializedThread() });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+    const failure = fail(sessionView(initialSessionProjection(), undefined), {
+      code: "MODEL_CALL_FAILED",
+      details: { errorId: "err_1" },
+      message: "The provider rejected the request",
+      terminal: { sessionId: "test-session" },
+    });
+
+    for (const event of failure.events) await callEvent(channelAdapter, event, ctx);
+
+    expect(adapter.posted).toEqual([
+      {
+        message:
+          "This session could not recover from an error (The provider rejected the request).\n\nStart a new conversation to continue.\n\nError id: err_1",
         threadId: THREAD_ID,
       },
     ]);

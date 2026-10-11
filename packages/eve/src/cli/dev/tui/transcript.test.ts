@@ -404,6 +404,7 @@ describe("ConversationTranscript", () => {
             code: "MODEL_CALL_FAILED",
             message: "Unavailable.",
             sequence: 1,
+            terminal: false,
             turnId: "child_turn_2",
           }),
         ]),

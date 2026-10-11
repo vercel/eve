@@ -514,10 +514,21 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await finalizeStreamedMessage(channel, event.message, true);
     },
     async "turn.failed"(event, channel, _ctx) {
-      await postFailure(channel.thread, "I hit an error while handling your request", event);
+      if (event.terminal) return;
+      await postFailure(
+        channel.thread,
+        "I hit an error while handling your request",
+        "Please try again, rephrase, or reach out if it keeps failing.",
+        event,
+      );
     },
     async "session.failed"(event, channel) {
-      await postFailure(channel.thread, "This session could not recover from an error", event);
+      await postFailure(
+        channel.thread,
+        "This session could not recover from an error",
+        "Start a new conversation to continue.",
+        event,
+      );
     },
   };
 }
@@ -608,17 +619,14 @@ function truncate(text: string, max = MAX_TYPING_STATUS): string {
 async function postFailure(
   thread: Thread | null,
   prefix: string,
+  nextStep: string,
   event: EventData<"turn.failed"> | EventData<"session.failed">,
 ): Promise<void> {
   if (!thread) return;
   const hint = formatErrorHint(event);
   const errorId = extractErrorId(event.details);
   await thread.post(
-    [
-      `${prefix}${hint}.`,
-      "Please try again, rephrase, or reach out if it keeps failing.",
-      ...(errorId ? [`Error id: ${errorId}`] : []),
-    ].join("\n\n"),
+    [`${prefix}${hint}.`, nextStep, ...(errorId ? [`Error id: ${errorId}`] : [])].join("\n\n"),
   );
 }
 

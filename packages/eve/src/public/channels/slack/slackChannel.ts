@@ -28,6 +28,7 @@ import type {
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
+  fetchSlackThreadWindow,
   slackContinuationToken,
   type SlackBotToken,
   type SlackHandle,
@@ -872,6 +873,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   >({
     kindHint: "slack",
     turnPolicy: config.turnPolicy,
+    uploadPolicy: config.uploadPolicy,
     state: {
       channelId: null as string | null,
       threadTs: null as string | null,
@@ -1455,6 +1457,10 @@ async function deliverSlackMessage(input: {
         : await loadThreadContextMessages(thread, message, input.threadContext);
     const threadContext = formatSlackThreadContext(priorMessages);
     const fileParts = await collectInboundFileParts({
+      botUserId: input.botUserId,
+      fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
+      // A DM can mention the app too, but every DM message brings its own files.
+      isMentioned: input.kind === "app_mention",
       mention: message,
       thread,
       policy: input.uploadPolicy,

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { decodeBytesToUtf8, defineCommand, MountableFs, ReadWriteFs } from "just-bash";
@@ -438,6 +438,36 @@ describe("just-bash provider", () => {
       sandboxName: "session-from-repaired-template",
     });
     const result = await seededHandle.sandbox.run({
+      command: "find /workspace -maxdepth 3 -type f | sort",
+    });
+
+    expect(result.stdout.trim().split("\n")).toEqual(["/workspace/skills/weather.md"]);
+  });
+
+  it("opens a prewarmed template after the app moves to a different root", async () => {
+    const buildRoot = await createTemporaryCacheDirectory("build-root");
+    const runtimeRoot = await createTemporaryCacheDirectory("runtime-root");
+    const provider = createJustBashProvider();
+
+    const prepared = await provider.prepare({
+      appRoot: buildRoot,
+      seedFiles: [
+        {
+          content: "# Weather skill\n",
+          path: "/workspace/skills/weather.md",
+        },
+      ],
+    });
+    // Build in CI, then ship the cache to a different app root (#4606).
+    await cp(buildRoot, runtimeRoot, { recursive: true });
+    await rm(buildRoot, { force: true, recursive: true });
+
+    const handle = await provider.openSession({
+      appRoot: runtimeRoot,
+      prepared,
+      sandboxName: "session-after-move",
+    });
+    const result = await handle.sandbox.run({
       command: "find /workspace -maxdepth 3 -type f | sort",
     });
 

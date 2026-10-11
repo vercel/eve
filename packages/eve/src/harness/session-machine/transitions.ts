@@ -208,9 +208,10 @@ function failedEvents(
 ): UnstampedMessageStreamEvent[] {
   const { sequence, stepIndex, turnId } = at;
   const { code, details, message } = failure;
+  const terminal = failure.terminal !== undefined;
   return [
     createStepFailedEvent({ code, details, message, sequence, stepIndex, turnId }),
-    createTurnFailedEvent({ code, details, message, sequence, turnId }),
+    createTurnFailedEvent({ code, details, message, sequence, terminal, turnId }),
     failure.terminal === undefined
       ? createSessionWaitingEvent(view.usage)
       : createSessionFailedEvent({

@@ -26,6 +26,55 @@ function deps(): WebSetupDeps {
   };
 }
 
+function contexts() {
+  return createSetupContexts({
+    appRoot: "/project",
+    asker: headlessAsker(),
+    environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+    prompter: createFakePrompter().prompter,
+    resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+  });
+}
+
+/** Serves `files` from memory; every other path is absent. */
+function withFiles(effects: WebSetupDeps, files: Record<string, string>) {
+  vi.mocked(effects.pathExists).mockImplementation(async (path) => path in files);
+  vi.mocked(effects.readTextFile).mockImplementation(async (path) => {
+    const source = files[path];
+    if (source === undefined) throw Object.assign(new Error(path), { code: "ENOENT" });
+    return source;
+  });
+  effects.removeFile = vi.fn(async () => {});
+  return effects;
+}
+
+const SERVICES_VERCEL_CONFIG = `import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: {
+      framework: "nextjs",
+      root: "apps/web",
+      buildCommand: "node ../../node_modules/next/dist/bin/next build",
+    },
+  },
+  routes: [
+    { src: "^(.*)$", destination: { type: "service", service: "web" } },
+  ],
+});
+`;
+const LEGACY_SERVICES_VERCEL_CONFIG = `import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: { framework: "nextjs", root: "apps/web" },
+  },
+  routes: [
+    { src: "^(.*)$", destination: { type: "service", service: "web" } },
+  ],
+});
+`;
+
 describe("Web setup", () => {
   it("presents the hosting topology with concise guidance", async () => {
     const effects = deps();
@@ -79,6 +128,7 @@ describe("Web setup", () => {
     });
 
     await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({
+      framework: "next",
       hosting: "vercel",
       packageManager: "pnpm",
     });
@@ -101,6 +151,7 @@ describe("Web setup", () => {
     });
 
     await expect(prepareWebSetup(ctx.prepare, effects)).resolves.toEqual({
+      framework: "next",
       hosting: "next",
       packageManager: "pnpm",
     });
@@ -126,7 +177,11 @@ describe("Web setup", () => {
     });
 
     await expect(
-      applyWebSetup({ hosting: "vercel", packageManager: "pnpm" }, ctx.apply, effects),
+      applyWebSetup(
+        { framework: "next", hosting: "vercel", packageManager: "pnpm" },
+        ctx.apply,
+        effects,
+      ),
     ).rejects.toThrow("Web Chat setup requires a selected workspace agent.");
 
     expect(effects.writeTextFile).not.toHaveBeenCalled();
@@ -150,7 +205,11 @@ describe("Web setup", () => {
       prompter: createFakePrompter().prompter,
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
-    await applyWebSetup({ hosting: "vercel", packageManager: "pnpm" }, ctx.apply, effects);
+    await applyWebSetup(
+      { framework: "next", hosting: "vercel", packageManager: "pnpm" },
+      ctx.apply,
+      effects,
+    );
 
     expect(effects.writeTextFile).toHaveBeenNthCalledWith(
       1,
@@ -192,7 +251,11 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
 
-    await applyWebSetup({ hosting: "vercel", packageManager: "pnpm" }, ctx.apply, effects);
+    await applyWebSetup(
+      { framework: "next", hosting: "vercel", packageManager: "pnpm" },
+      ctx.apply,
+      effects,
+    );
 
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
@@ -217,7 +280,11 @@ describe("Web setup", () => {
       resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
     });
     await expect(
-      applyWebSetup({ hosting: "vercel", packageManager: "npm" }, ctx.apply, effects),
+      applyWebSetup(
+        { framework: "next", hosting: "vercel", packageManager: "npm" },
+        ctx.apply,
+        effects,
+      ),
     ).resolves.toEqual({
       facts: [{ label: "", value: "Start locally with `npm run dev:all`." }],
     });
@@ -252,7 +319,11 @@ describe("Web setup", () => {
     });
 
     await expect(
-      applyWebSetup({ hosting: "next", packageManager: "yarn" }, ctx.apply, effects),
+      applyWebSetup(
+        { framework: "next", hosting: "next", packageManager: "yarn" },
+        ctx.apply,
+        effects,
+      ),
     ).resolves.toEqual({
       facts: [{ label: "", value: "Start locally with `yarn dev:web`." }],
     });
@@ -267,6 +338,81 @@ describe("Web setup", () => {
       expect.anything(),
     );
   });
+  it("writes the Vercel services config byte for byte", async () => {
+    const effects = deps();
+
+    await applyWebSetup(
+      { framework: "next", hosting: "vercel", packageManager: "pnpm" },
+      contexts().apply,
+      effects,
+    );
+
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      SERVICES_VERCEL_CONFIG,
+      { force: true },
+    );
+  });
+
+  it.each([
+    ["next", "vercel", "/project/apps/web/next.config.ts"],
+    ["next", "next", "/project/apps/web/next.config.ts"],
+    ["next", "vercel", "/project/vercel.ts"],
+    ["tanstack", "tanstack", "/project/apps/web/vite.config.ts"],
+  ] as const)(
+    "refuses %s with %s hosting over authored %s before writing anything",
+    async (framework, hosting, path) => {
+      const effects = withFiles(deps(), { [path]: "export default {};\n" });
+
+      await expect(
+        applyWebSetup({ framework, hosting, packageManager: "pnpm" }, contexts().apply, effects),
+      ).rejects.toThrow(`${path} contains authored configuration`);
+      expect(effects.writeTextFile).not.toHaveBeenCalled();
+      expect(effects.removeFile).not.toHaveBeenCalled();
+    },
+  );
+
+  it("leaves an authored vercel.ts alone for Next.js hosting", async () => {
+    const effects = withFiles(deps(), { "/project/vercel.ts": "export default {};\n" });
+
+    await applyWebSetup(
+      { framework: "next", hosting: "next", packageManager: "pnpm" },
+      contexts().apply,
+      effects,
+    );
+
+    expect(effects.removeFile).not.toHaveBeenCalled();
+    expect(effects.writeTextFile).not.toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it.each([SERVICES_VERCEL_CONFIG, LEGACY_SERVICES_VERCEL_CONFIG])(
+    "removes the installer's Vercel services config when switching to Next.js hosting",
+    async (vercelConfig) => {
+      const effects = withFiles(deps(), {
+        "/project/vercel.ts": vercelConfig,
+        "/project/package.json":
+          '{"scripts":{"dev":"eve dev","dev:eve":"eve dev","dev:all":"vercel dev --local"}}\n',
+      });
+
+      await applyWebSetup(
+        { framework: "next", hosting: "next", packageManager: "pnpm" },
+        contexts().apply,
+        effects,
+      );
+
+      expect(effects.removeFile).toHaveBeenCalledWith("/project/vercel.ts");
+      expect(effects.writeTextFile).toHaveBeenCalledWith(
+        "/project/package.json",
+        `${JSON.stringify({ scripts: { dev: "eve dev" } }, null, 2)}\n`,
+        { force: true },
+      );
+    },
+  );
+
   it("resolves a project for sign-in and provisions it before installing auth", async () => {
     const effects = deps();
     const writeAuth = vi.fn(async () => {});
@@ -314,6 +460,7 @@ describe("Web setup", () => {
     await expect(
       applyWebSetup(
         {
+          framework: "next",
           hosting: "vercel",
           packageManager: "pnpm",
           authProject: { orgId: "team", projectId: "project" },
@@ -324,5 +471,132 @@ describe("Web setup", () => {
     ).rejects.toThrow("Cannot create app");
     expect(writeAuth).not.toHaveBeenCalled();
     expect(effects.installScaffoldDependencies).not.toHaveBeenCalled();
+  });
+});
+
+const TANSTACK_SERVICES_VERCEL_CONFIG = `import { withEve } from "eve/vercel";
+
+export default await withEve({
+  services: {
+    web: {
+      framework: "tanstack-start",
+      root: "apps/web",
+      buildCommand: "node ../../node_modules/vite/bin/vite.js build",
+    },
+  },
+  routes: [
+    { src: "^(.*)$", destination: { type: "service", service: "web" } },
+  ],
+});
+`;
+
+const supportMember: EveProjectContext = {
+  environmentRoot: "/project",
+  kind: "workspace-member",
+  member: { appRoot: "/project/agents/support", name: "support" },
+  workspace: {
+    root: "/project",
+    members: [{ appRoot: "/project/agents/support", name: "support" }],
+  },
+};
+
+describe("Web setup for a TanStack Start app", () => {
+  const tanStackApp = { "/project/apps/web/vite.config.ts": "export default {};\n" };
+
+  it("offers TanStack Start hosting and skips the Next.js-only sign-in question", async () => {
+    const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
+    const ctx = createSetupContexts({
+      appRoot: "/project",
+      // Headless refuses unanswered required questions, so a sign-in prompt would throw.
+      asker: withAnswers({ "web-hosting": "tanstack" })(headlessAsker()),
+      environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
+      prompter: createFakePrompter().prompter,
+      resolveVercelProject,
+    });
+
+    await expect(prepareWebSetup(ctx.prepare, withFiles(deps(), tanStackApp))).resolves.toEqual({
+      framework: "tanstack",
+      hosting: "tanstack",
+      packageManager: "pnpm",
+    });
+    expect(resolveVercelProject).not.toHaveBeenCalled();
+  });
+
+  it("deploys a workspace member as a peer service without asking", async () => {
+    const effects = withFiles(deps(), tanStackApp);
+    vi.mocked(effects.resolveEveProjectContext).mockResolvedValue(supportMember);
+
+    await expect(prepareWebSetup(contexts().prepare, effects)).resolves.toEqual({
+      framework: "tanstack",
+      hosting: "vercel",
+      packageManager: "pnpm",
+    });
+  });
+
+  it("configures Vercel services without mounting the agent in the app", async () => {
+    const effects = deps();
+
+    await expect(
+      applyWebSetup(
+        { framework: "tanstack", hosting: "vercel", packageManager: "npm" },
+        contexts().apply,
+        effects,
+      ),
+    ).resolves.toEqual({
+      facts: [{ label: "", value: "Start locally with `npm run dev:all`." }],
+    });
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/apps/web/vite.config.ts",
+      expect.not.stringContaining("eveTanStack"),
+      { force: true },
+    );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      TANSTACK_SERVICES_VERCEL_CONFIG,
+      { force: true },
+    );
+  });
+
+  it("mounts the agent with eveTanStack for TanStack Start hosting", async () => {
+    const effects = deps();
+
+    await expect(
+      applyWebSetup(
+        { framework: "tanstack", hosting: "tanstack", packageManager: "yarn" },
+        contexts().apply,
+        effects,
+      ),
+    ).resolves.toEqual({
+      facts: [{ label: "", value: "Start locally with `yarn dev:web`." }],
+    });
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/apps/web/vite.config.ts",
+      expect.stringContaining("eveTanStack({ eveRoot })"),
+      { force: true },
+    );
+    expect(effects.writeTextFile).not.toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("replaces the Next.js services config the installer wrote before a framework switch", async () => {
+    const effects = withFiles(deps(), {
+      "/project/vercel.ts": SERVICES_VERCEL_CONFIG,
+      "/project/package.json": '{"scripts":{"dev":"eve dev"}}\n',
+    });
+
+    await applyWebSetup(
+      { framework: "tanstack", hosting: "vercel", packageManager: "pnpm" },
+      contexts().apply,
+      effects,
+    );
+
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/vercel.ts",
+      TANSTACK_SERVICES_VERCEL_CONFIG,
+      { force: true },
+    );
   });
 });

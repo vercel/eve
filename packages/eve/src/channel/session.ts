@@ -19,7 +19,7 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
-import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
+import { serializeFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import {
   AuthKey,
@@ -120,7 +120,7 @@ export function createSession(
         context?: readonly string[];
         message: string | UserContent | undefined;
         outputSchema?: JsonObject;
-      }>({ message: serializeUrlFilePartsInMessage(message) }, readClientContext(options));
+      }>({ message: serializeFilePartsInMessage(message) }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {

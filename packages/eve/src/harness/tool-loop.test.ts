@@ -10482,9 +10482,9 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
 
-      // Small PNG-like payload — under the 3 MiB image inline cap so
-      // the hydration pass substitutes bytes (not a text reference).
-      const imageBytes = Buffer.alloc(1024, 0x89);
+      // A small PNG under the 3 MiB image inline cap, so the hydration pass
+      // adds its bytes after the label.
+      const imageBytes = pngBytes(64, 64, 1024);
       const userContent: UserContent = [
         { type: "text", text: "describe the image" },
         { data: imageBytes, filename: "logo.png", mediaType: "image/png", type: "file" },
@@ -10618,7 +10618,21 @@ describe("createToolLoopHarness", () => {
       expect(laterCalls).toHaveLength(2);
       for (const call of laterCalls) {
         expect(call.messages.find((message) => message.role === "tool")?.content).toEqual([
-          toolResult,
+          {
+            ...toolResult,
+            output: {
+              type: "content",
+              value: [
+                {
+                  text: expect.stringMatching(
+                    /^Attached file \/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/chart\.png \(image\/png\)$/,
+                  ),
+                  type: "text",
+                },
+                file,
+              ],
+            },
+          },
         ]);
       }
     });

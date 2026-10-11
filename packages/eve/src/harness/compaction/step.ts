@@ -9,7 +9,11 @@ import {
   type StepResult,
   type ToolLoopHarnessConfig,
 } from "#harness/types.js";
-import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
+import {
+  type HarnessModelMessage,
+  isUserModelMessage,
+  validateHarnessModelMessages,
+} from "#harness/messages.js";
 import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -311,13 +315,32 @@ export async function maybeCompact(input: {
     if (ctx !== undefined) {
       const commit = drainMemoryCommit(ctx);
       if (commit !== undefined) {
-        messages = validateHarnessModelMessages([...messages, ...commit.recalledMessages]);
+        messages = validateHarnessModelMessages(
+          placeRecalledMemory(messages, commit.recalledMessages, input.betweenTurns === true),
+        );
         session = { ...session, state: commit.state };
       }
     }
   }
 
   return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
+}
+
+/**
+ * Memory recalled after a compaction during a turn goes where `turn.started` puts it: before the
+ * turn's latest user message, or its replay. Between turns it follows the history, so it still
+ * comes before the next turn's input.
+ */
+function placeRecalledMemory(
+  messages: readonly ModelMessage[],
+  recalled: readonly ModelMessage[],
+  betweenTurns: boolean,
+): ModelMessage[] {
+  const index = betweenTurns
+    ? -1
+    : messages.findLastIndex((message) => isUserModelMessage(message) && message.kind === "user");
+  if (index === -1) return [...messages, ...recalled];
+  return [...messages.slice(0, index), ...recalled, ...messages.slice(index)];
 }
 
 type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];

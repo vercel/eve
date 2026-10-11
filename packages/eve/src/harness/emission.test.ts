@@ -174,6 +174,61 @@ describe("emitStreamContent action requests", () => {
     expect(emit).not.toHaveBeenCalled();
   });
 
+  it("does not stream input for a provider tool whose input start is unflagged", async () => {
+    const events: Parameters<HarnessEmitFn>[0][] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+    };
+
+    // AI Gateway streams the model's input under one id, then runs the search under another.
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "call-model", toolName: "web_search", type: "tool-input-start" },
+        { delta: '{"query":"eve"}', id: "call-model", type: "tool-input-delta" },
+        { id: "call-model", type: "tool-input-end" },
+        {
+          input: { query: "eve" },
+          providerExecuted: true,
+          toolCallId: "call-gateway",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          input: { query: "eve" },
+          output: { results: [] },
+          providerExecuted: true,
+          toolCallId: "call-gateway",
+          toolName: "web_search",
+          type: "tool-result",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map([
+          [
+            "web_search",
+            {
+              behavior: { availability: [], handling: { kind: "provider-tool", provider: "exa" } },
+              description: "Search the web.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "web_search",
+            },
+          ],
+        ]),
+      },
+    );
+
+    expect(events.filter((event) => event.type === "action.input.appended")).toEqual([]);
+    expect(
+      events
+        .filter((event) => event.type === "actions.requested")
+        .flatMap((event) => event.data.actions.map((action) => action.callId)),
+    ).toEqual(["call-gateway"]);
+  });
+
   it("cancels a pending provider action batch when the stream aborts", async () => {
     vi.useFakeTimers();
     const emit = createEmitStub();

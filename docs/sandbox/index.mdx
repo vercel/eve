@@ -153,14 +153,18 @@ Docker and microsandbox mount the compiled trees read-only under `/eve/resources
 
 eve writes byte-backed files that reach the agent into the sandbox under `/workspace/.eve/attachments/` and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
 
-Before every model call, eve reads the referenced files back from the sandbox:
+Before every model call, eve reads the referenced files back from the sandbox. Every file, whether attached to a message or returned by a tool, reaches the model with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow its label only when every major provider reads the format natively:
 
-- An image up to 3 MiB or a PDF up to 20 MiB attached to a message reaches the model as a file. Larger files and other types reach the model as a text reference, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`, that the agent can open with `read_file` or `bash`.
-- A file returned by a tool always reaches the model as a file.
+- A PNG, JPEG, GIF, or WebP image up to 3 MiB and at most 8000 pixels per side.
+- A PDF up to 20 MiB.
+
+Other files, such as CSV, HEIC, audio, and video, reach the model as the label alone. eve checks image and PDF media types against the file's bytes when it stages the file. A file whose bytes don't match its declared image or PDF type is staged as `application/octet-stream`, so a provider never receives bytes it would reject.
 
 If a referenced file is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.
 
-Each call sends the same bytes for the same file, so the model still sees attachments from earlier turns and the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. The `read_file` tool shows PNG, JPEG, GIF, and WebP files up to 3 MiB to the model as images, so the agent can look at an image again after compaction.
+A file that eve can't stage never enters session history. When a channel's `fetchFile` fails, or a file part's `data` is not bytes, base64, a `data:` URL, or a URL, the model receives a note that names the file instead.
+
+Each call sends the same bytes for the same file, so the model still sees attachments from earlier turns and the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. The `read_file` tool shows the same images and PDFs to the model as files, so the agent can look at an attachment again after compaction, or open a PDF that a tool or `bash` wrote to the sandbox.
 
 ## Custom providers
 

@@ -18,12 +18,6 @@ export { conversationReducer } from "#client/conversation-reducer.js";
 export { openConversationInputs } from "#client/conversation-state.js";
 export { toolCallState, type ToolCallState, type ToolCallStatus } from "#client/tool-call-state.js";
 export type {
-  SessionAuthorization,
-  SessionCall,
-  SessionCallStatus,
-  SessionProjection,
-} from "#protocol/session-projection.js";
-export type {
   AgentObservation,
   ConversationAgentSession,
   ConversationInput,

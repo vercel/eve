@@ -623,4 +623,33 @@ describe("compiler model catalog", () => {
     });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("compiles the one-line mockModel fixture without an authored context window", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-model-catalog-mock-model-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      [
+        'import { defineAgent } from "eve";',
+        'import { mockModel } from "eve/evals";',
+        "",
+        "export default defineAgent({",
+        '  model: mockModel("A deterministic reply"),',
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => mockCatalogResponse([]));
+
+    const result = await compileAgent({ startPath: appRoot });
+
+    expect(result.manifest.config.model).toMatchObject({
+      contextWindowTokens: expect.any(Number),
+      id: "eve-mock/model",
+    });
+  });
 });
