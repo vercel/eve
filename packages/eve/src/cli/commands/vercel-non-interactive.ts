@@ -1,12 +1,9 @@
 import { runVercelEnvPull } from "#setup/run-vercel-link.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 import { runVercel } from "#setup/primitives/index.js";
 import { readProjectLink } from "#setup/project-resolution.js";
 import { resolveProjectByNameOrId, resolveTeam } from "#setup/vercel-project.js";
 import type { Prompter } from "#setup/prompter.js";
 import { configureTraceSampling } from "#setup/vercel-trace-sampling.js";
-
-import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 
 interface VercelNonInteractiveLogger {
   error(message: string): void;
@@ -20,7 +17,6 @@ export interface VercelProjectCliOptions {
 }
 
 export interface NonInteractiveLinkDependencies {
-  isEveProject: typeof isEveProject;
   runVercel: typeof runVercel;
   runVercelEnvPull: typeof runVercelEnvPull;
   readProjectLink: typeof readProjectLink;
@@ -29,7 +25,6 @@ export interface NonInteractiveLinkDependencies {
 }
 
 const defaultDependencies: NonInteractiveLinkDependencies = {
-  isEveProject,
   runVercel,
   runVercelEnvPull,
   readProjectLink,
@@ -41,7 +36,11 @@ export function isNonInteractiveProjectCommand(options: VercelProjectCliOptions)
   return options.nonInteractive === true;
 }
 
-/** Links a named Vercel project and refreshes its local environment without a prompt. */
+/**
+ * Links a named Vercel project and refreshes its local environment without a
+ * prompt. Callers validate `appRoot` first, since a workspace root is not an
+ * eve project by itself.
+ */
 export async function runNonInteractiveLink(input: {
   logger: VercelNonInteractiveLogger;
   appRoot: string;
@@ -51,11 +50,6 @@ export async function runNonInteractiveLink(input: {
 }): Promise<boolean> {
   const { appRoot, logger, options } = input;
   const dependencies = input.dependencies ?? defaultDependencies;
-  if (!(await dependencies.isEveProject(appRoot))) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
-    return false;
-  }
   if (options.project === undefined) {
     logger.error("`eve link --non-interactive` requires `--project <name-or-id>`.");
     process.exitCode = 1;
