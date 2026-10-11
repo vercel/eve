@@ -206,8 +206,13 @@ async function checkCall(
   if (tool === undefined) {
     return { issues: [{ message: unknownToolMessage(connection, toolName, tools) }] };
   }
+  // Provided values replace these keys at execution, so a model value for one is dropped, not rejected.
+  const provided = connection.toolCall?.providedArguments ?? {};
+  const modelInput = Object.fromEntries(
+    Object.entries(isObject(input) ? input : {}).filter(([key]) => !Object.hasOwn(provided, key)),
+  );
   const result = await defineJsonSchema(tool.inputSchema as JsonObject)["~standard"].validate(
-    isObject(input) ? input : {},
+    modelInput,
   );
   if (result.issues === undefined) return { input: result.value as JsonObject, tool };
   return {
