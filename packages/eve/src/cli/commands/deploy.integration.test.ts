@@ -180,7 +180,7 @@ describe("runDeployCommand", () => {
     expect(logger.errors).toEqual([]);
     expect(process.exitCode).toBeUndefined();
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes", "--non-interactive"],
+      expect.arrayContaining(["deploy", "--prod", "--yes", "--non-interactive"]),
       expect.objectContaining({ nonInteractive: true }),
     );
     expect(fake.prompter.outro).toHaveBeenCalledWith("Deployed: https://my-agent.vercel.app");
@@ -305,13 +305,7 @@ describe("runDeployCommand", () => {
       if (traceSampling === false) {
         expect(linkDeps.resolveProjectByNameOrId).not.toHaveBeenCalled();
       }
-      if (existing === "unknown") {
-        expect(fake.prompter.log.warning).toHaveBeenCalledWith(
-          expect.stringContaining("so it was not configured"),
-        );
-      } else {
-        expect(fake.prompter.log.warning).not.toHaveBeenCalled();
-      }
+      expect(fake.prompter.log.warning).not.toHaveBeenCalled();
     },
   );
 });

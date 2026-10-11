@@ -55,6 +55,7 @@ function setupOperations(): SelfModificationSetupOperations {
     detectGitRepository: vi.fn(async () => ({ remoteKind: "missing" as const })),
     findOrCreateConnector: vi.fn(async () => "github/example"),
     readConfig: vi.fn(async () => undefined),
+    readLocalConfig: vi.fn(async () => undefined),
     writeConfig: vi.fn(),
   };
 }

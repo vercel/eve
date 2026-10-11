@@ -15,6 +15,7 @@ export interface TemplateEntry {
   category: TemplateCategory;
   demoHref?: string;
   description: string;
+  descriptionLink?: TemplateManifestEntry["descriptionLink"];
   files: TemplateFile[];
   integrations: TemplateIntegration[];
   model: string;

@@ -9,6 +9,7 @@ export {
   type ChatSdkEventContext,
   type ChatSdkInstrumentationMetadata,
   type ChatSdkReceiveTarget,
+  type ChatSdkRespondOptions,
   type ChatSdkSendOptions,
 } from "#public/channels/chat-sdk/chatSdkChannel.js";
 export { messageToUserContent } from "#public/channels/chat-sdk/messageToUserContent.js";

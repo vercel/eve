@@ -8,6 +8,9 @@ const SLEEPER_FOLLOW_UP = "SLEEPER-FOLLOW-UP";
 const CANCELLED_TURN_FOLLOW_UP = "CANCELLATION-SUBAGENT-FOLLOW-UP-OK";
 /** How a call the cancelled turn stopped reads in history. */
 const CANCELLED_CALL_TEXT = "cancelled before this call finished";
+/** Shared with `evals/cancellation/compact-session-handoff.eval.ts`. */
+const CODE_WORD = "ORCHID-42";
+const CODE_WORD_QUESTION = "What is Alice's project code word?";
 
 async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const message = request.lastUserMessage ?? "";
@@ -53,13 +56,13 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
   if (message.includes("call the sleeper subagent")) {
     const hitl = message.includes(HITL_REQUEST);
     // The workflow tool runs as a task: its call returns a receipt, and the
-    // program's result arrives in a <task_result> message after task_wait.
+    // program's result arrives in a <task_result> message after eve__task_wait.
     const taskResult = request.messages.find(
       (entry) => entry.role === "user" && entry.text.startsWith("<task_result"),
     );
     if (taskResult !== undefined) return taskResult.text;
     if (request.toolResults.some((entry) => entry.name === "workflow")) {
-      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: "task_wait" }] };
+      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: "eve__task_wait" }] };
     }
     return {
       toolCalls: [
@@ -76,7 +79,16 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     };
   }
   if (message.includes(CANCELLED_TURN_FOLLOW_UP)) return replyAfterCancelledTurn(request);
+  if (message.includes(CODE_WORD_QUESTION)) return recallCodeWord(request);
   return `Mock reply: ${message}`;
+}
+
+/** Answers only from history, so a session that lost it across compaction cannot answer. */
+function recallCodeWord(request: MockModelRequest): string {
+  const remembered = request.messages.some(
+    (entry) => !entry.text.includes(CODE_WORD_QUESTION) && entry.text.includes(CODE_WORD),
+  );
+  return remembered ? CODE_WORD : "Alice's code word is not in this conversation.";
 }
 
 /**
@@ -108,11 +120,11 @@ function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse 
   }
   const taskId = /Started task (\S+)\./u.exec(String(started.output))?.[1];
   if (taskId === undefined) throw new Error("The sleeper call returned no task receipt.");
-  if (calls("task_wait").length === 0) {
-    return { toolCalls: [{ input: { timeoutSeconds: 2 }, name: "task_wait" }] };
+  if (calls("eve__task_wait").length === 0) {
+    return { toolCalls: [{ input: { timeoutSeconds: 2 }, name: "eve__task_wait" }] };
   }
-  if (calls("task_cancel").length === 0) {
-    return { toolCalls: [{ input: { taskId }, name: "task_cancel" }] };
+  if (calls("eve__task_cancel").length === 0) {
+    return { toolCalls: [{ input: { taskId }, name: "eve__task_cancel" }] };
   }
   if (continued === undefined) {
     return { toolCalls: [{ input: { message: SLEEPER_FOLLOW_UP, taskId }, name: "sleeper" }] };
@@ -120,7 +132,7 @@ function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse 
   const result = [...request.messages]
     .reverse()
     .find((entry) => entry.role === "user" && entry.text.startsWith("<task_result"));
-  return result?.text ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
+  return result?.text ?? { toolCalls: [{ input: {}, name: "eve__task_wait" }] };
 }
 
 const base = e2eAgentConfig({ mock: respond });

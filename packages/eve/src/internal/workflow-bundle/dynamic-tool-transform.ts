@@ -7,8 +7,14 @@
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
-  collectReferencedIdentifierNames,
+  collectFreeVariables,
+  collectPatternNames,
+  extractParamNames,
+  findEveImportAliases,
   findProperty,
+  isAstNode,
+  isFunction,
+  readDefinerName,
   type DynamicToolAstNode as AstNode,
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
@@ -40,7 +46,8 @@ type CallbackPropertyName =
 
 interface CallbackInfo {
   readonly body: string;
-  readonly bodyNode: AstNode;
+  /** Node whose free variables are the callback's lexical captures. */
+  readonly captureNode: AstNode;
   readonly isAsync: boolean;
   readonly isGenerator: boolean;
   readonly isReference: boolean;
@@ -70,14 +77,14 @@ export async function transformDynamicToolExecute(
   if (!source.includes("defineTool") && !source.includes("defineWorkflowTool")) return null;
 
   const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
-  const defineToolAliases = findDefineToolAliases(ast);
+  const defineToolAliases = findEveImportAliases(ast, ["defineTool", "defineWorkflowTool"]);
   if (defineToolAliases.size === 0) return null;
 
   const callbacks: CallbackInfo[] = [];
   walkForCallbacks(source, ast, callbacks, [], {
     defineToolAliases,
     workflowFunctions,
-    durableSchemaAliases: findDefineToolAliases(ast, ["defineDurableSchema"]),
+    durableSchemaAliases: findEveImportAliases(ast, ["defineDurableSchema"]),
   });
   return callbacks.length === 0 ? null : applyTransform(source, callbacks);
 }
@@ -93,41 +100,6 @@ interface WalkContext {
    * callback, so it keeps its identity and is not stamped.
    */
   readonly workflowFunctions: ReadonlySet<string>;
-}
-
-function findDefineToolAliases(
-  ast: AstNode,
-  names: readonly string[] = ["defineTool", "defineWorkflowTool"],
-): ReadonlySet<string> {
-  const aliases = new Set<string>();
-  walkNode(ast, (node) => {
-    if (node.type !== "ImportDeclaration") return true;
-    const source = node.source?.value;
-    if (typeof source !== "string" || (source !== "eve" && !source.startsWith("eve/"))) {
-      return false;
-    }
-    for (const specifier of node.specifiers ?? []) {
-      if (specifier.type === "ImportNamespaceSpecifier" && specifier.local?.name) {
-        for (const name of names) aliases.add(`${specifier.local.name}.${name}`);
-      }
-      if (
-        specifier.type === "ImportSpecifier" &&
-        names.includes(String(specifier.imported?.name ?? specifier.imported?.value)) &&
-        specifier.local?.name
-      ) {
-        aliases.add(specifier.local.name);
-      }
-    }
-    return false;
-  });
-  return aliases;
-}
-
-function readDefinerName(callee: AstNode | undefined): string | undefined {
-  if (callee?.type === "Identifier") return callee.name;
-  if (callee?.type !== "MemberExpression" || callee.object?.type !== "Identifier") return undefined;
-  const property = callee.computed ? callee.property?.value : callee.property?.name;
-  return typeof property === "string" ? `${callee.object.name}.${property}` : undefined;
 }
 
 function walkForCallbacks(
@@ -261,7 +233,7 @@ function collectToolCallbacks(
       continue;
     results.push({
       body: `{ return ${source.slice(value.start, value.end)}; }`,
-      bodyNode: value,
+      captureNode: value,
       isAsync: false,
       isGenerator: false,
       isReference: false,
@@ -313,11 +285,10 @@ function collectCallbackProperty(
   if (!value || value.start === undefined || value.end === undefined) return;
 
   if (isFunction(value) || property.method === true) {
-    const bodyNode = value.body as AstNode | undefined;
-    if (!bodyNode) return;
+    if (!value.body) return;
     results.push({
       body: extractFnBody(source, value),
-      bodyNode,
+      captureNode: value,
       isAsync: value.async === true,
       isGenerator: value.generator === true,
       isReference: false,
@@ -334,7 +305,7 @@ function collectCallbackProperty(
   if (value.type === "Identifier") {
     results.push({
       body: `{ return ${source.slice(value.start, value.end)}(...__args); }`,
-      bodyNode: value,
+      captureNode: value,
       isAsync: false,
       isGenerator: false,
       isReference: true,
@@ -353,31 +324,30 @@ function applyTransform(source: string, callbacks: readonly CallbackInfo[]): { c
   const hoistedFunctions: string[] = [];
 
   for (const [index, callback] of callbacks.entries()) {
-    const referencedNames = collectReferencedIdentifierNames(callback.bodyNode);
+    const freeNames = collectFreeVariables(callback.captureNode);
     const candidateVars = callback.nestedScopes.flatMap((scope) => [
       ...scope.params,
       ...scope.vars,
     ]);
-    const callbackParamNames = extractCallbackParamNames(callback.params);
-    const allVars = dedupeShadowed(candidateVars).filter(
-      (name) => !callbackParamNames.has(name) && referencedNames.has(name),
-    );
+    const allVars = dedupeShadowed(candidateVars).filter((name) => freeNames.has(name));
     const closure = allVars.length > 0 ? `{ ${allVars.join(", ")} }` : "{}";
     const safePhase = callback.phase.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
     const hoistedName =
       callback.phase === "execute"
         ? `__eve_dynamic_exec_${index}`
         : `__eve_dynamic_${safePhase}_${index}`;
-    const originalParams = callback.params;
-    const hoistedParams = originalParams ? `__vars, ${originalParams}` : "__vars";
-    const varsDestructure = allVars.length > 0 ? `const ${closure} = __vars;\n  ` : "";
+    // Captures are free in the callback, so they never collide with its own
+    // parameters, and destructuring them first keeps them visible to defaults.
+    const hoistedParams = [allVars.length > 0 ? closure : "__vars", callback.params]
+      .filter(Boolean)
+      .join(", ");
     const bodyContent = callback.body.slice(1, -1).trim();
     const asyncPrefix = callback.isAsync ? "async " : "";
     const generatorStar = callback.isGenerator ? "*" : "";
 
     hoistedFunctions.push(
       `${asyncPrefix}function${generatorStar} ${hoistedName}(${hoistedParams}) {\n` +
-        `  ${varsDestructure}${bodyContent}\n` +
+        `  ${bodyContent}\n` +
         `}`,
     );
 
@@ -448,36 +418,6 @@ function collectScopeVarDeclarations(bodyNode: AstNode): string[] {
   return names;
 }
 
-function collectPatternNames(pattern: AstNode | null, names: string[]): void {
-  if (!pattern) return;
-  if (pattern.type === "Identifier" && pattern.name) {
-    names.push(pattern.name);
-    return;
-  }
-  if (pattern.type === "ObjectPattern") {
-    for (const property of pattern.properties ?? []) {
-      collectPatternNames(
-        property.type === "RestElement"
-          ? (property.argument as AstNode | null)
-          : (property.value as AstNode | null),
-        names,
-      );
-    }
-  }
-  if (pattern.type === "ArrayPattern") {
-    for (const element of pattern.elements ?? []) collectPatternNames(element, names);
-  }
-  if (pattern.type === "AssignmentPattern") {
-    collectPatternNames(pattern.left as AstNode | null, names);
-  }
-}
-
-function extractParamNames(fn: AstNode): string[] {
-  const names: string[] = [];
-  for (const parameter of fn.params ?? []) collectPatternNames(parameter, names);
-  return names;
-}
-
 function extractFnParams(source: string, fn: AstNode): string {
   if (!fn.params || fn.params.length === 0) return "";
   const first = fn.params[0]!;
@@ -494,62 +434,4 @@ function extractFnBody(source: string, fn: AstNode): string {
   return fn.type === "ArrowFunctionExpression" && body.type !== "BlockStatement"
     ? `{ return ${raw}; }`
     : raw;
-}
-
-function splitParamsTopLevel(raw: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let index = 0; index < raw.length; index++) {
-    const character = raw[index]!;
-    if (character === "<" || character === "(" || character === "[" || character === "{") {
-      depth++;
-    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
-      depth--;
-    } else if (character === "," && depth === 0) {
-      parts.push(raw.slice(start, index));
-      start = index + 1;
-    }
-  }
-  parts.push(raw.slice(start));
-  return parts;
-}
-
-function extractParamBindingName(parameter: string): string {
-  const trimmed = parameter.trim();
-  let depth = 0;
-  for (let index = 0; index < trimmed.length; index++) {
-    const character = trimmed[index]!;
-    if (character === "<" || character === "(" || character === "[" || character === "{") {
-      depth++;
-    } else if (character === ">" || character === ")" || character === "]" || character === "}") {
-      depth--;
-    } else if (depth === 0 && (character === ":" || character === "=")) {
-      return trimmed.slice(0, index).trim();
-    }
-  }
-  return trimmed;
-}
-
-function extractCallbackParamNames(params: string): Set<string> {
-  const names: string[] = [];
-  if (!params) return new Set();
-  for (const parameter of splitParamsTopLevel(params)) {
-    const binding = extractParamBindingName(parameter);
-    if (binding.startsWith("...")) names.push(binding.slice(3));
-    else names.push(binding);
-  }
-  return new Set(names);
-}
-
-function isFunction(node: AstNode): boolean {
-  return (
-    node.type === "ArrowFunctionExpression" ||
-    node.type === "FunctionDeclaration" ||
-    node.type === "FunctionExpression"
-  );
-}
-
-function isAstNode(value: unknown): value is AstNode {
-  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
 }

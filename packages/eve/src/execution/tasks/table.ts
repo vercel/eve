@@ -4,7 +4,7 @@ import type { SessionStateMap } from "#harness/types.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason, TaskStartedStreamEvent } from "#protocol/message.js";
 import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
 
 // The session's task table. Every write to a task record goes through this
@@ -17,7 +17,7 @@ const TASK_TABLE_VERSION = 1;
 /** At most this many tasks work at once in one session: a backstop normal use shouldn't reach. */
 export const MAX_WORKING_TASKS = 32;
 
-/** Finished records kept so `task_cancel` can still answer `already_finished`. */
+/** Finished records kept so `eve__task_cancel` can still answer `already_finished`. */
 const MAX_FINISHED_RECORDS = 100;
 
 /** Idle resumable tasks the `[Tasks]` note lists: the most recently used ones. */
@@ -62,13 +62,19 @@ export interface TaskRunCommands {
 export type TaskOutcome =
   | { readonly output: JsonValue; readonly status: "completed" }
   | { readonly error: string; readonly status: "failed" }
-  | { readonly status: "cancelled" };
+  | { readonly reason?: TaskCancelReason; readonly status: "cancelled" };
 
 /**
  * An outcome the model receives, one per reply or run end, however many calls
  * it settled. Cancelled work never reports back.
  */
-export type TaskResult = Exclude<TaskOutcome, { readonly status: "cancelled" }>;
+export type TaskResult = Exclude<TaskOutcome, { readonly status: "cancelled" }> & {
+  /**
+   * Keep original call and turn IDs so output-processing failures in a later turn
+   * can be recorded against the stubbed call.
+   */
+  readonly calls?: readonly TaskCall[];
+};
 
 export interface TaskRecord {
   readonly id: string;
@@ -183,7 +189,7 @@ export function taskWaitResult(
 }
 
 /**
- * What `task_cancel` answers, or `undefined` for a task that doesn't exist.
+ * What `eve__task_cancel` answers, or `undefined` for a task that doesn't exist.
  * `cancelled` means the caller cancels the working task.
  */
 export function taskCancelResult(table: TaskTable, taskId: string): TaskCancelResult | undefined {
@@ -306,7 +312,10 @@ export function settleTaskCalls(
   const next = updateTask(table, input.taskId, (current) => ({
     ...current,
     calls: current.calls.filter((call) => !settling.has(call.callId)),
-    results: outcome.status === "cancelled" ? current.results : [...current.results, outcome],
+    results:
+      outcome.status === "cancelled"
+        ? current.results
+        : [...current.results, { ...outcome, calls: settled }],
   }));
   return { settled, table: next };
 }
@@ -495,6 +504,12 @@ function isTaskRunCommand(value: unknown): value is TaskRunCommand {
 
 function isTaskResult(value: unknown): value is TaskResult {
   if (!isObject(value)) return false;
+  // Older saved results do not include call IDs.
+  if (
+    value.calls !== undefined &&
+    (!Array.isArray(value.calls) || !Array.from(value.calls as unknown[]).every(isTaskCall))
+  )
+    return false;
   if (value.status === "completed") return "output" in value;
   return value.status === "failed" && typeof value.error === "string";
 }

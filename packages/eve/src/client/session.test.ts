@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ClientError } from "#client/client-error.js";
+import { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
 import type { ClientSessionState } from "#client/types.js";
 import {
@@ -191,6 +191,8 @@ describe("ClientSession", () => {
     const requestUrl = new URL(requests[0]!);
     expect(requestUrl.searchParams.get("startIndex")).toBeNull();
     expect(requestUrl.searchParams.get("includeTailIndex")).toBe("1");
+    // A bounded read asks for history only, which a stranded session still serves.
+    expect(requestUrl.searchParams.get("follow")).toBe("false");
     expect(snapshot.events.map((event) => event.type)).toEqual(["turn.started", "session.waiting"]);
     expect(snapshot.session).toEqual({
       sessionId: "session_1",
@@ -396,6 +398,38 @@ describe("ClientSession", () => {
       expect(fetchMock).toHaveBeenCalledOnce();
     },
   );
+
+  it.each([
+    ["send", (session: ClientSession) => session.send("hello")],
+    [
+      "respond",
+      (session: ClientSession) => session.respond([{ requestId: "req_1", optionId: "approve" }]),
+    ],
+  ] as const)("throws a typed stranded error from %s without retrying", async (_, invoke) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        {
+          code: "session_stranded",
+          error: "This session is stranded.",
+          eveVersion: "0.0.1",
+          ok: false,
+        },
+        { status: 409 },
+      ),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    const error = await invoke(session).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ClientSessionStrandedError);
+    expect(error).toMatchObject({
+      code: "session_stranded",
+      eveVersion: "0.0.1",
+      message: "This session is stranded.",
+      status: 409,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 
   it("does not retry session_not_ready from respond", async () => {
     const fetchMock = vi
@@ -939,7 +973,7 @@ describe("ClientSession", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it.each(["Load failed", "network error"])(
+  it.each(["network error"])(
     "does not retry an unrecognized TypeError while opening a stream: %s",
     async (message) => {
       const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError(message));
@@ -1202,6 +1236,35 @@ describe("ClientSession", () => {
     ]);
     expect(result.status).toBe("waiting");
     expect(result.inputRequests.at(-1)?.requestId).toBe("request_2");
+  });
+
+  it("stops at a turn.waiting on input when its request was read earlier", async () => {
+    const turn = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
+      (init?.method ?? "GET") === "POST"
+        ? createAcceptedResponse()
+        : createStreamResponse([
+            {
+              type: "approval.candidate",
+              data: { ...turn, candidateId: "c1", outcome: "rejected", requestId: "request_1" },
+            },
+            {
+              type: "turn.waiting",
+              data: { on: "input", sequence: 0, turnId: "turn_0" },
+            },
+            { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
+          ]),
+    );
+
+    const result = await (
+      await createSession().respond([{ optionId: "approve", requestId: "request_1" }])
+    ).result();
+
+    expect(result.events.map((event) => event.type)).toEqual([
+      "approval.candidate",
+      "turn.waiting",
+    ]);
+    expect(result.status).toBe("waiting");
   });
 
   it("honors an explicit idle reconnect limit for an active turn", async () => {

@@ -18,5 +18,8 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:"
+  },
+  "e2e": {
+    "modelMatrix": "full"
   }
 }

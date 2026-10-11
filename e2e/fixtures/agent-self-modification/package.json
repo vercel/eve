@@ -31,7 +31,8 @@
         "name": "repair",
         "evals": [
           "self-modification/offer-repair",
-          "self-modification/repair-order-total"
+          "self-modification/repair-order-total",
+          "self-modification/update-identity"
         ]
       },
       {

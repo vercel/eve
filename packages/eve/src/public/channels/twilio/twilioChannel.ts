@@ -1,3 +1,4 @@
+import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
@@ -9,6 +10,7 @@ import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callTwilioApi,
+  createTwilioFetchFile,
   sendTwilioMessage,
   twilioContinuationToken,
   updateTwilioCall,
@@ -27,6 +29,7 @@ import {
   parseTwilioTextMessage,
   parseTwilioVoiceCall,
   parseTwilioVoiceTranscription,
+  twilioMessageContent,
   type TwilioTextMessage,
   type TwilioVoiceCall,
   type TwilioVoiceTranscription,
@@ -65,7 +68,7 @@ interface TwilioChannelContext extends TwilioContext {
 export interface TwilioEventContext extends TwilioChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable state for the phone-number conversation. */
-export interface TwilioChannelState {
+export interface TwilioChannelState extends PromptQueueState {
   /** Caller / sender phone number. */
   from: string | null;
   /** Twilio number or sender that received the latest session-starting webhook. */
@@ -162,6 +165,8 @@ export interface TwilioChannelEvents {
   readonly "message.completed"?: TwilioEventHandler<"message.completed">;
   readonly "message.appended"?: TwilioEventHandler<"message.appended">;
   readonly "input.requested"?: TwilioEventHandler<"input.requested">;
+  readonly "input.resolved"?: TwilioEventHandler<"input.resolved">;
+  readonly "approval.settled"?: TwilioEventHandler<"approval.settled">;
   readonly "turn.failed"?: TwilioEventHandler<"turn.failed">;
   readonly "turn.completed"?: TwilioEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: TwilioEventHandler<"turn.cancelled">;
@@ -316,6 +321,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
       };
     },
     audience: () => "private",
+    fetchFile: createTwilioFetchFile({ ...config.api, credentials: config.credentials }),
 
     context(state, session) {
       return rebuildTwilioContext(state, session, config);
@@ -563,17 +569,19 @@ async function dispatchText(input: {
   });
 
   try {
-    await input.from(twilioContinuationToken(message.from, message.to)).send(message.body, {
-      auth: result.auth,
-      context: [contextBlock],
-      state: {
-        from: message.from,
-        lastCallSid: null,
-        lastMessageSid: message.messageSid ?? null,
-        to: message.to ?? null,
-      },
-      title: result.title,
-    });
+    await input
+      .from(twilioContinuationToken(message.from, message.to))
+      .send(twilioMessageContent(message), {
+        auth: result.auth,
+        context: [contextBlock],
+        state: {
+          from: message.from,
+          lastCallSid: null,
+          lastMessageSid: message.messageSid ?? null,
+          to: message.to ?? null,
+        },
+        title: result.title,
+      });
   } catch (error) {
     log.error("text delivery failed", { error });
   }

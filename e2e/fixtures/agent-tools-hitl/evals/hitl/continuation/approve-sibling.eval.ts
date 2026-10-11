@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectResponseReply,
   expectToolResult,
@@ -26,11 +26,11 @@ export default defineEval({
       { requestId: current.requestId, optionId: "approve" },
     ]);
 
-    // Then B executes once and the read gets a completed reply; A stays unexecuted and answerable.
+    // Then B executes once and the read gets a completed reply; the message cancelled A, which never runs.
     await expectToolResult(t, live, "read-draft");
     const reply = await expectResponseReply(t, live, "Draft status: ready.", current.requestId);
     reply.calledTool("change-b", { status: "completed", output: { executions: 1 }, count: 1 });
     expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approvalA);
+    expectApprovalCancelled(session, approvalA);
   },
 });

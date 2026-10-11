@@ -3,6 +3,7 @@ export {
   defineWorkflowTool,
   disableTool,
   isDisabledToolSentinel,
+  serializeModelInputSchema,
   toolOutput,
   toolOutputPart,
   toolResultFrom,
@@ -25,4 +26,4 @@ export {
   type WorkflowToolInput,
   type WorkflowToolOptions,
 } from "../../src/public/tools/workflow.ts";
-export { evaluate } from "../../src/public/ai/index.ts";
+export { decide } from "../../src/public/ai/index.ts";

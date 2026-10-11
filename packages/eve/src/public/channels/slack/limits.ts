@@ -45,9 +45,11 @@ export const SLACK_CARD_SUBTEXT_MAX_LENGTH = 200;
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
 
 /**
- * Slack's native `markdown_text` field on `chat.postMessage` is capped at
- * 12000 characters. Default agent replies use this field so headings, tables,
- * and other Markdown render natively.
+ * Slack caps a message's Markdown at 12,000 characters: the `markdown_text`
+ * field of `chat.postMessage`, and the combined text of every `markdown`
+ * block in one message. eve's default replies use `markdown_text` so
+ * headings, tables, and other Markdown render natively, and upload longer
+ * replies as a snippet.
  */
 export const SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12000;
 
@@ -67,11 +69,15 @@ export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;
  * assistant-thread status does not render, trims, collapses runs of
  * whitespace into a single space, then truncates to
  * {@link SLACK_TYPING_STATUS_MAX_LENGTH} with a trailing ellipsis when
- * needed.
+ * needed, at a word boundary when one is near.
  */
 export function truncateTypingStatus(status: string): string {
   const normalized = stripTypingStatusMarkdown(status).trim().replace(/\s+/gu, " ");
-  return truncateWithEllipsis(normalized, SLACK_TYPING_STATUS_MAX_LENGTH);
+  if (normalized.length <= SLACK_TYPING_STATUS_MAX_LENGTH) return normalized;
+  const cut = normalized.slice(0, SLACK_TYPING_STATUS_MAX_LENGTH - 3);
+  const space = cut.lastIndexOf(" ");
+  const words = space > SLACK_TYPING_STATUS_MAX_LENGTH / 2 ? cut.slice(0, space) : cut;
+  return `${words.trimEnd()}...`;
 }
 
 /**

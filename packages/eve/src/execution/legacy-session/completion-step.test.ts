@@ -17,7 +17,7 @@ function fixture() {
     close,
     completionToken: "old:completion",
     serializedContext: { "eve.sessionCallback": { url: "https://example.com/callback" } },
-    sessionState: importConversation(session),
+    ...importConversation(session),
     sessionWritable: new WritableStream<Uint8Array>({ close }),
   };
 }
@@ -39,7 +39,10 @@ describe("original driver finalization", () => {
         serializedContext: prepared.serializedContext,
         sessionState: {
           ...prepared.sessionState,
-          snapshot: { version: 1, session: prepared.sessionState.snapshot.session },
+          snapshot: {
+            version: 1,
+            session: { ...prepared.sessionState.snapshot.session, history: prepared.history },
+          },
         },
       },
     });

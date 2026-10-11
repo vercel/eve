@@ -33,29 +33,30 @@ export async function emitWorkflowToolRunReportStep(
   return await withSessionStateDelta(input, (target) => publishSessionEvents(target, [event]));
 }
 
-/** Publishes `agent.started` for a session a workflow tool run opened. */
+/** Publishes `agent.started`, in order, for sessions workflow tool runs opened. */
 export async function emitAgentStartedStep(
   input: SessionStepState & {
-    readonly message: WorkflowToolRunAgentStartedMessage;
+    readonly messages: readonly WorkflowToolRunAgentStartedMessage[];
   },
 ): Promise<SessionStateTransition> {
   "use step";
 
-  const { from, session } = input.message;
-  const event = createAgentStartedEvent({
-    callId: from.callId,
-    name: session.name,
-    parentSessionId: input.sessionState.sessionId,
-    remote:
-      session.kind === "remote"
-        ? {
-            url: session.url,
-            ...(session.resolverId !== undefined && { resolverId: session.resolverId }),
-          }
-        : undefined,
-    sessionId: session.sessionId,
-    ...(from.taskId !== undefined && { taskId: from.taskId }),
-    turnId: from.turnId,
-  });
-  return await withSessionStateDelta(input, (target) => publishSessionEvents(target, [event]));
+  const events = input.messages.map(({ from, session }) =>
+    createAgentStartedEvent({
+      callId: from.callId,
+      name: session.name,
+      parentSessionId: input.sessionState.sessionId,
+      remote:
+        session.kind === "remote"
+          ? {
+              url: session.url,
+              ...(session.resolverId !== undefined && { resolverId: session.resolverId }),
+            }
+          : undefined,
+      sessionId: session.sessionId,
+      ...(from.taskId !== undefined && { taskId: from.taskId }),
+      turnId: from.turnId,
+    }),
+  );
+  return await withSessionStateDelta(input, (target) => publishSessionEvents(target, events));
 }

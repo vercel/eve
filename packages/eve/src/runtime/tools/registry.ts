@@ -34,6 +34,8 @@ export async function createRuntimeToolRegistry(
     readonly tools: readonly ResolvedToolDefinition[];
   },
   input: {
+    /** Set by `tool: "deferred"` on the agent, which defers its built-in `agent` tool. */
+    readonly deferSelfAgent?: boolean;
     readonly nodeId?: string;
     readonly reservedToolNames?: readonly string[];
   } = {},
@@ -45,7 +47,7 @@ export async function createRuntimeToolRegistry(
   );
 
   for (const toolDefinition of definitions.tools) {
-    const prepared = await createPreparedRuntimeTool(toolDefinition, input.nodeId);
+    const prepared = await createPreparedRuntimeTool(toolDefinition, input);
     registry.register(
       toolDefinition.name,
       { definition: toolDefinition, prepared },
@@ -79,14 +81,15 @@ export function findRegisteredRuntimeTool(
 
 async function createPreparedRuntimeTool(
   definition: ResolvedToolDefinition,
-  nodeId: string | undefined,
+  input: { readonly deferSelfAgent?: boolean; readonly nodeId?: string },
 ): Promise<PreparedRuntimeAuthoredTool> {
   const isSelfAgent =
     definition.behavior?.handling?.kind === "dispatch" &&
     definition.behavior.handling.action === "self-agent";
   return {
     availableInSubagents: definition.availableInSubagents,
-    behavior: prepareToolBehavior(definition.behavior, nodeId),
+    behavior: prepareToolBehavior(definition.behavior, input.nodeId),
+    deferred: definition.deferred ?? ((isSelfAgent && input.deferSelfAgent) || undefined),
     description: definition.description,
     inputSchema: serializeInputSchema(definition.inputSchema),
     kind: "authored-tool",
@@ -130,6 +133,5 @@ function prepareToolBehavior(
   return {
     availability: behavior.availability,
     handling,
-    presentation: behavior.presentation,
   };
 }

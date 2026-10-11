@@ -1,5 +1,6 @@
 import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
-import { isTurnSegmentBoundary, updatePendingInputRequests } from "#client/session-utils.js";
+import { TurnSegment } from "#client/session-utils.js";
+import { createSessionContract } from "#internal/testing/session-contract.js";
 
 /**
  * Minimal, duck-typed handle to one workflow `Run`'s readable stream.
@@ -54,18 +55,31 @@ export function captureTurnEvents(
   const state: StreamState = { buffer: "" };
   const decoder = options.decoder ?? new TextDecoder();
   let disposed = false;
+  // Every stream a test reads is held to the session contract readers rely on.
+  const contract = createSessionContract();
+  let index = 0;
 
   const readUntil = async (matches: (event: MessageStreamEvent) => boolean) => {
     if (disposed) {
       throw new Error("CapturedTurnStream: stream already disposed.");
     }
 
-    return await readUntilMatch(reader, state, decoder, matches);
+    return await readUntilMatch(reader, state, decoder, (event) => {
+      const [violation] = contract.observe(event);
+      if (violation !== undefined) {
+        throw new Error(
+          `Session stream contract (${violation.rule}) at event ${index}: ${violation.message}`,
+        );
+      }
+      index += 1;
+      return matches(event);
+    });
   };
 
   return {
     async nextTurn() {
-      return await readUntil(createTurnSegmentBoundary());
+      const segment = new TurnSegment();
+      return await readUntil((event) => segment.observe(event));
     },
     async nextUntil(matches) {
       return await readUntil(matches);
@@ -157,14 +171,6 @@ interface StreamState {
   buffer: string;
 }
 
-function createTurnSegmentBoundary(): (event: MessageStreamEvent) => boolean {
-  const pendingInputRequests = new Set<string>();
-  return (event) => {
-    updatePendingInputRequests(pendingInputRequests, event);
-    return isTurnSegmentBoundary(event, pendingInputRequests);
-  };
-}
-
 async function readUntilMatch(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamState,
@@ -223,3 +229,12 @@ export function stampTestEvents(
 ): MessageStreamEvent[] {
   return events.map((event, index) => stampTestEvent(event, index));
 }
+
+/** Token usage a session reports in tests that build session events without caring about its value. */
+export const TEST_USAGE = {
+  cacheReadTokens: 800,
+  cacheWriteTokens: 0,
+  costUsd: 0.0042,
+  inputTokens: 1200,
+  outputTokens: 150,
+};

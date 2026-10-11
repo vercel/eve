@@ -214,14 +214,14 @@ plain markdown`),
   });
 
   it("rejects JavaScript frontmatter in skill markdown instead of evaluating it", () => {
-    // gray-matter's built-in `javascript` engine would `eval()` the frontmatter
-    // body, so a `---javascript` fence must throw rather than execute code.
     const malicious = `---javascript
 globalThis.__eveMarkdownRce = true
 ---
 When the user asks about weather, call the weather tool before answering.`;
 
-    expect(() => lowerSkillMarkdown(malicious)).toThrow("JavaScript frontmatter is not supported.");
+    expect(() => lowerSkillMarkdown(malicious)).toThrow(
+      'Frontmatter language "javascript" is not supported.',
+    );
     expect(Reflect.get(globalThis, "__eveMarkdownRce")).toBeUndefined();
   });
 
@@ -232,7 +232,7 @@ globalThis.__eveScheduleRce = true
 body`;
 
     expect(() => lowerScheduleMarkdown(malicious)).toThrow(
-      "JavaScript frontmatter is not supported.",
+      'Frontmatter language "js" is not supported.',
     );
     expect(Reflect.get(globalThis, "__eveScheduleRce")).toBeUndefined();
   });

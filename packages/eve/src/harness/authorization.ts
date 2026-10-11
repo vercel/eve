@@ -35,9 +35,9 @@ import {
  * nonce that re-derives it) from start to finish.
  */
 
-import { contextStorage, loadContext } from "#context/container.js";
+import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { ActivityRootTurnIdKey, SessionIdKey } from "#context/keys.js";
+import { SessionIdKey, type SessionAuthContext } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
@@ -56,6 +56,12 @@ export interface AuthorizationChallenge {
   /** Opaque identity of this exact authorization attempt. */
   readonly attemptId?: string;
   readonly candidateId?: string;
+  /**
+   * Credential this sign-in grants, shared by every scope that uses it (the
+   * Vercel Connect connector). Attempts for the same grant and principal are
+   * one sign-in, so only one is shown.
+   */
+  readonly grant?: string;
   /** Opaque resolved connection identity; omitted for tool-hosted authorization. */
   readonly instanceId?: string;
   readonly name: string;
@@ -63,6 +69,14 @@ export interface AuthorizationChallenge {
   readonly hookUrl: string;
   /** Principal passed to `startAuthorization`; omitted from model-facing copies. */
   readonly principal?: ConnectionPrincipal;
+  /** Session principal that started this attempt; projected onto authorization events. */
+  readonly principalId?: string;
+  /**
+   * Session identity that started this attempt. The callback carries no
+   * identity, so the resumed turn runs as this caller. Never projected onto
+   * events or model-facing output.
+   */
+  readonly requester?: SessionAuthContext;
   /**
    * Opaque resume value from the strategy's `startAuthorization`,
    * journaled across the park. Absent for provider-owned flows.
@@ -290,7 +304,6 @@ export const AuthorizationHookKey = new ContextKey<string>("eve.authorizationHoo
 const PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
 
 export interface PendingAuthorizationState {
-  readonly activityRootTurnIds?: Readonly<Record<string, string>>;
   readonly challenges: readonly AuthorizationChallenge[];
 }
 
@@ -298,56 +311,61 @@ export function setPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
-  const active = resolveActiveAuthorizationChallenges(value.challenges);
-  const pending = getPendingAuthorization(sessionState);
-  const previous = pending?.challenges ?? [];
-  const superseded = getSupersededAuthorizationChallenges(sessionState, active);
-  const rootTurnId = contextStorage.getStore()?.get(ActivityRootTurnIdKey);
-  const activityRootTurnIds = { ...pending?.activityRootTurnIds };
-  for (const challenge of superseded)
-    delete activityRootTurnIds[authorizationAttemptKey(challenge)];
-  if (rootTurnId !== undefined) {
-    for (const challenge of active)
-      activityRootTurnIds[authorizationAttemptKey(challenge)] = rootTurnId;
-  }
   return {
     ...sessionState,
     [PENDING_AUTHORIZATION_KEY]: {
-      ...(Object.keys(activityRootTurnIds).length === 0 ? {} : { activityRootTurnIds }),
-      challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
+      challenges: withSignIns(
+        getPendingAuthorization(sessionState)?.challenges ?? [],
+        value.challenges,
+      ),
     },
   };
 }
 
-/** Keeps the last challenge for each authorization name and principal scope. */
+/** The pending sign-ins once `challenges` are asked for: each replaces the attempt it supersedes. */
+export function withSignIns(
+  previous: readonly AuthorizationChallenge[],
+  challenges: readonly AuthorizationChallenge[],
+): readonly AuthorizationChallenge[] {
+  const active = resolveActiveAuthorizationChallenges(challenges);
+  const superseded = supersededChallenges(previous, active);
+  return [...previous.filter((challenge) => !superseded.includes(challenge)), ...active];
+}
+
+/** Keeps the last challenge for each sign-in and principal. */
 export function resolveActiveAuthorizationChallenges(
   challenges: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
   return challenges.filter(
     (candidate, index) =>
-      !challenges
-        .slice(index + 1)
-        .some(
-          (replacement) =>
-            candidate.name === replacement.name &&
-            samePrincipal(candidate.principal, replacement.principal),
-        ),
+      !challenges.slice(index + 1).some((replacement) => sameSignIn(candidate, replacement)),
   );
 }
 
-/** Existing same-scope attempts replaced by newer attempts for the same principal. */
-export function getSupersededAuthorizationChallenges(
-  sessionState: Record<string, unknown> | undefined,
+/** The attempts in `previous` that `replacements` replace: the same sign-in and principal. */
+export function supersededChallenges(
+  previous: readonly AuthorizationChallenge[],
   replacements: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
-  const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
   return previous.filter((candidate) =>
-    replacements.some(
-      (replacement) =>
-        candidate.name === replacement.name &&
-        samePrincipal(candidate.principal, replacement.principal),
-    ),
+    replacements.some((replacement) => sameSignIn(candidate, replacement)),
   );
+}
+
+/**
+ * Same scope, or the same grant from another scope, such as two tools and a
+ * connection that all use one Vercel Connect connector. Approval sign-ins
+ * stay per candidate because each one settles its own approval.
+ */
+function sameSignIn(
+  left: Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">,
+  right: Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">,
+): boolean {
+  const sameGrant =
+    left.grant !== undefined &&
+    left.grant === right.grant &&
+    left.candidateId === right.candidateId;
+  return (left.name === right.name || sameGrant) && samePrincipal(left.principal, right.principal);
 }
 
 function samePrincipal(
@@ -379,7 +397,7 @@ export function clearPendingAuthorization(
       if (challenges.length > 0) {
         return {
           ...sessionState,
-          [PENDING_AUTHORIZATION_KEY]: pendingAuthorizationValue(pending, challenges),
+          [PENDING_AUTHORIZATION_KEY]: { challenges },
         };
       }
     }
@@ -388,23 +406,6 @@ export function clearPendingAuthorization(
   const state = { ...sessionState };
   delete state[PENDING_AUTHORIZATION_KEY];
   return Object.keys(state).length > 0 ? state : undefined;
-}
-
-function pendingAuthorizationValue(
-  pending: PendingAuthorizationState,
-  challenges: readonly AuthorizationChallenge[],
-): PendingAuthorizationState {
-  const activityRootTurnIds = Object.fromEntries(
-    challenges.flatMap((challenge) => {
-      const key = authorizationAttemptKey(challenge);
-      const rootTurnId = pending.activityRootTurnIds?.[key];
-      return rootTurnId === undefined ? [] : [[key, rootTurnId]];
-    }),
-  );
-  return {
-    ...(Object.keys(activityRootTurnIds).length === 0 ? {} : { activityRootTurnIds }),
-    challenges,
-  };
 }
 
 function authorizationAttemptKey(challenge: AuthorizationChallenge): string {

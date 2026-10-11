@@ -4,6 +4,7 @@ import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install
 import type { SandboxCommandResult, SandboxSession } from "#shared/sandbox-session.js";
 
 import { executeBashOnSandbox } from "./bash.js";
+import { bufferToStream } from "./stream-utils.js";
 
 describe("executeBashOnSandbox", () => {
   const previousDevFlag = process.env[EVE_DEV_ENV_FLAG];
@@ -30,6 +31,7 @@ describe("executeBashOnSandbox", () => {
 
     expect(result).toEqual({
       exitCode: 0,
+      status: "completed",
       stderr: "",
       stdout: "weather-codes.md\n",
       truncated: false,
@@ -40,16 +42,22 @@ describe("executeBashOnSandbox", () => {
 });
 
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
+  const encoder = new TextEncoder();
   return {
     readBinaryFile: async () => null,
     readFile: async () => null,
     readTextFile: async () => null,
     removePath: async () => {},
     resolvePath: (path) => path,
-    run: vi.fn().mockResolvedValue(result),
-    spawn: async () => {
-      throw new Error("spawn is not implemented in this test sandbox");
+    run: async () => {
+      throw new Error("run is not used by a command that finishes in time");
     },
+    spawn: async () => ({
+      kill: async () => {},
+      stderr: bufferToStream(encoder.encode(result.stderr)),
+      stdout: bufferToStream(encoder.encode(result.stdout)),
+      wait: async () => ({ exitCode: result.exitCode }),
+    }),
     writeBinaryFile: async () => {},
     writeFile: async () => {},
     writeTextFile: async () => {},

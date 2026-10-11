@@ -4,7 +4,7 @@ import { webSearch } from "#tools/provided/web-search.js";
 
 describe("webSearch", () => {
   it.each(["parallel", "exa"] as const)("configures the %s provider", (provider) => {
-    expect(webSearch({ provider })).toEqual({
+    expect(webSearch({ provider })).toMatchObject({
       kind: "eve:web-search-tool",
       provider,
     });

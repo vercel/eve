@@ -38,6 +38,7 @@ describe("legacy session import", () => {
               serializedContext: {
                 "eve.auth": null,
                 "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+                "eve.stateLayout": 1,
                 "eve.channel": { kind: "http", state: {} },
               },
             },
@@ -79,15 +80,16 @@ describe("legacy session import", () => {
               async () => {
                 const checkpoints = await readTurnStepStates(owner.runId);
                 const saved = checkpoints.find((result) =>
-                  result.sessionState.snapshot.session.history.some(
+                  result.history.some(
                     (message) =>
                       message.role === "user" &&
                       JSON.stringify(message.content).includes("Bob asks for the next update."),
                   ),
-                )?.sessionState.snapshot.session;
+                );
                 expect(saved).toBeDefined();
-                expect(saved!.agent.system).not.toBe("previous deployment");
-                expect(saved!.state?.["app.color"]).toBe("blue");
+                const session = saved!.sessionState.snapshot.session;
+                expect(session.agent.system).not.toBe("previous deployment");
+                expect(session.state?.["app.color"]).toBe("blue");
                 expect(
                   saved!.history.filter(
                     (message) =>
@@ -249,6 +251,7 @@ function legacyContext() {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.channel": { kind: "http", state: {} },
   };
 }

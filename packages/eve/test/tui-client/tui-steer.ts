@@ -12,9 +12,9 @@ import { theme } from "./lib/theme.ts";
  * and double-Ctrl+C exit against a live server:
  *
  *   1. Start a long turn, then press Enter on a follow-up while it streams.
- *      The message steers immediately without entering the queue panel.
+ *      The message steers the running turn immediately.
  *   2. The steered message is answered and the runner returns to an idle prompt.
- *   3. With no message queued, one Esc cancels another long turn, then a
+ *   3. One Esc cancels another long turn, then a
  *      follow-up succeeds on the preserved session.
  *
  * The tokens prove delivery order end-to-end: each must appear twice
@@ -67,7 +67,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.enter();
   await waitForActiveTurn(screen, 30_000);
 
-  // With no queued message, the first Esc cooperatively cancels the turn.
+  // The first Esc cooperatively cancels the turn.
   input.emit("data", Buffer.from("\x1b"));
   await sleep(60);
   await waitForRawOutput(
@@ -78,7 +78,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     "single-Esc cancellation",
   );
   await screen.waitForIdlePrompt(30_000);
-  console.log(theme.muted("[tui-steer] one empty-queue Esc cancelled the turn"));
+  console.log(theme.muted("[tui-steer] one Esc cancelled the turn"));
 
   input.type(`Reply with one short sentence containing the token ${CANCEL_FOLLOW_UP_TOKEN}.`);
   input.enter();

@@ -139,6 +139,7 @@ describe("runRegistryFlow", () => {
           {
             kind: "incomplete",
             title: "channel/slack",
+            address: "channel/slack",
             resumeCommand: "eve add channel/slack --skip-install",
           },
         ],

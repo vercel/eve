@@ -1,6 +1,6 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
@@ -9,7 +9,7 @@ import {
   containsEventSequence,
   filterEventsByType,
 } from "#internal/testing/events.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -28,6 +28,7 @@ import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
 import { captureConsoleOutput } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -47,6 +48,7 @@ function buildSerializedContext(overrides: {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
   };
@@ -295,6 +297,7 @@ function createCancelRouteCaller(): (
       },
     );
     const args = {
+      ...mockAgentRouteArgs(),
       ...mockChannelContext(() => {
         throw new Error("cancel route must not send through a channel address");
       }),
@@ -342,7 +345,7 @@ describe("turn cancellation integration", () => {
     });
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -432,7 +435,7 @@ describe("turn cancellation integration", () => {
       });
 
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -486,7 +489,7 @@ describe("turn cancellation integration", () => {
     });
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -542,7 +545,7 @@ describe("turn cancellation integration", () => {
       });
 
       await fixture.runtime.run(async () => {
-        const run = await start(workflowEntry, [
+        const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
@@ -594,7 +597,7 @@ describe("turn cancellation integration", () => {
     const continuationToken = "http:turn-cancel-tool";
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -631,6 +634,8 @@ describe("turn cancellation integration", () => {
         ).toBe(true);
         expect(filterEventsByType(cancelledTurn, "turn.started")).toHaveLength(1);
         expect(filterEventsByType(cancelledTurn, "turn.cancelled")).toHaveLength(1);
+        // v26 cancellation ends the turn without inventing a tool result.
+        expect(filterEventsByType(cancelledTurn, "action.result")).toEqual([]);
         // The superseding step attempt settles before any model work, so
         // the cancelled turn streams exactly one step.
         expect(filterEventsByType(cancelledTurn, "step.started")).toHaveLength(1);
@@ -679,7 +684,7 @@ describe("turn cancellation integration", () => {
         status: "no_active_turn",
       });
 
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -773,7 +778,7 @@ describe("turn cancellation integration", () => {
         status: "no_active_turn",
       });
 
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -849,7 +854,7 @@ describe("turn cancellation integration", () => {
     const continuationToken = "http:turn-cancel-stale-guard";
 
     await fixture.runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -898,7 +903,7 @@ describe("turn cancellation integration", () => {
     const continuationToken = "http:turn-cancel-late";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",

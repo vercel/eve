@@ -1,1 +1,1 @@
-export { addRegistryItems, getRegistryItems, searchRegistries } from "shadcn/registry";
+export { addRegistryItems, getRegistryItems, searchRegistries } from "@shadcn/registry";

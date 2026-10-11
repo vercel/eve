@@ -192,32 +192,6 @@ export class SelfModificationHarness {
     return { child, parent, session: liveParent.session };
   }
 
-  /** Approves the registry install the parent turn paused on and observes the resumed child turn. */
-  async approveRegistry(run: SelfModificationRun): Promise<EveEvalTurn> {
-    const toolName = "registry_add";
-    const session = run.session;
-    session.requireInputRequest({ toolName });
-    const childSessionId = run.child.sessionId;
-    const previousChild = [...this.#turns]
-      .reverse()
-      .find((turn) => turn.sessionId === childSessionId);
-    if (previousChild === undefined) throw new Error("Missing registry child session cursor.");
-    const child = this.#t.target.watchTurn(childSessionId, {
-      startIndex: previousChild.session.state.streamIndex,
-    });
-    this.#turns.add(child);
-    const responses = session.pendingInputRequests.map((request) => ({
-      optionId: "approve",
-      requestId: request.requestId,
-    }));
-    const parent = await session.startRespond(responses);
-    this.#turns.add(parent);
-    const [childTurn, parentTurn] = await Promise.all([child.result(), parent.result()]);
-    childTurn.expectOk();
-    parentTurn.expectOk();
-    return childTurn;
-  }
-
   followUp(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {
     return this.#runTurn(session, prompt);
   }

@@ -398,25 +398,6 @@ describe("run assertions", () => {
     ).toBe(0);
   });
 
-  it("loadedSkill matches a load_skill call by skill id", async () => {
-    const result = makeResult({
-      derived: {
-        toolCalls: [
-          {
-            ...completedToolCall("load_skill"),
-            input: { skill: "custom__talk-like-a-dog" },
-          },
-        ],
-        toolCallCount: 1,
-      },
-    });
-    expect((await Run.loadedSkill("custom__talk-like-a-dog").evaluate(result)).score).toBe(1);
-    expect((await Run.loadedSkill("talk-like-a-dog").evaluate(result)).score).toBe(0);
-    expect(Run.loadedSkill("custom__talk-like-a-dog").name).toBe(
-      "loadedSkill(custom__talk-like-a-dog)",
-    );
-  });
-
   it("usedNoTools passes only with zero tool calls", async () => {
     expect((await Run.usedNoTools().evaluate(makeResult({}))).score).toBe(1);
     expect(

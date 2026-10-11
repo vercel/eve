@@ -55,9 +55,20 @@ export function createNativeAuthoringSetup(options: {
       });
     }
 
+    // DefaultSandbox selects just-bash inside the Linux eval container, where Docker
+    // and microsandbox are unavailable. Supply its optional peer before the model runs.
+    await run(
+      sandbox,
+      "npm install --save-dev --save-exact just-bash@3.1.0",
+      "local sandbox dependency",
+    );
+
     const context = setupContext(sandbox, bootstrap.projectDirectory);
     for (const setup of setupsFor(bootstrap.setupIds)) await setup.onSession?.(context);
     if (options.treatment === "baseline") await run(sandbox, "rm -f AGENTS.md CLAUDE.md GEMINI.md");
+    if (bootstrap.startingPoint === "scaffolded") {
+      await run(sandbox, "npm run typecheck && npm run build", "starting workspace validation");
+    }
     await run(sandbox, "git add . && git commit --amend --no-edit --quiet");
   };
 }

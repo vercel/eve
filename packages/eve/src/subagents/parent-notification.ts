@@ -5,7 +5,7 @@ import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { ActivityObserverKey, SessionCallbackKey } from "#context/keys.js";
+import { SessionCallbackKey } from "#context/keys.js";
 import {
   isSubagentAdapterState,
   SUBAGENT_ADAPTER_KIND,
@@ -19,10 +19,6 @@ import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
-import {
-  withSessionStateDelta,
-  type SessionStateTransition,
-} from "#execution/session/state-delta.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
@@ -86,13 +82,12 @@ export async function notifyTurnCallerStep(input: {
 
 /** Settles a workflow-owned caller after the child turn is cooperatively cancelled. */
 export async function notifyCancelledTaskCallerStep(input: {
-  readonly caller: TurnCaller | undefined;
+  readonly caller: TurnCaller;
   readonly sessionId: string;
   readonly usage?: TokenUsage;
 }): Promise<void> {
   "use step";
 
-  if (input.caller === undefined) return;
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
   const error = {
     code: SUBAGENT_EXECUTION_FAILED,
@@ -207,27 +202,16 @@ export async function resolveInitialTurnCallerStep(input: {
   };
 }
 
-/** Rebinds child event forwarding to the caller that owns the next accepted turn. */
-export async function bindTurnCallerContextStep(input: {
-  readonly caller: TurnCaller | undefined;
-  readonly serializedContext: Record<string, unknown>;
-}): Promise<SessionStateTransition> {
-  "use step";
-
-  return await withSessionStateDelta(input, async ({ caller, serializedContext }) => ({
-    serializedContext: bindTurnCallerContext(caller, serializedContext),
-  }));
-}
-
-function bindTurnCallerContext(
+/**
+ * Points child event forwarding at the caller that owns the next accepted turn,
+ * so the turn's input requests and progress reach that caller and not the
+ * previous one.
+ */
+export function bindTurnCallerContext(
   caller: TurnCaller | undefined,
   serializedContext: Record<string, unknown>,
 ): Record<string, unknown> {
   if (caller === undefined) return serializedContext;
-  const withActivity =
-    caller.activityObserver === undefined
-      ? serializedContext
-      : { ...serializedContext, [ActivityObserverKey.name]: caller.activityObserver };
   if (caller.replyTo.kind === "callback") {
     const callback = {
       callId: caller.callId,
@@ -235,10 +219,10 @@ function bindTurnCallerContext(
       token: caller.replyTo.token,
       url: caller.replyTo.url,
     };
-    return { ...withActivity, [SessionCallbackKey.name]: callback };
+    return { ...serializedContext, [SessionCallbackKey.name]: callback };
   }
 
-  const adapter = withActivity[ChannelKey.name];
+  const adapter = serializedContext[ChannelKey.name];
   if (
     adapter === null ||
     typeof adapter !== "object" ||
@@ -255,7 +239,7 @@ function bindTurnCallerContext(
     subagentName: caller.subagentName,
   };
   return {
-    ...withActivity,
+    ...serializedContext,
     [ChannelKey.name]: {
       ...adapter,
       state: nextState,

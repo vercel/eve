@@ -18,7 +18,7 @@ export default defineEval({
     );
     turn.expectOk();
 
-    turn.notCalledTool("task_wait");
+    turn.notCalledTool("eve__task_wait");
     turn.eventsSatisfy("eve holds the turn after the reply", heldTurn);
     turn.eventsSatisfy("the model replies before the report is ready", (events) => {
       const callIds = taskStarts(events, "compile_report").map((call) => call.callId);

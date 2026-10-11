@@ -13,20 +13,20 @@ With eve, you can support UCP in three steps:
 
 ## Author the profile
 
-Your profile is a plain JSON object that follows the [UCP spec](https://ucp.dev/). This spec outlines the `version`, `services`, `payment_handlers` and `capabilities` of your business. It also includes `signing_keys`, the public keys agents use to verify your business's signed messages.
+Your profile is a plain JSON object that follows the [UCP spec](https://ucp.dev/2026-08-25/specification/overview#profile-structure). The `ucp` object declares the `version`, `services`, `capabilities`, and `payment_handlers` of your business. The top-level `keys` array lists the public keys agents use to verify your business's signed messages. It's a standard JWK Set, so the same document also works as a key source for [Web Bot Auth](https://ucp.dev/2026-08-25/specification/overview#deployment-patterns-for-wba-interop).
 
 ```ts
 // agent/ucp-profile.ts
 export const profile = {
   ucp: {
-    version: "2026-04-08",
+    version: "2026-08-25",
     services: {
       "dev.ucp.shopping": [
         {
-          version: "2026-04-08",
-          spec: "https://ucp.dev/2026-04-08/specification/overview",
+          version: "2026-08-25",
+          spec: "https://ucp.dev/2026-08-25/specification/overview",
           transport: "rest",
-          schema: "https://ucp.dev/2026-04-08/services/shopping/rest.openapi.json",
+          schema: "https://ucp.dev/2026-08-25/services/shopping/rest.openapi.json",
           endpoint: "https://your_deployment_url_here/ucp/shopping",
         },
       ],
@@ -34,9 +34,9 @@ export const profile = {
     capabilities: {
       "dev.ucp.shopping.checkout": [
         {
-          version: "2026-04-08",
-          spec: "https://ucp.dev/2026-04-08/specification/checkout",
-          schema: "https://ucp.dev/2026-04-08/schemas/shopping/checkout.json",
+          version: "2026-08-25",
+          spec: "https://ucp.dev/2026-08-25/specification/shopping/checkout",
+          schema: "https://ucp.dev/2026-08-25/schemas/shopping/checkout.json",
         },
       ],
     },
@@ -44,7 +44,7 @@ export const profile = {
       "dev.shopify.shop_pay": [
         {
           id: "shop_pay_1234",
-          version: "2026-04-08",
+          version: "2026-08-25",
           spec: "https://shopify.dev/ucp/shop-pay-handler",
           schema: "https://shopify.dev/ucp/schemas/shop-pay-config.json",
           available_instruments: [
@@ -57,14 +57,16 @@ export const profile = {
       "com.example.processor_tokenizer": [
         {
           id: "processor_tokenizer",
-          version: "2026-04-08",
+          version: "2026-08-25",
           spec: "https://example.com/specs/payments/processor_tokenizer-payment",
           schema: "https://example.com/schemas/payments/delegate-payment.json",
           available_instruments: [
             {
               type: "card",
               constraints: {
-                brands: ["visa", "mastercard"],
+                properties: {
+                  brand: { enum: ["visa", "mastercard"] },
+                },
               },
             },
           ],
@@ -72,7 +74,7 @@ export const profile = {
       ],
     },
   },
-  signing_keys: [
+  keys: [
     {
       kid: "business_2025",
       kty: "EC",
@@ -112,7 +114,7 @@ export default defineChannel({
 });
 ```
 
-- **Caching**: The spec requires `public` and a `max-age` of at least 60 seconds, and forbids `private`, `no-store`, and `no-cache`. See [Profile Requirements](https://ucp.dev/2026-04-08/specification/overview#hosting).
+- **Caching**: The spec requires `public` and a `max-age` of at least 60 seconds, and forbids `private`, `no-store`, and `no-cache`. See [Profile Requirements](https://ucp.dev/2026-08-25/specification/overview#hosting).
 - **CORS**: `cors: true` suits public discovery metadata. Pass a `cors` options object to narrow origins. See [CORS](../channels/custom#cors).
 - **HTTPS, no redirects**: The spec requires HTTPS and forbids 3xx responses on the profile endpoint.
 
@@ -130,13 +132,15 @@ export default defineChannel({
       const request = await req.json();
       // Create a checkout session per your published schema. Every UCP
       // response must carry the `ucp` envelope with the negotiated
-      // version and the capabilities active for this response.
+      // version and the capabilities active for this response. Checkout
+      // responses also require `payment_handlers`, even when empty.
       return Response.json({
         ucp: {
-          version: "2026-04-08",
+          version: "2026-08-25",
           capabilities: {
-            "dev.ucp.shopping.checkout": [{ version: "2026-04-08" }],
+            "dev.ucp.shopping.checkout": [{ version: "2026-08-25" }],
           },
+          payment_handlers: {},
         },
         id: "checkout_123",
         status: "incomplete",

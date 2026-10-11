@@ -7,7 +7,7 @@ import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-addres
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defineSelfModificationAgent } from "./agent.js";
+import { defineSelfModificationAgent, type SelfModificationAgentOptions } from "./agent.js";
 
 const serverUrl = "http://127.0.0.1:3000";
 const context: DynamicResolveContext = {
@@ -38,9 +38,63 @@ describe("self-modification local agent", () => {
     await withDevHost(async () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-      await expect(agent.events["turn.started"]?.({}, context)).resolves.not.toBeNull();
+      await expect(agent.events["turn.started"]?.({}, context)).resolves.toMatchObject({
+        model: "openai/gpt-6-luna-fast",
+        reasoning: "high",
+      });
     });
   });
+
+  it.each<{
+    label: string;
+    options: SelfModificationAgentOptions;
+    parent: DynamicResolveContext["model"];
+    model: string;
+    reasoning: string | undefined;
+  }>([
+    {
+      label: "explicit model",
+      options: { model: "anthropic/claude-sonnet-5" },
+      parent: null,
+      model: "anthropic/claude-sonnet-5",
+      reasoning: undefined,
+    },
+    {
+      label: "parent model",
+      options: {},
+      parent: { id: "openai/gpt-6-luna-fast" },
+      model: "openai/gpt-6-luna-fast",
+      reasoning: undefined,
+    },
+    {
+      label: "explicit reasoning",
+      options: { reasoning: "low" },
+      parent: null,
+      model: "openai/gpt-6-luna-fast",
+      reasoning: "low",
+    },
+    {
+      label: "provider-default reasoning",
+      options: { reasoning: "provider-default" },
+      parent: null,
+      model: "openai/gpt-6-luna-fast",
+      reasoning: "provider-default",
+    },
+  ])(
+    "preserves $label instead of forcing fallback reasoning",
+    async ({ options, parent, model, reasoning }) => {
+      await withDevHost(async () => {
+        const agent = defineSelfModificationAgent({
+          ...options,
+          config: { local: { enabled: true } },
+        });
+        const resolved = await agent.events["turn.started"]?.({}, { ...context, model: parent });
+
+        expect(resolved).toMatchObject({ model });
+        expect(resolved).toHaveProperty("reasoning", reasoning);
+      });
+    },
+  );
 
   it("is available to a direct remote request on an eve dev host", async () => {
     await withDevHost(async () => {

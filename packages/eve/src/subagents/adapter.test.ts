@@ -8,8 +8,7 @@ import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/ke
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
-import { bindTurnCallerContextStep } from "#subagents/parent-notification.js";
-import { runSessionStateStep } from "#internal/testing/session-state-step.js";
+import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
@@ -122,6 +121,38 @@ describe("SUBAGENT_ADAPTER authorization handlers", () => {
     });
   });
 
+  it("forwards only the resolutions of requests its parent leaves to it", async () => {
+    resumeHookMock.mockClear();
+    const at = { sequence: 2, stepIndex: 1, turnId: "turn-hitl" };
+    const approval = {
+      kind: "tool-approval" as const,
+      outcome: "approved" as const,
+      requestId: "a",
+    };
+    const question = { kind: "question" as const, outcome: "answered" as const, requestId: "q" };
+
+    await callAdapterEventHandler(
+      SUBAGENT_ADAPTER,
+      { data: { ...at, resolutions: [question] }, type: "input.resolved" },
+      makeContext(),
+    );
+    expect(resumeHookMock).not.toHaveBeenCalled();
+
+    await callAdapterEventHandler(
+      SUBAGENT_ADAPTER,
+      { data: { ...at, resolutions: [question, approval] }, type: "input.resolved" },
+      makeContext(),
+    );
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: { data: { ...at, resolutions: [approval] }, type: "input.resolved" },
+      kind: "subagent-authorization-event",
+      subagentName: "linear",
+    });
+  });
+
   it("skips forwarding when the adapter state is invalid", async () => {
     resumeHookMock.mockClear();
     const base = makeContext();
@@ -160,24 +191,21 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
 
   it("forwards continuation HITL to the newly bound parent turn", async () => {
     resumeHookMock.mockClear();
-    const rebound = await runSessionStateStep(
+    const rebound = bindTurnCallerContext(
       {
-        caller: {
-          callId: "call-continued",
-          replyTo: { kind: "hook", token: "parent-token-current" },
-          subagentName: "linear",
-        },
-        serializedContext: {
-          [ChannelKey.name]: {
-            kind: "subagent",
-            state: makeContext().state,
-          },
+        callId: "call-continued",
+        replyTo: { kind: "hook", token: "parent-token-current" },
+        subagentName: "linear",
+      },
+      {
+        [ChannelKey.name]: {
+          kind: "subagent",
+          state: makeContext().state,
         },
       },
-      bindTurnCallerContextStep,
     );
     const base = makeContext();
-    const channel = rebound.serializedContext[ChannelKey.name] as {
+    const channel = rebound[ChannelKey.name] as {
       readonly state: Record<string, unknown>;
     };
 

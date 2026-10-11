@@ -13,6 +13,7 @@ export interface NormalizedSkillPackageFile {
 }
 
 export interface MaterializableSkillPackage {
+  readonly deferred?: boolean;
   readonly description: string;
   readonly files: readonly NormalizedSkillPackageFile[];
   readonly license?: string;
@@ -59,6 +60,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
   files.sort((left, right) => comparePaths(left.relativePath, right.relativePath));
 
   return {
+    deferred: input.deferred,
     description: input.description,
     files,
     license: input.license,

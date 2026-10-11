@@ -73,12 +73,10 @@ export type TuiDisplayOptions = {
   contextSize?: number;
 
   /**
-   * Which captured output (stdout, stderr, sandbox lifecycle lines) to
-   * surface as inline regions. Output is always captured and buffered so it
+   * Minimum log severity to surface as inline regions. Output is always captured and buffered so it
    * cannot corrupt the frame; this only controls what is rendered. The
    * `/loglevel` command switches the mode at runtime, retroactively hiding or
-   * restoring buffered lines. `TerminalRenderer` defaults to `none`; the
-   * `eve dev` CLI defaults to `stderr`.
+   * restoring buffered lines. Defaults to `error`. Only `all` includes unclassified raw output.
    */
   logs?: LogDisplayMode;
 };

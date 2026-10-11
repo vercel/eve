@@ -1,4 +1,4 @@
-import { LogoIconVercel } from "@vercel/geistdocs/assets/logos/logo-icon-vercel";
+import { LogoIconVercelSvg } from "@vercel/geistdocs/assets/logos/logo-icon-vercel-svg";
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { NightsGalaxy } from "../nights/nights-galaxy";
@@ -96,7 +96,7 @@ const NightsPage = () => (
               className="justify-self-center text-white transition-opacity hover:opacity-70 [&>svg]:size-8"
               href="/"
             >
-              <LogoIconVercel size={32} />
+              <LogoIconVercelSvg size={32} />
             </Link>
             <span className="justify-self-end font-mono text-[14px] text-white/60">2026</span>
           </div>

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, ChannelInstrumentationKey } from "#context/keys.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
@@ -25,7 +25,7 @@ const session: HarnessSession = {
   sessionId: "test-session",
 };
 
-const emissionState: HarnessEmissionState = {
+const emissionState: TurnPosition = {
   sessionStarted: true,
   sequence: 2,
   stepIndex: 1,
@@ -35,13 +35,7 @@ const emissionState: HarnessEmissionState = {
 const messages: readonly ModelMessage[] = [{ content: "hello", role: "user" }];
 
 const FRAMEWORK_KEYS = {
-  "eve.channel.kind": "unknown",
   "eve.environment": "test",
-  "eve.session.id": "test-session",
-  "eve.step.index": "1",
-  "eve.turn.id": "turn_2",
-  "eve.turn.sequence": "2",
-  "eve.version": "0.0.0-test",
 };
 
 function build(
@@ -49,7 +43,6 @@ function build(
 ): Record<string, unknown> | undefined {
   return buildTelemetryRuntimeContext({
     capturesContent: false,
-    eveVersion: "0.0.0-test",
     emissionState,
     environment: "test",
     modelInput: { instructions: undefined, messages },
@@ -64,11 +57,11 @@ describe("buildTelemetryRuntimeContext", () => {
     expect(build({ providerResolvers: undefined })).toBeUndefined();
   });
 
-  it("emits framework identifiers when no resolver is configured", () => {
+  it("emits only environment context when the resolver returns no values", () => {
     expect(build()).toEqual(FRAMEWORK_KEYS);
   });
 
-  it("reflects the active channel kind and exposes channel metadata to the resolver", () => {
+  it("exposes the active channel kind and metadata to the resolver", () => {
     const ctx = new ContextContainer();
     const resolver: RuntimeContextResolver = (input) => {
       if (input.channel.kind !== "channel:support") return undefined;
@@ -90,8 +83,8 @@ describe("buildTelemetryRuntimeContext", () => {
       }),
     );
 
-    expect(runtimeContext).toMatchObject({
-      "eve.channel.kind": "channel:support",
+    expect(runtimeContext).toEqual({
+      "eve.environment": "test",
       "slack.user_id": "U999",
     });
   });

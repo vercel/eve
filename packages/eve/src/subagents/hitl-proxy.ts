@@ -1,76 +1,17 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
-import type {
-  DeliverPayload,
-  SubagentAuthorizationEventHookPayload,
-  SubagentInputRequestHookPayload,
-} from "#channel/types.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { resolveInputOutcome } from "#harness/input-request-resolution.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
-import {
-  getProxyInputRequests,
-  toProxyInputRequestEntries,
-} from "#harness/proxy-input-requests.js";
+import { firstOpenInput } from "#harness/open-input-request.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
+import { getProxyInputRequests, resolvedByChild } from "#harness/proxy-input-requests.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
-import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
-import {
-  createInputRequestedEvent,
-  createTurnWaitingEvent,
-  type InputResolution,
-} from "#protocol/message.js";
+import type { SessionStateMap } from "#harness/types.js";
+import type { InputResolution } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import { resolveTextToResponse } from "#channel/resolve-text.js";
-import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
-
-// ---------------------------------------------------------------------------
-// Upward proxy emission
-// ---------------------------------------------------------------------------
-
-/**
- * Runs the parent-side work for a `subagent-input-request`: emits the request,
- * then `turn.waiting` for the parent's open turn. The call that asked is still
- * running, so the turn stays open until the answer lets that call settle. The
- * returned proxy entries route the eventual response back down to the asker.
- */
-export async function emitProxiedInputRequest(input: {
-  readonly emit: HarnessEmitFn;
-  readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly session: HarnessSession;
-}): Promise<readonly (readonly [requestId: string, route: ProxyInputRequest])[]> {
-  await input.emit(
-    createInputRequestedEvent({
-      requests: input.hookPayload.event.requests,
-      sequence: input.hookPayload.event.sequence,
-      stepIndex: input.hookPayload.event.stepIndex,
-      taskId: input.hookPayload.event.taskId,
-      turnId: input.hookPayload.event.turnId,
-    }),
-  );
-  await emitTurnWaiting(input.emit, input.session);
-  return toProxyInputRequestEntries(input.hookPayload);
-}
-
-/**
- * Runs the parent-side work for a `subagent-authorization-event`: re-emits the
- * event, and after `authorization.required` parks the parent's open turn with
- * `turn.waiting`. The sign-in completes on the asker's own callback while the
- * call keeps running, so the parent's turn neither ends nor resets.
- */
-export async function emitProxiedAuthorizationEvent(input: {
-  readonly emit: HarnessEmitFn;
-  readonly hookPayload: SubagentAuthorizationEventHookPayload;
-  readonly session: HarnessSession;
-}): Promise<void> {
-  await input.emit(input.hookPayload.event);
-  if (input.hookPayload.event.type === "authorization.required") {
-    await emitTurnWaiting(input.emit, input.session);
-  }
-}
-
-async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSession): Promise<void> {
-  const turn = getHarnessEmissionState(session.state);
-  await emit(createTurnWaitingEvent({ sequence: turn.sequence, turnId: turn.turnId }));
-}
+import { inputTextKey, readAnswerText } from "#internal/input-text.js";
+import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/hitl/budget-request.js";
 
 // ---------------------------------------------------------------------------
 // Downward deliver routing
@@ -83,6 +24,8 @@ export interface RoutedChildDelivery {
   readonly inputSource?: string;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
+  /** The person's message whose text answered this bucket's question. */
+  readonly message?: DeliverPayload["message"];
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
   /** What forwarding this bucket resolves on the routing session. */
   readonly resolved: ProxiedInputResolutions;
@@ -124,13 +67,17 @@ interface ChildResponseBucket {
   readonly routes: ProxyInputRequest[];
 }
 
+/** Payload keys that describe the message, dropped with it when it answers a question. */
+const CONSUMED_MESSAGE_KEYS: ReadonlySet<string> = new Set(["context", "message", inputTextKey]);
+
 /**
  * Splits a deliver payload into parent-local and proxied-child buckets.
  *
- * With `resolveMessage`, a plain-text message is also resolved against pending
- * `ctx.ask()` questions: when exactly one question is pending, a matching option or
- * permitted free text answers it and consumes the message. Otherwise the
- * message stays with the parent.
+ * With `resolveMessage`, a plain-text message is also resolved against the
+ * first open request when a child asked it, whether a `ctx.ask()` question, a
+ * tool approval, or a session-limit prompt: a matching option or permitted free
+ * text answers that one request, and the message is consumed along with its
+ * `context`. Otherwise the message stays with the parent.
  */
 export function routeDeliverPayload(input: {
   readonly allowRoute?: (requestId: string, route: ProxyInputRequest) => boolean;
@@ -141,12 +88,14 @@ export function routeDeliverPayload(input: {
   const entries = getProxyInputRequests(input.state);
   const routable = (requestId: string, route: ProxyInputRequest | undefined) =>
     route !== undefined && input.allowRoute?.(requestId, route) !== false;
-  const message = resolveMessageAgainstQuestions({
+  const message = resolveMessageAgainstFirstRequest({
     enabled: input.resolveMessage === true,
     entries,
     payload: input.payload,
     routable,
+    state: input.state,
   });
+  const [textAnswer] = message.responses;
   const inputResponses = [...(input.payload.inputResponses ?? []), ...message.responses];
 
   const responsesByChild = new Map<string, ChildResponseBucket>();
@@ -215,7 +164,11 @@ export function routeDeliverPayload(input: {
       routes,
     }): RoutedChildDelivery => {
       const responseIds = new Set(parentRequestIds);
-      const retireRequestIds = new Set(responseIds);
+      const decided = (requestId: string) => {
+        const kind = entries.get(requestId)?.kind;
+        return kind === undefined || !resolvedByChild(kind);
+      };
+      const retireRequestIds = new Set([...responseIds].filter(decided));
 
       // A fully-answered approval batch retires its sibling requests
       // too, so a late free-form answer cannot route through a stale
@@ -225,7 +178,9 @@ export function routeDeliverPayload(input: {
           route.batch !== undefined &&
           batchResolves({ batch: route.batch, childContinuationToken, entries, responseIds })
         ) {
-          for (const requestId of route.batch.requestIds) retireRequestIds.add(requestId);
+          for (const requestId of route.batch.requestIds) {
+            if (decided(requestId)) retireRequestIds.add(requestId);
+          }
         }
       }
 
@@ -237,6 +192,8 @@ export function routeDeliverPayload(input: {
           resolutions: resolveRetiredRequests({ entries, responses, retireRequestIds }),
         },
         ...(childSessionInbox !== undefined && { childSessionInbox }),
+        ...(textAnswer !== undefined &&
+          responses.includes(textAnswer) && { message: input.payload.message }),
         ...(workflowAsk !== undefined && { workflowAsk }),
         ...(remote !== undefined && { remote }),
         ...(routes[0]?.inputSource !== undefined && { inputSource: routes[0].inputSource }),
@@ -253,7 +210,9 @@ export function routeDeliverPayload(input: {
     if (key === "inputResponses" || value === undefined) {
       continue;
     }
-    if (key === "message" && message.consumed) continue;
+    // Channels attach per-message context, such as Telegram's sender block. Kept
+    // without its message, it would reach the model as a message of its own.
+    if (message.consumed && CONSUMED_MESSAGE_KEYS.has(key)) continue;
 
     remainder[key] = value;
   }
@@ -292,11 +251,12 @@ function toInputResolution(
   return response === undefined ? resolution : { ...resolution, response };
 }
 
-function resolveMessageAgainstQuestions(input: {
+function resolveMessageAgainstFirstRequest(input: {
   readonly enabled: boolean;
   readonly entries: ReadonlyMap<string, ProxyInputRequest>;
   readonly payload: DeliverPayload;
   readonly routable: (requestId: string, route: ProxyInputRequest) => boolean;
+  readonly state: SessionStateMap | undefined;
 }): {
   readonly consumed: boolean;
   readonly responses: readonly InputResponse[];
@@ -304,26 +264,23 @@ function resolveMessageAgainstQuestions(input: {
   const none = { consumed: false, responses: [] };
   // An explicit structured answer means the client already chose what to answer.
   if (!input.enabled || (input.payload.inputResponses?.length ?? 0) > 0) return none;
-  if (input.payload.message === undefined) return none;
+  const text = readAnswerText(input.payload);
+  if (text === undefined) return none;
 
-  // Task and subagent questions carry no `ctx.ask()` metadata, so plain text
-  // cannot resolve them, but they still make the message ambiguous.
-  const pending = [...input.entries].filter(
-    ([requestId, route]) => route.kind === "question" && input.routable(requestId, route),
-  );
-  const questions = pending.flatMap(([requestId, route]) => {
-    const question = route.workflowAsk?.question ?? route.question;
-    return question !== undefined ? [{ requestId, ...question }] : [];
-  });
-  if (questions.length === 0) return none;
-
-  const [only] = questions;
-  const answer =
-    pending.length === 1 && only !== undefined && typeof input.payload.message === "string"
-      ? resolveTextToResponse(input.payload.message, only)
-      : undefined;
-  if (answer !== undefined) return { consumed: true, responses: [answer] };
-  return none;
+  // A request an earlier payload answered is no longer open to this one.
+  const answered = (id: string) => {
+    const route = input.entries.get(id);
+    return route !== undefined && !input.routable(id, route);
+  };
+  // A relay the session recorded without publishing it falls back to the order it was recorded.
+  const requestId =
+    firstOpenInput(storedProjection(input.state), answered)?.request.requestId ??
+    [...input.entries.keys()].find((id) => !answered(id));
+  const reply = requestId === undefined ? undefined : input.entries.get(requestId)?.reply;
+  // A request recorded without reply metadata cannot be matched at all.
+  if (requestId === undefined || reply === undefined) return none;
+  const answer = resolveTextToResponse(text, { requestId, ...reply });
+  return answer === undefined ? none : { consumed: true, responses: [answer] };
 }
 
 function batchResolves(input: {

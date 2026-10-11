@@ -3,7 +3,7 @@ import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSessionBase } from "#harness/types.js";
 import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,
@@ -58,7 +58,7 @@ export interface StartWorkflowTaskInput {
   };
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
-  readonly session: HarnessSession;
+  readonly session: HarnessSessionBase;
   readonly task: RuntimeWorkflowTaskRequest;
 }
 
@@ -88,9 +88,10 @@ export async function startWorkflowToolCallRun(
 }
 
 /** Starts the run of an `execute` call the turn waits on and records it on the owning session. */
-export async function startWorkflowTask(
-  input: StartWorkflowTaskInput,
-): Promise<{ readonly result?: RuntimeToolResultActionResult; readonly session: HarnessSession }> {
+export async function startWorkflowTask(input: StartWorkflowTaskInput): Promise<{
+  readonly result?: RuntimeToolResultActionResult;
+  readonly session: HarnessSessionBase;
+}> {
   const { task, batchEvent, session } = input;
   try {
     const started = await startWorkflowToolCallRun(input, { entryPoint: "execute" });

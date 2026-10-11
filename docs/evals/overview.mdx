@@ -7,6 +7,8 @@ An eval is a scored check that runs your agent against real sessions and grades 
 
 Evals exercise the same HTTP surface your users hit. The runner boots (or targets) a real agent server, drives sessions through the [TypeScript client](../guides/client/overview) protocol, and grades what comes back, so a passing eval means the agent booted, accepted a request, and produced the result you asserted.
 
+Define [tool stubs](./tool-stubs) in your eval to control tool results, then assert on the agent's tool calls and responses.
+
 ## `defineEval`
 
 eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is one eval by default. A file can also default-export an array to fan out over a dataset (see [Cases](./cases)). The file path is the eval's identity, so you don't author an `id` or `name`. Directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` becomes id `weather/brooklyn-forecast`).
@@ -56,7 +58,7 @@ export default defineEvalConfig({
 });
 ```
 
-Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default evaluator, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
+Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default decider, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
 
 ### Run setup and teardown
 

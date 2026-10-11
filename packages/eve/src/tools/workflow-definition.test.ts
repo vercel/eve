@@ -168,4 +168,15 @@ describe("defineWorkflowTool", () => {
       ),
     ).toThrow("Workflow executors require defineWorkflowTool()");
   });
+
+  it("rejects endsTurn on a workflow tool, which resumes the turn when it finishes", () => {
+    const execute = Object.assign(async () => 1, { workflowId: "workflow//test//execute" });
+    const definition = Object.assign(
+      defineWorkflowTool({ description: "Workflow", inputSchema: {}, execute }),
+      { endsTurn: true },
+    );
+    expect(() => normalizeToolDefinition(definition, "Invalid tool.")).toThrow(
+      '"endsTurn" is not supported on defineWorkflowTool()',
+    );
+  });
 });

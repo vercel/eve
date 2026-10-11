@@ -6,6 +6,7 @@ import {
   computerUseDisplayCommand,
   computerUseDriverStartCommand,
   computerUsePaths,
+  computerUseReadyCommand,
 } from "./computer-use.ts";
 import { shellQuote } from "./shell.ts";
 
@@ -67,6 +68,22 @@ export async function startComputerUse(
       `computer-use driver startup failed (exit ${driver.exitCode}): ${commandFailureDetail(driver)}`,
     );
   }
+}
+
+/**
+ * Restart the desktop when a resumed sandbox lost its processes.
+ *
+ * Sandbox resume does not rerun consumer startup, so the display and driver
+ * started there are gone after a stop. The check is one cheap command when
+ * everything is already live.
+ */
+export async function ensureComputerUse(
+  sandbox: Pick<SandboxSession, "resolvePath" | "run">,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const ready = await sandbox.run({ command: computerUseReadyCommand(sandbox), abortSignal });
+  if (ready.exitCode === 0) return;
+  await startComputerUse(sandbox);
 }
 
 function computerUseInstallScript(sandbox: Pick<SandboxSession, "resolvePath">): string {

@@ -156,6 +156,7 @@ class BraintrustReporter implements EvalReporter {
       eveSkipReason: result.skipReason,
       eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
       eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
+      eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
       eveParked: result.result.derived.parked,
       eveAssertionScores: composeAssertionScoreMetadata(result.assertions),
     };

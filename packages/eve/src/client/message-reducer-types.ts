@@ -42,10 +42,13 @@ export interface EveMessageMetadata {
  * or `"done"`; `file` carries user-attachment metadata; `step-start` marks the
  * boundary of an agent step; and `dynamic-tool` ({@link EveDynamicToolPart})
  * holds the tool call and its lifecycle state. `stepIndex` ties a part to the
- * agent step that produced it.
+ * agent step that produced it. Assistant text and reasoning parts carry an
+ * `id` from the event that created the run. It survives appends and completion;
+ * a null completion removes the part. User text may not have an `id`.
  */
 export type EveMessagePart =
   | {
+      readonly id?: string;
       readonly providerMetadata?: Record<string, unknown>;
       readonly state?: "done" | "streaming";
       readonly stepIndex?: number;
@@ -53,6 +56,7 @@ export type EveMessagePart =
       readonly type: "text";
     }
   | {
+      readonly id?: string;
       readonly providerMetadata?: Record<string, unknown>;
       readonly state?: "done" | "streaming";
       readonly stepIndex?: number;
@@ -93,7 +97,7 @@ export type EveAuthorizationOutcome = AuthorizationOutcome;
 
 /**
  * An authorization prompt or result. The default reducer projects
- * `authorization.required` into a pending part so browser chat UIs can render a
+ * `authorization.required` into a `required` part so browser chat UIs can render a
  * sign-in affordance, then updates it when `authorization.completed` arrives.
  */
 export type EveAuthorizationPart = {
@@ -101,6 +105,9 @@ export type EveAuthorizationPart = {
   readonly description: string;
   readonly displayName: string;
   readonly name: string;
+  readonly attemptId?: string;
+  /** The sign-in's callback settles this attempt and resumes the parked turn. */
+  readonly awaitsCallback?: boolean;
   readonly stepIndex: number;
   readonly turnId: string;
   readonly type: "authorization";
@@ -220,13 +227,18 @@ export type EveDynamicToolPart = {
  * classifies the action (`"tool-call"`, `"subagent-call"`, `"load-skill"`, or
  * `"unknown"`), `eve.name` is the resolved action name, and `eve.inputRequest`
  * and `eve.inputResponse` store the HITL prompt and submitted response when the
- * call required approval.
+ * call required approval. `eve.label` is how the call reads to people, the same
+ * text eve's channels and terminal UI show: the tool's label, or a readable form
+ * of its name, replaced by its completion label once it settles. The default
+ * reducer always sets it; it is optional only for parts persisted by older eve
+ * versions.
  */
 export interface EveMessageToolMetadata {
   readonly eve?: {
     readonly inputRequest?: EveMessageInputRequest;
     readonly inputResponse?: InputResponse;
     readonly kind: "load-skill" | "subagent-call" | "tool-call" | "unknown";
+    readonly label?: string;
     readonly name: string;
   };
 }

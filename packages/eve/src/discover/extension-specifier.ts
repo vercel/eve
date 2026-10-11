@@ -12,6 +12,7 @@ function escapeRegExp(value: string): string {
  * - `export { default } from "@acme/crm";`
  * - `import { crm } from "@acme/crm"; export default crm({ ... });`
  * - `import crm from "@acme/crm"; export default crm();`
+ * - `import crm from "@acme/crm"; const mount = crm(); export { mount as default };`
  *
  * Returns the specifier string, or `null` when the file does not match a
  * recognized mount shape.
@@ -23,7 +24,7 @@ export function parseExtensionMountSpecifier(source: string): string | null {
   }
 
   const factory = source.match(/export\s+default\s+([A-Za-z_$][\w$]*)\s*[(;\n]/);
-  const boundName = factory?.[1];
+  const boundName = factory?.[1] ?? emittedMountFactory(source);
   if (boundName === undefined) {
     return null;
   }
@@ -50,4 +51,21 @@ export function parseExtensionMountSpecifier(source: string): string | null {
   }
 
   return null;
+}
+
+function emittedMountFactory(source: string): string | undefined {
+  const exports = /export\s*\{([^}]*)\}\s*(?:;|$)/g;
+  for (const match of source.matchAll(exports)) {
+    for (const entry of (match[1] ?? "").split(",")) {
+      const alias = entry.trim().match(/^([A-Za-z_$][\w$]*)\s+as\s+default$/);
+      if (alias === null) continue;
+      const declaration = source.match(
+        new RegExp(
+          `\\b(?:const|let|var)\\s+${escapeRegExp(alias[1]!)}\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*\\(`,
+        ),
+      );
+      return declaration?.[1];
+    }
+  }
+  return undefined;
 }

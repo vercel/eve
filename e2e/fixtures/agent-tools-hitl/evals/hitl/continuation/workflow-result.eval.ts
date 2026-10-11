@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectReply,
   requestFrom,
@@ -21,11 +21,11 @@ export default defineEval({
     // When the user asks a workflow to read the draft.
     const live = await session.start("Read the draft through a workflow.");
 
-    // Then the reply reports the workflow result and completes; A stays unexecuted and answerable.
+    // Then the reply reports the workflow result and completes; the message cancelled A, which never runs.
     await expectToolResult(t, live, "workflow-draft");
     const turn = await expectReply(t, live, "Workflow draft status: ready.");
     turn.calledTool("workflow-draft", { status: "completed", count: 1 });
     expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approval);
+    expectApprovalCancelled(session, approval);
   },
 });

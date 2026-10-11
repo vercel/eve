@@ -1,3 +1,9 @@
+import { randomUUID } from "node:crypto";
+import type { ExtensionCompileMount } from "#compiler/load-binding-namespace.js";
+import { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
+import { assertStaticConnectionOwnership } from "#compiler/connection-ownership.js";
+import { bindingMountId } from "#compiler/extension-mount-bindings.js";
+
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
   type CompiledAgentDefinition,
@@ -15,6 +21,7 @@ import {
   type CompiledHookDefinition,
   type CompiledRemoteAgentNode,
   type CompiledSkillDefinition,
+  type CompiledScheduleCollectionDefinition,
   type CompiledScheduleDefinition,
   type CompiledSandboxDefinition,
   type CompiledSubagentNode,
@@ -26,17 +33,13 @@ import {
   ROOT_COMPILED_AGENT_NODE_ID,
 } from "#compiler/manifest.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
-import {
-  markConfigRuntimeEntries,
-  NodeModuleEvaluationContext,
-} from "#compiler/module-lifecycle.js";
+import { markConfigRuntimeEntries } from "#compiler/module-lifecycle.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import {
   applyAgentToolPolicy,
   applyDefaultToolPolicy,
-  assertFrameworkToolPolicy,
   canDisableToolWithoutSelectedSource,
 } from "#compiler/default-tool-policy.js";
 import {
@@ -47,22 +50,24 @@ import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-
 import { workspaceSubagentName } from "#public/definitions/workspace-agent.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
-import { compileMemoryDefinition, deriveMemorySlot } from "#compiler/normalize-memory.js";
+import { compileMemoryDefinition } from "#compiler/normalize-memory.js";
+import { createMemoryWrapperCandidates } from "#compiler/memory-wrapper-candidates.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
-import { compileSkillSource } from "#compiler/normalize-skill.js";
+import { compileScheduleCollectionDefinition } from "#compiler/normalize-schedule-collection.js";
+import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
+import { createScheduleCollectionWrapperCandidates } from "#compiler/schedule-collection-wrapper-candidates.js";
+import { assertSkillNameAvailable, compileSkillSource } from "#compiler/normalize-skill.js";
 import {
   assertRemoteAgentDefinitionHasNoLocalPackageEntries,
   normalizeSubagentConfig,
 } from "#compiler/normalize-subagent.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
-import { createCompiledChannelRoutePlan } from "#compiler/channel-route-plan.js";
 import {
   finalizeNodeSourceState,
   type ComposedNodeSourceGraph,
   type FinalizedNodeSourceState,
   type PhaseOneNodeSourceState,
-  type SelectedNodeConfig,
 } from "#compiler/node-source-state.js";
 import {
   assertApplicationOverlayCanApplyToAllNodes,
@@ -71,9 +76,12 @@ import {
   assertUniqueBy,
   assertUniqueRegistryIds,
   compileExtensionMounts,
+  compileChannelRoutes,
+  createExtensionCompileMounts,
   createCompiledRemoteAgent,
   expectSubagentDescription,
   mergeExternalDependencies,
+  loadSelectedNodeConfig,
   collectSelectedSourceIds,
   withDiagnosticsSummary,
   withExtensionNamespace,
@@ -84,19 +92,13 @@ import {
   composeAgentModuleCandidates,
   createAgentModuleBinding,
   createProgrammaticModuleCandidates,
-  describeAgentSourceCandidate,
   disableComposedCandidate,
-  instantiateProgrammaticTemplate,
   isAgentModuleCandidate,
   type AgentModuleCandidate,
   type AgentSourceCandidate,
   type AgentSourceRegistry,
-  canonicalSourceSlot,
 } from "#compiler/source-graph.js";
-import {
-  frameworkAgentSourceRegistry,
-  memoryWrapperTemplate,
-} from "#framework/sources/registry.js";
+import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import {
   noDevelopmentExtensions,
   prepareDevelopmentExtensions,
@@ -137,6 +139,7 @@ export async function compileAgentManifest(
     layer: "application",
     manifest: developmentExtensions.manifest,
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    nodePath: "",
     owner: { kind: "application" },
   });
 
@@ -153,6 +156,8 @@ class AgentGraphCompiler {
   private readonly context: ManifestCompileContext;
   private readonly registries: readonly AgentSourceRegistry[];
   private readonly diagnostics: CompilerDiagnostic[];
+  private readonly mounts = new Map<string, ExtensionCompileMount>();
+  private readonly evaluationId = randomUUID();
 
   constructor(
     context: ManifestCompileContext,
@@ -223,11 +228,13 @@ class AgentGraphCompiler {
       const nodeId = createCompiledSubagentNodeId(input.nodeId, source.sourceId);
       const childInput: NodeCompileInput = {
         extensionScope: projected.extensionScope ?? input.extensionScope,
+        mountId: projected.mountId,
         inheritedExternalDependencies,
         isRoot: false,
         layer: projected.candidate.layer,
         manifest: source.manifest,
         nodeId,
+        nodePath: projected.nodePath,
         owner: projected.owner,
         parentNodeId: input.nodeId,
       };
@@ -357,9 +364,11 @@ class AgentGraphCompiler {
     const projected = projectAgentSources({
       externalDependencies,
       extensionScope: input.extensionScope,
+      mountId: input.mountId,
       layer: input.layer,
       manifest: input.manifest,
       nodeId: input.nodeId,
+      nodePath: input.nodePath,
       owner: input.owner,
     });
     const frameworkCandidates: AgentModuleCandidate[] = [];
@@ -384,33 +393,15 @@ class AgentGraphCompiler {
         (framework ? frameworkCandidates : applicationCandidates).push(...candidates);
       }
     }
-    const memoryWrapperCandidates = [...projected.candidates, ...applicationCandidates]
-      .filter(
-        (candidate): candidate is AgentModuleCandidate =>
-          candidate.backing.kind !== "resource" &&
-          (canonicalSourceSlot(candidate.logicalPath) === "memory" ||
-            canonicalSourceSlot(candidate.logicalPath).startsWith("memory/")),
-      )
-      .map((candidate) => {
-        const slot = deriveMemorySlot(candidate.logicalPath);
-        return instantiateProgrammaticTemplate({
-          anchor: candidate,
-          dependencies: { memory: candidate },
-          logicalPath: `tools/${slot}.ts`,
-          owner: { feature: "memory", kind: "framework" },
-          parameters: {
-            memoryExportName: candidate.exportName ?? "default",
-            memoryLogicalPath: candidate.logicalPath,
-            slot,
-          },
-          template: memoryWrapperTemplate,
-        });
-      });
     const orderedCandidates: AgentSourceCandidate[] = [
       ...frameworkCandidates,
       ...(input.developmentExtensionCandidates ?? []),
       ...projected.candidates,
-      ...memoryWrapperCandidates,
+      ...createMemoryWrapperCandidates([...projected.candidates, ...applicationCandidates]),
+      ...createScheduleCollectionWrapperCandidates(
+        [...projected.candidates, ...applicationCandidates],
+        input.manifest.agentId,
+      ),
       ...applicationCandidates,
     ];
     const composed = composeAgentModuleCandidates(orderedCandidates);
@@ -434,7 +425,15 @@ class AgentGraphCompiler {
     externalDependencies: readonly string[],
   ): Promise<PhaseOneNodeSourceState> {
     const graph = this.composeNodeSources(input, externalDependencies);
-    const evaluation = new NodeModuleEvaluationContext(this.registries);
+    const { mounts, sourceIds } = createExtensionCompileMounts(input.manifest, input.nodePath);
+    for (const [mountId, mount] of mounts) this.mounts.set(mountId, mount);
+    const evaluation = new NodeModuleEvaluationContext(
+      this.registries,
+      (binding) => sourceIds.get(bindingMountId(binding) ?? ""),
+      this.mounts,
+      this.evaluationId,
+      input.manifest.appRoot,
+    );
     evaluation.setBindings(
       Object.fromEntries(
         [...graph.composed.selected.values()]
@@ -445,34 +444,7 @@ class AgentGraphCompiler {
     return {
       evaluation,
       graph,
-      selectedConfig: await this.loadSelectedConfig(graph, evaluation),
-    };
-  }
-
-  private async loadSelectedConfig(
-    state: ComposedNodeSourceGraph,
-    evaluation: NodeModuleEvaluationContext,
-  ): Promise<SelectedNodeConfig> {
-    const candidate = state.composed.selected.get("agent");
-    if (candidate === undefined || !isAgentModuleCandidate(candidate)) {
-      throw new Error("Every local agent node requires a selected module-backed agent.ts source.");
-    }
-    const binding = createAgentModuleBinding(candidate);
-    const projected = state.sourcesBySourceId.get(candidate.sourceId);
-    if (projected?.source.sourceKind !== "module") {
-      throw new Error(`Selected agent config source "${candidate.sourceId}" was not projected.`);
-    }
-    const source = projected.source;
-    return {
-      binding,
-      candidate,
-      definition: await loadModuleBackedDefinition({
-        binding,
-        kind: "agent config",
-        loadNamespace: evaluation.loadNamespace,
-        source,
-      }),
-      source,
+      selectedConfig: await loadSelectedNodeConfig(graph, evaluation),
     };
   }
 
@@ -491,6 +463,7 @@ class AgentGraphCompiler {
     const memories: CompiledMemoryDefinition[] = [];
     const hooks: CompiledHookDefinition[] = [];
     const schedules: CompiledScheduleDefinition[] = [];
+    const scheduleCollections: CompiledScheduleCollectionDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
@@ -575,10 +548,25 @@ class AgentGraphCompiler {
           }
           break;
         case "schedule": {
-          const schedule = await compileScheduleDefinition(
+          const value =
+            entry.source.sourceKind === "module"
+              ? await loadModuleBackedDefinition({
+                  binding: binding!,
+                  loadNamespace,
+                  kind: "schedule",
+                  source: entry.source,
+                })
+              : entry.source.definition;
+          if (isScheduleCollectionDefinition(value)) {
+            scheduleCollections.push(compileScheduleCollectionDefinition(entry.source, value));
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+            break;
+          }
+          const schedule = compileScheduleDefinition(
             input.manifest.agentRoot,
             entry.source,
-            options,
+            value,
+            options.owner,
           );
           schedules.push(schedule);
           if (schedule.sourceKind === "module" && schedule.hasRun) {
@@ -588,8 +576,10 @@ class AgentGraphCompiler {
         }
         case "skill": {
           const result = await compileSkillSource(input.manifest.agentRoot, entry.source, options);
-          if (result.kind === "skill") skills.push(result.definition);
-          else {
+          if (result.kind === "skill") {
+            assertSkillNameAvailable(result.definition);
+            skills.push(result.definition);
+          } else {
             dynamicSkills.push(withExtensionNamespace(result.definition, candidate.owner));
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
           }
@@ -600,7 +590,6 @@ class AgentGraphCompiler {
             binding: binding!,
             loadNamespace,
           });
-          assertFrameworkToolPolicy(candidate, result);
           if (result.kind === "disabled") {
             state.composed = disableComposedCandidate({
               allowUnmatched: canDisableToolWithoutSelectedSource(state, result.name),
@@ -634,23 +623,16 @@ class AgentGraphCompiler {
     assertUniqueBy(connections, (connection) => connection.connectionName, "connection name");
     assertUniqueBy(dynamicConnections, (connection) => connection.slug, "dynamic connection slug");
     assertUniqueBy(skills, (skill) => skill.name, "skill name");
-
-    const channelRoutes = createCompiledChannelRoutePlan({
-      bindings: state.bindings,
-      channels,
-      diagnostics: this.diagnostics,
-      nodeId: input.nodeId,
-      sources: Object.fromEntries(
-        state.orderedCandidates.map((candidate) => [
-          candidate.sourceId,
-          describeAgentSourceCandidate(candidate),
-        ]),
-      ),
+    assertStaticConnectionOwnership({
+      connectionNames: connections.map((connection) => connection.connectionName),
+      subagentNames: state.projected.subagents
+        .filter((subagent) => selectedSourceIds.has(subagent.candidate.sourceId))
+        .map((subagent) => subagent.source.subagentId),
+      toolNames: tools.map((tool) => tool.name),
     });
-    for (const channel of channelRoutes.effective) {
-      state.evaluation.requireRuntimeEntry(channel.sourceId);
-    }
-    const extensionMounts = compileExtensionMounts(input.manifest, state.composed);
+
+    const channelRoutes = compileChannelRoutes(state, channels, this.diagnostics, input.nodeId);
+    const extensionMounts = compileExtensionMounts(input.manifest, state.composed, input.nodePath);
     for (const mount of extensionMounts) {
       state.evaluation.requireRuntimeEntry(mount.mountSourceId);
     }
@@ -678,6 +660,7 @@ class AgentGraphCompiler {
         sourcePath: workspace.sourcePath,
       })),
       schedules,
+      scheduleCollections,
       skills,
       sourceComposition: state.composed.composition,
       tools,

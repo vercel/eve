@@ -64,13 +64,14 @@ export async function expectResponseReply(
   expected: string | RegExp,
   requestId: string,
 ): Promise<EveEvalTurn> {
-  t.log(`Accepted response for ${requestId}; awaiting resolution and its resumed turn.`);
-  await live.waitForEvent("input.resolved", {
+  t.log(`Accepted response for ${requestId}; awaiting resolution and the held turn's reply.`);
+  const resolved = await live.waitForEvent("input.resolved", {
     data: { resolutions: (items) => items.some((item) => item.requestId === requestId) },
   });
-  // Several responses in one delivery can resolve during the same resumed turn.
-  const resumed = await live.waitForEvent("turn.started");
-  const turn = await expectReply(t, live, expected, resumed.data.turnId);
+  // The approval held its turn, so the answer resumes that turn instead of starting one.
+  const turnId = resolved.data.turnId;
+  const turn = await expectReply(t, live, expected, turnId);
+  turn.notEvent("turn.started");
   turn.eventOrder([
     {
       type: "input.resolved",
@@ -85,22 +86,29 @@ export async function expectResponseReply(
       },
       count: 1,
     },
-    {
-      type: "message.completed",
-      data: { turnId: resumed.data.turnId, message: expected },
-      count: 1,
-    },
-    { type: "turn.completed", data: { turnId: resumed.data.turnId }, count: 1 },
-  ]);
-  turn.eventOrder([
-    { type: "turn.started", data: { turnId: resumed.data.turnId }, count: 1 },
-    {
-      type: "message.completed",
-      data: { turnId: resumed.data.turnId, message: expected },
-      count: 1,
-    },
+    { type: "message.completed", data: { turnId, message: expected }, count: 1 },
+    { type: "turn.completed", data: { turnId }, count: 1 },
   ]);
   return turn;
+}
+
+/**
+ * A message steered the turn held on this approval, which cancels it: the
+ * request resolves as ignored and its call never runs.
+ */
+export function expectApprovalCancelled(session: EveEvalSession, request: InputRequest) {
+  session.event("input.resolved", {
+    data: {
+      resolutions: (items) =>
+        items.some((item) => item.requestId === request.requestId && item.outcome === "ignored"),
+    },
+    count: 1,
+  });
+  session.event("action.result", {
+    data: { status: "rejected", result: { toolName: request.action.toolName } },
+    count: 1,
+  });
+  expectChangeStillUnexecuted(session, request.action.toolName);
 }
 
 export async function expectToolResult(t: EveEvalContext, live: EveEvalLiveTurn, toolName: string) {
@@ -111,30 +119,25 @@ export async function expectToolResult(t: EveEvalContext, live: EveEvalLiveTurn,
 }
 
 export function expectChangeStillUnexecuted(session: EveEvalSession, toolName = "change-a") {
-  session.notEvent("action.result", { data: { result: { toolName } } });
+  session.notEvent("action.result", { data: { status: "completed", result: { toolName } } });
 }
 
 // A partial approval has no turn boundary to await. Await the real HTTP
 // acceptance, then send the next message on that same session's ordered inbox.
+/**
+ * Approves one request of a batch. The rest of the batch is still open, so the
+ * turn stays held and says so again.
+ */
 export async function submitPartialApproval(
   t: EveEvalContext,
   session: EveEvalSession,
   request: InputRequest,
 ) {
-  const response = await t.target.fetch(
-    `/eve/v1/session/${encodeURIComponent(session.sessionId)}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: t.signal,
-      body: JSON.stringify({
-        inputResponses: [{ requestId: request.requestId, optionId: "approve" }],
-      }),
-    },
-  );
-  await t.require(response.status, equals(202));
-  const accepted = await response.json();
-  t.log(`Partial approval accepted: ${JSON.stringify(accepted)}`);
+  const held = await session.respond([{ requestId: request.requestId, optionId: "approve" }]);
+  t.log(`Partial approval accepted for ${request.requestId}; the turn is still held.`);
+  held.event("turn.waiting", { data: { on: "input" }, count: 1 });
+  held.notEvent("input.resolved");
+  held.notEvent("turn.started");
 }
 
 export async function approveSavedChange(

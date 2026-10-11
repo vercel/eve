@@ -128,11 +128,42 @@ describe("parseRegistryIndex", () => {
     expect(
       parseRegistryIndex({
         items: [
-          { name: "eve/self-modification" },
-          { name: "experimental/self-modification", meta: { eve: { hidden: true } } },
+          { name: "eve/toolkit" },
+          { name: "experimental/toolkit", meta: { eve: { hidden: true } } },
         ],
       }).map((entry) => entry.address),
-    ).toEqual(["eve/self-modification"]);
+    ).toEqual(["eve/toolkit"]);
+  });
+
+  it("marks items that would scaffold the self-modification mount", () => {
+    expect(
+      parseRegistryIndex({
+        items: [
+          {
+            name: "eve/self-modification",
+            files: [
+              { target: "agent/tools/unrelated.ts" },
+              { target: "agent/extensions/self-modification/extension.ts" },
+            ],
+          },
+          {
+            name: "acme/self-modification",
+            files: [{ target: "agent/extensions/self-modification.ts" }],
+          },
+          {
+            name: "extension/self-modification-tools",
+            files: [{ target: "agent/extensions/self-modification-tools/extension.ts" }],
+          },
+        ],
+      }).map((entry) => ({
+        address: entry.address,
+        selfModificationMount: entry.selfModificationMount,
+      })),
+    ).toEqual([
+      { address: "eve/self-modification", selfModificationMount: true },
+      { address: "acme/self-modification", selfModificationMount: true },
+      { address: "extension/self-modification-tools", selfModificationMount: undefined },
+    ]);
   });
 
   it("reads whether an item declares a setup flow, used by selfmod__registry_add's split rule", () => {
@@ -315,6 +346,28 @@ describe("selfmod__search_registry", () => {
       }),
     } as never;
   }
+
+  it("does not return self-modification mount scaffolds in search results", async () => {
+    stubFetch({
+      body: {
+        items: [
+          {
+            name: "eve/self-modification",
+            files: [{ target: "agent/extensions/self-modification/extension.ts" }],
+          },
+          { name: "extension/browserbase" },
+        ],
+      },
+      ok: true,
+    });
+
+    const result = await run({}, ctx());
+
+    expect(result).toMatchObject({
+      items: [{ address: "extension/browserbase" }],
+      total: 1,
+    });
+  });
 
   it("returns catalog rows with installed state from the source mount", async () => {
     stubFetch({ body: INDEX, ok: true });

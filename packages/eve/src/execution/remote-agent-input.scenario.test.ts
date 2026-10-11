@@ -6,6 +6,7 @@ import type { ClientSession } from "#client/session.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { type ScenarioAppDescriptor, useScenarioApp } from "#internal/testing/scenario-app.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 const scenarioApp = useScenarioApp();
 const TOKEN = "remote-input-scenario-token";
@@ -79,7 +80,7 @@ function parentDescriptor(url: string, concurrent = false): ScenarioAppDescripto
     ? "REMOTE_HITL_RESULT=alice-lantern,bob-comet"
     : PARENT_RESULT;
   const parentAgent = `import { defineAgent } from "eve"; import { mockModel } from "eve/evals";
-const model = mockModel((request) => { const text = request.messages.map((m) => m.text).join("\\n"); if (text.includes("<task_result") && text.includes("${expectedChildResult}")) return "${expectedParentResult}"; if (request.toolResults.some((r) => r.id === "delegate")) return { toolCalls: [{ id: "wait", name: "task_wait", input: {} }] }; return { toolCalls: [{ id: "delegate", name: "delegate-approval", input: {} }] }; });
+const model = mockModel((request) => { const text = request.messages.map((m) => m.text).join("\\n"); if (text.includes("<task_result") && text.includes("${expectedChildResult}")) return "${expectedParentResult}"; if (request.toolResults.some((r) => r.id === "delegate")) return { toolCalls: [{ id: "wait", name: "${TASK_WAIT_TOOL_NAME}", input: {} }] }; return { toolCalls: [{ id: "delegate", name: "delegate-approval", input: {} }] }; });
 export default defineAgent({ model, modelContextWindowTokens: 32000 });`;
   const tool = `import { defineWorkflowTool } from "eve/tools";
 export default defineWorkflowTool({ description: "Delegate approval.", inputSchema: {}, async task(_input, ctx) { "use workflow"; const result = await ctx.agent("remote-hitl-child").send("Ask the parent for approval."); return (await result.result()).message; } });`;
@@ -103,7 +104,7 @@ const model = mockModel((request) => {
   const text = request.messages.map((message) => message.text).join("\\n");
   if (text.includes("MEMORY_RECALLED=LANTERN-COMET-7319")) return "PARENT_RECALLED=LANTERN-COMET-7319";
   if (text.includes("MEMORY_RECALLED=CONTEXT_LOST")) return "PARENT_RECALLED=CONTEXT_LOST";
-  if (request.toolResults.some((result) => result.id === "remember")) return { toolCalls: [{ id: "wait-memory", name: "task_wait", input: {} }] };
+  if (request.toolResults.some((result) => result.id === "remember")) return { toolCalls: [{ id: "wait-memory", name: "${TASK_WAIT_TOOL_NAME}", input: {} }] };
   return { toolCalls: [{ id: "remember", name: "remember", input: {} }] };
 });
 export default defineAgent({ model, modelContextWindowTokens: 32000 });`;

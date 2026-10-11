@@ -20,7 +20,6 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.approval.request",
   "ai.documents",
   "ai.prompt",
-  "ai.prompt.system",
   "ai.prompt.toolChoice",
   "ai.prompt.tools",
   "ai.value",

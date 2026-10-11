@@ -50,7 +50,7 @@ void (async () => {
     input.enter();
     console.warn(WARNING);
 
-    await screen.waitForText("○ stderr", 5_000);
+    await screen.waitForText("○ warn", 5_000);
     await screen.waitForText(WARNING, 5_000);
 
     // The warning must ride the section's rail, not shred the prompt.

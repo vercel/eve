@@ -10,12 +10,10 @@ export {
   slackChannel,
   type SlackApiResponse,
   type SlackAuthorizationEventContext,
-  type SlackAuthorizationRequiredHandler,
   type SlackBotToken,
   type SlackChannel,
   type SlackChannelConfig,
   type SlackChannelCredentials,
-  type SlackChannelEvents,
   type SlackChannelState,
   type SlackContext,
   type SlackEventContext,
@@ -29,9 +27,6 @@ export {
   type SlackInboundResult,
   type SlackInboundResultOrPromise,
   type SlackInitialMessage,
-  type SlackInputRequestedDefaultDeliver,
-  type SlackInputRequestedEvent,
-  type SlackInputRequestedHandler,
   type SlackInputResponseContext,
   type SlackInputResponseResult,
   type SlackInputResponseSubmission,
@@ -79,22 +74,31 @@ export {
 export { type SlackFetch, type SlackTransportOptions } from "#public/channels/slack/transport.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+export { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 
 export {
-  experimental_slackActivityPlan,
-  experimental_slackActivityRenderer,
-  experimental_slackActivityTree,
-  experimental_slackActivityStatus,
-  type ExperimentalSlackActivityDestination,
-  type ExperimentalSlackActivityRenderer,
-  type ExperimentalSlackActivitySnapshot,
-  type SlackActivityRenderer,
-} from "#public/channels/slack/activity.js";
+  postCompletedSlackReply,
+  type SlackCompletedReply,
+} from "#public/channels/slack/reply-delivery.js";
+
+export { SLACK_MARKDOWN_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
 
 export {
-  describeActionRequest,
-  describeActionRequests,
-} from "#public/channels/slack/action-status.js";
+  defineSlackRenderer,
+  type SlackRenderer,
+  type SlackRendererEvents,
+  type SlackRenderHandler,
+  type SlackRenderNext,
+  type SlackTaskCard,
+} from "#public/channels/slack/renderers.js";
+
+export type {
+  TaskCardAction,
+  TaskCardBlocker,
+  TaskCardStatus,
+  TaskCardTask,
+  TaskCardView,
+} from "#channel/task-card.js";
 
 export {
   loadThreadContextMessages,
@@ -107,6 +111,15 @@ export {
   cardToFallbackText,
   type BlockKitBlock,
 } from "#public/channels/slack/blocks.js";
+
+export {
+  deriveHitlResponse,
+  HITL_ACTION_PREFIX,
+  renderInputRequestBlocks,
+  type DerivedHitlResponse,
+  type SlackHitlAction,
+  type SlackHitlRoute,
+} from "#public/channels/slack/hitl.js";
 
 /**
  * Card builders and element types re-exported from the vendored chat

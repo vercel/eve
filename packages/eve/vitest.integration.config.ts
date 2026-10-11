@@ -32,7 +32,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    exclude: ["**/node_modules/**", "test/scenarios/**"],
+    exclude: [
+      "**/node_modules/**",
+      "test/scenarios/**",
+      // Channel conformance checks platform protocol, not the OS, and is slowest on Windows runners.
+      ...(process.platform === "win32" ? ["**/conformance*.integration.test.ts"] : []),
+    ],
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
     include: ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"],
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],

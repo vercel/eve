@@ -1,5 +1,3 @@
-import { resumeHook } from "#internal/workflow/runtime.js";
-
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
   SubagentAuthorizationEvent,
@@ -7,6 +5,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
+import { resolvedForParent } from "#harness/proxy-input-requests.js";
 import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 
@@ -16,8 +15,9 @@ const log = createLogger("execution.subagent-adapter");
  * Framework adapter that bridges a child subagent session to its
  * parent.
  *
- * It proxies child `input.requested` events upward so the parent channel
- * can render HITL prompts and route responses back down to the child.
+ * It proxies child `input.requested` events upward so the parent channel can
+ * render HITL prompts and route responses back down to the child, and the
+ * `input.resolved` of requests only the child can close.
  */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
@@ -32,6 +32,11 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
   },
   async "authorization.completed"(data, ctx) {
     await forwardSubagentAuthorizationEvent({ data, type: "authorization.completed" }, ctx);
+  },
+  async "input.resolved"(data, ctx) {
+    const relayed = resolvedForParent(data);
+    if (relayed === undefined) return;
+    await forwardSubagentAuthorizationEvent({ data: relayed, type: "input.resolved" }, ctx);
   },
   async "input.requested"(data, ctx) {
     const state = ctx.state;
@@ -93,7 +98,7 @@ async function forwardSubagentAuthorizationEventStep(input: {
   "use step";
 
   try {
-    await resumeHook(input.parentContinuationToken, input.hookPayload);
+    await resumeParentHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     const errorId = createErrorId();
     log.warn("failed to forward subagent authorization event to parent", {
@@ -120,7 +125,7 @@ async function forwardSubagentInputRequestStep(input: {
   "use step";
 
   try {
-    await resumeHook(input.parentContinuationToken, input.hookPayload);
+    await resumeParentHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     const errorId = createErrorId();
     log.warn("failed to forward proxied HITL batch to parent", {
@@ -134,4 +139,13 @@ async function forwardSubagentInputRequestStep(input: {
     });
     throw error;
   }
+}
+
+/**
+ * Resumes the parent's hook. The workflow runtime loads only when a child forwards, so the
+ * channel adapters every session context restores stay free of it.
+ */
+async function resumeParentHook(token: string, payload: unknown): Promise<void> {
+  const { resumeHook } = await import("#internal/workflow/runtime.js");
+  await resumeHook(token, payload);
 }

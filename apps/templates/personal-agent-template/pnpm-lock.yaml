@@ -13,13 +13,13 @@ importers:
         version: 0.6.2(magic-string@1.2.2)(magicast@0.5.4)(nuxt@4.5.2(99e75a557cede4926b71c8c93d703d06))(rolldown@1.2.5)(shiki@4.4.3)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.5)(rollup@4.62.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)))(vue@3.5.41(typescript@6.0.3))
       '@github-tools/sdk':
         specifier: ^1.11.1
-        version: 1.11.1(@vercel/connect@0.8.0(ai@7.0.105(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)))(ai@7.0.105(zod@4.4.3))(eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))(zod@4.4.3)
+        version: 1.11.1(@vercel/connect@2.4.0(ai@7.0.128(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)))(ai@7.0.128(zod@4.4.3))(eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))(zod@4.4.3)
       '@libsql/client':
         specifier: ^0.17.4
         version: 0.17.4
       '@nuxt/ui':
         specifier: ^4.11.1
-        version: 4.11.1(bb980e1ad3ed1800d848c88676a3cc2c)
+        version: 4.11.1(3805a5bf82acd8278d90575bde40015f)
       '@nuxthub/core':
         specifier: ^0.10.8
         version: 0.10.8(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(db0@0.3.4(@libsql/client@0.17.4)(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5)))(ioredis@5.11.1(supports-color@10.2.2))(magic-string@1.2.2)(magicast@0.5.4)(rolldown@1.2.5)(typescript@6.0.3)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.5)(rollup@4.62.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)))(vue-tsc@3.3.10(typescript@6.0.3))
@@ -30,20 +30,20 @@ importers:
         specifier: ^2.0.1
         version: 2.0.1(nuxt@4.5.2(99e75a557cede4926b71c8c93d703d06))(react@19.2.6)(vue@3.5.41(typescript@6.0.3))
       '@vercel/connect':
-        specifier: 0.8.0
-        version: 0.8.0(ai@7.0.105(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))
+        specifier: ^2.4.0
+        version: 2.4.0(ai@7.0.128(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))
       ai:
-        specifier: 7.0.105
-        version: 7.0.105(zod@4.4.3)
+        specifier: 7.0.128
+        version: 7.0.128(zod@4.4.3)
       better-auth:
         specifier: ^1.7.1
         version: 1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3))
       chat:
         specifier: ^4.38.1
-        version: 4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+        version: 4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
       chat-adapter-sendblue:
         specifier: ^0.2.0
-        version: 0.2.0(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))
+        version: 0.2.0(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
@@ -52,7 +52,7 @@ importers:
         version: 0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5)
       eve:
         specifier: ^0.66.3
-        version: 0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)
+        version: 0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)
       maska:
         specifier: ^3.2.0
         version: 3.2.0
@@ -96,20 +96,20 @@ importers:
 
 packages:
 
-  '@ai-sdk/gateway@4.0.85':
-    resolution: {integrity: sha512-c8ztST/CslupqO3p7izsAuG3TlKg9mhE6mGJ42iUADsSMJIV5IOKd9AsLG33QCAY7SWs6NDO2giM/rq7bUTNlQ==}
+  '@ai-sdk/gateway@4.0.104':
+    resolution: {integrity: sha512-4lTyt8a4BMfVz4QGo+VO5odakmYMX5kq+xiRgdQGGY7o/jP2WSasp6LvIvYvt/lHzz1MfE+xKTOJhz7mMwjynA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider-utils@5.0.43':
-    resolution: {integrity: sha512-gw/bcNseOGSs59TMtV4H1KwqXXe24NHgx+uBYr98pa4Fg6Uvp8hPPxjuckVnfFFyIxHCDew8so0ujpvcSuyMZA==}
+  '@ai-sdk/provider-utils@5.0.54':
+    resolution: {integrity: sha512-amqDxFnw9+dpVrDACRDGmExUUNOH9C1D2bhg/DqWJnamEOieDTXBBXLHujSby/0MqHdAFksnpE8Pzfqx6ABMBw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider@4.0.17':
-    resolution: {integrity: sha512-VYMBxIQdcHqbIf1j+YZlI9Ati6LZ4wJe0GGd4z4a5H/KxTggjeOiyaVYTnfF7LHZK5jMQ+rofmzz4QPqf++NUw==}
+  '@ai-sdk/provider@4.0.22':
+    resolution: {integrity: sha512-1Jtmn36VNMOBo9CMUQrPqsR744qtqRloEiXpWCYS8ffPlhS2CrSNmoho5lPjp3R7EnkzBsGI6p51TA7fQJQZdA==}
     engines: {node: '>=22'}
 
   '@alloc/quick-lru@5.2.0':
@@ -2818,28 +2818,31 @@ packages:
       vue-router:
         optional: true
 
-  '@vercel/cli-config@0.2.3':
-    resolution: {integrity: sha512-Ggh0Wmi92TUkUexmSUPkkDtvJmbjUr7IvF5T3FkSsWrXXs3GFzOujfxFpECdJZpux1JG4SWDv9BT4w++TDgD6A==}
+  '@vercel/cli-config@0.3.1':
+    resolution: {integrity: sha512-sISbygqlFXYb8qfPu/+2Cf/A8IjrlAuZePdag3EDQr2PRA455s7UZtl9Ro674CWsB/saBRmz3jEkw0YsQs8OoQ==}
 
   '@vercel/cli-exec@1.0.1':
     resolution: {integrity: sha512-g9XerViJ/paZujufXYcu5XYI2vU2rtB4sgdpjUHde5RnOkdmpu0ngH46LCFGHoPXO/C+qDPSczIHIRN+8Q2YKQ==}
     engines: {node: '>= 18'}
 
-  '@vercel/connect@0.8.0':
-    resolution: {integrity: sha512-EMC7e0i+3xQZyjyceEoqPD3/CZFEfVHiNN/CMRrzg52n/IvoN8f9KElN2aqWdL0rGx/FVexMj5Czl/YqVed76Q==}
+  '@vercel/connect@2.4.0':
+    resolution: {integrity: sha512-DLgITa6iPZRhmPA5L76c1riEiCnsTUmBvfkcbgaOM/0PtSHjOnb8AQ9ywyiyDidlUvLnBot9cteaorjIx0aoWA==}
     peerDependencies:
       '@ai-sdk/mcp': ^1 || ^2
       '@auth/core': '>=0.37.0'
       '@chat-adapter/slack': ^4.0.0
+      '@modelcontextprotocol/sdk': ^1.29.0
       ai: ^6 || ^7.0.0-beta.0
       better-auth: '>=1.5.0'
-      eve: '>=0.13.7'
+      eve: '>=0.39.1'
     peerDependenciesMeta:
       '@ai-sdk/mcp':
         optional: true
       '@auth/core':
         optional: true
       '@chat-adapter/slack':
+        optional: true
+      '@modelcontextprotocol/sdk':
         optional: true
       ai:
         optional: true
@@ -2857,8 +2860,8 @@ packages:
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
     engines: {node: '>= 20'}
 
-  '@vercel/oidc@3.8.4':
-    resolution: {integrity: sha512-FGNvVZ5pgX9FaBqkPt6VkYFZ6bWAMDzYi7nxW+1Xt+Z4fn5PuTULVwsxjKc+0uKhysyWBQmvsmM50Oh6C2/oMA==}
+  '@vercel/oidc@4.0.0':
+    resolution: {integrity: sha512-ko6ATeRUlHZMB5hLFdC7+/Q1dI2f3NX3gZHxtpALdkxurwjD5HFHGWYF+4o+4SF0E47jg6KzcHknmRpHcKgJ5A==}
     engines: {node: '>= 20'}
 
   '@vitejs/plugin-vue-jsx@5.1.6':
@@ -3050,8 +3053,8 @@ packages:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
 
-  ai@7.0.105:
-    resolution: {integrity: sha512-gkV3W+tTtWwQ41KNV/KjV8wabBrk+bnbnZ3f0AWp/T9LLyljose8uhFViKleVy7tIdEiR2PiS4BpbNdcExf7rQ==}
+  ai@7.0.128:
+    resolution: {integrity: sha512-WMKN83DodYtH52ETPHq0jrSwj3wU0aHkhLHXMrwMRabC/aMpIqeWsXJgjkUwrOqkaKHWONdupk/2ttPRvAyFcg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -6529,23 +6532,23 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/gateway@4.0.85(zod@4.4.3)':
+  '@ai-sdk/gateway@4.0.104(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.4.3)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.4.3)
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
-  '@ai-sdk/provider-utils@5.0.43(zod@4.4.3)':
+  '@ai-sdk/provider-utils@5.0.54(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 4.0.17
+      '@ai-sdk/provider': 4.0.22
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.1
       undici: 7.29.0
       zod: 4.4.3
 
-  '@ai-sdk/provider@4.0.17':
+  '@ai-sdk/provider@4.0.22':
     dependencies:
       json-schema: 0.4.0
 
@@ -7232,14 +7235,14 @@ snapshots:
       - '@vue/composition-api'
       - vue
 
-  '@github-tools/sdk@1.11.1(@vercel/connect@0.8.0(ai@7.0.105(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)))(ai@7.0.105(zod@4.4.3))(eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))(zod@4.4.3)':
+  '@github-tools/sdk@1.11.1(@vercel/connect@2.4.0(ai@7.0.128(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)))(ai@7.0.128(zod@4.4.3))(eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))(zod@4.4.3)':
     dependencies:
-      ai: 7.0.105(zod@4.4.3)
+      ai: 7.0.128(zod@4.4.3)
       octokit: 5.0.5
       zod: 4.4.3
     optionalDependencies:
-      '@vercel/connect': 0.8.0(ai@7.0.105(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))
-      eve: 0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)
+      '@vercel/connect': 2.4.0(ai@7.0.128(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))
+      eve: 0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)
 
   '@iconify-json/lucide@1.2.124':
     dependencies:
@@ -7814,7 +7817,7 @@ snapshots:
       rc9: 3.0.1
       std-env: 4.2.0
 
-  '@nuxt/ui@4.11.1(bb980e1ad3ed1800d848c88676a3cc2c)':
+  '@nuxt/ui@4.11.1(3805a5bf82acd8278d90575bde40015f)':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@iconify/vue': 5.0.1(vue@3.5.41(typescript@6.0.3))
@@ -7883,7 +7886,7 @@ snapshots:
     optionalDependencies:
       '@internationalized/date': 3.12.3
       '@internationalized/number': 3.6.7
-      ai: 7.0.105(zod@4.4.3)
+      ai: 7.0.128(zod@4.4.3)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -9249,7 +9252,7 @@ snapshots:
       react: 19.2.6
       vue: 3.5.41(typescript@6.0.3)
 
-  '@vercel/cli-config@0.2.3':
+  '@vercel/cli-config@0.3.1':
     dependencies:
       xdg-app-paths: 5.5.1
       zod: 4.1.11
@@ -9258,13 +9261,13 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@0.8.0(ai@7.0.105(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))':
+  '@vercel/connect@2.4.0(ai@7.0.128(zod@4.4.3))(better-auth@1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3)))(eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12))':
     dependencies:
-      '@vercel/oidc': 3.8.4
+      '@vercel/oidc': 4.0.0
     optionalDependencies:
-      ai: 7.0.105(zod@4.4.3)
+      ai: 7.0.128(zod@4.4.3)
       better-auth: 1.7.1(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.10.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vue@3.5.41(typescript@6.0.3))
-      eve: 0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)
+      eve: 0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12)
 
   '@vercel/nft@1.11.0(rollup@4.62.4)(supports-color@10.2.2)':
     dependencies:
@@ -9287,9 +9290,9 @@ snapshots:
 
   '@vercel/oidc@3.2.0': {}
 
-  '@vercel/oidc@3.8.4':
+  '@vercel/oidc@4.0.0':
     dependencies:
-      '@vercel/cli-config': 0.2.3
+      '@vercel/cli-config': 0.3.1
       '@vercel/cli-exec': 1.0.1
       jose: 5.10.0
 
@@ -9505,11 +9508,11 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  ai@7.0.105(zod@4.4.3):
+  ai@7.0.128(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 4.0.85(zod@4.4.3)
-      '@ai-sdk/provider': 4.0.17
-      '@ai-sdk/provider-utils': 5.0.43(zod@4.4.3)
+      '@ai-sdk/gateway': 4.0.104(zod@4.4.3)
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.4.3)
       zod: 4.4.3
 
   alien-signals@3.2.1: {}
@@ -9767,12 +9770,12 @@ snapshots:
 
   character-entities@2.0.2: {}
 
-  chat-adapter-sendblue@0.2.0(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)):
+  chat-adapter-sendblue@0.2.0(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)):
     dependencies:
-      chat: 4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      chat: 4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
       sendblue: 3.11.0
 
-  chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3):
+  chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -9782,7 +9785,7 @@ snapshots:
       remend: 1.3.0
       unified: 11.0.5
     optionalDependencies:
-      ai: 7.0.105(zod@4.4.3)
+      ai: 7.0.128(zod@4.4.3)
       zod: 4.4.3
     transitivePeerDependencies:
       - supports-color
@@ -10293,13 +10296,13 @@ snapshots:
 
   etag@1.8.1: {}
 
-  eve@0.66.3(ai@7.0.105(zod@4.4.3))(chat@4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12):
+  eve@0.66.3(ai@7.0.128(zod@4.4.3))(chat@4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(microsandbox@0.6.12):
     dependencies:
-      ai: 7.0.105(zod@4.4.3)
+      ai: 7.0.128(zod@4.4.3)
       nitro: 3.0.260903-beta
       undici: 8.9.0
     optionalDependencies:
-      chat: 4.38.1(ai@7.0.105(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
+      chat: 4.38.1(ai@7.0.128(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
       microsandbox: 0.6.12
 
   event-target-shim@5.0.1: {}

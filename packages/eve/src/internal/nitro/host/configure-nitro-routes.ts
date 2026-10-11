@@ -29,6 +29,10 @@ import {
 } from "#internal/nitro/host/application-route-registry.js";
 import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import {
+  EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+  hasVercelScheduleCollections,
+} from "#internal/schedules/consumer-route.js";
 
 function resolveNitroWorkflowBuildDirectory(nitro: Nitro): string {
   return join(nitro.options.buildDir, "workflow");
@@ -415,11 +419,22 @@ export async function configureProductionNitroRoutes(
   await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
 
   const routeRegistry = createApplicationRouteRegistry(preparedHost);
-  registerApplicationRoutes(
-    nitro,
-    createProductionNitroArtifactsConfig(preparedHost.appRoot),
-    routeRegistry,
-  );
+  const artifactsConfig = createProductionNitroArtifactsConfig(preparedHost.appRoot);
+  registerApplicationRoutes(nitro, artifactsConfig, routeRegistry);
+  if (
+    isVercelBuildEnvironment() &&
+    hasVercelScheduleCollections(preparedHost.compileResult.manifest)
+  ) {
+    addHostVirtualHandler(nitro, {
+      args: JSON.stringify(artifactsConfig),
+      handlerExport: "handleScheduleCollectionConsumer",
+      method: "POST",
+      modulePath: resolvePackageSourceFilePath(
+        "src/internal/nitro/routes/schedule-collection-consumer.ts",
+      ),
+      route: EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+    });
+  }
 
   const workflowBundlePath = join(preparedHost.workflowBuildDir, "workflows.mjs");
   const hasConfiguredWorkflowWorld =

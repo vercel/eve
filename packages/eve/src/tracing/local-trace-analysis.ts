@@ -119,7 +119,7 @@ function recordFor(operation: LocalTraceOperation, startTimeNs: bigint): TraceTi
     spanId: span.spanId,
     startOffsetMs: Number(span.startTimeNs - startTimeNs) / 1_000_000,
   };
-  const callId = traceStringAttribute(span, "agent.action.call_id");
+  const callId = traceStringAttribute(span, "gen_ai.tool.call.id");
   const model = traceModelName(span);
   const sessionId = traceSessionId(span);
   const name = traceToolName(span);
@@ -137,10 +137,10 @@ function recordFor(operation: LocalTraceOperation, startTimeNs: bigint): TraceTi
   if (category === "model") {
     const usage: Mutable<TraceTokenUsage> = {};
     for (const [field, attribute] of Object.entries({
-      inputTokens: "agent.usage.input_tokens",
-      outputTokens: "agent.usage.output_tokens",
-      cacheReadTokens: "agent.usage.cache_read_tokens",
-      cacheWriteTokens: "agent.usage.cache_write_tokens",
+      inputTokens: "gen_ai.usage.input_tokens",
+      outputTokens: "gen_ai.usage.output_tokens",
+      cacheReadTokens: "gen_ai.usage.cache_read.input_tokens",
+      cacheWriteTokens: "gen_ai.usage.cache_write.input_tokens",
     })) {
       const value = span.attributes[attribute];
       if (typeof value === "number" && Number.isFinite(value) && value >= 0) {

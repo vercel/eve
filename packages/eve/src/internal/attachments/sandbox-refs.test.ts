@@ -71,9 +71,11 @@ describe("encodeSandboxRef", () => {
 describe("decodeSandboxRef", () => {
   it("round-trips every field end-to-end via a URL instance", () => {
     const original: SandboxRef = {
+      height: 1080,
       mediaType: "image/png",
       path: "/vercel/sandbox/workspace/attachments/abc123/diagram.png",
       size: 524288,
+      width: 1920,
     };
     const decoded = decodeSandboxRef(encodeSandboxRef(original));
     expect(decoded).toEqual(original);
@@ -135,7 +137,7 @@ describe("isSandboxRefUrl", () => {
   });
 
   it("returns false for a URL with a different scheme", () => {
-    expect(isSandboxRefUrl(new URL("eve-attachment:?v=1&p=e30"))).toBe(false);
+    expect(isSandboxRefUrl(new URL("https://example.com/a.png"))).toBe(false);
     expect(isSandboxRefUrl(new URL("https://example.com/a"))).toBe(false);
     expect(isSandboxRefUrl(new URL("data:text/plain;base64,Zm9v"))).toBe(false);
   });

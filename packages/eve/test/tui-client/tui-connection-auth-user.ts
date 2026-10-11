@@ -315,7 +315,12 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
         throw new Error(`Follow-up session failed: ${event.data.code} ${event.data.message}`);
       }
 
-      if (event.type === "session.waiting" || event.type === "session.completed") {
+      // The fresh sign-in holds the second principal's turn (`on: "input"`).
+      if (
+        event.type === "session.waiting" ||
+        event.type === "session.completed" ||
+        (event.type === "turn.waiting" && event.data.on === "input")
+      ) {
         followupBoundary = event.type;
         break;
       }

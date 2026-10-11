@@ -7,8 +7,13 @@ import { findEveProjectContext } from "#internal/project-context.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
+import { resolveDevServerTimeout } from "#shared/framework-eve-server.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
-import { NEXT_PHASE_PRODUCTION_BUILD, resolveEveDestinationPrefix } from "./server.js";
+import {
+  EVE_NEXT_HOST,
+  NEXT_PHASE_PRODUCTION_BUILD,
+  resolveEveDestinationPrefix,
+} from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
 /**
@@ -160,18 +165,6 @@ function resolveApplicationRoot(appPath: string | undefined): string {
   }
 
   return resolve(process.cwd(), appPath);
-}
-
-function resolveDevServerTimeout(timeoutMs: number | undefined): number | undefined {
-  if (timeoutMs === undefined) {
-    return undefined;
-  }
-
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error("eve Next.js development server timeout must be a positive number.");
-  }
-
-  return timeoutMs;
 }
 
 function normalizeRoutePrefix(prefix: string): string {
@@ -440,7 +433,7 @@ export function withEve<TConfig extends EveNextConfig>(
   options: WithEveOptions = {},
 ): EveNextConfigFunction<TConfig> {
   const nextRoot = process.cwd();
-  const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs);
+  const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NEXT_HOST);
   assertValidWithEveOptions(options);
   return async function eveNextConfig(phase, context) {
     const [agents, nextConfig] = await Promise.all([

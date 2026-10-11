@@ -51,6 +51,8 @@ The default `message.completed` handler sends plain text via `sendMessage`. It p
 
 Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`.
 
+A text reply to a bot message is sent as a normal message, with the replied-to message id in `state.replyToBotMessageId`. When that id matches a pending `ForceReply` prompt, the channel's `deliver` hook turns the reply into the answer. Otherwise the reply reaches the agent as a message, and starts a new session when none owns the thread.
+
 ### Proactive sessions
 
 Start a session without an inbound message through `to(telegram, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(telegram, target).send(message, { auth })` from another channel. `target.chatId` is required. Add `messageThreadId` to land in a specific forum topic.

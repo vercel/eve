@@ -20,7 +20,12 @@ const isOpen = ref(
   props.part.state === "approval-requested" || props.part.state === "approval-responded",
 );
 
-const toolName = computed(() => props.part.toolMetadata?.eve?.name ?? props.part.toolName);
+const title = computed(
+  () =>
+    props.part.toolMetadata?.eve?.label ??
+    props.part.toolMetadata?.eve?.name ??
+    props.part.toolName,
+);
 
 const stateLabel = computed(() => {
   const labels: Record<string, string> = {
@@ -75,7 +80,7 @@ const formattedOutput = computed(() => {
             d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
           />
         </svg>
-        <span class="text-sm font-medium">{{ toolName }}</span>
+        <span class="text-sm font-medium">{{ title }}</span>
         <span class="rounded-full bg-secondary px-2 py-0.5 text-xs" :class="stateColor">
           {{ stateLabel }}
         </span>

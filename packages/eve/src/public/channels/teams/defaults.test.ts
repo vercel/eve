@@ -42,41 +42,10 @@ function authRequiredEvent(overrides: { displayName?: string } = {}) {
 }
 
 describe("defaultEvents approval lifecycle", () => {
-  it("records a posted tool approval card for settlement", async () => {
-    const { channel, post } = buildChannelStub();
-
-    await defaultEvents["input.requested"]!(
-      {
-        requests: [
-          {
-            action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "deploy" },
-            kind: "tool-approval",
-            options: [
-              { id: "approve", label: "Approve" },
-              { id: "cancel", label: "Cancel" },
-            ],
-            prompt: "Approve deployment?",
-            requestId: "approval_1",
-          },
-        ],
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-      channel,
-      sessionCtx,
-    );
-
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(channel.state.pendingApprovalCards).toEqual({
-      approval_1: { activityId: "act1", prompt: "Approve deployment?" },
-    });
-  });
-
   it("replaces the settled approval card with the responder's identity", async () => {
     const { channel, update } = buildChannelStub({
       approvalResponderAccounts: { "teams:TENANT:USER": { id: "USER", name: "Ada" } },
-      pendingApprovalCards: {
+      pendingPromptCards: {
         approval_1: { activityId: "approval-card", prompt: "Approve deployment?" },
       },
     });
@@ -99,7 +68,7 @@ describe("defaultEvents approval lifecycle", () => {
       expect.objectContaining({ attachments: expect.any(Array) }),
     );
     expect(JSON.stringify(update.mock.calls[0]?.[1])).toContain("Answered: Approved by Ada");
-    expect(channel.state.pendingApprovalCards).toEqual({});
+    expect(channel.state.pendingPromptCards).toEqual({});
   });
 });
 

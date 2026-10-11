@@ -109,18 +109,31 @@ describe("session callback route", () => {
       kind: "subagent-authorization-event",
       subagentName: "research",
     };
-    const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
-        body: JSON.stringify(payload),
-        method: "POST",
-      }),
-      createRouteContext({ token: "tok123" }),
-    );
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", payload);
+    // A remote agent sends the protocol-1 form to a session created by eve 0.66–0.68,
+    // whose callback URL now resolves to this deployment.
+    const legacy = {
+      ...payload,
+      childContinuationToken: "child-inbox",
+      kind: "task.authorization",
+      taskId: "task-1",
+    };
+    for (const body of [payload, legacy]) {
+      const response = await handleSessionCallbackRequest(
+        new Request("https://app.example.com/eve/v1/callback/tok123", {
+          body: JSON.stringify(body),
+          method: "POST",
+        }),
+        createRouteContext({ token: "tok123" }),
+      );
+      expect(response.status).toBe(202);
+    }
+    expect(resumeHookMock.mock.calls).toEqual([
+      ["tok123", payload],
+      ["tok123", payload],
+    ]);
   });
 
-  it.each(["approval.candidate", "approval.settled"])(
+  it.each(["approval.candidate", "approval.settled", "input.resolved"])(
     "rejects a malformed %s callback before it reaches the parent channel",
     async (type) => {
       const response = await handleSessionCallbackRequest(
@@ -141,19 +154,21 @@ describe("session callback route", () => {
     },
   );
 
-  it("relays a well-formed approval settlement", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const event = {
+  const at = { sequence: 0, stepIndex: 1, turnId: "child-turn" };
+  it.each([
+    {
       type: "approval.settled",
+      data: { ...at, outcome: "approved", requestId: "approval-1", responderPrincipalId: "alice" },
+    },
+    {
+      type: "input.resolved",
       data: {
-        outcome: "approved",
-        requestId: "approval-1",
-        responderPrincipalId: "alice",
-        sequence: 0,
-        stepIndex: 1,
-        turnId: "child-turn",
+        ...at,
+        resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "approval-1" }],
       },
-    };
+    },
+  ])("relays a well-formed $type", async (event) => {
+    resumeHookMock.mockResolvedValue(undefined);
     const payload = {
       callId: "call-2",
       childSessionId: "remote-session",

@@ -15,7 +15,11 @@ export const metadata: Metadata = {
   ...titleMetadata,
   description,
   alternates: canonicalAlternates(canonicalRoutes.templates),
-  openGraph: { ...titleMetadata.openGraph, images: [staticOgImage] },
+  openGraph: {
+    ...titleMetadata.openGraph,
+    images: [staticOgImage],
+    url: canonicalRoutes.templates,
+  },
   twitter: {
     ...titleMetadata.twitter,
     card: "summary_large_image",
@@ -25,15 +29,17 @@ export const metadata: Metadata = {
 
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));
 
-const templateSummaries = templateManifest.map(
-  ({ category, description: templateDescription, integrations, slug, title: templateTitle }) => ({
-    category,
-    description: templateDescription,
-    integrations,
-    slug,
-    title: templateTitle,
-  }),
-);
+const templateSummaries = templateManifest
+  .filter(({ unlisted }) => !unlisted)
+  .map(
+    ({ category, description: templateDescription, integrations, slug, title: templateTitle }) => ({
+      category,
+      description: templateDescription,
+      integrations,
+      slug,
+      title: templateTitle,
+    }),
+  );
 
 const TemplatesPage = () => (
   <main className="mx-auto max-w-[1080px] px-4 pb-32 sm:px-6">

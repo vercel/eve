@@ -1,0 +1,259 @@
+---
+title: "Tool Stubs"
+description: "Define tool outcomes and outcome sequences in your evals."
+---
+
+Pass `stubs` when creating an eval session to replace selected tool executions with JSON responses. The same rules work against local and deployed agents, without deploying mock functions or keeping the runner connected to answer tool calls.
+
+Stubs specify what tools return. [Assertions](./assertions) check what the agent does and tells the user. Unused stubs produce a warning without failing the eval.
+
+## Author an eval
+
+```ts title="evals/complete-task.eval.ts"
+import { defineEval } from "eve/evals";
+
+export default defineEval({
+  async test(t) {
+    const session = await t.session({
+      stubs: [
+        {
+          id: "tasks",
+          tool: "list_tasks",
+          outcomes: [
+            {
+              response: {
+                tasks: [
+                  { id: "milk", title: "Buy milk" },
+                  { id: "dog", title: "Walk dog" },
+                  { id: "rent", title: "Pay rent" },
+                ],
+              },
+            },
+            {
+              response: {
+                tasks: [
+                  { id: "dog", title: "Walk dog" },
+                  { id: "rent", title: "Pay rent" },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          id: "complete-milk",
+          tool: "complete_task",
+          match: { task_id: { const: "milk" } },
+          outcome: { response: { success: true } },
+        },
+      ],
+    });
+
+    const first = await session.send("What tasks do I have?");
+    first.expectOk();
+    first.calledTool("list_tasks", { count: 1 });
+    first.messageIncludes("Buy milk");
+
+    const second = await session.send("Complete Buy milk, then list my remaining tasks.");
+    second.expectOk();
+    second.calledTool("complete_task", { input: { task_id: "milk" }, count: 1 });
+    second.toolOrder(["complete_task", "list_tasks"]);
+    second.messageIncludes("Walk dog");
+    second.messageIncludes("Pay rent");
+  },
+});
+```
+
+Use your agent's actual tool names and response shapes. The client accepts the same option on `client.sessions.create({ stubs })` or `client.sessions.create({ message, stubs })`.
+
+These responses describe a sequence, not a simulated task database. The second `list_tasks` call returns two tasks even if `complete_task` was never called. The completion and order assertions check that the agent actually requested the write; testing a real database update requires the real tool.
+
+## Stub fields
+
+| Field      | Meaning                                                                                                                                |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`       | Your session-unique rule identifier. eve uses it to track this rule's response sequence. It is neither a tool name nor a tool-call ID. |
+| `tool`     | The existing tool's name, optionally qualified by its local subagent path.                                                             |
+| `match`    | Optional input-property constraints, expressed as JSON Schema. Omit it or use `{}` to match any valid input.                           |
+| `outcome`  | One outcome repeated on every matching call, such as `{ response: { tasks: [] } }`.                                                    |
+| `outcomes` | A nonempty array of outcomes returned in sequence. Use exactly one of `outcome` or `outcomes`.                                         |
+
+Each outcome contains exactly one of `response` or `throw`. `response` holds the JSON returned by the tool; `throw` describes an error raised immediately instead. The enclosing outcome is not part of the tool's response. Top-level `response` and `responses` are not accepted.
+
+Exposing rule IDs and response positions in traces is a follow-up: [AX-5157](https://linear.app/vercel/issue/AX-5157).
+
+Stubs are plain JSON and can be shared between evals:
+
+```ts title="evals/fixtures/tasks.ts"
+import type { ToolStub } from "eve/evals";
+
+export const taskStubs = [
+  { id: "tasks", tool: "list_tasks", outcome: { response: { tasks: [] } } },
+] satisfies readonly ToolStub[];
+```
+
+Pass the fixture to `t.session({ stubs: taskStubs })`. Each session has its own sequence position. Both `eve/evals` and `eve/client` export `ToolStub` and `ToolStubOutcome`. These types check the JSON contract; they do not infer the response type from your tool definition.
+
+## Match tool arguments
+
+**Rules are evaluated from top to bottom. The first matching stub wins.** Put specific rules before an unconditional fallback:
+
+```ts
+const stubs = [
+  {
+    id: "milk",
+    tool: "complete_task",
+    match: { task_id: { const: "milk" } },
+    outcome: { response: { success: true } },
+  },
+  { id: "other-tasks", tool: "complete_task", outcome: { response: { success: false } } },
+];
+```
+
+A call for milk receives success; other valid calls receive the fallback. Reversing these rules makes the unconditional rule win every time. If no rule matches, eve executes the real tool. A broken stub or failure processing its response fails the eval, even if the agent recovers. An intentional `throw` outcome is a normal tool failure that the eval can assert on. Neither falls back to real execution.
+
+If eve cannot record an output-processing failure, it cancels the workflow serving stubs. The original tool error or fallback is preserved, but verification rejects the eval. Failed or cancelled stub sessions cannot pass verification.
+
+Every property listed in `match` must exist and satisfy its constraint. Extra top-level properties are allowed:
+
+```json
+{
+  "id": "open-tasks",
+  "tool": "search_tasks",
+  "match": {
+    "filter": {
+      "type": "object",
+      "properties": { "status": { "const": "open" } },
+      "required": ["status"]
+    },
+    "query": { "type": "string", "pattern": "\\b(?i:milk)\\b" },
+    "tags": { "type": "array", "contains": { "const": "urgent" } }
+  },
+  "outcome": { "response": { "tasks": ["Buy milk"] } }
+}
+```
+
+Nested properties are optional unless listed in `required`. Matching does not coerce values, apply defaults, or change arguments. The real tool schema validates input before replacement; normal approvals and output processing still apply.
+
+Constraints use a reference-free subset of JSON Schema 2020-12: types, scalar `const` and `enum`, string patterns and bounds, numeric bounds, array items/contains, object properties/required/additionalProperties, and logical/conditional schemas. `pattern` uses JavaScript regular expressions. Schema validation, regex syntax checks, and validator initialization run before session creation.
+
+Unsupported constraints fail setup: `patternProperties`, references, formats, `multipleOf`, `minContains`, `maxContains`, `uniqueItems`, dependencies, and object/array values in `const` or `enum`. Nested `properties` and `required` cannot use inherited property names such as `constructor` or `toString`. Use nested properties or array items to match structured values.
+
+Unknown static tool names, invalid local-agent paths, and paths into remote agents fail session creation. Dynamic names and connection operations are checked where possible; unresolved names are allowed. After the eval, unused rule IDs are reported as warnings. Use tool assertions when a call must happen.
+
+Configuration is limited to 100 rules, 20,000 JSON nodes, nesting depth 32, and approximately one million characters. The `__proto__` property name is reserved.
+
+## Sequences and session scope
+
+`outcome` repeats on every matching call. `outcomes` advances on each new matching call, then repeats its final entry. For example, `outcomes: [{ response: "pending" }, { response: "completed" }]` returns `"pending"` once and `"completed"` thereafter. Only the selected rule advances; exhaustion never selects a later rule.
+
+Two calls within one agent turn consume two entries. Later turns continue the same sequence. Calls awaiting or denied approval do not consume entries. Each session supports up to 10,000 recorded calls.
+
+Choose the rules at session creation; they stay fixed for that session. Local subagents share playback through explicit tool paths, and deployment handoffs preserve it. An independent session starts at the first response.
+
+eve's transparent internal workflow replay reuses the recorded outcome without consuming another entry.
+
+Parallel calls consume responses in arrival order, which can vary. Use separate argument matchers when particular arguments must receive particular responses.
+
+## Permit tool replacement
+
+Tool replacement is denied by default, including in development. With [Vercel OIDC](../guides/auth-and-route-protection#verceloidc), put the permission on the eval runner's verified subject:
+
+```ts title="agent/channels/eve.ts"
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth: [
+    vercelOidc({
+      subjects: [
+        vercelSubject({ teamSlug: "acme", projectName: "app" }),
+        {
+          subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }),
+          allowToolStubs: true,
+        },
+      ],
+    }),
+  ],
+});
+```
+
+Both projects can authenticate; only the eval runner receives replacement permission. `vercelSubject` defaults to production; pass `environment: "*"` to include all environments. The target's server configuration supplies the grant after token verification. Request JSON cannot grant permission, and user principals do not inherit project grants.
+
+Custom authenticators can return the same `allowToolStubs: true` after verifying the caller. See [authentication and route protection](../guides/auth-and-route-protection#tool-replacement-permission) for the grant rules and a local development example.
+
+Permission is checked at session creation before identity projection. Later messages and result reads use normal channel authentication. Anyone your channel admits to an existing session can use its stubs. Your application's session-access policy must provide the required isolation; an isolated eval deployment can use the same agent code.
+
+The stub verification endpoint also requires `allowToolStubs`, checked before reading workflow status.
+
+## Supported tools and subagents
+
+Stubs replace execution of existing ordinary, dynamic, and workflow tools. They retain the real tool's input schema, approvals, and output processing. A stub does not register a new tool or make it visible to the model.
+
+Ordinary tools with configured stub rules can emit an extra `action.partial` containing the final response. This also applies when no rule matches and the real tool returns a non-streaming result. The final `action.result` remains correct, and real streaming still delivers progress. Use `action.result` for final-result assertions. Removing the extra event is tracked in [AX-5164](https://linear.app/vercel/issue/AX-5164).
+
+### Subagents
+
+Stubbing a delegation tool returns its configured result without starting the subagent. Persistent tools implemented with `serve`, including the built-in `agent`, require an unconditional stub: omit `match` or use `{}`. Mixing real and mocked calls to the same persistent tool is unsupported.
+
+To let a local subagent run but replace its tools, use `/` to qualify the delegation path:
+
+```ts
+const stubs = [
+  { id: "root-tasks", tool: "list_tasks", outcome: { response: ["Root task"] } },
+  { id: "research-tasks", tool: "researcher/list_tasks", outcome: { response: ["Research task"] } },
+  { id: "nested-tasks", tool: "researcher/assistant/list_tasks", outcome: { response: [] } },
+];
+```
+
+`researcher` replaces the whole delegation; `researcher/list_tasks` replaces only that subagent's list tool. The built-in `agent` uses `agent/list_tasks`. Model-visible names stay unchanged. A root rule never implicitly matches a subagent's same-named tool.
+
+Repeated subagent sessions at the same path share that rule's sequence. Different paths use different rules. Remote agents do not receive the configuration; replace their whole delegation tool instead.
+
+### Connections and provider tools
+
+Use the qualified operation name, such as `linear__list_issues` or `researcher/linear__list_issues`. Put operation arguments in `match` and its JSON result in `outcome.response`, or in each sequence entry's `response`.
+
+Connection discovery stays live: eve lists the connection's tools to validate the operation and its arguments before a stub replaces the call, so stubs do not provide an offline connection.
+
+A rule names the tool itself, whether the model calls it directly or through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill), as it does for deferred tools and connection operations. A call through `eve__tool` matches by the name and `input` of the tool it reaches. `eve__search`, `eve__tool`, and `eve__skill` cannot themselves be stubbed.
+
+Tools executed by the model provider, such as provider-hosted web search, have no eve executor to replace. A search tool implemented in your own agent can be stubbed.
+
+## Inject tool errors
+
+Use `throw` to test how the agent handles a failed tool call. Mix errors and responses to test recovery:
+
+```ts
+const stubs = [
+  {
+    id: "tasks",
+    tool: "list_tasks",
+    outcomes: [
+      { throw: { name: "TimeoutError", message: "Task service timed out" } },
+      { response: { tasks: [] } },
+    ],
+  },
+];
+```
+
+`throw.message` is required. `throw.name` is optional and defaults to `"Error"`. eve creates an ordinary JavaScript `Error` with that name and message; it does not instantiate custom error classes. `TimeoutError` reports a timeout immediately, without delaying the call or testing an actual deadline.
+
+Ordinary tools and connection operations expose the error message to the model, without the error name. Workflow task errors also retain the name. Put any details the model needs to act on in `message`.
+
+Use `outcome: { throw: { message: "Service unavailable" } }` to fail every matching call. A sequence consumes one entry per new call, whether it returns or throws, and repeats its final entry. Workflow replay reuses the same recorded outcome.
+
+An injected exception follows the tool's normal error handling. Ordinary and blocking workflow calls are recorded as failed; background tasks report failure when they settle. The model can report the failure or try again. Assert the failed call explicitly:
+
+```ts
+const turn = await session.send(
+  "List my tasks once. If the service fails, explain the failure and wait for me to retry.",
+);
+turn.expectOk();
+turn.calledTool("list_tasks", { status: "failed", count: 1 });
+```
+
+The eval can pass when the agent handles the failure correctly. `noFailedActions()` still rejects the failed call, so use explicit assertions for expected failures. Stub infrastructure and response-processing failures still fail verification.
+
+This works for ordinary tools, workflow tools, whole-agent replacements, and qualified connection operations. An exception in a persistent workflow tool ends that task; retry with a new call, rather than its failed task ID. Normal approvals apply before an outcome is consumed.
+
+Returning `{ response: { error: "timeout" } }` remains ordinary JSON. Only `throw` raises an exception.

@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { ResolvedRuntimeSubagentNode } from "#runtime/types.js";
 
-function subagent(tool?: boolean): ResolvedRuntimeSubagentNode {
+function subagent(tool?: boolean, name = "researcher"): ResolvedRuntimeSubagentNode {
   return {
     description: "Research difficult questions.",
     kind: "subagent",
-    logicalPath: "subagents/researcher",
-    name: "researcher",
-    nodeId: "subagents/researcher",
-    sourceId: "subagents/researcher",
+    logicalPath: `subagents/${name}`,
+    name,
+    nodeId: `subagents/${name}`,
+    sourceId: `subagents/${name}`,
     sourceKind: "module",
     tool,
   };
@@ -52,5 +52,19 @@ describe("createRuntimeSubagentRegistry", () => {
         subagents: [subagent()],
       }),
     ).toThrow('Subagent "researcher" collides with another runtime-visible tool name.');
+  });
+
+  it.each([true, false])("rejects a subagent in eve's namespace with tool %s", (tool) => {
+    expect(() =>
+      createRuntimeSubagentRegistry({ subagents: [subagent(tool, "eve__task_wait")] }),
+    ).toThrow(
+      'Subagent "subagents/eve__task_wait" uses the reserved name "eve__task_wait". Rename its path; eve reserves the "eve" namespace for its built-in tools.',
+    );
+  });
+
+  it("lets a model-visible subagent take a built-in tool's former name", () => {
+    const registry = createRuntimeSubagentRegistry({ subagents: [subagent(true, "task_wait")] });
+
+    expect(registry.preparedTools.map((tool) => tool.name)).toEqual(["task_wait"]);
   });
 });

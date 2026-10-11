@@ -107,11 +107,9 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
 
-      # --force replaces any vercel/vc bin links already on the runner; the allowed
-      # postinstall swaps the Node launcher for the native binary.
       - name: Install Vercel CLI
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: npm install --global --force --allow-scripts=@vercel/vc-native @vercel/vc-native && vercel --version
+        run: pnpm add --global vercel@latest && vercel --version
 
       - name: Install dependencies
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}

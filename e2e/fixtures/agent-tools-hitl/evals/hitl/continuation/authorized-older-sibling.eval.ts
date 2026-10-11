@@ -1,47 +1,34 @@
 import { defineEval } from "eve/evals";
 import {
   scriptedSession,
-  approveSavedChange,
-  expectChangeStillUnexecuted,
+  expectApprovalCancelled,
   expectResponseReply,
-  expectToolResult,
   requestFrom,
 } from "./helpers.ts";
 
 export default defineEval({
   description:
-    "Approving the older response-authorized request completes its read and reply while newer approval A stays answerable.",
+    "Asking for change A cancels a held response-authorized change, and approving A still completes.",
   tags: ["hitl", "continuation", "regression", "input-response", "authorization"],
   timeoutMs: 60_000,
   async test(t) {
-    // Given a response-authorized change is pending before an ordinary approval A.
+    // Given a response-authorized change holds the turn.
     const first = await t.send(
       "Prepare an authorized change, then read the draft status.",
       scriptedSession,
     );
-    const current = requestFrom(first, "authorized-change");
+    const authorized = requestFrom(first, "authorized-change");
     const session = first.session;
+    // When the user asks for change A instead, which steers the held turn.
     const second = await session.send("Prepare change A.");
     const approvalA = requestFrom(second, "change-a");
-
-    // When the authorized responder approves the older change.
+    // Then the authorized change is cancelled and never runs.
+    expectApprovalCancelled(session, authorized);
+    // And approving A runs it once and completes the held turn.
     const live = await session.startRespond([
-      { requestId: current.requestId, optionId: "approve" },
+      { requestId: approvalA.requestId, optionId: "approve" },
     ]);
-
-    // Then authorization settles, the change executes once, and the read gets a reply; A stays answerable.
-    await expectToolResult(t, live, "read-draft");
-    const reply = await expectResponseReply(t, live, "Draft status: ready.", current.requestId);
-    reply.calledTool("authorized-change", {
-      status: "completed",
-      output: { executions: 1 },
-      count: 1,
-    });
-    reply.event("approval.settled", {
-      data: { requestId: current.requestId, outcome: "approved" },
-      count: 1,
-    });
-    expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approvalA);
+    const reply = await expectResponseReply(t, live, "Change A resolved.", approvalA.requestId);
+    reply.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
   },
 });

@@ -1,6 +1,7 @@
 import type { FilePart, UserContent } from "ai";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import { describe, expect, it, vi } from "vitest";
+import { WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -30,6 +31,7 @@ import {
 import { createMessageCompletedEvent } from "#protocol/message.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -58,13 +60,7 @@ const OVERRIDE_AUTH: SessionAuthContext = {
 
 type MockSendOptions = Pick<
   RunInput,
-  | "auth"
-  | "callback"
-  | "capabilities"
-  | "continuationToken"
-  | "activityObserver"
-  | "initiatorAuth"
-  | "title"
+  "auth" | "callback" | "capabilities" | "continuationToken" | "initiatorAuth" | "title"
 >;
 
 function createJsonMessageRequest(body: unknown): Request {
@@ -99,6 +95,7 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
 
 function createRouteArgs(): RouteHandlerArgs {
   return {
+    ...mockAgentRouteArgs(),
     ...mockChannelContext(vi.fn()),
     attachSession: () => createMockSession(),
     to: vi.fn() as never,
@@ -143,7 +140,6 @@ function createEveCreateHandler(
       callback: runInput.callback,
       capabilities: runInput.capabilities,
       continuationToken: runInput.continuationToken,
-      activityObserver: runInput.activityObserver,
       initiatorAuth: runInput.initiatorAuth,
       title: runInput.title,
     } satisfies MockSendOptions);
@@ -492,6 +488,25 @@ describe("eveChannel — events", () => {
     });
   });
 
+  it("hands staging its fetchFile and the upload policy it holds every file to", async () => {
+    const fetchFile = vi.fn(async (url: string) =>
+      url.startsWith("https://uploads.example.com/") ? Buffer.from("ok") : null,
+    );
+    const adapter = getEveAdapter({
+      auth: none(),
+      fetchFile,
+      uploadPolicy: { allowedMediaTypes: ["image/*"], maxBytes: 4 },
+    });
+
+    await expect(adapter.fetchFile!("https://uploads.example.com/a")).resolves.toEqual(
+      Buffer.from("ok"),
+    );
+    await expect(adapter.fetchFile!("https://elsewhere.example.com/a")).resolves.toBeNull();
+    expect(adapter.uploadPolicy).toEqual({ allowedMediaTypes: ["image/*"], maxBytes: 4 });
+    // Without either option the channel keeps the framework's HTTP adapter.
+    expect(getEveAdapter({ auth: none() }).kind).toBe("http");
+  });
+
   it("passes configured event handlers through with session context", async () => {
     const observed: string[] = [];
     const adapter = getEveAdapter({
@@ -578,7 +593,20 @@ describe("eveChannel — stream cursor", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(handler.getEventStream).toHaveBeenCalledWith({ startIndex });
+    expect(handler.getEventStream).toHaveBeenCalledWith({ follow: true, startIndex });
+  });
+
+  it("bounds a historical read at the durable tail and asks for it without following", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockResolvedValueOnce(41);
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?follow=false",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+    expect(handler.getEventStream).toHaveBeenCalledWith({ follow: false, startIndex: undefined });
   });
 
   it.each(["1.5", "1junk", "0x10", "1e2", ""])(
@@ -594,14 +622,50 @@ describe("eveChannel — stream cursor", () => {
     },
   );
 
-  it("omits the tail index by default without paying for the lookup", async () => {
+  it("resolves the tail index by default without returning it", async () => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBeNull();
-    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
+    expect(handler.getStreamTailIndex).toHaveBeenCalledOnce();
+  });
+
+  it("returns 404 for an unknown session in follow mode", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockRejectedValueOnce(
+      new WorkflowRunNotFoundError("test-session-id"),
+    );
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Session not found.", ok: false });
+  });
+
+  it("cancels the early-opened event stream when the tail lookup fails", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const cancelled = vi.fn();
+    handler.getEventStream.mockResolvedValueOnce(new ReadableStream({ cancel: cancelled }));
+    handler.getStreamTailIndex.mockRejectedValueOnce(
+      new WorkflowRunNotFoundError("test-session-id"),
+    );
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(404);
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+  });
+
+  it("returns 503 when the session lookup fails transiently", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockRejectedValueOnce(new Error("stream lookup failed"));
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Session stream unavailable.", ok: false });
   });
 
   it("reports the durable tail index when the request opts in", async () => {
@@ -1374,6 +1438,106 @@ describe("eveChannel — create session (text)", () => {
 
     expect(response.status).toBe(400);
   });
+});
+
+describe("eveChannel — remote agent protocol 1 callers", () => {
+  const callback = {
+    callId: "call-1",
+    subagentName: "research",
+    token: "tok123",
+    url: "https://caller.example.com/eve/v1/callback/tok123",
+  };
+  // What an eve 0.66–0.68 background task adds when it delegates.
+  const legacyTaskFields = {
+    activityObserver: {
+      sink: {
+        url: "https://caller.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+        version: 1,
+      },
+      workIdentity: {
+        callId: "call-1",
+        id: "work:caller:turn-1:call-1",
+        kind: "task",
+        name: "research",
+        rootSessionId: "caller",
+        rootTurnId: "turn-1",
+      },
+    },
+    callback: { ...callback, taskId: "task-1" },
+  };
+
+  it.each([
+    ["a direct call", { callback }, {}],
+    ["a background task", legacyTaskFields, { taskId: "task-1" }],
+  ])(
+    "serves an unversioned create from %s and answers protocol 1",
+    async (_caller, fields, legacyCaller) => {
+      const logs = captureLogRecords();
+      const handler = createEveCreateHandler({ auth: none() });
+
+      const response = await handler.fetch(
+        createJsonMessageRequest({ capabilities: {}, message: "hi", ...fields }),
+      );
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        protocolVersion: 1,
+        sessionId: "test-session-id",
+        status: "accepted",
+      });
+      const runInput = handler.createSession.mock.calls[0]?.[0];
+      expect(runInput?.callback).toEqual(callback);
+      expect(runInput?.legacyRemoteAgentCaller).toEqual(legacyCaller);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "info",
+          message: "serving a remote agent protocol 1 caller",
+        }),
+      );
+    },
+  );
+
+  it("serves a protocol-1 continuation", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "and then?", ...legacyTaskFields }),
+    );
+
+    expect(response.status).toBe(202);
+    const options = handler.send.mock.calls[0]?.[1];
+    expect(options?.callback).toEqual(callback);
+  });
+
+  it("rejects a delegating caller on a protocol this deployment does not serve", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ callback, message: "hi", protocolVersion: 3 }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "REMOTE_AGENT_PROTOCOL_MISMATCH",
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+    });
+    expect(handler.createSession).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "2"])(
+    "rejects a delegating create whose protocolVersion is %j instead of treating it as protocol 1",
+    async (protocolVersion) => {
+      const handler = createEveCreateHandler({ auth: none() });
+
+      const response = await handler.fetch(
+        createJsonMessageRequest({ callback, message: "hi", protocolVersion }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(handler.createSession).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("eveChannel — create session (UserContent array)", () => {

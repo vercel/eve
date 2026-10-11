@@ -73,18 +73,24 @@ describe("tool schemas at the model provider boundary", () => {
       },
     }).responses("gpt-5.4");
     const execute = vi.fn(async (_input: unknown) => ({ issues: [] }));
+    const definitions = new Map([
+      [
+        "linear__list_issues",
+        {
+          name: "linear__list_issues",
+          description: "Search issues by query or saved custom view.",
+          inputSchema: schema(),
+          execute,
+        },
+      ],
+    ]);
     const tools = buildToolSet({
-      tools: new Map([
-        [
-          "linear__list_issues",
-          {
-            name: "linear__list_issues",
-            description: "Search issues by query or saved custom view.",
-            inputSchema: schema(),
-            execute,
-          },
-        ],
-      ]),
+      describe: (definition) => definition.description,
+      resolve: (call) => {
+        const definition = definitions.get(call.toolName);
+        return definition === undefined ? undefined : { call, definition };
+      },
+      tools: definitions,
     });
 
     await generateText({

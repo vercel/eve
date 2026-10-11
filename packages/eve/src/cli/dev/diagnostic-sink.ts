@@ -9,6 +9,7 @@ type DevDiagnosticSource = "stderr" | "stdout" | "sandbox" | "workflow" | "tool"
 /** Captured output or a failure summary attributed to one capture point. */
 export interface DevDiagnosticOutputEntry {
   readonly source: Exclude<DevDiagnosticSource, "log">;
+  readonly level?: LogLevel;
   readonly summary?: string;
   readonly detail: string;
   /** Structured remediation carried by cataloged failures. */

@@ -16,6 +16,7 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
     const auth = createAuthorizationContext({ scope: input.scope });
     const ctx: ToolContext = {
       ...buildBaseToolContext({ options, toolName: input.scope }),
+      messages: options.messages,
       getToken: auth.getToken,
       requireAuth: auth.requireAuth,
     };

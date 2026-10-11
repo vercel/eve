@@ -67,6 +67,7 @@ export default await withEve({
     web: {
       framework: "nextjs",
       root: "apps/web",
+      buildCommand: "node ../../node_modules/next/dist/bin/next build",
     },
   },
   routes: [
@@ -120,7 +121,7 @@ Deploy the linked project to production from its root:
 eve deploy
 ```
 
-`eve deploy` installs dependencies, runs `vercel deploy --prod`, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
+`eve deploy` installs dependencies, runs `vercel deploy --prod --logs` to show build logs, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
 When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../../observability/agent-runs) for details. Pass `--no-trace-sampling` to skip this setting.
 

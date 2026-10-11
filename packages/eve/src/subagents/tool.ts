@@ -2,7 +2,6 @@ import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { formatSubagentInput, type SubagentParentContext } from "#subagents/invocation.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
-  ActivityObserverConfig,
   ChannelInstrumentationProjection,
   RunSessionLimits,
   SessionAuthContext,
@@ -64,6 +63,7 @@ export function buildSubagentRunInput(input: {
    * parent capabilities produce an undefined child capability set.
    */
   readonly capabilities?: SessionCapabilities;
+  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   /** Replay-stable key the child's continuation token derives from. */
   readonly continuationKey: string;
@@ -81,7 +81,6 @@ export function buildSubagentRunInput(input: {
   /** Session token limits the child inherits. */
   readonly limits: RunSessionLimits;
   readonly parent: SubagentParentContext;
-  readonly activityObserver?: ActivityObserverConfig;
   readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -122,6 +121,7 @@ export function buildSubagentRunInput(input: {
     },
     auth,
     capabilities,
+    schedule: input.schedule,
     channelMetadata,
     inheritedConversation,
     continuationToken: childContinuationToken,
@@ -138,7 +138,7 @@ export function buildSubagentRunInput(input: {
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
-    activityObserver: input.activityObserver,
+    traceRoot: input.parent.traceRoot,
   };
   return { childContinuationToken, runInput };
 }

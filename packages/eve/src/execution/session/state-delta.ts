@@ -1,16 +1,23 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { applyValueDelta, diffValue, snapshotValue, type ValueDelta } from "#shared/value-delta.js";
 
-/** The durable values a session workflow threads through its steps. */
+/**
+ * The durable values a session workflow threads through its steps. `history`
+ * is separate from `sessionState` so that only the steps that read or change
+ * it receive it as input.
+ */
 export interface SessionStateValues {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly history: HarnessModelMessage[];
 }
 
 /** How a step changed the session's values; an absent value is unchanged. */
 export interface SessionStateDelta {
   readonly serializedContext?: ValueDelta;
   readonly sessionState?: ValueDelta;
+  readonly history?: ValueDelta;
 }
 
 /** A step result the session workflow adopts through its state cursor. */
@@ -22,6 +29,8 @@ export interface SessionStateTransition {
 export type WithSessionStateDelta<T> = T extends unknown
   ? Omit<T, keyof SessionStateValues> & SessionStateTransition
   : never;
+
+const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as const;
 
 /**
  * Runs a session step's work and returns its result with the session values
@@ -43,20 +52,16 @@ export async function withSessionStateDelta(
   input: Partial<SessionStateValues>,
   work: (input: Partial<SessionStateValues>) => Promise<Partial<SessionStateValues>>,
 ): Promise<SessionStateTransition> {
-  const base = {
-    serializedContext: snapshotValue(input.serializedContext),
-    sessionState: snapshotValue(input.sessionState),
-  };
-  const { serializedContext, sessionState, ...result } = await work(input);
+  const base = Object.fromEntries(
+    SESSION_VALUE_KEYS.map((key) => [key, snapshotValue(input[key])]),
+  );
+  const { serializedContext, sessionState, history, ...result } = await work(input);
+  const next = { serializedContext, sessionState, history };
   const stateDelta: { -readonly [K in keyof SessionStateDelta]: SessionStateDelta[K] } = {};
-  const contextDelta =
-    serializedContext === undefined
-      ? undefined
-      : diffValue(base.serializedContext, serializedContext);
-  if (contextDelta !== undefined) stateDelta.serializedContext = contextDelta;
-  const sessionDelta =
-    sessionState === undefined ? undefined : diffValue(base.sessionState, sessionState);
-  if (sessionDelta !== undefined) stateDelta.sessionState = sessionDelta;
+  for (const key of SESSION_VALUE_KEYS) {
+    const delta = next[key] === undefined ? undefined : diffValue(base[key], next[key]);
+    if (delta !== undefined) stateDelta[key] = delta;
+  }
   return { ...result, stateDelta };
 }
 
@@ -68,5 +73,6 @@ export function applySessionStateDelta(
   return {
     serializedContext: applyValueDelta(values.serializedContext, delta.serializedContext),
     sessionState: applyValueDelta(values.sessionState, delta.sessionState),
+    history: applyValueDelta(values.history, delta.history),
   };
 }

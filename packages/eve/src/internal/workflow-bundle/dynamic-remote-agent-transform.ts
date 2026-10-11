@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
+  collectFreeVariables,
+  findEveImportAliases,
   findProperty,
   type DynamicToolAstNode as AstNode,
-  walkNode,
+  walkDefinerCalls,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 import { stableModuleId } from "#internal/workflow-bundle/stable-module-id.js";
 
@@ -45,46 +47,67 @@ function findCredentialsFactories(
 ): CredentialsFactoryInfo[] {
   const factories: CredentialsFactoryInfo[] = [];
   const moduleId = stableModuleId(filename);
+  // The bare name also covers re-exports through authored modules.
+  const definers = new Set([
+    "defineRemoteAgent",
+    ...findEveImportAliases(ast, ["defineRemoteAgent"]),
+  ]);
 
-  walkNode(ast, (node) => {
-    if (
-      node.type !== "CallExpression" ||
-      node.callee?.type !== "Identifier" ||
-      node.callee.name !== "defineRemoteAgent" ||
-      node.arguments?.length !== 1 ||
-      node.start === undefined ||
-      node.end === undefined
-    ) {
-      return true;
-    }
-    const argument = node.arguments[0]!;
-    if (argument.type !== "ObjectExpression") {
-      return false;
-    }
+  walkDefinerCalls(ast, definers, (call, argument, enclosingBindings) => {
     const auth = findProperty(argument, "auth");
     const headers = findProperty(argument, "headers");
-    if (auth === undefined && headers === undefined) {
-      return false;
+    if (
+      (auth === undefined && headers === undefined) ||
+      call.start === undefined ||
+      call.end === undefined
+    ) {
+      return;
     }
+    assertModuleScoped(filename, [auth, headers], enclosingBindings);
     // Content-addressed so the id survives rebuilds and never collides across
     // modules or transform order; editing the factory itself invalidates it.
-    const callSource = source.slice(node.start, node.end);
+    const callSource = source.slice(call.start, call.end);
     const hash = createHash("sha256")
       .update(`${moduleId}//${callSource}`)
       .digest("hex")
       .slice(0, 16);
     factories.push({
       authPropertySource: sliceNode(source, auth),
-      callEnd: node.end,
+      callEnd: call.end,
       callSource,
-      callStart: node.start,
+      callStart: call.start,
       headersPropertySource: sliceNode(source, headers),
       hoistedName: `__eve_dynamic_remote_credentials_${hash}`,
     });
-    return false;
   });
 
   return factories;
+}
+
+/**
+ * Hoisted credentials run at module scope, so a reference to a binding from an
+ * enclosing function or block would throw or, when a module binding shares its
+ * name, silently resolve to the wrong value.
+ */
+function assertModuleScoped(
+  filename: string,
+  properties: ReadonlyArray<AstNode | undefined>,
+  enclosingBindings: ReadonlySet<string>,
+): void {
+  for (const property of properties) {
+    const value = property?.value as AstNode | undefined;
+    if (value === undefined) continue;
+    const captured = [...collectFreeVariables(value)].filter((name) => enclosingBindings.has(name));
+    if (captured.length > 0) {
+      const key = String(property!.key?.name ?? property!.key?.value);
+      const names = captured.map((name) => `"${name}"`).join(", ");
+      throw new Error(
+        `Dynamic remote agent "${key}" in ${filename} references ${names}, declared outside module scope. ` +
+          `eve moves dynamic remote auth and headers to module scope so credentials stay out of durable workflow state. ` +
+          `Declare ${names} at module scope or inside "${key}" itself.`,
+      );
+    }
+  }
 }
 
 function applyTransform(

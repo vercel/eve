@@ -1,0 +1,499 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { ApprovalPolicy } from "#approval/definition.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { withToolSessionSandboxes } from "#execution/tool-session/sandbox.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import type { ToolContext } from "#tools/definition.js";
+import { defineJsonSchema } from "#tools/schema.js";
+
+vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
+  loadSandboxPreparedArtifact: vi.fn(async () => null),
+}));
+
+afterEach(() => shutdownActiveSandboxHandles());
+
+const alice: SessionAuthContext = {
+  attributes: {},
+  authenticator: "test",
+  principalId: "alice",
+  principalType: "user",
+};
+
+const inputSchema = defineJsonSchema({
+  additionalProperties: false,
+  properties: { text: { type: "string" } },
+  type: "object",
+});
+
+function tool(
+  name: string,
+  execute: (input: any, ctx: ToolContext) => unknown,
+  extra: Partial<HarnessToolDefinition> = {},
+): HarnessToolDefinition {
+  return {
+    description: name,
+    execute: createToolExecuteWithAuth({ execute, scope: name }),
+    inputSchema,
+    name,
+    ...extra,
+  };
+}
+
+function sandboxes(options: { readonly startGate?: Promise<void> } = {}) {
+  const started: string[] = [];
+  const deleted = vi.fn(async () => {});
+  const shutdown = vi.fn(async () => {});
+  const start = vi.fn(async (context: { readonly session: { readonly id: string } }) => {
+    started.push(context.session.id);
+    await options.startGate;
+    const sandbox = mockSandbox();
+    return {
+      handle: {
+        sandbox: sandbox.session,
+        onRuntimeShutdown: shutdown,
+        onSandboxDelete: deleted,
+        onSandboxStop: async () => {},
+      },
+      state: null,
+    };
+  });
+  const environment = defineSandboxProvider({
+    name: "memory",
+    environment: () => ({
+      prepare: async () => null,
+      resume: async () => {
+        throw new Error("a call's sandbox is never resumed");
+      },
+      start,
+    }),
+  }).environment();
+  const registry: RuntimeSandboxRegistry = {
+    sandbox: {
+      definition: {
+        environment,
+        kind: "independent",
+        logicalPath: "sandbox.ts",
+        revisionHash: "hash",
+        selector: defineSandbox(async () => await environment.open()),
+        sourceId: "sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+  return { deleted, registry, shutdown, started };
+}
+
+/**
+ * A provider whose `start` reopens a session's sandbox by session id, as
+ * Vercel Sandbox and just-bash do, opted into tool sessions.
+ * Each open hands out its own handle over the shared sandbox, as just-bash
+ * runs one interpreter per handle; `released` records which handles a call
+ * let go of, and `stopped` which were stopped through the sandbox API.
+ */
+function keyedSandboxes(options: { readonly failSelector?: () => boolean } = {}) {
+  const live = new Map<string, { sandbox: ReturnType<typeof mockSandbox> }>();
+  const starts: string[] = [];
+  const handles: object[] = [];
+  const released: object[] = [];
+  const stopped = vi.fn();
+  const deleted = vi.fn((sessionId: string) => void live.delete(sessionId));
+  const reopen = (sessionId: string) => {
+    let entry = live.get(sessionId);
+    if (entry === undefined) {
+      starts.push(sessionId);
+      entry = { sandbox: mockSandbox() };
+      live.set(sessionId, entry);
+    }
+    const handle = {
+      sandbox: entry.sandbox.session,
+      onRuntimeShutdown: async () => {},
+      onSandboxDelete: async () => deleted(sessionId),
+      onSandboxStop: stopped,
+    };
+    handles.push(handle);
+    return handle;
+  };
+  const environment = defineSandboxProvider({
+    name: "keyed",
+    environment: () =>
+      withToolSessionSandboxes(
+        {
+          prepare: async () => null,
+          resume: async (context: { readonly session: { readonly id: string } }) =>
+            reopen(context.session.id),
+          start: async (context: { readonly session: { readonly id: string } }) => ({
+            handle: reopen(context.session.id),
+            state: {},
+          }),
+        },
+        {
+          releaseHandle: async (handle) => void released.push(handle),
+        },
+      ),
+  }).environment();
+  const registry: RuntimeSandboxRegistry = {
+    sandbox: {
+      definition: {
+        environment,
+        kind: "independent",
+        logicalPath: "sandbox.ts",
+        revisionHash: "hash",
+        selector: defineSandbox(async () => {
+          const sandbox = await environment.open();
+          if (options.failSelector?.() === true) throw new Error("selector failed");
+          return sandbox;
+        }),
+        sourceId: "sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+  return { deleted, handles, live, registry, released, starts, stopped };
+}
+
+/** A tool that appends to a note in its sandbox and returns the note, after `gate` opens. */
+function noteTool(gate: Promise<void> = Promise.resolve()) {
+  return tool("note", async (input: { text: string }, ctx) => {
+    const sandbox = await ctx.getSandbox();
+    await gate;
+    const previous = await sandbox.readTextFile({ path: "/workspace/note.txt" });
+    const note = (previous ?? "") + input.text;
+    await sandbox.writeTextFile({ content: note, path: "/workspace/note.txt" });
+    return note;
+  });
+}
+
+function runtimeWith(
+  tools: readonly HarnessToolDefinition[],
+  registry = sandboxes().registry,
+  owners: Readonly<Record<string, "application" | "framework">> = {},
+): InvokeToolRuntime {
+  return {
+    agentName: "test-agent",
+    callbackBaseUrl: "https://agent.example",
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    manifest: {
+      bindings: Object.fromEntries(
+        tools.map(({ name }) => [
+          `source:${name}`,
+          { owner: { kind: owners[name] ?? "application" } } as never,
+        ]),
+      ),
+      tools: tools.map(({ name }) => ({ hasExecute: true, name, sourceId: `source:${name}` })),
+    },
+    nodeId: "__root__",
+    sandboxRegistry: registry,
+    tools: new Map(tools.map((definition) => [definition.name, definition])),
+  };
+}
+
+describe("invokeTool", () => {
+  it("runs as auth, with initiator defaulting to auth", async () => {
+    const bob: SessionAuthContext = { ...alice, principalId: "bob" };
+    const seen: unknown[] = [];
+    const runtime = runtimeWith([
+      tool("whoami", (_input, ctx) => {
+        seen.push({ ...ctx.session.auth });
+        return "ok";
+      }),
+    ]);
+    await invokeTool(runtime, "whoami", {}, { auth: alice });
+    await invokeTool(runtime, "whoami", {}, { auth: alice, initiator: bob });
+    expect(seen).toEqual([
+      { current: alice, initiator: alice },
+      { current: alice, initiator: bob },
+    ]);
+  });
+
+  it("evaluates the approval policy and never asks anyone", async () => {
+    const policies: Array<[ApprovalPolicy, object, boolean]> = [
+      [() => "user-approval", { status: "approval-required" }, false],
+      [
+        () => ({ reason: "Read-only mode.", type: "denied" }),
+        { reason: "Read-only mode.", status: "denied" },
+        false,
+      ],
+      [() => "not-applicable", { output: "ran", status: "completed" }, true],
+    ];
+    for (const [approval, expected, ran] of policies) {
+      const execute = vi.fn(() => "ran");
+      const runtime = runtimeWith([tool("deploy", execute, { approval })]);
+      expect(await invokeTool(runtime, "deploy", {}, { auth: alice })).toMatchObject(expected);
+      expect(execute).toHaveBeenCalledTimes(ran ? 1 : 0);
+    }
+  });
+
+  it("refuses unknown, framework, and badly typed calls before running anything", async () => {
+    const execute = vi.fn();
+    const runtime = runtimeWith([tool("note", execute), tool("web_fetch", execute)], undefined, {
+      web_fetch: "framework",
+    });
+    expect(await invokeTool(runtime, "missing", {}, { auth: alice })).toMatchObject({
+      message: 'The agent has no tool named "missing".',
+      status: "failed",
+    });
+    expect(await invokeTool(runtime, "web_fetch", {}, { auth: alice })).toMatchObject({
+      message: expect.stringContaining("framework tool"),
+      status: "failed",
+    });
+    expect(await invokeTool(runtime, "note", { text: 7 }, { auth: alice })).toMatchObject({
+      status: "invalid-input",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("checks input as a conversation does: none is {}, and a non-object is refused", async () => {
+    const execute = vi.fn((input: unknown) => input);
+    const runtime = runtimeWith([tool("note", execute)]);
+    for (const input of [[1], "plain", 7, true]) {
+      expect(await invokeTool(runtime, "note", input, { auth: alice })).toMatchObject({
+        message: expect.stringContaining('Invalid input for tool "note"'),
+        status: "invalid-input",
+      });
+    }
+    expect(execute).not.toHaveBeenCalled();
+    for (const input of [undefined, null, ""]) {
+      expect(await invokeTool(runtime, "note", input, { auth: alice })).toMatchObject({
+        output: {},
+        status: "completed",
+      });
+    }
+  });
+
+  it("gives each call its own sandbox and deletes it when the call ends", async () => {
+    const { deleted, registry, shutdown, started } = sandboxes();
+    const write = tool("write", async (input: { text: string }, ctx) => {
+      const sandbox = await ctx.getSandbox();
+      await sandbox.writeTextFile({ content: input.text, path: "/workspace/note.txt" });
+      return ctx.session.auth.current?.principalId;
+    });
+    const plain = tool("plain", () => "no sandbox");
+    const runtime = runtimeWith([write, plain], registry);
+
+    expect(await invokeTool(runtime, "write", { text: "a" }, { auth: alice })).toMatchObject({
+      output: "alice",
+      status: "completed",
+    });
+    await invokeTool(runtime, "write", { text: "b" }, { auth: alice });
+    await invokeTool(runtime, "plain", {}, { auth: alice });
+
+    expect(started).toHaveLength(2);
+    expect(started[0]).not.toBe(started[1]);
+    expect(deleted).toHaveBeenCalledTimes(2);
+    await shutdownActiveSandboxHandles();
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it("deletes a sandbox whose start finishes after the call failed", async () => {
+    let finishStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+    const { deleted, registry, shutdown, started } = sandboxes({ startGate });
+    let gaveUp = false;
+    const racing = tool("racing", async (_input: unknown, ctx) => {
+      // The call gives up while the provider is still starting, as a lost
+      // race against cancellation would.
+      void ctx.getSandbox().catch(() => {});
+      await vi.waitFor(() => expect(started).toHaveLength(1));
+      gaveUp = true;
+      throw new Error("gave up");
+    });
+    const runtime = runtimeWith([racing], registry);
+
+    const result = invokeTool(runtime, "racing", {}, { auth: alice });
+    await vi.waitFor(() => expect(gaveUp).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deleted).not.toHaveBeenCalled();
+    finishStart();
+    // Let a start that outlived the call settle before checking what it left behind.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await result).toMatchObject({ status: "failed" });
+    expect(deleted).toHaveBeenCalledTimes(1);
+    await shutdownActiveSandboxHandles();
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it("keeps one sandbox per caller and key across calls", async () => {
+    const { deleted, registry, starts } = keyedSandboxes();
+    const runtime = runtimeWith([noteTool()], registry);
+    const note = (text: string, auth: SessionAuthContext, key: string) =>
+      invokeTool(runtime, "note", { text }, { auth, key });
+
+    // Concurrent first calls converge on one sandbox; later calls reuse it.
+    const first = await Promise.all([note("a", alice, "desk"), note("b", alice, "desk")]);
+    expect(first.map((result) => result.status)).toEqual(["completed", "completed"]);
+    expect(starts).toHaveLength(1);
+    expect(await note("c", alice, "desk")).toMatchObject({
+      output: expect.stringMatching(/^[ab]{1,2}c$/u),
+    });
+    // Another key, or another caller with the same key, gets its own sandbox.
+    expect(await note("x", alice, "lobby")).toMatchObject({ output: "x" });
+    expect(await note("y", bob, "desk")).toMatchObject({ output: "y" });
+    expect(starts).toHaveLength(3);
+    expect(deleted).not.toHaveBeenCalled();
+  });
+
+  it("keeps forwarded callers apart by effective user and by the forwarder that vouched", async () => {
+    const { registry, starts } = keyedSandboxes();
+    const runtime = runtimeWith([noteTool()], registry);
+    const router = (principalId: string): SessionAuthContext => ({
+      ...alice,
+      principalId,
+      principalType: "service",
+    });
+    const [routerA, routerB] = [router("router-a"), router("router-b")];
+    // A forwarded user's attributes are asserted by the forwarder, so the
+    // session must not depend on them: both routers stamp the same ones.
+    const forwarded = (principalId: string): SessionAuthContext => ({
+      ...alice,
+      attributes: { "eve:forwarded-by": "router" },
+      principalId,
+    });
+    const note = (text: string, auth: SessionAuthContext, forwardedBy: SessionAuthContext) =>
+      invokeTool(runtime, "note", { text }, { auth, forwardedBy, key: "desk" });
+
+    expect(await note("a", forwarded("alice"), routerA)).toMatchObject({ output: "a" });
+    // Another user through the same router, with the same key.
+    expect(await note("b", forwarded("bob"), routerA)).toMatchObject({ output: "b" });
+    // The same user and key through another router.
+    expect(await note("c", forwarded("alice"), routerB)).toMatchObject({ output: "c" });
+    // Neither is the user's direct session, and the first one is still there.
+    const direct = await invokeTool(runtime, "note", { text: "d" }, { auth: alice, key: "desk" });
+    expect(direct).toMatchObject({ output: "d" });
+    expect(await note("e", forwarded("alice"), routerA)).toMatchObject({ output: "ae" });
+    expect(starts).toHaveLength(4);
+    expect(new Set(starts).size).toBe(4);
+  });
+
+  it("lets go of each keyed call's own handle when it ends, and nothing else", async () => {
+    const { handles, registry, released, stopped } = keyedSandboxes();
+    let openGate!: () => void;
+    const held = runtimeWith(
+      [noteTool(new Promise<void>((resolve) => (openGate = resolve)))],
+      registry,
+    );
+    const runtime = runtimeWith([noteTool()], registry);
+    const note = (text: string, run = runtime) =>
+      invokeTool(run, "note", { text }, { auth: alice, key: "desk" });
+
+    const holding = note("a", held);
+    await vi.waitFor(() => expect(handles).toHaveLength(1));
+    // An overlapping call reopens the same sandbox through its own handle and
+    // releases only that one when it ends; the first call's handle stays open.
+    expect(await note("b")).toMatchObject({ status: "completed" });
+    expect(handles).toHaveLength(2);
+    expect(released).toEqual([handles[1]]);
+    openGate();
+    expect(await holding).toMatchObject({ status: "completed" });
+    expect(released).toEqual([handles[1], handles[0]]);
+    // The sandbox itself is neither stopped nor tracked for shutdown any more.
+    expect(stopped).not.toHaveBeenCalled();
+    await shutdownActiveSandboxHandles();
+    expect(await note("c")).toMatchObject({ output: expect.stringMatching(/^[ab]{2}c$/u) });
+
+    // A call that fails, or never opens a sandbox, has no handle to let go of.
+    const failing = tool("failing", () => {
+      throw new Error("boom");
+    });
+    expect(
+      await invokeTool(
+        runtimeWith([failing], registry),
+        "failing",
+        {},
+        { auth: alice, key: "desk" },
+      ),
+    ).toMatchObject({ status: "failed" });
+    expect(handles).toHaveLength(3);
+    expect(released).toHaveLength(3);
+  });
+
+  it("lets go of a keyed call's handle even when the call fails after opening it", async () => {
+    const { handles, registry, released } = keyedSandboxes();
+    const failing = tool("failing", async (_input: unknown, ctx) => {
+      await ctx.getSandbox();
+      throw new Error("boom");
+    });
+    expect(
+      await invokeTool(
+        runtimeWith([failing], registry),
+        "failing",
+        {},
+        { auth: alice, key: "desk" },
+      ),
+    ).toMatchObject({ status: "failed" });
+    expect(released).toEqual(handles);
+    expect(handles).toHaveLength(1);
+  });
+
+  it("denies an anonymous caller a key before deriving a session or opening a sandbox", async () => {
+    const { registry, starts } = keyedSandboxes();
+    const execute = vi.fn(() => "ran");
+    const runtime = runtimeWith([tool("note", execute)], registry);
+    const anonymous: SessionAuthContext = {
+      attributes: {},
+      authenticator: "none",
+      principalId: "anonymous",
+      principalType: "anonymous",
+    };
+
+    expect(await invokeTool(runtime, "note", {}, { auth: anonymous, key: "desk" })).toEqual({
+      reason: expect.stringContaining("anonymous caller cannot send a key"),
+      status: "denied",
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(starts).toHaveLength(0);
+    // Without a key the anonymous caller still gets a one-off call.
+    expect(await invokeTool(runtime, "note", {}, { auth: anonymous })).toMatchObject({
+      output: "ran",
+      status: "completed",
+    });
+  });
+
+  it("refuses a keyed sandbox on a provider that cannot keep it, and an empty key", async () => {
+    const runtime = runtimeWith([noteTool()], sandboxes().registry);
+    expect(await invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "desk" })).toEqual({
+      message: expect.stringContaining('Sandbox provider "memory" cannot keep a sandbox'),
+      status: "failed",
+    });
+    expect(await invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "" })).toEqual({
+      message: "The tool session key must not be empty.",
+      status: "invalid-input",
+    });
+  });
+
+  it("never deletes a keyed sandbox another call is using when its own start fails", async () => {
+    let failSelector = false;
+    const { deleted, live, registry } = keyedSandboxes({ failSelector: () => failSelector });
+    let openGate!: () => void;
+    const runtime = runtimeWith(
+      [noteTool(new Promise<void>((resolve) => (openGate = resolve)))],
+      registry,
+    );
+    const holding = invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "desk" });
+    await vi.waitFor(() => expect(live.size).toBe(1));
+
+    // The second call's `start` finds the first call's sandbox, then its selector fails.
+    failSelector = true;
+    expect(
+      await invokeTool(runtime, "note", { text: "b" }, { auth: alice, key: "desk" }),
+    ).toMatchObject({ status: "failed" });
+    openGate();
+    expect(await holding).toMatchObject({ output: "a", status: "completed" });
+    expect(deleted).not.toHaveBeenCalled();
+  });
+});
+
+const bob: SessionAuthContext = { ...alice, principalId: "bob" };

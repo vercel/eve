@@ -60,6 +60,7 @@ export function bindSlackSessionOperations(input: {
       return await source.respond(inputResponses, {
         ...options,
         auth: auth(options.auth),
+        state: withSlackResponder(options.state, input.state.triggeringUserId),
       });
     },
     async cancel(options) {
@@ -78,4 +79,17 @@ export function bindSlackSessionOperations(input: {
       return await input.resolveSession(input.address);
     },
   };
+}
+
+/**
+ * Stamps the verified Slack user behind an input response, so `deliver` can map
+ * a custom-auth responder's principal to them. The verified user wins over any
+ * caller-supplied value.
+ */
+export function withSlackResponder(
+  state: Partial<SlackChannelState> | undefined,
+  slackUserId: string | null | undefined,
+): Partial<SlackChannelState> | undefined {
+  if (!slackUserId) return state;
+  return { ...state, triggeringUserId: slackUserId };
 }

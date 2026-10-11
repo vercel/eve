@@ -12,6 +12,7 @@ import { createAgentStartedEvent, type MessageStreamEvent } from "#protocol/mess
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none, type AuthFn } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const coordinates = {
   callId: "call-1",
@@ -250,6 +251,7 @@ function createHarness(input: {
 
 function createRouteArgs(attachSession: RouteHandlerArgs["attachSession"]): RouteHandlerArgs {
   return {
+    ...mockAgentRouteArgs(),
     ...mockChannelContext(vi.fn()),
     attachSession,
     to: vi.fn() as never,

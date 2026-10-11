@@ -7,7 +7,7 @@ import {
   createCrossChannelToFn,
   toCrossChannelTargets,
 } from "../../src/channel/cross-channel-receive.js";
-import type { Runtime, SessionCommand, SessionCommandResult } from "../../src/channel/types.js";
+import type { SessionCommandResult, Runtime, SessionCommand } from "../../src/channel/types.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "../../src/runtime/sessions/compiled-agent-cache.js";
@@ -17,6 +17,7 @@ import {
 } from "../../src/runtime/sessions/runtime-session.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 import { mockChannelContext } from "../../src/internal/testing/mocks/mock-channel-operations.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 /**
  * Locks the cross-channel `ctx.to(channel, target).send(...)` path end-to-end:
@@ -172,6 +173,7 @@ describe("cross-channel receive end-to-end", () => {
           }),
         }),
         {
+          ...mockAgentRouteArgs(),
           ...mockChannelContext(() => {
             throw new Error("webhook should not send directly");
           }),

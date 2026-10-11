@@ -21,11 +21,19 @@ vi.mock("#internal/nitro/host/vercel-build-prewarm.js", () => ({
 const execFileAsync = promisify(execFile);
 const createDirectory = useTemporaryDirectories();
 const createAppRoot = useTemporaryAppRoots();
+const ENTRY_TARGETS = [
+  "vercel-web",
+  "vercel-node",
+  "node-server",
+  "node-middleware",
+  "development",
+  "setup-failure",
+];
 
 afterEach(() => vi.unstubAllEnvs());
 
 describe("instrumentation before the Nitro entry", () => {
-  it.each(["vercel-web", "vercel-node", "node-server", "development", "setup-failure"])(
+  it.each(ENTRY_TARGETS)(
     "awaits asynchronous setup before application imports with %s",
     async (target) => {
       const root = await createDirectory("eve-instrumentation-entry-");
@@ -61,7 +69,7 @@ describe("instrumentation before the Nitro entry", () => {
       const nitro = await createNitro({
         rootDir: root,
         dev: target === "development",
-        preset: target === "node-server" ? "node-server" : "vercel",
+        preset: target.startsWith("node-") ? target : "vercel",
         vercel: { entryFormat: target === "vercel-node" ? "node" : "web" },
         logLevel: 0,
         plugins: [applicationPath, instrumentationPath],
@@ -85,10 +93,11 @@ describe("instrumentation before the Nitro entry", () => {
             "-e",
             `globalThis.startup = [];
            try {
-             const { default: server } = await import(${JSON.stringify(entry)});
+             const { default: server, middleware } = await import(${JSON.stringify(entry)});
              await import(${JSON.stringify(entry)});
              if (${JSON.stringify(target)} === 'vercel-web' && typeof server.fetch !== 'function') throw new Error('Missing Vercel fetch handler');
              if (${JSON.stringify(target)} === 'vercel-node' && typeof server !== 'function') throw new Error('Missing Vercel Node handler');
+             if (${JSON.stringify(target)} === 'node-middleware' && typeof middleware !== 'function') throw new Error('Missing Node middleware handler');
              if (${JSON.stringify(target)} === 'development' && typeof server.ipc.onClose !== 'function') throw new Error('Missing development close handler');
              await globalThis.closeNitro();
            } catch (error) {

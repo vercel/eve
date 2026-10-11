@@ -23,10 +23,11 @@ import {
   slackContinuationToken,
 } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
+import { dispatchSignInCancel } from "#public/channels/slack/sign-in-cancel.js";
 import {
   buildFreeformModalView,
   decodeFreeformHitlActionId,
-  deriveHitlResponse,
+  decodeHitlResponse,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
   HITL_FREEFORM_MODAL_CALLBACK_ID,
@@ -39,10 +40,7 @@ import {
   updateAnsweredFreeformCard,
   updateAnsweredHitlCard,
 } from "#public/channels/slack/interaction-cards.js";
-import {
-  approvalResponderStatePatch,
-  authorizeInputResponse,
-} from "#public/channels/slack/input-response.js";
+import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -54,7 +52,10 @@ import type {
   SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
+import {
+  bindSlackSessionOperations,
+  withSlackResponder,
+} from "#public/channels/slack/session-operations.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseInputResponse } from "#shared/input.js";
 
@@ -128,6 +129,7 @@ export function parseBlockActionsPayload(
       blockId: a.block_id != null ? String(a.block_id) : undefined,
       selectedOptionValue: extractSelectedOptionValue(a),
       messageTs: message?.ts,
+      triggerId: typeof rawBody.trigger_id === "string" ? rawBody.trigger_id : undefined,
       label: extractActionLabel(a),
       user,
     })),
@@ -157,6 +159,7 @@ function parseSharedBlockActionsPayload(
       blockId: action.blockId,
       selectedOptionValue: action.selectedOptionValue,
       messageTs: body.messageTs,
+      triggerId: body.triggerId,
       label: action.label,
       user: {
         id: action.user?.id ?? body.userId,
@@ -292,6 +295,8 @@ export async function handleInteractionPost(
     return ack;
   }
 
+  if (dispatchSignInCancel(payload.raw, ctx)) return ack;
+
   const interaction = parseBlockActionsPayload(payload);
   if (!interaction) return ack;
 
@@ -302,7 +307,7 @@ export async function handleInteractionPost(
   }
 
   const hitlActions = interaction.actions.flatMap((action) => {
-    const derived = deriveHitlResponse(action);
+    const derived = decodeHitlResponse(action);
     return derived === null ? [] : [{ action, derived }];
   });
 
@@ -344,6 +349,7 @@ export async function handleInteractionPost(
           address: slackContinuationToken(interaction.channelId, interaction.threadTs),
           defaultAuth: buildSlackAuthContext({
             channelId: interaction.channelId,
+            installationTeamId: interaction.installationTeamId,
             teamId: interaction.teamId,
             threadTs: interaction.threadTs,
             userId: actionUser.id,
@@ -495,7 +501,7 @@ async function dispatchBlockInputResponses(input: {
       .from(slackContinuationToken(channelId, threadTs))
       .respond(input.submission.inputResponses, {
         auth: result.auth,
-        state: approvalResponderStatePatch(input.submission, result.auth),
+        state: withSlackResponder(undefined, input.submission.user.id),
       });
   } catch (error) {
     log.error("HITL interaction delivery failed", { error });
@@ -503,7 +509,7 @@ async function dispatchBlockInputResponses(input: {
   }
 
   if (
-    input.submission.actions.some((action) => deriveHitlResponse(action)?.kind === "tool-approval")
+    input.submission.actions.some((action) => decodeHitlResponse(action)?.kind === "tool-approval")
   ) {
     return;
   }
@@ -672,6 +678,7 @@ async function dispatchViewInputResponse(input: {
       .from(input.metadata.continuationToken)
       .respond(input.submission.inputResponses, {
         auth: result.auth,
+        state: withSlackResponder(undefined, input.submission.user.id),
       });
   } catch (error) {
     log.error("freeform answer delivery failed", { error });

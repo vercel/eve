@@ -44,6 +44,12 @@ describe("Discord setup API", () => {
               type: 3,
               required: true,
             },
+            {
+              name: "file",
+              description: "A file for the agent to read",
+              type: 11,
+              required: false,
+            },
           ],
         }),
       }),

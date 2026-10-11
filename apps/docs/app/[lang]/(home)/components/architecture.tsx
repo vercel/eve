@@ -12,9 +12,9 @@ import {
   IconWrench,
 } from "@vercel/geistdocs/assets/icons";
 import { IconArrowUpRight } from "@vercel/geistdocs/assets/icons/icon-arrow-up-right";
-import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
-import { LogoIconVercel } from "@vercel/geistdocs/assets/logos/logo-icon-vercel";
-import { Switch } from "@vercel/geistdocs/components/switch";
+import { LogoEveSvg } from "@vercel/geistdocs/assets/logos/logo-eve-svg";
+import { LogoIconVercelSvg } from "@vercel/geistdocs/assets/logos/logo-icon-vercel-svg";
+import { Toggle } from "@vercel/geistdocs/components/toggle";
 import Link from "next/link";
 import { type ComponentType, type JSX, type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,12 @@ type LogoComponent = ComponentType<{
   color?: string;
   className?: string;
 }>;
+
+// Simple Icons read `color="default"` as the brand color; the Vercel mark
+// inherits the chip's text color instead.
+const VercelLogo: LogoComponent = ({ className, size }) => (
+  <LogoIconVercelSvg className={className} size={size} />
+);
 
 interface Backend {
   label: string;
@@ -53,7 +59,7 @@ const RUNTIME_ITEMS: Primitive[] = [
     description: "Model calls, streaming",
     href: "https://ai-sdk.dev/",
     backend: {
-      managed: { label: "AI Gateway", Logo: LogoIconVercel },
+      managed: { label: "AI Gateway", Logo: VercelLogo },
       "self-hosted": { label: "GPT-5.4 API", Logo: IconOpenai },
     },
   },
@@ -65,7 +71,7 @@ const RUNTIME_ITEMS: Primitive[] = [
     href: "https://vercel.com/docs/sandbox/sdk-reference",
     managedOnlyHref: true,
     backend: {
-      managed: { label: "Vercel Sandbox", Logo: LogoIconVercel },
+      managed: { label: "Vercel Sandbox", Logo: VercelLogo },
       "self-hosted": { label: "Docker", Logo: SiDocker },
     },
   },
@@ -80,7 +86,7 @@ const RUNTIME_ITEMS: Primitive[] = [
     href: "https://vercel.com/docs/connect",
     managedOnlyHref: true,
     backend: {
-      managed: { label: "Vercel Connect", Logo: LogoIconVercel },
+      managed: { label: "Vercel Connect", Logo: VercelLogo },
       "self-hosted": { label: "Snowflake API", Logo: SiSnowflake },
     },
   },
@@ -92,7 +98,7 @@ const RUNTIME_ITEMS: Primitive[] = [
 ];
 
 const WORKFLOW_BACKEND: Record<Mode, Backend> = {
-  managed: { label: "Vercel Workflows", Logo: LogoIconVercel },
+  managed: { label: "Vercel Workflows", Logo: VercelLogo },
   "self-hosted": {
     label: "Postgres (@workflow/world-postgres)",
     Logo: SiPostgresql,
@@ -208,12 +214,14 @@ export function ArchitectureDiagram() {
           >
             Managed
           </button>
-          <Switch
+          <Toggle
             checked={selfHosted}
-            onCheckedChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
-            aria-label="Toggle deployment target"
-            className="cursor-pointer"
-          />
+            onChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
+            className="cursor-pointer gap-0"
+            size="medium"
+          >
+            <span className="sr-only">Toggle deployment target</span>
+          </Toggle>
           <span className="text-copy-14">
             <button
               type="button"
@@ -235,7 +243,7 @@ export function ArchitectureDiagram() {
           </span>
         </div>
 
-        <LogoEve className="mt-10 ml-5 text-gray-1000" height={13} />
+        <LogoEveSvg className="mt-10 ml-5 text-gray-1000" height={13} />
         <div className="mt-3 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
           <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">

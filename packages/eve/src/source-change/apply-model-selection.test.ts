@@ -35,17 +35,25 @@ describe("applyModelSelectionToSource", () => {
     expect(result.nextSource).toContain('model: "anthropic/claude-sonnet-5"');
   });
 
-  it("switches the documented no-argument chatgpt() call back to Gateway", async () => {
-    const source = `import { defineAgent } from "eve";\nimport { chatgpt } from "eve/models/openai";\n\nexport default defineAgent({ model: chatgpt() });\n`;
+  it.each([
+    ["chatgpt", "chatgpt/gpt-6-luna-fast"],
+    ["openai", "openai-api/gpt-6-luna-fast"],
+  ])(
+    "resolves the no-argument %s() default when switching back to Gateway",
+    async (helper, selection) => {
+      const source = `import { defineAgent } from "eve";\nimport { ${helper} } from "eve/models/openai";\n\nexport default defineAgent({ model: ${helper}(), reasoning: "low" });\n`;
 
-    const result = await applyModelSelectionToSource(source, "openai/gpt-5.5");
+      expect(await readModelSelectionFromSource(source)).toBe(selection);
+      const result = await applyModelSelectionToSource(source, "openai/gpt-5.5");
 
-    expect(result.kind).toBe("applied");
-    if (result.kind !== "applied") return;
-    expect(result.from).toBe("chatgpt/gpt-5.6-luna-fast");
-    expect(result.nextSource).not.toContain("eve/models/openai");
-    expect(result.nextSource).toContain('model: "openai/gpt-5.5"');
-  });
+      expect(result.kind).toBe("applied");
+      if (result.kind !== "applied") return;
+      expect(result.from).toBe(selection);
+      expect(result.nextSource).not.toContain("eve/models/openai");
+      expect(result.nextSource).toContain('model: "openai/gpt-5.5"');
+      expect(result.nextSource).toContain('reasoning: "low"');
+    },
+  );
 
   it("normalizes an openai-prefixed chatgpt() argument when changing models", async () => {
     const source = `import { chatgpt } from "eve/models/openai";\nexport default defineAgent({ model: chatgpt("openai/gpt-5.5") });\n`;

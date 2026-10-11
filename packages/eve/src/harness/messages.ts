@@ -9,6 +9,7 @@ import type {
 import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 
 /** Reason a framework-authored user-role message was added to model history. */
 export type FrameworkMessageKind =
@@ -159,7 +160,13 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
+  const attributedInputResponses = [
+    ...(a.attributedInputResponses ?? []),
+    ...(b.attributedInputResponses ?? []),
+  ];
+
   const result: {
+    attributedInputResponses?: StepInput["attributedInputResponses"];
     inputResponses?: readonly InputResponse[];
     message?: string | UserContent;
     context?: readonly string[];
@@ -168,6 +175,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   if (inputResponses !== undefined) {
     result.inputResponses = inputResponses;
+  }
+
+  if (attributedInputResponses.length > 0) {
+    result.attributedInputResponses = attributedInputResponses;
   }
 
   if (message !== undefined) {
@@ -182,10 +193,20 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     result.outputSchema = outputSchema;
   }
 
+  // Typed text describes one message, so it survives only when the other input has none.
+  const inputText =
+    normalizeUserContent(a.message) === undefined
+      ? readInputText(b)
+      : normalizeUserContent(b.message) === undefined
+        ? readInputText(a)
+        : undefined;
   return attachClientContext(
-    frameworkMessageKind === undefined
-      ? result
-      : markFrameworkStepInput(result, frameworkMessageKind),
+    attachInputText(
+      frameworkMessageKind === undefined
+        ? result
+        : markFrameworkStepInput(result, frameworkMessageKind),
+      inputText,
+    ),
     ephemeralContext,
   );
 }

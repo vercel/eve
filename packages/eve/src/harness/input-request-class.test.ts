@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { isApprovalRequest } from "#harness/input-request-class.js";
-import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
 
 describe("isApprovalRequest", () => {
   const action = {
@@ -40,6 +40,7 @@ describe("isApprovalRequest", () => {
       isApprovalRequest(
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          turnSequence: 0,
           violation: { kind: "input", limit: 12, usedTokens: 12 },
         }),
       ),

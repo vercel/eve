@@ -16,6 +16,7 @@ import {
   writeTaskTable,
   type TaskCall,
   type TaskOutcome,
+  type TaskRecord,
   type TaskRunCommand,
   type TaskRunCommands,
   type TaskTable,
@@ -38,10 +39,12 @@ import type {
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
-import { withdrawWorkflowAsks } from "#execution/tools/workflow/withdraw-step.js";
-import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
@@ -69,7 +72,8 @@ async function applyTaskRunMessage(
     return { serializedContext: input.serializedContext, sessionState: input.sessionState };
   }
   let table = readTaskTable(session.state);
-  const events: TaskSettledStreamEvent[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
+  let withdrawn: readonly UnstampedMessageStreamEvent[] = [];
   switch (message.kind) {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
@@ -80,9 +84,10 @@ async function applyTaskRunMessage(
     case "reply": {
       ({ session, table } = countTaskRunUsage(session, table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
+      const record = findTask(table, taskId);
       const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
       table = settled.table;
-      events.push(...settled.settled.map((call) => taskSettledEvent(taskId, call, outcome)));
+      events.push(...taskSettledEvents(session, record, settled.settled, outcome));
       break;
     }
     case "usage":
@@ -91,78 +96,82 @@ async function applyTaskRunMessage(
     case "outcome": {
       ({ session, table } = countTaskRunUsage(session, table, taskId, message));
       const outcome = toOutcome(message);
+      const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
-      events.push(...settled.settled.map((call) => taskSettledEvent(taskId, call, outcome)));
+      events.push(...taskSettledEvents(session, record, settled.settled, outcome));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      session = forgetRunQuestions(session, message.from.runId);
+      // Nobody can answer what a finished run relayed, so channels stop offering it.
+      withdrawn = finishRun(viewOf(session), {
+        requestIds: runRequestIds(session, message.from.runId),
+        taskId,
+      }).events;
       break;
     }
   }
-  return await publishSessionEvents(
+  const relayed = await relaySessionEvents(
     { ...input, sessionState: saveTable(input.sessionState, session, table) },
-    events,
+    withdrawn,
   );
+  return await publishSessionEvents({ ...input, ...relayed }, events);
 }
 
 /**
  * Cancels tasks: their calls settle as cancelled and their runs are told to
  * stop. A run ends itself within its cleanup deadline and reports cancelled.
- * A `task()` run's cancel settles its questions, so the session withdraws
- * them in the same step and accepts no answer after it. A `serve()` run
- * withdraws its stretch's questions itself, and the session decides each one.
+ * A `task()` run's cancel settles every request it relayed, so the session
+ * withdraws them in the same step and accepts no answer after it. A `serve()`
+ * run withdraws its stretch's questions itself, and the session decides each one.
  */
 export async function cancelTasksStep(
-  input: SessionStepState & { readonly taskIds: readonly string[] },
+  input: SessionStepState & TaskCancellationInput,
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, cancelTasks);
 }
 
+interface TaskCancellationInput {
+  readonly reason: TaskCancelReason;
+  readonly taskIds: readonly string[];
+}
+
 async function cancelTasks(
-  input: SessionStepState & { readonly taskIds: readonly string[] },
+  input: SessionStepState & TaskCancellationInput,
 ): Promise<PublishedSessionEvents> {
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
-  const events: TaskSettledStreamEvent[] = [];
-  const stoppedRunIds = new Set<string>();
+  const events: UnstampedMessageStreamEvent[] = [];
+  const view = viewOf(session);
+  const withdrawn: UnstampedMessageStreamEvent[] = [];
+  const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   for (const taskId of input.taskIds) {
-    const resumable = findTask(table, taskId)?.resumable;
+    const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
     table = cancelled.table;
-    events.push(...cancelled.settled.map((call) => taskSettledEvent(taskId, call, CANCELLED)));
+    events.push(...taskSettledEvents(session, record, cancelled.settled, outcome));
     if (cancelled.send === undefined) continue;
-    if (resumable === false) stoppedRunIds.add(cancelled.send.run.runId);
+    // A `task()` run's cancel settles what it relayed; a `serve()` run withdraws its own.
+    if (record?.resumable === false) {
+      const requestIds = runRequestIds(session, cancelled.send.run.runId);
+      withdrawn.push(...finishRun(view, { requestIds, taskId }).events);
+    }
     await sendTaskRunCommands(cancelled.send);
   }
-  const withdrawn = withdrawWorkflowAsks(session, (_requestId, runId) => stoppedRunIds.has(runId));
   const relayed = await relaySessionEvents(
-    { ...input, sessionState: saveTable(input.sessionState, withdrawn.session, table) },
-    withdrawn.events,
+    { ...input, sessionState: saveTable(input.sessionState, session, table) },
+    withdrawn,
   );
   return await publishSessionEvents({ ...input, ...relayed }, events);
 }
 
-const CANCELLED: TaskOutcome = { status: "cancelled" };
-
-/** The `task.settled` event for one settled call. */
-function taskSettledEvent(
-  taskId: string,
-  call: TaskCall,
+/** The `task.settled` events for a task's settled calls; calls only settle on a known task. */
+function taskSettledEvents(
+  session: DurableSession,
+  record: TaskRecord | undefined,
+  calls: readonly TaskCall[],
   outcome: TaskOutcome,
-): TaskSettledStreamEvent {
-  const base = { callId: call.callId, taskId, turnId: call.turnId };
-  switch (outcome.status) {
-    case "completed":
-      return createTaskSettledEvent({ ...base, output: outcome.output, status: "completed" });
-    case "failed":
-      return createTaskSettledEvent({
-        ...base,
-        error: { message: outcome.error },
-        status: "failed",
-      });
-    case "cancelled":
-      return createTaskSettledEvent({ ...base, status: "cancelled" });
-  }
+): readonly UnstampedMessageStreamEvent[] {
+  if (record === undefined) return [];
+  return settleTask(viewOf(session), { calls, outcome, task: record }).events;
 }
 
 /**
@@ -223,9 +232,15 @@ function countTaskRunUsage(
   };
 }
 
-/** A finished run can no longer take answers, so its unanswered questions are dropped. */
-function forgetRunQuestions(session: DurableSession, runId: string): DurableSession {
-  return clearProxyInputRequestsWhere(session, (route) => route.workflowAsk?.runId === runId);
+/** The requests a run relayed: its own questions and those of the sessions it opened. */
+function runRequestIds(session: DurableSession, runId: string): readonly string[] {
+  return [...getProxyInputRequests(session.state)]
+    .filter(([, route]) => route.runId === runId)
+    .map(([requestId]) => requestId);
+}
+
+function viewOf(session: DurableSession) {
+  return sessionView(storedProjection(session.state), session.state);
 }
 
 function saveTable(

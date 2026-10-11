@@ -15,9 +15,7 @@ import { theme } from "./lib/theme.ts";
  *
  *   - `/loglevel none` hides log lines already in the transcript
  *   - lines captured while hidden stay buffered, invisible
- *   - `/loglevel all` restores the streams: each source renders one
- *     section showing its NEWEST write, with earlier writes behind an
- *     `… (N more)` count (the diagnostics file carries the history)
+ *   - `/loglevel all` restores every buffered log line
  *
  * Needs no agent server and no model credentials.
  */
@@ -79,22 +77,19 @@ void (async () => {
     await screen.waitForText("Showing all logs", 5_000);
 
     const restored = screen.snapshot();
-    // The stdout section shows only its newest write (the one captured
-    // while hidden); the earlier mark sits behind the elided count.
-    if (!restored.includes(HIDDEN_STDOUT_MARK) || !restored.includes(VISIBLE_STDERR_MARK)) {
-      throw new Error(`/loglevel all should restore each stream's newest write:\n${restored}`);
-    }
-    if (restored.includes(VISIBLE_STDOUT_MARK) || !restored.includes("(1 more)")) {
-      throw new Error(`earlier writes should collapse behind the elided count:\n${restored}`);
+    if (
+      !restored.includes(VISIBLE_STDOUT_MARK) ||
+      !restored.includes(HIDDEN_STDOUT_MARK) ||
+      !restored.includes(VISIBLE_STDERR_MARK)
+    ) {
+      throw new Error(`/loglevel all should restore every buffered line:\n${restored}`);
     }
 
     input.type("/exit");
     input.enter();
     await runPromise;
 
-    process.stdout.write(
-      `${theme.muted("[tui-loglevel] buffered hide/restore with newest-write sections verified")}\n`,
-    );
+    process.stdout.write(`${theme.muted("[tui-loglevel] buffered hide/restore verified")}\n`);
   } catch (error) {
     process.stdout.write(
       `${theme.danger("\n[tui] tui-loglevel smoke test failed:")} ${String(error)}\n`,

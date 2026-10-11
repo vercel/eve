@@ -22,8 +22,11 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 63,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 63],
+    current: 85,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 84,
+      85,
+    ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -52,13 +55,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       44: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       45: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       46: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
-      47: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
-      48: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
+      47: "eve/experimental/evaluate was removed; import decide from eve/ai",
+      48: "eve/experimental/evaluate was removed; import decide from eve/ai",
       49: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       50: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       51: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       52: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      54: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      55: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
       56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       57: "agentRouter() no longer accepts a model-facing outputSchema; structured subagent output is requested only through ctx.agent().",
       58: "Workflow tools no longer accept execution or return background task receipts; every call blocks until it settles.",
@@ -66,13 +71,28 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       60: "Workflow tools define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx): a task() call returns a receipt and runs as a task, a serve() call reaches a resumable task through receive() and its model input gains taskId, and stream events gained task.started and task.settled. Agent tools are serve() tools with taskId in place of agentId, and the subagent.* stream events were removed. ctx.interruptSignal and WorkflowTaskContext were removed: a steering message aborts the abortSignal of an execute call the turn waits on.",
       61: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       62: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      63: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      64: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      65: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      66: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      67: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      68: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      69: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      70: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      71: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      72: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      73: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      74: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      75: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
+      79: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      83: 'webSearch provider "openai" was replaced by "native" before it shipped in a release',
     },
   },
   dynamicTool: {
-    current: 60,
+    current: 79,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      60,
+      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78, 79,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -108,11 +128,16 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       57: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
       58: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       59: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      71: "AI SDK evaluation models became decision models; auto() accepts decision models only",
+      74: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
     },
   },
   channel: {
-    current: 36,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 36],
+    current: 59,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 36, 37, 38, 39, 40, 41, 42,
+      43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57, 58, 59,
+    ],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -130,11 +155,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       33: "Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text.",
       34: 'Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       35: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
+      53: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
     },
   },
   schedule: {
-    current: 18,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18],
+    current: 31,
+    supported: [
+      1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+      29, 30, 31,
+    ],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       16: 'Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
@@ -142,8 +171,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 23,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23],
+    current: 35,
+    supported: [
+      3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+      34, 35,
+    ],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -156,8 +188,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 32,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 32],
+    current: 46,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 32, 33, 34,
+      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46,
+    ],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -168,11 +203,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       29: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
       30: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       31: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      42: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
     },
   },
   hook: {
-    current: 31,
-    supported: [20, 21, 22, 23, 25, 27, 31],
+    current: 44,
+    supported: [20, 21, 22, 23, 25, 27, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -198,12 +234,16 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       28: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
       29: 'Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       30: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event hook events were removed; subscribe to task.started, task.settled, and agent.started.",
+      40: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
     },
   },
-  skill: { current: 2, supported: [1, 2], dropped: {} },
+  skill: { current: 3, supported: [1, 2, 3], dropped: {} },
   dynamicSkill: {
-    current: 25,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25],
+    current: 36,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25, 26, 27, 28, 29, 30,
+      31, 32, 33, 34, 35, 36,
+    ],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       22: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
@@ -213,8 +253,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 26,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 26],
+    current: 37,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 28, 29, 30,
+      31, 32, 33, 34, 35, 36, 37,
+    ],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
@@ -224,11 +267,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   config: { current: 1, supported: [1], dropped: {} },
   state: {
-    current: 9,
-    supported: [1, 2, 3, 4, 5, 7, 9],
+    current: 13,
+    supported: [1, 2, 3, 4, 5, 7, 9, 10, 12, 13],
     dropped: {
       6: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       8: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      11: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
     },
   },
 } as const satisfies Record<string, ExtensionCapabilityContract>;

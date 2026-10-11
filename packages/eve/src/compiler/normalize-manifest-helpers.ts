@@ -1,6 +1,9 @@
 import { posix } from "node:path";
+import type { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
+import type { ComposedNodeSourceGraph, SelectedNodeConfig } from "#compiler/node-source-state.js";
+import { loadModuleBackedDefinition } from "#compiler/normalize-helpers.js";
 
-import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.js";
+import { mountRefNamespace } from "#discover/extensions.js";
 import type { AgentSourceManifest, LocalSubagentSourceRef } from "#discover/manifest.js";
 import type {
   CompiledAgentDefinition,
@@ -9,15 +12,50 @@ import type {
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { ExtensionCompileMount } from "#compiler/load-binding-namespace.js";
+import { createCompiledChannelRoutePlan } from "#compiler/channel-route-plan.js";
+import { describeAgentSourceCandidate } from "#compiler/source-graph.js";
+import type { FinalizedNodeSourceState } from "#compiler/node-source-state.js";
+import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
 import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
 import {
   canonicalSourceSlot,
+  createAgentModuleBinding,
+  extensionMountId,
+  isAgentModuleCandidate,
   type AgentModuleCandidate,
   type AgentSourceOwner,
   type AgentSourceRegistry,
   type ComposedAgentModuleCandidates,
   type CompiledModuleBinding,
 } from "#compiler/source-graph.js";
+
+export async function loadSelectedNodeConfig(
+  state: ComposedNodeSourceGraph,
+  evaluation: NodeModuleEvaluationContext,
+): Promise<SelectedNodeConfig> {
+  const candidate = state.composed.selected.get("agent");
+  if (candidate === undefined || !isAgentModuleCandidate(candidate)) {
+    throw new Error("Every local agent node requires a selected module-backed agent.ts source.");
+  }
+  const binding = createAgentModuleBinding(candidate);
+  const projected = state.sourcesBySourceId.get(candidate.sourceId);
+  if (projected?.source.sourceKind !== "module") {
+    throw new Error(`Selected agent config source "${candidate.sourceId}" was not projected.`);
+  }
+  const source = projected.source;
+  return {
+    binding,
+    candidate,
+    definition: await loadModuleBackedDefinition({
+      binding,
+      kind: "agent config",
+      loadNamespace: evaluation.loadNamespace,
+      source,
+    }),
+    source,
+  };
+}
 
 export function collectSelectedSourceIds(composed: ComposedAgentModuleCandidates): Set<string> {
   return new Set([...composed.selected.values()].map((candidate) => candidate.sourceId));
@@ -164,24 +202,104 @@ export function createCompiledRemoteAgent(input: {
   return node;
 }
 
+export function compileChannelRoutes(
+  state: FinalizedNodeSourceState,
+  channels: readonly import("#compiler/manifest.js").CompiledChannelDefinition[],
+  diagnostics: CompilerDiagnostic[],
+  nodeId: string,
+) {
+  const channelRoutes = createCompiledChannelRoutePlan({
+    bindings: state.bindings,
+    channels,
+    diagnostics,
+    nodeId,
+    sources: Object.fromEntries(
+      state.orderedCandidates.map((candidate) => [
+        candidate.sourceId,
+        describeAgentSourceCandidate(candidate),
+      ]),
+    ),
+  });
+  for (const channel of channelRoutes.effective) {
+    state.evaluation.requireRuntimeEntry(channel.sourceId);
+  }
+  return channelRoutes;
+}
+
+export function resolveExtensionMountSource(
+  manifest: AgentSourceManifest,
+  mount: AgentSourceManifest["resolvedExtensions"][number],
+  nodePath: string,
+) {
+  const mountRef =
+    mount.programmaticDeclaration ??
+    manifest.extensions.find((entry) => mountRefNamespace(entry.logicalPath) === mount.namespace);
+  if (mountRef === undefined) return undefined;
+  return {
+    mountId: extensionMountId(nodePath, mount.namespace),
+    logicalPath: mountRef.logicalPath,
+    mountSourceId: mountRef.sourceId,
+    mountSourcePath: posix.join(manifest.agentRoot, mountRef.logicalPath),
+  };
+}
+
+export function createExtensionCompileMounts(
+  manifest: AgentSourceManifest,
+  nodePath: string,
+): {
+  mounts: Map<string, ExtensionCompileMount>;
+  sourceIds: Map<string, string>;
+} {
+  const mounts = new Map<string, ExtensionCompileMount>();
+  const sourceIds = new Map<string, string>();
+  for (const mount of manifest.resolvedExtensions) {
+    const source = resolveExtensionMountSource(manifest, mount, nodePath);
+    if (source === undefined) continue;
+    sourceIds.set(source.mountId, source.mountSourceId);
+    mounts.set(source.mountId, {
+      mountId: source.mountId,
+      entry:
+        mount.programmaticDeclaration === undefined
+          ? {
+              mountSourcePath: source.mountSourcePath,
+              packageName: mount.packageName,
+              sourceRoot: mount.sourceRoot,
+              specifier: mount.specifier,
+            }
+          : undefined,
+    });
+  }
+  return { mounts, sourceIds };
+}
+
 export function compileExtensionMounts(
   manifest: AgentSourceManifest,
   composed: ComposedAgentModuleCandidates,
+  nodePath: string,
 ): CompiledExtensionMount[] {
   const selected = collectSelectedSourceIds(composed);
   return manifest.resolvedExtensions.flatMap((mount) => {
-    const mountRef =
-      mount.programmaticDeclaration ??
-      manifest.extensions.find((entry) => mountRefNamespace(entry.logicalPath) === mount.namespace);
-    if (mountRef === undefined || !selected.has(mountRef.sourceId)) return [];
+    const source = resolveExtensionMountSource(manifest, mount, nodePath);
+    if (source === undefined || !selected.has(source.mountSourceId)) return [];
     return [
       {
         externalDependencies: [...mount.externalDependencies],
-        mountLogicalPath: mountRef.logicalPath,
-        mountSourceId: mountRef.sourceId,
+        mountLogicalPath: source.logicalPath,
+        mountSourceId: source.mountSourceId,
+        ...(mount.programmaticDeclaration === undefined
+          ? {}
+          : {
+              programmaticImport: {
+                specifier: mount.programmaticDeclaration.importSpecifier,
+                entryPath: mount.programmaticDeclaration.entryPath,
+                config: mount.programmaticDeclaration.config,
+              },
+            }),
+        mountSourcePath: source.mountSourcePath,
         namespace: mount.namespace,
         packageName: mount.packageName,
-        packageNamespace: packageStateNamespace(mount.packageName),
+        specifier: mount.specifier,
+        mountId: source.mountId,
         sourceRoot: mount.sourceRoot,
       },
     ];

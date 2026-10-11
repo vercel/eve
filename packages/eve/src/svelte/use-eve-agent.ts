@@ -12,7 +12,8 @@ import {
   type PrepareSend,
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
-import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
+import { conversationReducer } from "#client/conversation-reducer.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import type {
@@ -53,6 +54,8 @@ export interface UseEveAgentReturn<TData> {
   readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state built by reducing every stream event through the reducer. */
   readonly data: TData;
+  /** Canonical session state, regardless of the chosen data reducer. */
+  readonly conversation: ConversationState;
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: Error | undefined;
   /** Raw server events received during this session (authoritative stream). */
@@ -130,11 +133,12 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
+  /** Follow each subagent call's session into `conversation.agents` while mounted. @default false */
+  readonly followSubagents?: boolean;
   /** Prewarm an owned session on mount and after reset. @default false */
   readonly prewarm?: boolean;
   /**
-   * Projects stream events into `TData`. Defaults to {@link defaultMessageReducer},
-   * which fixes `TData` to {@link EveMessageData}.
+   * Projects stream events into `TData`. Defaults to the conversation reducer.
    */
   readonly reducer?: EveAgentReducer<TData>;
   /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
@@ -171,6 +175,11 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
   get data(): TData {
     this.#subscribe();
     return this.#snapshot.data;
+  }
+
+  get conversation(): ConversationState {
+    this.#subscribe();
+    return this.#snapshot.conversation;
   }
 
   get error(): Error | undefined {
@@ -225,8 +234,8 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
 }
 
 export function useEveAgent(
-  options?: UseEveAgentOptions<EveMessageData>,
-): UseEveAgentReturn<EveMessageData>;
+  options?: UseEveAgentOptions<ConversationState>,
+): UseEveAgentReturn<ConversationState>;
 
 export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> & { readonly reducer: EveAgentReducer<TData> },
@@ -236,8 +245,8 @@ export function useEveAgent<TData>(
  * Svelte 5 binding that drives an eve session and projects its events into
  * rune-friendly reactive data.
  *
- * Without a `reducer`, projects to {@link EveMessageData} via
- * {@link defaultMessageReducer}; pass a `reducer` for a different `TData`.
+ * Without a `reducer`, projects conversation state including message parts;
+ * pass a `reducer` for a different `TData`.
  * Configuration is read once; create a new binding to change host, reducer,
  * or session.
  */
@@ -247,7 +256,7 @@ export function useEveAgent<TData>(
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
     throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
   }
-  const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
+  const reducer = options.reducer ?? (conversationReducer as EveAgentReducer<TData>);
   const store = new EveAgentStore<TData>({
     auth: options.auth,
     headers: options.headers,
@@ -255,6 +264,7 @@ export function useEveAgent<TData>(
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     optimistic: options.optimistic,
+    followSubagents: options.followSubagents,
     prewarm: options.prewarm,
     reducer,
     session: options.session,

@@ -1,9 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { createHmac } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createChannelOperations } from "#channel/channel-operations.js";
+import { isCompiledChannel } from "#channel/compiled-channel.js";
+import { isHttpRouteDefinition } from "#channel/routes.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { slackChannel } from "#public/channels/slack/slackChannel.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
@@ -27,8 +34,104 @@ import {
   expectHookClaims,
   expectSingleTurn,
 } from "#internal/testing/entry-test-helpers.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("workflowEntry integration", () => {
+  it("sends a first-turn sign-in privately to a custom-auth Slack author", async () => {
+    const signingSecret = "first-turn-signing-secret";
+    const ephemeral: Record<string, unknown>[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.hostname !== "slack.com") return realFetch(input, init);
+      if (url.pathname.endsWith("/chat.postEphemeral")) {
+        ephemeral.push(Object.fromEntries(new URLSearchParams(String(init?.body))));
+      }
+      return Response.json({ ok: true, ts: "1700000000.000900", messages: [] });
+    });
+    const slack = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret },
+      onDirectMessage: () => ({
+        auth: {
+          attributes: {},
+          authenticator: "employee-directory",
+          principalId: "employee:alice",
+          principalType: "user",
+        },
+      }),
+    });
+    if (!isCompiledChannel(slack)) throw new Error("Expected a compiled Slack channel.");
+    const route = slack.routes.find((candidate) => candidate.method === "POST");
+    if (route === undefined || !isHttpRouteDefinition(route)) {
+      throw new Error("Expected the Slack events route.");
+    }
+    const { runtime } = await createWeatherAuthRuntime("workflow-entry-slack-first-turn-auth", [
+      { logicalPath: "channels/slack.ts", loadNamespace: async () => ({ default: slack }) },
+    ]);
+
+    await runtime.run(async () => {
+      const bundle = await getCompiledRuntimeAgentBundle({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const resolved = bundle.graph.root.channels.find((channel) => channel.name === "slack");
+      if (resolved?.adapter === undefined) throw new Error("Expected the resolved Slack channel.");
+      const operations = createChannelOperations<unknown>({
+        adapter: resolved.adapter,
+        channelName: "slack",
+        runtime: createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        }),
+      });
+      const body = JSON.stringify({
+        event: {
+          channel: "D_ALICE",
+          channel_type: "im",
+          event_ts: "1700000000.000100",
+          text: "Use the get_weather tool to check the weather in Lisbon.",
+          ts: "1700000000.000100",
+          type: "message",
+          user: "U_ALICE",
+        },
+        event_id: "Ev_first_turn_auth",
+        team_id: "T01",
+        type: "event_callback",
+      });
+      const timestamp = Math.floor(Date.now() / 1000);
+      const signature = `v0=${createHmac("sha256", signingSecret)
+        .update(`v0:${timestamp}:${body}`)
+        .digest("hex")}`;
+      const pending: Promise<unknown>[] = [];
+      await route.handler(
+        new Request("https://agent.example.com/eve/v1/slack", {
+          body,
+          headers: {
+            "content-type": "application/json",
+            "x-slack-request-timestamp": String(timestamp),
+            "x-slack-signature": signature,
+          },
+          method: "POST",
+        }),
+        {
+          ...mockAgentRouteArgs(),
+          ...operations,
+          attachSession: vi.fn() as never,
+          params: {},
+          requestIp: null,
+          to: vi.fn() as never,
+          waitUntil: (task) => void pending.push(task),
+        },
+      );
+      await Promise.all(pending);
+
+      await vi.waitFor(() => expect(ephemeral).toHaveLength(1), { timeout: 20_000 });
+      expect(ephemeral[0]).toMatchObject({ channel: "D_ALICE", user: "U_ALICE" });
+    });
+  });
+
   it("resumes normal follow-ups after an interactive authorization callback", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-followup",
@@ -36,7 +139,7 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-auth-followup";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const run = await startSessionOwner(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
@@ -71,13 +174,15 @@ describe("workflowEntry integration", () => {
           authorization: { displayName: "Weather" },
         });
 
-        // The authorization park closes its turn boundary so stream
-        // consumers do not hang on the parked turn.
-        const parkBoundary = await stream.nextUntil(
-          "authorization park boundary",
-          (event) => event.type === "session.waiting",
+        // The sign-in holds the turn open, as a question or task does.
+        const held = await stream.nextUntil(
+          "authorization hold",
+          (event) => event.type === "turn.waiting",
         );
-        expect(parkBoundary.at(-1)?.type).toBe("session.waiting");
+        expect(held.map((event) => event.type)).toEqual(["turn.waiting"]);
+        expect(filterEventsByType(held, "turn.waiting")[0]?.data).toMatchObject({
+          turnId: "turn_0",
+        });
         await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId), continuationToken]);
 
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
@@ -103,7 +208,11 @@ describe("workflowEntry integration", () => {
         const completed = filterEventsByType(authorizedTurn, "authorization.completed");
 
         expect(completeCalls()).toBe(1);
-        expectSingleTurn(authorizedTurn, "turn_1");
+        // The held turn resumes: no new turn starts, and the same turn completes.
+        expect(filterEventsByType(authorizedTurn, "turn.started")).toHaveLength(0);
+        expect(filterEventsByType(authorizedTurn, "turn.completed")[0]?.data).toMatchObject({
+          turnId: "turn_0",
+        });
         expect(authorizedTurn.at(-1)?.type).toBe("session.waiting");
         expect(completed).toHaveLength(1);
         expect(completed[0]?.data).toMatchObject({
@@ -149,32 +258,14 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("runs ordinary deliveries while an authorization challenge stays open", async () => {
+  it("queues another person's message behind a held sign-in", async () => {
     const { completeCalls, completedPrincipals, runtime } = await createWeatherAuthRuntime(
-      "workflow-entry-auth-open",
+      "workflow-entry-auth-queued",
     );
-    const continuationToken = "http:workflow-entry-auth-open";
+    const continuationToken = "http:workflow-entry-auth-queued";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
-          serializedContext: buildSerializedContext({
-            auth: {
-              attributes: {},
-              authenticator: "test-idp",
-              issuer: "test-idp",
-              principalId: "user-1",
-              principalType: "user",
-            },
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
-
+      const run = await startWeatherRun(continuationToken);
       const stream = captureEvents(run);
 
       try {
@@ -182,104 +273,59 @@ describe("workflowEntry integration", () => {
           "initial auth-required event",
           (event) => event.type === "authorization.required",
         );
-        // Consume the park's own turn boundary so the next wait delimits
-        // the intervening message turn.
-        await stream.nextUntil(
-          "authorization park boundary",
-          (event) => event.type === "session.waiting",
-        );
+        await stream.nextUntil("authorization hold", (event) => event.type === "turn.waiting");
 
-        // An ordinary message while the challenge is open runs as a normal
-        // turn instead of queueing behind the callback.
         await waitForHook(
           { runId: run.runId },
           { token: sessionInboxHookToken(continuationToken) },
         );
         await resumeHook(sessionInboxHookToken(continuationToken), {
-          auth: {
-            attributes: {},
-            authenticator: "test-idp",
-            issuer: "test-idp",
-            principalId: "user-2",
-            principalType: "user",
-          },
+          auth: userAuth("user-2"),
           kind: "send",
           payload: { message: "Quick status note while I sign in." },
         });
-
-        const interveningTurn = await stream.nextUntil(
-          "intervening message turn",
-          (event) => event.type === "session.waiting",
-        );
-        expect(
-          interveningTurn.some(
-            (event) =>
-              event.type === "message.completed" &&
-              event.data.message?.includes("Quick status note while I sign in.") === true,
-          ),
-        ).toBe(true);
-        expect(filterEventsByType(interveningTurn, "authorization.completed")).toHaveLength(0);
-        expect(completeCalls()).toBe(0);
-
-        // The callback still lands on the retained read and closes the
-        // challenge exactly once.
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
-          payloads: [
-            {
-              authorizationCallback: {
-                attemptId: authorizationAttemptId(firstTurn),
-                callback: {
-                  method: "GET",
-                  params: { code: "oauth-code" },
-                },
-                connectionName: "weather",
-              },
-            },
-          ],
+          payloads: [weatherCallback(authorizationAttemptId(firstTurn))],
         });
 
-        const callbackTurn = await stream.nextUntil(
-          "authorization callback turn",
+        // The held turn resumes first, as user-1, and finishes the tool call.
+        const resumed = await stream.nextUntil(
+          "resumed held turn",
           (event) => event.type === "session.waiting",
         );
-        const completed = filterEventsByType(callbackTurn, "authorization.completed");
-        expectSingleTurn(callbackTurn, "turn_2");
-        expect(completed).toHaveLength(1);
-        expect(completed[0]?.data).toMatchObject({
+        expect(filterEventsByType(resumed, "turn.started")).toHaveLength(0);
+        expect(filterEventsByType(resumed, "authorization.completed")[0]?.data).toMatchObject({
           name: "weather",
           outcome: "authorized",
+          principalId: "user-1",
         });
-
-        // The granted authorization serves the next explicit tool request.
-        // (No waitForHook here: it only reports never-received hooks, and
-        // the continuation hook already received the intervening message.)
-        await resumeHook(sessionInboxHookToken(continuationToken), {
-          auth: {
-            attributes: {},
-            authenticator: "test-idp",
-            issuer: "test-idp",
-            principalId: "user-1",
-            principalType: "user",
-          },
-          kind: "send",
-          payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
+        expect(filterEventsByType(resumed, "turn.completed")[0]?.data).toMatchObject({
+          turnId: "turn_0",
         });
-
-        const toolTurn = await stream.nextUntil(
-          "post-authorization tool turn",
-          (event) => event.type === "session.waiting",
-        );
+        expect(
+          resumed.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("authorized with weather-token") === true,
+          ),
+        ).toBe(true);
         expect(completeCalls()).toBe(1);
         expect(completedPrincipals()).toEqual([
           expect.objectContaining({ id: "user-1", type: "user" }),
         ]);
+
+        // user-2's message waited behind the held turn and runs next.
+        const queued = await stream.nextUntil(
+          "queued message turn",
+          (event) => event.type === "session.waiting",
+        );
+        expectSingleTurn(queued, "turn_1");
         expect(
-          toolTurn.some(
+          queued.some(
             (event) =>
               event.type === "message.completed" &&
-              event.data.message?.includes("Used local weather tool for Lisbon") === true &&
-              event.data.message.includes("authorized with weather-token"),
+              event.data.message?.includes("Quick status note while I sign in.") === true,
           ),
         ).toBe(true);
       } finally {
@@ -289,31 +335,14 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("ignores stale and duplicate callbacks after a challenge is replaced", async () => {
+  it("cancels a held sign-in when the same person steers the turn, ignoring its late callback", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
-      "workflow-entry-auth-replaced",
+      "workflow-entry-auth-steered",
     );
-    const continuationToken = "http:workflow-entry-auth-replaced";
+    const continuationToken = "http:workflow-entry-auth-steered";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
-          serializedContext: buildSerializedContext({
-            auth: {
-              attributes: {},
-              authenticator: "test-idp",
-              issuer: "test-idp",
-              principalId: "user-1",
-              principalType: "user",
-            },
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startWeatherRun(continuationToken);
       const stream = captureEvents(run);
 
       try {
@@ -321,65 +350,51 @@ describe("workflowEntry integration", () => {
           "first auth-required event",
           (event) => event.type === "authorization.required",
         );
-        await stream.nextUntil(
-          "first authorization park",
-          (event) => event.type === "session.waiting",
-        );
+        await stream.nextUntil("first hold", (event) => event.type === "turn.waiting");
 
         await waitForHook(
           { runId: run.runId },
           { token: sessionInboxHookToken(continuationToken) },
         );
         await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: userAuth("user-1"),
           kind: "send",
           payload: { message: "Use the get_weather tool to check the weather in Lisbon." },
         });
+        // The steer cancels the open sign-in, and the model's retry asks again
+        // in the same turn.
         const replacementAttempt = await stream.nextUntil(
           "replacement auth-required event",
           (event) => event.type === "authorization.required",
         );
+        expect(filterEventsByType(replacementAttempt, "turn.started")).toHaveLength(0);
         expect(filterEventsByType(replacementAttempt, "authorization.completed")).toMatchObject([
-          { data: { name: "weather", outcome: "failed" } },
+          { data: { name: "weather", outcome: "declined" } },
         ]);
-        await stream.nextUntil(
-          "replacement authorization park",
+        await stream.nextUntil("replacement hold", (event) => event.type === "turn.waiting");
+
+        const stale = weatherCallback(authorizationAttemptId(firstAttempt), "stale-oauth-code");
+        for (let i = 0; i < 2; i++) {
+          await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+            kind: "authorization-callback",
+            payloads: [stale],
+          });
+        }
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [weatherCallback(authorizationAttemptId(replacementAttempt))],
+        });
+
+        const resumed = await stream.nextUntil(
+          "resumed held turn",
           (event) => event.type === "session.waiting",
         );
-
-        const stalePayload = {
-          authorizationCallback: {
-            attemptId: authorizationAttemptId(firstAttempt),
-            callback: { method: "GET", params: { code: "stale-oauth-code" } },
-            connectionName: "weather",
-          },
-        };
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [stalePayload],
+        expect(filterEventsByType(resumed, "authorization.completed")).toMatchObject([
+          { data: { outcome: "authorized" } },
+        ]);
+        expect(filterEventsByType(resumed, "turn.completed")[0]?.data).toMatchObject({
+          turnId: "turn_0",
         });
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [stalePayload],
-        });
-
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [
-            {
-              authorizationCallback: {
-                attemptId: authorizationAttemptId(replacementAttempt),
-                callback: { method: "GET", params: { code: "oauth-code" } },
-                connectionName: "weather",
-              },
-            },
-          ],
-        });
-
-        const callbackTurn = await stream.nextUntil(
-          "replacement authorization callback turn",
-          (event) => event.type === "session.waiting",
-        );
-        expect(filterEventsByType(callbackTurn, "authorization.completed")).toHaveLength(1);
         expect(completeCalls()).toBe(1);
       } finally {
         stream.dispose();
@@ -388,30 +403,12 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("completes the challenge after a no-op cancel consumed the parked wait", async () => {
+  it("cancelling a held turn drops its sign-in, so a late callback does nothing", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-cancel");
     const continuationToken = "http:workflow-entry-auth-cancel";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
-          serializedContext: buildSerializedContext({
-            auth: {
-              attributes: {},
-              authenticator: "test-idp",
-              issuer: "test-idp",
-              principalId: "user-1",
-              principalType: "user",
-            },
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
-
+      const run = await startWeatherRun(continuationToken);
       const stream = captureEvents(run);
 
       try {
@@ -419,57 +416,37 @@ describe("workflowEntry integration", () => {
           "initial auth-required event",
           (event) => event.type === "authorization.required",
         );
-        await stream.nextUntil(
-          "authorization park boundary",
-          (event) => event.type === "session.waiting",
-        );
+        await stream.nextUntil("authorization hold", (event) => event.type === "turn.waiting");
 
-        await waitForParkedTurnStep(run.runId);
-
-        // A cancel with no active turn is consumed by the parked wait
-        // without producing a parent turn. The callback must still surface
-        // in the continued wait instead of stalling until unrelated
-        // session activity re-parks the owner.
         await waitForHook(
           { runId: run.runId },
           { token: sessionInboxHookToken(continuationToken) },
         );
         await resumeHook(sessionInboxHookToken(continuationToken), { kind: "cancel" });
-        // Let the owner consume the no-op cancel and re-enter the parked
-        // wait before the callback fires; back-to-back resumes could
-        // otherwise surface the callback in the first wait iteration and
-        // mask a wait that ignores callbacks after a consumed cancel.
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        const cancelled = await stream.nextUntil(
+          "cancelled held turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(filterEventsByType(cancelled, "authorization.completed")).toMatchObject([
+          { data: { name: "weather", outcome: "declined" } },
+        ]);
+        expect(filterEventsByType(cancelled, "turn.cancelled")).toHaveLength(1);
 
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
-          payloads: [
-            {
-              authorizationCallback: {
-                attemptId: authorizationAttemptId(firstTurn),
-                callback: {
-                  method: "GET",
-                  params: { code: "oauth-code" },
-                },
-                connectionName: "weather",
-              },
-            },
-          ],
+          payloads: [weatherCallback(authorizationAttemptId(firstTurn))],
         });
-
-        const callbackTurn = await stream.nextUntil(
-          "authorization callback turn",
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: userAuth("user-1"),
+          kind: "send",
+          payload: { message: "follow up after cancel" },
+        });
+        const followup = await stream.nextUntil(
+          "follow-up turn",
           (event) => event.type === "session.waiting",
         );
-        const completed = filterEventsByType(callbackTurn, "authorization.completed");
-
-        expect(completeCalls()).toBe(1);
-        expect(completed).toHaveLength(1);
-        expect(completed[0]?.data).toMatchObject({
-          name: "weather",
-          outcome: "authorized",
-        });
-        expect(filterEventsByType(callbackTurn, "turn.cancelled")).toHaveLength(0);
+        expect(filterEventsByType(followup, "authorization.completed")).toHaveLength(0);
+        expect(completeCalls()).toBe(0);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -490,7 +467,10 @@ interface WeatherAuthRuntime {
  * `oauth-code` callback. Shared by the callback-resume and
  * challenge-stays-open owner tests.
  */
-async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
+async function createWeatherAuthRuntime(
+  agentName: string,
+  modules: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"] = [],
+): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
   const completedPrincipals: ConnectionPrincipal[] = [];
   const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
@@ -556,6 +536,7 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
   };
   const runtime = await createTestRuntime({
     agent: { name: agentName },
+    modules,
     tools: [getWeatherTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
@@ -585,4 +566,39 @@ function authorizationAttemptId(events: readonly MessageStreamEvent[]): string {
     throw new Error("Authorization callback URL is missing its attempt ID.");
   }
   return decodeURIComponent(attemptId);
+}
+
+function userAuth(principalId: string) {
+  return {
+    attributes: {},
+    authenticator: "test-idp",
+    issuer: "test-idp",
+    principalId,
+    principalType: "user" as const,
+  };
+}
+
+async function startWeatherRun(continuationToken: string) {
+  return await startSessionOwner(workflowEntry, [
+    {
+      kind: "initial",
+      ownerDeploymentId: "dpl_inline",
+      input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+      serializedContext: buildSerializedContext({
+        auth: userAuth("user-1"),
+        channelKind: "http",
+        continuationToken,
+      }),
+    },
+  ]);
+}
+
+function weatherCallback(attemptId: string, code = "oauth-code") {
+  return {
+    authorizationCallback: {
+      attemptId,
+      callback: { method: "GET", params: { code } },
+      connectionName: "weather",
+    },
+  };
 }

@@ -38,7 +38,7 @@ Module._resolveFilename = function(id, ...args) {
   );
   return async (filePath: string, requestedCompiler = typescriptPath) => {
     const request = Buffer.from(
-      JSON.stringify({ repoRoot: root, filePath, typescriptPath: requestedCompiler }),
+      JSON.stringify({ patchRoot: root, filePath, typescriptPath: requestedCompiler }),
     ).toString("base64");
     const { stdout } = await execFileAsync(process.execPath, ["--require", preload, worker], {
       cwd: root,

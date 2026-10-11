@@ -4,9 +4,8 @@ import type {
   ChannelReceiveContext,
   ChannelRespondOptions,
   ChannelSendOptions,
-  InternalChannelSource,
+  ChannelSource,
 } from "#channel/channel-operations.js";
-import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
 import { type InputResponse, inputResponseSchema } from "#shared/input.js";
 
 export type ObservedChannelDelivery<TState> =
@@ -24,7 +23,7 @@ export function mockChannelContext<TState = undefined>(
 ): ChannelReceiveContext<TState> {
   return {
     from(continuationToken) {
-      const source: InternalChannelSource<TState> = {
+      const source: ChannelSource<TState> = {
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },
@@ -45,19 +44,6 @@ export function mockChannelContext<TState = undefined>(
         },
         async reset() {
           return { status: "no_active_session" } as never;
-        },
-        async [INTERNAL_CHANNEL_DELIVER](payload, options) {
-          const validatedPayload =
-            payload.inputResponses === undefined
-              ? payload
-              : {
-                  ...payload,
-                  inputResponses: inputResponseSchema.array().parse(payload.inputResponses),
-                };
-          return (await observeDelivery(continuationToken, {
-            ...options,
-            ...validatedPayload,
-          } as ObservedChannelDelivery<TState>)) as never;
         },
       };
       return source;

@@ -1,7 +1,8 @@
 /**
  * Copies the private extension packages into eve's `src/`
  * so eve compiles and ships them as built-in extensions: `@eve/code` becomes
- * `eve/extensions/code` and `@eve/computer-use` becomes `eve/computer-use`. The
+ * `eve/extensions/code`, `@eve/git` becomes `eve/extensions/git`, and
+ * `@eve/computer-use` becomes `eve/computer-use`. The
  * packages stay the source of truth; the copies are gitignored. eve cannot
  * depend on them (they depend on eve), so the sibling workspace paths are read
  * directly and declared as turbo inputs in `turbo.json`.
@@ -19,6 +20,11 @@ export const builtInExtensions = [
     name: "code",
     source: join(packageRoot, "..", "eve-code", "extension"),
     target: join(packageRoot, "src", "extensions", "code", "extension"),
+  },
+  {
+    name: "git",
+    source: join(packageRoot, "..", "eve-git", "extension"),
+    target: join(packageRoot, "src", "extensions", "git", "extension"),
   },
   {
     name: "computer-use",

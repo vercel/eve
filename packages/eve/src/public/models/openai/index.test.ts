@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { chatgpt, experimental_chatgpt } from "./index.js";
+import { chatgpt, experimental_chatgpt, openai } from "./index.js";
+
+it.each([
+  ["chatgpt", chatgpt],
+  ["openai", openai],
+] as const)(
+  "%s defaults to gpt-6-luna-fast without overriding explicit models",
+  (_name, helper) => {
+    const model = helper();
+    const explicit = helper("gpt-5.6-luna-fast");
+    if (typeof model === "string" || typeof explicit === "string")
+      throw new Error("expected model instances");
+    expect(model.modelId).toBe("gpt-6-luna-fast");
+    expect(explicit.modelId).toBe("gpt-5.6-luna-fast");
+  },
+);
 
 describe("chatgpt", () => {
-  it("defaults to gpt-5.6-luna-fast", () => {
-    const model = chatgpt();
-    if (typeof model === "string") throw new Error("expected a model instance");
-    expect(model.modelId).toBe("gpt-5.6-luna-fast");
-  });
-
   it("creates a Codex-served model from a bare OpenAI slug", () => {
     const model = chatgpt("gpt-5.5");
     expect(typeof model).toBe("object");

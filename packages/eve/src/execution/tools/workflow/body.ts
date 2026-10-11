@@ -1,4 +1,7 @@
+import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import { toolStubOutput } from "#tool-stubs/output.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { callToolStubStep } from "#execution/tool-stubs/steps.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -74,7 +77,8 @@ export interface StartedWorkflowBody {
   readonly usage: RunUsageTally;
 }
 
-type WorkflowCallContext = ToolContext & WorkflowToolContext;
+// Workflow bodies replay deterministically, so they never receive model messages.
+type WorkflowCallContext = Omit<ToolContext, "messages"> & WorkflowToolContext;
 
 /** What an `execute` call a steering message stopped settles with when its body rejects. */
 const INTERRUPTED_OUTPUT = { interrupted: true } as const;
@@ -171,6 +175,17 @@ async function executeCallBody(
   from: WorkflowToolRunRef,
 ): Promise<WorkflowToolRunOutcome> {
   try {
+    const target = findStubTarget(input.agentContext.toolStubs, input.toolName);
+    if (target !== undefined) {
+      const result = await callToolStubStep(target.scope, {
+        callId: stubCallId(input.session.id, input.session.turn.id, input.callId),
+        tool: target.tool,
+        input: input.input,
+      });
+      if (result.kind === "error") throw new Error(result.error);
+      if (result.kind === "stub")
+        return { output: toolStubOutput(result.outcome), status: "completed" };
+    }
     const entryPoint = resolveWorkflowEntryPoint<WorkflowCallEntryPoint>(input);
     const result = entryPoint(input.executeInput ?? input.input, ctx);
     let output: JsonValue;
@@ -244,7 +259,10 @@ export function createSharedContext(
   input: WorkflowBodyInput,
   agent: (name: string) => AgentSession,
   askPerson: WorkflowSharedContext["ask"],
-): Omit<ToolContext & WorkflowSharedContext, "abortSignal" | "agents" | "callId" | "session"> {
+): Omit<
+  ToolContext & WorkflowSharedContext,
+  "abortSignal" | "agents" | "callId" | "messages" | "session"
+> {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,

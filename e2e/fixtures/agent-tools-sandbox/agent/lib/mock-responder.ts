@@ -1,3 +1,4 @@
+import { SKILL_TOOL } from "@eve-e2e/config/catalog-tools";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const SUBAGENT_DIRECTIVE = /ask the `([^`]+)` subagent with message:\s*([\s\S]+)/iu;
@@ -21,6 +22,9 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
             name: "bash",
           })),
         };
+  }
+  if (message.includes("EVE_SANDBOX_BASH_JOB")) {
+    return respondToBashJob(message, request);
   }
   if (message.includes("DYNAMIC-TURN-REPLAY-START")) {
     const gate = request.toolResults.find((result) => result.name === "dynamic-turn-replay-gate");
@@ -50,7 +54,9 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
       return { toolCalls: [{ input: { message: subagent[2] }, name: subagent[1] }] };
     }
     // The agent call returned a receipt; its result arrives in a <task_result> message.
-    return taskResultOf(request, subagent[1]) ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
+    return (
+      taskResultOf(request, subagent[1]) ?? { toolCalls: [{ input: {}, name: "eve__task_wait" }] }
+    );
   }
 
   const bash = BASH_DIRECTIVE.exec(message);
@@ -67,14 +73,41 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   const skill = SKILL_DIRECTIVE.exec(message);
   if (skill?.[1] !== undefined) {
     if (!turnHasToolResult) {
-      return { toolCalls: [{ input: { skill: skill[1] }, name: "load_skill" }] };
+      return { toolCalls: [{ input: { name: skill[1] }, name: SKILL_TOOL }] };
     }
     // Loaded skills instruct an exact reply whose text is the skill body's
     // final line (see the redeploy eval's deploy-note skill).
-    return lastNonEmptyLine(toolOutput(request, "load_skill"));
+    return lastNonEmptyLine(toolOutput(request, SKILL_TOOL));
   }
 
   return `Mock reply: ${message}`;
+}
+
+/** Starts the slow command, reads its output once, stops it, then replies. */
+function respondToBashJob(message: string, request: MockModelRequest): MockModelResponse | string {
+  const outputs = request.toolResults
+    .filter((result) => result.name === "bash")
+    .map(
+      (result) => result.output as { readonly outputDirectory?: unknown; readonly pid?: unknown },
+    );
+  if (outputs.length === 0) {
+    const command = /by running: `([^`]+)`/u.exec(message)?.[1] ?? "";
+    return { toolCalls: [{ input: { command }, name: "bash" }] };
+  }
+  const { outputDirectory, pid } = outputs[0] ?? {};
+  if (typeof outputDirectory !== "string" || typeof pid !== "number") {
+    return formatOutput(outputs[0]);
+  }
+  if (outputs.length === 1) {
+    const command = `sleep 2; tail -n 1 ${outputDirectory}/stdout`;
+    return { toolCalls: [{ input: { command }, name: "bash" }] };
+  }
+  if (outputs.length === 2) {
+    const exitFile = `${outputDirectory}/exit`;
+    const command = `kill -- -${pid}; for i in 1 2 3 4 5; do [ -f ${exitFile} ] && break; sleep 1; done; cat ${exitFile}`;
+    return { toolCalls: [{ input: { command }, name: "bash" }] };
+  }
+  return "index job stopped";
 }
 
 /** The `[Tasks]` note and `<task_result>` messages are eve's, not the user's. */

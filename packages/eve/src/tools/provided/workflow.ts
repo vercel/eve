@@ -44,11 +44,13 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");
   return attachWorkflowProgramOptions(
-    defineWorkflowTool({
-      description,
-      inputSchema: workflowInputSchema,
-      task: runWorkflowProgramTask,
-    }),
+    frameworkTool(
+      defineWorkflowTool({
+        description,
+        inputSchema: workflowInputSchema,
+        task: runWorkflowProgramTask,
+      }),
+    ),
     normalized,
   );
 }
@@ -63,3 +65,4 @@ function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
     maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   });
 }
+import { frameworkTool } from "./framework-tool.js";

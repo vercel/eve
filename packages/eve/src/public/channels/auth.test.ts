@@ -1460,6 +1460,54 @@ describe("vercelOidc strategy helper", () => {
     await expect(Promise.resolve(authFn(request))).resolves.toBeNull();
   });
 
+  it("grants stubs only through an explicitly granting matched subject entry", async () => {
+    const issuer = await installMockedVercelIssuer("stub-subject-grants");
+    const subject = "owner:acme:project:eval-runner:environment:preview";
+    const wildcard = "owner:acme:project:eval-runner:environment:*";
+    try {
+      const token = await issuer.signToken({
+        environment: "preview",
+        project_id: "prj_eval",
+        sub: subject,
+      });
+      const request = new Request(TEST_ROUTE_URL, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const cases = [
+        { subjects: undefined, allowed: false },
+        { subjects: [], allowed: false },
+        { subjects: [subject], allowed: false },
+        { subjects: [{ subject }], allowed: false },
+        { subjects: [{ subject, allowToolStubs: false }], allowed: false },
+        { subjects: [{ subject: "another-project", allowToolStubs: true }], allowed: false },
+        { subjects: [{ subject: wildcard, allowToolStubs: true }], allowed: true },
+        { subjects: [subject, { subject: wildcard, allowToolStubs: true }], allowed: true },
+      ];
+      for (const { subjects, allowed } of cases) {
+        const auth = await vercelOidc({
+          currentVercelProject: { projectId: "prj_eval", environment: "preview" },
+          subjects,
+        })(request);
+        expect(auth?.principalType).toBe("runtime");
+        expect(auth?.allowToolStubs === true).toBe(allowed);
+      }
+      const userToken = await issuer.signToken({
+        environment: "development",
+        project_id: "prj_eval",
+        sub: subject,
+        user_id: "user_alice",
+      });
+      const user = await vercelOidc({
+        currentVercelProject: { projectId: "prj_eval", environment: "development" },
+        subjects: [{ subject: "*", allowToolStubs: true }],
+      })(new Request(TEST_ROUTE_URL, { headers: { authorization: `Bearer ${userToken}` } }));
+      expect(user?.principalType).toBe("user");
+      expect(user?.allowToolStubs).toBeUndefined();
+    } finally {
+      issuer.restore();
+    }
+  });
+
   it("uses the local host's linked project binding only for bearer requests", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "");
     vi.stubEnv("VERCEL_TARGET_ENV", "");

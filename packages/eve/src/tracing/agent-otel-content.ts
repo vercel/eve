@@ -48,8 +48,34 @@ export function genAiInputMessagesAttribute(messages: unknown): string | undefin
 
 /** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */
 export function genAiSystemInstructionsAttribute(instructions: unknown): string | undefined {
-  const text = systemPromptAttribute(instructions);
-  return text === undefined ? undefined : semanticJsonAttribute([{ content: text, type: "text" }]);
+  const text = systemPromptText(instructions);
+  if (text === undefined) return undefined;
+  return fitSemanticText(text, (content) => [{ content, type: "text" }]);
+}
+
+/** Serializes tool definitions, dropping trailing entries to keep the JSON whole. */
+export function genAiToolDefinitionsAttribute(tools: unknown): string | undefined {
+  if (!Array.isArray(tools)) return undefined;
+  const definitions = tools.flatMap((tool): Record<string, unknown>[] => {
+    if (!isRecord(tool) || typeof tool.name !== "string") return [];
+    const definition: Record<string, unknown> = { name: tool.name };
+    if (typeof tool.description === "string") definition.description = tool.description;
+    if (tool.inputSchema !== undefined) definition.parameters = tool.inputSchema;
+    return [definition];
+  });
+  if (definitions.length === 0) return undefined;
+
+  const serialized: string[] = [];
+  let length = 2;
+  for (const definition of definitions) {
+    const json = stringifyContent(definition);
+    if (json === undefined) break;
+    const nextLength = length + (serialized.length === 0 ? 0 : 1) + json.length;
+    if (nextLength > CONTENT_ATTRIBUTE_LIMIT) break;
+    serialized.push(json);
+    length = nextLength;
+  }
+  return `[${serialized.join(",")}]`;
 }
 
 /** Serializes one model response using the OpenTelemetry GenAI message schema. */
@@ -102,9 +128,9 @@ function cappedToolResult(entry: Record<string, unknown>, cap: number): Record<s
   return out;
 }
 
-/** Normalizes the AI SDK's `instructions` prompt to plain text for `ai.prompt.system`. */
-export function systemPromptAttribute(instructions: unknown): string | undefined {
-  if (typeof instructions === "string") return textContentAttribute(instructions);
+/** Normalizes the AI SDK's `instructions` prompt to plain text. */
+function systemPromptText(instructions: unknown): string | undefined {
+  if (typeof instructions === "string") return instructions.length === 0 ? undefined : instructions;
   if (!isRecord(instructions) && !Array.isArray(instructions)) return undefined;
   const messages = Array.isArray(instructions) ? instructions : [instructions];
   const texts: string[] = [];
@@ -117,7 +143,7 @@ export function systemPromptAttribute(instructions: unknown): string | undefined
           texts.push(part.text);
   }
   const joined = texts.join("\n\n").trim();
-  return joined.length === 0 ? undefined : textContentAttribute(joined);
+  return joined.length === 0 ? undefined : joined;
 }
 
 /** Caps plain text, marking the cut. */
@@ -151,16 +177,27 @@ function truncateSingleSemanticMessage(
     typeof message.kind === "string"
       ? { kind: message.kind, role: message.role }
       : { role: message.role };
+  return fitSemanticText(
+    text,
+    (content) => [{ ...base, parts: [{ content, type: "text" }] }],
+    true,
+  );
+}
+
+function fitSemanticText(
+  text: string,
+  wrap: (content: string) => unknown,
+  alwaysMark = false,
+): string | undefined {
+  if (!alwaysMark && text.length <= CONTENT_ATTRIBUTE_LIMIT) {
+    const full = semanticJsonAttribute(wrap(text));
+    if (full !== undefined) return full;
+  }
   for (let length = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT); length > 0; length -= 256) {
-    const json = semanticJsonAttribute([
-      {
-        ...base,
-        parts: [{ content: `${text.slice(0, length)}… [truncated]`, type: "text" }],
-      },
-    ]);
+    const json = semanticJsonAttribute(wrap(`${text.slice(0, length)}… [truncated]`));
     if (json !== undefined) return json;
   }
-  return semanticJsonAttribute([{ ...base, parts: [{ content: "… [truncated]", type: "text" }] }]);
+  return semanticJsonAttribute(wrap("… [truncated]"));
 }
 
 function semanticMessageText(parts: unknown): string {

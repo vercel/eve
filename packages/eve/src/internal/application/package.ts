@@ -3,30 +3,15 @@ import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readStampedPackageVersion } from "#internal/application/stamped-package-version.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 
 let cachedPackageInfo: InstalledPackageInfo | undefined;
 let cachedPackageLocation: PackageLocation | undefined;
-// The package build stamps the published version into `dist` so bundled
-// deployments can still report package metadata without resolving package.json.
-const BUNDLED_FALLBACK_PACKAGE_VERSION: string = "__EVE_PACKAGE_VERSION__";
 const WORKFLOW_MODULE_ALIASES = {
   "workflow/errors": "src/compiled/@workflow/errors/index.js",
   "workflow/internal/private": "src/compiled/@workflow/core/private.js",
 } as const;
-
-function resolveFallbackPackageVersion(): string {
-  // Detect an unstamped build by the token's `__` shape — spelling the token
-  // out in a comparison would get rewritten by the stamp itself.
-  return BUNDLED_FALLBACK_PACKAGE_VERSION.startsWith("__")
-    ? "0.0.0"
-    : BUNDLED_FALLBACK_PACKAGE_VERSION;
-}
-
-const FALLBACK_PACKAGE_INFO: InstalledPackageInfo = {
-  name: EVE_PACKAGE_NAME,
-  version: resolveFallbackPackageVersion(),
-};
 
 interface InstalledPackageInfo {
   name: string;
@@ -65,7 +50,9 @@ function resolveCurrentModulePathFromStack(): string {
   }
 }
 
-const require = createRequire(resolveCurrentModulePath());
+// Not named `require`: bundles inline this module, and a top-level `require`
+// binding makes the Node ESM compatibility banner re-parse the whole chunk.
+const packageRequire = createRequire(resolveCurrentModulePath());
 
 function tryResolveVerifiedPackageRoot(packageJsonPath: string): string | undefined {
   try {
@@ -129,6 +116,24 @@ function isSourceCheckout(packageRoot: string): boolean {
   // Published packages exclude `src`, so this marker distinguishes a checkout
   // without depending on how its parent directories are named.
   return existsSync(join(packageRoot, "src", "internal", "application", "package.ts"));
+}
+
+function findNearestSourceCheckoutRoot(startDirectory: string): string | undefined {
+  let currentDirectory = startDirectory;
+
+  while (true) {
+    if (isSourceCheckout(currentDirectory)) {
+      return currentDirectory;
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+
+    currentDirectory = parentDirectory;
+  }
 }
 
 function tryCreatePackageLocation(packageRoot: string): PackageLocation | undefined {
@@ -231,6 +236,25 @@ function tryResolvePackageRoot(): string | undefined {
   }
 }
 
+function tryResolveLocalPackageRoot(currentModulePath: string): string | undefined {
+  try {
+    const canonicalModulePath = realpathSync.native(currentModulePath);
+    const directBuildLocation = tryResolveDirectBuildLocation(canonicalModulePath);
+
+    if (directBuildLocation !== undefined) {
+      return directBuildLocation.packageRoot;
+    }
+
+    const sourceCheckoutRoot = findNearestSourceCheckoutRoot(dirname(canonicalModulePath));
+
+    return sourceCheckoutRoot === undefined
+      ? undefined
+      : tryResolveVerifiedPackageRoot(join(sourceCheckoutRoot, "package.json"));
+  } catch {
+    return undefined;
+  }
+}
+
 function rewriteSourceFilePathForBuild(relativeSourcePath: string): string {
   return relativeSourcePath.replace(/\.[cm]?tsx?$/, ".js");
 }
@@ -267,7 +291,7 @@ export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): s
 
 export function resolvePackageDependencyPath(specifier: string): string {
   try {
-    return require.resolve(specifier);
+    return packageRequire.resolve(specifier);
   } catch (error) {
     const packageRoot = tryResolvePackageRoot();
     const sourcePath =
@@ -354,15 +378,26 @@ function tryReadInstalledPackageInfo(
   return resolvedPackageInfo;
 }
 
+function tryResolveSelfPackageInfo(): InstalledPackageInfo | undefined {
+  try {
+    return tryReadInstalledPackageInfo(
+      packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`),
+      EVE_PACKAGE_NAME,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Resolves the installed eve package identity from package.json.
+ * Resolves eve's package identity from local or build-stamped metadata.
  */
 export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   if (cachedPackageInfo) {
     return cachedPackageInfo;
   }
 
-  const packageRoot = tryResolvePackageRoot();
+  const packageRoot = tryResolveLocalPackageRoot(resolveCurrentModulePath());
   const packageRootInfo =
     packageRoot === undefined
       ? undefined
@@ -373,24 +408,19 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
     return cachedPackageInfo;
   }
 
-  try {
-    const resolvedPackageJsonPath = require.resolve(`${EVE_PACKAGE_NAME}/package.json`);
-    const resolvedPackageInfo = tryReadInstalledPackageInfo(
-      resolvedPackageJsonPath,
-      EVE_PACKAGE_NAME,
-    );
+  const stampedVersion = readStampedPackageVersion();
 
-    if (resolvedPackageInfo) {
-      cachedPackageInfo = resolvedPackageInfo;
-      return cachedPackageInfo;
-    }
-  } catch {
-    // Fall back to the package's development identity when the self package
-    // cannot be resolved from bundled runtime output.
+  if (stampedVersion !== undefined) {
+    cachedPackageInfo = { name: EVE_PACKAGE_NAME, version: stampedVersion };
+    return cachedPackageInfo;
   }
 
-  cachedPackageInfo = {
-    ...FALLBACK_PACKAGE_INFO,
+  // Only source builds are unstamped, such as a workspace app bundled through
+  // the `eve-source` condition. Published packages are always stamped, so
+  // serverless output never reaches this module-resolution probe.
+  cachedPackageInfo = tryResolveSelfPackageInfo() ?? {
+    name: EVE_PACKAGE_NAME,
+    version: "0.0.0",
   };
 
   return cachedPackageInfo;
@@ -446,7 +476,7 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
 
   try {
     return readWorkflowVersionFromManifest(
-      JSON.parse(readFileSync(require.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
+      JSON.parse(readFileSync(packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
     );
   } catch {
     return undefined;
@@ -479,5 +509,5 @@ export function resolveWorkflowModulePath(specifier: string): string {
     return resolvePackageCompiledFilePath(alias);
   }
 
-  return require.resolve(specifier);
+  return packageRequire.resolve(specifier);
 }

@@ -5,7 +5,7 @@ const DYNAMIC_SKILL_TOKEN = "dynamic-skill-ok-P4K9";
 /**
  * Skill smoke eval:
  * a `defineDynamic` single-skill resolver (skills/dynamic-tenant-policy.ts)
- * resolves at session start; the load_skill result must carry the resolved
+ * resolves at session start; the skill load's result must carry the resolved
  * markdown body, which then shapes the reply.
  */
 export default defineEval({

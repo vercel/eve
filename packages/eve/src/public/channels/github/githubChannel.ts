@@ -133,7 +133,8 @@ type GitHubSessionFailedHandler = (
 /**
  * Event handlers for `githubChannel({ events })`. The channel installs built-in
  * handlers for `turn.started` (eyes reaction plus repo checkout),
- * `message.completed` (posts the reply), `input.requested` (posts the prompt),
+ * `message.completed` (posts the reply), `input.requested`, `input.resolved`, and
+ * `approval.settled` (post each prompt in turn),
  * and `session.failed`/`turn.failed` (posts an error comment). A handler supplied
  * here replaces the built-in for that key rather than running alongside it.
  */
@@ -144,6 +145,8 @@ export interface GitHubChannelEvents {
   readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
   readonly "authorization.required"?: GitHubEventHandler<"authorization.required">;
   readonly "input.requested"?: GitHubEventHandler<"input.requested">;
+  readonly "input.resolved"?: GitHubEventHandler<"input.resolved">;
+  readonly "approval.settled"?: GitHubEventHandler<"approval.settled">;
   readonly "message.appended"?: GitHubEventHandler<"message.appended">;
   readonly "message.completed"?: GitHubEventHandler<"message.completed">;
   readonly "session.completed"?: GitHubEventHandler<"session.completed">;

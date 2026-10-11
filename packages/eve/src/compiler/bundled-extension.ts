@@ -1,19 +1,24 @@
-import { packageStateNamespace } from "#discover/extensions.js";
 import {
   defineProgrammaticExtensionMountDeclaration,
   type ProgrammaticAgentSource,
 } from "#compiler/source-graph.js";
 import { resolveInstalledPackageInfo, resolvePackageRoot } from "#internal/application/package.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 /** The small descriptor used for extensions shipped inside eve. */
 export interface BundledExtensionDescriptor {
-  readonly loadMount: () => Promise<unknown>;
+  readonly entryPath: string;
+  readonly importSpecifier: string;
+  readonly config: JsonObject;
   readonly namespace: string;
   readonly sourceDirectory: string;
 }
 
 export interface BundledExtensionMount {
   readonly declaration: ProgrammaticAgentSource;
+  readonly entryPath: string;
+  readonly importSpecifier: string;
+  readonly config: JsonObject;
   readonly namespace: string;
   readonly packageName: string;
   readonly packageRoot: string;
@@ -30,6 +35,7 @@ export function createBundledExtensionMount(
   const packageRoot = resolvePackageRoot();
   const revision = `eve@${packageInfo.version}:development-extensions-v1`;
   const logicalPath = `extensions/${descriptor.namespace}.ts`;
+  const config = parseJsonObject(descriptor.config);
   const declaration = defineProgrammaticExtensionMountDeclaration({
     id: `eve:development-extension:${descriptor.namespace}`,
     revision,
@@ -37,16 +43,8 @@ export function createBundledExtensionMount(
       {
         logicalPath,
         loadNamespace: async () => {
-          const container = globalThis as Record<symbol, unknown>;
-          const scopeSymbol = Symbol.for("eve.ext-config-scope");
-          const previousScope = container[scopeSymbol];
-          container[scopeSymbol] = packageStateNamespace(packageName);
-          try {
-            return { default: await descriptor.loadMount() };
-          } finally {
-            if (previousScope === undefined) delete container[scopeSymbol];
-            else container[scopeSymbol] = previousScope;
-          }
+          const { default: extension } = await import(descriptor.importSpecifier);
+          return { default: extension(config) };
         },
       },
     ],
@@ -54,6 +52,9 @@ export function createBundledExtensionMount(
 
   return Object.freeze({
     declaration,
+    entryPath: descriptor.entryPath,
+    importSpecifier: descriptor.importSpecifier,
+    config,
     namespace: descriptor.namespace,
     packageName,
     packageRoot,

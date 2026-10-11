@@ -168,7 +168,7 @@ describe("groupToolBlocksForDisplay", () => {
       kind: "log",
       title: "stderr",
       body: "concise one",
-      logVisibility: "stderr-only",
+      logVisibility: "summary",
       live: false,
     };
     const raw: Block = {
@@ -189,7 +189,7 @@ describe("groupToolBlocksForDisplay", () => {
     expect(groups[0]?.display).toMatchObject({
       body: "concise two",
       elided: 1,
-      logVisibility: "stderr-only",
+      logVisibility: "summary",
     });
     expect(groups[1]?.display).toMatchObject({
       body: "raw two",

@@ -9,7 +9,6 @@ import { describe, expect, it } from "vitest";
 import { CODING_AGENT_ENV_MARKERS } from "../../src/setup/primitives/coding-agent-env.js";
 import { stripAnsi } from "../../src/cli/ui/terminal-text.js";
 import { loadYaml } from "../../src/evals/loaders/yaml.js";
-import { DEFAULT_AGENT_MODEL_ID } from "../../src/shared/default-agent-model.js";
 import { pathExists } from "../../src/setup/path-exists.js";
 import { eveDevArguments } from "../../src/setup/primitives/index.js";
 import { ensureScenarioEveTarballPath } from "../../src/internal/testing/scenario-app.js";
@@ -228,7 +227,8 @@ describe("eve init smoke", () => {
     const packageJson = JSON.parse(await readFile(join(projectDir, "package.json"), "utf8")) as {
       engines?: { node?: string };
     };
-    expect(agentSource).toContain(DEFAULT_AGENT_MODEL_ID);
+    expect(agentSource).toContain('model: "openai/gpt-6-luna-fast"');
+    expect(agentSource).toContain('reasoning: "high"');
     expect(packageJson.engines?.node).toBe("24.x");
     await expect(readFile(join(projectDir, "pnpm-workspace.yaml"), "utf8")).resolves.toContain(
       "minimumReleaseAgeStrict: true",

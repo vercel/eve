@@ -1,0 +1,201 @@
+---
+title: "TanStack Start"
+description: "Run an eve agent and a TanStack Start app as one project with the eveTanStack Vite plugin."
+---
+
+`eve/tanstack` runs a TanStack Start frontend and an eve agent as one project instead of two services. The `eveTanStack()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./overview) from `eve/react` finds the mounted routes on its own. There's no CORS to configure and no URL env vars to keep in sync.
+
+## Prerequisites
+
+- The `eve` package installed in your project (`npm install eve@latest`).
+- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- A TanStack Start app using React, with the [Nitro Vite plugin](https://tanstack.com/start/latest/docs/framework/react/guide/hosting#nitro) (`nitro` installed and `nitro()` registered). TanStack Start deploys to Vercel through Nitro, and the plugin attaches eve to it.
+
+## Add the generated Web Chat app
+
+Run the Web Chat installer and choose **TanStack Start** when it asks which framework to use:
+
+```bash
+eve add channel/web
+```
+
+In automation, answer the framework and hosting questions up front. Without a `web-framework` answer, non-interactive installs use Next.js:
+
+```bash
+eve add channel/web --non-interactive \
+  --answer 'web-framework="tanstack"' \
+  --answer 'web-hosting="vercel"'
+```
+
+The installer creates a TanStack Start app under `apps/web/` and adds the `dev:web` and `build:web` scripts. It asks how to deploy it:
+
+- **Vercel services** (recommended) deploys Web Chat and the agent as separate services. Run both locally with `pnpm dev:all`; you don't need to link a Vercel project to do that.
+- **TanStack Start** hosts the agent in the TanStack Start app through `eveTanStack()`. Run it with `pnpm dev:web`. The app lives in `apps/web/` while its dependencies are in the project root `package.json`, so a Vercel deploy from the project root doesn't build it. Choose **Vercel services** to deploy Web Chat on Vercel.
+
+Rerun `eve add channel/web --skip-install` with the other choice to switch modes; the installer removes the `vercel.ts` and scripts it wrote for the previous one. When `apps/web/` already contains a Web Chat app, the installer keeps that app's framework and stops if you answer a different one. To switch between Next.js and TanStack Start, remove `apps/web/` first.
+
+Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
+
+The chat has the same URL-addressed durable sessions as the [Next.js Web Chat](./nextjs#use-the-generated-web-chat-routes): `/`, `/s`, and `/s/$sessionId`. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
+
+The installer doesn't support selecting a workspace agent for single-app hosting: a workspace agent always deploys as a separate Vercel service. If you already have a TanStack Start app, skip the installer and follow the steps below.
+
+## Register the Vite plugin
+
+Add `eveTanStack()` to `vite.config.ts` next to `nitro()`:
+
+```ts title="vite.config.ts"
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
+import { eveTanStack } from "eve/tanstack";
+import { nitro } from "nitro/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [eveTanStack(), tanstackStart(), viteReact(), nitro()],
+});
+```
+
+The plugin looks for an `agent/` folder in the TanStack Start project root. Pass `eveRoot` when the agent lives elsewhere:
+
+```ts
+export default defineConfig({
+  plugins: [
+    eveTanStack({
+      eveRoot: "../my-agent",
+    }),
+    tanstackStart(),
+    viteReact(),
+    nitro(),
+  ],
+});
+```
+
+Without `nitro()` registered, Vite fails at startup with an error naming the missing plugin instead of serving a project whose eve routes would return 404.
+
+### `eveTanStack` options
+
+All fields are optional.
+
+| Option               | Type     | Default                     | Purpose                                                                                                                     |
+| -------------------- | -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `eveRoot`            | `string` | TanStack Start project root | eve project root, relative to the TanStack Start project root unless absolute.                                              |
+| `eveBuildCommand`    | `string` | generated                   | Build command for the generated eve Vercel service.                                                                         |
+| `devServerTimeoutMs` | `number` | `180000`                    | Maximum time to wait for the eve development server to start, including when another TanStack Start process is starting it. |
+
+For slow cold starts, increase the development timeout:
+
+```ts
+export default defineConfig({
+  plugins: [
+    eveTanStack({
+      devServerTimeoutMs: 300_000,
+    }),
+    tanstackStart(),
+    viteReact(),
+    nitro(),
+  ],
+});
+```
+
+## Call the hook
+
+With the plugin in `vite.config.ts`, components call [`useEveAgent`](./overview) from `eve/react` and don't pass a host:
+
+```tsx title="src/routes/index.tsx"
+import { createFileRoute } from "@tanstack/react-router";
+import { useEveAgent } from "eve/react";
+import { useState } from "react";
+
+export const Route = createFileRoute("/")({
+  component: Chat,
+});
+
+function Chat() {
+  const agent = useEveAgent();
+  const [draft, setDraft] = useState("");
+  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isInputDisabled = isBusy || agent.status === "resuming";
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const text = draft.trim();
+        if (text.length === 0 || isInputDisabled) return;
+        setDraft("");
+        void agent.send(text);
+      }}
+    >
+      {agent.data.messages.map((message) => (
+        <article key={message.id}>
+          <header>{message.role}</header>
+          {message.parts.map((part, index) =>
+            part.type === "text" ? <p key={part.id ?? index}>{part.text}</p> : null,
+          )}
+        </article>
+      ))}
+      <input
+        disabled={isInputDisabled}
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        value={draft}
+      />
+      <button disabled={isInputDisabled} type="submit">
+        Send
+      </button>
+    </form>
+  );
+}
+```
+
+The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
+
+eve ships hook bindings for React, Vue, and Svelte. A TanStack Start app that uses Solid can still mount the agent with this plugin and call it through the [Client SDK](../client/overview).
+
+## Dev vs deploy topology
+
+- **Local dev.** `npm run dev` boots the eve dev server next to TanStack Start and Nitro proxies `/eve/v1/**` to it, so the browser only ever hits the TanStack Start origin. The plugin uses the server named by `EVE_BASE_URL` when that variable is set, then a healthy shared eve dev server already running for the app, and otherwise starts one. A server the plugin starts stops when the Vite dev server closes (Vite 8.3 or later; earlier versions stop it when the process exits). Any tool that loads `vite.config.ts` in serve mode starts or reuses this server, including test runners such as Vitest. Keep `eveTanStack()` out of a separate test config if you don't want that.
+- **Vercel.** The TanStack Start app and the eve runtime deploy as a single project. On Vercel builds the plugin adds Build Output [`services`](https://vercel.com/docs/services) for eve and a `routes` entry that sends `/eve/v1/**` to that service before filesystem routing and before any routes you declare in `nitro({ vercel: { config } })`; the TanStack Start app remains the default app. No `vercel.json` is required. By default the generated service runs the installed eve binary from the TanStack Start app's dependencies, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+
+  ```ts
+  export default defineConfig({
+    plugins: [
+      eveTanStack({
+        eveBuildCommand: "npm run build:eve",
+      }),
+      tanstackStart(),
+      viteReact(),
+      nitro(),
+    ],
+  });
+  ```
+
+- **Other hosts.** `vite preview` and a self-hosted `node .output/server/index.mjs` don't mount the eve routes. Run the eve service on its own origin and pass `host` directly to `useEveAgent`:
+
+  ```ts
+  const agent = useEveAgent({
+    host: "https://agent.example.com",
+  });
+  ```
+
+  `eve build` and `vite build` (with Nitro's default Node.js preset) both write `.output/`. When the agent lives in the TanStack Start project root, build and serve eve from a separate directory (set `eveRoot` to it) so the two outputs do not overwrite each other. See [Self-host eve](../deployment/self-hosting) for running the eve service.
+
+## Managing vercel.json yourself
+
+When `vercel.json` declares [`services`](https://vercel.com/docs/services), the plugin generates nothing and your configuration owns routing. It must include the eve service (`framework: "eve"`) and a rewrite that exposes the eve transport, or the build fails:
+
+```json title="vercel.json"
+{
+  "services": {
+    "web": { "root": ".", "framework": "tanstack-start" },
+    "eve": { "root": "agent", "framework": "eve", "buildCommand": "eve build" }
+  },
+  "rewrites": [{ "source": "/eve/v1/(.*)", "destination": { "service": "eve" } }]
+}
+```
+
+## What to read next
+
+- [Frontend overview](./overview): the `useEveAgent` API
+- [Auth & route protection](../auth-and-route-protection)
+- [Deployment](../deployment/overview)

@@ -23,6 +23,7 @@ export function buildWorkflowToolSerializedContext(input: {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.capabilities": { requestInput: input.requestInput ?? false },
     "eve.channel": { kind: "http", state: {} },
     ...(input.acceptedDeploymentId === undefined

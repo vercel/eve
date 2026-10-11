@@ -15,6 +15,7 @@ import {
   computerUseDriverStartCommand,
   computerUseFocusCommand,
   computerUseLaunchCommand,
+  computerUseReadyCommand,
   computerUseWindowLayoutCommand,
   recordingPath,
   screenshotPath,
@@ -85,6 +86,7 @@ test("computer-use derives every artifact and driver path from the sandbox", () 
 test("computer-use startup commands remain valid and use resolved paths", () => {
   const display = computerUseDisplayCommand(sandbox);
   const driver = computerUseDriverStartCommand(sandbox);
+  const ready = computerUseReadyCommand(sandbox);
   assert.match(display, /if ! xdpyinfo -display :99/u);
   assert.match(display, /-screen 0 1920x1080x24/u);
   assert.match(display, /xfwm4 --replace --compositor=on/u);
@@ -92,8 +94,12 @@ test("computer-use startup commands remain valid and use resolved paths", () => 
   assert.match(driver, /CUA_DRIVER_RS_TELEMETRY_ENABLED=false/u);
   assert.match(driver, /COMPUTER_USE_REQUEST='\{"action":"health"\}'/u);
   assert.match(driver, /custom\/workspace\/.eve-code\/computer-use-driver\/server\.mjs/u);
+  assert.match(ready, /xdpyinfo -display :99/u);
+  assert.match(ready, /_NET_SUPPORTING_WM_CHECK/u);
+  assert.match(ready, /custom\/workspace\/computer-use\/cua-driver\.sock/u);
   assertValidShell(display);
   assertValidShell(driver);
+  assertValidShell(ready);
 });
 
 test("computer-use launch, focus, sizing, and layout commands remain valid", () => {
@@ -238,15 +244,53 @@ test("computer-use sends a recording sequence through one resolved driver reques
       }),
     },
   );
-  assert.equal(commands.length, 1);
+  assert.deepEqual(
+    commands.map(({ command }) => command),
+    [computerUseReadyCommand(sandbox), computerUseDriverCommand(sandbox)],
+  );
   assert.equal(
-    commands[0]?.env?.COMPUTER_USE_SOCKET_PATH,
+    commands[1]?.env?.COMPUTER_USE_SOCKET_PATH,
     "/custom/workspace/computer-use/cua-driver.sock",
   );
-  const request = JSON.parse(commands[0]?.env?.COMPUTER_USE_REQUEST ?? "");
+  const request = JSON.parse(commands[1]?.env?.COMPUTER_USE_REQUEST ?? "");
   assert.equal(request.action.actions[0].path, "/custom/workspace/computer-use/take.mp4");
   assert.equal(output.path, "/custom/workspace/computer-use/take.mp4");
   assert.deepEqual(output.timings, [{ action: "record_start", durationMs: 12, result: null }]);
+});
+
+test("computer-use restarts a desktop lost to sandbox resume before acting", async () => {
+  const commands: string[] = [];
+  const tool = computerUseTool as {
+    execute(input: unknown, ctx: unknown): Promise<{ screenshot: string }>;
+  };
+  const output = await tool.execute(
+    { request: { action: "screenshot" } },
+    {
+      abortSignal: undefined,
+      getSandbox: async () => ({
+        ...sandbox,
+        run: async ({ command }: { command: string }) => {
+          commands.push(command);
+          // A resumed sandbox has no display or driver processes.
+          if (command === computerUseReadyCommand(sandbox)) {
+            return { exitCode: 1, stderr: "", stdout: "" };
+          }
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: driverResponse("/custom/workspace/computer-use/latest.png", "desktop"),
+          };
+        },
+      }),
+    },
+  );
+  assert.deepEqual(commands, [
+    computerUseReadyCommand(sandbox),
+    computerUseDisplayCommand(sandbox),
+    computerUseDriverStartCommand(sandbox),
+    computerUseDriverCommand(sandbox),
+  ]);
+  assert.equal(output.screenshot, "/custom/workspace/computer-use/latest.png");
 });
 
 test("computer-use advertises an object root while preserving action constraints", async () => {

@@ -8,10 +8,23 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { boundedTraceError } from "#tracing/bounded-error.js";
+import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
 import { boundedPrincipalId } from "#tracing/telemetry-budget.js";
 import { isInstrumentationPrincipalType } from "#instrumentation/lifecycle.js";
 
 export const AGENT_TRACE_CONTEXT_KEY = "eve.harness.agentTrace";
+
+export function decodeTraceSessionId(state: {
+  readonly traceSessionId?: unknown;
+  readonly rootSessionId?: unknown;
+}): string {
+  // Persisted state from before trace-session identity uses the lineage root.
+  return typeof state.traceSessionId === "string"
+    ? state.traceSessionId
+    : typeof state.rootSessionId === "string"
+      ? state.rootSessionId
+      : "";
+}
 
 export interface AgentTraceContextState {
   readonly actionAnchors: Readonly<Record<string, AgentActionTraceState>>;
@@ -84,6 +97,7 @@ function deserializeSession(value: unknown): AgentSessionTraceState | undefined 
     decision: readInstrumentationDecision(value.decision),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
+    traceSessionId: decodeTraceSessionId(value),
     scheduleId: typeof value.scheduleId === "string" ? value.scheduleId : undefined,
     title: typeof value.title === "string" ? value.title : undefined,
   };
@@ -99,9 +113,12 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     context: value.context,
     currentPrincipal: deserializePrincipalSummary(value.currentPrincipal),
     initiatorPrincipal: deserializePrincipalSummary(value.initiatorPrincipal),
+    inputMessagesAttribute: deserializeContentAttribute(value.inputMessagesAttribute),
     modelUsage: deserializeModelUsage(value.modelUsage),
+    outputMessagesAttribute: deserializeContentAttribute(value.outputMessagesAttribute),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
+    traceSessionId: decodeTraceSessionId(value),
     sequence: typeof value.sequence === "number" ? value.sequence : 0,
     startTimeMs: value.startTimeMs,
     subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
@@ -164,12 +181,41 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     name: value.name,
     parent: value.parent,
     rootSessionId: value.rootSessionId,
+    traceSessionId: decodeTraceSessionId(value),
     sessionId: value.sessionId,
     spanId: value.spanId,
     startTimeMs: value.startTimeMs,
     stepIndex: value.stepIndex,
     turnId: value.turnId,
+    toolEndTimeMs: typeof value.toolEndTimeMs === "number" ? value.toolEndTimeMs : undefined,
+    toolFailed: value.toolFailed === true,
+    toolErrorAttribute:
+      typeof value.toolErrorAttribute === "string" ? value.toolErrorAttribute : undefined,
+    toolAttributes: isRecord(value.toolAttributes)
+      ? Object.fromEntries(
+          Object.entries(value.toolAttributes).filter(
+            (
+              entry,
+            ): entry is [string, NonNullable<AgentActionTraceState["toolAttributes"]>[string]] => {
+              const attribute = entry[1];
+              return (
+                typeof attribute === "string" ||
+                typeof attribute === "number" ||
+                typeof attribute === "boolean" ||
+                (Array.isArray(attribute) &&
+                  attribute.every((entry) =>
+                    ["string", "number", "boolean"].includes(typeof entry),
+                  ))
+              );
+            },
+          ),
+        )
+      : undefined,
   };
+}
+
+function deserializeContentAttribute(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= CONTENT_ATTRIBUTE_LIMIT ? value : undefined;
 }
 
 function deserializeModelUsage(

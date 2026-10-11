@@ -85,24 +85,27 @@ export const GREP_OUTPUT_SCHEMA = defineJsonSchema<GrepToolOutput>({
 /**
  * Framework-owned executor that delegates to the default sandbox.
  */
-export const grep: ToolDefinition<GrepToolInput, GrepToolOutput> = defineTool({
-  label: { start: (input) => toolLabel("Search", input.pattern) },
-  description: [
-    "Fast content search tool that works with any codebase size.",
-    "",
-    "Usage:",
-    "- Searches file contents using regular expressions.",
-    '- Supports full regex syntax (e.g. "log.*Error", "function\\s+\\w+").',
-    '- Filter files by pattern with the glob parameter (e.g. "*.js", "*.{ts,tsx}").',
-    "- Returns matching lines with file paths and line numbers.",
-    "- Call this tool in parallel when you have multiple independent searches.",
-    "- Any line longer than 2000 characters is truncated.",
-  ].join("\n"),
-  async execute(input, ctx) {
-    return await executeGrepOnSandbox(await ctx.getSandbox(), input as GrepInput);
-  },
-  inputSchema: GREP_INPUT_SCHEMA,
-  outputSchema: GREP_OUTPUT_SCHEMA,
-});
+export const grep: ToolDefinition<GrepToolInput, GrepToolOutput> = frameworkTool(
+  defineTool({
+    label: { start: (input) => toolLabel("Search", input.pattern) },
+    description: [
+      "Fast content search tool that works with any codebase size.",
+      "",
+      "Usage:",
+      "- Searches file contents using regular expressions.",
+      '- Supports full regex syntax (e.g. "log.*Error", "function\\s+\\w+").',
+      '- Filter files by pattern with the glob parameter (e.g. "*.js", "*.{ts,tsx}").',
+      "- Returns matching lines with file paths and line numbers.",
+      "- Call this tool in parallel when you have multiple independent searches.",
+      "- Any line longer than 2000 characters is truncated.",
+    ].join("\n"),
+    async execute(input, ctx) {
+      return await executeGrepOnSandbox(await ctx.getSandbox(), input as GrepInput);
+    },
+    inputSchema: GREP_INPUT_SCHEMA,
+    outputSchema: GREP_OUTPUT_SCHEMA,
+  }),
+);
 
 export default grep;
+import { frameworkTool } from "./framework-tool.js";

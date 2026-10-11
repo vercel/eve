@@ -1,7 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile } from "node:child_process";
 import { access, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +19,7 @@ import {
   EVE_SESSION_STREAM_ROUTE_PATTERN,
 } from "../../src/protocol/routes.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
+import { startPackagedEveStart } from "./eve-start-harness.js";
 
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 const scenarioApp = useScenarioApp();
@@ -39,13 +41,6 @@ function clearCliBuildEnvironment(): void {
   for (const key of CLI_BUILD_ENV_KEYS) {
     delete process.env[key];
   }
-}
-
-interface RunningEveStart {
-  readonly url: string;
-  stderr(): string;
-  stdout(): string;
-  stop(): Promise<void>;
 }
 
 async function createMinimalAppRoot(prefix: string): Promise<string> {
@@ -74,117 +69,6 @@ async function createMinimalAppRoot(prefix: string): Promise<string> {
   await writeFile(join(appRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
 
   return appRoot;
-}
-
-async function startPackagedEveStart(appRoot: string): Promise<RunningEveStart> {
-  const child = spawn(
-    process.execPath,
-    [EVE_BIN_PATH, "start", "--host", "127.0.0.1", "--port", "0"],
-    {
-      cwd: appRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  let stderr = "";
-  let stdout = "";
-
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-
-  let url: string;
-  try {
-    url = await waitForStartUrl({
-      child,
-      getOutput: () => ({
-        stderr,
-        stdout,
-      }),
-    });
-  } catch (error) {
-    await stopChildProcess(child);
-    throw error;
-  }
-
-  return {
-    stderr: () => stderr,
-    stdout: () => stdout,
-    async stop() {
-      await stopChildProcess(child);
-    },
-    url,
-  };
-}
-
-async function waitForStartUrl(input: {
-  readonly child: ChildProcess;
-  readonly getOutput: () => {
-    readonly stderr: string;
-    readonly stdout: string;
-  };
-}): Promise<string> {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < 60_000) {
-    const output = input.getOutput();
-    const url = parseStartUrl(output.stdout);
-
-    if (url !== undefined) {
-      return url;
-    }
-
-    if (input.child.exitCode !== null || input.child.signalCode !== null) {
-      throw new Error(
-        [
-          `eve start exited before printing its server URL (code ${String(
-            input.child.exitCode,
-          )}, signal ${String(input.child.signalCode)}).`,
-          `stdout:\n${output.stdout}`,
-          `stderr:\n${output.stderr}`,
-        ].join("\n\n"),
-      );
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  const output = input.getOutput();
-  throw new Error(
-    [
-      "Timed out waiting for eve start to print its server URL.",
-      `stdout:\n${output.stdout}`,
-      `stderr:\n${output.stderr}`,
-    ].join("\n\n"),
-  );
-}
-
-function parseStartUrl(output: string): string | undefined {
-  const match = /\[START\] server listening at (https?:\/\/[^\s]+)/.exec(output);
-  return match?.[1];
-}
-
-async function stopChildProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve();
-    }, 10_000);
-
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
 }
 
 afterEach(() => {
@@ -300,6 +184,45 @@ describe("runCli", () => {
     expect(output).toContain("ready");
     expect(output).toContain("0 errors, 0 warnings");
   });
+
+  it("writes all of a large `eve info --json` document before the bin exits", async () => {
+    const appRoot = await createMinimalAppRoot("eve-cli-info-json-pipe-");
+    // Far larger than a pipe or socket buffer, so most of it is still queued
+    // when the command resolves.
+    const descriptionLength = 1024 * 1024;
+    await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+    await writeFile(
+      join(appRoot, "agent", "tools", "file_report.mjs"),
+      [
+        "export default {",
+        '  description: "File a report.",',
+        "  inputSchema: {",
+        '    type: "object",',
+        `    properties: { body: { type: "string", description: "x".repeat(${descriptionLength}) } },`,
+        "  },",
+        "  execute: () => null,",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [EVE_BIN_PATH, "info", "--json"],
+      {
+        cwd: appRoot,
+        // A telemetry flush yields to the event loop, which would drain stdout
+        // and hide an early exit.
+        env: { ...process.env, EVE_TELEMETRY_DISABLED: "1" },
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+
+    const info = JSON.parse(stdout);
+    expect(info.toolInputSchemas.root.file_report.properties.body.description).toHaveLength(
+      descriptionLength,
+    );
+  }, 60_000);
 
   it("defaults to dev when no command is provided in an eve project", async () => {
     const appRoot = await createMinimalAppRoot("eve-cli-default-dev-");

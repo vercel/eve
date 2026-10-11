@@ -169,7 +169,7 @@ function isGroupableLogWrite(block: Block): boolean {
 
 /** The (source, visibility) identity a write merges under. */
 function logBucketKey(block: Block): string {
-  return `${block.title ?? ""}\u0000${block.logVisibility ?? ""}`;
+  return `${block.title ?? ""}\u0000${block.logLevel ?? ""}\u0000${block.logVisibility ?? ""}`;
 }
 
 /**
@@ -207,6 +207,7 @@ function coalesceLogBucket(members: readonly Block[]): ToolBlockDisplayGroup {
   };
   if (newest.title !== undefined) display.title = newest.title;
   if (newest.logVisibility !== undefined) display.logVisibility = newest.logVisibility;
+  if (newest.logLevel !== undefined) display.logLevel = newest.logLevel;
   return { members, display };
 }
 

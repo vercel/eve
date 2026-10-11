@@ -1,5 +1,5 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
-import type { ActivityObserverConfig } from "#channel/types.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -8,7 +8,6 @@ import {
   resolveAgentStartTarget,
   type SubagentStartTarget,
 } from "#execution/agent-sessions/target.js";
-import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
   createWorkflowCallbackUrl,
@@ -37,6 +36,7 @@ import {
 } from "#execution/agent-sessions/remote.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
+import { stubToolPath } from "#tool-stubs/target.js";
 
 const log = createLogger("execution.agent-sessions");
 
@@ -130,7 +130,6 @@ export async function sendAgentSessionMessageStep(
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
     await continueRemoteAgentSession({
-      activityObserver: sessionActivityObserver(context, { ...address, key: input.key }),
       auth: input.auth.current,
       callback: {
         callId: context.parent.callId,
@@ -151,8 +150,8 @@ export async function sendAgentSessionMessageStep(
   const result = await dispatchWorkflowSessionCommand({
     command: {
       auth: input.auth.current,
+      schedule: context.schedule,
       caller: {
-        activityObserver: sessionActivityObserver(context, { ...address, key: input.key }),
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
         subagentName: address.name,
@@ -161,6 +160,11 @@ export async function sendAgentSessionMessageStep(
       payload: { message: input.message, outputSchema: input.outputSchema },
     },
     sessionId: address.sessionId,
+  }).catch((error: unknown) => {
+    if (!SessionStrandedError.is(error)) throw error;
+    throw new Error(`Agent "${address.name}" can no longer receive messages: ${error.message}`, {
+      cause: error,
+    });
   });
   if (result.status !== "accepted") {
     throw new Error(`Agent "${address.name}" can no longer receive messages; its session ended.`);
@@ -235,13 +239,9 @@ async function startLocalSession(
   const { action } = target;
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
-    activityObserver: sessionActivityObserver(context, {
-      key: input.key,
-      kind: "local",
-      name: action.name,
-    }),
     auth: auth.current,
     capabilities: context.capabilities,
+    schedule: context.schedule,
     channelMetadata: context.channelMetadata,
     continuationKey: input.key,
     graph: bundle.graph,
@@ -263,8 +263,18 @@ async function startLocalSession(
     dynamicSubagentAgentConfig: target.dynamicSubagentAgentConfig,
     nodeId: action.nodeId,
   });
+  let childToolStubs = context.toolStubs;
+  if (childToolStubs !== undefined) {
+    childToolStubs = {
+      ...childToolStubs,
+      agentPath: stubToolPath(childToolStubs, action.name),
+    };
+  }
   await contextStorage.run(new ContextContainer({ localDevRequest: context.localDevRequest }), () =>
-    childRuntime.createSession(runInput),
+    childRuntime.createSession({
+      ...runInput,
+      toolStubs: childToolStubs,
+    }),
   );
   const owner = await waitForCommandHookOwner(sessionInboxHookToken(childContinuationToken));
   return { kind: "local", name: action.name, nodeId: action.nodeId, sessionId: owner.runId };
@@ -284,11 +294,6 @@ async function startRemoteSession(
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
   const child = await startRemoteAgentSession({
     action,
-    activityObserver: sessionActivityObserver(context, {
-      key: input.key,
-      kind: "remote",
-      name: action.remoteAgentName,
-    }),
     auth: auth.current,
     callbackBaseUrl,
     capabilities: context.capabilities,
@@ -311,27 +316,6 @@ async function startRemoteSession(
   };
 }
 
-/**
- * The session's turns report their activity as its own work, beneath the
- * opening call's turn, never as the caller's. Every message carries the same
- * identity: its call id is the one steering and remote binding check, and the
- * session's key tells apart the sessions one call opens.
- */
-function sessionActivityObserver(
-  context: AgentSessionContext,
-  session: Pick<AgentSessionAddress, "kind" | "name"> & { readonly key: string },
-): ActivityObserverConfig | undefined {
-  return deriveChildActivityObserverConfig({
-    activityObserver: context.activityObserver,
-    callId: context.parent.callId,
-    kind: session.kind === "remote" ? "remote-agent" : "subagent",
-    name: session.name,
-    parentSessionId: context.parent.sessionId,
-    parentTurnId: context.parent.turn.id,
-    sessionKey: session.key,
-  });
-}
-
 function createParentContext(context: AgentSessionContext, replyTo: string): SubagentParentContext {
   return {
     continuationToken: replyTo,
@@ -340,6 +324,7 @@ function createParentContext(context: AgentSessionContext, replyTo: string): Sub
     lineage: context.parent,
     originAudience: context.trace.originAudience,
     traceContext: context.trace.parentTraceContext,
+    traceRoot: context.traceRoot,
   };
 }
 

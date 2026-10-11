@@ -9,7 +9,7 @@ import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discove
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
-import type { ProjectSource } from "#discover/project-source.js";
+import { type ProjectSource, readPackageJsonName } from "#discover/project-source.js";
 import {
   parseBuiltInExtensionPackageRoots,
   parseExtensionPackageRoots,
@@ -145,21 +145,6 @@ export function mountRefNamespace(logicalPath: string): string {
     return remainder.slice(0, slashIndex);
   }
   return mountNamespace(logicalPath);
-}
-
-/**
- * Derives the namespace that scopes an extension's durable state keys and config
- * binding from its package name. Unlike the mount namespace, this stays keyed to
- * the package (e.g. `@acme/crm` → `acme-crm`) so renaming the consumer's mount
- * file never orphans persisted state.
- */
-export function packageStateNamespace(packageName: string): string {
-  return (
-    packageName
-      .replace(/^@/, "")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "extension"
-  );
 }
 
 /**
@@ -382,6 +367,11 @@ async function resolvePackageRoot(input: {
   }
 
   const packageSubpath = bareSpecifierPackagePath(input.specifier);
+  // Node resolves a package's own name through self-reference; bundled extensions
+  // discovered from inside eve use it to mount other built-in extensions.
+  if ((await readPackageJsonName(input.source, input.appRoot)) === packageSubpath) {
+    return resolve(input.appRoot);
+  }
   let current = resolve(input.appRoot);
   while (true) {
     const candidate = join(current, "node_modules", packageSubpath);

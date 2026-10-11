@@ -22,6 +22,15 @@ export default defineEval({
   async test(t) {
     const turn = await t.send(CREATE_CHILD_MESSAGE);
     turn.expectOk();
+    turn.eventsSatisfy("remote agent calls preserve dispatch kind", (events) =>
+      events.some(
+        (event) =>
+          event.type === "actions.requested" &&
+          event.data.actions.some(
+            (action) => action.kind === "remote-agent-call" && action.name === "remote-loopback",
+          ),
+      ),
+    );
     const started = await requireRemoteSession(t, turn);
 
     const childEvents: MessageStreamEvent[] = [];
@@ -43,6 +52,16 @@ export default defineEval({
           ),
         "the proxied child stream carries the child's completed workspace lookup",
       ),
+    );
+    const parentTrace = turn.events.find((event) => event.type === "turn.started")?.data.trace;
+    const childTrace = childEvents.find((event) => event.type === "turn.started")?.data.trace;
+    turn.eventsSatisfy(
+      "remote dispatch starts a distinct child trace",
+      () =>
+        parentTrace !== undefined &&
+        childTrace !== undefined &&
+        childTrace.traceId !== parentTrace.traceId &&
+        childTrace.spanId !== parentTrace.spanId,
     );
     t.succeeded();
   },

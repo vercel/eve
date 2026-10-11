@@ -123,6 +123,101 @@ export async function listTeams(
   return parsed.data;
 }
 
+/** Capabilities required by a setup flow, using Vercel's permission resource names. */
+export interface VercelTeamRequirement {
+  permissions: Readonly<Record<string, readonly string[]>>;
+  disabledReason: string;
+}
+
+const TeamPermissionsSchema = z.record(z.string(), z.array(z.string()));
+const UNVERIFIED_TEAM_PERMISSIONS = "Could not verify permissions; run `vercel login` or retry.";
+
+function teamPermissionIssue(
+  permissions: unknown,
+  requirement: VercelTeamRequirement,
+): string | undefined {
+  const parsed = TeamPermissionsSchema.safeParse(permissions);
+  if (!parsed.success) return UNVERIFIED_TEAM_PERMISSIONS;
+  return Object.entries(requirement.permissions).every(([resource, actions]) =>
+    actions.every((action) => parsed.data[resource]?.includes(action)),
+  )
+    ? undefined
+    : requirement.disabledReason;
+}
+
+/** Checks the listed teams in one request, retaining unknown scopes as unavailable. */
+export async function checkTeamRequirements(
+  projectRoot: string,
+  teams: readonly VercelTeamListEntry[],
+  requirement: VercelTeamRequirement,
+  options: VercelProjectOperationOptions = {},
+): Promise<Map<string, string | undefined>> {
+  const issues = new Map<string, string | undefined>(
+    teams.map((team) => [team.slug, UNVERIFIED_TEAM_PERMISSIONS]),
+  );
+  const result = await captureVercel(
+    ["api", `/v2/teams?permissions=true&limit=${VERCEL_TEAM_PAGE_LIMIT}`, "--method", "GET"],
+    { cwd: projectRoot, signal: options.signal, timeoutMs: VERCEL_PROJECT_REQUEST_TIMEOUT_MS },
+  );
+  options.signal?.throwIfAborted();
+  if (!result.ok) return issues;
+  let body: unknown;
+  try {
+    body = JSON.parse(result.stdout);
+  } catch {
+    return issues;
+  }
+  const parsed = z
+    .object({
+      teams: z
+        .array(
+          z.object({
+            slug: z.string(),
+            permissions: z.unknown().optional(),
+            limited: z.boolean().optional(),
+          }),
+        )
+        .max(VERCEL_TEAM_PAGE_LIMIT),
+    })
+    .safeParse(body);
+  if (!parsed.success) return issues;
+  for (const team of parsed.data.teams) {
+    if (issues.has(team.slug))
+      issues.set(
+        team.slug,
+        team.limited
+          ? UNVERIFIED_TEAM_PERMISSIONS
+          : teamPermissionIssue(team.permissions, requirement),
+      );
+  }
+  return issues;
+}
+
+/** Returns an actionable reason when a specific team cannot satisfy a setup flow. */
+export async function checkTeamRequirement(
+  projectRoot: string,
+  team: string,
+  requirement: VercelTeamRequirement,
+  options: VercelProjectOperationOptions = {},
+): Promise<string | undefined> {
+  const result = await captureVercel(
+    ["api", "/v1/user/permissions", "--method", "GET", "--scope", team],
+    { cwd: projectRoot, signal: options.signal, timeoutMs: VERCEL_PROJECT_REQUEST_TIMEOUT_MS },
+  );
+  options.signal?.throwIfAborted();
+  if (!result.ok) return UNVERIFIED_TEAM_PERMISSIONS;
+  let body: unknown;
+  try {
+    body = JSON.parse(result.stdout);
+  } catch {
+    return UNVERIFIED_TEAM_PERMISSIONS;
+  }
+  const parsed = z.object({ permissions: z.unknown() }).safeParse(body);
+  return parsed.success
+    ? teamPermissionIssue(parsed.data.permissions, requirement)
+    : UNVERIFIED_TEAM_PERMISSIONS;
+}
+
 async function fetchProjectPage(
   projectRoot: string,
   team: string,

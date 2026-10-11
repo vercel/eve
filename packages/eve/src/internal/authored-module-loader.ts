@@ -2,9 +2,14 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
+import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import {
+  createExtensionMountPlugin,
+  EXTENSION_CHUNK_DIRECTORY,
+} from "#internal/bundler/extension-mount-plugin.js";
 import { authoredModuleConditions } from "#internal/authored-module-conditions.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
@@ -12,7 +17,7 @@ import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-pac
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
   createExtensionScopePlugin,
-  createFixedNamespaceScopePlugin,
+  createFixedMountScopePlugin,
 } from "#internal/bundler/extension-scope-plugin.js";
 import {
   RESOLVE_EXTENSIONS,
@@ -47,14 +52,31 @@ const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
   "authored-modules",
 );
 
+export interface ExtensionMountEntry {
+  readonly mountSourcePath: string;
+  readonly packageName: string;
+  readonly sourceRoot: string;
+  readonly specifier: string;
+}
+
 export interface AuthoredModuleLoadOptions {
-  readonly externalDependencies?: readonly string[];
   /**
-   * When set, the module being loaded is extension-owned: its
-   * `defineState`/`defineExtension` calls (and those of its same-package
-   * dependencies bundled with it) are scoped to this namespace at bundle time.
+   * Selected app root that owns authored Workflow ids. A workspace member's app root sits
+   * below the shared package root, which still owns dependency resolution.
    */
-  readonly extensionScopeNamespace?: string;
+  readonly appRoot?: string;
+  readonly externalDependencies?: readonly string[];
+  readonly extension?: {
+    readonly mountId: string;
+    /** Only filesystem mounts need a synthetic entry to bind their configuration. */
+    readonly entry?: ExtensionMountEntry;
+    /**
+     * Filesystem mounts enclosing `mountId`, outermost first. A mount declared inside another
+     * extension may read that extension's configuration, so those mounts bind first.
+     */
+    readonly ancestors?: readonly (ExtensionMountEntry & { readonly mountId: string })[];
+    readonly evaluationId?: string;
+  };
 }
 
 /**
@@ -147,12 +169,41 @@ export async function bundleAuthoredModuleCode(
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(modulePath);
+  const mount = options.extension?.entry;
+  const mountId = options.extension?.mountId;
+  const mountChain =
+    mount === undefined
+      ? []
+      : [...(options.extension?.ancestors ?? []), { ...mount, mountId: mountId! }];
   return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot,
+      extensionSpecifiers: new Set(mountChain.map((entry) => entry.specifier)),
     }),
-    plugins: [createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot })],
+    plugins: [
+      ...(mount === undefined
+        ? []
+        : [
+            {
+              name: "eve-compile-mount-entry",
+              resolveId(id: string) {
+                return id === "\0eve-compile-mount-entry" ? id : undefined;
+              },
+              load(id: string) {
+                if (id !== "\0eve-compile-mount-entry") return undefined;
+                const mountImports = mountChain.map(
+                  (entry) =>
+                    `import ${JSON.stringify(`${entry.mountSourcePath}?eve-mount=${encodeURIComponent(entry.mountId)}`)};`,
+                );
+                const contribution = `${modulePath}?eve-mount=${encodeURIComponent(mountId!)}`;
+                return `${mountImports.join(" ")} export * from ${JSON.stringify(contribution)}; import entry from ${JSON.stringify(contribution)}; export default entry;`;
+              },
+            },
+          ]),
+      createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
+      ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
+    ],
     sourcemap: "inline",
   });
 }
@@ -227,7 +278,7 @@ export async function bundleExtensionDistributionGraph(input: {
       tsconfig: resolveAuthoredTsConfigPath(input.packageRoot),
       write: false,
       output: {
-        chunkFileNames: "_chunks/[name]-[hash].mjs",
+        chunkFileNames: `${EXTENSION_CHUNK_DIRECTORY}/[name]-[hash].mjs`,
         codeSplitting: true,
         comments: false,
         entryFileNames: "[name].mjs",
@@ -258,6 +309,8 @@ export async function bundleExtensionDistributionGraph(input: {
 export interface AuthoredModuleMapBundle {
   readonly authoredWorkflowModules: AuthoredWorkflowModules;
   readonly code: string;
+  /** Application modules in the graph, including shared workspace modules outside the app root. */
+  readonly sourceModules: readonly string[];
   /** Fingerprint of the sources that also feed the driver and step registry; a change rebuilds the host. */
   readonly workflowSourceFingerprint: string | undefined;
 }
@@ -266,6 +319,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly appRoot: string;
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
+  readonly resolveExternalPaths?: boolean;
 }): Promise<AuthoredModuleMapBundle> {
   // The package root owns dependency resolution, while the selected app root
   // owns authored workflow IDs and must match the workflow driver.
@@ -288,11 +342,15 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     moduleMapPath: input.moduleMapPath,
     programmaticLoaderImportSpecifier,
   });
+  const extensionMounts = [
+    input.manifest,
+    ...input.manifest.subagents.map((subagent) => subagent.agent),
+  ].flatMap((node) => node.extensionMounts);
   const extensionScopePlugin = createExtensionScopePlugin(
     [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
       (node) =>
         node.extensionMounts.map((mount) => ({
-          packageNamespace: mount.packageNamespace,
+          mountId: mount.mountId,
           sourceRoot: mount.sourceRoot,
         })),
     ),
@@ -310,6 +368,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       workflowFunctions: (id) => workflowSources.workflowFunctions(id),
     }),
     workflowSources.graphPlugin(),
+    createExtensionMountPlugin(extensionMounts, extensionOverridePaths(input.manifest)),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin({ packageRoot }),
@@ -318,7 +377,12 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       extensions: RESOLVE_EXTENSIONS,
     }),
     createNodeEsmCompatBannerPlugin({ includeRequire: true }),
-    createGenerationPackageBoundaryPlugin({ externalDependencies, packageRoot }),
+    createGenerationPackageBoundaryPlugin({
+      externalDependencies,
+      packageRoot,
+      extensionSpecifiers: new Set(extensionMounts.map((mount) => mount.specifier)),
+      resolveExternalPaths: input.resolveExternalPaths,
+    }),
   ].filter((plugin) => plugin !== null);
 
   try {
@@ -341,6 +405,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     return {
       authoredWorkflowModules: workflowSources.modules(),
       code: removeRolldownModuleRegionComments(chunk.code),
+      sourceModules: workflowSources.sourceModules().filter((id) => id !== input.moduleMapPath),
       workflowSourceFingerprint: workflowSources.fingerprint(),
     };
   } catch (error) {
@@ -393,6 +458,10 @@ class AuthoredWorkflowSourceRecorder {
 
   workflowFunctions(id: string): ReadonlySet<string> | undefined {
     return this.#workflowFunctions.get(id);
+  }
+
+  sourceModules(): readonly string[] {
+    return [...this.#sources.keys()].sort();
   }
 
   graphPlugin(): Record<string, unknown> {
@@ -475,9 +544,7 @@ async function buildAuthoredModuleBundle(
   const tsconfigPath = resolveAuthoredTsConfigPath(packageRoot);
   const plugins = [
     ...configuration.plugins,
-    options.extensionScopeNamespace === undefined
-      ? null
-      : createFixedNamespaceScopePlugin(options.extensionScopeNamespace),
+    options.extension === undefined ? null : createFixedMountScopePlugin(options.extension.mountId),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin({ packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({
@@ -491,7 +558,7 @@ async function buildAuthoredModuleBundle(
   try {
     const chunk = await buildSingleRolldownChunk(`authored module for "${modulePath}"`, {
       cwd: packageRoot,
-      input: modulePath,
+      input: options.extension?.entry === undefined ? modulePath : "\0eve-compile-mount-entry",
       platform: "node",
       plugins,
       resolve: {
@@ -573,7 +640,7 @@ async function loadBundledAuthoredModule(
     .update("\0")
     .update(externalDependencies.join("\0"))
     .update("\0")
-    .update(options.extensionScopeNamespace ?? "")
+    .update(options.extension?.mountId ?? "")
     .update("\0")
     .update(code)
     .digest("hex");
@@ -589,7 +656,10 @@ async function loadBundledAuthoredModule(
   }
 
   try {
-    return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);
+    const instance = options.extension?.evaluationId ?? "";
+    return await import(
+      `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}&instance=${encodeURIComponent(instance)}`
+    );
   } catch (error) {
     throw createAuthoredModuleEvaluationError(modulePath, error);
   }
@@ -601,7 +671,7 @@ function createInFlightModuleLoadKey(
 ): string {
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
-  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}`;
+  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extension?.mountId ?? ""}\0${options.extension?.evaluationId ?? ""}\0${options.appRoot ?? ""}`;
 }
 
 export function resolveAuthoredTsConfigPath(packageRoot: string): string | false {

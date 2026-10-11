@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
 import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-workflow.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
@@ -33,7 +33,7 @@ describe("session command inbox integration", () => {
 
   it("stamps the public session id onto every inbox hook", async () => {
     const channelToken = "http:session-inbox:session-id";
-    const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
+    const run = await startSessionOwner(sessionCommandInboxWorkflow, [{ token: channelToken }]);
     const stableToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
 
     try {

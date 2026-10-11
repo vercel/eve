@@ -6,6 +6,7 @@ import { defineDynamic } from "#dynamic/definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { once } from "#tools/approval/policies.js";
 import { webSearch } from "#tools/provided/web-search.js";
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
@@ -30,10 +31,11 @@ describe("normalizeToolDefinition", () => {
     expect(typeof entry.definition.execute).toBe("function");
   });
 
-  it("preserves subagent visibility", () => {
+  it("preserves subagent visibility and turn ending", () => {
     const tool = defineTool({
       availableInSubagents: false,
       description: "Runs only in a root session.",
+      endsTurn: true,
       inputSchema: z.object({}),
       execute: () => null,
     });
@@ -43,6 +45,24 @@ describe("normalizeToolDefinition", () => {
     expect(entry.kind).toBe("tool");
     if (entry.kind !== "tool") throw new Error("expected tool kind");
     expect(entry.definition.availableInSubagents).toBe(false);
+    expect(entry.definition.endsTurn).toBe(true);
+  });
+
+  it("accepts an endsTurn function and rejects other endsTurn values", () => {
+    const endsTurn = (output: unknown) => output === null;
+    const tool = defineTool({
+      description: "Decides from its result.",
+      endsTurn,
+      inputSchema: z.object({}),
+      execute: () => null,
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind === "tool" && entry.definition.endsTurn).toBe(endsTurn);
+    expect(() => normalizeToolDefinition({ ...tool, endsTurn: "yes" }, FAILURE_MESSAGE)).toThrow(
+      FAILURE_MESSAGE,
+    );
   });
 
   it("normalizes a tool with a Zod 3 input schema", () => {
@@ -66,6 +86,27 @@ describe("normalizeToolDefinition", () => {
     });
   });
 
+  it("captures a serve tool's model input schema with the taskId eve adds", () => {
+    async function serve() {}
+    Reflect.set(serve, "workflowId", "workflow//test//review");
+    const tool = defineWorkflowTool({
+      description: "Reviews a pull request.",
+      inputSchema: z.object({ pr: z.number() }),
+      serve,
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.inputSchema).not.toHaveProperty("properties.taskId");
+    expect(entry.definition.modelInputSchema).toMatchObject({
+      additionalProperties: false,
+      properties: { pr: { type: "number" }, taskId: { type: "string" } },
+      required: ["pr"],
+      type: "object",
+    });
+  });
+
   it("returns a disabled entry for a disableTool sentinel", () => {
     const sentinel = disableTool();
 
@@ -74,11 +115,38 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns a configured entry for the provider-managed web search tool", () => {
-    expect(normalizeToolDefinition(webSearch({ provider: "exa" }), FAILURE_MESSAGE)).toEqual({
-      kind: "web-search-tool",
-      provider: "exa",
-    });
+  it.each(["exa", "parallel", "browserbase", "native"] as const)(
+    "normalizes the %s web search provider",
+    (provider) => {
+      expect(normalizeToolDefinition(webSearch({ provider }), FAILURE_MESSAGE)).toEqual({
+        kind: "web-search-tool",
+        selection: { provider },
+      });
+    },
+  );
+
+  it("normalizes a web search fallback provider", () => {
+    expect(
+      normalizeToolDefinition(webSearch({ fallback: "exa", provider: "native" }), FAILURE_MESSAGE),
+    ).toEqual({ kind: "web-search-tool", selection: { fallback: "exa", provider: "native" } });
+  });
+
+  it("rejects a fallback that can't serve every Gateway model", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        { fallback: "native", kind: "eve:web-search-tool", provider: "native" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Expected "fallback" to be one of: exa, parallel, browserbase');
+  });
+
+  it("rejects a fallback for a provider that serves every Gateway model", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        { fallback: "parallel", kind: "eve:web-search-tool", provider: "exa" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"fallback" applies only to provider "native"');
   });
 
   it("rejects an unsupported web search provider", () => {

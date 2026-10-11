@@ -1,9 +1,8 @@
 /**
  * Protocol-agnostic interfaces for the connection system.
  *
- * Framework tools (`connection_search`) and the context provider
- * depend only on these interfaces, not on any
- * protocol-specific implementation such as MCP.
+ * Framework tools and the context provider depend only on these
+ * interfaces, not on any protocol-specific implementation such as MCP.
  */
 
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
@@ -467,9 +466,4 @@ export interface ConnectionClient {
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
-  /**
-   * Projects an {@link executeTool} result to what the model sees, when the
-   * protocol defines a projection. Resolves `undefined` when it does not.
-   */
-  toModelOutput?(toolName: string, output: unknown): Promise<unknown>;
 }

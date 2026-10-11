@@ -8,6 +8,7 @@ import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
+import { createAgentDescriptionRouteArgs } from "#channel/agent-description.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { createAttachSessionFn } from "#channel/session.js";
@@ -20,10 +21,15 @@ import {
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
+  attachSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
-import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
+import {
+  type NitroArtifactsConfig,
+  resolveNitroCompiledArtifactsSource,
+} from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
+import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
@@ -265,6 +271,7 @@ async function buildRouteArgs(
   });
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
+  const agent = createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config));
   const args = attachRouteSessionCreator(
     attachHomeRouteMetadata(
       attachRouteChannelName(
@@ -272,6 +279,13 @@ async function buildRouteArgs(
           {
             attachSession,
             ...channelOperations,
+            ...agent.args,
+            invokeTool: createRouteInvokeTool({
+              agentName: bundle.agentName,
+              config,
+              origin: { adapter, agentName: bundle.agentName, channelName },
+              requestUrl: event.req.url,
+            }),
             params,
             requestIp,
             to,
@@ -299,6 +313,7 @@ async function buildRouteArgs(
         requestId,
       }),
   );
+  attachSkillFileSource(args, agent.skillFiles);
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
   }

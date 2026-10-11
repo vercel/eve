@@ -25,7 +25,7 @@ export default defineEval({
     parked.eventOrder([
       { type: "actions.requested" },
       { type: "input.requested" },
-      { type: "session.waiting" },
+      { type: "turn.waiting" },
     ]);
     session.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
 

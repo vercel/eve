@@ -61,21 +61,24 @@ export const GLOB_OUTPUT_SCHEMA = defineJsonSchema<GlobToolOutput>({
 /**
  * Framework-owned executor that delegates to the default sandbox.
  */
-export const glob: ToolDefinition<GlobToolInput, GlobToolOutput> = defineTool({
-  label: { start: (input) => toolLabel("Find", input.pattern) },
-  description: [
-    "Fast file pattern matching tool that works with any codebase size.",
-    "",
-    "Usage:",
-    '- Supports glob patterns like "**/*.js" or "src/**/*.ts".',
-    "- Returns matching file paths.",
-    "- Call this tool in parallel when you know there are multiple patterns to search for.",
-  ].join("\n"),
-  async execute(input, ctx) {
-    return await executeGlobOnSandbox(await ctx.getSandbox(), input as GlobInput);
-  },
-  inputSchema: GLOB_INPUT_SCHEMA,
-  outputSchema: GLOB_OUTPUT_SCHEMA,
-});
+export const glob: ToolDefinition<GlobToolInput, GlobToolOutput> = frameworkTool(
+  defineTool({
+    label: { start: (input) => toolLabel("Find", input.pattern) },
+    description: [
+      "Fast file pattern matching tool that works with any codebase size.",
+      "",
+      "Usage:",
+      '- Supports glob patterns like "**/*.js" or "src/**/*.ts".',
+      "- Returns matching file paths.",
+      "- Call this tool in parallel when you know there are multiple patterns to search for.",
+    ].join("\n"),
+    async execute(input, ctx) {
+      return await executeGlobOnSandbox(await ctx.getSandbox(), input as GlobInput);
+    },
+    inputSchema: GLOB_INPUT_SCHEMA,
+    outputSchema: GLOB_OUTPUT_SCHEMA,
+  }),
+);
 
 export default glob;
+import { frameworkTool } from "./framework-tool.js";

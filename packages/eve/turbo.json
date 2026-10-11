@@ -6,6 +6,7 @@
       "inputs": [
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
     },
@@ -13,6 +14,7 @@
       "inputs": [
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
     },
@@ -20,6 +22,7 @@
       "inputs": [
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
       ]
     }

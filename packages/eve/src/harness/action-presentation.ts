@@ -3,7 +3,7 @@ import type { ToolSet, TypedToolCall } from "ai";
 import type { ActionPresentationByCallId } from "#protocol/message.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessToolMap } from "#harness/types.js";
+import type { HarnessToolLookup } from "#harness/types.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import { normalizePresentationText } from "#shared/presentation-text.js";
 import { parseJsonObject } from "#shared/json.js";
@@ -15,7 +15,7 @@ export interface RuntimeActionRequestProjection {
 
 export function createPresentedRuntimeActionRequestFromToolCall(input: {
   readonly toolCall: TypedToolCall<ToolSet>;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
 }): RuntimeActionRequestProjection {
   const action = createRuntimeActionRequestFromToolCall(input);
   const presentationLabel = projectToolStartLabel(

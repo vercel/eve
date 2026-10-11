@@ -5,6 +5,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   resolvePackageDependencyPath,
+  resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 
@@ -40,6 +41,8 @@ interface ResolvedAuthoredExternalModule {
 export function createGenerationPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifiers?: ReadonlySet<string>;
+  readonly resolveExternalPaths?: boolean;
 }): Record<string, unknown> {
   return {
     name: "eve-generation-package-boundary",
@@ -53,7 +56,9 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
+      if (input.extensionSpecifiers?.has(source)) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
+        if (input.extensionSpecifiers?.has(source)) return undefined;
         return { external: true, id: resolveFrameworkRuntimeImport(source) };
       }
 
@@ -77,7 +82,12 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
-      return { external: true, id: source };
+      return {
+        external: true,
+        id: input.resolveExternalPaths
+          ? normalizeEsmImportSpecifier(externalModule.resolvedId)
+          : source,
+      };
     },
   };
 }
@@ -85,6 +95,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
 export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifiers?: ReadonlySet<string>;
 }): Record<string, unknown> {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
 
@@ -100,6 +111,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         return undefined;
       }
 
+      if (input.extensionSpecifiers?.has(source) === true) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
         return {
           external: true,
@@ -111,10 +123,14 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       // condition used by the app build maps them to TypeScript source.
       // Resolve through Node's default package-import conditions here so a
       // packed eve installation does not leak #shared/* into the bundle.
+      // eve's own compiled modules load by path: inlining them re-bundles most
+      // of the framework for every eve-owned module this loader evaluates.
       if (source.startsWith("#")) {
         const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
         if (resolvedPackageImport !== undefined) {
-          return { id: resolvedPackageImport };
+          return isFrameworkPackagePath(resolvedPackageImport)
+            ? { external: true, id: normalizeEsmImportSpecifier(resolvedPackageImport) }
+            : { id: resolvedPackageImport };
         }
       }
 
@@ -354,6 +370,13 @@ function resolvePackageImport(
   }
 }
 
+let canonicalFrameworkPackageRoot: string | undefined;
+
+function isFrameworkPackagePath(path: string): boolean {
+  canonicalFrameworkPackageRoot ??= toCanonicalPath(resolvePackageRoot());
+  return nearestPackageRoot(path) === canonicalFrameworkPackageRoot;
+}
+
 function resolveExistingExternalFilePath(id: string): string | undefined {
   if (existsSync(id)) {
     return id;
@@ -386,9 +409,15 @@ export function isPathImport(source: string): boolean {
   return source.startsWith(".") || source.startsWith("/") || /^[A-Za-z]:[\\/]/.test(source);
 }
 
+const SELF_MODIFICATION_MOUNT_SPECIFIERS = new Set([
+  "eve/self-modification",
+  "eve/self-modification/local",
+  "eve/self-modification/remote",
+]);
+
 function isFrameworkRuntimeImport(source: string, importer: string | undefined): boolean {
-  // The packaged extension is authored code: its mount and child must share a scoped handle.
-  if (source === "eve/self-modification") return false;
+  // Packaged extension mounts are authored code: each mount and its child must share a scoped handle.
+  if (SELF_MODIFICATION_MOUNT_SPECIFIERS.has(source)) return false;
   if (source === "eve" || source.startsWith("eve/")) {
     return true;
   }

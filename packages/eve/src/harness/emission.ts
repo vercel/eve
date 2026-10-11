@@ -10,11 +10,7 @@ import type {
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-import type {
-  AssistantStepFinishReason,
-  RuntimeIdentity,
-  RuntimeTraceContext,
-} from "#protocol/message.js";
+import type { AssistantStepFinishReason } from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
   createActionInputAppendedEvent,
@@ -22,22 +18,14 @@ import {
   createActionResultEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
-  createMessageReceivedEvent,
   createReasoningAppendedEvent,
   createReasoningCompletedEvent,
-  createSessionFailedEvent,
-  createSessionStartedEvent,
-  createSessionWaitingEvent,
-  createStepFailedEvent,
-  createStepStartedEvent,
-  createTurnCompletedEvent,
-  createTurnFailedEvent,
-  createTurnStartedEvent,
 } from "#protocol/message.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
+  toActionResult,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
 import {
@@ -53,196 +41,13 @@ import {
 } from "#harness/action-presentation.js";
 import { projectResultPresentation, projectDeltaPresentation } from "#harness/tool-presentation.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
-import { normalizeModelStreamError } from "#harness/model-call-error.js";
+import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
-import type { HarnessEmissionState } from "#harness/emission-state.js";
-import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
+import type { HarnessEmitFn, HarnessToolLookup } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
-
-export {
-  getHarnessEmissionState,
-  isHarnessBetweenTurns,
-  setHarnessEmissionState,
-} from "#harness/emission-state.js";
-export type { HarnessEmissionState } from "#harness/emission-state.js";
-
-/**
- * Emits `session.started` (once), `turn.started`, and `message.received` at the
- * beginning of a new turn. Returns updated emission state.
- */
-export async function emitTurnPreamble(
-  emitFn: HarnessEmitFn,
-  input: StepInput,
-  state: HarnessEmissionState,
-  messages: readonly ModelMessage[],
-  runtimeIdentity?: RuntimeIdentity,
-  traceContext?: RuntimeTraceContext,
-): Promise<HarnessEmissionState> {
-  // Steering re-enters an open turn: keep its id and step index and skip the
-  // `turn.started` it already emitted.
-  const steering = state.turnId !== "";
-  const turnId = steering ? state.turnId : `turn_${state.sequence}`;
-
-  if (!state.sessionStarted) {
-    await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
-  }
-
-  if (!steering) {
-    await emitFn(
-      createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }),
-      messages,
-    );
-  }
-
-  if (input.message !== undefined) {
-    await emitFn(
-      createMessageReceivedEvent({
-        message: input.message,
-        sequence: state.sequence,
-        turnId,
-      }),
-    );
-  }
-
-  const nextState: HarnessEmissionState = {
-    sessionStarted: true,
-    sequence: state.sequence,
-    stepIndex: steering ? state.stepIndex : 0,
-    turnId,
-  };
-  return steering && state.assistantOutputStarted
-    ? { ...nextState, assistantOutputStarted: true }
-    : nextState;
-}
-
-/**
- * Emits `step.started` for one model call.
- */
-export async function emitStepStarted(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-  modelId: string,
-  messages?: readonly import("ai").ModelMessage[],
-): Promise<void> {
-  await emitFn(
-    createStepStartedEvent({
-      modelId,
-      sequence: state.sequence,
-      stepIndex: state.stepIndex,
-      turnId: state.turnId,
-    }),
-    messages,
-  );
-}
-
-interface FailedStepPayload {
-  readonly code: string;
-  readonly details?: JsonObject;
-  readonly message: string;
-}
-
-/**
- * Emits the shared head of both failure cascades: `step.failed` →
- * `turn.failed`. Both terminal and recoverable paths diverge only on
- * the third event (`session.failed` vs. `session.waiting`).
- */
-async function emitStepAndTurnFailed(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-  input: FailedStepPayload,
-): Promise<void> {
-  await emitFn(
-    createStepFailedEvent({
-      ...input,
-      sequence: state.sequence,
-      stepIndex: state.stepIndex,
-      turnId: state.turnId,
-    }),
-  );
-  await emitFn(
-    createTurnFailedEvent({
-      ...input,
-      sequence: state.sequence,
-      turnId: state.turnId,
-    }),
-  );
-}
-
-/**
- * Emits the full terminal failure cascade: `step.failed` →
- * `turn.failed` → `session.failed`.
- *
- * Use this when the session cannot be salvaged (structural config
- * error, auth misconfig, non-recoverable provider response). The
- * `session.failed` tail tells adapters the session is dead and no
- * further follow-up is possible on the same continuation token.
- */
-export async function emitFailedStep(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-  input: FailedStepPayload & { readonly sessionId: string },
-): Promise<void> {
-  await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionFailedEvent(input));
-}
-
-/**
- * Emits the recoverable failure cascade: `step.failed` →
- * `turn.failed` → `session.waiting`.
- */
-export async function emitRecoverableFailedTurn(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-  input: FailedStepPayload & { readonly continuationToken: string },
-): Promise<HarnessEmissionState> {
-  await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionWaitingEvent());
-
-  return {
-    sessionStarted: state.sessionStarted,
-    sequence: state.sequence + 1,
-    stepIndex: 0,
-    turnId: "",
-  };
-}
-
-/**
- * Returns updated emission state for the next step in the current turn.
- */
-export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
-  return {
-    ...state,
-    stepIndex: state.stepIndex + 1,
-  };
-}
-
-/**
- * Emits `turn.completed` and `session.waiting`.
- * Returns updated emission state with an incremented sequence.
- */
-export async function emitTurnEpilogue(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-  messages: readonly ModelMessage[],
-): Promise<HarnessEmissionState> {
-  await emitFn(
-    createTurnCompletedEvent({
-      sequence: state.sequence,
-      turnId: state.turnId,
-    }),
-    messages,
-  );
-  await emitFn(createSessionWaitingEvent());
-
-  return {
-    sessionStarted: state.sessionStarted,
-    sequence: state.sequence + 1,
-    stepIndex: 0,
-    turnId: "",
-  };
-}
 
 /**
  * Result of consuming one step's `fullStream`.
@@ -266,7 +71,8 @@ interface StreamActionEmissionOptions {
    * as the reply.
    */
   readonly hidesHeldText?: boolean;
-  readonly tools: HarnessToolMap;
+  readonly tools: HarnessToolLookup;
+  readonly unsettledActionToolNames?: Map<string, string>;
 }
 
 /**
@@ -279,13 +85,18 @@ interface StreamActionEmissionOptions {
  */
 export async function emitStreamContent(
   emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
+  state: TurnPosition,
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
   options?: StreamActionEmissionOptions,
 ): Promise<EmittedStreamContent> {
   const orderedEmitter = createOrderedStreamEmitter(emitFn);
   const providerActionBatch = createProviderStreamActionBatch({
     emitFn: orderedEmitter.emit,
+    onActionsEmitted: (actions) => {
+      for (const { request, toolName } of actions) {
+        options?.unsettledActionToolNames?.set(request.action.callId, toolName);
+      }
+    },
     state,
   });
   try {
@@ -316,7 +127,7 @@ function reportedFinishReason(
 
 async function consumeStreamContent(
   emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
+  state: TurnPosition,
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
   providerActionBatch: ReturnType<typeof createProviderStreamActionBatch>,
   options?: StreamActionEmissionOptions,
@@ -356,8 +167,8 @@ async function consumeStreamContent(
     callId: string,
     toolName: string,
     inputTextDelta: string,
-  ): Promise<void> =>
-    emitFn(
+  ): Promise<void> => {
+    await emitFn(
       createActionInputAppendedEvent({
         callId,
         inputTextDelta,
@@ -367,8 +178,13 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
+    options?.unsettledActionToolNames?.set(callId, toolName);
+  };
 
-  const emitActionRequest = async (projection: RuntimeActionRequestProjection): Promise<void> => {
+  const emitActionRequest = async (
+    projection: RuntimeActionRequestProjection,
+    toolName: string,
+  ): Promise<void> => {
     const { action } = projection;
     if (emittedActionCallIds.has(action.callId)) {
       return;
@@ -389,6 +205,7 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
+    options?.unsettledActionToolNames?.set(action.callId, toolName);
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -421,7 +238,7 @@ async function consumeStreamContent(
     }
 
     actionInputs.set(resolved.request.action.callId, resolved.request.action.input);
-    providerActionBatch.observe(resolved.request);
+    providerActionBatch.observe(resolved.request, toolCall.toolName);
   };
 
   const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {
@@ -441,12 +258,13 @@ async function consumeStreamContent(
     await emitFn(
       createActionResultEvent({
         presentation: resultPresentation,
-        result,
+        result: toActionResult(result, actionInputs.get(result.callId)),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
     );
+    options?.unsettledActionToolNames?.delete(result.callId);
   };
 
   const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
@@ -482,6 +300,7 @@ async function consumeStreamContent(
           toolCall,
           tools: options.tools,
         }),
+        toolCall.toolName,
       );
     } catch (error) {
       if (error instanceof TypeError) {

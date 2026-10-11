@@ -1,5 +1,6 @@
-import type { ModelMessage, SystemModelMessage } from "ai";
+import type { SystemModelMessage } from "ai";
 import type { HistoryState } from "#context/keys.js";
+import type { Announcement } from "#harness/announcements.js";
 
 import {
   createFrameworkUserMessage,
@@ -27,11 +28,13 @@ export function createCurrentMessages(
   readonly nonSystemMessages: readonly HarnessModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
   add(message: string, kind: FrameworkMessageKind, options?: AddCurrentMessageOptions): void;
-  addAnnouncements(announcements: HistoryState): void;
+  addAnnouncements(announcements: Readonly<Record<string, Announcement>>): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
   const durableMessages = [...history];
-  const historyState = { ...options.historyState };
+  const historyState: { -readonly [K in keyof HistoryState]: HistoryState[K] } = {
+    ...options.historyState,
+  };
   const systemMessages: SystemModelMessage[] = [];
   const nonSystemMessages: HarnessModelMessage[] = [];
   const currentTurnMessages = new Set(options.currentTurnMessages);
@@ -50,37 +53,36 @@ export function createCurrentMessages(
   let userInsertionIndex = currentTurnInsertionIndex ?? nonSystemMessages.length;
   const currentInputIndex = history.findIndex((message) => currentTurnMessages.has(message));
   let historyInsertionIndex = currentInputIndex === -1 ? history.length : currentInputIndex;
-  // The AI SDK collects approval responses only from the tail tool message.
-  // Appending user-role context there would skip the approved tool's
-  // execution and send the provider a tool call with no result.
-  const canAppendUserMessages =
-    currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
+  function appendUserMessage(message: string, kind: FrameworkMessageKind): void {
+    const entry = createFrameworkUserMessage(kind, message);
+    nonSystemMessages.splice(userInsertionIndex, 0, entry);
+    durableMessages.splice(historyInsertionIndex, 0, entry);
+    userInsertionIndex += 1;
+    historyInsertionIndex += 1;
+  }
 
   function add(
     message: string,
     kind: FrameworkMessageKind,
     { cacheFriendly = true }: AddCurrentMessageOptions = {},
-  ): boolean {
-    if (cacheFriendly && canAppendUserMessages) {
-      const entry = createFrameworkUserMessage(kind, message);
-      nonSystemMessages.splice(userInsertionIndex, 0, entry);
-      durableMessages.splice(historyInsertionIndex, 0, entry);
-      userInsertionIndex += 1;
-      historyInsertionIndex += 1;
-      return true;
+  ): void {
+    if (cacheFriendly) {
+      appendUserMessage(message, kind);
+      return;
     }
     systemMessages.push({ role: "system", content: message });
-    return false;
   }
 
   return {
     add,
     addAnnouncements(announcements) {
-      const skills = announcements.availableSkills;
-      if (skills === undefined || skills.length === 0 || historyState.availableSkills === skills) {
-        return;
+      for (const key of Object.keys(announcements).sort()) {
+        const announcement = announcements[key]!;
+        const previous = historyState.announcements?.[key];
+        if (previous === announcement.value) continue;
+        appendUserMessage(announcement.render(previous), "context.state");
+        historyState.announcements = { ...historyState.announcements, [key]: announcement.value };
       }
-      if (add(skills, "context.state")) historyState.availableSkills = skills;
     },
     addSystem(messages) {
       systemMessages.push(...(Array.isArray(messages) ? messages : [messages]));
@@ -98,12 +100,4 @@ export function createCurrentMessages(
       return [...systemMessages];
     },
   };
-}
-
-/** True when the history ends with a tool message carrying a tool-approval-response. */
-export function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
-  const tail = messages.at(-1);
-  return (
-    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
-  );
 }

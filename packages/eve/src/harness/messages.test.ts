@@ -92,6 +92,22 @@ describe("coalesceDeliveries", () => {
 });
 
 describe("coalesceTurnInputs", () => {
+  it("keeps answers that carry their responder", () => {
+    const bob = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "bob",
+      principalType: "user",
+    };
+    const saved = { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] };
+    const answer = { auth: bob, response: { optionId: "cancel", requestId: "approval-2" } };
+
+    expect(coalesceTurnInputs(saved, { attributedInputResponses: [answer] })).toEqual({
+      ...saved,
+      attributedInputResponses: [answer],
+    });
+  });
+
   it("joins two messages with a double newline", () => {
     const result = coalesceTurnInputs({ message: "hello" }, { message: "world" });
 

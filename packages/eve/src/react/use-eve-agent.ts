@@ -12,7 +12,8 @@ import {
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
-import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
+import { conversationReducer } from "#client/conversation-reducer.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
@@ -38,9 +39,9 @@ export type { PrepareSend };
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
- * Snapshot of an eve agent session: `data` (the reducer projection), `events`
- * (the authoritative server stream), `session` (resumable cursor), `status`,
- * and `error`.
+ * Snapshot of an eve agent session: `conversation` (canonical state), `data`
+ * (the selected view), `events` (the authoritative server stream), `session`
+ * (resumable cursor), `status`, and `error`.
  */
 export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
 
@@ -111,6 +112,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
+  /** Follow each subagent call's session into `conversation.agents` while mounted. @default false */
+  readonly followSubagents?: boolean;
   /**
    * Prewarm an owned session when true. React observes this value across renders;
    * changing it from false to true prepares the current session, and reset checks
@@ -134,8 +137,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
 }
 
 export function useEveAgent(
-  options?: UseEveAgentOptions<EveMessageData>,
-): UseEveAgentHelpers<EveMessageData>;
+  options?: UseEveAgentOptions<ConversationState>,
+): UseEveAgentHelpers<ConversationState>;
 
 export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> & { readonly reducer: EveAgentReducer<TData> },
@@ -146,8 +149,8 @@ export function useEveAgent<TData>(
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
  * plus the commands `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. With no reducer, `data` is the
- * built-in `UIMessage` projection from {@link defaultMessageReducer} (`TData`
- * is {@link EveMessageData}); pass a reducer to project into your own shape and
+ * built-in conversation projection (including UIMessage-compatible `messages`);
+ * pass a reducer to project into your own shape and
  * infer `TData`.
  *
  * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
@@ -160,6 +163,7 @@ export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
 ): UseEveAgentHelpers<TData> {
   const storeRef = useRef<EveAgentStore<TData> | undefined>(undefined);
+  const mountedRef = useRef(false);
   const resumeOnMountRef = useRef(options.resume ?? false);
   const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
   const [prewarmResetGeneration, setPrewarmResetGeneration] = useState(0);
@@ -173,7 +177,7 @@ export function useEveAgent<TData>(
     ) {
       throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
     }
-    const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
+    const reducer = options.reducer ?? (conversationReducer as EveAgentReducer<TData>);
     storeRef.current = new EveAgentStore({
       auth: options.auth,
       headers: options.headers,
@@ -181,6 +185,7 @@ export function useEveAgent<TData>(
       initialEvents: options.initialEvents,
       initialSession: options.initialSession,
       optimistic: options.optimistic,
+      followSubagents: options.followSubagents,
       reducer,
       session: options.session,
     });
@@ -206,10 +211,15 @@ export function useEveAgent<TData>(
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     const timeout = setTimeout(() => attachEveAgentStore(store), 0);
     return () => {
+      mountedRef.current = false;
       clearTimeout(timeout);
-      detachEveAgentStore(store);
+      // Strict Mode and Fast Refresh replay this cleanup and setup in one synchronous commit.
+      queueMicrotask(() => {
+        if (!mountedRef.current) detachEveAgentStore(store);
+      });
     };
   }, [store]);
   useEffect(() => {

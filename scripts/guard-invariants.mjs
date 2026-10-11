@@ -78,11 +78,6 @@
  *             `queue-namespace.ts`. The generated agent bootstrap installs the
  *             agent-scoped namespace before queue-producing APIs can run.
  *   rule 34 — `phase` stays a runtime-only dependency. No file under the Eve\n *             logo renderer's GPU/runtime boundary (render/, shaders/, or the\n *             offline render harness) may import the `phase` package. This keeps\n *             the mechanical separation between the lifecycle layer and the GPU\n *             renderer enforceable.
- *   rule 35 — No direct `#compiled/gray-matter` imports outside the
- *             `internal/helpers/gray-matter.ts` wrapper. gray-matter's default
- *             engines `eval()` a `---js` frontmatter fence, so every call must
- *             route through `parseFrontmatter`, which is safe by default. A
- *             direct import lets untrusted input reach an evaluating engine.
  *   rule 36 — Extension capability epochs have immutable hashed API metadata
  *             and explicit support history. The current hash must match the
  *             authoring roots, every historical epoch must be supported or
@@ -122,6 +117,25 @@
  *             after the turn loop returns, and `execution/session/finalization.ts`
  *             when the session ends. A held turn is still open, so nothing
  *             inside the turn loop or the harness may reply.
+ *   rule 48 — Remote agent protocol 1 stays in
+ *             `execution/legacy-remote-agent/`. Only the ingress files that
+ *             route protocol-1 callers into it may import it, so deleting the
+ *             directory removes protocol 1 without a search.
+ *   rule 49 — Provided tool definitions carry a framework tool flag,
+ *             so telemetry ownership survives renamed and namespaced tools.
+ *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
+ *             reached only through its `index.ts`, its request vocabulary
+ *             (`approval-prompt`, `budget-request`), and the approvers that
+ *             approved calls run as (`approved-call-callers`), so replacing it
+ *             changes one seam.
+ *   rule 51 — Only the session machine (`harness/session-machine/`) and the
+ *             human-in-the-loop lifecycle it delegates to
+ *             (`harness/hitl/`) build lifecycle events and read the
+ *             machine's private state. Every change to a turn, request,
+ *             sign-in, task, or call outcome is a transition that returns its
+ *             events, so nothing changes without readers hearing it. The model
+ *             step's streamed content (its calls and their inline results) is
+ *             built where it streams.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -131,7 +145,7 @@ import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import matter from "gray-matter";
+import { load as loadYaml } from "js-yaml";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 
 const require = createRequire(import.meta.url);
@@ -139,6 +153,26 @@ const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor
 const ts = extractorRequire("typescript");
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../..");
 const BASELINE_PATH = join(REPO_ROOT, "scripts/guard-invariants-baseline.json");
+
+const FRONTMATTER_RE = /^\uFEFF?---\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/m;
+
+/**
+ * Parses a Markdown document's YAML frontmatter. Returns `undefined` when the
+ * document has no complete leading `---` block.
+ *
+ * @param {string} content
+ * @returns {unknown}
+ */
+function readFrontmatter(content) {
+  const match = FRONTMATTER_RE.exec(content);
+  if (match === null || match.index !== 0) return undefined;
+  return loadYaml(match[1] ?? "") ?? {};
+}
+
+/** @param {string} content */
+function startsWithFrontmatter(content) {
+  return /^\uFEFF?---/.test(content);
+}
 
 const SKIP_DIRS = new Set([
   "node_modules",
@@ -214,13 +248,15 @@ function isTsLike(relPath) {
  *   rule27: Violation[];
  *   rule28: Violation[];
  *   rule33: Violation[];
- *   rule35: Violation[];
  *   rule37: Violation[];
  *   rule43: Violation[];
  *   rule44: Violation[];
  *   rule45: { allowlist: Set<string>; violations: Violation[] };
  *   rule46: Violation[];
  *   rule47: Violation[];
+ *   rule48: Violation[];
+ *   rule50: Violation[];
+ *   rule51: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -247,13 +283,15 @@ async function scanRepo(state) {
     checkRule27(posix, lines, state.rule27);
     checkRule28(posix, lines, state.rule28);
     checkRule33(posix, lines, state.rule33);
-    checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
     checkRule45(posix, lines, state.rule45);
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
+    checkRule48(posix, lines, state.rule48);
+    checkRule50(posix, lines, state.rule50);
+    checkRule51(posix, lines, state.rule51);
   }
 }
 
@@ -355,7 +393,7 @@ const PROVIDED_TOOL_EXTRA_IMPORTS = new Set([
   "#tools/schema.js",
 ]);
 
-// `task_wait` and `task_cancel` belong to the session, not to authors: they
+// `eve__task_wait` and `eve__task_cancel` belong to the session, not to authors: they
 // take their model text from execution/tasks/render.ts directly.
 const PROVIDED_TASK_TOOL_FILES = new Set([
   "packages/eve/src/tools/provided/task-cancel.ts",
@@ -460,6 +498,121 @@ function checkRule47(posix, lines, violations) {
   });
 }
 
+// ---------- Rule 50: the human-in-the-loop lifecycle has one seam ----------
+
+const HUMAN_INPUT_DIR = "packages/eve/src/harness/hitl/";
+const HUMAN_INPUT_PRIVATE_IMPORT_RE =
+  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|approved-call-callers|budget-request)\.js["'])/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule50(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)
+  )
+    return;
+  lines.forEach((line, idx) => {
+    if (!HUMAN_INPUT_PRIVATE_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 50,
+      file: posix,
+      line: idx + 1,
+      message:
+        "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, the one seam the rest of eve meets it at.",
+    });
+  });
+}
+
+// ---------- Rule 51: the session machine owns lifecycle ----------
+
+const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
+const LIFECYCLE_EVENT_BUILDER_RE =
+  /\bcreate(?:Session(?:Started|Waiting|Failed|Completed)|Turn(?:Started|Completed|Failed|Cancelled|Waiting)|MessageReceived|Step(?:Started|Failed)|Input(?:Requested|Resolved)|Authorization(?:Required|Completed)|Approval(?:Candidate|Settled)|Task(?:Started|Settled)|ContextCleared|ResultCompleted)Event\b/;
+const CALL_EVENT_BUILDER_RE = /\bcreateAction(?:Result|sRequested)Event\b/;
+/** Where the model step streams its calls, their inline results, and the calls they made. */
+const STREAM_CONTENT_FILES = new Set([
+  "packages/eve/src/harness/emission.ts",
+  "packages/eve/src/harness/nested-actions.ts",
+  "packages/eve/src/harness/step-hooks.ts",
+  "packages/eve/src/harness/stream-actions.ts",
+]);
+const MACHINE_PRIVATE_IMPORT_RE = /["']#harness\/session-machine\/(?:state|events)\.js["']/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule51(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(SESSION_MACHINE_DIR) ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/protocol/") ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    posix.endsWith(".test.ts") ||
+    posix.includes("/test/")
+  )
+    return;
+  lines.forEach((line, idx) => {
+    const builder = LIFECYCLE_EVENT_BUILDER_RE.exec(line)?.[0];
+    const callBuilder = STREAM_CONTENT_FILES.has(posix)
+      ? undefined
+      : CALL_EVENT_BUILDER_RE.exec(line)?.[0];
+    if (builder !== undefined || callBuilder !== undefined) {
+      violations.push({
+        rule: 51,
+        file: posix,
+        line: idx + 1,
+        message: `uses ${builder ?? callBuilder} outside harness/session-machine/. Only the session machine builds lifecycle events: return them from a transition and publish what it returns with \`applyTransition\`.`,
+      });
+    }
+    if (MACHINE_PRIVATE_IMPORT_RE.test(line)) {
+      violations.push({
+        rule: 51,
+        file: posix,
+        line: idx + 1,
+        message:
+          "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
+      });
+    }
+  });
+}
+
+// ---------- Rule 48: remote agent protocol 1 stays compartmentalized ----------
+
+const LEGACY_REMOTE_AGENT_DIR = "packages/eve/src/execution/legacy-remote-agent/";
+const LEGACY_REMOTE_AGENT_INGRESS_FILES = new Set([
+  "packages/eve/src/channel/types.ts",
+  "packages/eve/src/context/keys.ts",
+  "packages/eve/src/eve-channel/create-request.ts",
+  "packages/eve/src/eve-channel/index.ts",
+  "packages/eve/src/eve-channel/request.ts",
+  "packages/eve/src/execution/forward-session-input.ts",
+  "packages/eve/src/subagents/callback-route.ts",
+]);
+// `from "…"` covers imports and re-exports; `import "…"` and `import("…")` cover side effects and dynamic imports.
+const LEGACY_REMOTE_AGENT_IMPORT_RE = /\b(?:from|import)\s*\(?\s*["'][^"']*legacy-remote-agent\//;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule48(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(LEGACY_REMOTE_AGENT_DIR) ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
+    LEGACY_REMOTE_AGENT_INGRESS_FILES.has(posix)
+  )
+    return;
+  lines.forEach((line, idx) => {
+    if (!LEGACY_REMOTE_AGENT_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 48,
+      file: posix,
+      line: idx + 1,
+      message:
+        "imports remote agent protocol 1 outside its ingress files. Route protocol-1 behavior through execution/legacy-remote-agent/ from an existing ingress so the legacy path stays removable in one place.",
+    });
+  });
+}
+
 // ---------- Rule 13: spread-ternary object composition ----------
 
 /** Matches `...(<expr> ? {} : { ... })` or the mirrored form. */
@@ -517,33 +670,6 @@ function checkRule33(posix, lines, violations) {
         file: posix,
         line: idx + 1,
         message: `writes WORKFLOW_QUEUE_NAMESPACE outside the canonical namespace module. Use installEveWorkflowQueueNamespace() so every queue surface derives the same agent-scoped value.`,
-      });
-    }
-  });
-}
-
-// ---------- Rule 35: direct gray-matter imports ----------
-
-const GRAY_MATTER_SPECIFIER_RE = /["']#compiled\/gray-matter(?:\/[^"']+)?["']/;
-const GRAY_MATTER_FACADE = "packages/eve/src/internal/helpers/gray-matter.ts";
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule35(posix, lines, violations) {
-  if (posix === GRAY_MATTER_FACADE) return;
-  lines.forEach((line, idx) => {
-    const isImport =
-      /^(?:import|export)\b|^}\s*from\b|\b(?:import|require)\s*\(/.test(line.trimStart()) &&
-      GRAY_MATTER_SPECIFIER_RE.test(line);
-    if (isImport) {
-      violations.push({
-        rule: 35,
-        file: posix,
-        line: idx + 1,
-        message: `imports "#compiled/gray-matter" directly. gray-matter's default engines eval() a \`---js\` frontmatter fence, so parse through parseFrontmatter() from "#internal/helpers/gray-matter.js" instead — it is safe by default and takes an explicit { allowCodeEngines: true } opt-in for trusted input.`,
       });
     }
   });
@@ -988,7 +1114,7 @@ async function checkRule29ChangesetPackageNames() {
     const relPath = `${CHANGESET_DIR}/${entry.name}`;
     const content = await readFile(join(REPO_ROOT, relPath), "utf8");
 
-    if (!matter.test(content)) {
+    if (!startsWithFrontmatter(content)) {
       violations.push({
         rule: 29,
         file: relPath,
@@ -1000,7 +1126,7 @@ async function checkRule29ChangesetPackageNames() {
 
     let data;
     try {
-      data = matter(content).data;
+      data = readFrontmatter(content);
     } catch (error) {
       violations.push({
         rule: 29,
@@ -1089,6 +1215,60 @@ async function checkRule30VendoredCompiledPackageJson() {
   return violations;
 }
 
+// Provided definitions must carry identity, not rely on their filesystem or runtime name.
+async function checkFrameworkActionIdentity() {
+  const violations = [];
+  const roots = ["packages/eve/src/tools/provided", "packages/eve/src/tools/framework"];
+  const files = [];
+  for (const root of roots) {
+    for await (const file of walkFiles(join(REPO_ROOT, root))) files.push(file);
+  }
+  for (const { absPath, relPath } of files) {
+    if (!absPath.endsWith(".ts") || absPath.endsWith(".test.ts")) continue;
+    const source = await readFile(absPath, "utf8");
+    const ast = ts.createSourceFile(relPath, source, ts.ScriptTarget.Latest, true);
+    const report = (node, message) =>
+      violations.push({
+        rule: 49,
+        file: toPosix(relPath),
+        line: ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1,
+        message,
+      });
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const name = node.expression.text;
+        if (["defineTool", "defineWorkflowTool", "stampToolDefinition"].includes(name)) {
+          const parent = node.parent;
+          if (
+            !ts.isCallExpression(parent) ||
+            !ts.isIdentifier(parent.expression) ||
+            parent.expression.text !== "frameworkTool"
+          )
+            report(
+              node,
+              "Wrap provided tool definitions in frameworkTool(definition), so renamed tools remain marked in traces.",
+            );
+        }
+      }
+      if (ts.isObjectLiteralExpression(node)) {
+        const properties = new Map(
+          node.properties
+            .filter(ts.isPropertyAssignment)
+            .map((property) => [property.name.getText(ast), property.initializer]),
+        );
+        if (properties.has("frameworkAction")) {
+          const flag = properties.get("frameworkTool");
+          if (flag === undefined || flag.kind !== ts.SyntaxKind.TrueKeyword)
+            report(node, "Framework harness tools must declare frameworkTool: true.");
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
+  }
+  return violations;
+}
+
 // ---------- Rule 31: removed CLI entry points stay removed ----------
 
 const ACTIVE_CLI_REFERENCE_EXTENSIONS = /\.(?:[cm]?[jt]sx?|mdx?|json|ya?ml)$/;
@@ -1174,7 +1354,7 @@ async function checkRule32ResearchFrontmatter() {
     if (!posix.endsWith(".md")) continue;
 
     const content = await readFile(absPath, "utf8");
-    if (!matter.test(content)) {
+    if (!startsWithFrontmatter(content)) {
       violations.push({
         rule: 32,
         file: posix,
@@ -1186,7 +1366,7 @@ async function checkRule32ResearchFrontmatter() {
 
     let data;
     try {
-      data = matter(content).data;
+      data = readFrontmatter(content);
     } catch (error) {
       violations.push({
         rule: 32,
@@ -1506,7 +1686,6 @@ async function main() {
     rule27: /** @type {Violation[]} */ ([]),
     rule28: /** @type {Violation[]} */ ([]),
     rule33: /** @type {Violation[]} */ ([]),
-    rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
@@ -1516,6 +1695,9 @@ async function main() {
     },
     rule46: /** @type {Violation[]} */ ([]),
     rule47: /** @type {Violation[]} */ ([]),
+    rule48: /** @type {Violation[]} */ ([]),
+    rule50: /** @type {Violation[]} */ ([]),
+    rule51: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1601,9 +1783,6 @@ async function main() {
   // Rule 34
   violations.push(...(await checkRule34PhaseBoundary()));
 
-  // Rule 35
-  violations.push(...state.rule35);
-
   // Rule 36
   for (const issue of await checkExtensionCapabilityContracts()) {
     violations.push({ rule: 36, ...issue });
@@ -1632,6 +1811,10 @@ async function main() {
 
   // Rule 47
   violations.push(...state.rule47);
+  violations.push(...state.rule48);
+  violations.push(...(await checkFrameworkActionIdentity()));
+  violations.push(...state.rule50);
+  violations.push(...state.rule51);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

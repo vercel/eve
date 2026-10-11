@@ -14,6 +14,7 @@ import {
   recordingPath,
   screenshotPath,
 } from "../lib/computer-use.ts";
+import { ensureComputerUse } from "../lib/computer-use-sandbox.ts";
 
 const SCREEN_WIDTH = 1920;
 const SCREEN_HEIGHT = 1080;
@@ -271,6 +272,8 @@ export default defineTool({
     }
 
     if (input.action === "sequence") validateSequenceBudget(input.actions);
+
+    await ensureComputerUse(sandbox, ctx.abortSignal);
 
     const action =
       input.action === "arrange_pair"

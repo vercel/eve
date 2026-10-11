@@ -1,15 +1,16 @@
 /**
- * Test fixture exercising the `createDurableSessionState` /
+ * Test fixture exercising the `createDurableSessionValues` /
  * `readDurableSession` round-trip from inside a real workflow runtime.
  * The workflow test-time bundle builder discovers this directory.
  */
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import {
-  createDurableSessionState,
+  createDurableSessionValues,
   type DurableSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession } from "#harness/types.js";
 
 /** Synthetic minimal session for storage-layer round-trips. */
@@ -45,12 +46,17 @@ function buildSyntheticSession(input: {
   };
 }
 
-/** Writes one synthetic snapshot into the returned durable state. */
+interface DurableSessionValues {
+  readonly history: HarnessModelMessage[];
+  readonly sessionState: DurableSessionState;
+}
+
+/** Writes one synthetic snapshot into the returned durable values. */
 async function durableSessionWriteStep(input: {
   readonly marker: string;
   readonly historyDepth: number;
   readonly sessionId: string;
-}): Promise<DurableSessionState> {
+}): Promise<DurableSessionValues> {
   "use step";
 
   const session = buildSyntheticSession({
@@ -59,7 +65,7 @@ async function durableSessionWriteStep(input: {
     sessionId: input.sessionId,
   });
 
-  return createDurableSessionState({ session });
+  return createDurableSessionValues(session);
 }
 
 /**
@@ -71,7 +77,7 @@ async function durableSessionWriteWithRetryStep(input: {
   readonly marker: string;
   readonly historyDepth: number;
   readonly sessionId: string;
-}): Promise<{ readonly attempt: number; readonly sessionState: DurableSessionState }> {
+}): Promise<{ readonly attempt: number; readonly values: DurableSessionValues }> {
   "use step";
 
   const meta = getStepMetadata();
@@ -86,15 +92,11 @@ async function durableSessionWriteWithRetryStep(input: {
     sessionId: input.sessionId,
   });
 
-  const sessionState = createDurableSessionState({ session });
-
-  return { attempt: meta.attempt, sessionState };
+  return { attempt: meta.attempt, values: createDurableSessionValues(session) };
 }
 
 /** Reads the latest snapshot and projects the fields the test asserts on. */
-async function durableSessionReadStep(input: {
-  readonly sessionState: DurableSessionState;
-}): Promise<{
+async function durableSessionReadStep(input: DurableSessionValues): Promise<{
   readonly marker: string;
   readonly historyDepth: number;
   readonly sessionId: string;
@@ -104,7 +106,7 @@ async function durableSessionReadStep(input: {
   const durable = readDurableSession(input.sessionState);
 
   return {
-    historyDepth: durable.history.length,
+    historyDepth: input.history.length,
     marker: durable.agent.system,
     sessionId: durable.sessionId,
   };
@@ -145,7 +147,7 @@ export async function durableSessionStoreFixtureWorkflow(
     historyDepth: number;
     sessionId: string;
   }[] = [];
-  let currentState: DurableSessionState | undefined;
+  let currentState: DurableSessionValues | undefined;
 
   for (const entry of input.markers) {
     currentState = await durableSessionWriteStep({
@@ -153,7 +155,7 @@ export async function durableSessionStoreFixtureWorkflow(
       marker: entry.marker,
       sessionId,
     });
-    const read = await durableSessionReadStep({ sessionState: currentState });
+    const read = await durableSessionReadStep(currentState);
     readsAfterEachWrite.push(read);
   }
 
@@ -161,7 +163,7 @@ export async function durableSessionStoreFixtureWorkflow(
     throw new Error("durable-session-store fixture requires at least one marker");
   }
 
-  const tailReadAfterAllWrites = await durableSessionReadStep({ sessionState: currentState });
+  const tailReadAfterAllWrites = await durableSessionReadStep(currentState);
 
   return {
     readsAfterEachWrite,
@@ -194,13 +196,13 @@ export async function durableSessionRetryFixtureWorkflow(): Promise<DurableSessi
     sessionId,
   });
 
-  const { attempt: writeAttempt, sessionState } = await durableSessionWriteWithRetryStep({
+  const { attempt: writeAttempt, values } = await durableSessionWriteWithRetryStep({
     historyDepth: 9,
     marker: "after-retry",
     sessionId,
   });
 
-  const readAfterRetry = await durableSessionReadStep({ sessionState });
+  const readAfterRetry = await durableSessionReadStep(values);
 
   return {
     readAfterRetry,

@@ -3,15 +3,20 @@ import { defineEval } from "eve/evals";
 const MARKER = "authored-always-unrelated-input-P7M2";
 const TOOL_NAME = "gate";
 
-/** Regression reproduction for https://github.com/vercel/eve/issues/533. */
+/**
+ * Regression reproduction for https://github.com/vercel/eve/issues/533: an
+ * unrelated message must never replay the unresolved authored tool call. The
+ * approval holds the turn, so the message steers it and cancels the approval;
+ * the call is resolved as ignored and never runs.
+ */
 export default defineEval({
   tags: ["real-model"],
   description:
-    "HITL repro (#533): unrelated input does not replay an unresolved authored tool call.",
+    "HITL repro (#533): unrelated input cancels, and never replays, an unresolved authored tool call.",
   async test(t) {
-    const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
-    const session = parked.session;
-    parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
+    const held = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
+    const session = held.session;
+    held.calledTool(TOOL_NAME, { status: "pending", count: 1 });
     const approval = session.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,
@@ -21,33 +26,21 @@ export default defineEval({
       "Note this unrelated marker and do not call any tools: ORBITAL-PINE-6C3R.",
     );
 
-    // The unrelated message runs as an ordinary turn; the point of #533 is
-    // that it must not replay or resolve the unresolved authored tool call.
     unrelated.expectOk();
+    unrelated.event("input.resolved", {
+      count: 1,
+      data: {
+        resolutions: (resolutions) =>
+          resolutions.some(
+            (resolution) =>
+              resolution.requestId === approval.requestId && resolution.outcome === "ignored",
+          ),
+      },
+    });
     unrelated.notEvent("action.result", {
-      data: { result: { toolName: TOOL_NAME } },
+      data: { result: { output: new RegExp(MARKER), toolName: TOOL_NAME } },
     });
     unrelated.event("session.waiting", { count: 1 });
-
-    const approved = await session.respond([
-      {
-        optionId: "approve",
-        requestId: approval.requestId,
-      },
-    ]);
-
-    approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(MARKER),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
-      count: 1,
-    });
     t.succeeded();
   },
 });

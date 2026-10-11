@@ -14,6 +14,7 @@ export {
   type ClearSessionResult,
   type CompactSessionResult,
   type ResetSessionResult,
+  SessionStrandedError,
   type Channel,
   type ChannelAudience,
   type AudienceCaller,
@@ -42,6 +43,13 @@ export {
   type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
+  type AgentDescription,
+  type AgentSkillDescription,
+  type AgentSkillFileDescription,
+  type AgentToolDescription,
+  type InvokeToolFn,
+  type InvokeToolOptions,
+  type InvokeToolResult,
   type HttpRouteDefinition,
   type WebSocketMessage,
   type WebSocketPeer,
@@ -52,6 +60,12 @@ export {
   type WebSocketUpgradeResult,
   isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
+export { attachmentError } from "#public/channels/attachment-error.js";
+export type {
+  FetchFileContext,
+  FetchFileFunction,
+  FetchFileResult,
+} from "#shared/channel-definition.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

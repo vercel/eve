@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextStorage, ContextContainer } from "#context/container.js";
-import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import {
+  ConnectionAuthorizationRequiredError,
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
@@ -10,6 +11,7 @@ import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {
+  isMcpAuthChallengeResult,
   isMcpAuthRequiredError,
   McpConnectionClient,
   passesToolFilter,
@@ -177,6 +179,43 @@ describe("McpConnectionClient", () => {
       },
       expect.any(Object),
     );
+  });
+
+  it("with forwardPrincipal, sends the turn's user in a header that refuses redirects", async () => {
+    createMCPClient.mockResolvedValue({ close: vi.fn() });
+    await new McpConnectionClient(makeConnection({ forwardPrincipal: true })).connect();
+    const fetch: typeof globalThis.fetch = createMCPClient.mock.calls[0]![0].transport.fetch;
+    const sent = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
+    const send = (auth: SessionAuthContext | null) =>
+      contextStorage.run(ctxWithAuth(auth), () => fetch("https://mcp.example.com", {}));
+    try {
+      await send(userAuth("alice"));
+      const init = sent.mock.calls[0]![1]!;
+      const header = new Headers(init.headers).get("eve-forwarded-principal")!;
+      expect(JSON.parse(Buffer.from(header, "base64url").toString())).toEqual({
+        current: userAuth("alice"),
+      });
+      expect(init.redirect).toBe("error");
+
+      await send({ ...userAuth("anon"), principalType: "anonymous" });
+      expect(sent.mock.calls[1]![1]).toEqual({});
+
+      const delegated = ctxWithAuth(userAuth("alice"));
+      delegated.set(InitiatorAuthKey, userAuth("bob"));
+      await contextStorage.run(delegated, () => fetch("https://mcp.example.com", {}));
+      const delegatedHeader = new Headers(sent.mock.calls[2]![1]!.headers).get(
+        "eve-forwarded-principal",
+      )!;
+      expect(JSON.parse(Buffer.from(delegatedHeader, "base64url").toString())).toEqual({
+        current: userAuth("alice"),
+        initiator: userAuth("bob"),
+      });
+
+      const large = { ...userAuth("alice"), attributes: { blob: "a".repeat(16 * 1024) } };
+      await expect(send(large)).rejects.toThrow(/Connection "test" cannot forward.*16384-byte/u);
+    } finally {
+      sent.mockRestore();
+    }
   });
 
   it("creates an HTTP MCP client with resolved connection headers", async () => {
@@ -460,6 +499,206 @@ describe("McpConnectionClient authorization recovery", () => {
       // so the re-authorization retry does not reuse the dead token.
       expect(ctx.get(ConnectionAuthorizationTokensKey)?.test).toEqual({});
     });
+  });
+});
+
+describe("McpConnectionClient without a token yet", () => {
+  beforeEach(() => {
+    createMCPClient.mockReset();
+  });
+
+  function unauthorized() {
+    return Object.assign(new Error("MCP HTTP Transport Error: POSTing to endpoint (HTTP 401)"), {
+      statusCode: 401,
+    });
+  }
+
+  /** An authorization that has no token until `signIn()` is called. */
+  function pendingSignIn() {
+    let token: string | undefined;
+    const evict = vi.fn();
+    const getToken = vi.fn(async () => {
+      if (token === undefined) throw new ConnectionAuthorizationRequiredError("test");
+      return { token };
+    });
+    return {
+      authorization: { evict, getToken, principalType: "app" as const },
+      evict,
+      getToken,
+      signIn: (value: string) => {
+        token = value;
+      },
+    };
+  }
+
+  function fakeServer(callTool: (name: string) => unknown) {
+    const close = vi.fn();
+    createMCPClient.mockImplementation(async () => ({
+      close,
+      listTools: vi.fn().mockResolvedValue({
+        tools: [
+          { name: "public_tool", description: "", inputSchema: {} },
+          { name: "protected_tool", description: "", inputSchema: {} },
+        ],
+      }),
+      toolsFromDefinitions: vi.fn(({ tools }: { tools: { name: string }[] }) =>
+        Object.fromEntries(
+          tools.map((tool) => [tool.name, { execute: vi.fn(async () => callTool(tool.name)) }]),
+        ),
+      ),
+    }));
+    return { close };
+  }
+
+  function sentHeaders(call: number): Record<string, string> {
+    return createMCPClient.mock.calls[call]?.[0].transport.headers;
+  }
+
+  it("connects without an Authorization header and lists tools", async () => {
+    const auth = pendingSignIn();
+    fakeServer(() => ({ content: [] }));
+    const client = new McpConnectionClient(
+      makeConnection({ authorization: auth.authorization, headers: { "X-Workspace": "w" } }),
+    );
+
+    const tools = await client.getToolMetadata();
+
+    expect(tools.map((tool) => tool.name)).toEqual(["public_tool", "protected_tool"]);
+    expect(sentHeaders(0)).toEqual({ "X-Workspace": "w" });
+    expect(auth.getToken).toHaveBeenCalledOnce();
+  });
+
+  it("propagates getToken errors other than authorization-required", async () => {
+    const boom = new Error("boom");
+    const client = new McpConnectionClient(
+      makeConnection({
+        authorization: { getToken: vi.fn().mockRejectedValue(boom), principalType: "app" },
+      }),
+    );
+
+    await expect(client.getToolMetadata()).rejects.toBe(boom);
+    expect(createMCPClient).not.toHaveBeenCalled();
+  });
+
+  it("asks for authorization when the server rejects the anonymous connection", async () => {
+    const auth = pendingSignIn();
+    createMCPClient.mockRejectedValue(unauthorized());
+    const client = new McpConnectionClient(makeConnection({ authorization: auth.authorization }));
+
+    const err = await client.getToolMetadata().catch((e) => e);
+
+    expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
+    expect(err.message).toBe(
+      'Connection "test" requires authorization (the server requires sign-in).',
+    );
+    // There was no bearer to evict.
+    expect(auth.evict).not.toHaveBeenCalled();
+  });
+
+  it("asks for authorization when an anonymous tools/list returns 401", async () => {
+    const auth = pendingSignIn();
+    createMCPClient.mockResolvedValue({
+      close: vi.fn(),
+      listTools: vi.fn().mockRejectedValue(unauthorized()),
+      toolsFromDefinitions: vi.fn(),
+    });
+    const client = new McpConnectionClient(makeConnection({ authorization: auth.authorization }));
+
+    const err = await client.getToolMetadata().catch((e) => e);
+
+    expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
+  });
+
+  it.each([
+    ["an HTTP 401", () => Promise.reject(unauthorized())],
+    [
+      "an mcp/www_authenticate tool result",
+      () => ({
+        _meta: { "mcp/www_authenticate": ['Bearer error="invalid_token"'] },
+        content: [{ type: "text", text: "Sign in to continue." }],
+        isError: true,
+      }),
+    ],
+  ])(
+    "runs public tools anonymously, asks for sign-in on %s, then reconnects with the token",
+    async (_label, challenge) => {
+      const auth = pendingSignIn();
+      const { close } = fakeServer((name) =>
+        name === "protected_tool" && auth.getToken.mock.calls.length === 1
+          ? challenge()
+          : { content: [{ type: "text", text: name }] },
+      );
+      const client = new McpConnectionClient(makeConnection({ authorization: auth.authorization }));
+
+      await expect(client.executeTool("public_tool", {}, { callId: "c1" })).resolves.toEqual({
+        content: [{ type: "text", text: "public_tool" }],
+      });
+      const err = await client.executeTool("protected_tool", {}, { callId: "c2" }).catch((e) => e);
+      expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
+      expect(close).toHaveBeenCalledOnce();
+      expect(auth.evict).not.toHaveBeenCalled();
+
+      auth.signIn("fresh-token");
+      await expect(client.executeTool("protected_tool", {}, { callId: "c3" })).resolves.toEqual({
+        content: [{ type: "text", text: "protected_tool" }],
+      });
+      expect(createMCPClient).toHaveBeenCalledTimes(2);
+      expect(sentHeaders(0)).toEqual({});
+      expect(sentHeaders(1)).toEqual({ Authorization: "Bearer fresh-token" });
+    },
+  );
+
+  it("evicts the bearer when a signed-in call returns an mcp/www_authenticate challenge", async () => {
+    const evict = vi.fn();
+    fakeServer(() => ({
+      _meta: { "mcp/www_authenticate": 'Bearer error="insufficient_scope"' },
+      content: [],
+      isError: true,
+    }));
+    const client = new McpConnectionClient(
+      makeConnection({
+        authorization: { evict, getToken: async () => ({ token: "t" }), principalType: "app" },
+      }),
+    );
+
+    // Eviction needs a runtime scope.
+    const err = await contextStorage.run(ctxWithAuth(null), () =>
+      client.executeTool("protected_tool", {}, { callId: "c1" }).catch((e) => e),
+    );
+
+    expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
+    expect(evict).toHaveBeenCalledOnce();
+  });
+
+  it("keeps resolveHeaders strict for callers that require a token", async () => {
+    const auth = pendingSignIn();
+    const err = await resolveHeaders(makeConnection({ authorization: auth.authorization })).catch(
+      (e) => e,
+    );
+    expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
+  });
+});
+
+describe("isMcpAuthChallengeResult", () => {
+  it("detects error results carrying a WWW-Authenticate challenge", () => {
+    const challenge = 'Bearer resource_metadata="https://mcp.example.com/.well-known/x"';
+    expect(
+      isMcpAuthChallengeResult({ isError: true, _meta: { "mcp/www_authenticate": [challenge] } }),
+    ).toBe(true);
+    expect(
+      isMcpAuthChallengeResult({ isError: true, _meta: { "mcp/www_authenticate": challenge } }),
+    ).toBe(true);
+  });
+
+  it("ignores successful results, empty challenges, and plain errors", () => {
+    expect(
+      isMcpAuthChallengeResult({ _meta: { "mcp/www_authenticate": ["Bearer"] }, content: [] }),
+    ).toBe(false);
+    expect(isMcpAuthChallengeResult({ isError: true, _meta: { "mcp/www_authenticate": [] } })).toBe(
+      false,
+    );
+    expect(isMcpAuthChallengeResult({ isError: true, content: [] })).toBe(false);
+    expect(isMcpAuthChallengeResult(undefined)).toBe(false);
   });
 });
 

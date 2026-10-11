@@ -4,7 +4,7 @@ import { requestFrom } from "./continuation/helpers.ts";
 
 const MARKER = "draft-status-3494";
 const READ_STATUS =
-  `Alice is checking her draft. Call the read-status tool exactly once with marker "${MARKER}". ` +
+  `Alice is checking her draft. Call the read-draft-status tool exactly once with marker "${MARKER}". ` +
   "After the tool returns, tell Alice the status and marker from its result.";
 
 export default [
@@ -23,7 +23,7 @@ export default [
 
       // Then the tool executes once and the completed reply includes its status and marker.
       turn.expectOk();
-      turn.calledTool("read-status", { status: "completed", count: 1 });
+      turn.calledTool("read-draft-status", { status: "completed", count: 1 });
       turn.event("turn.completed", { count: 1 });
       turn.messageIncludes(MARKER);
       turn.messageIncludes("ready");
@@ -34,7 +34,7 @@ export default [
           data: {
             turnId: received.data.turnId,
             status: "completed",
-            result: { toolName: "read-status" },
+            result: { toolName: "read-draft-status" },
           },
           count: 1,
         },
@@ -53,7 +53,7 @@ export default [
   }),
   defineEval({
     description:
-      "An ungated tool follow-up completes while an older approval remains answerable (#3494).",
+      "An ungated tool follow-up steers a held approval, cancels it, and completes (#3494).",
     tags: ["hitl", "continuation", "regression", "user-message", "tool-result"],
     timeoutMs: 120_000,
     async test(t) {
@@ -67,30 +67,36 @@ export default [
       const approval = requestFrom(parked, "gate");
       t.log(`Original gate approval is pending: ${approval.requestId}`);
 
-      // When the user leaves that approval pending and asks to read the draft status.
+      // When the user moves on and asks to read the draft status instead. The
+      // approval holds the turn, so this message steers it.
       const live = await session.start(
-        `Alice will review the account change later. Leave its approval pending. ${READ_STATUS}`,
+        `Alice will review the account change later. ${READ_STATUS}`,
       );
       // Then the tool result reaches a completed reply without executing the account change.
       const result = await live.waitForEvent("action.result", {
-        data: { status: "completed", result: { toolName: "read-status" } },
+        data: { status: "completed", result: { toolName: "read-draft-status" } },
       });
       t.log(`Follow-up tool completed before waiting for its reply: ${JSON.stringify(result)}`);
       const received = await live.waitForEvent("message.received");
       await live.waitForEvent("turn.completed", { data: { turnId: received.data.turnId } });
       const followup = await live.result();
       followup.expectOk();
-      followup.calledTool("read-status", { status: "completed", count: 1 });
+      followup.calledTool("read-draft-status", { status: "completed", count: 1 });
       followup.messageIncludes(MARKER);
       followup.messageIncludes("ready");
       followup.eventOrder([
-        { type: "message.received", data: { turnId: received.data.turnId }, count: 1 },
+        // The follow-up joins the held turn, which also received the original request.
+        {
+          type: "message.received",
+          data: { turnId: received.data.turnId, sequence: received.data.sequence },
+          count: 1,
+        },
         {
           type: "action.result",
           data: {
             turnId: received.data.turnId,
             status: "completed",
-            result: { toolName: "read-status" },
+            result: { toolName: "read-draft-status" },
           },
           count: 1,
         },
@@ -105,19 +111,20 @@ export default [
         },
         { type: "turn.completed", data: { turnId: received.data.turnId }, count: 1 },
       ]);
-      followup.notEvent("action.result", { data: { result: { toolName: "gate" } } });
-      followup.notEvent("input.requested");
-
-      // When the user later approves the original account change.
-      const approved = await session.respond([
-        { requestId: approval.requestId, optionId: "approve" },
-      ]);
-      // Then that saved approval executes exactly once.
-      approved.expectOk();
-      approved.calledTool("gate", { status: "completed", count: 1 });
-      session.event("action.result", {
-        count: 1,
+      followup.notEvent("action.result", {
         data: { status: "completed", result: { toolName: "gate" } },
+      });
+      followup.notEvent("input.requested");
+      // Then the steer cancelled the account change instead of leaving it open.
+      followup.event("input.resolved", {
+        count: 1,
+        data: {
+          resolutions: (resolutions) =>
+            resolutions.some(
+              (resolution) =>
+                resolution.requestId === approval.requestId && resolution.outcome === "ignored",
+            ),
+        },
       });
       t.check(session.pendingInputRequests.length, equals(0));
     },

@@ -5,13 +5,16 @@ import {
 } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import type {
   WorkflowToolAskRequest,
+  WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
-  WorkflowToolRunRef,
   WorkflowToolRunRequestMessage,
   WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
-import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
+import {
+  withdrawFinishedRunQuestionsStep,
+  withdrawWorkflowToolRunQuestionStep,
+} from "#execution/tools/workflow/withdraw-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import {
   workflowToolRunOutcomeToToolResult,
@@ -54,35 +57,52 @@ export async function handleWorkflowToolRunMessage(
       );
       return undefined;
     case "agent-started":
-      await input.cursor.advance((state) => emitAgentStartedStep({ ...state, message }));
+      await input.cursor.advance((state) =>
+        emitAgentStartedStep({ ...state, messages: [message] }),
+      );
       return undefined;
   }
+}
+
+/** Boundary messages in admission order, with consecutive `agent-started` messages grouped. */
+type BoundaryBatch =
+  | { readonly kind: "agent-started"; readonly messages: WorkflowToolRunAgentStartedMessage[] }
+  | { readonly kind: "message"; readonly message: WorkflowToolRunMessage };
+
+/** Groups consecutive `agent-started` messages so one `emitAgentStartedStep` publishes each group. */
+export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): BoundaryBatch[] {
+  const batches: BoundaryBatch[] = [];
+  for (const message of messages) {
+    const last = batches.at(-1);
+    if (message.kind !== "agent-started") batches.push({ kind: "message", message });
+    else if (last?.kind === "agent-started") last.messages.push(message);
+    else batches.push({ kind: "agent-started", messages: [message] });
+  }
+  return batches;
 }
 
 /**
  * Settles a workflow tool run outcome against the turn's recorded runs and
  * returns the runtime action result the turn should accept, or `undefined`
- * when the outcome does not bind to a run this turn owns.
+ * when the outcome does not bind to a run this turn owns. Requests the run
+ * relayed are withdrawn first, since nobody can answer them anymore.
  */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
 ): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
-  const recorded = findBlockingWorkflowToolRun(
-    cursor.sessionState.snapshot.session.state,
-    message.from.callId,
-    message.from.turnId,
-  );
+  const state = cursor.sessionState.snapshot.session.state;
+  const recorded = findBlockingWorkflowToolRun(state, message.from.callId, message.from.turnId);
   if (recorded?.address.runId !== message.from.runId) return undefined;
 
   const result = workflowToolRunOutcomeToToolResult(message);
+  if (!isInboxToolResultFromRecordedWorkflowToolRun(state, result)) return undefined;
 
-  return isInboxToolResultFromRecordedWorkflowToolRun(
-    cursor.sessionState.snapshot.session.state,
-    result,
-  )
-    ? result
-    : undefined;
+  if (cursor.sessionState.hasProxyInputRequests) {
+    const { runId } = message.from;
+    await cursor.advance((current) => withdrawFinishedRunQuestionsStep({ ...current, runId }));
+  }
+  return result;
 }
 
 async function handleWorkflowToolRunRequest(
@@ -101,9 +121,10 @@ async function handleWorkflowToolRunRequest(
   await cursor.advance((state) =>
     runProxySubagentEventStep({
       ...(message.request.kind === "ask" && {
-        workflowAsk: createWorkflowAskRoute(message.from, message.request),
+        workflowAsk: createWorkflowAskRoute(message.request),
       }),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
+      runId: message.from.runId,
       ...state,
     }),
   );
@@ -128,17 +149,6 @@ async function handleWorkflowToolRunWithdraw(
   );
 }
 
-function createWorkflowAskRoute(
-  from: WorkflowToolRunRef,
-  ask: WorkflowToolAskRequest,
-): WorkflowAskRoute {
-  const { allowFreeform, options } = ask.request;
-  return {
-    control: ask.control,
-    question: {
-      ...(allowFreeform !== undefined && { allowFreeform }),
-      ...(options !== undefined && { options: [...options] }),
-    },
-    runId: from.runId,
-  };
+function createWorkflowAskRoute(ask: WorkflowToolAskRequest): WorkflowAskRoute {
+  return { control: ask.control };
 }

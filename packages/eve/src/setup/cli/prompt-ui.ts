@@ -215,6 +215,7 @@ export function renderMultiselectPrompt<T extends PromptValue>(input: {
   footerNote?: string;
   leadingRail?: "white" | "green";
   message: string;
+  helpText?: string;
   options: readonly PromptOption<T>[];
   selectedValues: readonly T[];
   state: PromptState;
@@ -251,15 +252,24 @@ export function renderMultiselectPrompt<T extends PromptValue>(input: {
       return `${head}${rail}  ${input.colors.strikethrough(input.colors.dim("cancelled"))}\n${rail}`;
     case "error": {
       const rows = renderMultiselectRows({ ...input, rail });
-      return `${head.trim()}\n${rail}  ${rows}${emptyNotice}\n${cornerFor(input.state, input.colors)}  ${input.colors.red(input.error ?? "")}\n`;
+      return `${head.trim()}\n${rail}  ${rows}${emptyNotice}${selectHelpText(input.helpText, rail, input.colors)}\n${cornerFor(input.state, input.colors)}  ${input.colors.red(input.error ?? "")}\n`;
     }
     case "initial":
     case "active": {
       const rows = renderMultiselectRows({ ...input, rail });
       const corner = cornerWithNote(cornerFor(input.state, input.colors), input.footerNote);
-      return `${head}${rail}  ${rows}${emptyNotice}\n${corner}\n`;
+      return `${head}${rail}  ${rows}${emptyNotice}${selectHelpText(input.helpText, rail, input.colors)}\n${corner}\n`;
     }
   }
+}
+
+/** Keeps shared guidance separate from option rows and keyboard controls. */
+function selectHelpText(text: string | undefined, rail: string, colors: PromptColors): string {
+  if (!text) return "";
+  return `\n${rail}\n${text
+    .split("\n")
+    .map((line) => wrapTextWithPrefix(process.stdout, colors.dim(line), `${rail}  `))
+    .join("\n")}\n${rail}`;
 }
 
 /** Appends a status note to the corner glyph, mirroring how errors trail the corner. */
@@ -275,6 +285,7 @@ export function renderSelectPrompt<T extends PromptValue>(input: {
   footerNote?: string;
   leadingRail?: "white" | "green";
   message: string;
+  helpText?: string;
   options: readonly PromptOption<T>[];
   state: PromptState;
 }): string {
@@ -315,7 +326,7 @@ export function renderSelectPrompt<T extends PromptValue>(input: {
         })
         .join(`\n${rail}  `);
       const corner = cornerWithNote(cornerFor(input.state, input.colors), input.footerNote);
-      return `${head}${rail}  ${rows}\n${corner}\n`;
+      return `${head}${rail}  ${rows}${selectHelpText(input.helpText, rail, input.colors)}\n${corner}\n`;
     }
   }
 }
@@ -451,6 +462,7 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
   leadingRail?: "white" | "green";
   message: string;
   multiple: boolean;
+  helpText?: string;
   filter: string;
   placeholder?: string;
   options: readonly PromptOption<T>[];
@@ -540,7 +552,7 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
       : "";
 
   const help = searchableHelpLine(rail, colors, input.multiple);
-  const body = `${rail}  ${colors.dim(" ")} ${filterInput}\n${rail}  ${optionLines}${submitLine}${moreFooter}${help}`;
+  const body = `${rail}  ${colors.dim(" ")} ${filterInput}\n${rail}  ${optionLines}${submitLine}${moreFooter}${selectHelpText(input.helpText, rail, colors)}${help}`;
 
   if (input.state === "error") {
     return `${head.trim()}\n${body}\n${cornerFor(input.state, colors)}  ${colors.red(input.error ?? "")}\n`;

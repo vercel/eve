@@ -1,6 +1,7 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
-import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { InputResolvedStreamEvent } from "#protocol/message.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
+import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { inputOptionSchema, type InputOption, type InputRequestKind } from "#shared/input.js";
 import {
   isSessionInboxAddress,
@@ -23,13 +24,10 @@ const PROXY_INPUT_REQUEST_KINDS = {
  */
 export interface WorkflowAskRoute {
   readonly control: string;
-  /** What a plain-text message may answer. */
-  readonly question: ProxyInputQuestion;
-  readonly runId: string;
 }
 
-/** The parts of a `ctx.ask()` request a plain-text message is resolved against. */
-export interface ProxyInputQuestion {
+/** The parts of a request a plain-text reply is resolved against. */
+export interface ProxyInputReply {
   readonly allowFreeform?: boolean;
   readonly options?: readonly InputOption[];
 }
@@ -39,6 +37,12 @@ export interface ProxyInputRequest {
   readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
   readonly inputSource?: string;
   readonly workflowAsk?: WorkflowAskRoute;
+  /**
+   * The workflow tool run that relayed the request: its own `ctx.ask()`
+   * question, or a request from a session it opened with `ctx.agent`. Nobody
+   * can answer the request once that run ends.
+   */
+  readonly runId?: string;
   /** Batch semantics are optional so sessions written before this field remain routable. */
   readonly batch?: ProxyInputRequestBatch;
   readonly childContinuationToken: string;
@@ -49,13 +53,34 @@ export interface ProxyInputRequest {
    */
   readonly event: PendingInputBatchEvent;
   readonly kind: InputRequestKind;
-  /** Question metadata lets the human-facing parent resolve plain text before proxying by ID. */
-  readonly question?: ProxyInputQuestion;
+  /** Lets the human-facing parent resolve a plain-text reply before proxying it by ID. */
+  readonly reply?: ProxyInputReply;
 }
 
 export interface ProxyInputRequestBatch {
   readonly approvalRequestIds: readonly string[];
   readonly requestIds: readonly string[];
+}
+
+/**
+ * Whether the child, not this session, closes a relayed request. A child's tool approval can
+ * refuse the person who answered, so it stays open here until the child's own `input.resolved`
+ * or `approval.settled` arrives. This session closes every other relayed request once it
+ * forwards the answer.
+ */
+export function resolvedByChild(kind: InputRequestKind): boolean {
+  return kind === "tool-approval";
+}
+
+/**
+ * The part of a child's `input.resolved` its parent relays: the requests the parent leaves for
+ * the child to close. `undefined` when the parent already closed all of them.
+ */
+export function resolvedForParent(
+  data: InputResolvedStreamEvent["data"],
+): InputResolvedStreamEvent["data"] | undefined {
+  const resolutions = data.resolutions.filter(({ kind }) => resolvedByChild(kind));
+  return resolutions.length === 0 ? undefined : { ...data, resolutions };
 }
 
 /** `requestId → route` map stored on the parent session. */
@@ -88,12 +113,12 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
  * parent never keeps stale request metadata. Other sources' routes stay
  * independently answerable.
  */
-export function upsertProxyInputRequests(input: {
+export function upsertProxyInputRequests<S extends HarnessSessionBase>(input: {
   readonly inputSource?: string;
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
-  readonly session: HarnessSession;
-}): HarnessSession {
+  readonly session: S;
+}): S {
   return {
     ...input.session,
     state: upsertProxyInputRequestState({
@@ -139,21 +164,12 @@ export function upsertProxyInputRequestState(input: {
 /** Removes every proxy route the predicate selects. */
 export function clearProxyInputRequestsWhere<T extends { readonly state?: SessionStateMap }>(
   session: T,
-  select: (route: ProxyInputRequest) => boolean,
+  select: (route: ProxyInputRequest, requestId: string) => boolean,
 ): T {
-  const current = readMap(session.state);
-  const next: Record<string, ProxyInputRequest> = {};
-  let changed = false;
-
-  for (const [requestId, route] of Object.entries(current)) {
-    if (select(route)) {
-      changed = true;
-      continue;
-    }
-    next[requestId] = route;
-  }
-
-  return changed ? writeMap(session, next) : session;
+  const requestIds = Object.entries(readMap(session.state))
+    .filter(([requestId, route]) => select(route, requestId))
+    .map(([requestId]) => requestId);
+  return retireProxyInputRequests(session, requestIds);
 }
 
 /** Removes only the request IDs whose responses were successfully forwarded. */
@@ -173,17 +189,6 @@ export function retireProxyInputRequests<T extends { readonly state?: SessionSta
   }
 
   return changed ? writeMap(session, next) : session;
-}
-
-/**
- * Removes every proxy entry. Called when a cancelled turn orphans its
- * descendants so stale HITL responses no longer route to them.
- */
-export function clearAllProxyInputRequests(session: HarnessSession): HarnessSession {
-  if (!hasProxyInputRequests(session.state)) {
-    return session;
-  }
-  return writeMap(session, {});
 }
 
 /**
@@ -212,7 +217,7 @@ export function toProxyInputRequestEntries(
       childSessionInbox?: SessionInboxAddress;
       readonly event: PendingInputBatchEvent;
       readonly kind: InputRequestKind;
-      question?: ProxyInputQuestion;
+      readonly reply: ProxyInputReply;
     } & { readonly batch: ProxyInputRequestBatch } = {
       batch,
       childContinuationToken: payload.childContinuationToken,
@@ -220,13 +225,11 @@ export function toProxyInputRequestEntries(
       ...(payload.remote !== undefined && { remote: payload.remote }),
       event,
       kind: request.kind,
-    };
-    if (request.kind === "question") {
-      route.question = {
+      reply: {
         ...(request.allowFreeform !== undefined && { allowFreeform: request.allowFreeform }),
         ...(request.options !== undefined && { options: [...request.options] }),
-      };
-    }
+      },
+    };
     if (payload.childSessionInbox?.sessionId === payload.childSessionId) {
       route.childSessionInbox = payload.childSessionInbox;
     }
@@ -290,13 +293,16 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
   const workflowAsk = "workflowAsk" in value ? parseWorkflowAskRoute(value.workflowAsk) : undefined;
   if ("workflowAsk" in value && workflowAsk === undefined) return undefined;
-  const question = "question" in value ? parseProxyInputQuestion(value.question) : undefined;
-  if ("question" in value && question === undefined) return undefined;
+  const runId = "runId" in value ? value.runId : undefined;
+  if (runId !== undefined && (typeof runId !== "string" || runId.length === 0)) return undefined;
+  const reply = "reply" in value ? parseProxyInputReply(value.reply) : undefined;
+  if ("reply" in value && reply === undefined) return undefined;
   const childSessionInbox = "childSessionInbox" in value ? value.childSessionInbox : undefined;
   if (childSessionInbox !== undefined && !isSessionInboxAddress(childSessionInbox))
     return undefined;
   const request: {
     workflowAsk?: WorkflowAskRoute;
+    runId?: string;
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
     inputSource?: string;
@@ -304,7 +310,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     childSessionInbox?: SessionInboxAddress;
     readonly event: PendingInputBatchEvent;
     readonly kind: InputRequestKind;
-    question?: ProxyInputQuestion;
+    reply?: ProxyInputReply;
   } = {
     childContinuationToken: value.childContinuationToken,
     event,
@@ -313,9 +319,10 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (typeof inputSource === "string") request.inputSource = inputSource;
   if (remote !== undefined) request.remote = remote;
   if (workflowAsk !== undefined) request.workflowAsk = workflowAsk;
+  if (typeof runId === "string") request.runId = runId;
   if (childSessionInbox !== undefined) request.childSessionInbox = childSessionInbox;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
-  if (question !== undefined) request.question = question;
+  if (reply !== undefined) request.reply = reply;
   return request;
 }
 
@@ -332,12 +339,8 @@ function parseInputRequestEvent(value: unknown): PendingInputBatchEvent | undefi
 function parseWorkflowAskRoute(value: unknown): WorkflowAskRoute | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const control = Reflect.get(value, "control");
-  const runId = Reflect.get(value, "runId");
   if (typeof control !== "string" || control.length === 0) return undefined;
-  if (typeof runId !== "string" || runId.length === 0) return undefined;
-  const question = parseProxyInputQuestion(Reflect.get(value, "question"));
-  if (question === undefined) return undefined;
-  return { control, question, runId };
+  return { control };
 }
 
 function parseRemoteAgentBinding(
@@ -369,24 +372,24 @@ function parseRemoteAgentBinding(
   };
 }
 
-function parseProxyInputQuestion(value: unknown): ProxyInputQuestion | undefined {
+function parseProxyInputReply(value: unknown): ProxyInputReply | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const question: {
+  const reply: {
     allowFreeform?: boolean;
     options?: readonly InputOption[];
   } = {};
   const allowFreeform = Reflect.get(value, "allowFreeform");
   if (allowFreeform !== undefined) {
     if (typeof allowFreeform !== "boolean") return undefined;
-    question.allowFreeform = allowFreeform;
+    reply.allowFreeform = allowFreeform;
   }
   const options = Reflect.get(value, "options");
   if (options !== undefined) {
     const parsed = inputOptionSchema.array().safeParse(options);
     if (!parsed.success) return undefined;
-    question.options = parsed.data;
+    reply.options = parsed.data;
   }
-  return question;
+  return reply;
 }
 
 function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | undefined {

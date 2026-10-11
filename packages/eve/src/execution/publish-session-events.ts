@@ -2,10 +2,15 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
-import { ParentSessionKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  ParentSessionKey,
+  SessionKey,
+  TurnDeliveryIdsKey,
+} from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import * as activityCohort from "#execution/activity-cohort.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { forwardSessionInput } from "#execution/forward-session-input.js";
 import {
@@ -16,11 +21,17 @@ import {
 } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
-import type { HandleEventFn, HarnessSession } from "#harness/types.js";
+import { dropClosedRecords } from "#harness/session-machine/commit.js";
+import {
+  currentProjection,
+  enterSessionProjection,
+  recordPublishedEvent,
+  saveSessionProjection,
+} from "#harness/session-machine/current.js";
+import { activeTurnId, turnPosition } from "#harness/session-machine/view.js";
+import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
+import type { HandleEventFn, HarnessSession, HarnessSessionBase } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import {
@@ -29,6 +40,7 @@ import {
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { type SessionProjection } from "#protocol/session-projection.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.publish-session-events");
@@ -36,14 +48,14 @@ const log = createLogger("execution.publish-session-events");
 /**
  * Whose event a session publishes. Every event reaches the channel adapter, the
  * session stream, and stream-event hooks. The session's own events also reach
- * its instrumentation and activity and carry its turn's delivery ids.
+ * its instrumentation and carry its turn's delivery ids.
  *
  * A relayed event belongs to an exchange this session carries for a child
  * session or a workflow run: the question or sign-in it raised, the turn
  * boundary that question causes here, and the `input.resolved` for the answer
- * this session routes back. This session's instrumentation and activity never
- * track that pending input, so no event of the exchange reaches them; the
- * child records its side as its own.
+ * this session routes back. This session's instrumentation never tracks that
+ * pending input, so no event of the exchange reaches it; the child records its
+ * side as its own.
  */
 export type SessionEventOrigin = "own" | "relayed";
 
@@ -52,6 +64,11 @@ export interface SessionStepState {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
+}
+
+/** A {@link SessionStepState} with the conversation history, for a step that reads or changes it. */
+export interface SessionHistoryStepState extends SessionStepState {
+  readonly history: HarnessModelMessage[];
 }
 
 /** The context and session state a publication leaves behind. */
@@ -69,7 +86,7 @@ export async function publishSessionEvents(
   target: SessionStepState,
   events: readonly UnstampedMessageStreamEvent[],
 ): Promise<PublishedSessionEvents> {
-  return await publishFromStep(target, "own", events);
+  return await publishEventsFromStep(target, "own", events);
 }
 
 /** Publishes events of an exchange this session relays; see {@link SessionEventOrigin}. */
@@ -77,10 +94,10 @@ export async function relaySessionEvents(
   target: SessionStepState,
   events: readonly UnstampedMessageStreamEvent[],
 ): Promise<PublishedSessionEvents> {
-  return await publishFromStep(target, "relayed", events);
+  return await publishEventsFromStep(target, "relayed", events);
 }
 
-async function publishFromStep(
+async function publishEventsFromStep(
   target: SessionStepState,
   origin: SessionEventOrigin,
   events: readonly UnstampedMessageStreamEvent[],
@@ -88,55 +105,127 @@ async function publishFromStep(
   if (events.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
   }
-  const ctx = await deserializeContext(target.serializedContext);
-  const { session } = await withSessionEventEmitter(
-    {
-      ctx,
-      durableSession: readDurableSession(target.sessionState),
-      origin,
-      sessionWritable: target.sessionWritable,
-    },
-    async (emit, scopedSession) => {
+  const restored = await restoreSessionStep(target);
+  const { published } = await publishFromSessionStep(restored, {
+    origin,
+    async publish(emit) {
       for (const event of events) await emit(event);
-      return { result: undefined, session: scopedSession };
     },
-  );
+  });
+  return published;
+}
+
+/** A session step's context and session, restored so the step can publish. */
+export interface RestoredSessionStep {
+  readonly ctx: ContextContainer;
+  readonly durableSession: DurableSession;
+  readonly sessionWritable: WritableStream<Uint8Array>;
+}
+
+/** A {@link RestoredSessionStep} with the history, so its publication sees a whole session. */
+export interface RestoredSessionHistoryStep extends RestoredSessionStep {
+  readonly history: HarnessModelMessage[];
+}
+
+export async function restoreSessionStep(step: SessionStepState): Promise<RestoredSessionStep> {
   return {
-    serializedContext: serializeContext(ctx),
-    sessionState: createDurableSessionState({
-      session: reconcileSessionContinuationToken(ctx, session),
-    }),
+    ctx: await deserializeContext(step.serializedContext),
+    durableSession: readDurableSession(step.sessionState),
+    sessionWritable: step.sessionWritable,
   };
 }
 
 /**
- * Runs `emitEvents` in the session's context scope with an emit that publishes
- * each event with the given origin. `ctx` is updated in place; the returned
- * session is the one `emitEvents` returns after the scope commits.
+ * What a session step publishes, and how it changes the session the
+ * publication leaves. `S` is a {@link HarnessSession} only for a step
+ * restored with its history.
  */
-export async function withSessionEventEmitter<T>(
-  input: {
-    readonly ctx: ContextContainer;
-    readonly durableSession: DurableSession;
-    readonly origin: SessionEventOrigin;
-    readonly sessionWritable: WritableStream<Uint8Array>;
-    readonly inputSource?: string;
-  },
-  emitEvents: (
-    emit: HandleEventFn,
-    session: HarnessSession,
-  ) => Promise<{ readonly result: T; readonly session: HarnessSession }>,
-): Promise<{ readonly result: T; readonly session: HarnessSession }> {
-  const { ctx } = input;
-  const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
+export interface SessionStepPublication<T, R, S extends HarnessSessionBase = HarnessSessionBase> {
+  readonly origin: SessionEventOrigin;
+  /** Where a relayed input batch came from; the channel adapter and its forwarding see it. */
+  readonly inputSource?: string;
+  /** Emits the step's events in the session's context scope. */
+  publish(emit: HandleEventFn, session: S): Promise<T>;
+  /**
+   * Changes the step makes to the session once the scope has committed it,
+   * before its continuation token is reconciled.
+   */
+  updateSession?(session: S, published: T): SessionUpdate<R, S>;
+}
+
+/** The session a step keeps, and anything it derived while changing it. */
+export interface SessionUpdate<R, S extends HarnessSessionBase = HarnessSessionBase> {
+  readonly session: S;
+  readonly result?: R;
+}
+
+/**
+ * Publishes from a step that owns the session. Returns the context and session
+ * state to adopt, and the result of `updateSession`. `step.ctx` is updated in place.
+ * The history is published and returned only when the step was restored with it.
+ */
+export async function publishFromSessionStep<T, R = undefined>(
+  step: RestoredSessionHistoryStep,
+  publication: SessionStepPublication<T, R, HarnessSession>,
+): Promise<{
+  readonly published: PublishedSessionEvents & { readonly history: HarnessModelMessage[] };
+  readonly result: R | undefined;
+}>;
+export async function publishFromSessionStep<T, R = undefined>(
+  step: RestoredSessionStep,
+  publication: SessionStepPublication<T, R>,
+): Promise<{ readonly published: PublishedSessionEvents; readonly result: R | undefined }>;
+export async function publishFromSessionStep<T, R>(
+  step: RestoredSessionStep & { readonly history?: HarnessModelMessage[] },
+  publication: SessionStepPublication<T, R>,
+): Promise<{
+  readonly published: PublishedSessionEvents & { readonly history?: HarnessModelMessage[] };
+  readonly result: R | undefined;
+}> {
+  const { ctx } = step;
+  const scoped = await publishInSessionScope(step, publication);
+  const update: SessionUpdate<R> = publication.updateSession?.(scoped.session, scoped.result) ?? {
+    session: scoped.session,
+  };
+  // The session saves the lifecycle it published, without the records whose owners it closed.
+  const projection = readSessionProjection(ctx);
+  const session = reconcileSessionContinuationToken(
+    ctx,
+    saveSessionProjection(dropClosedRecords(update.session, projection), ctx),
+  );
+  return {
+    published: {
+      serializedContext: serializeContext(ctx),
+      sessionState: createDurableSessionState({ session }),
+      ...("history" in session && { history: session.history as HarnessModelMessage[] }),
+    },
+    result: update.result,
+  };
+}
+
+/**
+ * Runs `publication.publish` in the session's context scope with an emit that
+ * publishes each event in order. Returns its result and the session the scope
+ * commits.
+ */
+async function publishInSessionScope<T>(
+  step: RestoredSessionStep & { readonly history?: HarnessModelMessage[] },
+  publication: SessionStepPublication<T, unknown>,
+): Promise<{ readonly result: T; readonly session: HarnessSessionBase }> {
+  const { ctx } = step;
+  enterSessionProjection(ctx, step.durableSession.state);
+  const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
+  const hydrated = hydrateDurableSession({
     compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
-    durable: input.durableSession,
+    durable: step.durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
+  const session =
+    step.history === undefined
+      ? hydrated
+      : { ...hydrated, history: validateHarnessModelMessages(step.history) };
   const instrumentation =
-    input.origin === "own"
+    publication.origin === "own"
       ? bindSessionInstrumentation({
           agentName: effectiveAgent.turnAgent.id,
           ctx,
@@ -145,114 +234,173 @@ export async function withSessionEventEmitter<T>(
         })
       : undefined;
 
-  const sink = openSessionEventStream({
+  const publisher = openSessionEventPublisher({
     ctx,
-    origin: input.origin,
-    sessionId: session.sessionId,
-    sessionWritable: input.sessionWritable,
-    inputSource: input.inputSource,
+    inputSource: publication.inputSource,
+    origin: publication.origin,
+    sessionWritable: step.sessionWritable,
   });
   try {
     return await withContextScope(ctx, session, async (enrichedSession) => {
-      const publish: HandleEventFn = async (event) => {
-        const stamped = await sink.emit(event);
-        // Only turn-step events can cancel the running turn; see turn-event-handler.ts.
-        await dispatchStreamEventHooks({
-          cancelTurn: undefined,
-          ctx,
-          registry: bundle.hookRegistry,
-          event: stamped,
-        });
-      };
       const emit =
         instrumentation?.createHandleEvent({
-          handleEvent: publish,
-          turnId: activeTurnId(getHarnessEmissionState(input.durableSession.state)),
-        }) ?? publish;
-      return await emitEvents(emit, enrichedSession);
+          handleEvent: publisher.publish,
+          turnId: activeTurnId(turnPosition(readSessionProjection(ctx))),
+        }) ?? publisher.publish;
+      return { result: await publication.publish(emit, enrichedSession), session: enrichedSession };
     });
   } finally {
     await instrumentation?.flush();
-    sink.release();
+    publisher.writer.release();
   }
 }
 
-/** A session's stream held by one step. */
-export interface SessionEventSink {
-  readonly adapterCtx: ChannelAdapterContext;
-  /**
-   * Routes one event through the channel adapter, then stamps and writes it.
-   * Stream-event hooks and instrumentation belong to the caller.
-   */
-  emit(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
-  /** Closes the session stream; only a terminal `done` step does this. */
+/**
+ * Holds a session's stream for one step, which keeps its writer lock until it
+ * releases it. Events reach the stream through `SessionEventPublisher.emit`.
+ */
+export interface SessionEventWriter {
+  /** Closes the session stream; only a terminal event (`done`, completion, or failure) does this. */
   close(): Promise<void>;
   /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
 }
 
-/**
- * The turn step's sink for its own events. A turn composes the rest of the
- * publication itself: its tool loop binds instrumentation to each model call,
- * and an event's hooks run after that event's memory lifecycle.
- */
-export function createSessionEventSink(input: {
-  readonly ctx: ContextContainer;
-  readonly sessionId: string;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-}): SessionEventSink {
-  return openSessionEventStream({ ...input, origin: "own" });
+interface StreamWriter extends SessionEventWriter {
+  /** Stamps the event, then writes it; returns the event as written. */
+  write(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
 }
 
-function openSessionEventStream(input: {
+/** Dispatches a session's events to its channel and stream-event hooks. */
+export interface SessionEventDispatcher {
+  /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
+  readonly adapterCtx: ChannelAdapterContext;
+  /**
+   * Runs the stream-event hooks for a written event. Only a turn step passes
+   * `cancelTurn`; see `turn-event-handler.ts`.
+   */
+  runHooks(event: MessageStreamEvent, cancelTurn?: () => void): Promise<void>;
+}
+
+interface EventDispatcher extends SessionEventDispatcher {
+  /**
+   * Channel delivery: `forwardSessionInput` or the channel adapter's handler,
+   * then the channel context. Returns the event as the handler left it.
+   */
+  deliver(event: UnstampedMessageStreamEvent): Promise<UnstampedMessageStreamEvent>;
+}
+
+/** A session's stream held by one step, with the dispatch of the events that step publishes. */
+export interface SessionEventPublisher {
+  readonly dispatcher: SessionEventDispatcher;
+  readonly writer: SessionEventWriter;
+  /**
+   * Delivers and writes one event the step produced, and returns it
+   * as written for its hooks. Delivery comes first so the channel adapter's
+   * handler shapes what is written.
+   */
+  emit(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
+  /** `emit`, then the event's stream-event hooks. */
+  publish(event: UnstampedMessageStreamEvent): Promise<void>;
+}
+
+export function openSessionEventPublisher(input: {
   readonly ctx: ContextContainer;
   readonly origin: SessionEventOrigin;
-  readonly sessionId: string;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly inputSource?: string;
-}): SessionEventSink {
+}): SessionEventPublisher {
   const { ctx, origin } = input;
-  const adapter = ctx.require(ChannelKey);
-  const adapterCtx = buildAdapterContext(adapter, ctx);
-  const writer = input.sessionWritable.getWriter();
-
-  let released = false;
-  const release = (): void => {
-    if (released) return;
-    released = true;
-    writer.releaseLock();
+  const dispatcher = createSessionEventDispatcher(input);
+  // Opened after the dispatcher, so a context that cannot build one leaves the
+  // stream unlocked for the terminal event's fallback write.
+  const writer = openSessionEventWriter({
+    deliveryIds: () => (origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined),
+    sessionWritable: input.sessionWritable,
+  });
+  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
+    const stamped = await writer.write(await dispatcher.deliver(event));
+    recordPublishedEvent(ctx, stamped);
+    return stamped;
   };
   return {
+    dispatcher,
+    writer,
+    emit,
+    async publish(event) {
+      await dispatcher.runHooks(await emit(event));
+    },
+  };
+}
+
+function createSessionEventDispatcher(input: {
+  readonly ctx: ContextContainer;
+  readonly inputSource?: string;
+}): EventDispatcher {
+  const { ctx, inputSource } = input;
+  const adapter = ctx.require(ChannelKey);
+  const adapterCtx = buildAdapterContext(adapter, ctx);
+
+  return {
     adapterCtx,
-    async emit(event) {
-      if (origin === "own") activityCohort.updateActivityState(ctx, event);
-      const forwarded = await forwardSessionInput(ctx, event, input.inputSource);
+    async deliver(event) {
+      const forwarded = await forwardSessionInput(ctx, event, inputSource);
       const routed = forwarded
         ? event
         : await callAdapterEventHandler(
             adapter,
             event,
-            input.inputSource === undefined
-              ? adapterCtx
-              : { ...adapterCtx, inputSource: input.inputSource },
+            inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource },
           );
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-      const stamped = stampMessageStreamEvent(
-        routed,
-        origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined,
-      );
-      await writer.write(encodeMessageStreamEvent(stamped));
-      if (origin === "own") {
-        void observeSessionActivity({ ctx, event: stamped, sessionId: input.sessionId });
-      }
+      return routed;
+    },
+    async runHooks(event, cancelTurn) {
+      // Read here rather than when the dispatcher is built: terminal delivery
+      // runs no hooks and must not require the bundle.
+      await dispatchStreamEventHooks({
+        cancelTurn,
+        ctx,
+        event,
+        registry: ctx.require(BundleKey).hookRegistry,
+      });
+    },
+  };
+}
+
+function openSessionEventWriter(input: {
+  /**
+   * The delivery ids stamped on each event. Read at each write because a turn
+   * step records its delivery ids after it opens the stream.
+   */
+  readonly deliveryIds: () => readonly string[] | undefined;
+  readonly sessionWritable: WritableStream<Uint8Array>;
+}): StreamWriter {
+  const streamWriter = input.sessionWritable.getWriter();
+
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    streamWriter.releaseLock();
+  };
+  return {
+    async write(event) {
+      const stamped = stampMessageStreamEvent(event, input.deliveryIds());
+      await streamWriter.write(encodeMessageStreamEvent(stamped));
       return stamped;
     },
     close: async () => {
-      await writer.close();
+      await streamWriter.close();
       release();
     },
     release,
   };
+}
+
+/** The session's projection as of the last event it published. */
+export function readSessionProjection(ctx: ContextContainer): SessionProjection {
+  return currentProjection(ctx);
 }
 
 type TerminalSessionEvent = Extract<
@@ -263,17 +411,20 @@ type TerminalSessionEvent = Extract<
 /**
  * Publishes a terminal `session.completed` or `session.failed` from outside a
  * turn as the session's own event, through its channel adapter and
- * instrumentation. Stream-event hooks do not run: the ending session may not
+ * instrumentation, then closes the session stream so readers following it
+ * reach EOF. Stream-event hooks do not run: the ending session may not
  * restore, and no turn scope remains for authored code. Never throws.
  *
- * When the context cannot be restored, the event is only stamped and written so
- * the stream still ends: the one degraded write of a session event.
+ * When the context cannot be restored, the event is only stamped, written, and
+ * the stream closed: the one degraded write of a session event.
  */
 export async function publishTerminalSessionEvent(input: {
   readonly errorId?: string;
   readonly event: TerminalSessionEvent;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  /** The session's last turn, for channel handlers' `ctx.session.turn`. */
+  readonly turn?: { readonly id: string; readonly sequence: number };
   /** The turn the event ends, for instrumentation. */
   readonly turnId?: string;
 }): Promise<void> {
@@ -282,10 +433,15 @@ export async function publishTerminalSessionEvent(input: {
   const { type } = input.event;
 
   let ctx: ContextContainer;
-  let sink: SessionEventSink;
+  let publisher: SessionEventPublisher;
   try {
     ctx = await deserializeContext(input.serializedContext);
-    sink = createSessionEventSink({ ctx, sessionId, sessionWritable: input.sessionWritable });
+    enterSessionProjection(ctx, undefined);
+    publisher = openSessionEventPublisher({
+      ctx,
+      origin: "own",
+      sessionWritable: input.sessionWritable,
+    });
   } catch (error) {
     log.error(`failed to restore context for terminal ${type} event`, { ...fields, error });
     await writeUnroutedSessionEvent(input.sessionWritable, input.event).catch((writeError) =>
@@ -294,8 +450,22 @@ export async function publishTerminalSessionEvent(input: {
     return;
   }
 
+  // Terminal events publish outside any turn step, and only a turn step
+  // installs the session callback context that channel `session.completed`
+  // handlers read, so install it here. A prewarmed session that expires,
+  // resets, or closes before its first message has no turn yet: `turn_0`.
+  const auth = ctx.get(AuthKey) ?? null;
+  ctx.setVirtualContext(SessionKey, {
+    auth: { current: auth, initiator: ctx.get(InitiatorAuthKey) ?? auth },
+    parent: ctx.get(ParentSessionKey),
+    sessionId,
+    turn: input.turn ?? { id: "turn_0", sequence: 0 },
+  });
+
+  // Emitted without its hooks; see above.
   const publish: HandleEventFn = async (event) => {
-    await sink.emit(event);
+    await publisher.emit(event);
+    await publisher.writer.close();
   };
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {
@@ -315,7 +485,7 @@ export async function publishTerminalSessionEvent(input: {
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
-    sink.release();
+    publisher.writer.release();
     try {
       await instrumentation?.flush();
     } catch (error) {
@@ -331,10 +501,11 @@ async function writeUnroutedSessionEvent(
   sessionWritable: WritableStream<Uint8Array>,
   event: UnstampedMessageStreamEvent,
 ): Promise<void> {
-  const writer = sessionWritable.getWriter();
+  const writer = openSessionEventWriter({ deliveryIds: () => undefined, sessionWritable });
   try {
-    await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+    await writer.write(event);
+    await writer.close();
   } finally {
-    writer.releaseLock();
+    writer.release();
   }
 }

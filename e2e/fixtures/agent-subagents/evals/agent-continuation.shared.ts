@@ -20,7 +20,7 @@ export async function continueKeeperAcrossTurns(t: EveEvalContext, tool: string)
     `NOTEBOOK-REVIEW ${tool} Alice asks for a review, then changes her mind.`,
   );
   reviewed.expectOk();
-  reviewed.calledTool("task_cancel", { count: 1, output: /^Stopped \S+'s current work;/u });
+  reviewed.calledTool("eve__task_cancel", { count: 1, output: /^Stopped \S+'s current work;/u });
   reviewed.event("task.settled", {
     count: 1,
     data: { callId: "notebook-review", status: "cancelled" },

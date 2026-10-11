@@ -6,15 +6,18 @@ import { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
   ContinuationTokenKey,
+  LegacyRemoteAgentCallerKey,
   SessionCallbackKey,
   SessionIdKey,
   SessionInboxKey,
 } from "#context/keys.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
-import { createSessionEventSink } from "#execution/publish-session-events.js";
-import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { openSessionEventPublisher } from "#execution/publish-session-events.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
+import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { createAuthorizationRequiredEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -74,19 +77,22 @@ function fixture() {
   const durableSession: DurableSession = {
     agent: { system: "" },
     continuationToken: "http:parent",
-    history: [],
     sessionId: "parent-session",
-    state: {
-      "eve.harness.emission": {
-        turnId: "parent-turn",
-        sequence: 1,
-        stepIndex: 0,
-        sessionStarted: true,
+    state: withOpenTurn(
+      {
+        agent: { dynamicModel: true, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        continuationToken: "http:parent",
+        history: [],
+        sessionId: "parent-session",
       },
-    },
+      { sequence: 1, stepIndex: 0, turnId: "parent-turn" },
+    ).state,
   };
+  enterSessionProjection(ctx, durableSession.state);
   const request = createSessionLimitContinuationRequest({
     sessionId: "child-session",
+    turnSequence: 0,
     violation: { kind: "input", limit: 100, usedTokens: 101 },
   });
   const hookPayload: SubagentInputRequestHookPayload = {
@@ -147,7 +153,10 @@ describe("proxied stream hooks", () => {
     });
     expect(result.sessionState.continuationToken).toBe("http:parent-thread");
     expect(result.sessionState.hasProxyInputRequests).toBe(true);
-    expect(result.sessionState.emissionState).toMatchObject({ sequence: 1, turnId: "parent-turn" });
+    expect(positionOf(result.sessionState.snapshot.session)).toMatchObject({
+      sequence: 1,
+      turnId: "parent-turn",
+    });
     const routed = routeDeliverPayload({
       payload: { inputResponses: [{ requestId: f.request.requestId, optionId: "continue" }] },
       state: result.sessionState.snapshot.session.state,
@@ -172,6 +181,70 @@ describe("proxied stream hooks", () => {
     ]);
   });
 
+  const at = { sequence: 7, stepIndex: 2, turnId: "child-turn" };
+  it.each([
+    [
+      "settles it as a responder",
+      {
+        data: {
+          ...at,
+          outcome: "approved",
+          requestId: "approval-1",
+          responderPrincipalId: "alice",
+        },
+        type: "approval.settled",
+      },
+    ],
+    [
+      "resolves it",
+      {
+        data: {
+          ...at,
+          resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "approval-1" }],
+        },
+        type: "input.resolved",
+      },
+    ],
+  ] as const)("closes a relayed approval when the child %s", async (_, event) => {
+    const f = fixture();
+    const approval = {
+      action: { callId: "deploy-1", input: {}, kind: "tool-call" as const, toolName: "deploy" },
+      kind: "tool-approval" as const,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve deploy?",
+      requestId: "approval-1",
+    };
+    const relayed = await emitProxiedSubagentEvent({
+      ...f,
+      hookPayload: { ...f.hookPayload, event: { ...f.hookPayload.event, requests: [approval] } },
+    });
+    const parked = relayed.sessionState.snapshot.session;
+    const answer = { payload: { message: "approve" }, resolveMessage: true };
+    expect(routeDeliverPayload({ ...answer, state: parked.state }).forChildren).toHaveLength(1);
+
+    const closed = await emitProxiedSubagentEvent({
+      ...f,
+      durableSession: parked,
+      hookPayload: {
+        callId: "child-call",
+        childSessionId: "child-session",
+        event,
+        kind: "subagent-authorization-event",
+        subagentName: "child",
+      },
+    });
+    expect(f.events.at(-1)).toMatchObject({ data: event.data, type: event.type });
+    const after = closed.sessionState.snapshot.session.state;
+    expect(getProxyInputRequests(after).has("approval-1")).toBe(false);
+    expect(routeDeliverPayload({ ...answer, state: after })).toMatchObject({
+      forChildren: [],
+      forSelf: { message: "approve" },
+    });
+  });
+
   it("forwards a remote session's own input without asking on its channel", async () => {
     const f = fixture();
     f.ctx.set(SessionCallbackKey, {
@@ -184,13 +257,13 @@ describe("proxied stream hooks", () => {
       Response.json({ ok: true }, { status: 202 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const sink = createSessionEventSink({
+    const publisher = openSessionEventPublisher({
       ctx: f.ctx,
-      sessionId: "parent-session",
+      origin: "own",
       sessionWritable: f.sessionWritable,
     });
     try {
-      await sink.emit({ type: "input.requested", data: f.hookPayload.event });
+      await publisher.emit({ type: "input.requested", data: f.hookPayload.event });
       expect(fetchMock).toHaveBeenCalledOnce();
       const forwarded = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(forwarded).toMatchObject({
@@ -202,7 +275,80 @@ describe("proxied stream hooks", () => {
       expect(f.order).not.toContain("channel:input.requested");
       expect(f.events.map((event) => event.type)).toEqual(["input.requested"]);
     } finally {
-      sink.release();
+      publisher.writer.release();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("sends a protocol-1 background task the task callbacks it expects", async () => {
+    const f = fixture();
+    f.ctx.set(SessionCallbackKey, {
+      callId: "remote-call",
+      subagentName: "remote-child",
+      token: "parent-reply",
+      url: "https://parent.example/eve/v1/callback/parent-reply",
+    });
+    f.ctx.set(LegacyRemoteAgentCallerKey, { taskId: "task-1" });
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      Response.json({ ok: true }, { status: 202 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const publisher = openSessionEventPublisher({
+      ctx: f.ctx,
+      origin: "own",
+      sessionWritable: f.sessionWritable,
+    });
+    const signIn = createAuthorizationRequiredEvent({
+      description: "Sign in to Datadog",
+      name: "datadog",
+      sequence: 8,
+      stepIndex: 2,
+      turnId: "child-turn",
+    });
+    try {
+      await publisher.emit({ type: "input.requested", data: f.hookPayload.event });
+      await publisher.emit(signIn);
+      const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body as string));
+      const envelope = {
+        callId: "remote-call",
+        childContinuationToken: "http:parent",
+        childSessionId: "parent-session",
+        subagentName: "remote-child",
+        taskId: "task-1",
+      };
+      expect(bodies).toEqual([
+        { ...envelope, event: f.hookPayload.event, kind: "task.input-requested" },
+        { ...envelope, event: signIn, kind: "task.authorization" },
+      ]);
+      expect(f.order).not.toContain("channel:input.requested");
+    } finally {
+      publisher.writer.release();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps a protocol-1 caller's input on its own channel outside a background task", async () => {
+    const f = fixture();
+    f.ctx.set(SessionCallbackKey, {
+      callId: "remote-call",
+      subagentName: "remote-child",
+      token: "parent-reply",
+      url: "https://parent.example/eve/v1/callback/parent-reply",
+    });
+    f.ctx.set(LegacyRemoteAgentCallerKey, {});
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const publisher = openSessionEventPublisher({
+      ctx: f.ctx,
+      origin: "own",
+      sessionWritable: f.sessionWritable,
+    });
+    try {
+      await publisher.emit({ type: "input.requested", data: f.hookPayload.event });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(f.order).toContain("channel:input.requested");
+    } finally {
+      publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });
@@ -221,13 +367,13 @@ describe("proxied stream hooks", () => {
       Response.json({ ok: true }, { status: 202 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const sink = createSessionEventSink({
+    const publisher = openSessionEventPublisher({
       ctx: f.ctx,
-      sessionId: "parent-session",
+      origin: "own",
       sessionWritable: f.sessionWritable,
     });
     try {
-      await sink.emit({ type: "input.requested", data: f.hookPayload.event });
+      await publisher.emit({ type: "input.requested", data: f.hookPayload.event });
       const forwarded = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(forwarded).toMatchObject({
         childContinuationToken: "eve:session:parent-session:inbox",
@@ -236,7 +382,7 @@ describe("proxied stream hooks", () => {
       });
       expect(f.order).not.toContain("channel:input.requested");
     } finally {
-      sink.release();
+      publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });

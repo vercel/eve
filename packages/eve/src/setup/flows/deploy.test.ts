@@ -135,7 +135,7 @@ describe("runDeployFlow", () => {
     expect(login).toHaveBeenCalledOnce();
     expect(fake.selectMessages).toEqual([]);
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes"],
+      expect.arrayContaining(["deploy", "--prod", "--yes"]),
       expect.objectContaining({ cwd: APP_ROOT }),
     );
   });
@@ -206,7 +206,7 @@ describe("runDeployFlow", () => {
       { signal: undefined, traceSampling: false },
     );
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes"],
+      expect.arrayContaining(["deploy", "--prod", "--yes"]),
       expect.objectContaining({ cwd: APP_ROOT }),
     );
   });
@@ -255,7 +255,7 @@ describe("runDeployFlow", () => {
     expect(result).toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
     expect(login).not.toHaveBeenCalled();
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes", "--non-interactive"],
+      expect.arrayContaining(["deploy", "--prod", "--yes", "--non-interactive"]),
       expect.objectContaining({ cwd: APP_ROOT, nonInteractive: true }),
     );
   });

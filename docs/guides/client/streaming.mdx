@@ -56,11 +56,12 @@ This consumes the stream until the current turn boundary:
 - `session.waiting`
 - `session.completed`
 - `session.failed`
-- `turn.waiting` while an `input.requested` the response read is unanswered
+- `turn.waiting` with `on: "input"`, which the turn emits while a person must
+  act on an approval or question. A sign-in emits it too, but the response stays
+  attached through it; see [authorization pauses](#authorization-pauses)
 
-A `turn.waiting` without a pending request is informational: the turn stays
-open, and `result()` keeps reading to its final reply. This includes a sign-in
-a running call needs, such as a subagent's connection. When a call the turn
+A `turn.waiting` with `on: "tasks"` is informational: the turn stays open, and
+`result()` keeps reading to its final reply. When a call the turn
 runs asks a question, such as a workflow tool's `ctx.ask()`, `result()` returns
 `status: "waiting"` with the question in `inputRequests`. Answer it with
 `respond()`, which keeps reading the same turn. A question stays pending until
@@ -68,7 +69,7 @@ its `input.resolved`, which the session you answer on also emits for a
 subagent's or workflow tool's question.
 
 A turn that waits on its [tasks](/docs/tools/workflows#run-calls-as-tasks-task)
-also emits `turn.waiting` without a pending request. The text the model wrote
+emits `turn.waiting` with `on: "tasks"`. The text the model wrote
 before the wait is not the reply: `result()` resolves with the final reply
 after the tasks finish.
 
@@ -155,24 +156,24 @@ For the complete event table, see [Sessions, runs & streaming](../../concepts/se
 
 For `action.input.appended`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
 
-A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-task) returns a receipt as its `action.result` and settles later with `task.settled`, matched by `callId`. The model receives the result as a message in its history, but the stream reports it only as `task.settled`, so render the result from that event.
+A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-task) returns a receipt as its `action.result` and settles later with `task.settled`, matched by `callId`. The model receives the result as a message in its history, but the stream reports it only as `task.settled`, so render the result from that event. `task.settled` repeats the tool `name` and `kind` from `task.started`, so you can label a result without keeping the start event. Events recorded by earlier eve versions omit both fields.
 
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and
 file metadata. File parts never include raw bytes or internal sandbox paths; `url` appears only for
-client-resolvable `http(s)` and `data:` URLs.
+`http(s)` URLs, and an inline file reports its `size` instead.
 
 ## Authorization pauses
 
 `authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
 
-The stream can emit an interim `session.waiting` while the authorization callback is pending. An active `send()` or `respond()` response stays attached across that parking boundary until the authorization resolves and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
+The sign-in holds the turn open, and the stream emits `turn.waiting` with `on: "input"` while the authorization callback is pending. An active `send()` or `respond()` response stays attached across it until the authorization resolves and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
 
 ## Reconnection
 
 HTTP connections can end before a run does. The client reconnects from the number of events already consumed, so long turns continue without replaying events. By default, a turn response keeps reconnecting until it reaches a turn boundary or is aborted, including while the turn is paused for authorization. A manually opened `session.stream()` eventually stops after repeated empty streams when it can no longer make progress.
 
-Browser failures while reading a response body, including `TypeError: Load failed` and `TypeError: network error`, use the same reconnect policy. Invalid stream events still fail the read.
+Browser network failures use the same reconnect policy, both when opening a stream (`TypeError: Failed to fetch`, `TypeError: Load failed`, or `TypeError: NetworkError when attempting to fetch resource.`) and while reading a response body (any `TypeError`, such as `TypeError: network error`). Invalid stream events still fail the read.
 
 If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
 

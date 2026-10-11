@@ -62,7 +62,7 @@ The default `message.completed` handler sends the reply as SMS through Twilio's 
 
 ### Human-in-the-loop (HITL)
 
-SMS and voice have no native button or card affordance, so HITL prompts do not render as interactive controls. The agent's `input.requested` event reaches your `events["input.requested"]` handler if you declare one. Handle it by sending the prompt as text and mapping the caller's reply back to the input request yourself.
+SMS has no buttons or cards, so the default `input.requested` handler sends each question and tool approval as an SMS with its options numbered. A reply with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, any other text is taken as that answer. Callers on a voice call get the question by SMS too. To render questions differently, declare your own `events["input.requested"]` handler.
 
 ### Proactive sessions
 
@@ -70,7 +70,7 @@ Start a session without an inbound message through `to(twilio, target).send(mess
 
 ### Attachments
 
-Inbound media attachments are not supported on this channel today.
+MMS media reaches the agent as file parts. eve downloads each media URL with the account SID and auth token, and only from the Twilio API origin (`https://api.twilio.com`, or `api.apiBaseUrl` when set). If a download fails, the agent gets a short note in place of the file and the text turn continues.
 
 ## Disclaimer
 

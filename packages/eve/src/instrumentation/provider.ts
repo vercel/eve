@@ -15,12 +15,6 @@ import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 export type { JsonValue } from "#shared/json.js";
 
 export type {
-  InstrumentationActionCompletedEvent,
-  InstrumentationActionFailedEvent,
-  InstrumentationActionKind,
-  InstrumentationActionOutcome,
-  InstrumentationActionOutput,
-  InstrumentationActionStartedEvent,
   InstrumentationAttemptScope,
   InstrumentationChannelDeliveryInput,
   InstrumentationChannelDeliveryOutcome,
@@ -54,6 +48,8 @@ export type {
   InstrumentationToolCallCompletedEvent,
   InstrumentationToolCallFailedEvent,
   InstrumentationToolCallStartedEvent,
+  InstrumentationToolCallKind,
+  InstrumentationToolCallOutcome,
   InstrumentationToolOutput,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
@@ -62,6 +58,7 @@ export type {
   InstrumentationTurnTerminalEvent,
   InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
+
 export type {
   InstrumentationMemoryOperation,
   InstrumentationMemoryOperationCompletedEvent,

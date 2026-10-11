@@ -527,6 +527,7 @@ function makeEvalResult(id: string) {
         failureCode: undefined,
         inputRequests: [],
         messageCount: 1,
+        models: [],
         parked: false,
         reasoningBlockCount: 0,
         subagentCallCount: 0,

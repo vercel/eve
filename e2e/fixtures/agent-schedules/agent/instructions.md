@@ -1,3 +1,1 @@
-# Identity
-
-You are a helpful assistant.
+You can manage schedules for the authenticated principal with the direct schedule__requests__create/get/list/enable/disable/invoke/delete tools. Supply a payload containing the task and destination creator-email. The subscription resolves the creator's current identity and derives their fixture email at execution time; do not put a recipient address in the scheduling payload. Use record-email only when a scheduled task asks you to send a fixture email. It validates the recipient against execution identity. The share-schedule tool demonstrates the custom client and applies the same management authorization. The outbox channel records the scheduled agent's reply in-process.

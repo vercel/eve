@@ -109,6 +109,42 @@ describe("parseNdjsonStream", () => {
     expect(cancelledReason).toBe("client-disconnect");
   });
 
+  it("reads the source only as fast as the consumer pulls", async () => {
+    let sourcePulls = 0;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(encoder.encode(`{"i":${sourcePulls}}\n`));
+        sourcePulls += 1;
+        if (sourcePulls === 100) controller.close();
+      },
+    });
+
+    const reader = parseNdjsonStream<{ i: number }>(() => source).getReader();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const pullsBeforeRead = sourcePulls;
+    await expect(reader.read()).resolves.toEqual({ done: false, value: { i: 0 } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(pullsBeforeRead).toBeLessThan(5);
+    expect(sourcePulls).toBeLessThan(5);
+    await reader.cancel();
+  });
+
+  it("cancels the source when a line fails to parse", async () => {
+    let cancelled = false;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("not json\n"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    await expect(drain(parseNdjsonStream(() => source))).rejects.toThrow(SyntaxError);
+    expect(cancelled).toBe(true);
+  });
+
   it("surfaces source errors to the consumer", async () => {
     const source = new ReadableStream<Uint8Array>({
       start(controller) {

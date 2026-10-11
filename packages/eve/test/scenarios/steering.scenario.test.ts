@@ -45,6 +45,9 @@ export default defineAgent({
         // A one-second lease expires mid-step, so the ownership backstop
         // races the child wakes into the single-flight guard.
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
+        // Contention with a fresh claim logs at debug, which the Workflow SDK
+        // prints to stdout only for a matching namespace.
+        DEBUG: "workflow:runtime:debug",
       },
     });
     try {
@@ -65,7 +68,9 @@ export default defineAgent({
         ),
       ).toHaveLength(5);
       expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
-      expect(server.stderr()).toContain("Step execution already in flight in this process");
+      expect(`${server.stdout()}${server.stderr()}`).toContain(
+        "Step execution already in flight in this process",
+      );
     } finally {
       await server.stop();
     }

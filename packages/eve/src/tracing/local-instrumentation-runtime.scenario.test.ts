@@ -133,9 +133,9 @@ describe("local instrumentation runtime", () => {
         idempotencyKey: actionKey,
         input: {},
         kind: "tool-call",
-        name: "weather",
+        toolName: "weather",
         scope,
-        type: "action.started",
+        type: "tool.call.started",
       });
       await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
         {
@@ -167,7 +167,7 @@ describe("local instrumentation runtime", () => {
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
-        type: "action.completed",
+        type: "tool.call.completed",
       });
       await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
@@ -211,11 +211,10 @@ describe("local instrumentation runtime", () => {
     expect(formatTraceTree(spans)).toEqual([
       "invoke_agent weather",
       "  agent.step",
-      "    agent.action",
-      "      execute_tool weather",
-      "        user.tool-work",
       "    chat model-1",
       "      user.model-work",
+      "    execute_tool weather",
+      "      user.tool-work",
     ]);
     for (const exported of spans.filter((span) => !span.name.startsWith("user."))) {
       expect(exported.attributes).toEqual(
@@ -230,7 +229,19 @@ describe("local instrumentation runtime", () => {
                   ? "execute_tool"
                   : exported.name.startsWith("chat ")
                     ? "chat"
-                    : exported.name,
+                    : "workflow",
+            },
+          },
+          {
+            key: "gen_ai.operation.name",
+            value: {
+              stringValue: exported.name.startsWith("invoke_agent ")
+                ? "invoke_agent"
+                : exported.name.startsWith("execute_tool ")
+                  ? "execute_tool"
+                  : exported.name.startsWith("chat ")
+                    ? "chat"
+                    : "workflow",
             },
           },
         ]),

@@ -10,7 +10,11 @@ import {
   getSupportedModuleBaseName,
   normalizeLogicalPath,
 } from "#discover/filesystem.js";
-import { readSortedDirectoryEntries } from "#discover/grammar.js";
+import {
+  readSortedDirectoryEntries,
+  SKILL_NAME_PATTERN,
+  SKILL_NAME_RULE,
+} from "#discover/grammar.js";
 import {
   createModuleSourceRef,
   createPathDerivedSourceId,
@@ -27,6 +31,7 @@ export const DISCOVER_SKILL_COLLISION = "discover/skill-collision";
 export const DISCOVER_SKILL_ENTRY_NOT_DIRECTORY = "discover/skill-entry-not-directory";
 export const DISCOVER_SKILL_FRONTMATTER_INVALID = "discover/skill-frontmatter-invalid";
 export const DISCOVER_SKILL_MARKDOWN_MISSING = "discover/skill-markdown-missing";
+export const DISCOVER_SKILL_NAME_INVALID = "discover/skill-name-invalid";
 
 /**
  * Input for discovering authored skills.
@@ -107,6 +112,17 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
     diagnostics.push(...discoveredSkill.diagnostics);
 
     if (discoveredSkill.skill === null || discoveredSkill.skillId === null) {
+      continue;
+    }
+
+    if (!SKILL_NAME_PATTERN.test(discoveredSkill.skillId)) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_SKILL_NAME_INVALID,
+          message: `Skill "${discoveredSkill.logicalPath}" has an illegal name "${discoveredSkill.skillId}". ${SKILL_NAME_RULE}`,
+          sourcePath: join(skillsDirectoryPath, entry.name),
+        }),
+      );
       continue;
     }
 
@@ -256,6 +272,7 @@ async function discoverPackagedSkill(input: {
   const packagePaths = await discoverSkillPackagePaths(input.source, input.skillRootPath);
   const skillSourceRefInput: {
     assetsPath?: string;
+    deferred?: boolean;
     description: string;
     license?: string;
     logicalPath: string;
@@ -281,6 +298,10 @@ async function discoverPackagedSkill(input: {
 
   if (packagePaths.assetsPath !== undefined) {
     skillSourceRefInput.assetsPath = packagePaths.assetsPath;
+  }
+
+  if (definition.deferred !== undefined) {
+    skillSourceRefInput.deferred = definition.deferred;
   }
 
   if (definition.license !== undefined) {

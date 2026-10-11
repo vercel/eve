@@ -1,8 +1,9 @@
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { renameLegacyTaskCallback } from "#execution/legacy-remote-agent/protocol.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { inputRequestSchema } from "#shared/input.js";
+import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 
@@ -73,6 +74,33 @@ const sessionAuthorizationCallbackSchema = z.object({
         .passthrough(),
     }),
     z.object({
+      type: z.literal("input.resolved"),
+      data: z
+        .object({
+          resolutions: z.array(
+            z
+              .object({
+                kind: z.enum(["question", "session-limit", "tool-approval"]),
+                outcome: z.enum([
+                  "answered",
+                  "approved",
+                  "cancelled",
+                  "denied",
+                  "ignored",
+                  "invalid",
+                ]),
+                requestId: z.string(),
+                response: inputResponseSchema.optional(),
+              })
+              .passthrough(),
+          ),
+          sequence: z.number(),
+          stepIndex: z.number(),
+          turnId: z.string(),
+        })
+        .passthrough(),
+    }),
+    z.object({
       type: z.literal("authorization.required"),
       data: z
         .object({
@@ -84,6 +112,7 @@ const sessionAuthorizationCallbackSchema = z.object({
           webhookUrl: z.string().optional(),
           attemptId: z.string().optional(),
           taskId: z.string().optional(),
+          principalId: z.string().optional(),
         })
         .passthrough(),
     }),
@@ -98,6 +127,7 @@ const sessionAuthorizationCallbackSchema = z.object({
           turnId: z.string(),
           attemptId: z.string().optional(),
           taskId: z.string().optional(),
+          principalId: z.string().optional(),
         })
         .passthrough(),
     }),
@@ -133,7 +163,7 @@ export async function handleSessionCallbackRequest(
 
   let body: unknown;
   try {
-    body = await request.json();
+    body = renameLegacyTaskCallback(await request.json());
   } catch {
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
@@ -152,7 +182,7 @@ export async function handleSessionCallbackRequest(
   if (result instanceof Response) return result;
 
   try {
-    await resumeHook(
+    await resumeRunnableHook(
       token,
       forwarded?.success ? forwarded.data : { kind: "runtime-action-result", results: [result] },
     );

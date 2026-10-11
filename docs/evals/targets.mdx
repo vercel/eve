@@ -36,7 +36,11 @@ These helpers handle the session protocol, retries, and event collection for the
 
 ## Authentication
 
-Local targets send no auth: `eve eval` owns the dev server it boots. For a remote `--url`, eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are set. Otherwise it reads `.vercel/project.json`. Eve then asks Vercel to resolve the exact HTTPS origin and sends ambient credentials only when the project IDs match. An arbitrary URL remains anonymous.
+Local targets send no auth: `eve eval` owns the dev server it boots.
+
+For a remote `--url`, eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both values are nonblank. Otherwise it reads the local Vercel project link: `.vercel/project.json`, or the matching project in `.vercel/repo.json` for a linked monorepo.
+
+With a project reference, eve looks up the exact HTTPS origin under that owner, regardless of the Vercel CLI's current team. The deployment's project ID must match before eve sends ambient credentials. Without a project reference, eve verifies the URL under the CLI's current scope. URLs that Vercel cannot verify remain anonymous.
 
 After verification, eve sends the available Vercel credentials:
 

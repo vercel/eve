@@ -124,6 +124,8 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
   /** Inert context rendered beneath the question heading and above its options. */
   description?: string;
+  /** Shared guidance rendered below the options and above keyboard hints. */
+  helpText?: string;
   /** Labeled facts rendered beneath the description and above the options. */
   metadata?: readonly SelectMetadata[];
   options: SelectOption<T>[];
@@ -505,6 +507,7 @@ export function createPrompter(): Prompter {
       const result = guardCancel(
         await runSelectComponent<T>({
           message: opts.message,
+          helpText: opts.helpText,
           options: opts.options,
           multiple: opts.multiple === true,
           search: opts.search ?? false,

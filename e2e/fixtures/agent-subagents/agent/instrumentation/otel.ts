@@ -1,0 +1,5 @@
+import { otel } from "eve/instrumentation/otel";
+
+// The Postgres suite runs a production Node server without automatic tracing.
+// Enable OTel so the remote child-stream eval can check trace identity.
+export default otel({});

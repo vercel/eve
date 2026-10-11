@@ -3,10 +3,15 @@ import type {
   MessageStreamEvent,
   TaskSettledStreamEvent,
 } from "#protocol/message.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
+import type { TokenUsage } from "#shared/token-usage.js";
+import type {
+  EveEvalDerivedFacts,
+  EveEvalSkillLoad,
+  EveEvalSubagentCall,
+  EveEvalToolCall,
+} from "#evals/types.js";
 
 interface MutableToolCall {
   name: string;
@@ -16,6 +21,8 @@ interface MutableToolCall {
   turnIndex: number;
   sessionId?: string;
 }
+
+type MutableSkillLoad = { -readonly [K in keyof EveEvalSkillLoad]: EveEvalSkillLoad[K] };
 
 /** One call to an agent task, as `task.started` reports it. */
 interface AgentCall {
@@ -29,7 +36,7 @@ interface AgentCall {
  * Options for {@link deriveRunFacts}.
  */
 export interface DeriveRunFactsOptions {
-  /** Session id stamped onto every derived tool and subagent call. */
+  /** Session id stamped onto every derived tool call, skill load, and subagent call. */
   readonly sessionId?: string;
 }
 
@@ -48,8 +55,8 @@ const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
 /**
  * Extracts derived execution facts from a completed run's stream events.
  *
- * Tool calls pair each `actions.requested` entry with its matching
- * `action.result` by call id. Subagent calls are the calls to agent tasks,
+ * Tool calls and skill loads pair each `actions.requested` entry with its
+ * matching `action.result` by call id. Subagent calls are the calls to agent tasks,
  * paired with their `task.settled` the same way. These facts power checks,
  * scorers, and reporters.
  */
@@ -60,6 +67,7 @@ export function deriveRunFacts(
   const sessionId = options?.sessionId;
   const toolCalls: MutableToolCall[] = [];
   const toolCallsByCallId = new Map<string, MutableToolCall>();
+  const skillLoads = new Map<string, MutableSkillLoad>();
   const agentCalls: AgentCall[] = [];
   const settledTaskCalls = new Map<string, TaskSettledStreamEvent["data"]>();
   const agentSessions: AgentStartedStreamEvent["data"][] = [];
@@ -67,6 +75,8 @@ export function deriveRunFacts(
   let turnIndex = -1;
   let messageCount = 0;
   let reasoningBlockCount = 0;
+  const models = new Set<string>();
+  let usage: TokenUsage | undefined;
   let failureCode: string | undefined;
 
   const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
@@ -98,7 +108,13 @@ export function deriveRunFacts(
           if (action.kind === "tool-call") {
             ensureToolCall(action.callId, action.toolName, action.input);
           } else if (action.kind === "load-skill") {
-            ensureToolCall(action.callId, LOAD_SKILL_TOOL_NAME, action.input);
+            skillLoads.set(action.callId, {
+              output: undefined,
+              sessionId,
+              skill: action.name,
+              status: "pending",
+              turnIndex: Math.max(turnIndex, 0),
+            });
           }
         }
         break;
@@ -110,6 +126,12 @@ export function deriveRunFacts(
           const call = ensureToolCall(result.callId, result.toolName, {});
           call.output = result.output;
           call.status = status;
+        }
+        const load =
+          result.kind === "load-skill-result" ? skillLoads.get(result.callId) : undefined;
+        if (load !== undefined) {
+          load.output = result.output;
+          load.status = status;
         }
         break;
       }
@@ -151,7 +173,24 @@ export function deriveRunFacts(
         break;
       }
 
+      case "step.started": {
+        models.add(event.data.modelId);
+        break;
+      }
+
+      case "session.waiting":
+      case "turn.waiting": {
+        usage = event.data.usage;
+        break;
+      }
+
+      case "session.completed": {
+        usage = event.data?.usage;
+        break;
+      }
+
       case "session.failed": {
+        usage = event.data.usage;
         failureCode = event.data.code;
         break;
       }
@@ -167,12 +206,15 @@ export function deriveRunFacts(
   return {
     toolCalls: toolCalls as readonly EveEvalToolCall[],
     toolCallCount: toolCalls.length,
+    skillLoads: [...skillLoads.values()],
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     inputRequests,
     parked: endedParkedOnInput(events),
     messageCount,
     reasoningBlockCount,
+    models: [...models],
+    usage,
     failureCode,
   };
 }
@@ -215,12 +257,14 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
   return {
     toolCalls: [],
     toolCallCount: 0,
+    skillLoads: [],
     subagentCalls: [],
     subagentCallCount: 0,
     inputRequests: [],
     parked: false,
     messageCount: 0,
     reasoningBlockCount: 0,
+    models: [],
   };
 }
 

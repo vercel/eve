@@ -3,32 +3,6 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 /** Marker carried by the object an extension handle produces when called. */
 const MOUNTED_EXTENSION = Symbol.for("eve.mounted-extension");
 
-const CONFIG_REGISTRY = Symbol.for("eve.extension-config-registry");
-
-/**
- * Ambient namespace set by the dev/eval loader around a mount module's
- * evaluation. A mount loads the handle unbundled (cross-package), so the
- * bundler's scope shim never runs on it; this fallback lets the mount still bind
- * under the package namespace. The shim's explicit argument takes precedence.
- */
-const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
-
-function ambientConfigScope(): string | undefined {
-  const scope = (globalThis as Record<symbol, unknown>)[EXT_CONFIG_SCOPE];
-  return typeof scope === "string" && scope.length > 0 ? scope : undefined;
-}
-
-/** Process-global map of extension namespace to its bound, validated config. */
-function configRegistry(): Map<string, Record<string, unknown>> {
-  const container = globalThis as Record<symbol, unknown>;
-  let registry = container[CONFIG_REGISTRY] as Map<string, Record<string, unknown>> | undefined;
-  if (registry === undefined) {
-    registry = new Map();
-    container[CONFIG_REGISTRY] = registry;
-  }
-  return registry;
-}
-
 /**
  * Marker value an extension handle returns when called. The consumer's mount
  * file default-exports it (directly for a no-config extension, or as the result
@@ -119,8 +93,8 @@ function validateConfig(
  * const { apiKey } = extension.config;
  * ```
  *
- * The `namespace` argument is supplied by the bundler shim and is not part of the
- * authoring surface.
+ * The second argument is retained for source compatibility with compiled extension
+ * declarations; instance bindings come from the loaded module graph, not its value.
  */
 export function defineExtension<const S extends StandardSchemaV1>(
   options: { readonly config: S },
@@ -132,19 +106,12 @@ export function defineExtension(
 ): NoConfigExtensionHandle;
 export function defineExtension(
   options?: { readonly config?: StandardSchemaV1 },
-  namespace?: string,
+  _namespace?: string,
 ): ExtensionHandle | NoConfigExtensionHandle {
   const schema = options?.config;
-  // The bundler shim passes the namespace explicitly for the extension's own
-  // bundled modules; an unshimmed cross-package mount falls back to the ambient
-  // scope the loader sets around the mount evaluation.
-  const resolvedNamespace = namespace ?? ambientConfigScope();
-
+  let bound: Record<string, unknown> | undefined;
   const handle = ((values?: unknown): MountedExtension => {
-    const parsed = validateConfig(schema, values);
-    if (resolvedNamespace !== undefined && resolvedNamespace.length > 0) {
-      configRegistry().set(resolvedNamespace, parsed);
-    }
+    bound = validateConfig(schema, values);
     return { [MOUNTED_EXTENSION]: true };
   }) as ExtensionHandle & NoConfigExtensionHandle;
 
@@ -152,8 +119,6 @@ export function defineExtension(
   Object.defineProperty(handle, "config", {
     enumerable: true,
     get(): Record<string, unknown> {
-      const bound =
-        resolvedNamespace === undefined ? undefined : configRegistry().get(resolvedNamespace);
       return bound ?? validateConfig(schema, {});
     },
   });

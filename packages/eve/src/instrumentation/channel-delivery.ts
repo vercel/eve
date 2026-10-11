@@ -19,6 +19,7 @@ import {
 } from "#shared/conversation-context.js";
 
 export interface ChannelDeliveryStartInstrumentation {
+  readonly traceSessionId: string;
   readonly agentName?: string;
   readonly ctx: AlsContext;
   readonly delivery: DeliverHookPayload;
@@ -65,6 +66,7 @@ export async function instrumentChannelDelivery(
         idempotencyKey: channelDeliveryIdempotencyKey(item.sessionId, item.delivery.deliveryId),
         outcome: input.outcome,
         rootSessionId: item.rootSessionId,
+        traceSessionId: item.traceSessionId,
         sequence: input.includeTurn ? item.sequence : undefined,
         sessionId: item.sessionId,
         turnId: input.includeTurn ? item.turnId : undefined,
@@ -104,6 +106,7 @@ export async function instrumentChannelDelivery(
       delivery,
       policyAgentName: input.policyAgentName,
       rootSessionId: input.rootSessionId,
+      traceSessionId: input.traceSessionId,
       sequence: input.sequence,
       sessionId: input.sessionId,
       turnId: input.turnId,
@@ -125,6 +128,7 @@ export async function instrumentChannelDelivery(
       input: deliveryInput,
       parentTraceContext: input.ctx.get(ParentTraceContextKey),
       rootSessionId: input.rootSessionId,
+      traceSessionId: input.traceSessionId,
       sequence: input.sequence,
       sessionId: input.sessionId,
       traceSeed: input.ctx.get(SessionTraceSeedKey),

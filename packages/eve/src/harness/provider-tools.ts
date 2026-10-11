@@ -1,6 +1,6 @@
 import { jsonSchema, type JSONSchema7, type ToolSet } from "ai";
 
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { ModelProfile } from "#harness/model-profile.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -10,21 +10,21 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
+import type { WebSearchSelection } from "#shared/web-search.js";
 
 /**
  * The provider backend resolved for one web search tool invocation.
  */
-type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
+type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel" | "browserbase";
 
 /**
- * Maps an upstream provider tool type (the literal `type` string the AI SDK
- * sends to the provider) back to the framework tool name that injected it.
+ * Maps an upstream identifier back to the framework tool name that injected it: a provider tool
+ * type (the literal `type` string the AI SDK sends to the provider), or a request value the AI SDK
+ * adds only for that tool.
  *
- * Used when the AI Gateway routes a request to a fallback provider that
- * does not support a provider-specific tool — the upstream error references
- * the provider-specific type (e.g. `web_search_20250305`), but the harness
- * needs to drop the framework tool by its public name (`web_search`).
+ * Used when a host does not support a provider-specific tool — the upstream error references
+ * the provider-specific identifier (e.g. `web_search_20250305`), but the harness needs to drop
+ * the framework tool by its public name (`web_search`).
  *
  * Adding a new provider tool requires adding the corresponding mapping
  * entry here alongside its {@link resolveWebSearchProviderTool} switch
@@ -35,6 +35,10 @@ const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
   // Anthropic backends reject this type because they only host the
   // older Claude Messages surface.
   web_search_20250305: WEB_SEARCH_TOOL_NAME,
+  // OpenAI's web search tool, which OpenAI-compatible hosts such as Bedrock may not serve.
+  web_search: WEB_SEARCH_TOOL_NAME,
+  // The `include` value `@ai-sdk/openai` adds only alongside OpenAI web search.
+  "web_search_call.action.sources": WEB_SEARCH_TOOL_NAME,
 };
 
 /**
@@ -42,7 +46,7 @@ const UPSTREAM_TOOL_TYPE_TO_FRAMEWORK_NAME: Readonly<Record<string, string>> = {
  * `type`, or `null` when the type is not one we know how to remove.
  *
  * Used by the harness recovery path to decide which tools to drop when a
- * gateway fallback provider rejects a tool. Unknown types fall through to
+ * host rejects a tool. Unknown types fall through to
  * the existing terminal/recoverable handling.
  */
 export function resolveFrameworkToolFromUpstreamType(type: string): string | null {
@@ -53,7 +57,9 @@ export function resolveFrameworkToolFromUpstreamType(type: string): string | nul
  * Returns the output schema for the provider-managed web search tool that
  * will be injected for `backend`.
  */
-export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObject {
+export function resolveWebSearchOutputSchema(
+  backend: Exclude<WebSearchBackend, "browserbase">,
+): JsonObject {
   switch (backend) {
     case "anthropic":
       return WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA;
@@ -69,38 +75,33 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
 }
 
 /**
- * Determines the web search backend for a model reference.
- *
- * - All AI Gateway models: the configured search provider (Exa by default)
- * - Direct/BYO OpenAI models: native OpenAI search
- * - Direct/BYO Anthropic models: native Anthropic search
- * - Direct/BYO Google models: native Google search grounding
- * - Other BYO models: not available (returns `null`)
+ * Determines the web search backend for a model. On AI Gateway it is the selected search
+ * provider (Exa by default); `native` selects the model vendor's own search, or the fallback
+ * when the model has none. Direct models always use their provider's native search. A model
+ * left without a backend gets none (`null`).
  */
 export function resolveWebSearchBackend(
-  modelRef: RuntimeModelReference,
-  gatewayProvider: WebSearchProvider = "exa",
+  profile: ModelProfile,
+  selection: WebSearchSelection = { provider: "exa" },
 ): WebSearchBackend | null {
-  if (modelRef.source === undefined) {
-    return gatewayProvider;
-  }
-
-  const providerId = modelRef.id.split("/")[0] ?? "";
-
-  if (providerId === "openai" || providerId.startsWith("openai.")) {
-    return "openai";
-  }
-
-  if (providerId === "anthropic" || providerId.startsWith("anthropic.")) {
-    return "anthropic";
-  }
-
-  if (providerId.startsWith("google.")) {
-    return "google";
-  }
-
-  return null;
+  if (!profile.gateway) return resolveNativeWebSearchBackend(profile);
+  if (selection.provider !== "native") return selection.provider;
+  return resolveNativeWebSearchBackend(profile) ?? selection.fallback ?? null;
 }
+
+function resolveNativeWebSearchBackend(profile: ModelProfile): NativeWebSearchBackend | null {
+  if (!NATIVE_WEB_SEARCH_BACKENDS.has(profile.provider)) return null;
+  if (profile.provider === "google" && profile.googleSearchDropsTools) return null;
+  return profile.provider as NativeWebSearchBackend;
+}
+
+type NativeWebSearchBackend = "anthropic" | "google" | "openai";
+
+const NATIVE_WEB_SEARCH_BACKENDS: ReadonlySet<string> = new Set<NativeWebSearchBackend>([
+  "anthropic",
+  "google",
+  "openai",
+]);
 
 /**
  * Constructs the AI SDK provider tool for web search based on the resolved
@@ -113,6 +114,10 @@ export async function resolveWebSearchProviderTool(
   backend: WebSearchBackend,
 ): Promise<ToolSet[string]> {
   switch (backend) {
+    case "browserbase": {
+      const { gateway } = await import("ai");
+      return gateway.tools.browserbaseSearch();
+    }
     case "openai": {
       const { openai } = await import("#compiled/@ai-sdk/openai/index.js");
       return attachWebSearchOutputSchema(openai.tools.webSearch({}) as ToolSet[string], backend);
@@ -154,7 +159,7 @@ export async function resolveWebSearchProviderTool(
 
 function attachWebSearchOutputSchema(
   tool: ToolSet[string],
-  backend: WebSearchBackend,
+  backend: Exclude<WebSearchBackend, "browserbase">,
 ): ToolSet[string] {
   return {
     ...tool,

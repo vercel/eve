@@ -11,6 +11,7 @@ export interface AuthoringBenchmarkModel {
   readonly agentModel?: string;
   readonly displayName: string;
   readonly harness: "OpenCode" | "Claude Code" | "Codex";
+  readonly agentOptions?: Readonly<Record<string, unknown>>;
   readonly support: AuthoringBenchmarkSupport;
 }
 
@@ -39,8 +40,9 @@ export const benchmarkModels = [
   {
     id: "claude-fable-5-1",
     model: "anthropic/claude-fable-5.1",
-    displayName: "Claude Fable 5.1",
+    displayName: "Claude Fable 5.1 (high)",
     harness: "Claude Code",
+    agentOptions: { effort: "high" },
     support: "supported",
   },
   {
@@ -48,14 +50,14 @@ export const benchmarkModels = [
     model: "xai/grok-4.6",
     displayName: "Grok 4.6",
     harness: "OpenCode",
-    support: "supported",
+    support: "superseded",
   },
   {
     id: "gpt-5-6-sol",
     model: "openai/gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
     harness: "Codex",
-    support: "supported",
+    support: "superseded",
   },
   {
     id: "gpt-5-6-terra",
@@ -98,7 +100,7 @@ export const benchmarkModels = [
     model: "anthropic/claude-opus-5",
     displayName: "Claude Opus 5",
     harness: "Claude Code",
-    support: "supported",
+    support: "superseded",
   },
   {
     id: "gemini-3-1-pro-preview",
@@ -126,6 +128,57 @@ export const benchmarkModels = [
     model: "moonshotai/kimi-k2.7-code",
     displayName: "Kimi K2.7 Code",
     harness: "OpenCode",
+    support: "supported",
+  },
+  {
+    id: "claude-opus-5-5-high",
+    model: "anthropic/claude-opus-5.5",
+    displayName: "Claude Opus 5.5 (high)",
+    harness: "Claude Code",
+    agentOptions: { effort: "high" },
+    support: "supported",
+  },
+  {
+    id: "gpt-6-sol-high",
+    model: "openai/gpt-6-sol",
+    agentModel: "openai/gpt-6-sol?reasoningEffort=high",
+    displayName: "GPT-6 Sol (high)",
+    harness: "Codex",
+    support: "supported",
+  },
+  {
+    id: "gpt-6-luna-high",
+    model: "openai/gpt-6-luna",
+    agentModel: "openai/gpt-6-luna?reasoningEffort=high",
+    displayName: "GPT-6 Luna (high)",
+    harness: "Codex",
+    support: "supported",
+  },
+  {
+    id: "grok-4-7",
+    model: "spacexai/grok-4.7",
+    displayName: "Grok 4.7",
+    harness: "OpenCode",
+    agentOptions: {
+      binaryUrl:
+        "https://ymdea60kblwwhidh.public.blob.vercel-storage.com/opencode-linux-x64-RCtfS54uaTwa5i9C3bpzguLy3jEBP6",
+      extraProviders: {
+        vercel: {
+          models: {
+            "spacexai/grok-4.7": {
+              name: "Grok 4.7",
+              reasoning: true,
+              tool_call: true,
+              temperature: true,
+              attachment: true,
+              modalities: { input: ["text", "image"], output: ["text"] },
+              limit: { context: 500000, output: 131072 },
+              cost: { input: 0, output: 0, cache_read: 0 },
+            },
+          },
+        },
+      },
+    },
     support: "supported",
   },
 ] as const satisfies ReadonlyArray<AuthoringBenchmarkModel>;

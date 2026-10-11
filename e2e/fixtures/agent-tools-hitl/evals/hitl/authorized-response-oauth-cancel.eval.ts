@@ -19,14 +19,12 @@ export default defineEval({
       { headers: { "x-eve-fixture-user": "oauth-cancel-responder" } },
     );
     const required = await approvalTurn.waitForEvent("authorization.required");
+    // The responder's sign-in holds the turn, so this read stops there.
+    const held = await approvalTurn.result();
 
-    const cancelTurn = await approvalTurn.session.startRespond([
+    const cancelled = await held.session.respond([
       { optionId: "cancel", requestId: approval.requestId },
     ]);
-    await cancelTurn.waitForEvent("approval.settled", {
-      data: { outcome: "cancelled", requestId: approval.requestId },
-    });
-    const cancelled = await cancelTurn.result();
     cancelled.event("approval.settled", {
       count: 1,
       data: { outcome: "cancelled", requestId: approval.requestId },
@@ -46,7 +44,7 @@ export default defineEval({
     if (!callback.ok)
       throw new Error(`Late fixture OAuth callback failed (${String(callback.status)}).`);
 
-    const late = await cancelTurn.session.send("Confirm the cancelled action did not execute.");
+    const late = await cancelled.session.send("Confirm the cancelled action did not execute.");
     late.notEvent("approval.settled", { data: { outcome: "approved" } });
     late.notEvent("action.result", {
       data: { result: { kind: "tool-result", toolName: TOOL_NAME }, status: "completed" },

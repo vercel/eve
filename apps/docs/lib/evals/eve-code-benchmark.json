@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "datasets": {
+    "deepswe-lean": {
+      "dataset": {
+        "name": "deepswe-lean",
+        "version": "v1"
+      },
+      "model": {
+        "id": "anthropic/claude-sonnet-5.5",
+        "released": "2026-09-28",
+        "knowledge": "2026-06"
+      },
+      "attempts": 3,
+      "tasks": 12,
+      "harnesses": [
+        {
+          "harness": "eve-code",
+          "version": "4d14914",
+          "resolved": 24,
+          "attempts": 36,
+          "resolveRate": {
+            "estimate": 0.6666666666666666,
+            "low": 0.5277777777777776,
+            "high": 0.8055555555555557
+          },
+          "costUsd": 20.336862000000004,
+          "costPerResolvedUsd": 0.8473692500000002,
+          "inputTokens": 35312195,
+          "outputTokens": 865005,
+          "cachedShare": 0.94331136877784,
+          "latencyP50Ms": 235438.5,
+          "latencyP90Ms": 389674,
+          "source": "4d1491477a2e4f220131a3eb857a030c9eec0419",
+          "runUrl": "https://github.com/vercel/eve/actions/runs/36775772040",
+          "measuredAt": "2026-09-30T21:11:47.181Z"
+        },
+        {
+          "harness": "opencode",
+          "version": "1.18.30",
+          "resolved": 18,
+          "attempts": 36,
+          "resolveRate": {
+            "estimate": 0.5,
+            "low": 0.27777777777777773,
+            "high": 0.7222222222222223
+          },
+          "costUsd": null,
+          "costPerResolvedUsd": null,
+          "inputTokens": 25457380,
+          "outputTokens": 2837675,
+          "cachedShare": 0.9378020047624697,
+          "latencyP50Ms": 611686.5,
+          "latencyP90Ms": 1170330.5,
+          "source": "a7b0fb2bf24d57e6bb3613d557c0af53a171d558",
+          "runUrl": "https://github.com/vercel/eve/actions/runs/36661642270",
+          "measuredAt": "2026-09-30T03:33:15.672Z"
+        },
+        {
+          "harness": "pi",
+          "version": "0.85.1",
+          "resolved": 26,
+          "attempts": 36,
+          "resolveRate": {
+            "estimate": 0.7222222222222222,
+            "low": 0.5,
+            "high": 0.9166666666666666
+          },
+          "costUsd": null,
+          "costPerResolvedUsd": null,
+          "inputTokens": 27007661,
+          "outputTokens": 903678,
+          "cachedShare": 0,
+          "latencyP50Ms": 266711,
+          "latencyP90Ms": 340482.5,
+          "source": "a7b0fb2bf24d57e6bb3613d557c0af53a171d558",
+          "runUrl": "https://github.com/vercel/eve/actions/runs/36661642270",
+          "measuredAt": "2026-09-30T03:33:15.823Z"
+        }
+      ],
+      "generatedAt": "2026-10-03T03:29:12.252Z"
+    }
+  }
+}

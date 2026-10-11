@@ -139,11 +139,7 @@ export function registerRemoteCommands(input: {
       "Model context window size, shown as a usage percentage",
       parseContextSizeOption,
     )
-    .option(
-      "--logs <mode>",
-      "Which server/agent logs to show: all | stderr | sandbox | none",
-      parseLogsMode,
-    )
+    .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode)
     .action(async (options: DevelopmentCliOptions & { url: string }) => {
       const remoteTarget = resolveDevelopmentUrlTarget(options, undefined)!;
       const mode = resolveDevUiMode({ options, interactive: hasInteractiveTerminal() });
@@ -224,11 +220,7 @@ export function registerDevelopmentCommand(input: {
       "Model context window size, shown as a usage percentage",
       parseContextSizeOption,
     )
-    .option(
-      "--logs <mode>",
-      "Which server/agent logs to show: all | stderr | sandbox | none",
-      parseLogsMode,
-    )
+    .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode)
     .action(async (options: DevelopmentCliOptions) => {
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });

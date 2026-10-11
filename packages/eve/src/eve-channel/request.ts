@@ -1,19 +1,17 @@
+import { parseToolStubs } from "#tool-stubs/rules.js";
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type {
-  ActivityObserverConfig,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
   TurnPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
+import { strandedSessionResponse } from "#eve-channel/support.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
-import {
-  parseActivityObserverField,
-  validateActivityObserverBinding,
-} from "#eve-channel/activity-observer-request.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
+import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -31,6 +29,10 @@ import {
   REMOTE_AGENT_PROTOCOL_VERSION,
   readRemoteAgentProtocolVersion,
 } from "#protocol/remote-agent-protocol.js";
+import {
+  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
+  splitLegacyTaskFields,
+} from "#execution/legacy-remote-agent/protocol.js";
 import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
@@ -64,7 +66,9 @@ export async function deriveOperationContinuationToken(input: {
   return `eve:op:${hex.slice(0, 32)}`;
 }
 
-export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
+export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
+  const legacy = splitLegacyTaskFields(input);
+  const { payload } = legacy;
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -79,26 +83,17 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  if (callback !== undefined) {
-    const protocolRejection = rejectRemoteAgentProtocolMismatch(payload.protocolVersion);
-    if (protocolRejection !== undefined) return protocolRejection;
-  }
+  const protocolVersion =
+    callback === undefined ? undefined : parseProtocolVersionField(payload.protocolVersion);
+  if (protocolVersion instanceof Response) return protocolVersion;
 
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
-
-  const activityObserver = parseActivityObserverField(payload.activityObserver);
-  if (activityObserver instanceof Response) return activityObserver;
-  if (activityObserver !== undefined) {
-    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
-    if (observerRejection !== undefined) return observerRejection;
-  }
 
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
   const messageFreeRejection = validateMessageFreeCreate({
-    activityObserver,
     callback,
     hasClientContext: payload.clientContext !== undefined,
     hasMessageField: "message" in payload,
@@ -116,19 +111,31 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
-    activityObserver,
     callback,
     capabilities,
     context,
     outputSchema,
   };
+  if (payload.stubs !== undefined) {
+    try {
+      result.stubs = parseToolStubs(payload.stubs);
+    } catch (error) {
+      return Response.json(
+        { ok: false, error: error instanceof Error ? error.message : "Invalid tool stubs." },
+        { status: 400 },
+      );
+    }
+  }
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
+  if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
+  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
+    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
+  }
   return result;
 }
 
 interface ParsedSessionMessageBody {
-  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -138,8 +145,15 @@ interface ParsedSessionMessageBody {
 }
 
 export function parseSessionMessageBody(
-  payload: Record<string, unknown>,
+  input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
+  const { payload } = splitLegacyTaskFields(input);
+  if (Object.hasOwn(payload, "stubs")) {
+    return Response.json(
+      { ok: false, error: "Tool stubs are fixed at session creation." },
+      { status: 400 },
+    );
+  }
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -147,12 +161,6 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  const activityObserver = parseActivityObserverField(payload.activityObserver);
-  if (activityObserver instanceof Response) return activityObserver;
-  if (activityObserver !== undefined) {
-    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
-    if (observerRejection !== undefined) return observerRejection;
-  }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
@@ -180,7 +188,6 @@ export function parseSessionMessageBody(
   }
 
   return {
-    activityObserver,
     callback,
     message,
     inputResponses,
@@ -291,11 +298,24 @@ export async function createSessionStreamResponse(
 ): Promise<Response> {
   const startIndex = parseStartIndex(request);
   if (startIndex instanceof Response) return startIndex;
-  const includeTailIndex = parseIncludeTailIndex(request);
+  const follow = parseFollow(request);
+  const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
-    const events = await session.getEventStream({ startIndex });
+    // Resolve the tail before committing a response; otherwise an unknown or
+    // unreachable session would answer 200 and fail mid-body. Open the event
+    // stream alongside the tail lookup to avoid an extra round trip.
+    const eventsPromise = session.getEventStream({ follow, startIndex });
+    // Handled below; this keeps an early rejection from being reported as unhandled.
+    eventsPromise.catch(() => {});
+    let tailIndex: number;
+    try {
+      tailIndex = await session.getStreamTailIndex();
+    } catch (error) {
+      void eventsPromise.then((events) => events.cancel()).catch(() => {});
+      throw error;
+    }
+    const events = await eventsPromise;
     const controlVersion =
       new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
       EVE_STREAM_CONTROL_VERSION
@@ -309,20 +329,26 @@ export async function createSessionStreamResponse(
       [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
       [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
     });
-    if (tailIndex !== undefined) {
+    if (includeTailIndex) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
       serializeAsNdjson(
         events,
         request.signal,
-        streamEventLimit(startIndex, tailIndex),
+        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
         controlVersion !== undefined,
       ),
       { headers },
     );
-  } catch {
-    return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+  } catch (error) {
+    const stranded = strandedSessionResponse(error);
+    if (stranded !== undefined) return stranded;
+    const notFound = isMissingWorkflowRunError(error);
+    return Response.json(
+      { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },
+      { status: notFound ? 404 : 503 },
+    );
   }
 }
 
@@ -347,10 +373,22 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
 }
 
-/** Delegating callers must speak this deployment's remote agent protocol. */
-function rejectRemoteAgentProtocolMismatch(value: unknown): Response | undefined {
+/** Delegating callers must speak a remote agent protocol this deployment serves. */
+function parseProtocolVersionField(value: unknown): number | Response {
+  // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
+  if (value !== undefined && typeof value !== "number") {
+    return Response.json(
+      { error: "Expected 'protocolVersion' to be a number.", ok: false },
+      { status: 400 },
+    );
+  }
   const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (callerVersion === REMOTE_AGENT_PROTOCOL_VERSION) return undefined;
+  if (
+    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
+    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
+  ) {
+    return callerVersion;
+  }
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,
@@ -441,8 +479,8 @@ function parseMessagePart(raw: unknown): TextPart | FilePart | Response {
       );
     }
     // Callers must never supply framework-internal refs (`eve-url:`,
-    // `eve-sandbox:`, `eve-attachment:`): the staging pipeline trusts the
-    // scheme and would reconstitute the string into a privileged sandbox read.
+    // `eve-sandbox:`): the staging pipeline trusts the scheme and would
+    // reconstitute the string into a privileged sandbox read.
     if (hasInternalRefScheme(part.data)) {
       return Response.json(
         { error: "File part 'data' must not use a framework-internal ref scheme.", ok: false },
@@ -575,6 +613,12 @@ function toClientContextMessage(content: string): string {
 export function parseIncludeTailIndex(request: Request): boolean {
   const raw = new URL(request.url).searchParams.get("includeTailIndex");
   return raw === "1" || raw === "true";
+}
+
+/** `follow=false` (or `0`) bounds the read at the durable tail; following is the default. */
+function parseFollow(request: Request): boolean {
+  const raw = new URL(request.url).searchParams.get("follow");
+  return raw !== "0" && raw !== "false";
 }
 
 export function parseStartIndex(request: Request): number | undefined | Response {

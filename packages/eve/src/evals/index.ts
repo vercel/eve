@@ -41,6 +41,7 @@ export type {
   EveEvalSession,
   EveEvalSessionResult,
   EveEvalScheduleDispatchResult,
+  EveEvalSkillLoad,
   EveEvalSubagentCall,
   EveEval,
   EveEvalConfig,
@@ -78,3 +79,4 @@ export type {
   MockModelToolResult,
   MockModelUsage,
 } from "#evals/mock-model.js";
+export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";

@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectReply,
   expectToolResult,
@@ -22,10 +22,10 @@ export default defineEval({
     // When the user asks to read the draft.
     const live = await session.start("Read the draft status.");
 
-    // Then the reply reports ready and completes; the authorized change stays answerable.
+    // Then the reply reports ready and completes; the message cancelled the authorized change, which never runs.
     await expectToolResult(t, live, "read-draft");
     await expectReply(t, live, "Draft status: ready.");
     expectChangeStillUnexecuted(session, "authorized-change");
-    await approveSavedChange(t, session, approval);
+    expectApprovalCancelled(session, approval);
   },
 });

@@ -1,3 +1,4 @@
+import { observeToolOutput } from "#tool-stubs/execute.js";
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -22,7 +23,7 @@ import {
   type TaskResult,
 } from "#execution/tasks/table.js";
 import { splitTaskIdInput } from "#execution/tasks/task-id-input.js";
-import { entryPointOf, isAgentTool, startsTasks } from "#execution/tasks/tool-entry-point.js";
+import { entryPointOf, isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
@@ -41,17 +42,13 @@ export function isTaskTool(definition: HarnessToolDefinition | undefined): boole
   );
 }
 
-/** Whether the agent can start tasks, so the task tools and system block are offered. */
-export function offersTasks(tools: HarnessToolMap): boolean {
-  for (const definition of tools.values()) {
-    if (startsTasks(definition)) return true;
-  }
-  return false;
+/** Workflow tools, and the task tools that control them, run after the model step. */
+export function isWorkflowTool(definition: HarnessToolDefinition | undefined): boolean {
+  return definition?.workflowId !== undefined || isTaskTool(definition);
 }
 
-/** Adds `task_wait` and `task_cancel` to a tool set that can start tasks. */
+/** Adds `eve__task_wait` and `eve__task_cancel` to the tools of a session that offers tasks. */
 export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
-  if (!offersTasks(tools)) return tools;
   return new Map([
     ...tools,
     [TASK_WAIT_TOOL_NAME, taskWaitTool],
@@ -60,21 +57,21 @@ export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
 }
 
 /**
- * The task block, when the agent can start tasks. `finalReplyOnly` is set for a
+ * The task block, when the session offers tasks. `finalReplyOnly` is set for a
  * child or schedule session, which hides a held turn's text, so a reply before
  * a result would reach no one.
  */
 export function taskSystemMessages(
-  tools: HarnessToolMap,
+  offers: boolean,
   options: { readonly finalReplyOnly: boolean },
 ): SystemModelMessage[] {
-  if (!offersTasks(tools)) return [];
+  if (!offers) return [];
   const content = options.finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
   return [{ content, role: "system" }];
 }
 
-/** A deferred call as the model made it, before the session knows what it enters. */
-export interface DeferredCall {
+/** A workflow tool call as the model made it, before the session knows what it enters. */
+export interface WorkflowCall {
   readonly callId: string;
   readonly definition: HarnessToolDefinition | undefined;
   /** The call's model input. */
@@ -83,7 +80,7 @@ export interface DeferredCall {
   readonly turnId: string;
 }
 
-/** How a deferred call enters its workflow, with the tool's own input. */
+/** How a workflow tool call enters its workflow, with the tool's own input. */
 export interface CommittedCallEntry {
   readonly entry: WorkflowToolCallEntry;
   readonly input: JsonObject;
@@ -91,12 +88,12 @@ export interface CommittedCallEntry {
 }
 
 /**
- * How a deferred call enters its workflow. A call that starts a task commits
+ * How a workflow tool call enters its workflow. A call that starts a task commits
  * the task's record alongside the call, so the run starts with its id; a
  * `serve` tool's call with `taskId` goes to that task's `receive()`, which the
  * session checks when it sends the call.
  */
-export function commitCallEntry(session: HarnessSession, call: DeferredCall): CommittedCallEntry {
+export function commitCallEntry(session: HarnessSession, call: WorkflowCall): CommittedCallEntry {
   const entryPoint = entryPointOf(call.definition);
   switch (entryPoint) {
     case "execute":
@@ -113,7 +110,7 @@ export function commitCallEntry(session: HarnessSession, call: DeferredCall): Co
 
 function commitTask(
   session: HarnessSession,
-  call: DeferredCall,
+  call: WorkflowCall,
   entryPoint: "task" | "serve",
   input: JsonObject,
 ): CommittedCallEntry {
@@ -193,20 +190,26 @@ async function toResultBlock(
 ): Promise<TaskResultBlock> {
   const base = { taskId: record.id, tool: record.name };
   if (result.status === "failed") return { ...base, body: result.error, status: "failed" };
-  return { ...base, body: await projectOutput(result.output, definition), status: "completed" };
+  return {
+    ...base,
+    body: await projectOutput(record.name, result, definition),
+    status: "completed",
+  };
 }
 
 async function projectOutput(
-  output: unknown,
+  tool: string,
+  result: Extract<TaskResult, { status: "completed" }>,
   definition: HarnessToolDefinition | undefined,
 ): Promise<string> {
-  if (definition?.toModelOutput === undefined) return renderModelOutputText(output);
-  try {
-    return renderModelOutputText(await definition.toModelOutput(output));
-  } catch {
+  if (definition?.toModelOutput === undefined) return renderModelOutputText(result.output);
+  return await observeToolOutput(
+    tool,
+    result.calls ?? [],
+    async () => renderModelOutputText(await definition.toModelOutput!(result.output)),
     // A projection that throws must not wedge every later model step.
-    return renderModelOutputText(output);
-  }
+    () => renderModelOutputText(result.output),
+  );
 }
 
 /**

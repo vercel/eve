@@ -41,18 +41,7 @@ function renderToolRows(
     block.status === "done" && block.doneTitle !== undefined
       ? block.doneTitle
       : (block.title ?? "tool");
-  // The header is indented one cell so its glyph shares a column with the
-  // `│`/`└` rail beneath it.
-  const headerWidth = width - 3;
-  const namePlain = clipVisible(name, headerWidth);
-  let header = ` ${icon} ${boldLeadingWord(namePlain, theme)}`;
-  const argsBudget = headerWidth - namePlain.length - 2;
-  const args = block.subtitle ?? "";
-  if (args.length > 0 && argsBudget >= 6) {
-    header += `  ${theme.colors.gray(truncate(args, argsBudget))}`;
-  }
-
-  const rows = [header];
+  const rows = [renderToolHeader(name, block.subtitle ?? "", icon, width, theme)];
 
   // Detail region: `│`-railed rows closed by a `└` corner. Group items and
   // write bodies share the rail so every accumulating tool reads the same.
@@ -79,6 +68,23 @@ function renderToolRows(
   }
 
   return rows;
+}
+
+export function renderToolHeader(
+  name: string,
+  args: string,
+  icon: string,
+  width: number,
+  theme: Theme,
+): string {
+  const headerWidth = Math.max(0, width - 3);
+  const namePlain = clipVisible(name, headerWidth);
+  let header = ` ${icon} ${boldLeadingWord(namePlain, theme)}`;
+  const argsBudget = headerWidth - visibleLength(namePlain) - 2;
+  if (args.length > 0 && argsBudget >= 6) {
+    header += `  ${theme.colors.gray(truncate(args, argsBudget))}`;
+  }
+  return clipVisible(header, width);
 }
 
 /**

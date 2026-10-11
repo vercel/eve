@@ -30,8 +30,9 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
         async readFile() {
           return null;
         },
-        async readBinaryFile() {
-          return null;
+        async readBinaryFile({ path }: { path: string }) {
+          const content = files[path];
+          return content == null ? null : new TextEncoder().encode(content);
         },
         async readTextFile({ path }: { path: string }) {
           const content = files[path];
@@ -272,7 +273,7 @@ describe("executeReadFileOnSandbox", () => {
       runInContext({ "/workspace/binary.bin": "hello\0world" }, (sandbox) =>
         executeReadFileOnSandbox(sandbox, { filePath: "/workspace/binary.bin" }),
       ),
-    ).rejects.toThrow("contains NUL bytes");
+    ).rejects.toThrow("appears to be a binary file");
   });
 
   // ---------------------------------------------------------------------------

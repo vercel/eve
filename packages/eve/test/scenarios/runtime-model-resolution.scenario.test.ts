@@ -9,6 +9,7 @@ import { TEST_DEFAULT_MODEL_ID } from "../../src/internal/testing/app-harness.js
 import { resolveBootstrapRuntimeModel } from "../../src/runtime/agent/bootstrap-model.js";
 import { createMockAuthoredRuntimeModel } from "../../src/runtime/agent/mock-model-adapter.js";
 import { resolveRuntimeModelReference } from "../../src/runtime/agent/resolve-model.js";
+import { MODEL_HELPERS } from "../../src/shared/model-helper.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "../../src/internal/application/runtime-compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "../../src/runtime/sessions/compiled-agent-cache.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -22,12 +23,10 @@ afterEach(() => {
 });
 
 describe("runtime model resolution", () => {
-  it.each([
-    ["openai", "eve/models/openai", "gpt-5.6-luna-fast"],
-    ["anthropic", "eve/models/anthropic", "claude-sonnet-5"],
-  ])(
+  it.each(["openai", "anthropic"] as const)(
     "compiles and rehydrates the eve %s helper without capturing credentials",
-    async (helper, module, id) => {
+    async (helper) => {
+      const { module, defaultModel } = MODEL_HELPERS[helper];
       vi.stubEnv("NODE_ENV", "development");
       vi.stubEnv(
         helper === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY",
@@ -48,7 +47,7 @@ describe("runtime model resolution", () => {
         moduleMap: bundle.moduleMap,
         nodeId: bundle.nodeId,
       });
-      expect(model).toMatchObject({ modelId: id });
+      expect(model).toMatchObject({ modelId: defaultModel });
     },
   );
 

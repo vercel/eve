@@ -5,6 +5,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -13,6 +14,7 @@ import { linearChannel, type LinearChannelState } from "#public/channels/linear/
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#shared/input.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const SECRET = "linear-secret";
 
@@ -33,7 +35,10 @@ function withState(
 }
 
 function stubAccessor() {
-  return { get: () => undefined, set: () => {} } as any;
+  const accessor = { get: () => undefined, set: () => {} } as any;
+  // A step enters its projection before it publishes.
+  enterSessionProjection(accessor, undefined);
+  return accessor;
 }
 
 const stubAlsContext = (() => {
@@ -130,6 +135,7 @@ async function firePost(
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
+    ...mockAgentRouteArgs(),
     attachSession: vi.fn() as any,
     ...mockChannelContext(send),
     params: {},
@@ -203,29 +209,6 @@ describe("linearChannel inbound Agent Session events", () => {
 
     expect(response.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
-  });
-
-  it("delivers prompted values as messages for the harness to resolve", async () => {
-    const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
-    const { send } = await firePost(
-      channel,
-      signedRequest(
-        sessionPayload({
-          action: "prompted",
-          agentActivity: {
-            content: { body: "approve", type: "prompt" },
-            id: "activity_prompt",
-            user: { id: "user_1" },
-            userId: "user_1",
-          },
-        }),
-      ),
-    );
-
-    expect(send).toHaveBeenCalledTimes(1);
-    const [, input] = send.mock.calls[0]!;
-    expect(input.inputResponses).toBeUndefined();
-    expect(input.message).toBe("approve");
   });
 
   it("attaches authenticated Linear upload images to prompted messages", async () => {
@@ -457,7 +440,7 @@ describe("linearChannel default event handlers", () => {
       variables: {
         input: {
           agentSessionId: "agent_session_1",
-          content: { action: "search", parameter: "{}", type: "action" },
+          content: { action: "Search", parameter: "{}", type: "action" },
           ephemeral: true,
         },
       },

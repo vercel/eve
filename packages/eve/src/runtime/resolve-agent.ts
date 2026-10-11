@@ -23,6 +23,7 @@ import type {
   ResolvedSkillDefinition,
   ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 /**
  * Input for resolving one compiled authored agent into a runtime-owned model.
@@ -185,7 +186,7 @@ function createResolvedAgentConfig(
     name: string;
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
     source?: NonNullable<ResolvedAgent["config"]>["source"];
-    tool?: boolean;
+    tool?: AgentToolExposure;
     limits?: NonNullable<ResolvedAgent["config"]>["limits"];
   } = {
     name: manifest.config.name,
@@ -293,6 +294,7 @@ function createResolvedAgentConfig(
             contextWindowTokens: model.contextWindowTokens,
             id: model.id,
             maxOutputTokens: model.maxOutputTokens,
+            promptCache: model.promptCache,
             providerOptions: model.providerOptions,
             source: {
               exportName: model.source.exportName,

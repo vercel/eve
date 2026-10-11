@@ -9,7 +9,9 @@ import {
 } from "#public/channels/telegram/authorization.js";
 import {
   registerTelegramFreeformPrompt,
+  registerTelegramHitlPrompt,
   renderTelegramInputRequest,
+  takeTelegramResolvedPrompt,
 } from "#public/channels/telegram/hitl.js";
 import type { TelegramMessage } from "#public/channels/telegram/inbound.js";
 import type {
@@ -20,8 +22,13 @@ import type {
 
 const log = createLogger("telegram.defaults");
 
-/** Default auth projection for Telegram webhook actors. */
-export function defaultTelegramAuth(message: TelegramMessage): SessionAuthContext | null {
+/**
+ * Default auth projection for Telegram webhook actors. A button press passes
+ * the message it was on with the presser as `from`.
+ */
+export function defaultTelegramAuth(
+  message: Pick<TelegramMessage, "chat" | "from" | "messageId" | "messageThreadId">,
+): SessionAuthContext | null {
   const user = message.from;
   if (!user) return null;
 
@@ -159,10 +166,35 @@ export const defaultEvents: TelegramChannelEvents = {
         reply_markup: rendered.replyMarkup,
         text: rendered.text,
       });
-      if (rendered.freeformRequestId !== undefined && posted.id) {
+      if (!posted.id) continue;
+      if (rendered.freeformRequestId !== undefined) {
         registerTelegramFreeformPrompt(channel.state, {
           messageId: posted.id,
           requestId: rendered.freeformRequestId,
+        });
+      } else {
+        registerTelegramHitlPrompt(channel.state, request, {
+          messageId: posted.id,
+          text: rendered.text,
+        });
+      }
+    }
+  },
+
+  // Covers every way a prompt ends: a press, a typed answer, or a withdrawal.
+  async "input.resolved"(event, channel, _ctx) {
+    for (const resolution of event.resolutions) {
+      const edit = takeTelegramResolvedPrompt(channel.state, resolution);
+      if (edit === undefined) continue;
+      try {
+        await channel.telegram.editMessageText({
+          ...edit,
+          replyMarkup: { inline_keyboard: [] },
+        });
+      } catch (error) {
+        log.warn("Telegram answered prompt edit failed", {
+          error,
+          requestId: resolution.requestId,
         });
       }
     }

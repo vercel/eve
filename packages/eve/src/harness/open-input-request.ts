@@ -1,0 +1,19 @@
+import {
+  openInputs,
+  type SessionInput,
+  type SessionProjection,
+} from "#protocol/session-projection.js";
+
+/**
+ * The request a typed reply answers: the first open request nobody has answered yet. A budget
+ * prompt comes first, since the session settles it before anything else; the rest follow the
+ * order of the session's `input.requested` events. Channels that can only show text show this
+ * request alone, so a reply answers the request the person sees.
+ */
+export function firstOpenInput(
+  projection: SessionProjection,
+  answered: (requestId: string) => boolean = () => false,
+): SessionInput | undefined {
+  const open = openInputs(projection).filter((input) => !answered(input.request.requestId));
+  return open.find((input) => input.request.kind === "session-limit") ?? open[0];
+}

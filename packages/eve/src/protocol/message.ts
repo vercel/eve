@@ -5,6 +5,7 @@ import {
   hasInternalRefScheme,
   isSerializedUrlFilePart,
 } from "#internal/attachments/url-refs.js";
+import { getKnownByteLength } from "#internal/attachments/data.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { createEventId } from "#protocol/event-id.js";
 import {
@@ -18,8 +19,8 @@ import type {
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
 export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
@@ -43,7 +44,8 @@ export const EVE_STREAM_LEASE_ENDED_CONTROL = {
  *
  * `tool-calls` is the only non-terminal assistant step in the current
  * tool-loop harness. All other values indicate the assistant step ended the
- * current turn.
+ * current turn, except a step superseded by a steering message: it completes
+ * with `other` and the turn continues with the next step.
  */
 export type AssistantStepFinishReason =
   | "content-filter"
@@ -117,6 +119,18 @@ export interface SubagentSessionInvocationMetadata {
 }
 
 /**
+ * The session this one replaced. Present on a session eve started in place of
+ * one whose deployment was retired, when the next ordinary channel message
+ * arrived before the earlier session timed out. This session has its own id,
+ * stream, auth, and state, and starts with no history from its predecessor;
+ * read the predecessor with `sessions.attach(sessionId)` from `eve/server`.
+ */
+export interface SessionPredecessor {
+  /** Id of the session this one replaced. Its recorded history stays readable. */
+  readonly sessionId: string;
+}
+
+/**
  * Runtime identity metadata attached to the `session.started` event.
  *
  * The server populates this at run time so remote eval processes and
@@ -175,6 +189,8 @@ export type HandleMessageRequestBody =
 export interface SessionStartedStreamEvent {
   data: {
     invocation?: SubagentSessionInvocationMetadata;
+    /** Present when this session replaced one that could no longer run. */
+    predecessor?: SessionPredecessor;
     runtime?: RuntimeIdentity;
     trace?: RuntimeTraceContext;
   };
@@ -286,6 +302,12 @@ export interface ApprovalSettledStreamEvent {
  */
 export interface InputRequestedStreamEvent {
   data: {
+    /**
+     * The call a relayed request serves: the task or workflow call whose run, or whose child
+     * session, asks. The request retains its origin coordinates. Absent for the
+     * session's own requests, whose approvals name their call in `request.action`.
+     */
+    callId?: string;
     requests: readonly InputRequest[];
     sequence: number;
     stepIndex: number;
@@ -418,14 +440,30 @@ export interface TaskStartedStreamEvent {
 
 /**
  * Stream event emitted once when a task's call settles: by the run's return
- * or failure, or by a cancel. `turnId` is the call's turn, the same as on its
- * `task.started`.
+ * or failure, or by a cancel. `turnId`, `name`, and `kind` are the same as on
+ * the call's `task.started`.
  */
 export interface TaskSettledStreamEvent {
   data: {
     callId: string;
+    /**
+     * Why the call was cancelled; present only when `status` is `"cancelled"`
+     * and the session stopped it. Absent when the task's run stopped on its
+     * own, and on events recorded by eve versions before it was added.
+     */
+    cancel?: { reason: TaskCancelReason };
     /** Why the call failed; present only when `status` is `"failed"`. */
     error?: { message: string };
+    /**
+     * The task's kind, as on `task.started`. Absent on events recorded by eve
+     * versions before it was added.
+     */
+    kind?: TaskStartedStreamEvent["data"]["kind"];
+    /**
+     * The tool whose call started the task, as on `task.started`. Absent on
+     * events recorded by eve versions before it was added.
+     */
+    name?: string;
     /** The call's result; present only when `status` is `"completed"`. */
     output?: JsonValue;
     status: "completed" | "failed" | "cancelled";
@@ -434,6 +472,13 @@ export interface TaskSettledStreamEvent {
   };
   type: "task.settled";
 }
+
+/**
+ * Why the session cancelled a task call: the model called `eve__task_cancel`,
+ * someone cancelled the turn (or, between turns, the tasks still working), or
+ * the turn ended while the task still worked.
+ */
+export type TaskCancelReason = "task_cancel" | "turn_cancelled" | "turn_ended";
 
 /**
  * Stream event emitted when one assistant text delta is appended to the
@@ -586,6 +631,9 @@ export interface TurnCompletedStreamEvent {
   type: "turn.completed";
 }
 
+/** What an open turn waits on when it parks; see {@link TurnWaitingStreamEvent}. */
+export type TurnWaitingOn = "input" | "tasks";
+
 /**
  * Stream event emitted each time an open turn parks, such as when a call it is
  * running asks a question. The turn stays open: the next `step.started` with
@@ -594,8 +642,20 @@ export interface TurnCompletedStreamEvent {
  */
 export interface TurnWaitingStreamEvent {
   data: {
+    /**
+     * What the turn waits on. `"input"`: a person must act on a sign-in,
+     * approval, or question; clients stop reading here. `"tasks"`: work the
+     * turn started is still running, and the turn resumes on its own.
+     */
+    on: TurnWaitingOn;
     sequence: number;
     turnId: string;
+    /**
+     * The session's token usage so far: its own model calls plus what the
+     * agents it delegated to spent. `costUsd` is absent when no model call
+     * reported a cost. Absent on events from eve versions before it was added.
+     */
+    usage?: TokenUsage;
   };
   type: "turn.waiting";
 }
@@ -684,6 +744,11 @@ export interface AuthorizationRequiredStreamEvent {
     candidateId?: string;
     description: string;
     name: string;
+    /**
+     * Session principal that started this sign-in, matching `responderPrincipalId`
+     * on approval events. Channels use it to deliver the challenge privately.
+     */
+    principalId?: string;
     sequence: number;
     stepIndex: number;
     /** The task that needs the sign-in, when it comes from a task's run. */
@@ -726,6 +791,8 @@ export interface AuthorizationCompletedStreamEvent {
     authorization?: ConnectionAuthorizationChallenge;
     name: string;
     outcome: AuthorizationOutcome;
+    /** Session principal that started the matching sign-in. */
+    principalId?: string;
     reason?: string;
     sequence: number;
     stepIndex: number;
@@ -744,6 +811,12 @@ export interface SessionWaitingStreamEvent {
   data: {
     /** Channel-local continuation token, or the immutable session ID for an ID-only session. */
     continuationToken: string;
+    /**
+     * The session's token usage so far: its own model calls plus what the
+     * agents it delegated to spent. `costUsd` is absent when no model call
+     * reported a cost. Absent on events from eve versions before it was added.
+     */
+    usage?: TokenUsage;
     wait: "next-user-message";
   };
   type: "session.waiting";
@@ -758,6 +831,12 @@ export interface SessionFailedStreamEvent {
     details?: JsonObject;
     message: string;
     sessionId: string;
+    /**
+     * The session's token usage so far: its own model calls plus what the
+     * agents it delegated to spent. `costUsd` is absent when no model call
+     * reported a cost. Absent on events from eve versions before it was added.
+     */
+    usage?: TokenUsage;
   };
   type: "session.failed";
 }
@@ -766,6 +845,14 @@ export interface SessionFailedStreamEvent {
  * Stream event emitted when the session completes successfully.
  */
 export interface SessionCompletedStreamEvent {
+  /** Absent when the session's usage was unknown, and on events from eve versions before it was added. */
+  data?: {
+    /**
+     * The session's token usage: its own model calls plus what the agents it
+     * delegated to spent. `costUsd` is absent when no model call reported a cost.
+     */
+    usage: TokenUsage;
+  };
   type: "session.completed";
 }
 
@@ -866,6 +953,7 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
  */
 export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
+  readonly predecessor?: SessionPredecessor;
   readonly runtime?: RuntimeIdentity;
   readonly trace?: RuntimeTraceContext;
 }): SessionStartedStreamEvent {
@@ -873,6 +961,10 @@ export function createSessionStartedEvent(input?: {
 
   if (input?.invocation !== undefined) {
     data.invocation = input.invocation;
+  }
+
+  if (input?.predecessor !== undefined) {
+    data.predecessor = input.predecessor;
   }
 
   if (input?.runtime !== undefined) {
@@ -1001,12 +1093,16 @@ function projectFileLikePart(
     return tagged;
   }
 
-  const size = byteLengthOf(data);
-  if (size !== undefined) {
-    return createProjectedFilePart({ filename, mediaType, size });
+  const link = clientUrlFragment(data);
+  if (link.url !== undefined) {
+    return createProjectedFilePart({ filename, mediaType, ...link });
   }
-
-  return createProjectedFilePart({ filename, mediaType, ...clientUrlFragment(data) });
+  // Inline payloads report their size only: this event is stored with the
+  // session stream, which must not keep attachment bytes.
+  const size = getKnownByteLength(data);
+  return size === null
+    ? createProjectedFilePart({ filename, mediaType })
+    : createProjectedFilePart({ filename, mediaType, size });
 }
 
 function projectTaggedFileData(
@@ -1100,10 +1196,6 @@ function clientUrlFragment(data: unknown): { readonly url?: string } {
     return {};
   }
 
-  if (data.startsWith("data:")) {
-    return { url: data };
-  }
-
   try {
     const url = new URL(data);
     return isClientResolvableUrl(url) ? { url: url.href } : {};
@@ -1113,7 +1205,7 @@ function clientUrlFragment(data: unknown): { readonly url?: string } {
 }
 
 function isClientResolvableUrl(url: URL): boolean {
-  return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:";
+  return url.protocol === "http:" || url.protocol === "https:";
 }
 
 function basenameOf(path: string): string {
@@ -1187,6 +1279,7 @@ export function createAuthorizationRequiredEvent(input: {
   readonly candidateId?: string;
   readonly description: string;
   readonly name: string;
+  readonly principalId?: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly taskId?: string;
@@ -1208,6 +1301,9 @@ export function createAuthorizationRequiredEvent(input: {
   }
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
+  }
+  if (input.principalId !== undefined) {
+    data.principalId = input.principalId;
   }
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
@@ -1232,6 +1328,7 @@ export function createAuthorizationCompletedEvent(input: {
   readonly candidateId?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
+  readonly principalId?: string;
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1253,6 +1350,9 @@ export function createAuthorizationCompletedEvent(input: {
   }
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
+  }
+  if (input.principalId !== undefined) {
+    data.principalId = input.principalId;
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;
@@ -1284,6 +1384,7 @@ export function createApprovalSettledEvent(
  * Creates the `input.requested` event for one pending HITL batch.
  */
 export function createInputRequestedEvent(input: {
+  readonly callId?: string;
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1296,6 +1397,7 @@ export function createInputRequestedEvent(input: {
     stepIndex: input.stepIndex,
     turnId: input.turnId,
   };
+  if (input.callId !== undefined) data.callId = input.callId;
   if (input.taskId !== undefined) data.taskId = input.taskId;
   return { data, type: "input.requested" };
 }
@@ -1394,12 +1496,15 @@ export function createTaskSettledEvent(
 ): TaskSettledStreamEvent {
   const data: TaskSettledStreamEvent["data"] = {
     callId: input.callId,
+    ...(input.kind !== undefined && { kind: input.kind }),
+    ...(input.name !== undefined && { name: input.name }),
     status: input.status,
     taskId: input.taskId,
     turnId: input.turnId,
   };
   if (input.output !== undefined) data.output = input.output;
   if (input.error !== undefined) data.error = input.error;
+  if (input.cancel !== undefined) data.cancel = input.cancel;
   return { data, type: "task.settled" };
 }
 
@@ -1640,13 +1745,17 @@ export function createTurnCompletedEvent(input: {
  * Creates the `turn.waiting` event for one open turn that parked.
  */
 export function createTurnWaitingEvent(input: {
+  readonly on: TurnWaitingOn;
   readonly sequence: number;
   readonly turnId: string;
+  readonly usage: TokenUsage | undefined;
 }): TurnWaitingStreamEvent {
   return {
     data: {
+      on: input.on,
       sequence: input.sequence,
       turnId: input.turnId,
+      ...(input.usage !== undefined && { usage: input.usage }),
     },
     type: "turn.waiting",
   };
@@ -1755,11 +1864,12 @@ export function createCompactionCompletedEvent(input: {
  * wait.
  */
 export function createSessionWaitingEvent(
-  namespacedContinuationToken: string = "",
+  usage: TokenUsage | undefined,
 ): SessionWaitingStreamEvent {
   return {
     data: {
-      continuationToken: toChannelLocalContinuationToken(namespacedContinuationToken),
+      continuationToken: "",
+      ...(usage !== undefined && { usage }),
       wait: "next-user-message",
     },
     type: "session.waiting",
@@ -1774,6 +1884,7 @@ export function createSessionFailedEvent(input: {
   readonly details?: JsonObject;
   readonly message: string;
   readonly sessionId: string;
+  readonly usage: TokenUsage | undefined;
 }): SessionFailedStreamEvent {
   return {
     data: {
@@ -1781,6 +1892,7 @@ export function createSessionFailedEvent(input: {
       details: input.details,
       message: input.message,
       sessionId: input.sessionId,
+      ...(input.usage !== undefined && { usage: input.usage }),
     },
     type: "session.failed",
   };
@@ -1789,8 +1901,12 @@ export function createSessionFailedEvent(input: {
 /**
  * Creates the `session.completed` event for one terminal session completion.
  */
-export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
-  return { type: "session.completed" };
+export function createSessionCompletedEvent(
+  usage: TokenUsage | undefined,
+): SessionCompletedStreamEvent {
+  return usage === undefined
+    ? { type: "session.completed" }
+    : { data: { usage }, type: "session.completed" };
 }
 
 /**
@@ -1804,7 +1920,11 @@ export function stampMessageStreamEvent(
   event: UnstampedMessageStreamEvent,
   deliveryIds?: readonly string[],
 ): MessageStreamEvent {
-  const meta: { at: string; id: string; deliveryIds?: readonly string[] } = {
+  const meta: {
+    at: string;
+    id: string;
+    deliveryIds?: readonly string[];
+  } = {
     at: new Date().toISOString(),
     id: createEventId(),
   };
@@ -1826,6 +1946,7 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
   readonly error?: ActionResultError;
   readonly status: ActionResultStatus;
 } {
+  const outputError = readActionResultOutputError(result.output);
   if (result.isError === true) {
     return {
       error: buildActionResultError(result),
@@ -1833,7 +1954,6 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
     };
   }
 
-  const outputError = readActionResultOutputError(result.output);
   if (outputError !== undefined) {
     return {
       error: outputError,

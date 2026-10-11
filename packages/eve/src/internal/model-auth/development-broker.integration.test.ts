@@ -25,7 +25,7 @@ import { handleDevelopmentModelCredentialRequest } from "./development-broker-se
 import { readDevelopmentModelCredential } from "./development-broker-client.js";
 import {
   createDirectModelFetch,
-  localGatewayEvaluationModel,
+  localGatewayDecisionModel,
   localGatewayModel,
 } from "./transport.js";
 import { createCodexFetch } from "#public/models/openai/chatgpt/transport.js";
@@ -224,9 +224,9 @@ it("streams through the same Gateway model after switching teams and then to a k
   }
 });
 
-it("evaluates through the Gateway connection selected by /login", async () => {
-  const model = localGatewayEvaluationModel("typesafe-ai/jev");
-  if (!model) throw new Error("Expected a Gateway evaluation model");
+it("decides through the Gateway connection selected by /login", async () => {
+  const model = localGatewayDecisionModel("typesafe-ai/jev");
+  if (!model) throw new Error("Expected a Gateway decision model");
   expect(JSON.stringify(model)).not.toContain("account-token");
   expect(mocks.gateway).not.toHaveBeenCalled();
   upstream.mockResolvedValue(
@@ -236,7 +236,7 @@ it("evaluates through the Gateway connection selected by /login", async () => {
     }),
   );
 
-  const result = await model.doEvaluate({
+  const result = await model.doDecide({
     state: "Alice requests a routine summary.",
     questions: {
       route: {
@@ -249,7 +249,7 @@ it("evaluates through the Gateway connection selected by /login", async () => {
 
   expect(result.answers.route).toEqual({ type: "choice", choice: "fast" });
   const [url, init] = upstream.mock.calls[0]!;
-  expect(String(url)).toBe("https://ai-gateway.vercel.sh/v4/ai/evaluation-model");
+  expect(String(url)).toBe("https://ai-gateway.vercel.sh/v4/ai/decision-model");
   expect(init.headers.get("authorization")).toBe("Bearer account-token");
   expect(init.headers.get("x-vercel-ai-gateway-team")).toBe("team_a");
   expect(init.headers.get("ai-model-id")).toBe("typesafe-ai/jev");

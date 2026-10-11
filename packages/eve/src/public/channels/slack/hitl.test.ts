@@ -6,17 +6,19 @@ import {
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlActionId,
-  deriveHitlResponse,
   formatInputRequestFallbackText,
-  HITL_ACTION_PREFIX,
   HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
   HITL_FREEFORM_MODAL_CALLBACK_ID,
   isFreeformAction,
   isHitlAction,
-  renderInputRequestBlocks,
 } from "#public/channels/slack/hitl.js";
+import {
+  deriveHitlResponse,
+  HITL_ACTION_PREFIX,
+  renderInputRequestBlocks,
+} from "#public/channels/slack/index.js";
 import {
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
@@ -218,6 +220,7 @@ describe("renderInputRequestBlocks", () => {
     expect(card).toMatchObject({
       type: "card",
       body: { type: "mrkdwn", text: "*Approve tool call: mongodb-mutate*" },
+      subtext: { type: "mrkdwn", text: "I've paused until someone approves or cancels." },
     });
     expect(card.actions).toMatchObject([
       {

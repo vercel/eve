@@ -13,5 +13,9 @@ export const SIGN_OFF_INTERIM_MESSAGE = "Asked for sign-off on the api plan; I'l
 /** The root agent's text before its turn waits on the `workflow-stager` agent. */
 export const DELEGATE_INTERIM_MESSAGE = "Asked workflow-stager to stage api; I'll report back.";
 
+/** The root agent's text while `research_brief` works in the background. */
+export const RESEARCH_INTERIM_MESSAGE =
+  "Researching Alice's report in the background; I'll share the findings when they arrive.";
+
 /** The `workflow-stager` child's text before its own turn waits on its staging task. */
 export const STAGER_INTERIM_MESSAGE = "Staging api for the parent now.";

@@ -1,14 +1,15 @@
 import type {
-  ActivityObserverConfig,
   ChannelInstrumentationProjection,
   RunSessionLimits,
   SessionCapabilities,
   SessionParent,
+  SessionTraceRoot,
 } from "#channel/types.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
+import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
+import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { PreparedCoordinationDispatch } from "#execution/coordination-dispatch-shared.js";
-import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   serializeDurableCompiledArtifactsSource,
   type DurableCompiledArtifactsSource,
@@ -34,14 +35,13 @@ import {
  * of it: each message carries the auth of the call that sends it.
  */
 export interface AgentSessionContext {
-  readonly activityObserver?: ActivityObserverConfig & {
-    readonly workIdentity: ActivityWorkIdentityV1;
-  };
+  readonly toolStubs?: StubScope;
   /** The agents the call may open, by name, which `ctx.agents` lists. */
   readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   readonly bundle: AgentSessionBundle;
   /** Forwarded unchanged, so a session asks a person only when its caller can. */
   readonly capabilities?: SessionCapabilities;
+  readonly schedule?: SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
@@ -51,6 +51,8 @@ export interface AgentSessionContext {
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** The calling session, turn, and tool call, recorded as each session's lineage. */
   readonly parent: SessionParent;
+  /** Present when the caller's trace root differs from `parent.rootSessionId`. */
+  readonly traceRoot?: SessionTraceRoot;
   readonly sandbox: AgentSessionSandbox;
   readonly trace: AgentChildTraceDispatch;
 }
@@ -69,7 +71,6 @@ export interface AgentSessionSandbox {
 
 type CallerDispatch = Pick<
   PreparedCoordinationDispatch<unknown>,
-  | "activityObserver"
   | "batch"
   | "bundle"
   | "capabilities"
@@ -80,6 +81,7 @@ type CallerDispatch = Pick<
   | "sandboxSessionId"
   | "serializedContext"
   | "session"
+  | "traceRoot"
   | "workflowAgents"
 >;
 
@@ -109,13 +111,14 @@ export function captureAgentSessionContext(
 ): AgentSessionContext {
   const { batch, session } = caller;
   return {
-    activityObserver: caller.activityObserver,
     agents: caller.workflowAgents,
+    toolStubs: caller.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined,
     bundle: {
       nodeId: caller.bundle.nodeId,
       source: serializeDurableCompiledArtifactsSource(caller.bundle.compiledArtifactsSource),
     },
     capabilities: caller.capabilities,
+    schedule: readSerializedSessionSchedule(caller.serializedContext),
     channelMetadata: caller.channelMetadata,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
@@ -128,6 +131,7 @@ export function captureAgentSessionContext(
       turn: { id: batch.event.turnId, sequence: batch.event.sequence },
     },
     sandbox: { sessionId: caller.sandboxSessionId, state: session.sandboxState },
+    traceRoot: caller.traceRoot,
     trace: resolveToolCallAgentTrace({
       callId,
       conversation: caller.inheritedConversation,

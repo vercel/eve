@@ -34,6 +34,7 @@ export default defineConfig({
       "src/**/*.integration.test.ts",
       "src/**/*.scenario.test.ts",
       "test/**/*.integration.test.ts",
+      "test/browser/**",
       "test/framework-fixtures/**",
       "test/scenarios/**",
     ],

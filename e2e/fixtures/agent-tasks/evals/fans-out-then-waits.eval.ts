@@ -19,7 +19,7 @@ export default defineEval({
     const started = taskStarts(turn.events, "compile_report");
     t.check(started.length, equals(2)).label("each report is compiled once");
     turn.eventsSatisfy("both reports start before the first wait", (events) => {
-      const firstWait = firstRequestOf(events, "task_wait");
+      const firstWait = firstRequestOf(events, "eve__task_wait");
       const starts = events.flatMap((event, index) =>
         event.type === "task.started" && event.data.name === "compile_report" ? [index] : [],
       );

@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { posix, sep } from "node:path";
+import { join, posix, sep } from "node:path";
 
 /**
  * Minimum directory-entry shape returned by a {@link ProjectSource}.
@@ -278,6 +278,24 @@ function createMemoryEntry(name: string, kind: "file" | "directory"): ProjectSou
       return kind === "file";
     },
   };
+}
+
+/**
+ * Reads the non-empty string `name` field from `root/package.json`, or
+ * `undefined` when the file is missing, unparseable, or has no usable name.
+ */
+export async function readPackageJsonName(
+  source: ProjectSource,
+  root: string,
+): Promise<string | undefined> {
+  try {
+    const { name } = JSON.parse(await source.readTextFile(join(root, "package.json"))) as {
+      name?: unknown;
+    };
+    return typeof name === "string" && name.length > 0 ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeToPosix(path: string): string {

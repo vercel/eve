@@ -37,31 +37,6 @@ function request(overrides?: Partial<InputRequest>): InputRequest {
 }
 
 describe("renderInputRequestComponents", () => {
-  it("renders confirmation options as buttons and decodes the clicked option", () => {
-    const components = renderInputRequestComponents(
-      request({
-        display: "confirmation",
-        options: [
-          { id: "approve", label: "Approve", style: "primary" },
-          { id: "cancel", label: "Cancel", style: "danger" },
-        ],
-      }),
-    );
-    const firstRow = components[0] as { components: Array<{ custom_id: string }> };
-    const approveCustomId = firstRow.components[0]!.custom_id;
-
-    expect(
-      deriveComponentInputResponses({
-        ...BASE_COMPONENT,
-        componentType: 2,
-        customId: approveCustomId,
-        messageId: "M01",
-        type: 3,
-        values: [],
-      }),
-    ).toEqual([{ optionId: "approve", requestId: "call_1" }]);
-  });
-
   it("renders select requests as a string select and decodes selected values", () => {
     const components = renderInputRequestComponents(
       request({

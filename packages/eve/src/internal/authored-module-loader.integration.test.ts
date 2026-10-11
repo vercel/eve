@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
+import { resolveDiscoveryProject } from "#discover/project.js";
 import {
   bundleAuthoredModuleCode,
   bundleAuthoredModuleForGeneration,
@@ -1497,5 +1498,90 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     await expect(
       loadAuthoredModuleNamespace(join(app.appRoot, "agent", "tools", "use_native.ts")),
     ).rejects.toThrow(/build\.externalDependencies|asset import/);
+  });
+});
+
+describe("workspace member workflow ids", () => {
+  const createAppRoot = useTemporaryAppRoots();
+
+  const workflowTool = `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute() { "use workflow"; return 1; } });
+`;
+
+  // Members have no package.json, so the package root is the workspace root
+  // while the app root, which owns workflow ids, is the member directory.
+  async function compileMember(files: Record<string, string>) {
+    const workspace = await createAppRoot("eve-workspace-member-workflow-ids-", {
+      files: {
+        "package.json": JSON.stringify({ dependencies: { eve: "*" }, type: "module" }),
+        ...files,
+      },
+    });
+    await rm(workspace.agentRoot, { recursive: true });
+    const project = await resolveDiscoveryProject(join(workspace.appRoot, "agents", "assistant"));
+    const manifest = await compileAgentManifest((await discoverAgent(project)).manifest);
+    const generation = await bundleAuthoredModuleMapForGeneration({
+      appRoot: project.appRoot,
+      manifest,
+      moduleMapPath: join(project.appRoot, ".eve", "compile", "module-map.mjs"),
+    });
+    return { generation, manifest, project };
+  }
+
+  it("compiles root and subagent tool ids that match the generation bundle", async () => {
+    const { generation, manifest } = await compileMember({
+      "agents/assistant/agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+      "agents/assistant/agent/tools/plan.ts": workflowTool,
+      "agents/assistant/agent/subagents/reviewer/agent.ts":
+        'export default { description: "Review plans.", model: "openai/gpt-5.4" };\n',
+      "agents/assistant/agent/subagents/reviewer/tools/approve.ts": workflowTool,
+    });
+    const reviewer = manifest.subagents.find((subagent) => subagent.name === "reviewer");
+    const toolId = "workflow//./agent/tools/plan//execute";
+    const subagentToolId = "workflow//./agent/subagents/reviewer/tools/approve//execute";
+
+    expect(manifest.tools.find((tool) => tool.name === "plan")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
+      kind: "workflow-tool",
+      workflowId: toolId,
+    });
+    expect(
+      reviewer?.agent.tools.find((tool) => tool.name === "approve")?.behavior?.handling,
+    ).toEqual({ entryPoint: "execute", kind: "workflow-tool", workflowId: subagentToolId });
+    expect(generation.code).toContain(JSON.stringify(toolId));
+    expect(generation.code).toContain(JSON.stringify(subagentToolId));
+  });
+
+  it("compiles workflow modules from the shared package but not from sibling packages", async () => {
+    const { generation, manifest, project } = await compileMember({
+      "agents/assistant/agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+      "agents/assistant/agent/tools/plan.ts": `import { defineWorkflowTool } from "eve/tools";
+import "../../../../packages/shared/index";
+import { run } from "../../../../lib/run";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, execute: run });
+`,
+      "lib/run.ts":
+        'import { add } from "./steps";\nexport async function run() { "use workflow"; return add(1); }\n',
+      "lib/steps.ts": 'export async function add(n) { "use step"; return n + 1; }\n',
+      "packages/shared/package.json": JSON.stringify({ name: "shared", version: "1.0.0" }),
+      "packages/shared/index.ts": 'export async function other() { "use step"; return 1; }\n',
+    });
+    const workflowId = "workflow//../../lib/run//run";
+    const sharedModule = (name: string) => join(project.appRoot, "..", "..", "lib", name);
+
+    expect(manifest.tools.find((tool) => tool.name === "plan")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
+      kind: "workflow-tool",
+      workflowId,
+    });
+    expect(generation.code).toContain(JSON.stringify(workflowId));
+    expect(generation.authoredWorkflowModules).toEqual({
+      directiveModules: [sharedModule("run.ts"), sharedModule("steps.ts")],
+      workflowModules: [sharedModule("run.ts")],
+    });
+    expect(generation.sourceModules).toEqual(
+      expect.arrayContaining([sharedModule("run.ts"), sharedModule("steps.ts")]),
+    );
+    expect(generation.sourceModules.some((id) => id.includes("/packages/shared/"))).toBe(false);
   });
 });

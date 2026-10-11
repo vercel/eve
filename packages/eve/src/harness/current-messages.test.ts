@@ -78,34 +78,6 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
-  it("prepares tracked announcements without advancing the recorded baseline", () => {
-    const recorded = { availableSkills: "working" };
-    const current = createCurrentMessages([{ role: "user", content: "working", kind: "user" }], {
-      historyState: recorded,
-    });
-
-    current.addAnnouncements({ availableSkills: "working" });
-    current.addAnnouncements({ availableSkills: "completed" });
-    current.addAnnouncements({ availableSkills: "completed" });
-
-    expect(recorded).toEqual({ availableSkills: "working" });
-    expect(current.historyState).toEqual({ availableSkills: "completed" });
-    expect(current.history).toEqual([
-      { role: "user", content: "working", kind: "user" },
-      { role: "user", content: "completed", kind: "context.state" },
-    ]);
-  });
-
-  it("ignores empty or absent announcements", () => {
-    const current = createCurrentMessages([]);
-    current.addAnnouncements({ availableSkills: "skills" });
-    current.addAnnouncements({ availableSkills: "" });
-    current.addAnnouncements({});
-
-    expect(current.history).toEqual([{ role: "user", content: "skills", kind: "context.state" }]);
-    expect(current.historyState).toEqual({ availableSkills: "skills" });
-  });
-
   it("persists additions without storing client context or replacing projected history", () => {
     const hidden = {
       role: "user" as const,
@@ -132,36 +104,6 @@ describe("createCurrentMessages", () => {
       { role: "user", content: "[Skills]\nworking", kind: "context.state" },
       input,
     ]);
-  });
-
-  it("keeps later context out of the tail when history ends with an approval response", () => {
-    const approvalTail = {
-      role: "tool" as const,
-      content: [
-        {
-          approvalId: "approval-1",
-          approved: true,
-          type: "tool-approval-response" as const,
-        },
-      ],
-    };
-    const current = createCurrentMessages([
-      { role: "user", content: "history", kind: "user" },
-      {
-        role: "assistant",
-        content: [
-          { type: "tool-call", toolCallId: "call-1", toolName: "bash", input: {} },
-          { type: "tool-approval-request", approvalId: "approval-1", toolCallId: "call-1" },
-        ],
-      },
-      approvalTail,
-    ]);
-
-    current.addAnnouncements({ availableSkills: "skills" });
-
-    expect(current.systemMessages).toEqual([{ role: "system", content: "skills" }]);
-    expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
-    expect(current.historyState).toEqual({});
   });
 
   it("keeps hierarchy-sensitive context in instructions when requested", () => {

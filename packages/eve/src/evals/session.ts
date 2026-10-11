@@ -18,11 +18,7 @@ import type {
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
 import { isTurnFailureEvent } from "#protocol/message.js";
-import {
-  isTurnSegmentBoundary,
-  summarizeTurnEvents,
-  updatePendingInputRequests,
-} from "#client/session-utils.js";
+import { summarizeTurnEvents, TurnSegment } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -45,6 +41,7 @@ import type {
   EveEvalWaitForEventOptions,
 } from "#evals/types.js";
 import type { EveEvalInputRequestMatchOptions, EveEvalToolCallMatchOptions } from "#evals/match.js";
+import { assertReportedToolName } from "#evals/reported-tool-name.js";
 
 /* oxlint-disable typescript/no-unsafe-declaration-merging */
 
@@ -149,6 +146,14 @@ export class EvalSessionDriver implements EveEvalSession {
 
   async cancel(): Promise<CancelSessionResult> {
     return await this.#session.cancel();
+  }
+
+  async compact(): Promise<EveEvalTurn> {
+    const result = await this.#session.compact();
+    if (result.status !== "accepted") {
+      throw new Error(`compact() found no active session for "${this.sessionId}".`);
+    }
+    return await this.readTurn();
   }
 
   agent(started: AgentStartedStreamEvent): EveEvalAgentSession {
@@ -451,10 +456,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
-      const pendingInputRequests = new Set<string>();
+      const segment = new TurnSegment();
       for await (const event of source) {
         this.#events.push(event);
-        updatePendingInputRequests(pendingInputRequests, event);
+        const endsSegment = segment.observe(event);
         observe(event);
         this.#resolveWaiters(event);
 
@@ -466,7 +471,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
           );
         }
 
-        if (isTurnSegmentBoundary(event, pendingInputRequests)) {
+        if (endsSegment) {
           sawBoundary = true;
           this.#closeWaiters(
             new Error(`Session ${this.sessionId} reached ${event.type} before the expected event.`),
@@ -563,6 +568,7 @@ class EvalTurn implements EveEvalTurn {
     name: string,
     options: Omit<EveEvalToolCallMatchOptions, "count"> = {},
   ): EveEvalToolCall {
+    assertReportedToolName(name, this.#collector.tools);
     const matching = this.toolCalls.filter(
       (call) => call.name === name && toolCallMatches(call, options),
     );

@@ -1,8 +1,10 @@
-import type { LanguageModel } from "ai";
+import { createHash } from "node:crypto";
+
 import type { SessionAuthContext } from "#channel/types.js";
-import { mergeGatewaySessionId } from "#internal/gateway.js";
+import type { ModelProfile } from "#harness/model-profile.js";
+import type { HarnessSession } from "#harness/types.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import { mergeObjects } from "#shared/objects.js";
 
 /**
@@ -10,7 +12,7 @@ import { mergeObjects } from "#shared/objects.js";
  * raw eve principal. Authored provider options take precedence over the default.
  */
 export function mergeProviderSafetyIdentifier(
-  modelReference: RuntimeModelReference,
+  provider: string,
   providerOptions: Readonly<Record<string, unknown>> | undefined,
   auth: SessionAuthContext | null,
 ): Record<string, unknown> | undefined {
@@ -19,7 +21,6 @@ export function mergeProviderSafetyIdentifier(
   }
 
   const ownerKey = invocationOwnerKey(auth);
-  const provider = modelReference.id.split("/", 1)[0]?.toLowerCase();
   const defaults =
     provider === "openai"
       ? { openai: { safetyIdentifier: ownerKey } }
@@ -33,14 +34,62 @@ export function mergeProviderSafetyIdentifier(
 /** Composes the per-call defaults shared by model steps and compaction. */
 export function resolveCallProviderOptions(input: {
   readonly auth: SessionAuthContext | null;
-  readonly conversationId: string;
-  readonly model: LanguageModel;
-  readonly modelReference: RuntimeModelReference;
+  readonly profile: ModelProfile;
   readonly providerOptions: Readonly<Record<string, unknown>> | undefined;
+  readonly session: Pick<HarnessSession, "rootSessionId" | "sessionId">;
 }): Record<string, unknown> | undefined {
-  return mergeGatewaySessionId(
-    input.model,
-    mergeProviderSafetyIdentifier(input.modelReference, input.providerOptions, input.auth),
-    input.conversationId,
+  const { session } = input;
+  const providerOptions = mergeProviderSafetyIdentifier(
+    input.profile.provider,
+    input.providerOptions,
+    input.auth,
   );
+  if (input.profile.gateway) {
+    return mergeGatewaySessionId(
+      providerOptions,
+      resolveConversationId(session.rootSessionId ?? session.sessionId),
+    );
+  }
+  return PROMPT_CACHE_KEY_PROVIDERS.has(input.profile.provider)
+    ? mergeOpenAIPromptCacheKey(providerOptions, session.sessionId)
+    : providerOptions;
+}
+
+/**
+ * Direct OpenAI, and the ChatGPT subscription's Codex backend, which the Codex CLI itself sends a
+ * per-session `prompt_cache_key`.
+ */
+const PROMPT_CACHE_KEY_PROVIDERS: ReadonlySet<string> = new Set(["openai", "codex"]);
+
+/**
+ * OpenAI uses the cache key to route requests that share a prompt prefix toward the same cache,
+ * and matches less reliably without one. Each session keeps its own prefix, so its id makes the key. The hash
+ * keeps the key short and opaque whatever the session id looks like.
+ */
+function mergeOpenAIPromptCacheKey(
+  providerOptions: Readonly<Record<string, unknown>> | undefined,
+  sessionId: string,
+): Record<string, unknown> {
+  const promptCacheKey = createHash("sha256").update(sessionId, "utf8").digest("base64url");
+  return mergeObjects({ openai: { promptCacheKey } }, providerOptions);
+}
+
+/** Groups Gateway generations under the same identity used by eve's agent spans. */
+function mergeGatewaySessionId(
+  providerOptions: Readonly<Record<string, unknown>> | undefined,
+  conversationId: string,
+): Record<string, unknown> | undefined {
+  const gateway = providerOptions?.gateway;
+  const gatewayOptions =
+    gateway !== null && typeof gateway === "object" && !Array.isArray(gateway)
+      ? (gateway as Record<string, unknown>)
+      : undefined;
+  if (typeof gatewayOptions?.sessionId === "string" && gatewayOptions.sessionId.trim()) {
+    return providerOptions;
+  }
+
+  return {
+    ...providerOptions,
+    gateway: { ...gatewayOptions, sessionId: conversationId },
+  };
 }
