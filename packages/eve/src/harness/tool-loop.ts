@@ -1,3 +1,4 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { contextStorage } from "#context/container.js";
 import { StaticModelReferenceKey } from "#context/keys.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
@@ -150,7 +151,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     // Input that opened no turn and found none open, such as a stale answer eve dropped,
     // settled above and leaves nothing to run.
-    if (!intake.opensTurn && step.view().projection.activeTurnId === undefined) {
+    if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
       return { next: null, session: step.session };
     }
     await admitApprovedWork(step, intake.approved);

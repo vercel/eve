@@ -1,4 +1,5 @@
 import type { ControlDelivery } from "#harness/types.js";
+import { latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
@@ -74,7 +75,8 @@ export async function finalizeSession(
   const session = sessionState?.snapshot.session;
   const usage = session === undefined ? undefined : getSessionUsage(session);
   const stored = storedProjection(session?.state);
-  const latest = stored.latestTurn;
+  const latestTurnId = latestTurnIdOf(stored);
+  const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
       control: outcome.control,

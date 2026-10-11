@@ -16,7 +16,6 @@ import type { Answer } from "#shared/input.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 
 // How a delivery reaches `answer`: queued input joins it, stale answers turn into text, and a
 // plain-text answer becomes the response it stands for.
@@ -55,7 +54,7 @@ export function deliver(
     ...ownOpenRequestIds(view),
     ...view.turn.suspended.flatMap((step) => step.requests.map((ask) => ask.interactionId)),
   ]);
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const converted = convertStaleResponsesToUserMessage({
     pendingRequestIds,
     view: tables,

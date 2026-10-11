@@ -7,6 +7,7 @@ import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   initialSessionProjection,
+  activeTurnIdOf,
   openRunOf,
   turnCoordinates,
   type SessionProjection,
@@ -41,10 +42,18 @@ export interface SessionView {
 
 /** Reads the authoritative lifecycle facts saved alongside execution state. */
 export function storedProjection(state: SessionStateMap | undefined): SessionProjection {
-  return (
-    (state?.[SESSION_PROJECTION_STATE_KEY] as SessionProjection | undefined) ??
-    initialSessionProjection()
-  );
+  const stored = state?.[SESSION_PROJECTION_STATE_KEY] as Partial<SessionProjection> | undefined;
+  if (stored === undefined) return initialSessionProjection();
+  // A projection an earlier build stored may lack what this one keeps beside its view, and carry
+  // what this one no longer keeps.
+  const initial = initialSessionProjection();
+  const projection: SessionProjection = {
+    counters: stored.counters ?? initial.counters,
+    view: stored.view ?? initial.view,
+  };
+  return stored.outputStarted === undefined
+    ? projection
+    : { ...projection, outputStarted: stored.outputStarted };
 }
 
 /** Coordinates the next lifecycle event carries, and whether a turn is open. */
@@ -62,16 +71,16 @@ export interface TurnPosition {
 
 export function turnPosition(projection: SessionProjection): TurnPosition {
   const { sequence, stepIndex } = turnCoordinates(projection);
-  const turn =
-    projection.activeTurnId === undefined ? undefined : projection.turns[projection.activeTurnId];
+  const turnId = activeTurnIdOf(projection);
   const position: { -readonly [K in keyof TurnPosition]: TurnPosition[K] } = {
-    sessionStarted: projection.started === true,
+    sessionStarted: projection.view.session.status !== "new",
     sequence,
     stepIndex,
-    turnId: turn?.turnId ?? "",
+    turnId: turnId ?? "",
   };
-  if (turn?.outputStarted === true) position.assistantOutputStarted = true;
-  const runId = turn === undefined ? undefined : openRunOf(projection, turn.turnId);
+  if (turnId === undefined) return position;
+  if (projection.outputStarted === turnId) position.assistantOutputStarted = true;
+  const runId = openRunOf(projection, turnId);
   if (runId !== undefined) position.runId = runId;
   return position;
 }
@@ -82,14 +91,13 @@ export function activeTurnId(position: Pick<TurnPosition, "sequence" | "turnId">
 }
 
 export function isBetweenTurns(projection: SessionProjection): boolean {
-  return projection.activeTurnId === undefined;
+  return activeTurnIdOf(projection) === undefined;
 }
 
 /** The index the open turn's next `step.started` takes. */
 export function nextStepIndex(projection: SessionProjection): number {
-  const turn =
-    projection.activeTurnId === undefined ? undefined : projection.turns[projection.activeTurnId];
-  return turn?.stepIndex === undefined ? 0 : turn.stepIndex + 1;
+  const turnId = activeTurnIdOf(projection);
+  return turnId === undefined ? 0 : (projection.view.turns[turnId]?.runs ?? 0);
 }
 
 /** Input the session holds until it can run. */

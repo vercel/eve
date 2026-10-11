@@ -1,3 +1,4 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
   publishFromSessionStep,
@@ -57,7 +58,7 @@ export async function settleCancelledTurn(
   const step = { ...(await restoreSessionStep(input)), history: input.history };
   const durableState = step.durableSession.state;
   const owningTurnId =
-    runtimeWait(durableState)?.event.turnId ?? storedProjection(durableState).activeTurnId ?? "";
+    runtimeWait(durableState)?.event.turnId ?? activeTurnIdOf(storedProjection(durableState)) ?? "";
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
     publish: (emit, session) =>

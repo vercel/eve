@@ -9,7 +9,6 @@ import type { Answer } from "#shared/input.js";
 import { resolveTextToResponse } from "#channel/resolve-text.js";
 import { inputTextKey, readAnswerText } from "#internal/input-text.js";
 import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/hitl/budget-request.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 
 // ---------------------------------------------------------------------------
 // Downward deliver routing
@@ -85,7 +84,7 @@ export function routeDeliverPayload(input: {
     // A request takes one answer; the first one in the payload wins.
     if (routed.has(answer.interactionId)) continue;
     routed.add(answer.interactionId);
-    const kind = publicViewOf(projection).interactions[answer.interactionId]?.request.kind;
+    const kind = projection.view.interactions[answer.interactionId]?.request.kind;
     if (kind === "budget" && answer.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
       parentAction = { answer, kind: "cancel-turn" };
     }

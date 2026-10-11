@@ -2,7 +2,6 @@ import { userPartsOf } from "#harness/user-parts.js";
 import { routeAnswer } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { principalOf } from "#execution/session/delivery-facts.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
@@ -93,7 +92,7 @@ async function routeProxiedDeliver(
   const answerDeliveryIds: string[] = [];
   // A delivery that carried only relayed answers is this session's to record: it took effect
   // once forwarded, or, as a message, joins the turn that asked.
-  const tables = publicViewOf(storedProjection(durableSession.state));
+  const tables = storedProjection(durableSession.state).view;
   const routedDeliveries: Parameters<typeof routeAnswer>[1]["deliveries"][number][] = [];
   const answers: ResponseSubmittedData[] = [];
 

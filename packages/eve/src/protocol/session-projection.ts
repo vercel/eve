@@ -1,81 +1,31 @@
 import type { SessionEvent } from "#protocol/session-event.js";
-import { callTurn, interactionOwner } from "#protocol/session-projection/selectors.js";
+import { activeTurn } from "#protocol/session-projection/selectors.js";
 import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
-// The session's private coordinates: the turn sequence and step each event carries, the open model
-// runs and the ids the next ones take, and whether output started. Execution reads it alongside
-// the public view, which holds everything a reader sees. It reads only the protocol and stays free
-// of runtime dependencies, so workflow bodies import it.
-
-export interface SessionTurn {
-  readonly turnId: string;
-  readonly sequence: number;
-  readonly status: "active" | "completed" | "cancelled" | "failed";
-  /** The step the turn's latest `step.started` opened; absent before its first. */
-  readonly stepIndex?: number;
-  /** The model run that step requested. */
-  readonly runId?: string;
-  /** The turn streamed assistant output, so steering can no longer restart it. */
-  readonly outputStarted?: boolean;
-  /** The content parts that reply, in order: what `turn.settled.reply` lists. */
-  readonly reply?: readonly string[];
-}
+// What the session knows of its own lifecycle: the public view every reader folds, with
+// operational retention, and the two things it can't hold. Run and context-change ids are
+// minted from counters that outlive the rows retention drops, and whether the open turn streamed
+// output comes from deltas, which are progress, not facts. Everything else (the open turn, its
+// step and run, the line position) is read from the view. It reads only the protocol and stays
+// free of runtime dependencies, so workflow bodies import it.
 
 export interface SessionProjection {
-  /** `session.started` was published. */
-  readonly started?: true;
-  /** The session ended (`session.ended`). */
-  readonly ended?: true;
-  readonly activeTurnId?: string;
-  /** The most recent turn, open or closed. Pruning keeps it, so the session's end can name it. */
-  readonly latestTurn?: Pick<SessionTurn, "sequence" | "turnId">;
-  /** The sequence the next turn takes. */
-  readonly nextSequence: number;
-  /**
-   * Lines written to the session's stream so far: the position of the next one. The writer
-   * counts them, so every checkpoint knows its position without reading the stream.
-   */
-  readonly position?: number;
-  readonly turns: Readonly<Record<string, SessionTurn>>;
-  /** Open model runs, by `runId`: what owns each, and a turn's run's step index. */
-  readonly runs?: Readonly<Record<string, SessionRun>>;
+  /** The public view, kept with operational retention; its `position` is the next line's. */
+  readonly view: SessionView;
   /** Runs and context changes minted so far, so their ids are deterministic. */
-  readonly counters?: { readonly runs: number; readonly changes: number };
-  /** The public view, kept with operational retention, for observers and server readers. */
-  readonly view?: SessionView;
-}
-
-/** One open model run: the turn it serves with its step index, or the context change it summarizes. */
-export interface SessionRun {
-  readonly turnId?: string;
-  readonly stepIndex?: number;
-  readonly changeId?: string;
-}
-
-/** The public view a projection keeps, or an empty one before the first fold. */
-export function publicViewOf(projection: { readonly view?: SessionView } | undefined): SessionView {
-  return projection?.view ?? emptySessionView();
+  readonly counters: { readonly runs: number; readonly changes: number };
+  /** The turn that streamed output, so steering can no longer restart it. */
+  readonly outputStarted?: string;
 }
 
 export function initialSessionProjection(): SessionProjection {
-  return { nextSequence: 0, turns: {} };
-}
-
-function updateTurn<S extends SessionProjection>(
-  state: S,
-  turnId: string,
-  update: (turn: SessionTurn) => SessionTurn,
-): S {
-  const turn = state.turns[turnId];
-  if (turn === undefined) return state;
-  const next = update(turn);
-  return next === turn ? state : { ...state, turns: { ...state.turns, [turnId]: next } };
+  return { counters: { changes: 0, runs: 0 }, view: emptySessionView() };
 }
 
 /**
- * Folds one stream event into the session's coordinates. Events this fold doesn't track return
- * `state` unchanged, so callers may pass any event through it.
+ * Folds one event into what the view can't hold. Events this fold doesn't track return `state`
+ * unchanged, so callers may pass any event through it; the view folds lines separately.
  */
 export function foldSession<S extends SessionProjection>(
   state: S,
@@ -83,88 +33,69 @@ export function foldSession<S extends SessionProjection>(
 ): S {
   const typed = event as SessionEvent;
   switch (typed.type) {
-    case "session.started":
-      return state.started ? state : { ...state, started: true };
-    case "turn.started": {
-      const { turnId } = typed.data;
-      const sequence = turnSequence(turnId) ?? state.nextSequence;
-      const turn: SessionTurn = { turnId, sequence, status: "active" };
-      return {
-        ...state,
-        activeTurnId: turnId,
-        latestTurn:
-          state.latestTurn !== undefined && state.latestTurn.sequence > sequence
-            ? state.latestTurn
-            : { turnId, sequence },
-        nextSequence: Math.max(state.nextSequence, sequence + 1),
-        turns: { ...state.turns, [turnId]: turn },
-      };
-    }
-    case "turn.settled": {
-      const { outcome, turnId } = typed.data;
-      const status =
-        outcome === "completed" ? "completed" : outcome === "failed" ? "failed" : "cancelled";
-      const turn = state.turns[turnId];
-      const rest = turn ?? {
-        sequence: turnSequence(turnId) ?? state.nextSequence,
-        turnId,
-      };
-      return {
-        ...state,
-        activeTurnId: state.activeTurnId === turnId ? undefined : state.activeTurnId,
-        turns: { ...state.turns, [turnId]: { ...rest, status } },
-      };
-    }
-    case "model.requested": {
-      const { owner, runId } = typed.data;
-      const counters = state.counters ?? { changes: 0, runs: 0 };
-      const next = { ...state, counters: { ...counters, runs: counters.runs + 1 } };
-      if ("changeId" in owner) {
-        return { ...next, runs: { ...state.runs, [runId]: { changeId: owner.changeId } } };
-      }
-      const turn = state.turns[owner.turnId];
-      const stepIndex = turn?.stepIndex === undefined ? 0 : turn.stepIndex + 1;
-      const run: SessionRun = { stepIndex, turnId: owner.turnId };
-      return updateTurn(
-        { ...next, runs: { ...state.runs, [runId]: run } },
-        owner.turnId,
-        (current) => ({ ...current, runId, stepIndex }),
-      );
-    }
-    case "model.settled": {
-      if (state.runs?.[typed.data.runId] === undefined) return state;
-      const { [typed.data.runId]: _settled, ...runs } = state.runs;
-      return { ...state, runs };
-    }
+    case "model.requested":
+      return { ...state, counters: { ...state.counters, runs: state.counters.runs + 1 } };
+    case "context.started":
+      return { ...state, counters: { ...state.counters, changes: state.counters.changes + 1 } };
     case "content.delta": {
       const { delta, kind } = typed.data;
       if (kind !== "text" || delta.length === 0) return state;
       return markOutputStarted(state, typed.scope?.runId);
     }
     case "content.completed": {
-      const { kind, partId, phase, runId, value } = typed.data;
+      const { kind, runId, value } = typed.data;
       const output =
         kind === "result" || (kind === "text" && typeof value === "string" && value.length > 0);
-      const next = output ? markOutputStarted(state, runId) : state;
-      if (phase !== "reply") return next;
-      const turnId = next.runs?.[runId]?.turnId;
-      if (turnId === undefined) return next;
-      return updateTurn(next, turnId, (turn) => ({
-        ...turn,
-        reply: [...(turn.reply ?? []), partId],
-      }));
-    }
-    case "context.started": {
-      const counters = state.counters ?? { changes: 0, runs: 0 };
-      return { ...state, counters: { ...counters, changes: counters.changes + 1 } };
-    }
-    case "session.ended": {
-      const { activeTurnId: _activeTurnId, ...rest } = state;
-      return { ...rest, ended: true } as S;
+      return output ? markOutputStarted(state, runId) : state;
     }
     default:
       return state;
   }
+}
+
+function markOutputStarted<S extends SessionProjection>(state: S, runId: string | undefined): S {
+  const turnId = runId === undefined ? activeTurnIdOf(state) : runTurnId(state, runId);
+  return turnId === undefined || state.outputStarted === turnId
+    ? state
+    : { ...state, outputStarted: turnId };
+}
+
+/** The open turn's id, if one is open. */
+export function activeTurnIdOf(state: SessionProjection): string | undefined {
+  return activeTurn(state.view)?.turnId;
+}
+
+/** The session's newest turn, open or closed. */
+export function latestTurnIdOf(state: SessionProjection): string | undefined {
+  return state.view.session.latestTurnId;
+}
+
+/** The turn a run serves, if a turn owns it. */
+export function runTurnId(state: SessionProjection, runId: string): string | undefined {
+  const owner = state.view.runs[runId]?.owner;
+  return owner !== undefined && "turnId" in owner ? owner.turnId : undefined;
+}
+
+/** The id the session's next model run takes. */
+export function nextRunId(state: SessionProjection): string {
+  return `run_${String(state.counters.runs)}`;
+}
+
+/** The id the session's next context change takes. */
+export function nextChangeId(state: SessionProjection): string {
+  return `change_${String(state.counters.changes)}`;
+}
+
+/** The open run that serves a turn: its latest run not yet settled. */
+export function openRunOf(state: SessionProjection, turnId: string): string | undefined {
+  let found: { readonly runId: string; readonly step: number } | undefined;
+  for (const run of Object.values(state.view.runs)) {
+    if (run.status === "settled" || !("turnId" in run.owner) || run.owner.turnId !== turnId)
+      continue;
+    const step = run.step ?? 0;
+    if (found === undefined || step >= found.step) found = { runId: run.runId, step };
+  }
+  return found?.runId;
 }
 
 /** A turn id's sequence: `turn_${n}`. */
@@ -173,83 +104,30 @@ function turnSequence(turnId: string): number | undefined {
   return match === null ? undefined : Number(match[1]);
 }
 
-/** The turn a run serves streamed output, so steering can no longer restart it. */
-function markOutputStarted<S extends SessionProjection>(state: S, runId: string | undefined): S {
-  const turnId = runId === undefined ? state.activeTurnId : state.runs?.[runId]?.turnId;
-  if (turnId === undefined) return state;
-  return updateTurn(state, turnId, (turn) =>
-    turn.outputStarted ? turn : { ...turn, outputStarted: true },
-  );
-}
-
-/** The id the session's next model run takes. */
-export function nextRunId(state: SessionProjection): string {
-  return `run_${String(state.counters?.runs ?? 0)}`;
-}
-
-/** The id the session's next context change takes. */
-export function nextChangeId(state: SessionProjection): string {
-  return `change_${String(state.counters?.changes ?? 0)}`;
-}
-
-/** The open run that serves a turn: its latest run. */
-export function openRunOf(state: SessionProjection, turnId: string): string | undefined {
-  let found: string | undefined;
-  for (const [runId, run] of Object.entries(state.runs ?? {})) {
-    if (run.turnId === turnId) found = runId;
-  }
-  return found;
-}
-
 /** The coordinates the active turn's events carry, or the next turn's when none is open. */
 export function turnCoordinates(state: SessionProjection): {
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
 } {
-  const turn = state.activeTurnId === undefined ? undefined : state.turns[state.activeTurnId];
-  if (turn !== undefined) {
-    return { sequence: turn.sequence, stepIndex: turn.stepIndex ?? 0, turnId: turn.turnId };
-  }
-  return { sequence: state.nextSequence, stepIndex: 0, turnId: `turn_${state.nextSequence}` };
+  const turnId = activeTurnIdOf(state);
+  if (turnId !== undefined) return turnCoordinatesOf(state, turnId);
+  const sequence = state.view.session.turnCount;
+  return { sequence, stepIndex: 0, turnId: `turn_${sequence}` };
 }
 
-/** Where a turn's events go: its sequence and its latest step, from the private turn record. */
+/** Where a turn's events go: its sequence and its latest step. */
 export function turnCoordinatesOf(
   state: SessionProjection,
   turnId: string,
 ): { readonly sequence: number; readonly stepIndex: number; readonly turnId: string } {
-  const turn = state.turns[turnId];
+  const runs = state.view.turns[turnId]?.runs ?? 0;
+  const { latestTurnId, turnCount } = state.view.session;
+  // The newest turn took the last sequence the session minted; an older one, the one its id names.
+  const latest = turnId === latestTurnId ? Math.max(0, turnCount - 1) : undefined;
   return {
-    sequence: turn?.sequence ?? turnSequence(turnId) ?? state.nextSequence,
-    stepIndex: turn?.stepIndex ?? 0,
+    sequence: latest ?? turnSequence(turnId) ?? Math.max(0, turnCount - 1),
+    stepIndex: Math.max(0, runs - 1),
     turnId,
   };
-}
-
-/**
- * Drops turns nothing references any more, so a long-lived session's stored coordinates stay
- * proportional to its open work: the open turn, the latest, and the turns open calls and
- * requests in the public view belong to stay.
- */
-export function pruneSessionProjection(state: SessionProjection): SessionProjection {
-  const referenced = new Set<string>();
-  if (state.activeTurnId !== undefined) referenced.add(state.activeTurnId);
-  const { view } = state;
-  if (view !== undefined) {
-    for (const row of Object.values(view.calls)) {
-      if (row.status === "settled") continue;
-      const turnId = callTurn(view, row);
-      if (turnId !== undefined) referenced.add(turnId);
-    }
-    for (const row of Object.values(view.interactions)) {
-      if (row.status === "settled") continue;
-      const { turnId } = interactionOwner(view, row);
-      if (turnId !== undefined) referenced.add(turnId);
-    }
-  }
-  const turns = Object.fromEntries(
-    Object.entries(state.turns).filter(([turnId]) => referenced.has(turnId)),
-  );
-  return { ...state, turns };
 }
