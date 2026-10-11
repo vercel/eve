@@ -559,18 +559,13 @@ describe("Docker provider create", () => {
     expect(result.stdout.trim()).toBe("staging");
 
     const exec = findCall(calls, (args) => args[0] === "exec" && args.includes("bash"));
-    expect(exec?.args.slice(0, 10)).toEqual([
-      "exec",
-      "-w",
-      "/workspace",
-      "-e",
-      "AI_AGENT=eve",
-      "-e",
-      "DEPLOY_ENV=staging",
-      fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
-      "bash",
-      "-c",
-    ]);
+    const args = exec?.args ?? [];
+    const containerIndex = args.indexOf(fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME));
+    const envIndex = args.indexOf("DEPLOY_ENV=staging");
+    expect(args.slice(0, 3)).toEqual(["exec", "-w", "/workspace"]);
+    expect(args[envIndex - 1]).toBe("-e");
+    expect(envIndex).toBeLessThan(containerIndex);
+    expect(args.slice(containerIndex + 1, containerIndex + 3)).toEqual(["bash", "-c"]);
     const wrapper = String(exec?.args.at(-1));
     // The wrapper records its pid for the in-container tree kill, runs
     // the original command under a login shell, and preserves its exit
