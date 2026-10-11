@@ -479,7 +479,17 @@ describe("defaultEvents approval lifecycle", () => {
     const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
       blocks?: unknown[];
     };
-    expect(JSON.stringify(update.blocks)).toContain("Answered by <@U777>");
+    expect(update.blocks).toEqual([
+      {
+        body: { text: "Approve?", type: "mrkdwn" },
+        subtext: {
+          text: ":white_check_mark: *Approve* by <@U777>",
+          type: "mrkdwn",
+          verbatim: false,
+        },
+        type: "card",
+      },
+    ]);
     expect(channel.state.pendingApprovalCards).toEqual({});
   });
 
