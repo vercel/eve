@@ -36,6 +36,12 @@ function createDeps() {
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => DEPLOYED),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
+    checkDeployEnvironment: vi.fn<NonNullable<DeployProjectDeps["checkDeployEnvironment"]>>(
+      async () => ({
+        checked: true,
+        missing: [],
+      }),
+    ),
   };
 }
 
@@ -102,6 +108,42 @@ describe("deployProject box", () => {
     });
     expect(next.deploymentPending).toBe(false);
     expect(next.deploymentDependenciesInstalled).toBe(true);
+  });
+
+  it("warns before deploying when local variables are missing from Vercel Production", async () => {
+    const deps = createDeps();
+    deps.checkDeployEnvironment.mockResolvedValue({
+      checked: true,
+      missing: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+    });
+    const prompter = createPrompter();
+    const box = headlessBox({ deps, prompter });
+
+    await runHeadless([box], pendingState(), silentSink);
+
+    expect(prompter.log.warning).toHaveBeenCalledWith(
+      "Local environment variables missing from Vercel Production:\n" +
+        "  ANTHROPIC_API_KEY\n" +
+        "  OPENAI_API_KEY\n" +
+        "The deployed agent may behave differently from local development. " +
+        "Add them to the Vercel project environment before deploying.",
+    );
+    expect(deps.checkDeployEnvironment.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.runVercel.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("continues deploying when the Production environment check is unavailable", async () => {
+    const deps = createDeps();
+    deps.checkDeployEnvironment.mockResolvedValue({ checked: false, missing: [] });
+    const box = headlessBox({ deps });
+
+    await runHeadless([box], pendingState(), silentSink);
+
+    expect(deps.runVercel).toHaveBeenCalledWith(
+      ["deploy", "--prod", "--yes", "--non-interactive"],
+      expect.anything(),
+    );
   });
 
   it("uses Vercel non-interactive confirmation flags when headless", async () => {
