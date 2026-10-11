@@ -29,14 +29,14 @@ ignoredOptionalDependencies:
   - node-liblzma
 
 catalog:
-  "@ai-sdk/anthropic": "^4.0.72"
-  "@ai-sdk/code-mode": "^1.0.85"
-  "@ai-sdk/google": "^4.0.88"
-  "@ai-sdk/mcp": "^2.0.67"
-  "@ai-sdk/openai": "^4.0.84"
-  "@ai-sdk/otel": "^1.0.128"
-  "@ai-sdk/provider": "^4.0.22"
-  "@ai-sdk/provider-utils": "^5.0.54"
+  "@ai-sdk/anthropic": "^4.0.78"
+  "@ai-sdk/code-mode": "^1.0.94"
+  "@ai-sdk/google": "^4.0.93"
+  "@ai-sdk/mcp": "^2.0.73"
+  "@ai-sdk/openai": "^4.0.91"
+  "@ai-sdk/otel": "^1.0.137"
+  "@ai-sdk/provider": "^4.0.26"
+  "@ai-sdk/provider-utils": "^5.0.58"
   "@opentelemetry/context-async-hooks": "2.6.1"
   "@opentelemetry/core": "2.6.1"
   "@opentelemetry/sdk-trace-base": "2.6.1"
