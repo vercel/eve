@@ -35,7 +35,7 @@ import type {
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
-import { buildSandboxSession } from "#execution/sandbox/session.js";
+import { buildSandboxSession, SANDBOX_AGENT_ENV } from "#execution/sandbox/session.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import {
@@ -417,7 +417,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
   await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
 
   const templateSession = buildSandboxSession(
-    createVercelInternalSandboxSession(sandbox),
+    createVercelInternalSandboxSession(sandbox, input.createOptions.env),
     createVercelNetworkPolicySetter(sandbox),
   );
 
@@ -571,7 +571,7 @@ function createHandle(input: {
   const { sandbox } = input;
   return {
     sandbox: buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox),
+      createVercelInternalSandboxSession(sandbox, input.createOptions.env),
       createVercelNetworkPolicySetter(sandbox),
     ),
     async onSandboxDelete(options) {
@@ -595,7 +595,11 @@ function createHandle(input: {
   };
 }
 
-function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSandboxSession {
+function createVercelInternalSandboxSession(
+  sandbox: VercelSandbox,
+  environmentEnv: Readonly<Record<string, string>> | undefined,
+): InternalSandboxSession {
+  const baseEnv = { ...SANDBOX_AGENT_ENV, ...environmentEnv };
   return {
     resolvePath: resolveVercelSandboxPath,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
@@ -604,7 +608,7 @@ function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSan
         cmd: "bash",
         cwd: options.workingDirectory ?? WORKSPACE_ROOT,
         detached: true,
-        env: options.env,
+        env: { ...baseEnv, ...options.env },
         signal: options.abortSignal,
       });
       return adaptMultiplexedCommandToSandboxProcess({

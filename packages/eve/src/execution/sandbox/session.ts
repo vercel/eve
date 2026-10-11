@@ -22,13 +22,10 @@ export type { InternalSandboxSession };
 
 /**
  * Tells agent-aware CLIs (such as `vercel`) that an automated agent runs
- * the command, so they skip interactive prompts. Callers may override it.
+ * the command, so they skip interactive prompts. Built-in providers apply it
+ * beneath environment-level and per-call env so authors can override it.
  */
-const AGENT_ENV = { AI_AGENT: "eve" } as const;
-
-function withAgentEnv(options: SandboxSpawnOptions): SandboxSpawnOptions {
-  return { ...options, env: { ...AGENT_ENV, ...options.env } };
-}
+export const SANDBOX_AGENT_ENV: Readonly<Record<string, string>> = { AI_AGENT: "eve" };
 
 /**
  * Builds a public {@link SandboxSession} from provider-specific primitives.
@@ -52,7 +49,7 @@ export function buildSandboxSession(
   setNetworkPolicy?: (policy: SandboxNetworkPolicy) => Promise<void>,
 ): SandboxSession {
   async function run(options: SandboxRunOptions) {
-    const process = await primitives.spawn(withAgentEnv(options));
+    const process = await primitives.spawn(options);
     const [stdout, stderr, { exitCode }] = await Promise.all([
       collectStreamToString(process.stdout),
       collectStreamToString(process.stderr),
@@ -66,7 +63,7 @@ export function buildSandboxSession(
     },
     run,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
-      return await primitives.spawn(withAgentEnv(options));
+      return await primitives.spawn(options);
     },
     async readFile(options: SandboxReadFileOptions) {
       return await primitives.readFile({

@@ -295,6 +295,43 @@ describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
     expect(sandbox.detach).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { callEnv: undefined, env: undefined, expected: "eve" },
+    { callEnv: undefined, env: { AI_AGENT: "alice-bot" }, expected: "alice-bot" },
+    { callEnv: { AI_AGENT: "bob-bot" }, env: { AI_AGENT: "alice-bot" }, expected: "bob-bot" },
+  ])("sets AI_AGENT=$expected beneath environment and per-call env", async (row) => {
+    let envs: Record<string, string> | undefined;
+    const builder = {
+      args: () => builder,
+      cwd: () => builder,
+      envs: (value: Record<string, string>) => {
+        envs = value;
+        return builder;
+      },
+      user: () => builder,
+    };
+    const sandbox = {
+      async execStreamWith(_command: string, configure: (value: typeof builder) => unknown) {
+        configure(builder);
+        return createHangingExecHandleAfterExit([{ code: 0, kind: "exited" }]);
+      },
+    };
+    const vm = new MicrosandboxVm(
+      {
+        module: {} as never,
+        options: resolveMicrosandboxOptions({ env: row.env, image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      },
+      sandbox as never,
+      "sandbox-name",
+      undefined,
+    );
+
+    await vm.spawn({ command: "vercel whoami", env: row.callEnv });
+
+    expect(envs?.AI_AGENT).toBe(row.expected);
+  });
+
   it("finishes streamed commands when the exec handle emits an exit event", async () => {
     const sandbox = {
       async execStreamWith() {

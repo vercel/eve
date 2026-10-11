@@ -28,7 +28,7 @@ export default defineTool({
 
 Relative paths resolve under `/workspace`. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
 
-Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`, so agent-aware CLIs such as `vercel` skip interactive prompts. To use a different value, pass `env: { AI_AGENT: "..." }` to `run()` or `spawn()`. This default takes precedence over an `AI_AGENT` set in an environment's `env` option.
+Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`, so agent-aware CLIs such as `vercel` skip interactive prompts. To use a different value, set `AI_AGENT` in the environment's `env` option or pass it in the `env` of one `run()` or `spawn()` call.
 
 Pass the configured environment to preserve its specific session capabilities in authored runtime code:
 

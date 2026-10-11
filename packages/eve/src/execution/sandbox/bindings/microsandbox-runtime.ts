@@ -29,6 +29,7 @@ import {
   isEveDevEnvironment,
 } from "#internal/application/optional-package-install.js";
 import { withDevelopmentSandboxTags } from "#execution/sandbox/development-run.js";
+import { SANDBOX_AGENT_ENV } from "#execution/sandbox/session.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type { SandboxProviderHost } from "#shared/sandbox-provider.js";
@@ -238,6 +239,7 @@ export class MicrosandboxVm {
     }
 
     const env = {
+      ...SANDBOX_AGENT_ENV,
       ...this.#input.options.env,
       HOME: MICROSANDBOX_HOME,
       ...createTransformBrokerEnvironment(createMicrosandboxNetworkPlan(this.#networkPolicy)),

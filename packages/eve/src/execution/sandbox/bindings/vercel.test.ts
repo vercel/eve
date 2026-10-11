@@ -1045,7 +1045,7 @@ describe("createVercelSandbox", () => {
     );
   });
 
-  it("forwards env to runCommand when spawning a process", async () => {
+  it("forwards env with the AI_AGENT default to runCommand when spawning a process", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
     const sandboxModule = {
@@ -1084,12 +1084,12 @@ describe("createVercelSandbox", () => {
       expect.objectContaining({
         args: ["-lc", "printenv DEPLOY_ENV"],
         cmd: "bash",
-        env: expect.objectContaining({ DEPLOY_ENV: "staging" }),
+        env: { AI_AGENT: "eve", DEPLOY_ENV: "staging" },
       }),
     );
   });
 
-  it("forwards env to runCommand when running a command", async () => {
+  it("lets environment env override the AI_AGENT default when running a command", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
     const sandboxModule = {
@@ -1103,6 +1103,7 @@ describe("createVercelSandbox", () => {
     };
 
     const provider = createTestVercelSandbox({
+      createOptions: { env: { AI_AGENT: "alice-bot" } },
       loadSandboxModule: async () => sandboxModule as never,
     });
 
@@ -1128,7 +1129,7 @@ describe("createVercelSandbox", () => {
       expect.objectContaining({
         args: ["-lc", "printenv DEPLOY_ENV"],
         cmd: "bash",
-        env: expect.objectContaining({ DEPLOY_ENV: "production" }),
+        env: { AI_AGENT: "alice-bot", DEPLOY_ENV: "production" },
       }),
     );
   });

@@ -9,7 +9,7 @@ import {
 } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { buildSandboxSession } from "#execution/sandbox/session.js";
+import { buildSandboxSession, SANDBOX_AGENT_ENV } from "#execution/sandbox/session.js";
 import type { SandboxProviderHandle, SandboxProviderHost } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
@@ -174,7 +174,7 @@ export async function createBashSandbox(input: {
         args: [wrapped],
         cmd: "eval",
         detached: true,
-        env: options.env,
+        env: { ...SANDBOX_AGENT_ENV, ...options.env },
         signal: options.abortSignal,
       });
       return adaptMultiplexedCommandToSandboxProcess({

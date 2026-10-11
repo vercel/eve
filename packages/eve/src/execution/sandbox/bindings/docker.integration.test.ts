@@ -185,6 +185,26 @@ describe("Docker provider prewarm", () => {
     );
   });
 
+  it.each([
+    { env: undefined, expected: "AI_AGENT=eve" },
+    { env: { AI_AGENT: "alice-bot" }, expected: "AI_AGENT=alice-bot" },
+  ])("sets $expected on the container from environment env $env", async ({ env, expected }) => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    const { calls, cli } = createFakeDockerCli((args) =>
+      args[0] === "image" &&
+      args[1] === "inspect" &&
+      String(args.at(-1)).startsWith("eve-sandbox-template:")
+        ? { exitCode: 1, stderr: "No such image" }
+        : undefined,
+    );
+
+    await createEngine({ cli, options: { env } }).prepare({ appRoot, seedFiles: [] });
+
+    const runArgs = findCall(calls, (args) => args[0] === "run")?.args ?? [];
+    expect(runArgs.filter((arg) => arg.startsWith("AI_AGENT="))).toEqual([expected]);
+    expect(runArgs[runArgs.indexOf(expected) - 1]).toBe("-e");
+  });
+
   it("builds, seeds, commits, and cleans up when the template image is missing", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     const { calls, cli } = createFakeDockerCli((args) => {
@@ -559,13 +579,16 @@ describe("Docker provider create", () => {
     expect(result.stdout.trim()).toBe("staging");
 
     const exec = findCall(calls, (args) => args[0] === "exec" && args.includes("bash"));
-    const args = exec?.args ?? [];
-    const containerIndex = args.indexOf(fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME));
-    const envIndex = args.indexOf("DEPLOY_ENV=staging");
-    expect(args.slice(0, 3)).toEqual(["exec", "-w", "/workspace"]);
-    expect(args[envIndex - 1]).toBe("-e");
-    expect(envIndex).toBeLessThan(containerIndex);
-    expect(args.slice(containerIndex + 1, containerIndex + 3)).toEqual(["bash", "-c"]);
+    expect(exec?.args.slice(0, 8)).toEqual([
+      "exec",
+      "-w",
+      "/workspace",
+      "-e",
+      "DEPLOY_ENV=staging",
+      fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
+      "bash",
+      "-c",
+    ]);
     const wrapper = String(exec?.args.at(-1));
     // The wrapper records its pid for the in-container tree kill, runs
     // the original command under a login shell, and preserves its exit

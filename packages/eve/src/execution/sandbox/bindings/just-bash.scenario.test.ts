@@ -167,12 +167,12 @@ describe("just-bash sandbox file API", () => {
     });
 
     const result = await handle.sandbox.run({
-      command: 'echo "$DEPLOY_ENV"',
+      command: 'echo "$DEPLOY_ENV $AI_AGENT"',
       env: { DEPLOY_ENV: "staging" },
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe("staging");
+    expect(result.stdout.trim()).toBe("staging eve");
   });
 
   it("runs bash tool commands directly because just-bash cannot host background jobs", async () => {
