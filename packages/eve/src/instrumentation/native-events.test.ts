@@ -40,6 +40,7 @@ describe("createInstrumentationHandleEvent", () => {
         code: "MODEL_CALL_FAILED",
         message: "failed",
         sequence: 0,
+        terminal: false,
         turnId: "turn_0",
       }),
     ],

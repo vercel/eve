@@ -922,6 +922,7 @@ describe("useEveAgent", () => {
         code: "MODEL_CALL_FAILED",
         message: "Recoverable model failure",
         sequence: 0,
+        terminal: false,
         turnId: "turn_1",
       }),
       createSessionWaitingEvent(TEST_USAGE),

@@ -81,6 +81,13 @@ the exact session, while `channel.continuation` exposes the current address and
 receives only `(eventData, channel)` because it runs outside session context;
 its event data contains `sessionId` directly.
 
+A failed turn emits `turn.failed`, then either `session.waiting` or
+`session.failed`. `turn.failed` carries `terminal: true` when the failure ends
+the session and `session.failed` follows. The built-in channels skip terminal
+`turn.failed` events, so a person sees one notice: the `session.failed` handler
+tells them to start over instead of to try again. Check `eventData.terminal` the
+same way in a custom channel that posts on both events.
+
 A channel that renders questions and approvals from `input.requested` can handle
 `input.resolved` to learn when each request ends, however it ended: answered from
 the channel, answered by a plain-text reply, or withdrawn. A request that a

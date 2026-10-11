@@ -400,6 +400,7 @@ describe("defaultMessageReducer", () => {
         code: "MODEL_FAILED",
         message: "model failed",
         sequence: 4,
+        terminal: false,
         turnId: "turn_1",
       }),
     ]);
@@ -428,6 +429,7 @@ describe("defaultMessageReducer", () => {
         code: "MODEL_FAILED",
         message: "model failed",
         sequence: 1,
+        terminal: false,
         turnId: "turn_1",
       }),
     ] as const;
@@ -553,6 +555,7 @@ describe("defaultMessageReducer", () => {
         code: "MODEL_FAILED",
         message: "model failed",
         sequence: 1,
+        terminal: false,
         turnId: "turn_1",
       }),
     ]);

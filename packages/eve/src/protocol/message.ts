@@ -669,6 +669,12 @@ export interface TurnFailedStreamEvent {
     details?: JsonObject;
     message: string;
     sequence: number;
+    /**
+     * `true` when the failure ends the session and `session.failed` follows;
+     * `false` when `session.waiting` follows and the next message can retry.
+     * Absent on events from eve versions before it was added.
+     */
+    terminal?: boolean;
     turnId: string;
   };
   type: "turn.failed";
@@ -1769,6 +1775,7 @@ export function createTurnFailedEvent(input: {
   readonly details?: JsonObject;
   readonly message: string;
   readonly sequence: number;
+  readonly terminal: boolean;
   readonly turnId: string;
 }): TurnFailedStreamEvent {
   return {
@@ -1777,6 +1784,7 @@ export function createTurnFailedEvent(input: {
       details: input.details,
       message: input.message,
       sequence: input.sequence,
+      terminal: input.terminal,
       turnId: input.turnId,
     },
     type: "turn.failed",
