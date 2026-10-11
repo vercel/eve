@@ -45,8 +45,9 @@ export const ANTHROPIC_PROMPT_CACHE_TTLS: readonly AnthropicPromptCacheTtl[] = [
 
 /**
  * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
+ * The AI SDK's `max` level is not supported yet: eve's manifest and agent info list the levels.
  */
-export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
+export type AgentReasoningDefinition = Exclude<NonNullable<CallSettings["reasoning"]>, "max">;
 
 /**
  * How an agent's model is reached at runtime, decided at compile time from the

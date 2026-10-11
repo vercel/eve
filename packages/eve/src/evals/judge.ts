@@ -2,6 +2,7 @@ import { decide } from "#ai/decide.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { AssertionCollector } from "#evals/assertions/collector.js";
 import { formatDiagnosticValue, toDiagnosticMetadataValue } from "#evals/diagnostics.js";
+import type { JsonValue } from "#shared/json.js";
 import type {
   AssertionHandle,
   EveEvalJudgeConfig,
@@ -70,7 +71,10 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
         );
         const result = await decide({
           model,
-          state: capturedState,
+          // The AI SDK reads a bare array as state parts, so JSON arrays travel as one JSON part.
+          state: isJsonArray(capturedState)
+            ? [{ type: "json", value: capturedState }]
+            : capturedState,
           questions: decisionQuestions,
           providerOptions: modelOptions?.providerOptions,
           abortSignal: deps.signal,
@@ -116,6 +120,10 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
     return batch ? handles : handles.judgment!;
   }
   return judge;
+}
+
+function isJsonArray(state: JudgeInput): state is readonly JsonValue[] {
+  return Array.isArray(state);
 }
 
 function formatJudgeDetail(state: JudgeInput, question: JudgeQuestion, answer: unknown): string {

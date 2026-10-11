@@ -134,6 +134,19 @@ describe("judge", () => {
     });
   });
 
+  it("sends JSON array state as one JSON part", async () => {
+    decide.mockResolvedValue(result({ judgment: { type: "boolean", probability: 1 } }));
+    const { judge, collector } = setup();
+    judge({
+      state: ["first", { second: 2 }],
+      questions: { judgment: { type: "boolean", instructions: "Is it ordered?" } },
+    });
+    await collector.finalize(emptyTaskResult());
+    expect(decide.mock.calls[0]?.[0].state).toEqual([
+      { type: "json", value: ["first", { second: 2 }] },
+    ]);
+  });
+
   it("preserves explicit null and transcript values", async () => {
     decide.mockResolvedValue(result({ judgment: { type: "boolean", probability: 1 } }));
     const { judge, collector } = setup();

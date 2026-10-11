@@ -448,6 +448,81 @@ describe("tool loop streamed provider retries", () => {
     expect(events.filter((event) => event.type === "turn.failed")).toHaveLength(0);
   });
 
+  it("keeps the model call alive while an inline tool outlasts the output timeout", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const doStream = vi.fn(async () => ({
+      stream: new ReadableStream<StreamPart>({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          enqueueToolCall(controller, "call_slow", "slow note");
+          controller.enqueue({
+            finishReason: { raw: undefined, unified: "tool-calls" },
+            type: "finish",
+            usage,
+          });
+          controller.close();
+        },
+      }),
+    }));
+    const model = new MockLanguageModelV3({
+      doStream,
+      modelId: "retry-integration-model",
+      provider: "eve-integration-mock",
+    });
+    let toolSignal: AbortSignal | undefined;
+    const execute = vi.fn(
+      async ({ note }: { readonly note: string }, options?: { abortSignal?: AbortSignal }) => {
+        toolSignal = options?.abortSignal;
+        await new Promise((resolve) => setTimeout(resolve, 20 * 60_000));
+        return { saved: note };
+      },
+    );
+    const tools: ToolLoopHarnessConfig["tools"] = new Map([
+      [
+        "save_note",
+        {
+          description: "Save a note.",
+          execute,
+          inputSchema: jsonSchema({
+            additionalProperties: false,
+            properties: { note: { type: "string" } },
+            required: ["note"],
+            type: "object",
+          }),
+          name: "save_note",
+        },
+      ],
+    ]);
+    const { emit, events } = createEventCollector();
+
+    let settled = false;
+    const run = createToolLoopHarness(createConfig(model, emit, tools))(createSession(), {
+      message: "Save the note.",
+    }).finally(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    await vi.waitFor(() => expect(settled).toBe(true), { timeout: 5_000 });
+    await run;
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(toolSignal?.aborted).toBe(false);
+    expect(doStream).toHaveBeenCalledTimes(1);
+    expect(events.flatMap((event) => (event.type === "action.result" ? [event.data] : []))).toEqual(
+      [
+        expect.objectContaining({
+          result: expect.objectContaining({ callId: "call_slow", output: { saved: "slow note" } }),
+          status: "completed",
+        }),
+      ],
+    );
+    expect(events.filter((event) => event.type === "step.failed")).toHaveLength(0);
+  });
+
   it("fails once after the overloaded retry attempts are exhausted", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "error").mockImplementation(() => {});

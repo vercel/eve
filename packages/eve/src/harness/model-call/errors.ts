@@ -231,6 +231,19 @@ export class EmptyModelResponseError extends Error {
   }
 }
 
+/**
+ * The AI SDK abandoned a model stream that stopped producing output. A stalled
+ * connection says nothing about the request, so a fresh call is worth trying.
+ */
+export class ModelStreamStalledError extends Error {
+  readonly isRetryable = true;
+
+  constructor(options: { cause: unknown }) {
+    super("The model stopped responding. Please try again.", options);
+    this.name = "ModelStreamStalledError";
+  }
+}
+
 /** Provider filtering is a completed rejection, not an empty response to reissue. */
 export class ContentFilteredModelResponseError extends Error {
   readonly generationId?: string;

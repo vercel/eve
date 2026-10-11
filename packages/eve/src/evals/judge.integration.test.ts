@@ -89,7 +89,7 @@ describe("decision-backed judge runner", () => {
       fixture: { mode: "inherited" },
     });
     expect(vi.mocked(overridden.doDecide).mock.calls[0]?.[0]).toMatchObject({
-      state: { response: "Hello Alice" },
+      state: [{ type: "json", value: { response: "Hello Alice" } }],
       providerOptions: { fixture: { mode: "override" } },
     });
     expect(outcome.assertions.map((item) => item.score)).toEqual([0.8, 1, 1]);

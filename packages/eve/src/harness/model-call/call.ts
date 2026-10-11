@@ -25,6 +25,7 @@ import type { HarnessModelMessage, UserModelMessage } from "#harness/messages.js
 import {
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
+  ModelStreamStalledError,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
@@ -73,6 +74,13 @@ import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
 const environment = process.env.NODE_ENV ?? "unknown";
 
 const log = createLogger("harness.tool-loop");
+
+/**
+ * How long a model stream may go without output before the AI SDK abandons it and the
+ * call retries. Generous because reasoning can stay silent for minutes; tool execution
+ * does not count. Without it, a stream that stalls without closing holds the turn forever.
+ */
+const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 
 /** How one attempt differs from the step's first: what recovery and retries change. */
 export interface ModelCallOptions {
@@ -369,6 +377,7 @@ export class ModelCaller {
       runtimeContext,
       stopWhen: isStepCount(1),
       telemetry: toEntryTelemetry(attempt?.telemetry, catalog.resolve),
+      timeout: { chunkMs: MODEL_OUTPUT_TIMEOUT_MS, firstChunkMs: MODEL_OUTPUT_TIMEOUT_MS },
       toolApproval: buildToolApproval({
         abortSignal: generation.signal,
         approvedTools: this.input.approvedTools,
@@ -391,6 +400,10 @@ export class ModelCaller {
       if (generation.interrupted) await attempt?.complete();
       else await attempt?.fail(error);
       generation.check();
+      // Only the output timeout above aborts the stream without aborting our signal.
+      if (isAbortError(error) && !generation.signal.aborted) {
+        throw new ModelStreamStalledError({ cause: error });
+      }
       return rethrowNoOutputAsEmptyResponse(error);
     }
   }
@@ -500,4 +513,9 @@ function assertUsableResponse(
   ) {
     throw new EmptyModelResponseError();
   }
+}
+
+/** An aborted stream surfaces as `AbortError`; an aborted provider fetch rejects with the reason. */
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
 }
