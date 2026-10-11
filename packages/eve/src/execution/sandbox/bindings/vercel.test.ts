@@ -1084,7 +1084,7 @@ describe("createVercelSandbox", () => {
       expect.objectContaining({
         args: ["-lc", "printenv DEPLOY_ENV"],
         cmd: "bash",
-        env: { DEPLOY_ENV: "staging" },
+        env: { AI_AGENT: "eve", DEPLOY_ENV: "staging" },
       }),
     );
   });
@@ -1128,7 +1128,7 @@ describe("createVercelSandbox", () => {
       expect.objectContaining({
         args: ["-lc", "printenv DEPLOY_ENV"],
         cmd: "bash",
-        env: { DEPLOY_ENV: "production" },
+        env: { AI_AGENT: "eve", DEPLOY_ENV: "production" },
       }),
     );
   });

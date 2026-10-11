@@ -21,6 +21,16 @@ import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 export type { InternalSandboxSession };
 
 /**
+ * Tells agent-aware CLIs (such as `vercel`) that an automated agent runs
+ * the command, so they skip interactive prompts. Callers may override it.
+ */
+const AGENT_ENV = { AI_AGENT: "eve" } as const;
+
+function withAgentEnv(options: SandboxSpawnOptions): SandboxSpawnOptions {
+  return { ...options, env: { ...AGENT_ENV, ...options.env } };
+}
+
+/**
  * Builds a public {@link SandboxSession} from provider-specific primitives.
  *
  * Encoding handling, line-range slicing, and the binary/text/stream
@@ -42,7 +52,7 @@ export function buildSandboxSession(
   setNetworkPolicy?: (policy: SandboxNetworkPolicy) => Promise<void>,
 ): SandboxSession {
   async function run(options: SandboxRunOptions) {
-    const process = await primitives.spawn(options);
+    const process = await primitives.spawn(withAgentEnv(options));
     const [stdout, stderr, { exitCode }] = await Promise.all([
       collectStreamToString(process.stdout),
       collectStreamToString(process.stderr),
@@ -56,7 +66,7 @@ export function buildSandboxSession(
     },
     run,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
-      return await primitives.spawn(options);
+      return await primitives.spawn(withAgentEnv(options));
     },
     async readFile(options: SandboxReadFileOptions) {
       return await primitives.readFile({

@@ -104,7 +104,7 @@ describe("buildSandboxSession", () => {
     const session = buildSandboxSession(createTestPrimitives({ spawn }));
     const result = await session.run({ command: "echo hello" });
 
-    expect(spawn).toHaveBeenCalledWith({ command: "echo hello" });
+    expect(spawn).toHaveBeenCalledWith({ command: "echo hello", env: { AI_AGENT: "eve" } });
     expect(result).toEqual({ exitCode: 0, stderr: "", stdout: "hello" });
   });
 
@@ -121,13 +121,21 @@ describe("buildSandboxSession", () => {
     }
   });
 
-  it("delegates spawn directly to the primitive", async () => {
+  it("delegates spawn to the primitive with AI_AGENT defaulted under caller env", async () => {
     const process = syntheticProcess({ exitCode: 7, stdout: "live", stderr: "warn" });
     const spawn = vi.fn(async () => process);
     const session = buildSandboxSession(createTestPrimitives({ spawn }));
-    const handle = await session.spawn({ command: "tail -f log" });
+    const handle = await session.spawn({ command: "tail -f log", env: { DEPLOY_ENV: "staging" } });
+    await session.spawn({ command: "vercel whoami", env: { AI_AGENT: "custom" } });
 
-    expect(spawn).toHaveBeenCalledWith({ command: "tail -f log" });
+    expect(spawn).toHaveBeenNthCalledWith(1, {
+      command: "tail -f log",
+      env: { AI_AGENT: "eve", DEPLOY_ENV: "staging" },
+    });
+    expect(spawn).toHaveBeenNthCalledWith(2, {
+      command: "vercel whoami",
+      env: { AI_AGENT: "custom" },
+    });
     expect(handle).toBe(process);
   });
 

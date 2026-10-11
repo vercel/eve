@@ -559,10 +559,12 @@ describe("Docker provider create", () => {
     expect(result.stdout.trim()).toBe("staging");
 
     const exec = findCall(calls, (args) => args[0] === "exec" && args.includes("bash"));
-    expect(exec?.args.slice(0, 8)).toEqual([
+    expect(exec?.args.slice(0, 10)).toEqual([
       "exec",
       "-w",
       "/workspace",
+      "-e",
+      "AI_AGENT=eve",
       "-e",
       "DEPLOY_ENV=staging",
       fakeDockerContainerIdentity(PROVIDER_CONTAINER_NAME),
