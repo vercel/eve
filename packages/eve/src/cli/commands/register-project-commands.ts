@@ -42,7 +42,7 @@ export function registerProjectCommands(input: {
     .option("--project <name-or-id>", "Vercel project name or ID")
     .option("--team <team-id-or-slug>", "Vercel team ID or slug")
     .option("-y, --yes", "Confirm a non-interactive production deployment")
-    .option("--no-trace-sampling", "Skip 100% Vercel trace sampling for a new project")
+    .option("--no-trace-sampling", "Skip Vercel trace sampling setup")
     .action(
       async (options: {
         nonInteractive?: boolean;

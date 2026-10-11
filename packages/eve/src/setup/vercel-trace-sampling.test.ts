@@ -70,3 +70,17 @@ it("warns if no token is available without attempting a PUT", async () => {
   expect(fetchMock).not.toHaveBeenCalled();
   expect(prompter.log.warning).toHaveBeenCalledOnce();
 });
+
+it("uses a deployment warning when an existing project's API write fails", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(null, { status: 403 })),
+  );
+  const { prompter } = createFakePrompter();
+
+  await configureTraceSampling(link, prompter, undefined, "deployed");
+
+  expect(prompter.log.warning).toHaveBeenCalledWith(
+    expect.stringContaining("Deployment succeeded"),
+  );
+});
