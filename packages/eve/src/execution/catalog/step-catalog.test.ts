@@ -554,6 +554,33 @@ describe("buildStepCatalog", () => {
       expect(linear.calls).toEqual([]);
     });
 
+    it("accepts a key the connection provides when the model sends it anyway, since the provided value replaces it", async () => {
+      // Listed without `env`, as connection clients omit provided keys from the schemas they list.
+      const nova = fakeConnection({
+        name: "nova",
+        toolCall: { providedArguments: { env: "prod" } },
+        tools: [
+          connectionTool("loki_logs", {
+            type: "object",
+            properties: { logql: { type: "string" } },
+            required: ["logql"],
+            additionalProperties: false,
+          }),
+        ],
+      });
+      const { catalog, run } = catalogContext({ connections: [nova] });
+      const call = { input: { env: "staging", logql: '{app="api"}' }, name: "nova__loki_logs" };
+
+      expect(await validateTool(catalog, call)).toEqual({
+        value: { input: { logql: '{app="api"}' }, name: "nova__loki_logs" },
+      });
+      const resolved = catalog.resolve({ input: call, toolName: CALL_TOOL_NAME });
+      await run(() =>
+        resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
+      );
+      expect(nova.calls).toEqual([{ input: { logql: '{app="api"}' }, tool: "loki_logs" }]);
+    });
+
     it.each([
       [
         "an unknown tool, with the connection's closest tools",
