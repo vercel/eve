@@ -63,6 +63,8 @@ function parseManifest(source, expectedSha) {
     (expectedSha !== undefined && manifest.sourceSha !== expectedSha) ||
     typeof manifest.version !== "string" ||
     manifest.tarball !== `https://pkg.eve.dev/${manifest.sourceSha}/eve.tgz` ||
+    !/^sha512-[A-Za-z0-9+/]{86}==$/.test(manifest.integrity ?? "") ||
+    manifest.dependency !== `${manifest.tarball}#${manifest.integrity}` ||
     !/^[0-9a-f]{64}$/i.test(manifest.sha256 ?? "")
   ) {
     return undefined;

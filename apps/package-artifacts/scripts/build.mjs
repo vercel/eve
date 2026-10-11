@@ -8,6 +8,7 @@ import { BlobPreconditionFailedError, get, put } from "@vercel/blob";
 import { resolveDeploymentTarget, vercelOidcCredentials } from "../lib/deployment-target.mjs";
 import {
   packageArtifactPath,
+  packageDependencySpecifier,
   packageDependencyUrl,
   packageManifestPath,
   packagePointerPath,
@@ -43,10 +44,13 @@ async function publishPackage({ sourceSha, ref, origin }) {
       EVE_PACKAGE_DEPENDENCY_URL: dependencyUrl,
     });
     const sha256 = createHash("sha256").update(tarball).digest("hex");
+    const integrity = `sha512-${createHash("sha512").update(tarball).digest("base64")}`;
     const manifest = {
       sourceSha,
       version: preparedPackageJson.version,
       tarball: dependencyUrl,
+      dependency: packageDependencySpecifier(dependencyUrl, integrity),
+      integrity,
       sha256,
     };
 
