@@ -18,7 +18,7 @@ import type {
   ResponseSubmittedData,
   ResponseValue,
 } from "#protocol/session-events/families/response.js";
-import type { ApprovalAsk } from "#harness/session-machine/state.js";
+import type { ApprovalAsk } from "#harness/session-machine/view.js";
 
 /**
  * A question, approval, or budget prompt opens. An approval is about its call, a budget prompt

@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { PendingResponder } from "#harness/hitl/responders.js";
+import type { PendingResponder } from "#harness/hitl/index.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";

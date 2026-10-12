@@ -31,11 +31,14 @@ function withAnswersAlias(payload: DeliverPayload): DeliverPayload {
   if (payload.answers === undefined || payload.answers.length === 0) return payload;
   return {
     ...payload,
-    [PRE_V27_ANSWERS_KEY]: payload.answers.map((answer) => ({
-      requestId: answer.interactionId,
-      ...(answer.optionId === undefined ? {} : { optionId: answer.optionId }),
-      ...(answer.text === undefined ? {} : { text: answer.text }),
-    })),
+    [PRE_V27_ANSWERS_KEY]: payload.answers.map((answer) => {
+      const legacy: { requestId: string; optionId?: string; text?: string } = {
+        requestId: answer.interactionId,
+      };
+      if (answer.optionId !== undefined) legacy.optionId = answer.optionId;
+      if (answer.text !== undefined) legacy.text = answer.text;
+      return legacy;
+    }),
   };
 }
 
