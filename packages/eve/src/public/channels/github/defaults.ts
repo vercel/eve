@@ -1,4 +1,4 @@
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
+import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
@@ -8,7 +8,7 @@ import { promptQueueEvents } from "#channel/prompt-queue.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, formatErrorHint, logError } from "#internal/logging.js";
+import { createLogger, logError } from "#internal/logging.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
 import type {
   GitHubBotNameResolver,
@@ -125,29 +125,15 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     ...promptQueueEvents(showPrompt),
 
     async "session.ended"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
-      const message = [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new comment to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n");
-      await postFailure(channel, message);
+      const notice = failureNotice(data, { restart: "comment" });
+      if (notice === undefined) return;
+      await postFailure(channel, notice);
     },
 
     async "turn.settled"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
-      const message = [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n");
-      await postFailure(channel, message);
+      const notice = failureNotice(data, "turn");
+      if (notice === undefined) return;
+      await postFailure(channel, notice);
     },
   };
 }

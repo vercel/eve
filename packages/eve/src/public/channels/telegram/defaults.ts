@@ -8,8 +8,8 @@ import {
 } from "#channel/interaction-prompts.js";
 import type { AskedInteraction } from "#channel/interaction-prompts.js";
 
-import { createLogger, formatErrorHint } from "#internal/logging.js";
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
+import { createLogger } from "#internal/logging.js";
+import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import {
   formatTelegramAuthorizationDisplayName,
   renderTelegramAuthorizationCompleted,
@@ -236,31 +236,15 @@ export const defaultEvents: TelegramChannelEvents = {
   },
 
   async "turn.settled"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.telegram.post(
-      [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, "turn");
+    if (notice === undefined) return;
+    await channel.telegram.post(notice);
   },
 
   async "session.ended"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.telegram.post(
-      [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new message to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, { restart: "message" });
+    if (notice === undefined) return;
+    await channel.telegram.post(notice);
   },
 };
 

@@ -1,4 +1,4 @@
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
+import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
@@ -7,7 +7,7 @@ import {
   requestSettlementOf,
   signInSettlementOf,
 } from "#channel/interaction-prompts.js";
-import { createLogger, formatErrorHint } from "#internal/logging.js";
+import { createLogger } from "#internal/logging.js";
 import {
   DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
   splitDiscordMessageContent,
@@ -138,30 +138,14 @@ export const defaultEvents: DiscordChannelEvents = {
   },
 
   async "session.ended"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.discord.post(
-      [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new command to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, { restart: "command" });
+    if (notice === undefined) return;
+    await channel.discord.post(notice);
   },
 
   async "turn.settled"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.discord.post(
-      [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, "turn");
+    if (notice === undefined) return;
+    await channel.discord.post(notice);
   },
 };

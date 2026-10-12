@@ -9,11 +9,10 @@ import {
   type SignInPrompt,
   type SignInSettlement,
 } from "#channel/interaction-prompts.js";
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
+import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptAnswer } from "#channel/resolved-prompt.js";
-import { formatErrorHint } from "#internal/logging.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
 import {
@@ -284,31 +283,15 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 
   async "session.ended"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.thread.post(
-      [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new Teams conversation to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, { restart: "Teams conversation" });
+    if (notice === undefined) return;
+    await channel.thread.post(notice);
   },
 
   async "turn.settled"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.thread.post(
-      [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, "turn");
+    if (notice === undefined) return;
+    await channel.thread.post(notice);
   },
 };
 

@@ -1,6 +1,5 @@
-import { errorHintOf } from "#public/channels/reply.js";
+import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
-import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
 import type { MessageContent } from "#shared/message-content.js";
 
@@ -16,7 +15,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { assertWithinLimit } from "#internal/attachments/limited-read.js";
-import { createLogger, formatErrorHint } from "#internal/logging.js";
+import { createLogger } from "#internal/logging.js";
 import type { RequestSettlement } from "#channel/interaction-prompts.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
@@ -529,22 +528,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await finalizeStreamedMessage(channel, text, true);
     },
     async "turn.settled"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      await postFailure(
-        channel.thread,
-        "I hit an error while handling your request",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        data.error,
-      );
+      const notice = failureNotice(data, "turn");
+      if (notice !== undefined) await channel.thread?.post(notice);
     },
     async "session.ended"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      await postFailure(
-        channel.thread,
-        "This session could not recover from an error",
-        "Start a new conversation to continue.",
-        data.error,
-      );
+      const notice = failureNotice(data, { restart: "message" });
+      if (notice !== undefined) await channel.thread?.post(notice);
     },
   };
 }
@@ -630,20 +619,6 @@ function firstNonEmptyLine(text: string): string | undefined {
 /** Caps `text` at `max` characters with a trailing ellipsis. */
 function truncate(text: string, max = MAX_TYPING_STATUS): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
-}
-
-async function postFailure(
-  thread: Thread | null,
-  prefix: string,
-  nextStep: string,
-  error: ErrorInfo | undefined,
-): Promise<void> {
-  if (!thread) return;
-  const hint = formatErrorHint(errorHintOf(error));
-  const errorId = error?.id;
-  await thread.post(
-    [`${prefix}${hint}.`, nextStep, ...(errorId ? [`Error id: ${errorId}`] : [])].join("\n\n"),
-  );
 }
 
 async function bridgeSend<TAdapters extends ChatSdkAdapters>(

@@ -1,11 +1,10 @@
 import { signInEnding } from "#channel/interaction-prompts.js";
-import { errorHintOf } from "#public/channels/reply.js";
+import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
 import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import { linearInteractionSignal, renderLinearInteractions } from "#public/channels/linear/hitl.js";
@@ -208,31 +207,19 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "session.ended"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
+      const notice = failureNotice(data, { restart: "Linear agent session" });
+      if (notice === undefined) return;
       await postActivity(channel, options, {
-        body: [
-          `This session could not recover from an error${hint}.`,
-          "",
-          "Start a new Linear agent session to continue.",
-          ...(errorId ? ["", `Error id: ${errorId}`] : []),
-        ].join("\n"),
+        body: notice,
         type: "error",
       });
     },
 
     async "turn.settled"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
+      const notice = failureNotice(data, "turn");
+      if (notice === undefined) return;
       await postActivity(channel, options, {
-        body: [
-          `I hit an error while handling your request${hint}.`,
-          "",
-          "Please try again, rephrase, or reach out if it keeps failing.",
-          ...(errorId ? ["", `Error id: ${errorId}`] : []),
-        ].join("\n"),
+        body: notice,
         type: "error",
       });
     },

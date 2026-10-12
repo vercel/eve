@@ -1,11 +1,10 @@
 import { signInEnding } from "#channel/interaction-prompts.js";
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
+import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
 import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { formatErrorHint } from "#internal/logging.js";
 import type {
   TwilioTextMessage,
   TwilioVoiceCall,
@@ -129,31 +128,15 @@ export const defaultEvents: TwilioChannelEvents = {
   },
 
   async "turn.settled"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.twilio.sendMessage(
-      [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, "turn");
+    if (notice === undefined) return;
+    await channel.twilio.sendMessage(notice);
   },
 
   async "session.ended"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.twilio.sendMessage(
-      [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new message to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
+    const notice = failureNotice(data, { restart: "message" });
+    if (notice === undefined) return;
+    await channel.twilio.sendMessage(notice);
   },
 };
 
