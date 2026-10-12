@@ -1,8 +1,13 @@
-import type { SessionEvent } from "#protocol/session-event.js";
-import { callOutputSource, callTurn } from "#protocol/session-projection/selectors.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
+import {
+  callOutputSource,
+  callTurn,
+  interactionOwner,
+  openInteractions,
+} from "#protocol/session-projection/selectors.js";
+import type { CallRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import type { TaskCancelReason } from "#protocol/message.js";
-import type { CallOutcome, Capability } from "#protocol/session-events/families/call.js";
+import type { CallOutcome } from "#protocol/session-events/families/call.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { displayTitle } from "#shared/display-name.js";
@@ -88,323 +93,176 @@ export interface TaskCardView {
   readonly actions: readonly TaskCardAction[];
 }
 
-/** One call as a channel tracks it: plain JSON, kept in the channel's state. */
-interface TrackedCall {
-  readonly callId: string;
-  readonly name: string;
-  readonly kind?: "agent" | "tool";
-  readonly title: string;
-  readonly status: TaskCardStatus;
-  readonly startedAt: string;
-  readonly input?: JsonObject;
-  readonly settledAt?: string;
-  readonly task?: {
-    readonly id: string;
-    readonly kind: "agent" | "tool";
-    readonly summary?: string;
-    readonly cancelReason?: TaskCancelReason;
-    /** Open requests and sign-ins the task waits on, oldest first. */
-    readonly blockers?: readonly (TaskCardBlocker & { readonly id: string })[];
-  };
-}
-
-/** One turn's calls as a channel tracks them from its session's own events. */
-export interface TaskCardTurn {
-  readonly calls: readonly TrackedCall[];
-  readonly ended: boolean;
-}
-
-type TurnChanges = Readonly<Record<string, TaskCardTurn>>;
-
 /**
- * Folds one of the session's events into the turns' tracked calls, including
- * the requests a task's run relays through the session. Returns each turn it
- * changed, by turn id; none when the event changes no card.
+ * Where one card of a turn begins. A turn keeps one card unless it starts a task after every task
+ * on its card settled, as a turn its caller keeps talking to does: the settled card ends there,
+ * and a new one begins with the calls from that line on and the ones still working.
  */
-export function trackTaskCardEvent(
-  turns: Readonly<Record<string, TaskCardTurn>>,
-  event: SessionEvent,
-  at: string,
-  view?: SessionView,
-): TurnChanges {
-  switch (event.type) {
-    case "interaction.opened": {
-      // Only a task's requests block its card; the turn's own block the turn.
-      const taskId = event.scope?.taskId;
-      if (taskId === undefined) return {};
-      const { interactionId, request } = event.data;
-      const signIn = request.kind === "sign-in";
-      const label = signIn
-        ? (request.signIn?.displayName ?? request.signIn?.name ?? request.prompt)
-        : request.prompt;
-      const kind = signIn ? "authorization" : request.kind === "question" ? "input" : "approval";
-      return updateBlockers(turns, taskId, (open) => [
-        ...open.filter((item) => item.id !== interactionId),
-        blocker(interactionId, kind, label),
-      ]);
-    }
-    case "interaction.settled": {
-      const id = event.data.interactionId;
-      return updateBlockers(turns, event.scope?.taskId, (open) =>
-        open.filter((item) => item.id !== id),
-      );
-    }
-    default: {
-      const changed = trackTurnEvent(turns, event, at, view);
-      return changed === undefined ? {} : { [changed.turnId]: changed.turn };
-    }
-  }
+export interface TaskCardSegment {
+  /** The line the card begins at. */
+  readonly since: number;
+  /** Calls from before `since` still working when the card began. */
+  readonly carried?: readonly string[];
 }
 
-type TrackedBlocker = NonNullable<NonNullable<TrackedCall["task"]>["blockers"]>[number];
-
-function blocker(id: string, kind: TaskCardBlocker["kind"], text: string): TrackedBlocker {
-  const label = presentationText(text)?.slice(0, MAX_BLOCKER_LABEL_LENGTH);
-  return label === undefined ? { id, kind } : { id, kind, label };
-}
-
-/** Applies `update` to the open blockers of each working task call, or only `taskId`'s. */
-function updateBlockers(
-  turns: Readonly<Record<string, TaskCardTurn>>,
-  taskId: string | undefined,
-  update: (open: readonly TrackedBlocker[]) => readonly TrackedBlocker[],
-): TurnChanges {
-  const changes: Record<string, TaskCardTurn> = {};
-  for (const [turnId, turn] of Object.entries(turns)) {
-    for (const call of turn.calls) {
-      if (call.task === undefined || call.status !== "working") continue;
-      if (taskId !== undefined && call.task.id !== taskId) continue;
-      const open = call.task.blockers ?? [];
-      const next = update(open);
-      if (next.length === open.length && next.every((item, index) => item.id === open[index]!.id)) {
-        continue;
-      }
-      const task = { ...call.task, blockers: next };
-      changes[turnId] = replaceCall(changes[turnId] ?? turn, { ...call, task });
-    }
-  }
-  return changes;
-}
-
-function trackTurnEvent(
-  turns: Readonly<Record<string, TaskCardTurn>>,
-  event: SessionEvent,
-  at: string,
-  view?: SessionView,
-): { readonly turnId: string; readonly turn: TaskCardTurn } | undefined {
-  switch (event.type) {
-    case "call.requested": {
-      const turnId = event.scope?.turnId;
-      const { callId, capability, input, owner } = event.data;
-      // eve's own task controls, and calls a tool makes on the model's behalf, stay out of view.
-      if (turnId === undefined || isTaskControlTool(capability.name) || "callId" in owner) {
-        return undefined;
-      }
-      const current = turns[turnId] ?? { calls: [], ended: false };
-      if (current.calls.some((call) => call.callId === callId)) return undefined;
-      const call = requestedCall(callId, capability, input, at);
-      return { turn: { ...current, calls: bounded([...current.calls, call]) }, turnId };
-    }
-    case "call.settled": {
-      const { callId, outcome, reason, outputOf } = event.data;
-      for (const [turnId, current] of Object.entries(turns)) {
-        const call = current.calls.find((candidate) => candidate.callId === callId);
-        if (call === undefined) continue;
-        if (call.status !== "working") return undefined;
-        const status = callStatus(outcome);
-        const settled: { -readonly [K in keyof TrackedCall]: TrackedCall[K] } = {
-          ...call,
-          settledAt: at,
-          status,
-          title: event.data.title ?? call.title,
-        };
-        if (call.task !== undefined) {
-          const task: {
-            -readonly [K in keyof NonNullable<TrackedCall["task"]>]: NonNullable<
-              TrackedCall["task"]
-            >[K];
-          } = {
-            id: call.task.id,
-            kind: call.task.kind,
-          };
-          const source = view === undefined ? undefined : callOutputSource(view, callId);
-          const summary =
-            taskSummary({
-              status,
-              output: source?.output ?? event.data.output,
-              error: event.data.error,
-            }) ??
-            (outputOf === undefined
-              ? undefined
-              : Object.values(turns)
-                  .flatMap((turn) => turn.calls)
-                  .find((candidate) => candidate.callId === outputOf.callId)?.task?.summary);
-          if (summary !== undefined) task.summary = summary;
-          if (reason === "task_cancel" || reason === "turn_cancelled" || reason === "turn_ended")
-            task.cancelReason = reason;
-          settled.task = task;
-        }
-        return { turn: replaceCall(current, settled), turnId };
-      }
-      return undefined;
-    }
-    case "call.started": {
-      const { callId, taskId } = event.data;
-      if (taskId === undefined) return undefined;
-      const row = view?.calls[callId];
-      const turnId =
-        event.scope?.turnId ??
-        (row === undefined || view === undefined ? undefined : callTurn(view, row));
-      if (turnId === undefined) return undefined;
-      const current = turns[turnId] ?? { calls: [], ended: false };
-      const call = current.calls.find((candidate) => candidate.callId === callId);
-      if (call === undefined || call.task !== undefined) return undefined;
-      const kind = view?.tasks[taskId]?.kind ?? call.kind;
-      return {
-        turn: replaceCall(current, {
-          ...call,
-          task: { id: taskId, kind: kind === "agent" ? "agent" : "tool" },
-        }),
-        turnId,
-      };
-    }
-    case "turn.settled": {
-      const current = turns[event.data.turnId];
-      if (current === undefined || current.ended) return undefined;
-      return { turn: { ...current, ended: true }, turnId: event.data.turnId };
-    }
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Splits a turn's card when the turn starts a task after every task on the
- * card settled, which happens when the turn's caller keeps talking to an open
- * turn. The settled calls end as their own finished card; the calls still
- * working, including the one starting, open a new card. Returns nothing while
- * any of the card's tasks works.
- */
-export function closeSettledTasks(
-  turn: TaskCardTurn,
-  callId: string,
-): { readonly closed: TaskCardTurn; readonly open: TaskCardTurn } | undefined {
-  const tasks = turn.calls.filter((call) => call.task !== undefined && call.callId !== callId);
-  if (tasks.length === 0 || tasks.some((call) => call.status === "working")) return undefined;
-  return {
-    closed: { calls: turn.calls.filter((call) => call.status !== "working"), ended: true },
-    open: { calls: turn.calls.filter((call) => call.status === "working"), ended: false },
-  };
-}
-
-/** The view a renderer draws one turn's card from. */
+/** The view a renderer draws one card of a turn from, read from the session's tables. */
 export function taskCardView(
+  view: SessionView,
   turnId: string,
-  turn: TaskCardTurn,
-  options: { readonly audience: ChannelAudience },
+  options: { readonly audience: ChannelAudience; readonly segment?: TaskCardSegment },
 ): TaskCardView {
   const tasks: TaskCardTask[] = [];
   const actions: TaskCardAction[] = [];
-  for (const call of turn.calls) {
-    if (call.task === undefined) actions.push(toAction(call));
-    else tasks.push(toTask(call, call.task, options.audience));
+  for (const row of cardCalls(view, turnId, options.segment)) {
+    if (row.taskId === undefined) actions.push(toAction(row));
+    else tasks.push(toTask(view, row, row.taskId, options.audience));
   }
   const state = tasks.some((task) => task.status === "blocked")
     ? "blocked"
-    : !turn.ended || tasks.some((task) => task.status === "working")
+    : view.turns[turnId]?.status === "running" || tasks.some((task) => task.status === "working")
       ? "working"
       : "finished";
   return { actions, state, tasks, turnId };
 }
 
+/**
+ * The card a split ends: its settled calls, finished. Returns nothing while any of its tasks
+ * works, or when it has none, since then the turn keeps its card.
+ */
+export function closedTaskCard(card: TaskCardView): TaskCardView | undefined {
+  const settled = (status: TaskCardTask["status"]) => status !== "working" && status !== "blocked";
+  if (card.tasks.length === 0 || !card.tasks.every((task) => settled(task.status)))
+    return undefined;
+  return {
+    ...card,
+    actions: card.actions.filter((action) => settled(action.status)),
+    state: "finished",
+  };
+}
+
+/** The card that begins at a call starting a task, carrying the turn's calls still working. */
+export function nextSegment(view: SessionView, turnId: string, callId: string): TaskCardSegment {
+  const since = view.calls[callId]?.introducedAt ?? view.position;
+  const carried = cardCalls(view, turnId, undefined)
+    .filter((row) => row.status !== "settled" && row.introducedAt < since)
+    .map((row) => row.callId);
+  return carried.length === 0 ? { since } : { carried, since };
+}
+
 /** The names of a turn's working tasks, for a status such as `Waiting on researcher...`. */
-export function workingTaskNames(turn: TaskCardTurn | undefined): readonly string[] {
-  return (turn?.calls ?? [])
-    .filter((call) => call.task !== undefined && call.status === "working")
-    .map((call) => call.name);
+export function workingTaskNames(view: SessionView, turnId: string): readonly string[] {
+  return cardCalls(view, turnId, undefined)
+    .filter((row) => row.taskId !== undefined && row.status !== "settled")
+    .map((row) => row.capability.name);
 }
 
-function requestedCall(
-  callId: string,
-  capability: Capability,
-  input: unknown,
-  at: string,
-): TrackedCall {
-  const call: { -readonly [K in keyof TrackedCall]: TrackedCall[K] } = {
-    callId,
-    name: capability.name,
-    kind: capability.kind === "agent" ? "agent" : "tool",
-    startedAt: at,
-    status: "working",
-    title: capability.title ?? displayTitle(capability.name),
-  };
-  const bounded = boundedInput(input);
-  if (bounded !== undefined) call.input = bounded;
-  return call;
+/**
+ * The turn's own calls a card shows, in call order: eve's task controls, and calls a tool makes
+ * on the model's behalf, stay out of view. The oldest settled ones drop past the card's bound.
+ */
+function cardCalls(
+  view: SessionView,
+  turnId: string,
+  segment: TaskCardSegment | undefined,
+): readonly CallRow[] {
+  const carried = new Set(segment?.carried);
+  const calls = Object.values(view.calls)
+    .filter(
+      (row) =>
+        !isTaskControlTool(row.capability.name) &&
+        !("callId" in row.owner) &&
+        callTurn(view, row) === turnId &&
+        (segment === undefined || row.introducedAt >= segment.since || carried.has(row.callId)),
+    )
+    .sort((a, b) => a.introducedAt - b.introducedAt);
+  let overflow = calls.length - MAX_CALLS_PER_TURN;
+  return overflow <= 0
+    ? calls
+    : calls.filter((row) => {
+        if (overflow > 0 && row.status === "settled") {
+          overflow -= 1;
+          return false;
+        }
+        return true;
+      });
 }
 
-function toAction(call: TrackedCall): TaskCardAction {
+function titleOf(row: CallRow): string {
+  return row.title ?? row.capability.title ?? displayTitle(row.capability.name);
+}
+
+function statusOf(row: CallRow): TaskCardStatus {
+  return row.status === "settled" && row.outcome !== undefined
+    ? callStatus(row.outcome)
+    : "working";
+}
+
+function toAction(row: CallRow): TaskCardAction {
   const action: { -readonly [K in keyof TaskCardAction]: TaskCardAction[K] } = {
-    id: call.callId,
-    name: call.name,
-    startedAt: call.startedAt,
-    status: call.status,
-    title: call.title,
+    id: row.callId,
+    name: row.capability.name,
+    startedAt: row.startedAt,
+    status: statusOf(row),
+    title: titleOf(row),
   };
-  if (call.input !== undefined) action.input = call.input;
-  if (call.settledAt !== undefined) action.settledAt = call.settledAt;
+  const input = boundedInput(row.input);
+  if (input !== undefined) action.input = input;
+  if (row.endedAt !== undefined) action.settledAt = row.endedAt;
   return action;
 }
 
 function toTask(
-  call: TrackedCall,
-  task: NonNullable<TrackedCall["task"]>,
+  view: SessionView,
+  row: CallRow,
+  taskId: string,
   audience: ChannelAudience,
 ): TaskCardTask {
-  const row: { -readonly [K in keyof TaskCardTask]: TaskCardTask[K] } = {
-    id: call.callId,
-    kind: task.kind,
-    name: call.name,
-    startedAt: call.startedAt,
-    status: call.status,
-    taskId: task.id,
-    title: call.title,
+  const status = statusOf(row);
+  const kind = view.tasks[taskId]?.kind ?? (row.capability.kind === "agent" ? "agent" : "tool");
+  const task: { -readonly [K in keyof TaskCardTask]: TaskCardTask[K] } = {
+    id: row.callId,
+    kind: kind === "agent" ? "agent" : "tool",
+    name: row.capability.name,
+    startedAt: row.startedAt,
+    status,
+    taskId,
+    title: titleOf(row),
   };
   const shareable = audience === "private";
-  const waitingOn = call.status === "working" ? task.blockers?.at(-1) : undefined;
+  // Only a task's requests block its card; the turn's own block the turn.
+  const waitingOn =
+    status === "working"
+      ? openInteractions(view)
+          .filter((entry) => interactionOwner(view, entry).taskId === taskId)
+          .at(-1)
+      : undefined;
   if (waitingOn !== undefined) {
-    row.status = "blocked";
-    row.blockedOn =
-      shareable && waitingOn.label !== undefined
-        ? { kind: waitingOn.kind, label: waitingOn.label }
-        : { kind: waitingOn.kind };
+    const blocker = blockerOf(waitingOn.request);
+    task.status = "blocked";
+    task.blockedOn = shareable && blocker.label !== undefined ? blocker : { kind: blocker.kind };
   }
-  const shown = call.status !== "failed" || shareable;
-  if (task.summary !== undefined && shown) row.summary = task.summary;
-  if (task.cancelReason !== undefined) row.cancelReason = task.cancelReason;
-  if (call.settledAt !== undefined) row.settledAt = call.settledAt;
-  return row;
-}
-
-function replaceCall(turn: TaskCardTurn, call: TrackedCall): TaskCardTurn {
-  const known = turn.calls.some((candidate) => candidate.callId === call.callId);
-  const calls = known
-    ? turn.calls.map((candidate) => (candidate.callId === call.callId ? call : candidate))
-    : [...turn.calls, call];
-  return { ...turn, calls: bounded(calls) };
-}
-
-/** Keeps a turn within {@link MAX_CALLS_PER_TURN} by dropping its oldest settled calls. */
-function bounded(calls: readonly TrackedCall[]): readonly TrackedCall[] {
-  let overflow = calls.length - MAX_CALLS_PER_TURN;
-  if (overflow <= 0) return calls;
-  return calls.filter((call) => {
-    if (overflow > 0 && call.status !== "working") {
-      overflow -= 1;
-      return false;
-    }
-    return true;
+  const summary = taskSummary({
+    error: row.error,
+    output: callOutputSource(view, row.callId)?.output ?? row.output,
+    status,
   });
+  if (summary !== undefined && (status !== "failed" || shareable)) task.summary = summary;
+  const { reason } = row;
+  if (reason === "task_cancel" || reason === "turn_cancelled" || reason === "turn_ended")
+    task.cancelReason = reason;
+  if (row.endedAt !== undefined) task.settledAt = row.endedAt;
+  return task;
+}
+
+/** What a request asks of a person, and its prompt or the connection's name. */
+function blockerOf(request: InteractionRequest): TaskCardBlocker {
+  const signIn = request.kind === "sign-in";
+  const kind = signIn ? "authorization" : request.kind === "question" ? "input" : "approval";
+  const text = signIn
+    ? (request.signIn?.displayName ?? request.signIn?.name ?? request.prompt)
+    : request.prompt;
+  const label = presentationText(text)?.slice(0, MAX_BLOCKER_LABEL_LENGTH);
+  return label === undefined ? { kind } : { kind, label };
 }
 
 function callStatus(outcome: CallOutcome): TaskCardStatus {

@@ -359,7 +359,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "model.settled"(event, ctx) {
     const turnId = event.scope?.turnId;
     if (turnId === undefined || waiting(ctx.view, turnId)?.on !== "work") return;
-    const working = workingTaskNames(ctx.channel.state.taskCards?.[turnId]?.turn);
+    const working = workingTaskNames(ctx.view, turnId);
     if (working.length > 0) await showStatus(ctx.channel, waitingOnTasks(working));
   },
 

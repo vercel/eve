@@ -2,14 +2,15 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { createHash } from "node:crypto";
 
 import {
-  closeSettledTasks,
+  closedTaskCard,
+  nextSegment,
   taskCardView,
-  trackTaskCardEvent,
   type TaskCardBlocker,
+  type TaskCardSegment,
   type TaskCardTask,
-  type TaskCardTurn,
   type TaskCardView,
 } from "#channel/task-card.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import { contextStorage } from "#context/container.js";
 import { ScheduleIdKey } from "#context/keys.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -38,7 +39,7 @@ const MAX_NAMED_AGENTS = 3;
 const MIN_SHOWN_DURATION_MS = 1_000;
 const MAX_TITLE_LENGTH = 80;
 const MAX_LINE_LENGTH = 100;
-/** Unfinished turns eve keeps tracking; the oldest drop first. */
+/** Unfinished turns whose cards eve keeps; the oldest drop first. */
 const MAX_TRACKED_TURNS = 20;
 const WRITE_RETRY_MS = 1_000;
 
@@ -277,11 +278,13 @@ function slackBlockId(turnId: string): string {
   return `eve_task_card_${slackTaskId(turnId)}`;
 }
 
-/** A turn's tracked calls, and the card eve last wrote for it. */
+/** The card eve last wrote for a turn, and where that card begins. */
 export interface SlackTaskCardState {
-  readonly turn: TaskCardTurn;
   readonly ts?: string;
   readonly fingerprint?: string;
+  /** The tasks the written card shows, by call id. */
+  readonly shown?: readonly string[];
+  readonly segment?: TaskCardSegment;
 }
 
 const TRACKED_EVENTS = [
@@ -300,10 +303,9 @@ type TrackedHandler = (
 ) => Promise<void>;
 
 /**
- * Keeps each turn's task card current from the session's own events. It runs
- * around the renderer chain, so the card never depends on which handlers a
- * renderer keeps: eve tracks the turn's calls first, runs the chain's handler,
- * then writes the card `taskCard` returns if it changed.
+ * Keeps each turn's task card current from the session's tables. It runs around the renderer
+ * chain, so the card never depends on which handlers a renderer keeps: eve runs the chain's
+ * handler, then writes each card `taskCard` returns if it changed.
  */
 export function withTaskCards(
   events: SlackChannelInternalEvents,
@@ -313,22 +315,17 @@ export function withTaskCards(
   for (const type of TRACKED_EVENTS) {
     const handler = events[type] as TrackedHandler | undefined;
     wrapped[type] = async (event, ctx) => {
-      const { channel } = ctx;
+      const { channel, view } = ctx;
       const turnId = event.scope?.turnId;
-      if (event.type === "call.started" && event.data.taskId !== undefined && turnId !== undefined)
-        await closeSettledCard(channel, { callId: event.data.callId, turnId }, taskCard);
-      const changed = trackTaskCardEvent(
-        trackedTurns(channel.state),
-        event,
-        new Date().toISOString(),
-        ctx.view,
-      );
-      for (const [turnId, turn] of Object.entries(changed))
-        rememberTurn(channel.state, turnId, turn);
+      if (turnId !== undefined) await splitCard(channel, view, turnId, taskCard);
       try {
         await handler?.(event, ctx);
       } finally {
-        for (const turnId of Object.keys(changed)) await writeTaskCard(channel, turnId, taskCard);
+        const turnIds = new Set([
+          ...(turnId === undefined ? [] : [turnId]),
+          ...Object.keys(channel.state.taskCards ?? {}),
+        ]);
+        for (const id of turnIds) await writeTaskCard(channel, view, id, taskCard);
       }
     };
   }
@@ -336,79 +333,92 @@ export function withTaskCards(
 }
 
 /**
- * Writes a turn's card one last time as finished when the turn starts a task
- * after all of the card's tasks settled, then leaves the turn's working calls
- * to post a new card. Without this, a turn the caller kept talking to would
- * add its next tasks to a card far up the thread.
+ * Writes a turn's card one last time as finished when the turn starts a task after all of the
+ * card's tasks settled, then begins a new card for the turn's calls from that one on. Without
+ * this, a turn the caller kept talking to would add its next tasks to a card far up the thread.
  */
-async function closeSettledCard(
+async function splitCard(
   channel: SlackEventContext,
-  data: { readonly callId: string; readonly turnId: string },
+  view: SessionView,
+  turnId: string,
   taskCard: (view: TaskCardView) => SlackTaskCard | null,
 ): Promise<void> {
-  const current = channel.state.taskCards?.[data.turnId];
-  const split = current && closeSettledTasks(current.turn, data.callId);
-  if (split === undefined) return;
-  channel.state.taskCards = {
-    ...channel.state.taskCards,
-    [data.turnId]: { ...current, turn: split.closed },
-  };
-  await writeTaskCard(channel, data.turnId, taskCard);
+  const current = channel.state.taskCards?.[turnId];
+  const shown = new Set(current?.shown);
+  if (current?.ts === undefined || shown.size === 0) return;
+  const audience = normalizeChannelAudience(channel.state.audience);
+  const card = taskCardView(view, turnId, { audience, segment: current.segment });
+  const next = card.tasks.find((task) => !shown.has(task.id));
+  if (next === undefined) return;
+  const since = view.calls[next.id]?.introducedAt ?? view.position;
+  const closed = closedTaskCard({
+    ...card,
+    actions: card.actions.filter((action) => (view.calls[action.id]?.introducedAt ?? 0) < since),
+    tasks: card.tasks.filter((task) => shown.has(task.id)),
+  });
+  if (closed === undefined) return;
+  await writeChangedCard(channel, turnId, current, closed, taskCard);
   // No `ts`: the working calls post a new card, even if the closing write failed.
   channel.state.taskCards = {
     ...channel.state.taskCards,
-    [data.turnId]: { turn: split.open },
+    [turnId]: { segment: nextSegment(view, turnId, next.id) },
   };
 }
 
-function trackedTurns(state: SlackChannelState): Readonly<Record<string, TaskCardTurn>> {
-  return Object.fromEntries(
-    Object.entries(state.taskCards ?? {}).map(([turnId, card]) => [turnId, card.turn]),
-  );
+/**
+ * Renders the turn's card and posts or updates it, then forgets a finished turn, whose card can't
+ * change again. A turn the tables no longer hold is left as last written. A schedule's session
+ * posts only its final reply, and a session without a thread has nowhere to post.
+ */
+async function writeTaskCard(
+  channel: SlackEventContext,
+  view: SessionView,
+  turnId: string,
+  taskCard: (view: TaskCardView) => SlackTaskCard | null,
+): Promise<void> {
+  if (view.turns[turnId] === undefined) return;
+  const current = channel.state.taskCards?.[turnId] ?? {};
+  const audience = normalizeChannelAudience(channel.state.audience);
+  const card = taskCardView(view, turnId, { audience, segment: current.segment });
+  await writeChangedCard(channel, turnId, current, card, taskCard);
+  if (card.state === "finished") forgetTurn(channel.state, turnId);
 }
 
-function rememberTurn(state: SlackChannelState, turnId: string, turn: TaskCardTurn): void {
-  const cards = { ...state.taskCards, [turnId]: { ...state.taskCards?.[turnId], turn } };
+/** Posts or updates a card unless it reads as last written. */
+async function writeChangedCard(
+  channel: SlackEventContext,
+  turnId: string,
+  current: SlackTaskCardState,
+  view: TaskCardView,
+  taskCard: (view: TaskCardView) => SlackTaskCard | null,
+): Promise<void> {
+  const { channelId, threadTs } = channel.state;
+  const scheduled = contextStorage.getStore()?.get(ScheduleIdKey) !== undefined;
+  if (!channelId || !threadTs || scheduled) return;
+  const card = renderCard(taskCard, view);
+  if (card === null) return;
+  const fingerprint = createHash("sha256").update(JSON.stringify(card)).digest("base64url");
+  if (fingerprint === current.fingerprint) return;
+  const ts = await writeCardWithRetry(channel.slack, { card, channelId, threadTs, ts: current.ts });
+  // A card that failed to land keeps its last fingerprint, so the turn's next change writes it.
+  if (ts === undefined) return;
+  rememberCard(channel.state, turnId, {
+    ...current,
+    fingerprint,
+    shown: view.tasks.map((task) => task.id),
+    ts,
+  });
+  // Slack clears the thread status when the app posts, but the turn works on.
+  if (ts !== current.ts && view.state === "working") await restoreStatus(channel);
+}
+
+function rememberCard(state: SlackChannelState, turnId: string, card: SlackTaskCardState): void {
+  const cards = { ...state.taskCards, [turnId]: card };
   const turnIds = Object.keys(cards);
   for (const oldest of turnIds.slice(0, Math.max(0, turnIds.length - MAX_TRACKED_TURNS))) {
     delete cards[oldest];
   }
   state.taskCards = cards;
-}
-
-/**
- * Renders the turn's card and posts or updates it, then forgets a finished
- * turn, whose card can't change again. A schedule's session posts only its
- * final reply, and a session without a thread has nowhere to post.
- */
-async function writeTaskCard(
-  channel: SlackEventContext,
-  turnId: string,
-  taskCard: (view: TaskCardView) => SlackTaskCard | null,
-): Promise<void> {
-  const current = channel.state.taskCards?.[turnId];
-  if (current === undefined) return;
-  const audience = normalizeChannelAudience(channel.state.audience);
-  const view = taskCardView(turnId, current.turn, { audience });
-  const { channelId, threadTs } = channel.state;
-  const scheduled = contextStorage.getStore()?.get(ScheduleIdKey) !== undefined;
-  const thread = channelId && threadTs && !scheduled ? { channelId, threadTs } : undefined;
-  const card = thread === undefined ? null : renderCard(taskCard, view);
-  if (thread !== undefined && card !== null) {
-    const fingerprint = createHash("sha256").update(JSON.stringify(card)).digest("base64url");
-    if (fingerprint !== current.fingerprint) {
-      const ts = await writeCardWithRetry(channel.slack, { ...thread, card, ts: current.ts });
-      // Keep a card that failed to land, so the turn's next change writes it again.
-      if (ts === undefined) return;
-      channel.state.taskCards = {
-        ...channel.state.taskCards,
-        [turnId]: { fingerprint, ts, turn: current.turn },
-      };
-      // Slack clears the thread status when the app posts, but the turn works on.
-      if (ts !== current.ts && view.state === "working") await restoreStatus(channel);
-    }
-  }
-  if (view.state === "finished") forgetTurn(channel.state, turnId);
 }
 
 function forgetTurn(state: SlackChannelState, turnId: string): void {
