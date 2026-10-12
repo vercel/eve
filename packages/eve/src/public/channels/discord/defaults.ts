@@ -1,15 +1,9 @@
-import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
-import { requestBatchOf, requestSettlementOf } from "#channel/interaction-prompts.js";
-import {
-  postedIn,
-  settleSignIn,
-  showSignIn,
-  signInChallengeText,
-  type SignInSurface,
-} from "#channel/sign-in.js";
+import type { AskedInteraction, RequestSettlement } from "#channel/interaction-prompts.js";
+import { postedIn, signInChallengeText, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
 import { createLogger } from "#internal/logging.js";
 import {
   DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
@@ -104,84 +98,59 @@ function discordSignIns(channel: DiscordEventChannel): SignInSurface {
 }
 
 /** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
-export const defaultEvents: DiscordChannelEvents = {
-  async "turn.started"(_event, { channel }) {
-    await channel.discord.startTyping();
-  },
+export const defaultEvents: DiscordChannelEvents = surfaceEvents<DiscordEventChannel>({
+  typing: (channel) => channel.discord.startTyping(),
+  post: (channel, text) => channel.discord.post(text),
+  restart: "command",
+  requests: { show: postDiscordRequest, settle: editDiscordSettledRequest },
+  signIns: discordSignIns,
+});
 
-  async "call.requested"(_event, { channel }) {
-    await channel.discord.startTyping();
-  },
+async function postDiscordRequest(
+  channel: DiscordEventChannel,
+  request: AskedInteraction,
+): Promise<void> {
+  const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
+  const components = renderInteractionComponents(request);
+  const posted = await channel.discord.post({ components, content });
+  if (components.length === 0 || !posted.id) return;
+  channel.state.hitlPrompts = {
+    ...channel.state.hitlPrompts,
+    [request.interactionId]: {
+      content,
+      messageId: posted.id,
+      options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
+    },
+  };
+}
 
-  async "interaction.opened"({ data }, ctx) {
-    const { channel } = ctx;
-    const event = requestBatchOf(ctx.view, data);
-    for (const request of event?.requests ?? []) {
-      const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
-      const components = renderInteractionComponents(request);
-      const posted = await channel.discord.post({ components, content });
-      if (components.length === 0 || !posted.id) continue;
-      channel.state.hitlPrompts = {
-        ...channel.state.hitlPrompts,
-        [request.interactionId]: {
-          content,
-          messageId: posted.id,
-          options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
-        },
-      };
+/**
+ * Shows a prompt's answer in place of its buttons. The bot token outlives the interaction token
+ * the prompt may have been posted with.
+ */
+async function editDiscordSettledRequest(
+  channel: DiscordEventChannel,
+  settlement: RequestSettlement,
+): Promise<void> {
+  const { [settlement.interactionId]: prompt, ...rest } = channel.state.hitlPrompts ?? {};
+  if (prompt === undefined) return;
+  channel.state.hitlPrompts = rest;
+  const label = resolvedPromptLabel(settlement, prompt.options);
+  const content = `${prompt.content}\n\n${label}`.slice(0, DISCORD_MESSAGE_CONTENT_MAX_LENGTH);
+  const path = `/channels/${encodeURIComponent(channel.discord.channelId)}/messages/${encodeURIComponent(prompt.messageId)}`;
+  try {
+    const response = await channel.discord.request(
+      path,
+      { components: [], content },
+      { botAuth: true, method: "PATCH" },
+    );
+    if (!response.ok) {
+      log.warn("Discord answered prompt edit failed", {
+        requestId: settlement.interactionId,
+        status: response.status,
+      });
     }
-    await showSignIn(ctx.view, data.interactionId, discordSignIns(channel));
-  },
-
-  // Covers every way a prompt ends: a press, a modal answer, or a withdrawal.
-  // The bot token outlives the interaction token the prompt may have been posted with.
-  async "interaction.settled"({ data }, ctx) {
-    const { channel } = ctx;
-    await settleSignIn(ctx.view, data, discordSignIns(channel));
-    const settled = requestSettlementOf(ctx.view, data);
-    for (const resolution of settled === undefined ? [] : [settled]) {
-      const prompt = channel.state.hitlPrompts?.[resolution.interactionId];
-      if (prompt === undefined) continue;
-      const { [resolution.interactionId]: _, ...rest } = channel.state.hitlPrompts ?? {};
-      channel.state.hitlPrompts = rest;
-      const label = resolvedPromptLabel(resolution, prompt.options);
-      const content = `${prompt.content}\n\n${label}`.slice(0, DISCORD_MESSAGE_CONTENT_MAX_LENGTH);
-      try {
-        const response = await channel.discord.request(
-          `/channels/${encodeURIComponent(channel.discord.channelId)}/messages/${encodeURIComponent(prompt.messageId)}`,
-          { components: [], content },
-          { botAuth: true, method: "PATCH" },
-        );
-        if (!response.ok) {
-          log.warn("Discord answered prompt edit failed", {
-            requestId: resolution.interactionId,
-            status: response.status,
-          });
-        }
-      } catch (error) {
-        log.warn("Discord answered prompt edit failed", {
-          error,
-          requestId: resolution.interactionId,
-        });
-      }
-    }
-  },
-
-  async "content.completed"({ data }, { channel }) {
-    const text = replyTextOf(data);
-    if (text === undefined) return;
-    await channel.discord.post(text);
-  },
-
-  async "session.ended"({ data }, { channel }) {
-    const notice = failureNotice(data, { restart: "command" });
-    if (notice === undefined) return;
-    await channel.discord.post(notice);
-  },
-
-  async "turn.settled"({ data }, { channel }) {
-    const notice = failureNotice(data, "turn");
-    if (notice === undefined) return;
-    await channel.discord.post(notice);
-  },
-};
+  } catch (error) {
+    log.warn("Discord answered prompt edit failed", { error, requestId: settlement.interactionId });
+  }
+}

@@ -1,11 +1,10 @@
-import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
-import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { postedIn, settleSignIn, showSignIn, type SignInSurface } from "#channel/sign-in.js";
+import { postedIn, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
@@ -102,8 +101,15 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     await postCommentChunks(channel, sections.join("\n\n"));
   }
 
-  const prompts = promptQueueEvents(showPrompt);
   return {
+    ...surfaceEvents<GitHubEventContext>({
+      post: postCommentChunks,
+      restart: "comment",
+      // A comment can only answer the prompt it sees, so prompts post one at a time.
+      requests: { showOne: showPrompt },
+      signIns: gitHubSignIns,
+    }),
+
     async "turn.started"(_event, ctx) {
       const { channel } = ctx;
       if (options.progress?.reactions !== false) {
@@ -115,37 +121,6 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       }
 
       await checkoutRepositoryForTurn(channel, ctx, options);
-    },
-
-    async "content.completed"({ data }, { channel }) {
-      const text = replyTextOf(data);
-      if (text === undefined) return;
-      await postCommentChunks(channel, text);
-    },
-
-    // A comment can only answer the prompt it sees, so prompts post one at a time.
-    ...prompts,
-
-    async "interaction.opened"(event, ctx) {
-      await prompts["interaction.opened"](event, ctx);
-      await showSignIn(ctx.view, event.data.interactionId, gitHubSignIns(ctx.channel));
-    },
-
-    async "interaction.settled"(event, ctx) {
-      await prompts["interaction.settled"](event, ctx);
-      await settleSignIn(ctx.view, event.data, gitHubSignIns(ctx.channel));
-    },
-
-    async "session.ended"({ data }, { channel }) {
-      const notice = failureNotice(data, { restart: "comment" });
-      if (notice === undefined) return;
-      await postFailure(channel, notice);
-    },
-
-    async "turn.settled"({ data }, { channel }) {
-      const notice = failureNotice(data, "turn");
-      if (notice === undefined) return;
-      await postFailure(channel, notice);
     },
   };
 }
@@ -233,11 +208,4 @@ async function postCommentChunks(
   for (const chunk of splitGitHubCommentBody(body)) {
     await channel.thread.post(chunk);
   }
-}
-
-async function postFailure(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
-  message: string,
-): Promise<void> {
-  await postCommentChunks(channel, message);
 }

@@ -1,18 +1,6 @@
-import {
-  requestBatchOf,
-  requestSettlementOf,
-  type RequestBatch,
-  type RequestSettlement,
-} from "#channel/interaction-prompts.js";
-import {
-  postedIn,
-  settleSignIn,
-  showSignIn,
-  signInEndedText,
-  type SignIn,
-  type SignInSurface,
-} from "#channel/sign-in.js";
-import { failureNotice, replyTextOf } from "#public/channels/reply.js";
+import type { AskedInteraction, RequestSettlement } from "#channel/interaction-prompts.js";
+import { postedIn, signInEndedText, type SignIn, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptAnswer } from "#channel/resolved-prompt.js";
@@ -76,74 +64,51 @@ type TeamsHandlerChannel = Parameters<
   NonNullable<TeamsChannelEvents["turn.started"]>
 >[1]["channel"];
 
-async function showTeamsRequests(event: RequestBatch, channel: TeamsHandlerChannel): Promise<void> {
-  for (const request of event.requests) {
-    const posted = await channel.thread.post(
-      renderInteractionMessage(request, {
-        adaptiveCardVersion: channel.adaptiveCardVersion,
-        replyToActivityId: channel.teams.replyToActivityId,
-      }),
-    );
-    if (!posted.id) continue;
-    const card = { activityId: posted.id, prompt: request.prompt };
-    channel.state.pendingPromptCards = {
-      ...channel.state.pendingPromptCards,
-      [request.interactionId]:
-        request.kind === "question"
-          ? { ...card, options: (request.options ?? []).map(({ id, label }) => ({ id, label })) }
-          : card,
-    };
-  }
-}
-
-/** A pressed approval retires its card with the person who pressed it. */
-async function settleTeamsApproval(
-  event: {
-    readonly requestId: string;
-    readonly outcome: "approved" | "cancelled";
-    readonly responderPrincipalId: string;
-  },
+async function showTeamsRequest(
   channel: TeamsHandlerChannel,
+  request: AskedInteraction,
 ): Promise<void> {
-  const cards = channel.state.pendingPromptCards ?? {};
-  const card = cards[event.requestId];
-  if (card === undefined) return;
-  const account = channel.state.approvalResponderAccounts?.[event.responderPrincipalId];
-  const label = event.outcome === "approved" ? "Approved" : "Cancelled";
-  const actor = account?.name ?? account?.id;
-  await channel.thread.update(
-    card.activityId,
-    renderAnsweredInteractionMessage({
-      includeText: false,
-      label: actor === undefined ? label : `${label} by ${actor}`,
-      prompt: card.prompt,
+  const posted = await channel.thread.post(
+    renderInteractionMessage(request, {
+      adaptiveCardVersion: channel.adaptiveCardVersion,
+      replyToActivityId: channel.teams.replyToActivityId,
     }),
   );
-  const next = { ...cards };
-  delete next[event.requestId];
-  channel.state.pendingPromptCards = next;
+  if (!posted.id) return;
+  const card = { activityId: posted.id, prompt: request.prompt };
+  channel.state.pendingPromptCards = {
+    ...channel.state.pendingPromptCards,
+    [request.interactionId]:
+      request.kind === "question"
+        ? { ...card, options: (request.options ?? []).map(({ id, label }) => ({ id, label })) }
+        : card,
+  };
 }
 
-// A card that ends any other way (a typed answer, any question, or a withdrawal) retires here.
-async function settleTeamsRequests(
-  event: { readonly resolutions: readonly RequestSettlement[] },
+/** Retires a request's card with its answer; a pressed approval's names who pressed it. */
+async function settleTeamsRequest(
   channel: TeamsHandlerChannel,
+  settlement: RequestSettlement,
 ): Promise<void> {
-  for (const resolution of event.resolutions) {
-    const cards = channel.state.pendingPromptCards ?? {};
-    const card = cards[resolution.interactionId];
-    if (card === undefined) continue;
-    await channel.thread.update(
-      card.activityId,
-      renderAnsweredInteractionMessage({
-        includeText: false,
-        label: resolvedPromptAnswer(resolution, card.options),
-        prompt: card.prompt,
-      }),
-    );
-    const { [resolution.interactionId]: _, ...rest } = cards;
-    channel.state.pendingPromptCards = rest;
+  const { [settlement.interactionId]: card, ...rest } = channel.state.pendingPromptCards ?? {};
+  if (card === undefined) return;
+  const { kind, outcome, responder } = settlement;
+  const pressed =
+    kind === "approval" &&
+    responder !== undefined &&
+    (outcome === "accepted" || outcome === "declined");
+  let label = resolvedPromptAnswer(settlement, card.options);
+  if (pressed) {
+    const account = channel.state.approvalResponderAccounts?.[responder.id];
+    const actor = account?.name ?? account?.id;
+    const decided = outcome === "accepted" ? "Approved" : "Cancelled";
+    label = actor === undefined ? decided : `${decided} by ${actor}`;
   }
+  await channel.thread.update(
+    card.activityId,
+    renderAnsweredInteractionMessage({ includeText: false, label, prompt: card.prompt }),
+  );
+  channel.state.pendingPromptCards = rest;
 }
 
 /**
@@ -208,68 +173,15 @@ function teamsSignInCard(signIn: SignIn, channel: TeamsHandlerChannel) {
 }
 
 /** Built-in Teams event handlers for typing, replies, HITL, auth cards, and terminal errors. */
-export const defaultEvents: TeamsChannelEvents = {
-  async "turn.started"(_event, { channel }) {
-    await channel.thread.startTyping();
+export const defaultEvents: TeamsChannelEvents = surfaceEvents<TeamsHandlerChannel>({
+  typing: (channel) => channel.thread.startTyping(),
+  async post(channel, text) {
+    for (const chunk of splitTeamsMessageText(text)) await channel.thread.post(chunk);
   },
-
-  async "call.requested"(_event, { channel }) {
-    await channel.thread.startTyping();
-  },
-
-  async "interaction.opened"(event, ctx) {
-    const { data } = event;
-    const { channel } = ctx;
-    const batch = requestBatchOf(ctx.view, data);
-    if (batch !== undefined) {
-      await showTeamsRequests(batch, channel);
-      return;
-    }
-    await showSignIn(ctx.view, data.interactionId, teamsSignIns(channel));
-  },
-
-  async "interaction.settled"({ data }, ctx) {
-    const { channel } = ctx;
-    await settleSignIn(ctx.view, data, teamsSignIns(channel));
-    const resolution = requestSettlementOf(ctx.view, data);
-    if (resolution === undefined) return;
-    const pressed =
-      resolution.kind === "approval" &&
-      resolution.responder !== undefined &&
-      (resolution.outcome === "accepted" || resolution.outcome === "declined");
-    if (pressed && resolution.responder !== undefined) {
-      await settleTeamsApproval(
-        {
-          outcome: resolution.outcome === "accepted" ? "approved" : "cancelled",
-          requestId: resolution.interactionId,
-          responderPrincipalId: resolution.responder.id,
-        },
-        channel,
-      );
-    }
-    await settleTeamsRequests({ resolutions: [resolution] }, channel);
-  },
-
-  async "content.completed"({ data }, { channel }) {
-    const text = replyTextOf(data);
-    if (text === undefined) return;
-    for (const chunk of splitTeamsMessageText(text)) {
-      await channel.thread.post(chunk);
-    }
-  },
-
-  async "session.ended"({ data }, { channel }) {
-    const notice = failureNotice(data, { restart: "Teams conversation" });
-    if (notice === undefined) return;
-    await channel.thread.post(notice);
-  },
-
-  async "turn.settled"({ data }, { channel }) {
-    const notice = failureNotice(data, "turn");
-    if (notice === undefined) return;
-    await channel.thread.post(notice);
-  },
-};
+  restart: "Teams conversation",
+  requests: { show: showTeamsRequest, settle: settleTeamsRequest },
+  signIns: teamsSignIns,
+});
 
 /** A connection name for the Teams auth card (`linear` → `Linear`). */
 export function formatConnectionDisplayName(connectionName: string): string {

@@ -1,14 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import {
-  requestBatchOf,
-  requestSettlementOf,
-  type RequestSettlement,
-} from "#channel/interaction-prompts.js";
-import { postedIn, settleSignIn, showSignIn, type SignInSurface } from "#channel/sign-in.js";
+import type { RequestSettlement } from "#channel/interaction-prompts.js";
+import { postedIn, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
 import type { AskedInteraction } from "#channel/interaction-prompts.js";
 
 import { createLogger } from "#internal/logging.js";
-import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import {
   renderTelegramAuthorizationPrompt,
   renderTelegramAuthorizationStatus,
@@ -126,34 +122,32 @@ export function isTelegramBotMentioned(
   return new RegExp(`(?:^|[^A-Za-z0-9_])@${escapedUsername}(?=$|[^A-Za-z0-9_])`, "iu").test(text);
 }
 
-async function postTelegramRequests(
-  requests: readonly AskedInteraction[],
-  channel: Parameters<NonNullable<TelegramChannelEvents["interaction.opened"]>>[1]["channel"],
+async function postTelegramRequest(
+  channel: TelegramEventChannel,
+  request: AskedInteraction,
 ): Promise<void> {
-  for (const request of requests) {
-    const rendered = renderTelegramInteraction(request, channel.state);
-    const posted = await channel.telegram.post({
-      reply_markup: rendered.replyMarkup,
+  const rendered = renderTelegramInteraction(request, channel.state);
+  const posted = await channel.telegram.post({
+    reply_markup: rendered.replyMarkup,
+    text: rendered.text,
+  });
+  if (!posted.id) return;
+  if (rendered.freeformRequestId !== undefined) {
+    registerTelegramFreeformPrompt(channel.state, {
+      messageId: posted.id,
+      requestId: rendered.freeformRequestId,
+    });
+  } else {
+    registerTelegramHitlPrompt(channel.state, request, {
+      messageId: posted.id,
       text: rendered.text,
     });
-    if (!posted.id) continue;
-    if (rendered.freeformRequestId !== undefined) {
-      registerTelegramFreeformPrompt(channel.state, {
-        messageId: posted.id,
-        requestId: rendered.freeformRequestId,
-      });
-    } else {
-      registerTelegramHitlPrompt(channel.state, request, {
-        messageId: posted.id,
-        text: rendered.text,
-      });
-    }
   }
 }
 
 async function editTelegramResolvedPrompt(
+  channel: TelegramEventChannel,
   resolution: RequestSettlement,
-  channel: Parameters<NonNullable<TelegramChannelEvents["interaction.settled"]>>[1]["channel"],
 ): Promise<void> {
   const edit = takeTelegramResolvedPrompt(channel.state, resolution);
   if (edit === undefined) return;
@@ -171,55 +165,13 @@ async function editTelegramResolvedPrompt(
 }
 
 /** Built-in Telegram event handlers for typing, replies, HITL, and terminal errors. */
-export const defaultEvents: TelegramChannelEvents = {
-  async "turn.started"(_event, { channel }) {
-    await channel.telegram.startTyping();
-  },
-
-  async "interaction.opened"(fact, ctx) {
-    const { data } = fact;
-    const { channel } = ctx;
-    const batch = requestBatchOf(ctx.view, data);
-    if (batch !== undefined) {
-      await postTelegramRequests(batch.requests, channel);
-      return;
-    }
-    await showSignIn(ctx.view, data.interactionId, telegramSignIns(channel));
-  },
-
-  // Covers every way a prompt ends: a press, a typed answer, or a withdrawal.
-  async "interaction.settled"({ data }, ctx) {
-    const { channel } = ctx;
-    const resolution = requestSettlementOf(ctx.view, data);
-    if (resolution !== undefined) {
-      await editTelegramResolvedPrompt(resolution, channel);
-      return;
-    }
-    await settleSignIn(ctx.view, data, telegramSignIns(channel));
-  },
-
-  async "call.requested"(_event, { channel }) {
-    await channel.telegram.startTyping();
-  },
-
-  async "content.completed"({ data }, { channel }) {
-    const text = replyTextOf(data);
-    if (text === undefined) return;
-    await channel.telegram.post(text);
-  },
-
-  async "turn.settled"({ data }, { channel }) {
-    const notice = failureNotice(data, "turn");
-    if (notice === undefined) return;
-    await channel.telegram.post(notice);
-  },
-
-  async "session.ended"({ data }, { channel }) {
-    const notice = failureNotice(data, { restart: "message" });
-    if (notice === undefined) return;
-    await channel.telegram.post(notice);
-  },
-};
+export const defaultEvents: TelegramChannelEvents = surfaceEvents<TelegramEventChannel>({
+  typing: (channel) => channel.telegram.startTyping(),
+  post: (channel, text) => channel.telegram.post(text),
+  restart: "message",
+  requests: { show: postTelegramRequest, settle: editTelegramResolvedPrompt },
+  signIns: telegramSignIns,
+});
 
 function shouldDispatchTelegramMessage(
   message: TelegramMessage,
