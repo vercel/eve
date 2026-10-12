@@ -187,7 +187,7 @@ Policy lookup failures should throw or deny, never silently allow. Recheck autho
 
 An approval durably pauses the session and a later request resumes it. Your HTTP boundary must ensure a caller cannot continue or stream a session owned by another tenant. Persist session ownership in your application and check it before proxying:
 
-- `POST /eve/v1/session/:sessionId`, including `inputResponses`;
+- `POST /eve/v1/session/:sessionId`, including `answers`;
 - `GET /eve/v1/session/:sessionId/stream`.
 
 Built-in approval confirms that a human with access to the session approved the call. To restrict who may respond, add an [approval response policy](/docs/human-in-the-loop#authorizing-approval-responses): it receives who responded as `response.principal` and who asked for the call as `request.principal`, and runs for both Approve and Cancel. For a four-eyes workflow, where a different person or role must approve, branch on `response.decision`: allow `cancel` so the requester can still withdraw the call, and for `approve` reject a `response.principal` that matches `request.principal` and check the responder's role.

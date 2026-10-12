@@ -4,6 +4,9 @@ description: "Move workflow tools, agent calls, clients, hooks, and evals from b
 url: /tools/tasks-upgrade
 ---
 
+> This guide names session events as they were before stream version 27. To move those events to
+> v27 facts, see [Upgrade to v27 session events](/docs/concepts/upgrade-to-v27-events).
+
 This release replaces background tasks with [tasks](/docs/tools/tasks). Every change below breaks
 the previous API. Work through the sections that apply to your agent. A workflow tool that uses
 none of `execution: "background"`, `dismissible`, or `ctx.agent` keeps its code: `execute(input,

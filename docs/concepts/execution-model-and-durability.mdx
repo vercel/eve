@@ -66,7 +66,7 @@ For a root session, what happens next depends on how the message is addressed:
 - **Reset** works on a stranded session through a channel address or a session ID. **Clear** would keep a session that cannot run, so it is refused: `Session.clear()` throws `SessionStrandedError`, the eve HTTP channel returns `409 session_stranded`, and nothing changes. Reset the session instead.
 - **Session timeouts** end a stranded session the same way a reset does; see [How a stranded session ends](#how-a-stranded-session-ends).
 
-A reset ends the stranded session without running any of its code. eve cancels the session's owner run and, after a handoff, the original run that anchors its event stream, then waits until the world releases the session's addresses. If another run has taken over the session since eve inspected it, the reset ends nothing and fails so the request can be retried. The stranded session's `session.completed` and `session.failed` hooks do not run; the fresh session runs `session.started` as usual. Before cancelling, eve attempts to append a `session.failed` event with code `session_stranded` and close the old stream, without invoking authored hooks. Stream publication is best effort and waits at most 5 seconds: missing payload keys, unavailable storage, or a stalled write do not prevent reset. Each step tolerates an earlier attempt having completed it, so a reset that fails part way can be retried.
+A reset ends the stranded session without running any of its code. eve cancels the session's owner run and, after a handoff, the original run that anchors its event stream, then waits until the world releases the session's addresses. If another run has taken over the session since eve inspected it, the reset ends nothing and fails so the request can be retried. The stranded session's `session.ended` hooks do not run; the fresh session runs `session.started` as usual. Before cancelling, eve attempts to append a `session.ended` fact with `outcome: "failed"`, error code `session_stranded`, and a cause naming what ended it (`{ policy: "stranded-reset" }`, `"stranded-message"`, or `"stranded-timeout"`), then close the old stream, without invoking authored hooks. Stream publication is best effort and waits at most 5 seconds: missing payload keys, unavailable storage, or a stalled write do not prevent reset. Each step tolerates an earlier attempt having completed it, so a reset that fails part way can be retried.
 
 Each reset logs a `warn` record, `Reset stranded session`, with the previous session ID, both eve versions, and the `trigger`: `message`, `reset`, or `timeout`.
 
@@ -76,10 +76,10 @@ A reset cannot be undone. A fresh session started by a message can read at most 
 
 A replacement session is a new session with its own ID, stream, auth, channel binding, and state. It starts with no history from the stranded session. `ctx.session.predecessor` and the `session.started` event's `data.predecessor` name the session it replaced: `{ sessionId }`.
 
-To let the model continue the conversation, read the stranded session's recorded stream with `sessions.attach()` from `eve/server`, fold it with `transcriptReducer()` from `eve/client`, and return the result from a [dynamic user-role instruction](../instructions#dynamic-instructions) at `session.started`:
+To let the model continue the conversation, read the stranded session's recorded stream with `sessions.attach()` from `eve/server`, read it with `transcriptOf()` from `eve/client`, and return the result from a [dynamic user-role instruction](../instructions#dynamic-instructions) at `session.started`:
 
 ```ts title="agent/instructions/replaced-conversation.ts"
-import { transcriptReducer } from "eve/client";
+import { transcriptOf } from "eve/client";
 import { defineDynamic, defineInstructions } from "eve/instructions";
 import { sessions } from "eve/server";
 
@@ -89,15 +89,15 @@ export default defineDynamic({
       const predecessor = ctx.session.predecessor;
       if (predecessor === undefined) return null;
 
-      const reducer = transcriptReducer({ maxMessages: 40 });
-      let transcript = reducer.initial();
+      const events = [];
       for await (const event of sessions.attach(predecessor.sessionId).stream({
         startIndex: -2000,
         follow: false,
         signal: AbortSignal.timeout(5_000),
       })) {
-        transcript = reducer.reduce(transcript, event);
+        events.push(event);
       }
+      const transcript = transcriptOf(events, { maxMessages: 40 });
       if (transcript.messages.length === 0) return null;
 
       const lines = transcript.messages.map((message) => JSON.stringify(message));
@@ -115,7 +115,7 @@ export default defineDynamic({
 
 The resolver runs before the replacement's first model call, and its result enters the replacement's durable history once, ahead of the new message. In a session that replaced no other, `ctx.session.predecessor` is undefined and the instruction contributes nothing.
 
-`transcriptReducer()` keeps user message text and completed assistant text, oldest first, as `{ role, text }` messages. Reasoning, tool calls and results, attachments, approvals, and output from a turn that never completed are left out. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. `maxMessages` keeps only the newest messages.
+`transcriptOf()` keeps the text of each consumed delivery and each completed reply part, oldest first, as `{ role, text }` messages. Reasoning, narration, tool calls and results, attachments, interactions, and interrupted output are left out. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. A stranded session an eve version before v27 recorded reads the same way: `sessions.attach()` reads its user messages, assistant text, clears, and end from the v26 events it stored, and nothing else from them. `maxMessages` keeps only the newest messages.
 
 The read and the prompt are yours to bound:
 
@@ -265,7 +265,7 @@ An executing eve tool finishes and commits its result before steering reaches th
 
 Once eve publishes an input request or begins publishing turn completion or failure, eve finishes committing that boundary before applying new messages.
 
-`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
+`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `answers` deliveries do not steer; they remain available to the pending request they address.
 
 Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
 

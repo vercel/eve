@@ -65,8 +65,8 @@ result.
 
 ## Waiting, completed, and reset sessions
 
-A session that emits `session.waiting` accepts another message through the same
-handle. A terminal or reset session does not. Start a fresh conversation
+A session that hasn't ended (`session.ended`) accepts another message through the
+same handle. A terminal or reset session does not. Start a fresh conversation
 explicitly with another `client.sessions.create(firstTurn)` call.
 
 ```ts

@@ -351,8 +351,8 @@ import { search } from "@acme/crm/tools";
 
 export default defineHook({
   events: {
-    "action.result"(event) {
-      const match = toolResultFrom(event.data.result, search);
+    "call.settled"(event, ctx) {
+      const match = toolResultFrom(ctx.view.calls[event.data.callId], search);
       if (match) console.log(match.output);
     },
   },

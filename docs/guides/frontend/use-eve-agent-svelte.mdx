@@ -3,7 +3,7 @@ title: "useEveAgent (Svelte)"
 description: "Use the eve Svelte binding and its Svelte-specific reactive interface."
 ---
 
-`useEveAgent()` from `eve/svelte` exposes the shared eve frontend client through Svelte 5 reactive getters and methods. Read the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, reducers, and persistence. This page covers the Svelte-specific interface.
+`useEveAgent()` from `eve/svelte` exposes the shared eve frontend client through Svelte 5 reactive getters and methods. Read the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, and persistence. This page covers the Svelte-specific interface.
 
 On SvelteKit, register the [`eveSvelteKit` Vite plugin](./sveltekit) to mount the agent routes on the application origin.
 
@@ -62,33 +62,36 @@ Call `agent.send(text)` for text or pass content parts for attachments. The API 
 
 ## Human-in-the-loop prompts
 
-Open requests appear in the `agent.data.inputs` ledger. Read them with `openConversationInputs()`, then answer through `agent.respond()`. An answered request leaves the list right away, so its buttons can't be pressed twice:
+Open requests appear in the `agent.data.interactions` ledger. Read them with `openConversationInteractions()`, then answer through `agent.respond()`. An answered request leaves the list right away, so its buttons can't be pressed twice:
 
 ```svelte
 <script lang="ts">
-  import { openConversationInputs, useEveAgent } from "eve/svelte";
+  import { openConversationInteractions, useEveAgent } from "eve/svelte";
 
   const agent = useEveAgent();
   const pendingRequests = $derived(
-    openConversationInputs(agent.data).map((input) => input.request),
+    openConversationInteractions(agent.data)
+      .map((interaction) => interaction.request)
+      // A sign-in is answered by signing in; render it from its interaction part.
+      .filter((request) => request.kind !== "sign-in"),
   );
 </script>
 
-{#each pendingRequests as request (request.requestId)}
+{#each pendingRequests as request (request.interactionId)}
   <fieldset>
     <legend>
-      {request.kind === "tool-approval"
+      {request.kind === "approval"
         ? "Approval required"
         : request.kind === "question"
           ? "Question"
-          : "Session limit"}
+          : "Budget"}
     </legend>
     <p>{request.prompt}</p>
     {#each request.options ?? [] as option (option.id)}
       <button
         type="button"
         onclick={() =>
-          void agent.respond([{ requestId: request.requestId, optionId: option.id }])}
+          void agent.respond([{ interactionId: request.interactionId, optionId: option.id }])}
       >
         {option.label}
       </button>
@@ -120,9 +123,9 @@ Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add con
 
 Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application needs lifecycle notifications. See [Lifecycle callbacks](./overview#lifecycle-callbacks) for callback timing and optimistic projection behavior.
 
-## Custom reducer
+## Derive your own state
 
-Import `EveAgentReducer` from `eve/svelte` when projecting events into application-specific state. The resulting `agent.data` uses the reducer's `TData` type; `agent.conversation` remains `ConversationState`. See [Custom reducer](./overview#custom-reducer) for the reducer contract and client projection events.
+`agent.data` is the conversation. Derive anything else from `agent.events`, the authoritative list of the session's stream events. See [Derive your own state](./overview#derive-your-own-state).
 
 ## What to read next
 
