@@ -1,3 +1,5 @@
+import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import {
   EntityConflictError,
   HookNotFoundError,
@@ -15,6 +17,18 @@ import { endStrandedSession } from "#execution/session-inbox/end-stranded-sessio
 import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
+
+/** Records the initial deadline from the persisted owner, not turbo's provisional metadata. */
+export async function resolveSessionTimeoutDeadlineStep(input: {
+  readonly timeoutMs: number | false;
+}): Promise<Date | undefined> {
+  "use step";
+
+  if (input.timeoutMs === false) return undefined;
+  const world = await getWorld();
+  const owner = await world.runs.get(getWorkflowMetadata().workflowRunId);
+  return sessionTimeoutDeadline(input.timeoutMs, owner.startedAt!.getTime());
+}
 
 /** Starts the durable timer that signals one session deadline. */
 export async function startSessionTimeoutStep(

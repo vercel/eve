@@ -4,6 +4,7 @@ import { bootInitialOwner } from "#execution/session/entry.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import {
+  resolveSessionTimeoutDeadlineStep,
   cancelSessionTimeoutStep,
   startSessionTimeoutStep,
 } from "#execution/session/timeout-steps.js";
@@ -41,6 +42,7 @@ vi.mock("./program.js", () => ({
 vi.mock("../create-session-step.js", () => ({ createSessionStep: vi.fn() }));
 vi.mock("../session-inbox/inbox.js", () => ({ createSessionInbox: vi.fn() }));
 vi.mock("./timeout-steps.js", () => ({
+  resolveSessionTimeoutDeadlineStep: vi.fn(),
   cancelSessionTimeoutStep: vi.fn(),
   startSessionTimeoutStep: vi.fn(),
 }));
@@ -93,6 +95,9 @@ function createInbox() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(resolveSessionTimeoutDeadlineStep).mockImplementation(async ({ timeoutMs }) =>
+    timeoutMs === false ? undefined : new Date(Date.parse("2026-02-01T00:00:00.000Z") + timeoutMs),
+  );
   vi.mocked(createSessionStep).mockResolvedValue({ history: [], state: {} } as never);
   vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timeout-run-1" });
   vi.mocked(cancelSessionTimeoutStep).mockResolvedValue(undefined);
