@@ -51,8 +51,12 @@ describe("World hub transport", () => {
       for (const chunk of ["a", "b", "c"]) await client.streams.write("run", "stream", chunk);
       expect(writeMulti).not.toHaveBeenCalled();
       await client.streams.close("run", "stream");
-      expect(writeMulti).toHaveBeenCalledExactlyOnceWith("run", "stream", ["a", "b", "c"]);
-      expect(close).toHaveBeenCalledOnce();
+      expect(writeMulti).toHaveBeenCalledExactlyOnceWith("run", "stream", ["a", "b", "c"], {
+        operationId: expect.any(String),
+      });
+      expect(close).toHaveBeenCalledExactlyOnceWith("run", "stream", {
+        operationId: expect.any(String),
+      });
       expect(await client.runs.get("run")).toEqual({ createdAt: new Date(0) });
       expect(onDeployment).toHaveBeenCalled();
       await client.queue("__wkf_step_test" as never, {} as never);
