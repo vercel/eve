@@ -1,4 +1,5 @@
 import { failureNotice } from "#public/channels/reply.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
 import type { MessageContent } from "#shared/message-content.js";
@@ -18,7 +19,6 @@ import { assertWithinLimit } from "#internal/attachments/limited-read.js";
 import { createLogger } from "#internal/logging.js";
 import type { RequestSettlement } from "#channel/interaction-prompts.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
-import { displayTitle } from "#shared/display-name.js";
 import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type {
@@ -448,7 +448,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       }
       // eve's own task controls stay out of view.
       if (data.capability.kind === "control") return;
-      const label = data.capability.title ?? displayTitle(data.capability.name);
+      const label = callLabel(data);
       await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
     async "content.delta"({ data }, { channel }) {

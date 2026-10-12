@@ -1,6 +1,6 @@
 import { errorHintOf } from "#public/channels/reply.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
-import { displayTitle } from "#shared/display-name.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { waiting } from "#protocol/session-projection/selectors.js";
 import { workingTaskNames } from "#channel/task-card.js";
@@ -420,7 +420,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (!narration && !counts) return;
     if (!("runId" in owner)) return;
     const stream = stepStream(channel.state, owner.runId);
-    const label = capability.title ?? displayTitle(capability.name);
+    const label = callLabel(data);
     const calls =
       !narration && stream.calls
         ? { ...stream.calls, count: stream.calls.count + 1 }

@@ -219,7 +219,9 @@ Slack renderers take `(event, ctx, next)`, with Slack's handles on `ctx.channel.
   conversation. `transcriptReducer(options)` is `transcriptOf(events, options)`.
 - **Use the shared fold.** `eve/events` exports the catalog, the fold that turns facts into tables,
   and selectors such as `activeTurn`, `reply`, `openInteractions`, `waiting`, and `idle`, so a
-  client doesn't need its own reducer for session state.
+  client doesn't need its own reducer for session state. `callState(view, callId)` says where a
+  call stands for a display, `callLabel(row)` how to name it, and `waiting(view, { taskId })` or
+  `waiting(view, { callId })` who a task's or call's work waits on.
 - **Follow children with `child.opened`.** `session.agent(opened)` takes a `child.opened` event.
 
 ## Evals

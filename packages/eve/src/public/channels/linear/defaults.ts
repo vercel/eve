@@ -1,4 +1,5 @@
 import { signInEndedText, signInOf } from "#channel/sign-in.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
@@ -9,7 +10,6 @@ import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import { linearInteractionSignal, renderLinearInteractions } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { displayTitle } from "#shared/display-name.js";
 import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import type {
   LinearChannelEvents,
@@ -118,7 +118,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         channel,
         options,
         {
-          action: data.capability.title ?? displayTitle(data.capability.name),
+          action: callLabel(data),
           parameter: actionParameter({ input: data.input }),
           type: "action",
         },

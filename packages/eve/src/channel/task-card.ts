@@ -9,7 +9,7 @@ import type { InteractionRequest } from "#protocol/session-events/families/inter
 import type { TaskCancelReason } from "#protocol/message.js";
 import type { CallOutcome } from "#protocol/session-events/families/call.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { displayTitle } from "#shared/display-name.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { firstSentence, normalizePresentationText } from "#shared/presentation-text.js";
 

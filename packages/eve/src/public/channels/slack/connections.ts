@@ -23,7 +23,7 @@ import {
   SIGN_IN_CANCEL_ACTION_ID,
   type SignInCancelTarget,
 } from "#public/channels/slack/sign-in-cancel.js";
-import { displayProperName } from "#shared/display-name.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
 
 export type { InteractionOutcome };
 

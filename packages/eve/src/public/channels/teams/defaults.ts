@@ -15,7 +15,7 @@ import type {
   TeamsContext,
   TeamsInboundResult,
 } from "#public/channels/teams/teamsChannel.js";
-import { displayProperName } from "#shared/display-name.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
 import { parseJsonObject } from "#shared/json.js";
 
 /** Default auth projection for Teams message actors. */

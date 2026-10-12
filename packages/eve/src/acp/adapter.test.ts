@@ -138,6 +138,8 @@ describe("EveAcpAdapter", () => {
       ["agent_thought_chunk", undefined],
       ["agent_message_chunk", undefined],
       ["tool_call", "pending"],
+      // Pending until it starts, as ACP has it, then running.
+      ["tool_call_update", "in_progress"],
       ["tool_call_update", "completed"],
     ]);
     expect(updates(notifications)[2]).toMatchObject({

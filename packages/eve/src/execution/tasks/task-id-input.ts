@@ -5,7 +5,7 @@ import {
 } from "#execution/tasks/render.js";
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { displayTitle } from "#shared/display-name.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 import type { JsonObject } from "#shared/json.js";
 import { firstSentence } from "#shared/presentation-text.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";

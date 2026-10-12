@@ -25,7 +25,7 @@ import type {
   SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
-import { displayName } from "#shared/display-name.js";
+import { displayName } from "#protocol/session-projection/display-name.js";
 import { formatDuration } from "#shared/format-duration.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 
