@@ -59,13 +59,7 @@ export async function settleWorkflowToolRunCancellation(
   if (cooperative) {
     const deadline = Date.now() + WORKFLOW_CANCELLATION_SETTLE_MS;
     while (Date.now() < deadline) {
-      try {
-        const status = await getRun(runId).status;
-        if (status !== "pending" && status !== "running") return;
-      } catch (error) {
-        if (isTaskWorkflowTargetGone(error)) return;
-        throw error;
-      }
+      if (!(await isWorkflowToolRunLive(runId))) return;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
@@ -73,6 +67,17 @@ export async function settleWorkflowToolRunCancellation(
     await cancelRun(await getWorld(), runId, { cancelReason: reason });
   } catch (error) {
     if (isTaskWorkflowTargetGone(error)) return;
+    throw error;
+  }
+}
+
+/** Whether a workflow tool run can still receive control messages. */
+export async function isWorkflowToolRunLive(runId: string): Promise<boolean> {
+  try {
+    const status = await getRun(runId).status;
+    return status === "pending" || status === "running";
+  } catch (error) {
+    if (isTaskWorkflowTargetGone(error)) return false;
     throw error;
   }
 }
