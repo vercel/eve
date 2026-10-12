@@ -445,7 +445,6 @@ export function relay(
         };
   const events: SessionEvent[] = [];
   const upsert: Record<string, Relay> = {};
-  const retire: string[] = [];
   for (const event of payload.events) {
     const interactionId = event.data.interactionId;
     const mirror = tables.interactions[interactionId];
@@ -469,7 +468,6 @@ export function relay(
       case "interaction.settled":
         if (mirror?.status !== "open") break;
         events.push(...mirrorSettled(tables, event.data));
-        retire.push(interactionId);
         break;
       case "response.admitted": {
         // The asker admitted an answer this session forwarded: it stands here too, while the
@@ -489,12 +487,9 @@ export function relay(
       }
     }
   }
-  const relays = {
-    ...(Object.keys(upsert).length > 0 && { upsert }),
-    ...(retire.length > 0 && { retire }),
-  };
-  return Object.keys(relays).length > 0
-    ? { ...unchanged(view, events), relays }
+  // A route retires once its request closes, with the records of every closed row.
+  return Object.keys(upsert).length > 0
+    ? { ...unchanged(view, events), relays: { upsert } }
     : unchanged(view, events);
 }
 
@@ -620,9 +615,8 @@ export function routeAnswer(
       continue;
     events.push(deliveryApplied(delivery.deliveryId));
   }
-  // The answered routes retire, so a later delivery can't route through them.
-  const retire = input.decided.map(({ answer }) => answer.interactionId);
-  return { ...unchanged(view, events), ...(retire.length > 0 && { relays: { retire } }) };
+  // The answered routes retire with the commit, so a later delivery can't route through them.
+  return unchanged(view, events);
 }
 
 // ---------------------------------------------------------------------------

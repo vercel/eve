@@ -9,7 +9,6 @@ import {
   withSessionStateDelta,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
-import { retireCancelledCandidates } from "#harness/hitl/index.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { cancel, controlled } from "#harness/session-machine/transitions.js";
 import type { ControlDelivery } from "#harness/types.js";
@@ -71,9 +70,10 @@ export async function settleCancelledTurn(
       ),
     updateSession(_session, cancelled) {
       // The cancel reported every request and call it closed and committed the steps it stopped;
-      // what remains is private: its runs are forgotten, and its responders stop.
+      // what remains is private: its runs are forgotten, and its responders retire with the
+      // answers it closed.
       const cancelledSession = removeBlockingWorkflowToolRuns(
-        retireCancelledCandidates({ ...cancelled, outputSchema: undefined }),
+        { ...cancelled, outputSchema: undefined },
         owningTurnId,
       );
       const spent = sessionUsage(cancelled);

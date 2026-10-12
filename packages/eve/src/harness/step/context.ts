@@ -15,6 +15,7 @@ import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness
 import { cascade } from "#harness/session-machine/cascade.js";
 import {
   applyTransition,
+  dropClosedRecords,
   type Publish,
   sessionView,
   type Transition,
@@ -106,11 +107,10 @@ export function createStep(input: {
       const transition = "events" in change ? change : { events: change, turn: step.view().turn };
       // An owner's end closes what it holds in the same commit.
       const events = cascade(live.read().view, transition.events);
-      step.session = await applyTransition(
-        step.session,
-        { ...transition, events },
-        input.publish,
-        messages,
+      // Records whose rows the commit closed retire with it.
+      step.session = dropClosedRecords(
+        await applyTransition(step.session, { ...transition, events }, input.publish, messages),
+        live.read(),
       );
       if (ctx !== undefined) recordAppliedSession(ctx, step.session);
     },

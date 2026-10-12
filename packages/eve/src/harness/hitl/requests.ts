@@ -68,18 +68,18 @@ export interface HitlStateChange {
   readonly responders?: ResponderChange;
 }
 
-/** Responder records a transition writes or retires. */
+/** Responder records a transition writes. Each retires once its response closes. */
 export interface ResponderChange {
   readonly upsert?: Readonly<Record<string, PendingResponder>>;
-  /** Responses that closed, or every record when `"all"`. */
-  readonly retire?: readonly string[] | "all";
+  /** Responses whose record goes now: `dropClosedRecords` retires closed ones. */
+  readonly retire?: readonly string[];
 }
 
-/** Relay routes a transition records or retires. */
+/** Relay routes a transition records. Each retires once its request closes or is answered. */
 export interface RelayChange {
   /** Routes of requests that opened, by interaction id. */
   readonly upsert?: Readonly<Record<string, Relay>>;
-  /** Routes whose request closed. */
+  /** Routes whose record goes now: `dropClosedRecords` retires closed ones. */
   readonly retire?: readonly string[];
 }
 
@@ -150,12 +150,9 @@ function changeResponders(
   change: ResponderChange,
 ): SessionStateMap | undefined {
   const current = readResponders(state);
-  const retired =
-    change.retire === "all"
-      ? {}
-      : Object.fromEntries(
-          Object.entries(current).filter(([id]) => !(change.retire ?? []).includes(id)),
-        );
+  const retired = Object.fromEntries(
+    Object.entries(current).filter(([id]) => !(change.retire ?? []).includes(id)),
+  );
   const next = { ...retired, ...change.upsert };
   return writeRequests(state, "responders", Object.keys(next).length > 0 ? next : undefined);
 }

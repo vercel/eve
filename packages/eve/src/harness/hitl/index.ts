@@ -26,7 +26,6 @@ import {
   requireSignIn,
 } from "./approvals.js";
 import { checkSessionUsageLimit } from "./budget.js";
-import { writeHitlState } from "./requests.js";
 import { isEmptyInput } from "./delivery.js";
 
 // The session's human-in-the-loop rules, behind the few points where the rest of the harness
@@ -171,11 +170,6 @@ function responsePolicyRequestIds(
 /** The caller whose turn parks a step. */
 function currentRequester(step: Step): SessionAuthContext | null {
   return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
-}
-
-/** The cancelled turn's responders stop: the cancel closed the answers their policies weighed. */
-export function retireCancelledCandidates<T extends HarnessSessionBase>(session: T): T {
-  return writeHitlState(session, { responders: { retire: "all" } });
 }
 
 /**
