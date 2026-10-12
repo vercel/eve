@@ -245,3 +245,10 @@ export function createWorld(): Promise<World> {
   });
 }
 export default createWorld;
+
+/** Hub persistence and streams with Vercel Queues delivery and deployment identity. */
+export async function createHubVercelWorld(options: WorldHubOptions): Promise<World> {
+  const { createQueue } = await import("#compiled/@workflow/world-vercel/index.js");
+  const queue = createQueue();
+  return { ...(await createWorldHubWorld(options)), ...queue };
+}

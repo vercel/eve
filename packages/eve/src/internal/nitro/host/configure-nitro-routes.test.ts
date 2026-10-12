@@ -424,7 +424,7 @@ describe("Nitro route configuration", () => {
     expect(prodNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toBeUndefined();
   });
 
-  it("does not register direct workflow queue handlers for Vercel production builds", async () => {
+  it("installs the configured world in Vercel queue consumer routes", async () => {
     vi.stubEnv("VERCEL", "1");
 
     const root = "/tmp/eve-nitro-direct-handlers-vercel";
@@ -437,7 +437,7 @@ describe("Nitro route configuration", () => {
       createPreparedHost({
         appRoot: root,
         workflowBuildDir,
-        workflowWorld: "@workflow/world-postgres",
+        workflowWorld: "eve/world-hub/vercel",
       }),
     );
 
@@ -446,8 +446,11 @@ describe("Nitro route configuration", () => {
     expect(workflowHandlerSource).toContain(
       'import { POST } from "../../workflow-cache/workflows.mjs";',
     );
-    expect(workflowHandlerSource).not.toContain("registerHandler");
-    expect(workflowHandlerSource).not.toContain("__eveGetWorkflowWorld");
+    expect(workflowHandlerSource).toContain(
+      'import "../../.eve/compiled-artifacts-workflow-world.mjs";',
+    );
+    expect(workflowHandlerSource).toContain("registerHandler");
+    expect(workflowHandlerSource).toContain("__eveGetWorkflowWorld");
     expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
   });
 
