@@ -156,6 +156,15 @@ export type WorkflowToolRunMessage =
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
 
 /**
+ * Messages a run relays to its session in one delivery, in the order its body
+ * sent them. The session's inbox reads them as separate messages.
+ */
+export interface WorkflowToolRunMessageBatch {
+  readonly kind: "workflow-batch";
+  readonly messages: readonly WorkflowToolRunMessage[];
+}
+
+/**
  * A later call to a `serve` task, which its run hands to `receive()`. It
  * carries everything the session knew of the call when it admitted it, as a
  * run's input does for the call that started it: the coordinates of the model

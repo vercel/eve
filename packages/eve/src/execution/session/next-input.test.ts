@@ -29,6 +29,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
 
   return {
     claimedTokens: [],
+    takeLeading: () => [],
     async claimSessionHook() {},
     async claimSessionHooks() {},
     drain() {

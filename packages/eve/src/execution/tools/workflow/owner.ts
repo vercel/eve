@@ -25,26 +25,27 @@ type WorkflowToolRunBodyMessage = Exclude<WorkflowToolRunMessage, { readonly kin
 
 export interface WorkflowToolRunOwnerInbox {
   readonly owner: WorkflowToolRunInbox;
-  readonly reader: ChannelReader<"workflow", WorkflowToolRunBodyMessage>;
+  /** Everything sent since the last read, in the order it was sent. */
+  readonly reader: ChannelReader<"workflow", WorkflowToolRunBodyMessage[]>;
 }
 
 /**
  * Receives body messages before routing them to the waiting turn. The body
  * and the run share one workflow, which replays both deterministically, so
  * the inbox is an in-memory queue; a durable hop would add a step and a
- * replay to every message. The run relays each message in a step that can
- * run before hooks created in the same suspension are registered, so a body
- * that hands the session a hook token registers that hook before sending it.
+ * replay to every message. The run relays what queued up together, so a
+ * fan-out's messages share a relay. A relay can run before hooks created in
+ * the same suspension are registered, so a body that hands the session a
+ * hook token registers that hook before sending it.
  */
 export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
   const queued: WorkflowToolRunBodyMessage[] = [];
   let wake: (() => void) | undefined;
   let sent = 0;
-  async function* read(): AsyncGenerator<WorkflowToolRunBodyMessage> {
+  async function* read(): AsyncGenerator<WorkflowToolRunBodyMessage[]> {
     for (;;) {
-      const next = queued.shift();
-      if (next !== undefined) {
-        yield next;
+      if (queued.length > 0) {
+        yield queued.splice(0);
         continue;
       }
       await new Promise<void>((resolve) => {

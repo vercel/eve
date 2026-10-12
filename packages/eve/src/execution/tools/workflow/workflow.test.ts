@@ -105,7 +105,7 @@ it("emits every persisted report before the terminal outcome", async () => {
       (async function* () {
         // The body settles before the persisted report reaches its owner.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        yield report;
+        yield [report];
       })(),
     ),
   });
@@ -194,7 +194,7 @@ it.each(["completed", "failed", "cancelled", "throw", "blocked"] as const)(
 
 it("preserves the pending inbox read across cancellation and drains the report before settling", async () => {
   const controller = new AbortController();
-  const pending = Promise.withResolvers<IteratorResult<WorkflowToolRunMessage>>();
+  const pending = Promise.withResolvers<IteratorResult<WorkflowToolRunMessage[]>>();
   const next = vi.fn(() => pending.promise);
   const report: WorkflowToolRunMessage = {
     from: {
@@ -219,7 +219,7 @@ it("preserves the pending inbox read across cancellation and drains the report b
   await vi.waitFor(() => expect(next).toHaveBeenCalledOnce());
   controller.abort(new Error("stop"));
   await vi.waitFor(() => expect(mocks.sleep).toHaveBeenCalledOnce());
-  pending.resolve({ done: false, value: report });
+  pending.resolve({ done: false, value: [report] });
   await completion;
   expect(mocks.deliver).toHaveBeenNthCalledWith(1, "parent", report, { ifPresent: false });
   expect(next).toHaveBeenCalledOnce();
@@ -233,6 +233,13 @@ it("preserves the pending inbox read across cancellation and drains the report b
     { ifPresent: true },
   );
 });
+
+/** A relay that hands the session each message in turn; owner.test covers batching. */
+function relayThrough(deliver: (message: never) => unknown) {
+  return async (messages: readonly WorkflowToolRunMessage[]): Promise<void> => {
+    for (const message of messages) await deliver(message as never);
+  };
+}
 
 function setControl(controller: AbortController) {
   const { signal } = controller;
@@ -254,6 +261,7 @@ function setControl(controller: AbortController) {
         ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
       }),
     register: async () => true,
+    relay: relayThrough((message) => mocks.deliver("parent", message, { ifPresent: false })),
   });
 }
 
@@ -287,7 +295,12 @@ it("applies cancellation buffered during the last report delivery before publish
       await vi.waitFor(() => expect(commands.landed).toHaveLength(1));
     }
   });
-  mocks.owner.mockReturnValue({ commands, handleMessage: deliver, register: async () => true });
+  mocks.owner.mockReturnValue({
+    commands,
+    handleMessage: deliver,
+    register: async () => true,
+    relay: relayThrough(deliver),
+  });
   mocks.body.runSignal = controller.signal;
   mocks.applyCommand.mockImplementation(() => controller.abort(new Error("stop")));
   mocks.sleep.mockReturnValue(new Promise<void>(() => {}));
@@ -297,7 +310,7 @@ it("applies cancellation buffered during the last report delivery before publish
       "workflow",
       (async function* () {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        yield report;
+        yield [report];
         await new Promise<void>(() => {});
       })(),
     ),
@@ -318,6 +331,7 @@ it("keeps waiting for the body after the control hook closes", async () => {
   mocks.owner.mockReturnValue({
     commands: createChannelReader("control", (async function* () {})()),
     handleMessage: mocks.deliver,
+    relay: relayThrough(mocks.deliver),
     register: async () => true,
   });
   mocks.body.runSignal = new AbortController().signal;
@@ -367,6 +381,7 @@ it("reports a task started once its control hook is registered, without holding 
     }),
     handleMessage: (message: WorkflowToolRunMessage) =>
       mocks.deliver("parent", message, { ifPresent: false }),
+    relay: relayThrough((message) => mocks.deliver("parent", message, { ifPresent: false })),
     register: async () => {
       await registered.promise;
       return true;
@@ -378,7 +393,7 @@ it("reports a task started once its control hook is registered, without holding 
     reader: createChannelReader(
       "workflow",
       (async function* () {
-        yield report;
+        yield [report];
         await new Promise<void>(() => {});
       })(),
     ),
@@ -423,6 +438,7 @@ it("relays a question only once the control hook that takes its answer is regist
       [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
     }),
     handleMessage: mocks.deliver,
+    relay: relayThrough(mocks.deliver),
     register: () => registered.promise,
   });
   mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
@@ -430,7 +446,7 @@ it("relays a question only once the control hook that takes its answer is regist
     reader: createChannelReader(
       "workflow",
       (async function* () {
-        yield question;
+        yield [question];
         await new Promise<void>(() => {});
       })(),
     ),
@@ -449,6 +465,7 @@ it("reports a duplicate task start as started without starting its body", async 
   mocks.owner.mockReturnValue({
     commands: createChannelReader("control", (async function* () {})()),
     handleMessage: mocks.deliver,
+    relay: relayThrough(mocks.deliver),
     register: async () => false,
   });
   mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({

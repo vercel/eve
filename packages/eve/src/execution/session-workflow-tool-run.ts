@@ -1,11 +1,7 @@
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
-import {
-  emitAgentStartedStep,
-  emitWorkflowToolRunReportStep,
-} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import type {
   WorkflowToolAskRequest,
-  WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRequestMessage,
@@ -16,6 +12,8 @@ import {
   withdrawWorkflowToolRunQuestionStep,
 } from "#execution/tools/workflow/withdraw-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { isWorkflowMessage, type SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import { isTaskRunMessage } from "#execution/tasks/session.js";
 import {
   workflowToolRunOutcomeToToolResult,
   workflowToolRunRequestToInputRequestPayload,
@@ -33,12 +31,28 @@ interface HandlerInput<T> {
   readonly message: T;
 }
 
+export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is AppliedRunMessage {
+  return message.kind === "agent-started" || message.kind === "report" || isTaskRunMessage(message);
+}
+
+/** Removes the applied run messages at the front of the inbox, in arrival order. */
+export function takeLeadingAppliedRunMessages(inbox: SessionInboxReader): AppliedRunMessage[] {
+  return inbox.takeLeading(
+    (payload): payload is AppliedRunMessage =>
+      isWorkflowMessage(payload) && isAppliedRunMessage(payload),
+  );
+}
+
+/**
+ * Handles a run message the session does not apply as it reads it: a
+ * question, its withdrawal, or an `execute` run's outcome.
+ */
 export async function handleWorkflowToolRunMessage(
-  input: HandlerInput<WorkflowToolRunMessage>,
+  input: HandlerInput<Exclude<WorkflowToolRunMessage, AppliedRunMessage>>,
 ): Promise<RuntimeActionResult | undefined> {
   const { message } = input;
   switch (message.kind) {
-    // Only task runs report started, reply, or usage, and the session applies those to the task table.
+    // Only task runs report started, reply, or usage, and the session applies those as it reads them.
     case "started":
     case "reply":
     case "usage":
@@ -51,34 +65,7 @@ export async function handleWorkflowToolRunMessage(
     case "withdraw":
       await handleWorkflowToolRunWithdraw({ ...input, message });
       return undefined;
-    case "report":
-      await input.cursor.advance((state) =>
-        emitWorkflowToolRunReportStep({ ...state, from: message.from, update: message.update }),
-      );
-      return undefined;
-    case "agent-started":
-      await input.cursor.advance((state) =>
-        emitAgentStartedStep({ ...state, messages: [message] }),
-      );
-      return undefined;
   }
-}
-
-/** Boundary messages in admission order, with consecutive `agent-started` messages grouped. */
-type BoundaryBatch =
-  | { readonly kind: "agent-started"; readonly messages: WorkflowToolRunAgentStartedMessage[] }
-  | { readonly kind: "message"; readonly message: WorkflowToolRunMessage };
-
-/** Groups consecutive `agent-started` messages so one `emitAgentStartedStep` publishes each group. */
-export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): BoundaryBatch[] {
-  const batches: BoundaryBatch[] = [];
-  for (const message of messages) {
-    const last = batches.at(-1);
-    if (message.kind !== "agent-started") batches.push({ kind: "message", message });
-    else if (last?.kind === "agent-started") last.messages.push(message);
-    else batches.push({ kind: "agent-started", messages: [message] });
-  }
-  return batches;
 }
 
 /**

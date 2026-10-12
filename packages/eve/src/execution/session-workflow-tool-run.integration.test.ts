@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
+import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { applyTaskRunMessageStep } from "#execution/tasks/steps.js";
 import {
   createTask,
   markTaskRunStarted,
@@ -67,7 +67,7 @@ describe("handleWorkflowToolRunMessage", () => {
         },
       }),
     });
-    const from: WorkflowToolRunRef = {
+    const from: WorkflowToolRunRef & { readonly taskId: string } = {
       callId: "reviewer-call",
       input: { message: "Review the release notes." },
       runId: "reviewer-run",
@@ -107,13 +107,15 @@ describe("handleWorkflowToolRunMessage", () => {
         },
       });
       await cursor.advance((state) =>
-        applyTaskRunMessageStep({
+        applyRunMessagesStep({
           ...state,
-          message: {
-            from,
-            kind: "outcome",
-            result: { error: "The reviewer's model call failed.", status: "failed" },
-          },
+          messages: [
+            {
+              from,
+              kind: "outcome",
+              result: { error: "The reviewer's model call failed.", status: "failed" },
+            },
+          ],
         }),
       );
     });

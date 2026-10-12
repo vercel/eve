@@ -123,11 +123,11 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
         bodyOutcome = read.next.value;
         continue;
       }
-      const message = read.next.value;
-      relayedMessages += 1;
+      const messages = read.next.value;
+      relayedMessages += messages.length;
       // An execute run's generated token can't be held by another run.
-      if (isAnsweredOnControlHook(message)) await owner.register();
-      await owner.handleMessage(message);
+      if (messages.some(isAnsweredOnControlHook)) await owner.register();
+      await owner.relay(messages);
     }
   } finally {
     await started.close();

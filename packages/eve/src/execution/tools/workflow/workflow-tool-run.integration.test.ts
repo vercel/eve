@@ -588,7 +588,7 @@ describe("workflow tools", () => {
         expect(filterEventsByType(settled, "action.partial")).toHaveLength(1);
 
         const inputs = await readStepInputs(run.runId);
-        const reportInputs = inputs.get("emitWorkflowToolRunReportStep") ?? [];
+        const reportInputs = inputs.get("applyRunMessagesStep") ?? [];
         expect(reportInputs).toHaveLength(1);
         expect(reportInputs[0]).not.toContain(earlyNote);
         expect(inputs.get("turnStep")?.at(-1)).toContain(earlyNote);

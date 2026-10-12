@@ -54,15 +54,11 @@ export type TaskRunMessage = Extract<
 
 const TASK_CANCEL_REASON = "The task was cancelled.";
 
-/** Applies one message from a task's run: started, a reply, usage no reply carried, or the run's outcome. */
-export async function applyTaskRunMessageStep(
-  input: SessionStepState & { readonly message: TaskRunMessage },
-): Promise<SessionStateTransition> {
-  "use step";
-  return await withSessionStateDelta(input, applyTaskRunMessage);
-}
-
-async function applyTaskRunMessage(
+/**
+ * Applies one message from a task's run: started, a reply, usage no reply
+ * carried, or the run's outcome. Call from a step and adopt the result.
+ */
+export async function applyTaskRunMessage(
   input: SessionStepState & { readonly message: TaskRunMessage },
 ): Promise<PublishedSessionEvents> {
   const { message } = input;

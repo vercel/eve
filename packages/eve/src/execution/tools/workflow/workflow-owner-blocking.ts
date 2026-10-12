@@ -6,6 +6,7 @@ import {
 } from "#execution/tools/workflow/owner-channels.js";
 import type {
   WorkflowToolRunMessage,
+  WorkflowToolRunMessageBatch,
   WorkflowToolRunControlMessage,
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
@@ -22,12 +23,21 @@ export interface BlockingWorkflowOwner {
    */
   register(): Promise<boolean>;
   handleMessage(message: WorkflowToolRunMessage): Promise<void>;
+  /**
+   * Relays the body's messages to the session in one delivery, which is one
+   * durable write: the session gets all of them or none, never a prefix.
+   */
+  relay(messages: readonly WorkflowToolRunMessage[]): Promise<void>;
 }
 
 /** The run's link to its session: commands arrive on its control hook, and its messages go to the session's inbox. */
 export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWorkflowOwner {
   const hook = createHook<WorkflowToolRunControlMessage>({ token: input.hookToken });
   let registered: Promise<boolean> | undefined;
+  const handleMessage = (message: WorkflowToolRunMessage): Promise<void> =>
+    resumeHookStep(input.owner.inbox, message, {
+      ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
+    });
   return {
     commands: createChannelReader("control", hook),
     register() {
@@ -41,10 +51,12 @@ export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWor
       );
       return registered;
     },
-    handleMessage(message: WorkflowToolRunMessage) {
-      return resumeHookStep(input.owner.inbox, message, {
-        ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
-      });
+    handleMessage,
+    relay(messages) {
+      // A lone message keeps the shape every session reads.
+      if (messages.length === 1) return handleMessage(messages[0]!);
+      const batch: WorkflowToolRunMessageBatch = { kind: "workflow-batch", messages };
+      return resumeHookStep(input.owner.inbox, batch);
     },
   };
 }

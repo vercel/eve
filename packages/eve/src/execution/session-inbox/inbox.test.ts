@@ -130,6 +130,48 @@ describe("createSessionInbox", () => {
     expect(await inbox.release()).toEqual([]);
   });
 
+  it("reads the messages a run relayed together as separate messages, in order", async () => {
+    const from = {
+      callId: "call",
+      input: {},
+      runId: "tool-run",
+      sequence: 0,
+      stepIndex: 0,
+      toolName: "review",
+      turnId: "turn-1",
+    };
+    const opened: SessionInboxPayload = {
+      from,
+      kind: "agent-started",
+      session: { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId: "child-1" },
+    };
+    const report: SessionInboxPayload = { from, kind: "report", update: "one reviewer started" };
+    const batch = { kind: "workflow-batch", messages: [opened, report] };
+    installHooks(
+      createMockHook({
+        token: "stable",
+        reads: [
+          Promise.resolve(resolved(batch as never)),
+          Promise.resolve(resolved(send("Bob asks how it is going."))),
+        ],
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    // Taking run messages from the front stops at Bob's message.
+    expect(
+      inbox.takeLeading(
+        (payload): payload is typeof opened =>
+          payload.kind === "agent-started" || payload.kind === "report",
+      ),
+    ).toEqual([opened, report]);
+    expect(inbox.drain()).toEqual([send("Bob asks how it is going.")]);
+    await inbox.dispose();
+  });
+
   it("keeps a pushed cancellation queued for the consumer", async () => {
     const input = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(createMockHook({ token: "stable", reads: [input.promise] }));

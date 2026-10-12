@@ -94,6 +94,9 @@ const CHECKPOINT_UPGRADES: Readonly<
   // Version 13 prevents older deployments from ignoring stubs and running real tools.
   // Existing checkpoints need no data changes.
   12: (checkpoint) => checkpoint,
+  // Version 14 prevents older deployments from dropping the batched messages
+  // workflow tool runs relay. Existing checkpoints need no data changes.
+  13: (checkpoint) => checkpoint,
 };
 
 /**

@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 
 import { replaceDurableSessionSnapshot } from "#execution/durable-session-store.js";
-import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -55,20 +55,25 @@ it("publishes a session step's action.partial to the stream and its hooks", asyn
   const { hooked, runtime, sessionWritable, streamed } = await createPublishingRuntime();
 
   await runtime.run(async () => {
-    await emitWorkflowToolRunReportStep({
-      from: {
-        callId: "call-1",
-        input: {},
-        runId: "run-1",
-        sequence: 1,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
+    await applyRunMessagesStep({
+      messages: [
+        {
+          from: {
+            callId: "call-1",
+            input: {},
+            runId: "run-1",
+            sequence: 1,
+            stepIndex: 0,
+            toolName: "research",
+            turnId: "turn-1",
+          },
+          kind: "report",
+          update: { progress: "halfway" },
+        },
+      ],
       serializedContext,
       sessionState: createTestSessionState(),
       sessionWritable,
-      update: { progress: "halfway" },
     });
   });
 

@@ -82,6 +82,7 @@ function sessionWithTask(input: {
     claimSessionHooks: vi.fn(),
     onDelivery: () => () => {},
     onInterrupt: () => () => {},
+    takeLeading: () => [],
   } as Partial<SessionInbox> as SessionInbox;
   const cursor = new SessionStateCursor({
     history: [],
