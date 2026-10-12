@@ -78,12 +78,13 @@ export function cascade(view: SessionView, events: readonly SessionEvent[]): Ses
     // it made on to its turn, so they don't close with it.
     const probe = copyView(scratch);
     foldReceivedEvent(probe, { ...event, meta: { endOfLine: false } });
+    // A turn's deliveries settle after it; `session.ended` is always last.
     const under = cascaded(openUnder(probe, owner));
-    for (const ref of under.filter((entry) => entry.family !== "delivery"))
+    const after = (ref: Ref) => ref.family === "delivery" && owner !== "session";
+    for (const ref of under.filter((entry) => !after(entry)))
       apply(closing(scratch, ref, why, owner === "session"));
     apply(event);
-    for (const ref of under.filter((entry) => entry.family === "delivery"))
-      apply(closing(scratch, ref, why, owner === "session"));
+    for (const ref of under.filter(after)) apply(closing(scratch, ref, why, false));
   }
   return out;
 }
@@ -128,6 +129,8 @@ function reasonFor(owner: Ref | "session", outcome?: string, reason?: string): s
       return outcome === "abandoned" ? "model-call-retried" : "steered";
     case "task":
       return reason ?? "task-ended";
+    case "interaction":
+      return reason ?? `interaction-${outcome ?? "ended"}`;
     case "change":
       return "context-change-failed";
     default:
@@ -201,7 +204,17 @@ function closing(
           : { data: { deliveryId: ref.id, outcome, turnId }, type: "delivery.settled" }
       ) as SessionEvent;
     }
-    default:
-      return { data: { outcome, turnId: ref.id }, scope, type: "turn.settled" } as SessionEvent;
+    default: {
+      const reply = rowOf(view, "turn", ref.id)?.reply;
+      return {
+        data: {
+          outcome,
+          ...(reply !== undefined && reply.length > 0 && { reply }),
+          turnId: ref.id,
+        },
+        scope,
+        type: "turn.settled",
+      } as SessionEvent;
+    }
   }
 }

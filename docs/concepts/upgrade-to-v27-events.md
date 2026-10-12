@@ -63,7 +63,7 @@ epochs must be rebuilt.
 | `turn.cancelled`          | `turn.settled` with `outcome: "cancelled"`                                                                                  |
 | `session.waiting`         | `delivery.settled` (a message's response is done) or `turn.settled`; `idle(view)` from `eve/events` says nothing is running |
 | `session.completed`       | `session.ended` with `outcome: "completed"`                                                                                 |
-| `session.failed`          | `session.ended` with `outcome: "failed"`                                                                                    |
+| `session.failed`          | `session.ended` with `outcome: "failed"`; a turn it held settles `cancelled`, not failed                                    |
 
 New facts with no v26 counterpart: `delivery.admitted` and `delivery.settled` (every message,
 answer, control, and callback), `model.requested`, `model.retried`, `call.started`,

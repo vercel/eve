@@ -5,12 +5,7 @@ import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 import { closeUnder } from "#harness/session-machine/cascade.js";
 import { isOpen } from "#protocol/session-projection/tree.js";
-import {
-  activeTurn,
-  interactionOwner,
-  type OpenWork,
-  openWork,
-} from "#protocol/session-projection/selectors.js";
+import { activeTurn, interactionOwner } from "#protocol/session-projection/selectors.js";
 import type {
   RuntimeIdentity,
   RuntimeTraceContext,
@@ -286,19 +281,13 @@ interface TurnEnding {
  * The fact that ends the open turn. The writer closes what it leaves open before it, and settles
  * the deliveries it answered after it (`cascade`).
  */
-function closeTurn(projection: SessionProjection, ending: TurnEnding): SessionEvent[] {
-  const turnId = activeTurn(projection.view)?.turnId;
-  return turnId === undefined ? [] : turnClosure(projection, turnId, ending).facts;
-}
-
-function turnClosure(
+function closeTurn(
   projection: SessionProjection,
-  turnId: string,
   ending: TurnEnding,
-): { readonly facts: SessionEvent[]; readonly closed: OpenWork } {
-  const tables = projection.view;
-  const open = openWork(tables, { turnId });
-  const turn = tables.turns[turnId];
+  turnId = activeTurn(projection.view)?.turnId,
+): SessionEvent[] {
+  if (turnId === undefined) return [];
+  const turn = projection.view.turns[turnId];
   const data: {
     -readonly [K in keyof FactOf<"turn.settled">["data"]]: FactOf<"turn.settled">["data"][K];
   } = {
@@ -308,7 +297,7 @@ function turnClosure(
   if (turn?.reply !== undefined && turn.reply.length > 0) data.reply = turn.reply;
   if (ending.cause !== undefined) data.cause = ending.cause;
   if (ending.error !== undefined) data.error = ending.error;
-  return { closed: open, facts: [{ data, type: "turn.settled" }] };
+  return [{ data, type: "turn.settled" }];
 }
 
 /** Nothing is left to run: the turn completes. */
@@ -369,9 +358,9 @@ export function idle(view: SessionView): Transition {
 // ---------------------------------------------------------------------------
 
 /**
- * The facts that end a session, in one commit: an open turn ends first (failed with the session's
- * error, or cancelled), then everything else the session leaves open, and `session.ended` is
- * last. Every reader stops there.
+ * The facts that end a session, in one commit, `session.ended` last. The writer closes what the
+ * session leaves open before it (`cascade`): an open turn ends cancelled, since its session ended,
+ * not it; `failure(view, turnId)` reads the session's error. Every reader stops there.
  */
 export function sessionEndedFacts(
   projection: SessionProjection | undefined,
@@ -391,19 +380,6 @@ export function sessionEndedFacts(
   }
   const { control } = ending;
   if (control !== undefined) facts.push(controlAdmitted(control, "reset"));
-  // The shared tables, not an execution pointer, decide which turns are still open. This
-  // also works for degraded terminal publication from a checkpoint without live turn state. The
-  // writer closes what each turn, and then the session, leaves open (`cascade`).
-  if (projection !== undefined) {
-    for (const row of Object.values(projection.view.turns)) {
-      if (row.status === "settled") continue;
-      const turn = turnClosure(projection, row.turnId, {
-        error: ending.error,
-        outcome: ending.outcome === "failed" ? "failed" : "cancelled",
-      });
-      facts.push(...turn.facts);
-    }
-  }
   if (control !== undefined) facts.push(deliveryApplied(control.deliveryId));
   const data: {
     -readonly [K in keyof FactOf<"session.ended">["data"]]: FactOf<"session.ended">["data"][K];
@@ -702,27 +678,17 @@ export function finishRun(
   );
   return unchanged(
     view,
-    withdrawn.flatMap((row) => withdrawInteraction(tables, row.interactionId, "asker-ended")),
+    withdrawn.map((row) => withdrawInteraction(row.interactionId, "asker-ended")),
   );
 }
 
-/** An interaction nobody needs anymore, with the answers still open on it. */
+/** An interaction nobody needs anymore; the writer withdraws the answers still open on it. */
 function withdrawInteraction(
-  tables: PublicView,
   interactionId: string,
   reason: string,
   outcome: "withdrawn" | "interrupted" = "withdrawn",
-): SessionEvent[] {
-  const row = tables.interactions[interactionId];
-  if (row === undefined || row.status !== "open") return [];
-  return [
-    ...Object.values(tables.responses)
-      .filter(
-        (response) => response.interactionId === interactionId && response.status !== "settled",
-      )
-      .map((response) => responseSettled(response.responseId, "withdrawn", reason)),
-    interactionSettled(interactionId, outcome, { reason }),
-  ];
+): SessionEvent {
+  return interactionSettled(interactionId, outcome, { reason });
 }
 
 // ---------------------------------------------------------------------------
@@ -822,10 +788,10 @@ function mirrorSettled(
     settled.outcome === "accepted" ||
     settled.outcome === "declined" ||
     settled.outcome === "invalid";
+  // The writer withdraws the answers that didn't decide (`cascade`).
   const decider = decided ? open.at(-1) : undefined;
-  const events: SessionEvent[] = open.map((row) =>
-    responseSettled(row.responseId, row === decider ? "applied" : "withdrawn", settled.reason),
-  );
+  const events: SessionEvent[] =
+    decider === undefined ? [] : [responseSettled(decider.responseId, "applied", settled.reason)];
   const data: { -readonly [K in keyof typeof settled]: (typeof settled)[K] } = { ...settled };
   if (decider !== undefined) data.cause = { responseId: decider.responseId };
   events.push({ data, type: "interaction.settled" });
@@ -920,9 +886,9 @@ export function routeAnswer(
         .filter((binding) => binding.interactionId === row.interactionId)
         .map((binding) => binding.responseId),
     ];
+    // The latest answer decides; the writer withdraws the others (`cascade`).
     const decider = answers.at(-1);
-    for (const responseId of answers)
-      events.push(responseSettled(responseId, responseId === decider ? "applied" : "withdrawn"));
+    if (decider !== undefined) events.push(responseSettled(decider, "applied"));
     events.push(
       interactionSettled(row.interactionId, outcome, {
         cause: decider === undefined ? undefined : { responseId: decider },
@@ -1108,24 +1074,24 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
     stopped.flatMap((step) => step.requests.map((request) => request.interactionId)),
   );
   const tables = projection.view;
-  const closingTurn = activeTurn(tables)?.turnId ?? turnId;
-  const turn =
-    closingTurn === undefined
-      ? undefined
-      : turnClosure(projection, closingTurn, { cause: input.cause, outcome: "cancelled" });
-  const closed = new Set(turn?.closed.interactions.map((row) => row.interactionId));
-  // The cancel also stops the work behind every relayed request and the stopped steps' asks.
+  // The cancel also stops the work behind every relayed request and the stopped steps' asks,
+  // wherever they sit; the writer closes the rest of what the turn held.
   const events: SessionEvent[] = Object.values(tables.interactions)
     .filter(
       (row) =>
         row.status === "open" &&
-        !closed.has(row.interactionId) &&
         (view.relayedRequestIds.has(row.interactionId) ||
           stoppedRequestIds.has(row.interactionId) ||
           row.request.kind === "budget"),
     )
-    .flatMap((row) => withdrawInteraction(tables, row.interactionId, "Cancelled.", "interrupted"));
-  events.push(...(turn?.facts ?? []));
+    .map((row) => withdrawInteraction(row.interactionId, "Cancelled.", "interrupted"));
+  events.push(
+    ...closeTurn(
+      projection,
+      { cause: input.cause, outcome: "cancelled" },
+      activeTurn(tables)?.turnId ?? turnId,
+    ),
+  );
   return {
     commit: stopped.flatMap(cancelledTranscript),
     events,
@@ -1188,26 +1154,15 @@ export function clear(
 }
 
 /**
- * What a clear withdraws beyond the turn it closes: the requests the cleared history asked for
- * outside it. Requests relayed from live tasks stay.
+ * What a clear withdraws: every request the cleared history asked for, its turn's too. Requests
+ * relayed from live tasks stay.
  */
 function clearedInteractions(view: SessionView): SessionEvent[] {
   const tables = view.projection.view;
-  const turnId = activeTurn(tables)?.turnId;
-  const closed = new Set(
-    turnId === undefined
-      ? []
-      : openWork(tables, { turnId }).interactions.map((row) => row.interactionId),
-  );
   return Object.values(tables.interactions)
-    .filter(
-      (row) =>
-        row.status === "open" &&
-        !closed.has(row.interactionId) &&
-        !view.relayedRequestIds.has(row.interactionId),
-    )
-    .flatMap((row) =>
-      withdrawInteraction(tables, row.interactionId, "The context was cleared.", "interrupted"),
+    .filter((row) => row.status === "open" && !view.relayedRequestIds.has(row.interactionId))
+    .map((row) =>
+      withdrawInteraction(row.interactionId, "The context was cleared.", "interrupted"),
     );
 }
 
