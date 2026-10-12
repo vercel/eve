@@ -104,7 +104,6 @@ export async function compactHistory(step: Step): Promise<StepResult> {
         events: [
           {
             data: { owner: { changeId }, runId },
-            scope: { changeId, runId },
             type: "model.requested",
           },
         ],
@@ -122,7 +121,6 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       step.session.agent.compactionModelReference ?? requireSessionModelReference(step.session);
     await step.publish({
       data: { attempt: 0, modelId: summaryModel.id, runId },
-      scope: { changeId, runId },
       type: "model.started",
     });
     const compacted = await maybeCompact({
@@ -197,7 +195,6 @@ function summaryFailed(
   return [
     ...runs.map((run): SessionEvent => ({
       data: { error, outcome: "failed", runId: run.runId },
-      scope: { changeId: input.changeId, runId: run.runId },
       type: "model.settled",
     })),
     {
@@ -207,7 +204,6 @@ function summaryFailed(
         kind: view.changes[input.changeId]?.kind ?? "compaction",
         outcome: "failed",
       },
-      scope: { changeId: input.changeId },
       type: "context.settled",
     },
   ];
@@ -347,11 +343,6 @@ async function compactOnce(input: {
   };
 
   const { change } = input;
-  const changeScope =
-    change.turnId === undefined
-      ? { changeId: change.changeId }
-      : { changeId: change.changeId, turnId: change.turnId };
-  const runScope = { ...changeScope, runId: change.summaryRunId };
   {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
@@ -379,7 +370,6 @@ async function compactOnce(input: {
         await publish([
           {
             data: { owner: { changeId: change.changeId }, runId: change.summaryRunId },
-            scope: runScope,
             type: "model.requested",
           },
           {
@@ -388,7 +378,6 @@ async function compactOnce(input: {
               modelId: gatewayModelId(model) ?? "unknown",
               runId: change.summaryRunId,
             },
-            scope: runScope,
             type: "model.started",
           },
         ]);
@@ -451,7 +440,6 @@ async function compactOnce(input: {
   if (usage !== undefined) {
     usageFacts.push({
       data: { kind: "model", owner: { runId: change.summaryRunId }, usage },
-      scope: runScope,
       type: "usage.recorded",
     });
   }
@@ -476,13 +464,11 @@ async function compactOnce(input: {
     if (needsSummary) {
       settled.push({
         data: { finishReason: "stop", outcome: "completed", runId: change.summaryRunId },
-        scope: runScope,
         type: "model.settled",
       });
     }
     settled.push(...usageFacts, {
       data: { changeId: change.changeId, kind: "compaction", outcome: "completed" },
-      scope: changeScope,
       type: "context.settled",
     });
     await publish(

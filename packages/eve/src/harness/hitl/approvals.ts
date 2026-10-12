@@ -25,7 +25,6 @@ import {
   signInInteractionId,
   signInOpened,
 } from "#harness/interaction-facts.js";
-import { turnCoordinates, turnCoordinatesOf } from "#protocol/session-projection.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import { openRequests, SUPERSEDED_BY_MESSAGE } from "#protocol/session-reader.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
@@ -106,10 +105,7 @@ export function askApprovals(
       ...committed,
       ...(snippet === undefined ? [] : [createFrameworkUserMessage("context.state", snippet)]),
     ],
-    events:
-      input.tasks.length > 0
-        ? []
-        : input.requests.map((ask) => approvalOpened(ask, input.event.turnId)),
+    events: input.tasks.length > 0 ? [] : input.requests.map((ask) => approvalOpened(ask)),
     turn,
   };
 }
@@ -122,7 +118,7 @@ export function openDeferredApprovals(view: SessionView): Transition {
     runningTasks(step).length > 0 ||
     step.requests.some((request) => tables.interactions[request.interactionId] !== undefined)
       ? []
-      : step.requests.map((ask) => approvalOpened(ask, step.event.turnId)),
+      : step.requests.map((ask) => approvalOpened(ask)),
   );
   return { events, turn: view.turn };
 }
@@ -262,12 +258,7 @@ export function settleApprovals(
   const approved: ApprovedCall[] = [];
   let answered = false;
   const events: SessionEvent[] = [];
-  const decide = (
-    request: ApprovalAsk,
-    outcome: InteractionOutcome,
-    scope: { readonly turnId: string },
-    reason?: string,
-  ) => {
+  const decide = (request: ApprovalAsk, outcome: InteractionOutcome, reason?: string) => {
     const answer = outcome === "withdrawn" ? undefined : standing.get(request.interactionId);
     if (answer !== undefined) responses.settle(answer.responseId, "applied");
     responses.closeOthers(request.interactionId, answer?.responseId);
@@ -276,7 +267,6 @@ export function settleApprovals(
         cause: answer === undefined ? undefined : { responseId: answer.responseId },
         reason,
         response: outcome === "withdrawn" ? undefined : answerOf(request),
-        scope,
       }),
     );
   };
@@ -289,7 +279,6 @@ export function settleApprovals(
     if (!input.steer && !complete) return step;
     answered ||= complete;
     let messages = step.messages;
-    const scope = { turnId: step.event.turnId };
     for (const request of pending) {
       const { callId, toolName } = request.call;
       const { approved: approves, reason, status } = resolveApprovalOutcome(answerOf(request));
@@ -301,11 +290,11 @@ export function settleApprovals(
           step,
           ...(responder !== undefined && { responder: responder.responder }),
         });
-        decide(request, "accepted", scope);
+        decide(request, "accepted");
         continue;
       }
-      if (status === "ignored") decide(request, "withdrawn", scope, SUPERSEDED_BY_MESSAGE);
-      else decide(request, status === "invalid" ? "invalid" : "declined", scope);
+      if (status === "ignored") decide(request, "withdrawn", SUPERSEDED_BY_MESSAGE);
+      else decide(request, status === "invalid" ? "invalid" : "declined");
       messages = withResult(messages, {
         output: { reason, type: "execution-denied" },
         toolCallId: callId,
@@ -325,7 +314,7 @@ export function settleApprovals(
           },
           toolName,
         },
-        { rejected: true, scope },
+        { rejected: true },
       );
       events.push({
         ...settled,
@@ -362,14 +351,13 @@ export function withdrawUnavailable(
     for (const request of pendingApprovals(view, step)) {
       if (!gone.has(request.interactionId)) continue;
       const { callId, toolName } = request.call;
-      const scope = { turnId: step.event.turnId };
       const message = unavailableToolMessage(toolName, input.searchable(request));
       const failed = failedCall({ callId, message, toolName });
       messages = withResult(messages, failed.part);
       responses.closeOthers(request.interactionId, undefined);
       events.push(
-        interactionSettled(request.interactionId, "withdrawn", { reason: message, scope }),
-        callSettledFrom(failed.result, { scope }),
+        interactionSettled(request.interactionId, "withdrawn", { reason: message }),
+        callSettledFrom(failed.result),
       );
     }
     return messages === step.messages ? step : { ...step, messages };
@@ -426,7 +414,7 @@ export function openLimit(
 export function requestLimit(view: SessionView, ask: LimitAsk): Transition {
   const { turnId } = turnPosition(view.projection);
   return {
-    events: [interactionOpened({ ...ask, scope: { turnId }, subject: { turnId } })],
+    events: [interactionOpened({ ...ask, subject: { turnId } })],
     turn: view.turn,
   };
 }
@@ -457,10 +445,6 @@ export function settleLimit(view: SessionView): Transition & {
     responses.settle(answer.responseId, "refused", INVALID_BUDGET_ANSWER);
     return { events: responses.facts(), turn: view.turn };
   }
-  const at = turnCoordinatesOf(
-    view.projection,
-    open.turnId ?? turnCoordinates(view.projection).turnId,
-  );
   responses.settle(answer.responseId, "applied");
   responses.closeOthers(interactionId, answer.responseId);
   return {
@@ -469,7 +453,6 @@ export function settleLimit(view: SessionView): Transition & {
       interactionSettled(interactionId, granted.granted ? "accepted" : "declined", {
         cause: { responseId: answer.responseId },
         response,
-        scope: { turnId: at.turnId },
       }),
     ],
     limit: granted,
@@ -528,7 +511,6 @@ export function requireSignIn(
       return [
         {
           data: { callId, outcome: "interrupted", reason: "authorization-required" },
-          scope: { turnId },
           type: "call.settled",
         },
       ];
@@ -546,7 +528,6 @@ export function requireSignIn(
     }),
     ...opening.map((challenge) =>
       signInOpened(challenge, {
-        scope: { turnId },
         // A responder's sign-in is about their answer; any other holds the turn.
         subject:
           challenge.candidateId !== undefined &&

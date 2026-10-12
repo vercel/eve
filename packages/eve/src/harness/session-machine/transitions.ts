@@ -7,8 +7,6 @@ import { closeUnder } from "#harness/session-machine/cascade.js";
 import { isOpen } from "#protocol/session-projection/tree.js";
 import {
   activeTurn,
-  callTask,
-  callTurn,
   interactionOwner,
   type OpenWork,
   openWork,
@@ -164,12 +162,11 @@ export function receive(
       turnId,
     };
     if (input.trace !== undefined) data.trace = input.trace;
-    events.push({ data, scope: { turnId }, type: "turn.started" });
+    events.push({ data, type: "turn.started" });
   }
   for (const delivery of deliveries) {
     events.push({
       data: { deliveryId: delivery.deliveryId, parts: delivery.parts, turnId },
-      scope: { turnId },
       type: "delivery.consumed",
     });
   }
@@ -201,7 +198,6 @@ export function join(
   for (const delivery of open) {
     events.push({
       data: { deliveryId: delivery.deliveryId, parts: delivery.parts, turnId },
-      scope: { turnId },
       type: "delivery.consumed",
     });
   }
@@ -213,9 +209,7 @@ export function requestModel(view: SessionView): Transition & { readonly runId: 
   const { turnId } = at(view.projection);
   const runId = nextRunId(view.projection);
   return {
-    ...unchanged(view, [
-      { data: { owner: { turnId }, runId }, scope: { runId, turnId }, type: "model.requested" },
-    ]),
+    ...unchanged(view, [{ data: { owner: { turnId }, runId }, type: "model.requested" }]),
     runId,
   };
 }
@@ -225,11 +219,9 @@ export function startModel(
   view: SessionView,
   input: { readonly runId: string; readonly modelId: string; readonly attempt: number },
 ): Transition {
-  const owner = view.projection.view.runs[input.runId]?.owner;
   return unchanged(view, [
     {
       data: { attempt: input.attempt, modelId: input.modelId, runId: input.runId },
-      scope: runScope(owner, input.runId),
       type: "model.started",
     },
   ]);
@@ -240,11 +232,9 @@ export function retryModel(
   view: SessionView,
   input: { readonly runId: string; readonly attempt: number; readonly error: ErrorInfo },
 ): Transition {
-  const owner = view.projection.view.runs[input.runId]?.owner;
   return unchanged(view, [
     {
       data: { attempt: input.attempt, error: input.error, runId: input.runId },
-      scope: runScope(owner, input.runId),
       type: "model.retried",
     },
   ]);
@@ -262,12 +252,10 @@ export interface RunSettlement {
 
 /** A run settles, with its usage in the same commit. */
 export function settleModel(view: SessionView, input: RunSettlement): Transition {
-  return unchanged(view, runSettledFacts(view.projection, input));
+  return unchanged(view, runSettledFacts(input));
 }
 
-function runSettledFacts(projection: SessionProjection, input: RunSettlement): SessionEvent[] {
-  const owner = projection.view.runs[input.runId]?.owner;
-  const scope = runScope(owner, input.runId);
+function runSettledFacts(input: RunSettlement): SessionEvent[] {
   const data: {
     -readonly [K in keyof FactOf<"model.settled">["data"]]: FactOf<"model.settled">["data"][K];
   } = {
@@ -277,25 +265,14 @@ function runSettledFacts(projection: SessionProjection, input: RunSettlement): S
   if (input.finishReason !== undefined) data.finishReason = input.finishReason;
   if (input.generationId !== undefined) data.generationId = input.generationId;
   if (input.error !== undefined) data.error = input.error;
-  const facts: SessionEvent[] = [{ data, scope, type: "model.settled" }];
+  const facts: SessionEvent[] = [{ data, type: "model.settled" }];
   if (input.usage !== undefined) {
     facts.push({
       data: { kind: "model", owner: { runId: input.runId }, usage: input.usage },
-      scope,
       type: "usage.recorded",
     });
   }
   return facts;
-}
-
-function runScope(
-  owner: { readonly turnId?: string; readonly changeId?: string } | undefined,
-  runId: string,
-) {
-  const scope: { runId: string; turnId?: string; changeId?: string } = { runId };
-  if (owner?.turnId !== undefined) scope.turnId = owner.turnId;
-  if (owner?.changeId !== undefined) scope.changeId = owner.changeId;
-  return scope;
 }
 
 /** How a turn ends. */
@@ -331,7 +308,7 @@ function turnClosure(
   if (turn?.reply !== undefined && turn.reply.length > 0) data.reply = turn.reply;
   if (ending.cause !== undefined) data.cause = ending.cause;
   if (ending.error !== undefined) data.error = ending.error;
-  return { closed: open, facts: [{ data, scope: { turnId }, type: "turn.settled" }] };
+  return { closed: open, facts: [{ data, type: "turn.settled" }] };
 }
 
 /** Nothing is left to run: the turn completes. */
@@ -454,11 +431,7 @@ export interface SettledCall {
 }
 
 /** What the agent behind a call spent, recorded against the call. */
-export function delegatedUsageFact(
-  callId: string,
-  usage: TokenUsage,
-  scope: { readonly turnId: string },
-): SessionEvent {
+export function delegatedUsageFact(callId: string, usage: TokenUsage): SessionEvent {
   const recorded: { -readonly [K in keyof Usage]: Usage[K] } = {
     cacheReadTokens: usage.cacheReadTokens,
     cacheWriteTokens: usage.cacheWriteTokens,
@@ -468,7 +441,6 @@ export function delegatedUsageFact(
   if (usage.costUsd !== undefined) recorded.costUsd = usage.costUsd;
   return {
     data: { kind: "model", owner: { callId }, usage: recorded },
-    scope,
     type: "usage.recorded",
   };
 }
@@ -489,10 +461,9 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
     if (result !== undefined && recorded?.taskId === undefined && recorded?.status !== "settled") {
       // A task's start receipt is model history only. Its public call stays open until the
       // task replies; the reply path publishes its actual settlement and delegated spend.
-      const scope = { turnId: step.event.turnId };
-      events.push(callSettledFrom(result, { scope }));
+      events.push(callSettledFrom(result));
       // A child's usage counts once, in the commit that settles its call.
-      if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage, scope));
+      if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage));
     }
   }
   const complete = steps.filter(isComplete);
@@ -532,7 +503,7 @@ export function discardAttempt(
           runId: input.runId,
           usage: input.usage,
         };
-  return unchanged(view, [...work, ...runSettledFacts(view.projection, run)]);
+  return unchanged(view, [...work, ...runSettledFacts(run)]);
 }
 
 /**
@@ -627,7 +598,6 @@ export function startTask(
   task: TaskCallStart,
   introducedTasks?: Set<string>,
 ): Transition {
-  const scope = { taskId: task.taskId, turnId: task.turnId };
   const events: SessionEvent[] = [];
   const introduced =
     introducedTasks?.has(task.taskId) ?? view.projection.view.tasks[task.taskId] !== undefined;
@@ -635,7 +605,6 @@ export function startTask(
     introducedTasks?.add(task.taskId);
     events.push({
       type: "task.started",
-      scope,
       data: {
         taskId: task.taskId,
         kind: task.kind,
@@ -644,7 +613,7 @@ export function startTask(
       },
     });
   }
-  events.push({ type: "call.started", scope, data: { callId: task.callId, taskId: task.taskId } });
+  events.push({ type: "call.started", data: { callId: task.callId, taskId: task.taskId } });
   return unchanged(view, events);
 }
 
@@ -666,7 +635,7 @@ export function settleTask(
     readonly outcome: TaskCallOutcome;
   },
 ): Transition {
-  const { outcome, task } = input;
+  const { outcome } = input;
   const settled = input.calls.map((call, index): SessionEvent => {
     const data: {
       -readonly [K in keyof FactOf<"call.settled">["data"]]: FactOf<"call.settled">["data"][K];
@@ -686,7 +655,7 @@ export function settleTask(
     }
     if (outcome.status === "failed") data.error = { code: "TASK_FAILED", message: outcome.error };
     if (outcome.status === "cancelled") data.reason = outcome.reason ?? "task-cancelled";
-    return { data, scope: { taskId: task.id, turnId: call.turnId }, type: "call.settled" };
+    return { data, type: "call.settled" };
   });
   return unchanged(view, settled);
 }
@@ -712,7 +681,7 @@ export function endTask(
     }),
     ...(outcome.status === "cancelled" && { reason: outcome.reason ?? "task-ended" }),
   };
-  return unchanged(view, [{ data, scope: { taskId: input.taskId }, type: "task.ended" }]);
+  return unchanged(view, [{ data, type: "task.ended" }]);
 }
 
 /**
@@ -746,17 +715,13 @@ function withdrawInteraction(
 ): SessionEvent[] {
   const row = tables.interactions[interactionId];
   if (row === undefined || row.status !== "open") return [];
-  const owner = interactionOwner(tables, row);
-  const scope: { turnId?: string; taskId?: string } = {};
-  if (owner.turnId !== undefined) scope.turnId = owner.turnId;
-  if (owner.taskId !== undefined) scope.taskId = owner.taskId;
   return [
     ...Object.values(tables.responses)
       .filter(
         (response) => response.interactionId === interactionId && response.status !== "settled",
       )
       .map((response) => responseSettled(response.responseId, "withdrawn", reason)),
-    interactionSettled(interactionId, outcome, { reason, scope }),
+    interactionSettled(interactionId, outcome, { reason }),
   ];
 }
 
@@ -782,12 +747,6 @@ export function relay(
 ): Transition {
   const { payload } = input;
   const tables = view.projection.view;
-  const serving = tables.calls[payload.callId];
-  const scope: { turnId?: string; taskId?: string } = {};
-  const turnId = serving === undefined ? undefined : callTurn(tables, serving);
-  const taskId = serving === undefined ? undefined : callTask(tables, serving);
-  if (turnId !== undefined) scope.turnId = turnId;
-  if (taskId !== undefined) scope.taskId = taskId;
   const route: Relay | undefined =
     payload.route === undefined
       ? undefined
@@ -812,7 +771,6 @@ export function relay(
             origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
             subject: { callId: payload.callId },
           },
-          scope,
           type: "interaction.opened",
         });
         // A person answers it here, and the answer goes back the way it came.
@@ -822,7 +780,7 @@ export function relay(
       }
       case "interaction.settled":
         if (mirror?.status !== "open") break;
-        events.push(...mirrorSettled(tables, event.data, scope));
+        events.push(...mirrorSettled(tables, event.data));
         retire.push(interactionId);
         break;
       case "response.admitted": {
@@ -856,7 +814,6 @@ export function relay(
 function mirrorSettled(
   tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
-  scope: { readonly turnId?: string; readonly taskId?: string },
 ): SessionEvent[] {
   const open = Object.values(tables.responses)
     .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
@@ -871,7 +828,7 @@ function mirrorSettled(
   );
   const data: { -readonly [K in keyof typeof settled]: (typeof settled)[K] } = { ...settled };
   if (decider !== undefined) data.cause = { responseId: decider.responseId };
-  events.push({ data, scope, type: "interaction.settled" });
+  events.push({ data, type: "interaction.settled" });
   return events;
 }
 
@@ -938,7 +895,6 @@ export function routeAnswer(
       const { parts, turnId } = delivery.consumed;
       events.push({
         data: { deliveryId: delivery.deliveryId, parts, turnId },
-        scope: { turnId },
         type: "delivery.consumed",
       });
     }
@@ -967,15 +923,10 @@ export function routeAnswer(
     const decider = answers.at(-1);
     for (const responseId of answers)
       events.push(responseSettled(responseId, responseId === decider ? "applied" : "withdrawn"));
-    const owner = interactionOwner(tables, row);
-    const scope: { turnId?: string; taskId?: string } = {};
-    if (owner.turnId !== undefined) scope.turnId = owner.turnId;
-    if (owner.taskId !== undefined) scope.taskId = owner.taskId;
     events.push(
       interactionSettled(row.interactionId, outcome, {
         cause: decider === undefined ? undefined : { responseId: decider },
         response: answer,
-        scope,
       }),
     );
   }
@@ -1006,12 +957,10 @@ export function runSignIn(
   outcome?: "accepted" | "failed",
 ): RelayedInteractionEvent {
   if (outcome === undefined) {
-    const scope: { turnId: string; taskId?: string } = { turnId: from.turnId };
-    if (from.taskId !== undefined) scope.taskId = from.taskId;
     return {
       data: signInOpened(challenge, {
         prompt: `Sign in to ${challenge.name} to continue.`,
-        scope,
+
         subject: from.taskId === undefined ? { turnId: from.turnId } : { taskId: from.taskId },
       }).data,
       type: "interaction.opened",
@@ -1064,15 +1013,11 @@ export function completeSignIn(
       // One callback per attempt reaches the session, so the attempt names its delivery.
       const deliveryId = `callback_${interactionId}`;
       const responseId = `response_${deliveryId}`;
-      const owner = interactionOwner(tables, row);
-      const scope: { turnId?: string; taskId?: string } = {};
-      if (owner.turnId !== undefined) scope.turnId = owner.turnId;
-      if (owner.taskId !== undefined) scope.taskId = owner.taskId;
       return [
         { data: { deliveryId, source: { callback: "authorization" } }, type: "delivery.admitted" },
         responseSubmitted({ deliveryId, interactionId, responseId }),
         responseSettled(responseId, "applied"),
-        interactionSettled(interactionId, "accepted", { cause: { responseId }, scope }),
+        interactionSettled(interactionId, "accepted", { cause: { responseId } }),
         deliveryApplied(deliveryId),
       ];
     }),
@@ -1284,6 +1229,6 @@ export function contextStarted(input: {
   if (input.cause !== undefined) data.cause = input.cause;
   if (input.trigger !== undefined) data.trigger = input.trigger;
   return input.turnId === undefined
-    ? { data, scope: { changeId: input.changeId }, type: "context.started" }
-    : { data, scope: { changeId: input.changeId, turnId: input.turnId }, type: "context.started" };
+    ? { data, type: "context.started" }
+    : { data, type: "context.started" };
 }
