@@ -26,6 +26,7 @@ import type {
 } from "#protocol/session-events/families/delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
+import type { ModelOwner } from "#protocol/session-events/families/model.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type {
   Cause,
@@ -203,23 +204,28 @@ export function join(
 export function requestModel(view: SessionView): Transition & { readonly runId: string } {
   const { turnId } = at(view.projection);
   const runId = nextRunId(view.projection);
-  return {
-    ...unchanged(view, [{ data: { owner: { turnId }, runId }, type: "model.requested" }]),
-    runId,
-  };
+  return { ...unchanged(view, [runRequested({ turnId }, runId)]), runId };
+}
+
+/** A model run is asked for: a turn's, or a context change's summary run. */
+export function runRequested(owner: ModelOwner, runId: string): SessionEvent {
+  return { data: { owner, runId }, type: "model.requested" };
 }
 
 /** The run's model was chosen and an attempt at its provider call begins. */
-export function startModel(
-  view: SessionView,
-  input: { readonly runId: string; readonly modelId: string; readonly attempt: number },
-): Transition {
-  return unchanged(view, [
-    {
-      data: { attempt: input.attempt, modelId: input.modelId, runId: input.runId },
-      type: "model.started",
-    },
-  ]);
+export function startModel(view: SessionView, input: RunStart): Transition {
+  return unchanged(view, [runStarted(input)]);
+}
+
+interface RunStart {
+  readonly runId: string;
+  readonly modelId: string;
+  readonly attempt: number;
+}
+
+export function runStarted(input: RunStart): SessionEvent {
+  const { attempt, modelId, runId } = input;
+  return { data: { attempt, modelId, runId }, type: "model.started" };
 }
 
 /** The run's attempt failed, and the run tries again. */
@@ -250,7 +256,8 @@ export function settleModel(view: SessionView, input: RunSettlement): Transition
   return unchanged(view, runSettledFacts(input));
 }
 
-function runSettledFacts(input: RunSettlement): SessionEvent[] {
+/** The facts that settle a run: its end, then what it spent. */
+export function runSettledFacts(input: RunSettlement): SessionEvent[] {
   const data: {
     -readonly [K in keyof FactOf<"model.settled">["data"]]: FactOf<"model.settled">["data"][K];
   } = {
