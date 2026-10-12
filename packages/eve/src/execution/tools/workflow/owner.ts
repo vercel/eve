@@ -1,4 +1,3 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunRequestMessage,
@@ -18,29 +17,55 @@ import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 export interface WorkflowToolRunInbox {
   /** Messages that reached the run's inbox so far. */
   readonly sent: number;
-  send(message: Exclude<WorkflowToolRunMessage, { readonly kind: "outcome" }>): Promise<void>;
+  send(message: WorkflowToolRunBodyMessage): Promise<void>;
 }
+
+/** What a body sends its session through the run: everything but the outcome, which the run sends. */
+type WorkflowToolRunBodyMessage = Exclude<WorkflowToolRunMessage, { readonly kind: "outcome" }>;
 
 export interface WorkflowToolRunOwnerInbox {
   readonly owner: WorkflowToolRunInbox;
-  readonly reader: ChannelReader<"workflow", WorkflowToolRunMessage>;
+  readonly reader: ChannelReader<"workflow", WorkflowToolRunBodyMessage>;
 }
 
-/** Receives body messages before routing them to the waiting turn. */
+/**
+ * Receives body messages before routing them to the waiting turn. The body
+ * and the run share one workflow, which replays both deterministically, so
+ * the inbox is an in-memory queue; a durable hop would add a step and a
+ * replay to every message. The run relays each message in a step that can
+ * run before hooks created in the same suspension are registered, so a body
+ * that hands the session a hook token registers that hook before sending it.
+ */
 export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
-  const hook = createHook<WorkflowToolRunMessage>();
+  const queued: WorkflowToolRunBodyMessage[] = [];
+  let wake: (() => void) | undefined;
   let sent = 0;
+  async function* read(): AsyncGenerator<WorkflowToolRunBodyMessage> {
+    for (;;) {
+      const next = queued.shift();
+      if (next !== undefined) {
+        yield next;
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+  }
   return {
     owner: {
       get sent() {
         return sent;
       },
       async send(message) {
-        await resumeHookStep(hook.token, message);
+        queued.push(message);
         sent += 1;
+        const woken = wake;
+        wake = undefined;
+        woken?.();
       },
     },
-    reader: createChannelReader("workflow", hook),
+    reader: createChannelReader("workflow", read()),
   };
 }
 

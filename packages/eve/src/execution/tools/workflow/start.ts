@@ -58,6 +58,12 @@ export interface StartWorkflowTaskInput {
   };
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
+  /**
+   * The call's run, when its batch already started it alongside the others
+   * with the entry this dispatch starts. The dispatch records it in place of
+   * starting one.
+   */
+  readonly run?: Promise<WorkflowToolRunAddress>;
   readonly session: HarnessSessionBase;
   readonly task: RuntimeWorkflowTaskRequest;
 }
@@ -67,6 +73,7 @@ export async function startWorkflowToolCallRun(
   input: StartWorkflowTaskInput,
   entry: WorkflowToolRunEntry,
 ): Promise<WorkflowToolRunAddress> {
+  if (input.run !== undefined) return await input.run;
   const { task, batchEvent, session } = input;
   return await startWorkflowToolRun({
     agentContext: input.agentContext,

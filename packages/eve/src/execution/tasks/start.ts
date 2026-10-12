@@ -29,7 +29,11 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import { TOO_MANY_TASKS_CODE, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
-import type { RuntimeToolResultActionResult, WorkflowToolRunEntry } from "#shared/action-types.js";
+import type {
+  RuntimeToolResultActionResult,
+  RuntimeWorkflowTaskRequest,
+  WorkflowToolRunEntry,
+} from "#shared/action-types.js";
 
 const log = createLogger("execution.tasks");
 
@@ -125,12 +129,55 @@ export async function sendToTask(input: TaskDispatchInput): Promise<TaskDispatch
   };
 }
 
+/**
+ * The entry of the run that dispatching `task` starts, or `undefined` when it
+ * starts none: a call to a running task, or a task cancelled before the
+ * session could start it. The task cap can still refuse a task's run.
+ */
+export function runEntryToStart(
+  table: TaskTable,
+  task: RuntimeWorkflowTaskRequest,
+): WorkflowToolRunEntry | undefined {
+  const { entry } = task;
+  switch (entry.entryPoint) {
+    case "execute":
+      return { entryPoint: "execute" };
+    case "task":
+    case "serve": {
+      const record = findTask(table, entry.taskId);
+      return record !== undefined && isTaskWorking(record) ? entry : undefined;
+    }
+    case "receive":
+      return undefined;
+  }
+}
+
+/**
+ * Whether dispatching `tasks` in order starts every run {@link runEntryToStart}
+ * names. A call to a running task can take a slot under the task cap, and
+ * sending to it can fail the batch, so such a batch never qualifies.
+ */
+export function startsEveryRun(
+  table: TaskTable,
+  tasks: readonly RuntimeWorkflowTaskRequest[],
+): boolean {
+  if (tasks.some((task) => task.entry.entryPoint === "receive")) return false;
+  const starting = tasks.filter(
+    (task) => task.entry.entryPoint !== "execute" && runEntryToStart(table, task) !== undefined,
+  );
+  return runningTasks(table).length + starting.length <= MAX_WORKING_TASKS;
+}
+
+function runningTasks(table: TaskTable): readonly TaskRecord[] {
+  return workingTasks(table).filter((candidate) => candidate.run !== undefined);
+}
+
 /** The `TOO_MANY_TASKS` error when the session already runs as many tasks as it may. */
 function tooManyTasks(
   input: TaskDispatchInput,
   table: TaskTable,
 ): RuntimeToolResultActionResult | undefined {
-  const running = workingTasks(table).filter((candidate) => candidate.run !== undefined);
+  const running = runningTasks(table);
   if (running.length < MAX_WORKING_TASKS) return undefined;
   const runningIds = running.map((candidate) => candidate.id);
   return createRuntimeToolResultFromValue({

@@ -8,13 +8,14 @@ import {
   context as otelContext,
   trace as otelTrace,
 } from "#compiled/@opentelemetry/api/index.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   waitForCommandHookOwner,
+  waitForSessionInbox,
   sessionTimeoutWorkflowReference,
   startSessionOwnerStep,
   startWorkflowOnCurrentDeployment,
@@ -517,6 +518,49 @@ describe("waitForCommandHookOwner", () => {
 
     await expect(waitForCommandHookOwner("task:token")).rejects.toBe(failure);
     expect(getHookByTokenMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("waitForSessionInbox", () => {
+  const inboxToken = sessionInboxHookToken(sessionCommandHookToken("child-session"));
+
+  it("waits for a started session to claim its inbox", async () => {
+    getHookByTokenMock
+      .mockRejectedValueOnce(new HookNotFoundError(inboxToken))
+      .mockResolvedValueOnce({ runId: "child-session" });
+    // `start()` may accept a run before it can be read.
+    getRunMock.mockReturnValue({
+      get status() {
+        return Promise.reject(new WorkflowRunNotFoundError("child-session"));
+      },
+    });
+
+    await expect(waitForSessionInbox("child-session")).resolves.toBe(true);
+    expect(getHookByTokenMock).toHaveBeenLastCalledWith(inboxToken);
+  });
+
+  it("stops waiting once the session's run ended without an inbox", async () => {
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError(inboxToken));
+    getRunMock.mockReturnValue({ status: Promise.resolve("completed") });
+
+    await expect(waitForSessionInbox("child-session")).resolves.toBe(false);
+  });
+
+  it("gives up on a running session that never claims its inbox", async () => {
+    vi.useFakeTimers();
+    try {
+      getHookByTokenMock.mockRejectedValue(new HookNotFoundError(inboxToken));
+      getRunMock.mockReturnValue({ status: Promise.resolve("running") });
+
+      const waiting = waitForSessionInbox("child-session");
+      const settled = expect(waiting).rejects.toThrow(
+        'Timed out waiting for session "child-session" to open its inbox.',
+      );
+      await vi.advanceTimersByTimeAsync(31_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

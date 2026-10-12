@@ -8,8 +8,6 @@ import {
 } from "#compiled/@workflow/errors/index.js";
 
 import type {
-  CancelTurnInput,
-  CancelTurnResult,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -80,6 +78,7 @@ import {
 } from "#execution/session-inbox/resume.js";
 import {
   assertRunnableSessionInbox,
+  findSessionHookHolder,
   StrandedSessionOwnerError,
 } from "#execution/session-inbox/owner.js";
 import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -465,15 +464,6 @@ export async function dispatchWorkflowSessionCommand<TCommand extends SessionCom
   }
 }
 
-/** Requests cancellation through a session's stable command inbox. */
-export async function requestWorkflowTurnCancellation(
-  input: CancelTurnInput,
-): Promise<CancelTurnResult> {
-  const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
-  if (input.turnId !== undefined) command.turnId = input.turnId;
-  return await dispatchWorkflowSessionCommand({ command, sessionId: input.sessionId });
-}
-
 async function isRunActive(runId: string): Promise<boolean> {
   try {
     const status = await getRun(runId).status;
@@ -513,6 +503,38 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
       if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     }
+  }
+}
+
+/**
+ * Waits until a started session claims its inbox, which it does when its run
+ * first suspends. Resolves `false` when the run ended without an inbox, so
+ * there is nothing left to command.
+ */
+export async function waitForSessionInbox(sessionId: string): Promise<boolean> {
+  const token = sessionInboxHookToken(sessionCommandHookToken(sessionId));
+  const deadline = Date.now() + SESSION_HOOK_HANDOVER_TIMEOUT_MS;
+  for (let delayMs = 20; ; delayMs = Math.min(delayMs * 2, 200)) {
+    if ((await findSessionHookHolder(token)) !== undefined) return true;
+    if (await hasRunEnded(sessionId)) return false;
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for session "${sessionId}" to open its inbox.`);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
+/** A run `start()` accepted may not be readable yet, which is not an ended run. */
+async function hasRunEnded(runId: string): Promise<boolean> {
+  try {
+    const status = await getRun(runId).status;
+    return status !== "pending" && status !== "running";
+  } catch (error) {
+    for (const cause of walkCauseChain(error)) {
+      if (WorkflowRunNotFoundError.is(cause)) return false;
+    }
+    if (isInactiveCommandTarget(error)) return true;
+    throw error;
   }
 }
 

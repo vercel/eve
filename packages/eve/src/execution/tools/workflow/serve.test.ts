@@ -44,14 +44,17 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (options?: { readonly token?: string }) =>
     options?.token === "control"
-      ? (async function* () {
-          while (true) {
-            const command = mocks.commands.shift();
-            if (command !== undefined) yield command;
-            else await new Promise<void>((resolve) => (mocks.wakeCommands = resolve));
-          }
-        })()
-      : // Agent turns and the run's inbox never report; only what the run sends matters here.
+      ? Object.assign(
+          (async function* () {
+            while (true) {
+              const command = mocks.commands.shift();
+              if (command !== undefined) yield command;
+              else await new Promise<void>((resolve) => (mocks.wakeCommands = resolve));
+            }
+          })(),
+          { getConflict: async () => null },
+        )
+      : // Agent turns never report; only what the run sends matters here.
         {
           [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
           token: "agent-turn",

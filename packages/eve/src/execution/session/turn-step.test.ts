@@ -36,6 +36,13 @@ import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
+import {
+  MAX_WORKING_TASKS,
+  readTaskTable,
+  writeTaskTable,
+  type TaskRecord,
+} from "#execution/tasks/table.js";
+import { applyValueDelta } from "#shared/value-delta.js";
 import { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/hitl/approved-calls.js";
 import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { openInputs } from "#protocol/session-projection.js";
@@ -80,7 +87,7 @@ import { turnStep as runTurnStep } from "#execution/session/turn-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import type { DeliverHookPayload } from "#channel/types.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -159,7 +166,8 @@ vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
   };
 });
 
-vi.mock("#execution/tools/workflow/start.js", () => ({
+vi.mock("#execution/tools/workflow/start.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/tools/workflow/start.js")>()),
   startWorkflowTask: vi.fn(async ({ session }: { session: unknown }) => ({ session })),
 }));
 
@@ -970,6 +978,117 @@ describe("dispatchCoordinationStep", () => {
     expect(vi.mocked(startWorkflowTask).mock.calls[0]?.[0].agentContext.traceRoot).toEqual({
       kind: "inherited",
       sessionId: expected,
+    });
+  });
+
+  describe("when one batch starts several task runs", () => {
+    // The override below gives the real reader to a mock other tests configure themselves.
+    afterEach(() => vi.mocked(readDurableSession).mockReset());
+
+    function batchOfReviews(running: number): HarnessSession {
+      const call = (taskId: string): RuntimeWorkflowTaskRequest => ({
+        callId: `call-${taskId}`,
+        entry: { entryPoint: "serve", taskId },
+        executeInput: { message: "Bob asks for a review of the plan." },
+        input: { message: "Bob asks for a review of the plan." },
+        kind: "workflow-task",
+        toolName: "reviewer",
+        workflowId: "workflow//eve//reviewer",
+      });
+      const record = (id: string, run?: string): TaskRecord => ({
+        calls: [{ callId: `call-${id}`, turnId: "turn_3" }],
+        id,
+        kind: "agent",
+        name: "reviewer",
+        results: [],
+        resumable: true,
+        ...(run !== undefined && { run: { hookToken: `hook-${id}`, runId: run, started: true } }),
+      });
+      const busy = Array.from({ length: running }, (_, index) =>
+        record(`busy-${String(index)}`, `run-busy-${String(index)}`),
+      );
+      const parked = withParkedStep(createStubSession(), {
+        event: { sequence: 3, stepIndex: 2, turnId: "turn_3" },
+        messages: [],
+        tasks: [call("alice"), call("bob")],
+      });
+      return writeTaskTable(parked, { tasks: [...busy, record("alice"), record("bob")] });
+    }
+
+    async function dispatch(session: HarnessSession) {
+      mockCoordinationBundle();
+      // The step reads the parked session, then the state its own writes produce.
+      const actual = await vi.importActual<typeof import("../durable-session-store.js")>(
+        "../durable-session-store.js",
+      );
+      vi.mocked(readDurableSession)
+        .mockImplementation(actual.readDurableSession)
+        .mockImplementationOnce(() => session);
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+      const sessionState = createStubSessionState();
+      const dispatched = await dispatchCoordinationStep({
+        action: "park",
+        workflowToolRunOwner: { inbox: "owner-inbox" },
+        sessionWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState,
+      });
+      const next = applyValueDelta(sessionState, dispatched.stateDelta.sessionState);
+      return { results: dispatched.results, table: readTaskTable(next.snapshot.session.state) };
+    }
+
+    it("starts them together and records each run on its task", async () => {
+      const starts = [
+        Promise.withResolvers<{ runId: string }>(),
+        Promise.withResolvers<{ runId: string }>(),
+      ];
+      startMock.mockImplementation(() => starts[startMock.mock.calls.length - 1]?.promise);
+
+      const dispatching = dispatch(batchOfReviews(0));
+      // Both runs start before either start returns.
+      await vi.waitFor(() => expect(startMock).toHaveBeenCalledTimes(2));
+      starts[1]?.resolve({ runId: "run-bob" });
+      starts[0]?.resolve({ runId: "run-alice" });
+      const { table } = await dispatching;
+
+      expect(table.tasks.map((task) => [task.id, task.run?.runId])).toEqual([
+        ["alice", "run-alice"],
+        ["bob", "run-bob"],
+      ]);
+    });
+
+    it("starts them one by one when the task cap could refuse one, so no run is left unrecorded", async () => {
+      startMock.mockResolvedValue({ runId: "run-alice" });
+
+      const { results, table } = await dispatch(batchOfReviews(MAX_WORKING_TASKS - 1));
+
+      expect(startMock).toHaveBeenCalledOnce();
+      expect(table.tasks.find((task) => task.id === "alice")?.run?.runId).toBe("run-alice");
+      expect(table.tasks.some((task) => task.id === "bob")).toBe(false);
+      expect(results.find((result) => result.callId === "call-bob")).toMatchObject({
+        isError: true,
+      });
+    });
+
+    it("fails only the call whose run did not start", async () => {
+      const alice = Promise.withResolvers<{ runId: string }>();
+      startMock
+        .mockImplementationOnce(() => alice.promise)
+        .mockRejectedValueOnce(new Error("Workflow start rejected"));
+
+      const dispatching = dispatch(batchOfReviews(0));
+      // Bob's start fails while Alice's is still on its way.
+      await vi.waitFor(() => expect(startMock).toHaveBeenCalledTimes(2));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      alice.resolve({ runId: "run-alice" });
+      const { results, table } = await dispatching;
+
+      expect(table.tasks.map((task) => [task.id, task.run?.runId])).toEqual([
+        ["alice", "run-alice"],
+      ]);
+      expect(results.find((result) => result.callId === "call-bob")).toMatchObject({
+        isError: true,
+      });
     });
   });
 });

@@ -77,7 +77,6 @@ const UNAVAILABLE: ToolInputResponse = { status: "unavailable" };
 
 interface PendingAsk {
   readonly resolve: (response: ToolInputResponse) => void;
-  readonly reject: (error: unknown) => void;
   /** Sends the session the request to withdraw the question; unset once sent. */
   withdraw: (() => Promise<void>) | undefined;
 }
@@ -109,8 +108,8 @@ export class WorkflowToolRunAsks {
     this.opened += 1;
     const requestId = `${this.runId}-ask-${String(this.opened)}`;
     let entry!: PendingAsk;
-    const answer = new Promise<ToolInputResponse>((resolve, reject) => {
-      entry = { reject, resolve, withdraw: undefined };
+    const answer = new Promise<ToolInputResponse>((resolve) => {
+      entry = { resolve, withdraw: undefined };
     });
     this.pending.set(requestId, entry);
     entry.withdraw = send(requestId);
@@ -127,7 +126,7 @@ export class WorkflowToolRunAsks {
     const withdraw = entry?.withdraw;
     if (entry === undefined || withdraw === undefined) return;
     entry.withdraw = undefined;
-    const sending = withdraw().catch((error: unknown) => this.fail(requestId, error));
+    const sending = withdraw();
     this.withdrawing.add(sending);
     void sending.then(() => this.withdrawing.delete(sending));
   }
@@ -149,10 +148,6 @@ export class WorkflowToolRunAsks {
   settle(decision: WorkflowToolRunAskDecision): void {
     const response = decision.kind === "answer" ? decision.response : CANCELLED;
     this.take(decision.requestId)?.resolve(response);
-  }
-
-  fail(requestId: string, error: unknown): void {
-    this.take(requestId)?.reject(error);
   }
 
   /** The session stopped the work, so it answers none of its questions anymore. */
@@ -199,7 +194,6 @@ export function ask(
       replyTo,
       request: { control, kind: "ask", request },
     });
-    sent.catch((error: unknown) => asks.fail(replyTo, error));
     // The withdrawal must not overtake the request it withdraws.
     return () => sent.then(() => owner.send({ control, from, kind: "withdraw", replyTo }));
   });
