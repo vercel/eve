@@ -424,6 +424,62 @@ describe("createWorkflowRuntime command dispatch", () => {
     );
   });
 
+  it("does not acknowledge reset in the disposed-inbox / running-owner gap", async () => {
+    resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("released"));
+    getRunMock
+      .mockReturnValueOnce({ status: Promise.resolve("running") })
+      .mockReturnValue({ status: Promise.resolve("completed") });
+
+    await expect(
+      buildRuntime().dispatchContinuation({
+        command: { kind: "reset" },
+        continuationToken: "eve:token",
+      }),
+    ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
+    expect(getRunMock).toHaveBeenCalledTimes(2);
+    expect(getRunMock).toHaveBeenCalledWith("session-1");
+  });
+
+  it("waits for both the handed-off owner and its running anchor", async () => {
+    resumeHookMock.mockResolvedValue({
+      ...currentSessionHook("eve:token", "owner-2"),
+      metadata: { sessionId: "session-1" },
+    });
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("released"));
+    let anchorPolls = 0;
+    getRunMock.mockImplementation((runId: string) => ({
+      status: Promise.resolve(
+        runId === "session-1" && anchorPolls++ === 0 ? "running" : "completed",
+      ),
+    }));
+    await expect(
+      buildRuntime().dispatchContinuation({
+        command: { kind: "reset" },
+        continuationToken: "eve:token",
+      }),
+    ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
+    expect(getRunMock.mock.calls.map(([id]) => id)).toEqual(["owner-2", "session-1", "session-1"]);
+  });
+
+  it("acknowledges a committed reset when finalization exceeds the shared deadline", async () => {
+    resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("released"));
+    getRunMock.mockReturnValue({ status: Promise.resolve("running") });
+    let clock = 0;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => (clock += 30_001));
+    try {
+      await expect(
+        buildRuntime().dispatchContinuation({
+          command: { kind: "reset" },
+          continuationToken: "eve:token",
+        }),
+      ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));

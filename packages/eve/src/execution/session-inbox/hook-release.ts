@@ -8,16 +8,20 @@ export const SESSION_HOOK_HANDOVER_TIMEOUT_MS = 30_000;
 export async function waitForSessionHooksRelease(
   logicalTokens: Iterable<string>,
   ownerRunId: string,
+  deadline = Date.now() + SESSION_HOOK_HANDOVER_TIMEOUT_MS,
 ): Promise<void> {
   await Promise.all(
     [...new Set(logicalTokens)].map((token) =>
-      waitForHookRelease(sessionInboxHookToken(token), ownerRunId),
+      waitForHookRelease(sessionInboxHookToken(token), ownerRunId, deadline),
     ),
   );
 }
 
-async function waitForHookRelease(token: string, ownerRunId: string): Promise<void> {
-  const deadline = Date.now() + SESSION_HOOK_HANDOVER_TIMEOUT_MS;
+async function waitForHookRelease(
+  token: string,
+  ownerRunId: string,
+  deadline: number,
+): Promise<void> {
   while (true) {
     if ((await findSessionHookHolder(token))?.runId !== ownerRunId) return;
 
