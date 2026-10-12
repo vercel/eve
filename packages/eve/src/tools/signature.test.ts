@@ -81,6 +81,23 @@ describe("renderToolSignature", () => {
     expect(signature.endsWith("...")).toBe(true);
   });
 
+  it("keeps every property name when long descriptions overflow the cap", () => {
+    // Like Linear's `save_issue`: dozens of documented fields whose names alone fit easily.
+    const names = Array.from({ length: 40 }, (_, index) => `field${index}`);
+    const properties = Object.fromEntries(
+      names.map((name) => [
+        name,
+        { type: "string", description: `Sets ${name}. ${"x".repeat(200)}` },
+      ]),
+    );
+    const signature = renderToolSignature({
+      name: "f",
+      inputSchema: { type: "object", properties },
+    });
+    expect(signature.length).toBeLessThanOrEqual(4_000);
+    expect(names.filter((name) => !signature.includes(`${name}?:`))).toEqual([]);
+  });
+
   it("bounds the work for schemas whose shared refs expand exponentially", () => {
     // Each definition has ten properties pointing at the next: about 10^6 nodes
     // within the depth limit if every reference were expanded.
