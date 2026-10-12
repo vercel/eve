@@ -12,6 +12,8 @@ import {
   turnCoordinates,
   type SessionProjection,
 } from "#protocol/session-projection.js";
+import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import { openRequests } from "#protocol/session-reader.js";
 import {
   readTurnState,
   type StepCoordinates,
@@ -153,4 +155,18 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
     taskToolCalls,
     tasks,
   };
+}
+
+/** Requests this session asked itself and still awaits; relayed requests answer elsewhere. */
+export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<string> {
+  return new Set(
+    openRequests(view.projection.view)
+      .filter(
+        (row) =>
+          row.origin === undefined &&
+          interactionOwner(view.projection.view, row).taskId === undefined &&
+          !view.relayedRequestIds.has(row.interactionId),
+      )
+      .map((row) => row.interactionId),
+  );
 }

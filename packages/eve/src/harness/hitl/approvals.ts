@@ -46,13 +46,9 @@ import type {
   TurnState,
 } from "#harness/session-machine/view.js";
 import { withoutCalls } from "#harness/inline-tool-authorization.js";
-import {
-  ownOpenRequestIds,
-  settle,
-  stepCallIds,
-  suspend,
-  withResult,
-} from "#harness/session-machine/transitions.js";
+import { settle } from "#harness/session-machine/transitions.js";
+import { stepCallIds, suspend, withResult } from "#harness/session-machine/suspended-steps.js";
+import { ownOpenRequestIds } from "#harness/session-machine/view.js";
 import { runningTasks, turnPosition, type SessionView } from "#harness/session-machine/view.js";
 
 // The session's human-in-the-loop rules. Each reads the session and returns what changed; the

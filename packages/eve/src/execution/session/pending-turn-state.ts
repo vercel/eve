@@ -1,7 +1,6 @@
 import { readHitlState } from "#harness/hitl/index.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
-import { runtimeWait } from "#harness/session-machine/view.js";
+import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";

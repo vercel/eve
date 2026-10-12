@@ -10,7 +10,8 @@ import {
   TOOL_RESULT_BOUNDARY,
   type UserModelMessage,
 } from "#harness/messages.js";
-import { delegatedUsageFact, finishRun, settle } from "#harness/session-machine/transitions.js";
+import { finishRun, settle } from "#harness/session-machine/transitions.js";
+import { delegatedUsageFact } from "#harness/facts.js";
 import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";

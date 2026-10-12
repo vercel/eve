@@ -48,16 +48,17 @@ import { resolveModelProfile } from "#harness/model-profile.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
 import { addTokenUsage } from "#shared/token-usage.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
+import { controlDeliveryFor } from "#harness/session-machine/transitions.js";
 import {
   contextStarted,
   controlAdmitted,
   deliveryApplied,
-  controlDeliveryFor,
-  idle,
+  fact,
   runRequested,
   runSettledFacts,
   runStarted,
-} from "#harness/session-machine/transitions.js";
+  usageOf,
+} from "#harness/facts.js";
 import { openWork } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
@@ -80,30 +81,21 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const { deliveryId } = delivery;
   const changeId = nextChangeId(projection);
   if (step.session.history.length === 0) {
-    await step.apply({
-      events: [controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)],
-      turn: step.view().turn,
-    });
+    await step.apply([controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)]);
     return { next: null, session: step.session };
   }
   const messages = validateHarnessModelMessages(step.projectHistory(step.session.history));
   await step.apply(
-    {
-      events: [
-        controlAdmitted(delivery, "compact"),
-        contextStarted({ cause: { deliveryId }, changeId, kind: "compaction" }),
-      ],
-      turn: step.view().turn,
-    },
+    [
+      controlAdmitted(delivery, "compact"),
+      contextStarted({ cause: { deliveryId }, changeId, kind: "compaction" }),
+    ],
     messages,
   );
   const runId = nextRunId(step.view().projection);
   let outcome: "applied" | "failed" = "applied";
   try {
-    await step.apply(
-      { events: [runRequested({ changeId }, runId)], turn: step.view().turn },
-      messages,
-    );
+    await step.apply([runRequested({ changeId }, runId)], messages);
     const resolvedModel = await resolveEffectiveRuntimeModel({
       config,
       ctx: step.ctx,
@@ -142,14 +134,9 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       sessionId: step.session.sessionId,
     });
   }
-  await step.publish({
-    data:
-      outcome === "applied"
-        ? { deliveryId, outcome }
-        : { deliveryId, outcome, reason: "compaction-failed" },
-    type: "delivery.settled",
-  });
-  await step.apply(idle(step.view()));
+  // Applied, not only published: the step's applied session is the compacted one.
+  const reason = outcome === "failed" ? "compaction-failed" : undefined;
+  await step.apply([fact("delivery.settled", { deliveryId, outcome, reason })]);
   return { next: null, session: step.session };
 }
 
@@ -157,17 +144,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
 function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage | undefined {
   const spent = deltas.filter((delta) => delta !== undefined);
   if (spent.length === 0) return undefined;
-  return spent.reduce<Usage>(
-    (total, delta) =>
-      addTokenUsage(total, {
-        cacheReadTokens: delta.cacheReadTokens ?? 0,
-        cacheWriteTokens: delta.cacheWriteTokens ?? 0,
-        costUsd: delta.costUsd,
-        inputTokens: delta.inputTokens ?? 0,
-        outputTokens: delta.outputTokens ?? 0,
-      }),
-    NO_USAGE,
-  );
+  return spent.reduce<Usage>((total, delta) => addTokenUsage(total, usageOf(delta)), NO_USAGE);
 }
 
 /** The summary run and its change failed; the run records what it spent. */

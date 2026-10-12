@@ -13,7 +13,7 @@ import { readAnswerText } from "#internal/input-text.js";
 import type { Answer } from "#shared/input.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
-import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
+import { ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 
 // How a delivery reaches `answer`: queued input joins it, stale answers turn into text, and a

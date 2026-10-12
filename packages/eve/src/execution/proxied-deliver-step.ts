@@ -116,21 +116,18 @@ async function routeProxiedDeliver(
         .find((row) => row !== undefined);
       const turnId = askedIn === undefined ? undefined : interactionOwner(tables, askedIn).turnId;
       for (const metadata of payloadMetadata) {
-        const entry: {
-          -readonly [
-            K in keyof (typeof routedDeliveries)[number]
-          ]: (typeof routedDeliveries)[number][K];
-        } = {
-          deliveryId: metadata.deliveryId,
-        };
-        const principal = principalOf(sourceDelivery.auth);
-        if (principal !== undefined) entry.principal = principal;
-        if (metadata.channelKind !== undefined) entry.source = { channel: metadata.channelKind };
         // Input left for this session goes on to its turn, which admits nothing twice.
-        if (routed.forSelf !== undefined) entry.continues = true;
-        else if (message?.message !== undefined && turnId !== undefined)
-          entry.consumed = { parts: userPartsOf(message.message), turnId };
-        routedDeliveries.push(entry);
+        routedDeliveries.push({
+          consumed:
+            routed.forSelf === undefined && message?.message !== undefined && turnId !== undefined
+              ? { parts: userPartsOf(message.message), turnId }
+              : undefined,
+          continues: routed.forSelf === undefined ? undefined : true,
+          deliveryId: metadata.deliveryId,
+          principal: principalOf(sourceDelivery.auth),
+          source:
+            metadata.channelKind === undefined ? undefined : { channel: metadata.channelKind },
+        });
       }
       for (const forChild of routed.forChildren) {
         for (const response of forChild.payload.answers) {

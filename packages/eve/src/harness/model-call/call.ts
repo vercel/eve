@@ -30,7 +30,8 @@ import {
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { discardAttempt, retryModel } from "#harness/session-machine/transitions.js";
+import { fact, usageOf } from "#harness/facts.js";
+import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import {
@@ -48,7 +49,6 @@ import {
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
-import type { Usage } from "#protocol/session-events/envelope.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { maybeCompact } from "#harness/compaction/step.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
@@ -72,18 +72,6 @@ import {
 import { extractGatewayCostUsd, extractTokenUsageDelta, type TokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
-
-/** A usage delta as `usage.recorded` carries it: every count, zero when unreported. */
-function usageOf(delta: TokenUsageDelta): Usage {
-  const usage: { -readonly [K in keyof Usage]: Usage[K] } = {
-    cacheReadTokens: delta.cacheReadTokens ?? 0,
-    cacheWriteTokens: delta.cacheWriteTokens ?? 0,
-    inputTokens: delta.inputTokens ?? 0,
-    outputTokens: delta.outputTokens ?? 0,
-  };
-  if (delta.costUsd !== undefined) usage.costUsd = delta.costUsd;
-  return usage;
-}
 
 const log = createLogger("harness.tool-loop");
 
@@ -197,7 +185,7 @@ export class ModelCaller {
       return;
     }
     if (attempt === undefined) return;
-    await step.apply(retryModel(step.view(), { attempt, error: modelCallErrorInfo(error), runId }));
+    await step.apply([fact("model.retried", { attempt, error: modelCallErrorInfo(error), runId })]);
   }
 
   /** A failed compaction fails the step, whatever recovery the call attempted. */

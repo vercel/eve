@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import { usageOf } from "#harness/facts.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
@@ -118,14 +119,13 @@ export function importProjection(session: LegacySession): SessionProjection {
 function legacyUsage(raw: unknown): TokenUsage | undefined {
   if (!isObject(raw)) return undefined;
   const count = (field: string) => (typeof raw[field] === "number" ? raw[field] : 0);
-  const usage: { -readonly [K in keyof TokenUsage]: TokenUsage[K] } = {
+  return usageOf({
     cacheReadTokens: count("cacheReadTokens"),
     cacheWriteTokens: count("cacheWriteTokens"),
+    costUsd: raw.sawCost === true && typeof raw.costUsd === "number" ? raw.costUsd : undefined,
     inputTokens: count("inputTokens"),
     outputTokens: count("outputTokens"),
-  };
-  if (raw.sawCost === true && typeof raw.costUsd === "number") usage.costUsd = raw.costUsd;
-  return usage;
+  });
 }
 
 export function normalizeHistory(messages: readonly ModelMessage[]) {

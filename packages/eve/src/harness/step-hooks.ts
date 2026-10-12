@@ -8,6 +8,7 @@ import type {
   ToolSet,
   ToolResultPart,
 } from "ai";
+import { usageOf } from "#harness/facts.js";
 import { createRuntimeToolResultFromMessagePart } from "#harness/action-result-helpers.js";
 import { callSettledFrom, toJsonValue } from "#harness/call-facts.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
@@ -261,14 +262,13 @@ export function runUsageOf(input: {
 }): Usage | undefined {
   const { usage } = input;
   if (usage === undefined && input.costUsd === undefined) return undefined;
-  const recorded: { -readonly [K in keyof Usage]: Usage[K] } = {
-    cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens ?? 0,
-    cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens ?? 0,
-    inputTokens: usage?.inputTokens ?? 0,
-    outputTokens: usage?.outputTokens ?? 0,
-  };
-  if (input.costUsd !== undefined) recorded.costUsd = input.costUsd;
-  return recorded;
+  return usageOf({
+    cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens,
+    cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
+    costUsd: input.costUsd,
+    inputTokens: usage?.inputTokens,
+    outputTokens: usage?.outputTokens,
+  });
 }
 
 export function extractGatewayCostUsd(

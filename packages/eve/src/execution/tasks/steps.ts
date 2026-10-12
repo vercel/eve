@@ -42,12 +42,8 @@ import type {
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
-import {
-  delegatedUsageFact,
-  endTask,
-  finishRun,
-  settleTask,
-} from "#harness/session-machine/transitions.js";
+import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import { delegatedUsageFact } from "#harness/facts.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";

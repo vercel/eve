@@ -12,8 +12,8 @@ import {
   fail,
   relay,
   routeAnswer,
-  sessionEndedFacts,
 } from "#harness/session-machine/transitions.js";
+import { sessionEndedFacts } from "#harness/facts.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
