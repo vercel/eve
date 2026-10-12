@@ -29,7 +29,6 @@ import {
 import {
   recordSessionOwnerStep,
   signalSessionOwnerActivationStep,
-  stopUntrackedChildSessionsStep,
   validateSessionCheckpointStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
@@ -253,7 +252,6 @@ async function bootHandoffOwner(
   const { sessionId } = input;
   const inbox = createSessionInbox(sessionId);
   let checkpoint: SessionCheckpoint;
-  let childRunIdsToStop: readonly string[];
   let serializedContext: Record<string, unknown>;
   try {
     // The previous owner may run an older eve build; read its checkpoint in this build's shape.
@@ -267,7 +265,7 @@ async function bootHandoffOwner(
       });
       return undefined;
     }
-    ({ checkpoint, childRunIdsToStop } = migration);
+    ({ checkpoint } = migration);
     serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
     await recordSessionOwnerStep({ sessionId });
     await inbox.claimSessionHooks(
@@ -284,9 +282,6 @@ async function bootHandoffOwner(
       token: input.activationToken,
     });
     return undefined;
-  }
-  if (childRunIdsToStop.length > 0) {
-    await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
   }
   const deadline =
     input.reason === "compaction"

@@ -1,18 +1,13 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { IncompatibleStateLayoutError } from "#context/serialize.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
-import {
-  stopUntrackedChildSessionsStep,
-  validateSessionCheckpointStep,
-} from "#execution/session/handoff-steps.js";
+import { validateSessionCheckpointStep } from "#execution/session/handoff-steps.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const deserializeContextMock = vi.fn();
 const readDurableSessionMock = vi.fn();
-const cancelRunMock = vi.fn();
 
 vi.mock("#context/serialize.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -21,11 +16,6 @@ vi.mock("#context/serialize.js", async (importOriginal) => ({
 vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: (...args: unknown[]) => readDurableSessionMock(...args),
-}));
-vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
-  ...(await importOriginal()),
-  cancelRun: (...args: unknown[]) => cancelRunMock(...args),
-  getWorld: async () => ({}),
 }));
 
 describe("validateSessionCheckpointStep", () => {
@@ -122,28 +112,9 @@ describe("validateSessionCheckpointStep", () => {
   );
 });
 
-describe("stopUntrackedChildSessionsStep", () => {
-  it("stops every child except the session itself and tolerates finished runs", async () => {
-    cancelRunMock.mockReset();
-    cancelRunMock.mockImplementation(async (_world: unknown, runId: string) => {
-      if (runId === "child-gone") throw new WorkflowRunNotFoundError(runId);
-    });
-
-    await stopUntrackedChildSessionsStep({
-      runIds: ["child-gone", "session-1", "child-parked"],
-      sessionId: "session-1",
-    });
-
-    expect(cancelRunMock.mock.calls.map(([, runId]) => runId)).toEqual([
-      "child-gone",
-      "child-parked",
-    ]);
-  });
-});
-
 function validate(checkpoint: SessionCheckpoint) {
   return validateSessionCheckpointStep({
-    migration: { kind: "current", checkpoint, childRunIdsToStop: [] },
+    migration: { kind: "current", checkpoint },
     sessionId: "session-1",
   });
 }

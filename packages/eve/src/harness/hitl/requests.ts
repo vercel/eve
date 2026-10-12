@@ -10,17 +10,10 @@ import { parseRelay, type Relay } from "./relays.js";
 // people act, i.e. who gave each answer a response policy weighs, the sign-ins it waits on, and
 // the requests it relays for a workflow run or a child session. Nothing else names their
 // session-state key; `responders.ts` and `relays.ts` model the records it stores. Machine
-// transitions write them; checkpoint upgrades migrate legacy storage outside the machine.
+// transitions write them.
 
 /** The session-state key of the human-in-the-loop requests. */
 const REQUESTS_KEY = "eve.runtime.hitl.requests";
-
-/** Where builds before checkpoint version 14 kept the requests. Only checkpoint upgrades read them. */
-export const LEGACY_HITL_STATE_KEYS = {
-  approvals: "eve.runtime.hitl.approvalState",
-  signIns: "eve.runtime.pendingAuthorization",
-  relays: "eve.runtime.proxyInputRequests",
-} as const;
 
 /**
  * A read-only snapshot of the human-in-the-loop records, the one way code outside `harness/hitl/`
@@ -137,33 +130,6 @@ function writeRequests(
   const { [REQUESTS_KEY]: _requests, ...rest } = state ?? {};
   if (Object.keys(requests).length > 0) return { ...rest, [REQUESTS_KEY]: requests };
   return Object.keys(rest).length > 0 ? rest : undefined;
-}
-
-/**
- * Moves the records builds before checkpoint version 14 kept under
- * {@link LEGACY_HITL_STATE_KEYS} into the requests record as they were stored; each reader is as
- * lenient as its old one. Only the checkpoint upgrade calls it.
- */
-export function upgradeLegacyHitlState(
-  state: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  const {
-    [LEGACY_HITL_STATE_KEYS.approvals]: approvals,
-    [LEGACY_HITL_STATE_KEYS.signIns]: signIns,
-    [LEGACY_HITL_STATE_KEYS.relays]: relays,
-    ...rest
-  } = state;
-  // Responders' approval progress isn't carried forward: the answers it weighed are asked again.
-  void approvals;
-  let next: SessionStateMap | undefined = rest;
-  next = writeRequests(
-    next,
-    "signIns",
-    isObject(signIns) && signIns.challenges !== undefined ? signIns.challenges : signIns,
-  );
-  const noRelays = isObject(relays) && Object.keys(relays).length === 0;
-  next = writeRequests(next, "relays", noRelays ? undefined : relays);
-  return next ?? {};
 }
 
 // ---------------------------------------------------------------------------

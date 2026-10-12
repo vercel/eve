@@ -10,17 +10,6 @@ import type { SessionStateMap } from "#harness/types.js";
 const RUNNING_WORK_STATE_KEY = "eve.work";
 const RUNNING_WORK_VERSION = 1;
 
-/**
- * Keys of the stores this record replaced. A checkpoint upgrade moves the last two into this
- * record, so a state that still holds one was written by another build.
- */
-const RETIRED_KEYS = [
-  "eve.tasks",
-  "eve.runtime.workflowToolRuns",
-  "eve.workflowTool",
-  "eve.taskTable",
-];
-
 export interface RunningWork {
   /** Workflow runs a turn waits on, as `workflow-tool-runs.ts` encodes them. */
   readonly calls: readonly unknown[];
@@ -29,11 +18,6 @@ export interface RunningWork {
 }
 
 export function readRunningWork(state: SessionStateMap | undefined): RunningWork {
-  if (RETIRED_KEYS.some((key) => state?.[key] !== undefined)) {
-    throw new Error(
-      "Unsupported running-work state: start a new session or import its conversation.",
-    );
-  }
   const raw = state?.[RUNNING_WORK_STATE_KEY];
   if (raw === undefined) return { calls: [], tasks: [] };
   if (
