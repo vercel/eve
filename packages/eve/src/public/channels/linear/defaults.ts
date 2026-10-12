@@ -9,7 +9,6 @@ import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import { linearInteractionSignal, renderLinearInteractions } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import { displayTitle } from "#shared/display-name.js";
 import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import type {
@@ -114,7 +113,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
       // eve's own task controls stay out of view.
-      if (isTaskControlTool(data.capability.name)) return;
+      if (data.capability.kind === "control") return;
       await postActivity(
         channel,
         options,

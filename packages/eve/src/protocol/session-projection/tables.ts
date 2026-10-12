@@ -4,6 +4,7 @@
 import type {
   CallOutcome,
   Capability,
+  CapabilityKind,
   CallOwner,
   ClearedBy,
 } from "#protocol/session-events/families/call.js";
@@ -240,6 +241,8 @@ export interface CallPreview {
   readonly callId: string;
   readonly runId?: string;
   readonly name: string;
+  /** What the call invokes, as announced; the call's row names its capability. */
+  readonly kind?: CapabilityKind;
   readonly input: string;
   /** The latest output snapshot, while the call runs. */
   readonly output?: JsonValue;

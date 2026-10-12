@@ -1,7 +1,6 @@
 import { errorHintOf } from "#public/channels/reply.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { displayTitle } from "#shared/display-name.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { waiting } from "#protocol/session-projection/selectors.js";
 import { workingTaskNames } from "#channel/task-card.js";
@@ -417,7 +416,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     const { capability, owner } = data;
-    const counts = !("callId" in owner) && !isTaskControlTool(capability.name);
+    const counts = !("callId" in owner) && capability.kind !== "control";
     if (!narration && !counts) return;
     if (!("runId" in owner)) return;
     const stream = stepStream(channel.state, owner.runId);

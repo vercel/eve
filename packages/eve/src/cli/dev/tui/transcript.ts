@@ -9,7 +9,6 @@ import {
 } from "#client/conversation-state.js";
 import type { EveInteractionPart, EveToolPart, EveMessage } from "#client/message-types.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { Block } from "./blocks.js";
 import type { AgentTUIConversationView, AgentTUIFailure, ToolLabels } from "./conversation-view.js";
 import { FileContentCache } from "./file-content-cache.js";
@@ -178,7 +177,7 @@ export class ConversationTranscript {
           isToolCallRow(part) &&
           // A call still streaming its input shows a placeholder only while the turn runs.
           (part.status !== "streaming" || working) &&
-          !isTaskControlTool(part.name) &&
+          part.kind !== "control" &&
           !withdrawn(part.callId) &&
           !taskCalls.has(part.callId) &&
           !childToolIds.has(part.callId) &&
@@ -391,7 +390,7 @@ export class ConversationTranscript {
     for (const message of messages) {
       for (const part of message.parts) {
         order += 1;
-        if (!isToolCallRow(part) || isTaskControlTool(part.name)) continue;
+        if (!isToolCallRow(part) || part.kind === "control") continue;
         const childTask = childTasks.get(part.callId);
         const state = toolState(part, running);
         const id = `subagent:${record.callId}:tool:${part.callId}`;
@@ -672,7 +671,7 @@ export function turnActivity(view: AgentTUIConversationView, tasks: readonly Tas
     message?.parts.some(
       (part) =>
         isTerminalToolCallPart(part) &&
-        !isTaskControlTool(part.name) &&
+        part.kind !== "control" &&
         !taskCalls.has(part.callId) &&
         (part.status === "requested" || part.status === "running") &&
         part.interaction?.status !== "open",

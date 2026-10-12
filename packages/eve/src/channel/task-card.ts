@@ -8,7 +8,6 @@ import type { CallRow, SessionView } from "#protocol/session-projection/tables.j
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import type { TaskCancelReason } from "#protocol/message.js";
 import type { CallOutcome } from "#protocol/session-events/families/call.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { displayTitle } from "#shared/display-name.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -169,7 +168,7 @@ function cardCalls(
   const calls = Object.values(view.calls)
     .filter(
       (row) =>
-        !isTaskControlTool(row.capability.name) &&
+        row.capability.kind !== "control" &&
         !("callId" in row.owner) &&
         callTurn(view, row) === turnId &&
         (segment === undefined || row.introducedAt >= segment.since || carried.has(row.callId)),

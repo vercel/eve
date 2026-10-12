@@ -446,13 +446,14 @@ function foldProgress(view: SessionView, previews: MutablePreviews, raw: unknown
       return;
     }
     case "call.input": {
-      const { callId, delta, name } = progress.data;
+      const { callId, delta, kind, name } = progress.data;
       if (view.calls[callId] !== undefined || typeof delta !== "string") return;
       const preview: CallPreview | undefined = previews.calls[callId];
       if (preview !== undefined) {
         previews.calls[callId] = { ...preview, input: preview.input + delta };
       } else if (name !== undefined) {
-        previews.calls[callId] = { callId, input: delta, name, runId: progress.scope?.runId };
+        const announced: CallPreview = { callId, input: delta, name, runId: progress.scope?.runId };
+        previews.calls[callId] = kind === undefined ? announced : { ...announced, kind };
       }
       return;
     }

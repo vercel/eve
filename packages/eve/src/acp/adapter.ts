@@ -27,7 +27,6 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import { actionLabel } from "#shared/action-label.js";
 import { failureOf } from "#client/session-utils.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import { displayTitle } from "#shared/display-name.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
@@ -462,7 +461,7 @@ export class EveAcpAdapter {
       }
       case "call.requested": {
         const { callId, capability, input } = event.data;
-        if (capability.kind === "tool" && isTaskControlTool(capability.name)) return;
+        if (capability.kind === "control") return;
         const toolCall: ToolCall = {
           toolCallId: callId,
           title: capability.title ?? displayTitle(capability.name),

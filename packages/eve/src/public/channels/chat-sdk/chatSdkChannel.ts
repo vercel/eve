@@ -18,7 +18,6 @@ import { assertWithinLimit } from "#internal/attachments/limited-read.js";
 import { createLogger } from "#internal/logging.js";
 import type { RequestSettlement } from "#channel/interaction-prompts.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import { displayTitle } from "#shared/display-name.js";
 import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
@@ -448,7 +447,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         return;
       }
       // eve's own task controls stay out of view.
-      if (isTaskControlTool(data.capability.name)) return;
+      if (data.capability.kind === "control") return;
       const label = data.capability.title ?? displayTitle(data.capability.name);
       await safeStartTyping(channel.thread, truncate(`${label}...`));
     },

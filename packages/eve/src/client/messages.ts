@@ -115,6 +115,7 @@ export function assistantMessages(
       part: {
         callId: preview.callId,
         inputText: preview.input,
+        kind: preview.kind,
         label: displayTitle(preview.name),
         name: preview.name,
         status: "streaming",

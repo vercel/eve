@@ -88,7 +88,10 @@ export interface EveToolPart {
   readonly type: "tool";
   readonly callId: string;
   readonly stepIndex?: number;
-  /** What the call invokes: a tool, an agent, or a skill. Absent while the input streams. */
+  /**
+   * What the call invokes: a tool, an agent, a skill, or `control`, the model waiting on or
+   * cancelling its own tasks, which most activity displays leave out.
+   */
   readonly kind?: CapabilityKind;
   readonly name: string;
   readonly label: string;
