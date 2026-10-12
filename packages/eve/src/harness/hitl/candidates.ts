@@ -44,6 +44,8 @@ export interface ApprovalSettlementAuditRecord {
   readonly requestId: string;
   readonly settledAt: number;
   readonly candidateId?: string;
+  /** The note sent with a Cancel a response policy allowed, which the model reads with the denial. */
+  readonly text?: string;
 }
 
 export interface ActiveApprovalCandidate {
@@ -55,6 +57,7 @@ export interface ActiveApprovalCandidate {
   readonly createdAt: number;
   readonly expiresAt: number;
   readonly authorizationChallenges?: readonly AuthorizationChallenge[];
+  readonly text?: string;
 }
 
 interface DurableApprovalState {
@@ -78,6 +81,7 @@ export function createApprovalCandidate(input: {
   readonly requestId: string;
   readonly responder: SessionAuthContext;
   readonly state: SessionStateMap | undefined;
+  readonly text?: string;
 }): ApprovalStateTransition {
   const expiredState = expireApprovalCandidates({ now: input.createdAt, state: input.state });
   const approvalState = readApprovalState(expiredState);
@@ -120,6 +124,7 @@ export function createApprovalCandidate(input: {
     requestId: input.requestId,
     responder,
     status: "pending",
+    ...(input.text !== undefined && { text: input.text }),
   };
   const next: DurableApprovalState = {
     ...approvalState,
@@ -227,6 +232,7 @@ export function settleAllowedCandidate(input: {
     responder: candidate.responder,
     settledAt: input.settledAt,
     state: expiredState,
+    text: candidate.text,
   });
 }
 
@@ -303,6 +309,7 @@ function settleRequest(input: {
   readonly responder: SessionAuthContext;
   readonly settledAt: number;
   readonly state: SessionStateMap | undefined;
+  readonly text?: string;
 }): ApprovalStateTransition {
   const approvalState = readApprovalState(input.state);
   const existing = approvalState.settlements[input.requestId];
@@ -317,6 +324,7 @@ function settleRequest(input: {
     outcome: input.outcome,
     requestId: input.requestId,
     settledAt: input.settledAt,
+    ...(input.outcome === "cancelled" && input.text !== undefined && { text: input.text }),
   };
   const activeCandidates: Record<string, ActiveApprovalCandidate> = {};
   const candidateHistory = [...approvalState.candidateHistory];
@@ -353,6 +361,7 @@ function toCandidateAuditRecord(input: {
   const {
     authorizationChallenges: _authorizationChallenges,
     responder,
+    text: _text,
     ...candidate
   } = input.candidate;
   return {

@@ -209,6 +209,7 @@ export async function coordinateApprovalDelivery(input: {
       requestId: request.requestId,
       responder,
       state: session.state,
+      text: response.text,
     });
     session = { ...session, state: created.state };
     didCommit ||= created.changed;
@@ -505,6 +506,7 @@ function appendSettledResponses(
       ...missingSettlements.map((settlement) => ({
         optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
         requestId: settlement.requestId,
+        ...(settlement.text !== undefined && { text: settlement.text }),
       })),
     ],
   };
