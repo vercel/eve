@@ -525,7 +525,7 @@ export async function waitForSessionInbox(sessionId: string): Promise<boolean> {
 }
 
 /** A run `start()` accepted may not be readable yet, which is not an ended run. */
-async function hasRunEnded(runId: string): Promise<boolean> {
+export async function hasRunEnded(runId: string): Promise<boolean> {
   try {
     const status = await getRun(runId).status;
     return status !== "pending" && status !== "running";
