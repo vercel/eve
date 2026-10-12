@@ -25,7 +25,7 @@ import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 import {
   cancelRemoteAgentTurn,
@@ -34,6 +34,8 @@ import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
+import { remoteAgentCredentials } from "#reactions/kinds/subagent.js";
+import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
@@ -58,6 +60,11 @@ export type AgentSessionAddress =
       readonly nodeId: string;
       /** Keys the authored credential functions, as on `child.opened`. */
       readonly resolverId?: string;
+      /**
+       * A dynamic remote agent's record, which its credentials render from: the child keeps the
+       * record it was opened with, whatever the parent selects later. Private, like the binding.
+       */
+      readonly record?: JsonValue;
       readonly sessionId: string;
       readonly url: string;
       /** The child's remote agent protocol, when it speaks an earlier one than this deployment. */
@@ -289,7 +296,15 @@ async function startRemoteSession(
 ): Promise<AgentSessionAddress> {
   const { auth, bundle, context, target } = input;
   const { action } = target;
+  const record = recordOf(context, action.nodeId);
   const remote = resolveRemoteAgentForAction({
+    credentials:
+      target.dynamicRemoteAgent === undefined
+        ? undefined
+        : await credentialsOf(bundle, action.nodeId, record, {
+            name: action.remoteAgentName,
+            url: target.dynamicRemoteAgent.url,
+          }),
     dynamicRemoteAgent: target.dynamicRemoteAgent,
     nodeId: action.nodeId,
     registry: bundle.subagentRegistry.subagentsByNodeId,
@@ -316,10 +331,11 @@ async function startRemoteSession(
     forwardPrincipal: remote.forwardPrincipal,
     name: action.remoteAgentName,
     nodeId: action.nodeId,
-    resolverId: target.dynamicRemoteAgent?.credentialsStepId ?? action.nodeId,
+    resolverId: action.nodeId,
     sessionId: child.sessionId,
     url: remote.url,
   };
+  if (record !== undefined) address.record = record;
   if (child.earlierProtocol !== undefined) address.earlierProtocol = child.earlierProtocol;
   return address;
 }
@@ -344,12 +360,41 @@ async function resolveSessionRemote(
   const bundle = await loadAgentSessionBundle(context);
   const selection = context.dynamicSelections[address.nodeId];
   const resolved = resolveRemoteAgentForAction({
+    // Credentials render from the record the child was opened with, and go only to its destination.
+    credentials: await credentialsOf(bundle, address.nodeId, address.record, address),
     dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
     nodeId: address.nodeId,
     registry: bundle.subagentRegistry.subagentsByNodeId,
     remoteAgentName: address.name,
   });
   return { ...resolved, url: address.url };
+}
+
+/** The record a dynamic remote agent with credentials renders them from, as `context` selects it. */
+function recordOf(context: AgentSessionContext, nodeId: string): JsonValue | undefined {
+  const selection = context.dynamicSelections[nodeId];
+  return selection?.kind === "remote" && selection.remoteAgent.credentials === true
+    ? (selection.record ?? null)
+    : undefined;
+}
+
+/**
+ * A dynamic remote agent's credentials, rendered from `record` for `destination`. `undefined` for
+ * one without credentials, which records nothing.
+ */
+async function credentialsOf(
+  bundle: CompiledBundle,
+  nodeId: string,
+  record: JsonValue | undefined,
+  destination: { readonly name: string; readonly url: string },
+): Promise<RemoteAgentCredentials | undefined> {
+  if (record === undefined) return undefined;
+  return await remoteAgentCredentials({
+    destination,
+    nodeId,
+    record,
+    resolvers: bundle.subagentRegistry.dynamicResolvers,
+  });
 }
 
 async function loadAgentSessionBundle(context: AgentSessionContext): Promise<CompiledBundle> {

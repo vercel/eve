@@ -1,10 +1,6 @@
-import type { DynamicResolveContext } from "#dynamic/definition.js";
-import {
-  defineAgent,
-  defineDynamic,
-  type DynamicSentinel,
-  type DynamicSubagentDefinition,
-} from "eve";
+import type { SessionAuthContext } from "#channel/types.js";
+import type { RecordContext } from "#dynamic/definition.js";
+import { defineAgent, defineDynamic } from "eve";
 
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 
@@ -38,7 +34,14 @@ const description = renderDescription([
   effectiveEdits,
 ]);
 
-const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
+interface Selected {
+  readonly model: string | null;
+  readonly principal: SessionAuthContext | null;
+  /** `authorize` reads the principal's attributes and the channel, so it runs again each turn. */
+  readonly turn: string | null;
+}
+
+const record = async (selected: Selected, ctx: RecordContext) => {
   if (!isDeployedRuntime()) return null;
   const bound = selfModification.config;
   const config = resolveDeployedSelfModificationConfig(bound);
@@ -52,7 +55,7 @@ const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
   } catch {
     return null;
   }
-  const configuredModel = bound.model ?? ctx.model?.id;
+  const configuredModel = bound.model ?? selected.model ?? undefined;
   return defineAgent({
     description,
     model: configuredModel ?? DEFAULT_AGENT_MODEL_ID,
@@ -62,12 +65,11 @@ const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
 };
 
 /** Offers the deployed self-modification child only to authorized principals outside `eve dev`. */
-const deployedSelfModificationAgent: DynamicSentinel<DynamicSubagentDefinition | null> =
-  defineDynamic({
-    events: {
-      "session.started": resolve,
-      "turn.started": resolve,
-    },
-  });
-
-export default deployedSelfModificationAgent;
+export default defineDynamic<Selected>({
+  select: (view, ctx) => ({
+    model: view.model?.id ?? null,
+    principal: ctx.session.auth.current,
+    turn: view.turn?.id ?? null,
+  }),
+  record,
+});

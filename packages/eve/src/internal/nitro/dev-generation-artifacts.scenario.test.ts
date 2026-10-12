@@ -86,7 +86,7 @@ describe("development generation artifacts", () => {
     expect(subagentTool.default.execute()).toBe(sharedMarker);
   });
 
-  it("materializes dynamic remote credential metadata for the development runtime", async () => {
+  it("loads a dynamic remote agent's render, credentials included, in the development runtime", async () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
@@ -99,14 +99,13 @@ describe("development generation artifacts", () => {
           '  path: "/eve/v1/session",',
           "});",
           "export default defineDynamic({",
-          "  events: {",
-          '    "session.started": () =>',
-          "      defineRemoteAgent({",
-          '        description: "Remote research.",',
-          '        headers: () => ({ authorization: "Bearer fresh" }),',
-          '        url: "https://research.example.com",',
-          "      }),",
-          "  },",
+          "  select: () => null,",
+          "  render: () =>",
+          "    defineRemoteAgent({",
+          '      description: "Remote research.",',
+          '      headers: () => ({ authorization: "Bearer fresh" }),',
+          '      url: "https://research.example.com",',
+          "    }),",
           "});",
           "",
         ].join("\n"),
@@ -125,24 +124,16 @@ describe("development generation artifacts", () => {
     const sourceId = subagent?.sourceId;
     expect(sourceId).toBeDefined();
     const moduleNamespace = moduleMap.nodes[subagent!.nodeId]?.modules[sourceId!] as {
-      default: { events: Record<string, Function> };
+      default: { render?: (input: unknown) => Record<string, unknown> };
     };
-    const handler = moduleNamespace.default.events["session.started"];
-    expect(handler).toBeDefined();
-    const remote = handler!() as Record<string, unknown>;
-    const credentialsFactory = remote.__eveResolveRemoteAgentCredentials as {
-      stepId?: string;
+    // Credentials are code the render makes, so the runtime renders them where it needs them:
+    // nothing is transformed or registered for them.
+    const remote = moduleNamespace.default.render!(null) as {
+      headers(): Record<string, string>;
+      url: string;
     };
-
-    expect(Object.keys(remote)).not.toContain("__eveResolveRemoteAgentCredentials");
-    expect(credentialsFactory.stepId).toMatch(/^eve:dynamic-remote-agent\/\//);
-    const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[
-      Symbol.for("@workflow/core//registeredSteps")
-    ];
-    const registered = registry?.get(credentialsFactory.stepId!);
-    expect(registered).toBeDefined();
-    const credentials = registered!() as { headers(): Record<string, string> };
-    expect(credentials.headers()).toEqual({ authorization: "Bearer fresh" });
+    expect(remote.url).toBe("https://research.example.com");
+    expect(remote.headers()).toEqual({ authorization: "Bearer fresh" });
   });
 
   it("hydrates a dynamic directory subagent resolver relative to the child root", async () => {
@@ -153,12 +144,11 @@ describe("development generation artifacts", () => {
         "agent/subagents/conditional/agent.mjs": [
           'const defineDynamic = (definition) => ({ ...definition, kind: "eve:dynamic" });',
           "export default defineDynamic({",
-          "  events: {",
-          '    "session.started": () => ({',
-          '      description: "Conditionally available.",',
-          '      model: "openai/gpt-5.4",',
-          "    }),",
-          "  },",
+          "  select: () => null,",
+          "  render: () => ({",
+          '    description: "Conditionally available.",',
+          '    model: "openai/gpt-5.4",',
+          "  }),",
           "});",
           "",
         ].join("\n"),
@@ -178,9 +168,9 @@ describe("development generation artifacts", () => {
 
     const moduleNamespace = moduleMap.nodes[subagent.nodeId]?.modules[
       subagent.configResolver.sourceId
-    ] as { default: { events: Record<string, Function> } };
+    ] as { default: { render?: Function } };
 
-    expect(moduleNamespace.default.events["session.started"]).toBeDefined();
+    expect(moduleNamespace.default.render).toBeTypeOf("function");
   });
 
   it("preserves extension scope in a shared generation graph", async () => {
@@ -286,11 +276,9 @@ describe("development generation artifacts", () => {
       if (child?.configResolver === undefined) throw new Error("expected a dynamic subagent");
       const modules = moduleMap.nodes[child.nodeId]!.modules;
       const agent = modules[child.configResolver.sourceId] as {
-        default: { events: Record<string, Function> };
+        default: { record: (model: string | null, ctx: unknown) => Promise<unknown> };
       };
-      for (const event of ["session.started", "turn.started"]) {
-        await expect(agent.default.events[event]!({}, { model: null })).resolves.toBeNull();
-      }
+      await expect(agent.default.record(null, {})).resolves.toBeNull();
 
       const sandbox = modules[child.agent.sandbox.sourceId] as {
         defineSelfModificationSandbox(): Function;

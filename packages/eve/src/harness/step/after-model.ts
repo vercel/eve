@@ -17,7 +17,7 @@ import {
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
-import type { Step } from "#harness/step/context.js";
+import { failTurnForReaction, type Step } from "#harness/step/context.js";
 import { turnSettled } from "#harness/facts.js";
 import { fail, suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
@@ -341,6 +341,9 @@ async function settleTurn(
   },
 ): Promise<StepResult> {
   const { history, result, stepOutput } = input;
+  // A hook that failed after the turn's last model call fails it rather than let it complete.
+  const hookFailure = await failTurnForReaction(step);
+  if (hookFailure !== undefined) return hookFailure;
   const schema = step.session.outputSchema;
   step.session = clearTurnClientContextState(step.session);
 

@@ -1,13 +1,27 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { loadSkills } from "@eve-e2e/config/mock-script";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 import { PREFIX_REQUEST, prefixModel } from "./lib/prompt-prefix";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const DYNAMIC_INSTRUCTIONS_TOKEN = "dynamic-instructions-ok-M3K8";
 const SKILL_LOAD_DIRECTIVE = "SKILL-LOAD";
+/** Reads a skill's supporting file from the sandbox: `SKILL-FILE <skill> <path>`. */
+const SKILL_FILE_DIRECTIVE = "SKILL-FILE";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  const file = request.userMessages.at(-1);
+  if (file?.startsWith(SKILL_FILE_DIRECTIVE) === true) {
+    const read = request.toolResults.find((result) => result.name === "bash");
+    if (read !== undefined) return JSON.stringify(read.output);
+    const [skill, path] = file.slice(SKILL_FILE_DIRECTIVE.length).trim().split(/\s+/u);
+    return {
+      toolCalls: [
+        { name: "bash", input: { command: `cat "$HOME/.agents/skills/${skill}/${path}"` } },
+      ],
+    };
+  }
   const directive = request.userMessages.find((message) =>
     message.startsWith(SKILL_LOAD_DIRECTIVE),
   );
@@ -25,14 +39,14 @@ const { model, modelContextWindowTokens, ...config } = e2eAgentConfig({ mock: re
 export default defineAgent({
   ...config,
   model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) =>
-        ctx.messages.some(
-          (message) => message.role === "user" && message.content === PREFIX_REQUEST,
-        )
-          ? { model: prefixModel, modelContextWindowTokens: 1_000_000 }
-          : { model, modelContextWindowTokens },
-    },
+    select: (view) =>
+      view.messages.some(
+        (message) => message.role === "user" && message.content === PREFIX_REQUEST,
+      ),
+    render: (prefixed) =>
+      prefixed
+        ? { model: prefixModel, modelContextWindowTokens: 1_000_000 }
+        : { model, modelContextWindowTokens },
   }),
   reasoning: "high",
 });

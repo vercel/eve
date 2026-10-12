@@ -4,7 +4,7 @@ import type { QueuedAuditEvent } from "../../agent/lib/workspace";
 
 export default defineEval({
   description:
-    "An audit hook that queues its event and throws on turn.started and step.started leaves the turn and the conversation running.",
+    "An audit hook that catches its failed export and queues the event leaves the turn and the conversation running.",
   async test(t) {
     const session = await t.session();
     const auth = { authorization: "Bearer workspace-carol" };
@@ -36,7 +36,7 @@ export default defineEval({
               (entry) => entry.type === type && /^\d+:\d+$/u.test(entry.position),
             ),
           ),
-        "the audit hook queued the first turn's turn.started and model.started before throwing",
+        "the audit hook queued the first turn's turn.started and model.started when their export failed",
       ),
     );
   },

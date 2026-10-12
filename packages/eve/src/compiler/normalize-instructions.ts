@@ -10,12 +10,7 @@ import {
   requireModuleBackedDefinitionLoadOptions,
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
-import {
-  assertDynamicResolverEvents,
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Compiled instructions entry produced from one authored `instructions/*`
@@ -78,14 +73,11 @@ export async function compileInstructionsEntry(
 
   if (isDynamicSentinel(exportValue)) {
     const message = `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
-    assertResolverOnlyDynamicSentinel(exportValue, message);
-    const eventNames = Object.keys(exportValue.events);
-    assertDynamicResolverEvents("instructions", eventNames, message);
+    assertDynamicSentinelKeys(exportValue, message);
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
     return {
       kind: "dynamic-instructions",
       definition: {
-        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug,

@@ -1,4 +1,4 @@
-import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
+import { defineDynamic, defineTool, once, type ToolContext } from "eve/tools";
 
 import { createGitHubCredentialProvider } from "../../../../credentials.js";
 import { readPreparedSelfModificationWorkspace } from "../../../../git-workspace.js";
@@ -113,7 +113,6 @@ export function publicationOperationId(ctx: Pick<ToolContext, "session">): strin
 }
 
 export default defineDynamic({
-  events: {
-    "session.started": resolveTool,
-  },
+  select: once,
+  render: resolveTool,
 });

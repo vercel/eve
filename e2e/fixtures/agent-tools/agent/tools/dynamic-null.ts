@@ -1,9 +1,8 @@
-import { defineDynamic } from "eve/tools";
+import { defineDynamic, once } from "eve/tools";
 
 export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      return null;
-    },
+  select: once,
+  render: () => {
+    return null;
   },
 });

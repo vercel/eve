@@ -24,10 +24,9 @@ input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
 
-First-class [memory](../memory) participates in a separate lifecycle. eve asks
-providers to capture before compaction, excludes attributed recalled records
-from the summarizer, keeps their canonical latest values, and recalls again
-after the checkpoint.
+First-class [memory](../memory) stays outside history, so the summarizer never
+sees it. eve asks providers to capture before compaction rewrites history, and
+what earlier turns recalled follows the checkpoint.
 
 Clients and channels can also request compaction between turns. Call
 `ClientSession.compact()`, a channel route's `compact(address)`, or

@@ -32,7 +32,7 @@ it("attributes a failure to the running turn after a compaction hands the sessio
     slot: "capture",
     value: defineInstrumentation({
       events: {
-        "session.ended": (event) => {
+        "turn.settled": (event) => {
           if (event.outcome === "failed") failedTurnIds.push(event.turnId);
         },
       },
@@ -48,7 +48,7 @@ it("attributes a failure to the running turn after a compaction hands the sessio
           default: defineMemory({
             provider: {
               recall: {
-                // The second turn's recall fails the session; an abort-shaped error isn't retried.
+                // The second turn's recall fails that turn; an abort-shaped error isn't retried.
                 "turn.started": async (context) => {
                   if (context.turn.sequence === 0) return null;
                   throw Object.assign(new Error("This operation was aborted"), {
@@ -93,7 +93,11 @@ it("attributes a failure to the running turn after a compaction hands the sessio
       expect(filterEventsByType(failed, "turn.started")).toMatchObject([
         { data: { turnId: "turn_1" } },
       ]);
-      expect(failed.at(-1)).toMatchObject({ data: { outcome: "failed" }, type: "session.ended" });
+      // A value that fails fails its turn, not the session.
+      expect(filterEventsByType(failed, "turn.settled")).toMatchObject([
+        { data: { outcome: "failed" } },
+      ]);
+      expect(filterEventsByType(failed, "session.ended")).toEqual([]);
     } finally {
       stream.dispose();
     }

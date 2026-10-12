@@ -9,5 +9,13 @@ export {
   type SkillFileContent,
   type SkillPackageDefinition,
 } from "#public/definitions/skill.js";
-export { defineDynamic } from "#dynamic/definition.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export { defineDynamic, type DynamicSkillResult } from "#public/definitions/skill.js";
+export type {
+  DynamicSentinel,
+  ReactionView,
+  RecordContext,
+  SelectContext,
+} from "#dynamic/definition.js";
+
+/** Named lifetimes for `select`: once per session, turn, or model call. */
+export { once, perStep, perTurn } from "#dynamic/definition.js";

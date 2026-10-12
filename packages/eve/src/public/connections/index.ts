@@ -21,12 +21,15 @@ export type { JsonValue } from "#public/types/json.js";
 export {
   defineDynamic,
   type DynamicConnectionDefinition,
-  type DynamicConnectionEvents,
-  type DynamicConnectionResolveContext,
   type DynamicConnectionResult,
   type DynamicConnectionSet,
 } from "#public/definitions/connections/dynamic.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicSentinel,
+  ReactionView,
+  RecordContext,
+  SelectContext,
+} from "#dynamic/definition.js";
 export {
   defineMcpClientConnection,
   type McpClientConnectionDefinition,
@@ -51,3 +54,6 @@ export {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#public/connections/errors.js";
+
+/** Named lifetimes for `select`: once per session, turn, or model call. */
+export { once, perStep, perTurn } from "#dynamic/definition.js";

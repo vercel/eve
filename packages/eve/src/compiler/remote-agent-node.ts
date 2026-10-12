@@ -10,7 +10,6 @@ export interface CompiledDynamicSubagentDefinition extends Readonly<ModuleSource
   readonly build?: {
     readonly externalDependencies?: readonly string[];
   };
-  readonly eventNames: readonly string[];
 }
 
 /**

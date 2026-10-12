@@ -14,4 +14,7 @@ export {
   defineDynamic,
   defineRemoteAgent,
   defineWorkspaceAgent,
+  once,
+  perStep,
+  perTurn,
 } from "../../src/public/index.ts";

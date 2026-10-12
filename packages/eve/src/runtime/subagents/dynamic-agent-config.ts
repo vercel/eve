@@ -1,6 +1,7 @@
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
@@ -62,7 +63,8 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
       catalog: input.catalog,
       selection: {
         model: definition.model,
-        modelContextWindowTokens: definition.modelContextWindowTokens,
+        modelContextWindowTokens:
+          definition.modelContextWindowTokens ?? parentContextWindow(input.state, definition.model),
         modelOptions: definition.modelOptions,
       },
       state: input.state,
@@ -115,4 +117,15 @@ async function normalizeDurableModelSelection(input: {
     state: input.state,
   });
   return resolved.reference;
+}
+
+/**
+ * The parent's context window, for a child that runs the parent's own model: a subagent that
+ * passes `view.model.id` along gets the metadata the parent's model already has, which a custom
+ * model's id alone doesn't carry.
+ */
+function parentContextWindow(state: ContextAccessor, model: unknown): number | undefined {
+  if (typeof model !== "string") return undefined;
+  const parent = getEffectiveModelSelection(state)?.reference;
+  return parent?.id === model ? parent.contextWindowTokens : undefined;
 }

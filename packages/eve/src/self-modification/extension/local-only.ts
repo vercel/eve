@@ -1,4 +1,4 @@
-import { defineDynamic } from "#dynamic/definition.js";
+import { defineDynamic, once } from "#dynamic/definition.js";
 
 import { resolveSelfModificationConfig, type ResolvedSelfModificationConfig } from "../config.js";
 import { isLocalSelfModificationEnabled } from "../mode.js";
@@ -15,9 +15,8 @@ export function resolveLocalOnly<T>(
 /** Creates a dynamic definition that is present only during local development. */
 export function defineLocalOnlyDynamic<T>(definition: T) {
   return defineDynamic({
-    events: {
-      "session.started": () =>
-        resolveLocalOnly(resolveSelfModificationConfig(selfModification.config), definition),
-    },
+    select: once,
+    render: () =>
+      resolveLocalOnly(resolveSelfModificationConfig(selfModification.config), definition),
   });
 }

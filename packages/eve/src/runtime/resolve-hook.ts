@@ -1,6 +1,7 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { CompiledHookDefinition } from "../compiler/manifest.js";
 import type { CompiledModuleMap } from "../compiler/module-map.js";
+import { assertReactionForm, HOOK_FORM } from "../dynamic/definition.js";
 import { expectFunction, expectObjectRecord } from "../internal/authored-module.js";
 import type { StreamEventHook } from "../public/definitions/hook.js";
 import { removedEventKeyMessage } from "../public/definitions/removed-event-keys.js";
@@ -33,6 +34,11 @@ export async function resolveHookDefinition(
       resolvedExportValue,
       describe(definition, "to return an object"),
     );
+    assertReactionForm(
+      resolvedRecord,
+      `The hook export "${definition.exportName ?? "default"}" from "${definition.logicalPath}"`,
+      HOOK_FORM,
+    );
 
     const events: Record<string, StreamEventHook<SessionEvent>> = {};
 
@@ -59,8 +65,21 @@ export async function resolveHookDefinition(
       }
     }
 
+    const select =
+      resolvedRecord.select === undefined
+        ? undefined
+        : expectFunction(
+            resolvedRecord.select,
+            describe(definition, "to provide select as a function"),
+          );
+    const run =
+      resolvedRecord.run === undefined
+        ? undefined
+        : expectFunction(resolvedRecord.run, describe(definition, "to provide run as a function"));
     return {
       events,
+      ...(select !== undefined && { select: select as ResolvedHookDefinition["select"] }),
+      ...(run !== undefined && { run: run as ResolvedHookDefinition["run"] }),
       exportName: definition.exportName,
       logicalPath: definition.logicalPath,
       slug: definition.slug,

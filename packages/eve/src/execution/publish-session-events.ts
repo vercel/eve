@@ -2,7 +2,7 @@ import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
-import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
+import { runReactions, type RunReactionsInput } from "#reactions/runner.js";
 import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -292,14 +292,10 @@ interface StreamWriter extends SessionEventWriter {
 export interface SessionEventDispatcher {
   /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
   readonly adapterCtx: ChannelAdapterContext;
-  /**
-   * Runs the stream-event hooks for written events, in order. Only a turn step passes
-   * `cancelTurnFor`, which says how a hook on each event may stop the turn; see
-   * `turn-event-handler.ts`.
-   */
-  runHooks(
+  /** Runs the session's reactions after written events; see `reactions/runner.ts`. */
+  react(
     written: readonly WrittenEvent[],
-    cancelTurnFor?: (event: SessionStreamEvent) => (() => void) | undefined,
+    options?: Omit<RunReactionsInput, "written">,
   ): Promise<void>;
 }
 
@@ -420,7 +416,7 @@ export function openSessionEventPublisher(input: {
     return next;
   };
   const publish = async (publication: SessionPublication): Promise<void> => {
-    await dispatcher.runHooks(await emit(publication));
+    await dispatcher.react(await emit(publication));
   };
   return {
     dispatcher,
@@ -445,6 +441,9 @@ function createSessionEventDispatcher(input: {
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const deliveryCtx = inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource };
+  // Commits react one at a time, in order. Inline tool calls publish concurrently, and a slow
+  // reaction to an earlier commit must not write its slot over a later commit's.
+  let reacting: Promise<void> = Promise.resolve();
 
   return {
     adapterCtx,
@@ -472,22 +471,11 @@ function createSessionEventDispatcher(input: {
       await committed();
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     },
-    async runHooks(written, cancelTurnFor) {
-      if (written.length === 0) return;
-      // Read here rather than when the dispatcher is built: terminal delivery
-      // runs no hooks and must not require the bundle.
-      const registry = ctx.require(BundleKey).hookRegistry;
-      for (const { event, position, progress, view } of written) {
-        await dispatchStreamEventHooks({
-          cancelTurn: cancelTurnFor?.(event),
-          ctx,
-          event,
-          position,
-          progress,
-          registry,
-          view,
-        });
-      }
+    react(written, options) {
+      if (written.length === 0) return Promise.resolve();
+      const reacted = reacting.then(() => runReactions(ctx, { ...options, written }));
+      reacting = reacted.catch(() => undefined);
+      return reacted;
     },
   };
 }

@@ -166,6 +166,7 @@ class RunAgentSession implements AgentSession {
                           resolverId: address.resolverId,
                           url: address.url,
                           sessionId: address.sessionId,
+                          ...(address.record !== undefined && { record: address.record }),
                         }
                       : undefined,
                   ),

@@ -1,16 +1,15 @@
-import { defineDynamic, defineMcpClientConnection } from "eve/connections";
+import { defineDynamic, defineMcpClientConnection, once } from "eve/connections";
 
 import { createFakeAuthProvider } from "../lib/fake-auth-provider.ts";
 import { fixtureUrl } from "../lib/fake-service.ts";
 
 export default defineDynamic({
-  events: {
-    "session.started": () =>
-      defineMcpClientConnection({
-        description: "Public catalog: lists items without sign-in; orders need sign-in.",
-        url: fixtureUrl("/fixture-public-catalog/mcp").href,
-        instanceKey: "fixture-public-catalog",
-        auth: createFakeAuthProvider({ expiredToken: false, rememberSignIns: true }),
-      }),
-  },
+  select: once,
+  render: () =>
+    defineMcpClientConnection({
+      description: "Public catalog: lists items without sign-in; orders need sign-in.",
+      url: fixtureUrl("/fixture-public-catalog/mcp").href,
+      instanceKey: "fixture-public-catalog",
+      auth: createFakeAuthProvider({ expiredToken: false, rememberSignIns: true }),
+    }),
 });

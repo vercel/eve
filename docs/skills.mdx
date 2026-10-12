@@ -97,12 +97,12 @@ Supporting files are for the model. After loading a skill, the model reads its r
 
 ## Dynamic skills
 
-To serve a different skill per principal, tenant, or channel (the caller's own team playbook, say), wrap `defineSkill` in a `defineDynamic` resolver keyed on `ctx.session.auth`. See [Dynamic capabilities](./guides/dynamic-capabilities).
+To serve a different skill per principal, tenant, or channel (the caller's own team playbook, say), wrap `defineSkill` in `defineDynamic` and select the attribute it depends on from `ctx.session.auth`. See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-skills).
 
-Subagent lifecycle events do not re-run skill resolvers. The parent's resolved dynamic skills remain available when it resumes after delegation.
+Delegating to a subagent does not change the parent's dynamic skills. They remain available when the parent resumes after delegation.
 
 ## What to read next
 
 - [Connections](./connections): add tools from external MCP and OpenAPI servers
-- [Dynamic capabilities](./guides/dynamic-capabilities): resolve skills per caller with `defineDynamic`
+- [Dynamic capabilities](./guides/dynamic-capabilities): choose skills per caller with `defineDynamic`
 - [Context control](./concepts/context-control): how skills fit the full context model

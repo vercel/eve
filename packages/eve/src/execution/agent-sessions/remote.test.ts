@@ -8,75 +8,17 @@ import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
   resetRemoteAgentSession,
-  resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
   startRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
-
-describe("resolveRemoteAgentForAction", () => {
-  it("overlays a selected dynamic remote config on the compiled delegation node", async () => {
-    const definition = {
-      dynamic: {
-        eventNames: ["session.started"],
-        events: { "session.started": () => null },
-        logicalPath: "subagents/research.ts",
-        sourceId: "subagents/research.ts",
-        sourceKind: "module",
-      },
-      kind: "subagent",
-      logicalPath: "subagents/research.ts",
-      name: "research",
-      nodeId: "subagents/research.ts",
-      sourceId: "subagents/research.ts",
-      sourceKind: "module",
-      workflowId: "workflow//./agent/subagents/research//execute",
-    } as const;
-
-    const credentialsStepId = "eve:dynamic-remote-agent//selected-research";
-    const registryKey = Symbol.for("@workflow/core//registeredSteps");
-    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
-    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
-    globalRecord[registryKey] = stepRegistry;
-    stepRegistry.set(credentialsStepId, () => ({
-      auth: async () => ({ headers: { authorization: "Bearer selected" } }),
-      headers: { "x-selected": "yes" },
-    }));
-
-    const resolved = await resolveRemoteAgentForAction({
-      dynamicRemoteAgent: {
-        credentialsStepId,
-        description: "Selected remote research.",
-        path: "/custom/session",
-        url: "https://selected.example.com",
-      },
-      nodeId: definition.nodeId,
-      registry: new Map([[definition.nodeId, { definition }]]),
-      remoteAgentName: "research",
-    });
-
-    expect(resolved).toMatchObject({
-      description: "Selected remote research.",
-      headers: { "x-selected": "yes" },
-      kind: "remote",
-      logicalPath: "subagents/research.ts",
-      name: "research",
-      nodeId: "subagents/research.ts",
-      path: "/custom/session",
-      sourceId: "subagents/research.ts",
-      sourceKind: "module",
-      url: "https://selected.example.com",
-    });
-    await expect(resolved.auth?.()).resolves.toEqual({
-      headers: { authorization: "Bearer selected" },
-    });
-  });
-});
+import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
+import { remoteAgentCredentials } from "#reactions/kinds/subagent.js";
 
 describe("resolveRemoteAgentStreamHeaders", () => {
-  it("resolves static and dynamic authored credentials without storing them in events", async () => {
+  it("resolves static authored credentials without storing them in events", async () => {
     const staticRemote = {
       definition: {
         auth: async () => ({ headers: { authorization: "Bearer static" } }),
@@ -97,6 +39,7 @@ describe("resolveRemoteAgentStreamHeaders", () => {
         nodesByNodeId: new Map(),
         root: {
           subagentRegistry: {
+            dynamicNodeIds: new Set(),
             subagentsByNodeId: new Map([[staticRemote.definition.nodeId, staticRemote]]),
           },
         },
@@ -111,24 +54,6 @@ describe("resolveRemoteAgentStreamHeaders", () => {
         url: staticRemote.definition.url,
       }),
     ).resolves.toEqual({ authorization: "Bearer static", "x-static": "yes" });
-
-    const credentialsStepId = "eve:dynamic-remote-agent//stream-research";
-    const registryKey = Symbol.for("@workflow/core//registeredSteps");
-    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
-    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
-    globalRecord[registryKey] = stepRegistry;
-    stepRegistry.set(credentialsStepId, () => ({
-      auth: async () => ({ headers: { authorization: "Bearer dynamic" } }),
-    }));
-
-    await expect(
-      resolveRemoteAgentStreamHeaders({
-        bundle,
-        name: "research",
-        resolverId: credentialsStepId,
-        url: "https://dynamic.example",
-      }),
-    ).resolves.toEqual({ authorization: "Bearer dynamic" });
   });
 
   it("rejects a static resolver whose authored URL does not match the event", async () => {
@@ -148,6 +73,7 @@ describe("resolveRemoteAgentStreamHeaders", () => {
         nodesByNodeId: new Map(),
         root: {
           subagentRegistry: {
+            dynamicNodeIds: new Set(),
             subagentsByNodeId: new Map([[definition.nodeId, { definition }]]),
           },
         },
@@ -162,6 +88,57 @@ describe("resolveRemoteAgentStreamHeaders", () => {
         url: "https://forged.example",
       }),
     ).rejects.toThrow(/does not match/);
+  });
+});
+
+describe("dynamic remote agent credentials", () => {
+  /** A dynamic subagent that renders a tenant's remote agent, with a token for that tenant. */
+  const tenantRemote = {
+    logicalPath: "subagents/finance.ts",
+    name: "finance",
+    nodeId: "subagents/finance",
+    render: (tenant: { readonly id: string; readonly region: string }) =>
+      defineRemoteAgent({
+        auth: async () => ({ headers: { authorization: `Bearer ${tenant.id}` } }),
+        description: "Finance",
+        url: `https://${tenant.region}.finance.example`,
+      }),
+  };
+  const bundle = {
+    graph: {
+      nodesByNodeId: new Map(),
+      root: {
+        subagentRegistry: {
+          dynamicNodeIds: new Set([tenantRemote.nodeId]),
+          dynamicResolvers: [tenantRemote],
+          subagentsByNodeId: new Map(),
+        },
+      },
+    },
+  } as never;
+
+  it("renders credentials from the record the child was opened with, for its destination", async () => {
+    await expect(
+      resolveRemoteAgentStreamHeaders({
+        bundle,
+        name: "finance",
+        record: { id: "acme", region: "eu" },
+        resolverId: tenantRemote.nodeId,
+        url: "https://eu.finance.example",
+      }),
+    ).resolves.toEqual({ authorization: "Bearer acme" });
+  });
+
+  it("sends no credentials to a destination the record doesn't render", async () => {
+    // The tenant moved to another region after the child opened in the old one.
+    await expect(
+      remoteAgentCredentials({
+        destination: { name: "finance", url: "https://eu.finance.example" },
+        nodeId: tenantRemote.nodeId,
+        record: { id: "acme", region: "us" },
+        resolvers: [tenantRemote as never],
+      }),
+    ).rejects.toThrow("now renders another destination");
   });
 });
 

@@ -402,7 +402,7 @@ For notifications that don't need an agent turn, use the platform's API instead.
 
 ## Channel metadata
 
-A channel can project a subset of its adapter state as metadata, available to instrumentation resolvers, dynamic tool resolvers, and dynamic skill or instruction resolvers. Define a `metadata(state)` function on the channel config:
+A channel can project a subset of its adapter state as metadata, available to instrumentation resolvers and to the `select` of dynamic tools, skills, instructions, and other dynamic capabilities. Define a `metadata(state)` function on the channel config:
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
@@ -440,7 +440,7 @@ export default defineChannel({
 });
 ```
 
-The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
+The projection is re-evaluated whenever adapter state changes after channel event handlers run. A dynamic capability's `select` reads it via `ctx.channel.metadata` and narrows it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
 
 ### Conversation audience
 

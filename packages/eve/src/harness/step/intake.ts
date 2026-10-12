@@ -1,6 +1,7 @@
 import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import {
+  anchorToTurn,
   createFrameworkUserMessage,
   createUserMessage,
   frameworkMessageKindForStepInput,
@@ -112,7 +113,7 @@ export async function prepareTurnInput(
       createFrameworkUserMessage("context.instruction", content),
     ) ?? [];
   const messages: UserModelMessage[] = (input?.context ?? []).map((entry) =>
-    createFrameworkUserMessage("context.instruction", entry),
+    anchorToTurn(createFrameworkUserMessage("context.instruction", entry), turnId),
   );
   const kind = frameworkMessageKindForStepInput(input);
   const content = normalizeMessage(input?.message);
@@ -122,9 +123,12 @@ export async function prepareTurnInput(
       : undefined;
   if (staged !== undefined) {
     messages.push(
-      kind === undefined
-        ? createUserMessage("user", staged)
-        : createFrameworkUserMessage(kind, staged),
+      anchorToTurn(
+        kind === undefined
+          ? createUserMessage("user", staged)
+          : createFrameworkUserMessage(kind, staged),
+        turnId,
+      ),
     );
   }
   return {

@@ -1,3 +1,4 @@
+import type { JsonValue } from "#shared/json.js";
 import type { RelayRoute } from "#channel/types.js";
 import { isSessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
@@ -72,6 +73,8 @@ function parseRemoteAgentBinding(
   const resolverId = Reflect.get(value, "resolverId");
   const forwardPrincipal = Reflect.get(value, "forwardPrincipal");
   const sessionId = Reflect.get(value, "sessionId");
+  // The parent's own step wrote it: the record its credentials render from.
+  const record = Reflect.get(value, "record") as JsonValue | undefined;
   if (typeof name !== "string" || !name || typeof url !== "string" || !url) return undefined;
   if (typeof sessionId !== "string" || !sessionId) return undefined;
   if (resolverId !== undefined && (typeof resolverId !== "string" || !resolverId)) return undefined;
@@ -82,6 +85,7 @@ function parseRemoteAgentBinding(
     sessionId,
     ...(resolverId !== undefined && { resolverId }),
     ...(forwardPrincipal !== undefined && { forwardPrincipal }),
+    ...(record !== undefined && { record }),
   };
 }
 

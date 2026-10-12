@@ -6,9 +6,16 @@
 export {
   defineDynamic,
   defineInstructions,
-  type DynamicInstructionsEvents,
   type DynamicInstructionsResult,
   type InstructionsDefinition,
 } from "#public/definitions/instructions.js";
 
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicSentinel,
+  ReactionView,
+  RecordContext,
+  SelectContext,
+} from "#dynamic/definition.js";
+
+/** Named lifetimes for `select`: once per session, turn, or model call. */
+export { once, perStep, perTurn } from "#dynamic/definition.js";

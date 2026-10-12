@@ -75,15 +75,14 @@ const EXT_TREE: Readonly<Record<string, string>> = {
     'import { defineDynamic, defineTool } from "eve/tools";',
     'import extension from "../extension.js";',
     "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () => ({',
-    "      quote: defineTool({",
-    '        description: "Quote the configured API key.",',
-    '        inputSchema: { type: "object", properties: {}, additionalProperties: false },',
-    "        async execute() { return { apiKey: extension.config.apiKey }; },",
-    "      }),",
+    "  select: () => null,",
+    "  render: () => ({",
+    "    quote: defineTool({",
+    '      description: "Quote the configured API key.",',
+    '      inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+    "      async execute() { return { apiKey: extension.config.apiKey }; },",
     "    }),",
-    "  },",
+    "  }),",
     "});",
     "",
   ].join("\n"),
@@ -167,14 +166,13 @@ const EXT_TREE: Readonly<Record<string, string>> = {
   "extension/skills/oncall.ts": [
     'import { defineDynamic, defineSkill } from "eve/skills";',
     "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () => ({',
-    "      escalation: defineSkill({",
-    '        description: "Escalate an incident.",',
-    '        markdown: "# Escalation\\nPage the on-call.",',
-    "      }),",
+    "  select: () => null,",
+    "  render: () => ({",
+    "    escalation: defineSkill({",
+    '      description: "Escalate an incident.",',
+    '      markdown: "# Escalation\\nPage the on-call.",',
     "    }),",
-    "  },",
+    "  }),",
     "});",
     "",
   ].join("\n"),
@@ -182,10 +180,8 @@ const EXT_TREE: Readonly<Record<string, string>> = {
   "extension/instructions/dynamic.ts": [
     'import { defineDynamic, defineInstructions } from "eve/instructions";',
     "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () =>',
-    '      defineInstructions({ markdown: "Treat CRM results as authoritative." }),',
-    "  },",
+    "  select: () => null,",
+    '  render: () => defineInstructions({ markdown: "Treat CRM results as authoritative." }),',
     "});",
     "",
   ].join("\n"),
@@ -394,7 +390,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicTools = graph.root.agent.dynamicToolResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedTools = (await dynamicTools?.events["session.started"]?.({}, {})) as {
+    const producedTools = (await dynamicTools?.render!(null as never, {} as never)) as {
       quote: { execute(input: unknown, context: unknown): Promise<unknown> };
     };
     await expect(producedTools.quote.execute({}, {})).resolves.toEqual({ apiKey: "sk-installed" });
@@ -402,7 +398,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicSkills = graph.root.agent.dynamicSkillResolvers.find(
       (resolver) => resolver.slug === "crm__oncall",
     );
-    const producedSkills = (await dynamicSkills?.events["session.started"]?.({}, {})) as {
+    const producedSkills = (await dynamicSkills?.render!(null as never, {} as never)) as {
       escalation: { markdown: string };
     };
     expect(producedSkills.escalation.markdown).toContain("Page the on-call.");
@@ -410,10 +406,12 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicInstructions = graph.root.agent.dynamicInstructionsResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedInstructions = (await dynamicInstructions?.events["session.started"]?.(
-      {},
-      {},
-    )) as { markdown: string };
+    const producedInstructions = (await dynamicInstructions?.render!(
+      null as never,
+      {} as never,
+    )) as {
+      markdown: string;
+    };
     expect(producedInstructions.markdown).toBe("Treat CRM results as authoritative.");
     expect(manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
       "Prefer the CRM tools for account questions.",

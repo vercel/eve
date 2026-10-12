@@ -1,4 +1,5 @@
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent, once } from "eve";
+import { defineDynamic } from "eve/models";
 import { mockModel } from "eve/evals";
 
 import { respondAsNotebookKeeper } from "../../lib/notebook.js";
@@ -12,8 +13,7 @@ export default defineAgent({
   // Selected per step: in mock mode this fixture replaces static authored
   // models with eve's bootstrap mock, which would drop the keeper's script.
   model: defineDynamic({
-    events: {
-      "step.started": () => ({ model: keeperModel, modelContextWindowTokens: 1_000_000 }),
-    },
+    select: once,
+    render: () => ({ model: keeperModel, modelContextWindowTokens: 1_000_000 }),
   }),
 });

@@ -5,7 +5,7 @@ import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HandleEventFn, HarnessToolMap, StepFn, StepParticipants } from "#harness/types.js";
+import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
@@ -16,7 +16,6 @@ import {
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
-import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
@@ -68,10 +67,7 @@ interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
-  readonly participants?: StepParticipants;
   readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
-  readonly historyProjector?: HistoryViewProjector;
-  readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
@@ -95,10 +91,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     compactOnly: input.compactOnly,
     controlDelivery: input.controlDelivery,
     handleEvent: input.handleEvent,
-    historyProjector: input.historyProjector,
-    historyView: input.historyView,
     instrumentation: sessionInstrumentation,
-    participants: input.participants,
     signInCompletions: input.signInCompletions,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),

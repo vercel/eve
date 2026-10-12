@@ -74,14 +74,41 @@ describe("resolveHookDefinition", () => {
     );
   });
 
-  it("accepts a hook with an empty export (no events)", async () => {
+  it("rejects a hook that takes neither form", async () => {
     const definition = buildDefinition({ slug: "noop" });
     const moduleMap = buildModuleMap(definition.sourceId, {
       default: {},
     });
 
-    const resolved = await resolveHookDefinition(definition, moduleMap, undefined);
-    expect(Object.keys(resolved.events)).toEqual([]);
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "requires events, or select with a run function",
+    );
+  });
+
+  it("rejects a hook with both events and select", async () => {
+    const definition = buildDefinition({ slug: "both" });
+    const moduleMap = buildModuleMap(definition.sourceId, {
+      default: { events: {}, run: () => null, select: () => null },
+    });
+
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "either events, or select with run, not both",
+    );
+  });
+
+  it("rejects a hook run without select, and a hook render", async () => {
+    const definition = buildDefinition({ slug: "unselected" });
+    const unselected = buildModuleMap(definition.sourceId, { default: { run: () => null } });
+    await expect(resolveHookDefinition(definition, unselected, undefined)).rejects.toThrow(
+      "requires a select function beside run",
+    );
+
+    const rendered = buildModuleMap(definition.sourceId, {
+      default: { render: () => null, select: () => null },
+    });
+    await expect(resolveHookDefinition(definition, rendered, undefined)).rejects.toThrow(
+      "a hook acts rather than holds a value",
+    );
   });
 
   it("rejects a non-function event handler with a typed error", async () => {

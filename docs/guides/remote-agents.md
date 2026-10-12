@@ -33,42 +33,57 @@ export default defineRemoteAgent({
 ## Dynamic remote agents
 
 Wrap the file in `defineDynamic` when the target or its availability depends on
-the current session. Return `defineRemoteAgent(...)` to expose it and `null` to
-omit it:
+the current session. `select` reads what it depends on, and `render` returns
+`defineRemoteAgent(...)` to expose it or `null` to omit it:
 
 ```ts title="agent/subagents/weather.ts"
 import { defineDynamic, defineRemoteAgent } from "eve";
 
 export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.region === "us"
-        ? defineRemoteAgent({
-            description: "Answers weather questions for US customers.",
-            url: "https://us-weather-agent.example.com",
-          })
-        : null,
-  },
+  select: (_view, ctx) => ctx.session.auth.current?.attributes.region ?? null,
+  render: (region) =>
+    region === "us"
+      ? defineRemoteAgent({
+          description: "Answers weather questions for US customers.",
+          url: "https://us-weather-agent.example.com",
+        })
+      : null,
 });
 ```
 
-Dynamic remote subagents support `session.started` and `turn.started`. The
-returned definition may select different remote settings at either scope. eve
-resolves function-valued URLs when the event handler runs. Auth and headers
-remain lazy and resolve before each outbound request without entering durable
-workflow state.
+eve renders the remote agent again whenever what `select` returns changes. A
+function-valued URL resolves when the remote agent renders.
 
-Author `auth` and `headers` directly in the `defineRemoteAgent({ ... })` object
-and keep their functions self-contained with module imports, module-level
-constants, or environment variables. They are rehydrated outside the event
-handler, so they cannot close over `_event`, `ctx`, or handler-local values. The
-build fails with an error that names the handler-local value when they do.
+`auth` and `headers` are code, so return them from `render`, where they can
+close over what `render` received, such as a tenant ID. They resolve before each
+outbound request and never enter durable state. eve rejects a remote agent with
+credentials that `record` returns, because what `record` returns is kept as
+JSON.
 
-eve compiles only `auth` and `headers` written directly in the
-`defineRemoteAgent({ ... })` object in the subagent file. When they arrive
-through a spread, a variable passed as the argument, or a definition built in
-another module, eve rejects the definition at runtime, logs the error, and runs
-the agent without that subagent.
+```ts title="agent/subagents/finance.ts"
+import { defineDynamic, defineRemoteAgent } from "eve";
+import { mintFinanceToken } from "../lib/finance";
+
+export default defineDynamic({
+  select: (_view, ctx) => ctx.session.auth.current?.attributes.tenant ?? null,
+  render: (tenant) =>
+    typeof tenant === "string"
+      ? defineRemoteAgent({
+          description: "Analyzes the tenant's financial data.",
+          url: `https://${tenant}.finance-agent.example.com`,
+          auth: async () => ({
+            headers: { authorization: `Bearer ${await mintFinanceToken(tenant)}` },
+          }),
+        })
+      : null,
+});
+```
+
+A child session keeps the selection it was opened with. Messages to the child,
+answers to its questions, cancellation, reset, and the parent's stream proxy all
+render the child's credentials from that selection, even after the parent
+selects another tenant. If the deployment's `render` no longer returns the
+child's URL for that selection, eve sends no credentials and the request fails.
 
 ## Runtime URLs
 

@@ -17,10 +17,17 @@ export {
   type DefinedAgent,
   type DynamicSubagentDefinition,
   type DynamicLocalSubagentDefinition,
+  type DynamicSubagentResult,
+  type DynamicSubagentStaticFields,
   defineAgent,
   defineDynamic,
 } from "#public/definitions/agent.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicSentinel,
+  ReactionView,
+  RecordContext,
+  SelectContext,
+} from "#dynamic/definition.js";
 export {
   defineWorkspaceAgent,
   type WorkspaceAgentDefinition,
@@ -32,3 +39,6 @@ export {
   type RemoteAgentUrl,
   defineRemoteAgent,
 } from "#public/definitions/remote-agent.js";
+
+/** Named lifetimes for `select`: once per session, turn, or model call. */
+export { once, perStep, perTurn } from "#dynamic/definition.js";

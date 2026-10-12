@@ -1,7 +1,6 @@
-import { defineDynamic } from "eve";
+import { defineDynamic, once } from "eve";
 
 export default defineDynamic({
-  events: {
-    "session.started": () => null,
-  },
+  select: once,
+  render: () => null,
 });

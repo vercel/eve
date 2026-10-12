@@ -30,7 +30,7 @@ import {
   join,
 } from "#harness/session-machine/transitions.js";
 import { turnPosition } from "#harness/session-machine/view.js";
-import { createStep, openTurn, type Step } from "#harness/step/context.js";
+import { createStep, failTurnForReaction, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
 import type {
   HarnessSession,
@@ -41,9 +41,7 @@ import type {
 } from "#harness/types.js";
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { createHistoryViewPreparer } from "#shared/history-view.js";
 import { eventsOf } from "#harness/publication.js";
-import { clearMemorySessionState } from "#shared/memory-state.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;
@@ -93,11 +91,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     input: HarnessStepInput | undefined,
     instrumentation: InstrumentationStepScope<HarnessSession> | undefined,
   ): Promise<StepResult> {
-    const prepareHistory = createHistoryViewPreparer({
-      previous: config.historyView,
-      projector: config.historyProjector,
-    });
-    prepareHistory(initialSession.history, initialSession.state);
     const ctx = contextStorage.getStore();
     if (ctx !== undefined && !ctx.has(StaticModelReferenceKey)) {
       ctx.setVirtualContext(
@@ -126,7 +119,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emit,
       instrumentation,
       live,
-      prepareHistory,
       publish,
       runStep,
       session: initialSession,
@@ -136,14 +128,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.compactOnly === true) return compactHistory(step);
 
     // A step takes what arrived, in order: the runtime's results, then people's answers, then
-    // the delivery's input. Then it acts: what the answers approved runs, or the turn waits on
-    // people, or the model runs.
+    // the delivery's input. Then it acts: a hook that failed during the turn fails it, or what
+    // the answers approved runs, or the turn waits on people, or the model runs.
     const runtime = await runtimeResults(step, input);
     if ("ended" in runtime) return runtime.ended;
     const answered = await answers(step, runtime);
     if ("ended" in answered) return answered.ended;
     const turn = await turnInput(step, input, answered);
     if ("ended" in turn) return turn.ended;
+    const hookFailure = await failTurnForReaction(step);
+    if (hookFailure !== undefined) return hookFailure;
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
     if (blocked(step.view(), step.session.state)) return park(step);
@@ -237,10 +231,7 @@ async function clearContext(step: Step): Promise<StepResult> {
       clear(step.view(), { cause, sessionId: step.session.sessionId }),
     ),
   );
-  const cleared = discardClearedHumanInput({
-    ...step.session,
-    state: clearMemorySessionState(step.session.state),
-  });
+  const cleared = discardClearedHumanInput(step.session);
   return { next: null, session: replaceSessionHistory(cleared, []) };
 }
 
