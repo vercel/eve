@@ -102,10 +102,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `photon` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| an image a person sends reaches the agent with its bytes and type | —<sup>[23](#note-23)</sup> | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
-| a PDF a person sends reaches the agent with its bytes and type | —<sup>[23](#note-23)</sup> | —<sup>[23](#note-23)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
-| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[23](#note-23)</sup> | —<sup>[23](#note-23)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
-| a file sent earlier in the conversation is still there on a later message | —<sup>[23](#note-23)</sup> | —<sup>[23](#note-23)</sup> | ✅ |  | ✅ | —<sup>[24](#note-24)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[23](#note-23)</sup> | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[23](#note-23)</sup> | —<sup>[24](#note-24)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[23](#note-23)</sup> | ✅ | ✅ |  | ✅ | —<sup>[25](#note-25)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
 
 ## Notes
 
@@ -132,4 +132,5 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 21. <a id="note-21"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
 22. <a id="note-22"></a>a public thread gets a status naming who must sign in, since nothing on GitHub is private to them
 23. <a id="note-23"></a>the platform has no files a person can send
-24. <a id="note-24"></a>each slash command starts its own session, so no later message shares one with the file
+24. <a id="note-24"></a>the browser sends a file's bytes with the message, so there is no download to fail
+25. <a id="note-25"></a>each slash command starts its own session, so no later message shares one with the file
