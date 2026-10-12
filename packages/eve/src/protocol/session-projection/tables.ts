@@ -42,8 +42,11 @@ export interface Introduced {
   readonly startedAt: string;
 }
 
-/** When a row's entity ended. */
+/** When a row's entity ended, once it has. */
 export interface Ended {
+  /** The position of the line that ended it, comparable with `introducedAt`. */
+  readonly closedAt?: number;
+  /** The time of that line. */
   readonly endedAt?: string;
 }
 

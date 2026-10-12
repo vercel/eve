@@ -1,4 +1,3 @@
-import { failureOf } from "#client/session-utils.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { MessageContent } from "#shared/message-content.js";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -27,7 +26,12 @@ import {
   askedInteraction,
   readerInteraction,
 } from "#protocol/session-reader.js";
-import { interactionBatches, reply, replyText } from "#protocol/session-projection/selectors.js";
+import {
+  failure,
+  interactionBatches,
+  reply,
+  replyText,
+} from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import { type Answer, parseAnswers } from "#shared/input.js";
 import type { AskedInteraction } from "#protocol/session-reader.js";
@@ -207,28 +211,8 @@ interface InvocationStream {
 
 async function readInvocationStream(invocationId: string): Promise<InvocationStream> {
   const view = emptySessionView();
-  let settled: InvocationStream["settled"];
   for await (const event of streamSessionEvents(invocationId, { follow: false })) {
     foldReceivedEvent(view, event);
-    switch (event.type) {
-      case "turn.started":
-      case "turn.paused":
-      case "interaction.settled":
-        settled = undefined;
-        break;
-      case "turn.settled": {
-        const error = failureOf(event);
-        if (error !== undefined) settled = { error, terminal: false };
-        else settled = event.data.outcome === "cancelled" ? "cancelled" : "completed";
-        break;
-      }
-      case "session.ended": {
-        const error = failureOf(event);
-        if (error !== undefined) settled = { error, terminal: true };
-        else settled ??= "completed";
-        break;
-      }
-    }
   }
   const batches = interactionBatches(view).map(
     (batch): InputBatch =>
@@ -247,10 +231,29 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
     batches,
     pending,
     result: latestResult(view),
-    settled,
+    settled: howItSettled(view),
     signIns: openSignIns(view),
     view,
   };
+}
+
+/**
+ * How the latest turn ended, unless an answer it waited on has settled since; a failed session
+ * ends the invocation for good.
+ */
+function howItSettled(view: SessionView): InvocationStream["settled"] {
+  const { session } = view;
+  const ended = session.outcome === "failed" ? failure(view) : undefined;
+  if (ended !== undefined) return { error: ended, terminal: true };
+  const turn = session.latestTurnId === undefined ? undefined : view.turns[session.latestTurnId];
+  const closedAt = turn?.closedAt ?? Infinity;
+  const resumed = Object.values(view.interactions).some((row) => (row.closedAt ?? -1) > closedAt);
+  if (turn?.status === "settled" && !resumed) {
+    const error = turn.outcome === "failed" ? failure(view, turn.turnId) : undefined;
+    if (error !== undefined) return { error, terminal: false };
+    return turn.outcome === "cancelled" ? "cancelled" : "completed";
+  }
+  return session.status === "ended" ? "completed" : undefined;
 }
 
 /** What the latest turn replied once it settled: its structured result, or else its text. */
