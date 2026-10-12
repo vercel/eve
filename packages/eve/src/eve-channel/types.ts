@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
@@ -176,7 +176,7 @@ export interface EveChannelInput {
    */
   readonly onMessage?: (
     ctx: EveMessageContext,
-    message: string | UserContent,
+    message: MessageContent,
   ) => EveMessageResultOrPromise;
   /**
    * Runtime stream-event handlers for the default eve HTTP channel. Handlers receive

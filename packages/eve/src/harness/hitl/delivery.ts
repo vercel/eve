@@ -1,5 +1,4 @@
 import { openRequests } from "#protocol/session-reader.js";
-import type { UserContent } from "ai";
 
 import { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -12,6 +11,7 @@ import type { HarnessStepInput, SubmittedAnswer } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { readAnswerText } from "#internal/input-text.js";
 import type { Answer } from "#shared/input.js";
+import type { MessageContent } from "#shared/message-content.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -31,7 +31,7 @@ export function deliver(
   options: { readonly takeQueued: boolean },
 ): {
   readonly input?: HarnessStepInput;
-  readonly displayMessage?: string | UserContent;
+  readonly displayMessage?: MessageContent;
   readonly takeQueued: boolean;
 } {
   const queued = options.takeQueued ? view.turn.queued : undefined;

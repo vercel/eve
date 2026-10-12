@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
@@ -107,7 +107,7 @@ export interface ClientOptions {
  * Input object for creating a client session. The first message is required.
  */
 export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutput> {
-  readonly message: string | UserContent;
+  readonly message: MessageContent;
 }
 
 /** Request options for creating a conversation session before its first turn. */
@@ -174,7 +174,7 @@ export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
 export type SendTurnPayload<TOutput = unknown> =
   | (SendTurnOptions<TOutput> & {
       readonly answers?: never;
-      readonly message: string | UserContent;
+      readonly message: MessageContent;
     })
   | (RespondTurnOptions<TOutput> & {
       readonly answers: readonly Answer[];

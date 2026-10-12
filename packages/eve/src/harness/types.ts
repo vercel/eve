@@ -1,7 +1,8 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { LanguageModel, ModelMessage, UserContent } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
@@ -148,7 +149,7 @@ export interface ControlDelivery {
 export interface StepInput {
   /** Answers to the session's open interactions. */
   readonly answers?: readonly Answer[];
-  readonly message?: string | UserContent;
+  readonly message?: MessageContent;
   /**
    * Context strings from the channel delivery. Each entry is appended as a
    * synthetic user-role message to `session.history` before the

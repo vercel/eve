@@ -2,7 +2,7 @@
  * Upload-policy authoring helpers for channel routes.
  */
 
-import type { FilePart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart } from "#shared/message-content.js";
 
 import { getKnownByteLength } from "#internal/attachments/data.js";
 
@@ -38,7 +38,7 @@ export const DEFAULT_UPLOAD_POLICY: UploadPolicyConfig = Object.freeze({
 });
 
 /**
- * Describes the reason one inbound `FilePart` failed the policy check.
+ * Describes the reason one inbound `MessageFilePart` failed the policy check.
  *
  * Channels use this to produce human-readable error responses
  * (`413 Payload Too Large`, `415 Unsupported Media Type`) or to log and
@@ -122,7 +122,7 @@ export function isMediaTypeAllowed(mediaType: string, policy: UploadPolicy): boo
 }
 
 /**
- * Evaluates a single `FilePart` against a {@link UploadPolicy}. Returns
+ * Evaluates a single `MessageFilePart` against a {@link UploadPolicy}. Returns
  * a {@link UploadPolicyViolation} on rejection, or `null` when the
  * part is either accepted or has a non-local payload (remote URL) whose
  * size cannot be determined without fetching.
@@ -133,7 +133,7 @@ export function isMediaTypeAllowed(mediaType: string, policy: UploadPolicy): boo
  * proxies enforce policy.
  */
 export function evaluateFilePart(
-  part: FilePart,
+  part: MessageFilePart,
   policy: UploadPolicy,
 ): UploadPolicyViolation | null {
   if (policy === "disabled" || !isMediaTypeAllowed(part.mediaType, policy)) {
@@ -170,8 +170,8 @@ export function evaluateFilePart(
 }
 
 /**
- * Walks a `UserContent` array and returns every policy violation, in
- * iteration order. Non-file parts (text, image) are skipped.
+ * Walks a message's parts and returns every policy violation, in
+ * iteration order. Text parts are skipped.
  *
  * Returns an empty array when the message is a plain string or when
  * every file part passes. Channels use this to decide between
@@ -179,7 +179,7 @@ export function evaluateFilePart(
  * (Slack).
  */
 export function collectUploadPolicyViolations(
-  content: string | UserContent,
+  content: MessageContent,
   policy: UploadPolicy,
 ): readonly UploadPolicyViolation[] {
   if (typeof content === "string") {

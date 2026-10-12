@@ -67,6 +67,12 @@ export type {
   FetchFileFunction,
   FetchFileResult,
 } from "#shared/channel-definition.js";
+export type {
+  MessageContent,
+  MessageFilePart,
+  MessagePart,
+  MessageTextPart,
+} from "#shared/message-content.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

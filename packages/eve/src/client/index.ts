@@ -26,6 +26,12 @@ export type {
   ConversationTurn,
 } from "#client/conversation-state.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
+export type {
+  MessageContent,
+  MessageFilePart,
+  MessagePart,
+  MessageTextPart,
+} from "#shared/message-content.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientAgentSession } from "#client/agent-session.js";
 export { ClientSession } from "#client/session.js";

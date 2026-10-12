@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import {
@@ -46,10 +46,7 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
-  send(
-    message: string | UserContent,
-    options: ChannelAddressDeliveryOptions<TState>,
-  ): Promise<Session>;
+  send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   respond(
     answers: SendPayload["answers"],
     options: ChannelAddressDeliveryOptions<TState>,

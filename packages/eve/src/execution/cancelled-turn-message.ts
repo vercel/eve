@@ -3,7 +3,8 @@ import {
   createFrameworkUserMessage,
   createUserMessage,
   frameworkMessageKindForStepInput,
-  normalizeUserContent,
+  normalizeMessage,
+  userContentOf,
 } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 
@@ -11,9 +12,9 @@ export async function preserveCancelledTurnMessage(
   session: HarnessSession,
   input: HarnessStepInput | undefined,
 ): Promise<HarnessSession> {
-  const message = normalizeUserContent(input?.message);
+  const message = normalizeMessage(input?.message);
   if (message === undefined) return session;
-  const content = await stageAttachmentsToSandbox(message);
+  const content = await stageAttachmentsToSandbox(userContentOf(message));
   const frameworkMessageKind = frameworkMessageKindForStepInput(input);
   return {
     ...session,

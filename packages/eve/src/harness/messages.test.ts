@@ -1,4 +1,6 @@
-import type { FilePart, ModelMessage, UserContent } from "ai";
+import type { ModelMessage, UserContent } from "ai";
+
+import type { MessageFilePart } from "#shared/message-content.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -12,7 +14,7 @@ import {
   isUserModelMessage,
   markFrameworkStepInput,
   normalizeModelMessages,
-  normalizeUserContent,
+  normalizeMessage,
   resolveAssistantStepText,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
@@ -22,7 +24,7 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 function textFilePart(overrides: {
   readonly filename: string;
   readonly payload: string;
-}): FilePart {
+}): MessageFilePart {
   return {
     data: Buffer.from(overrides.payload, "utf8"),
     filename: overrides.filename,
@@ -257,7 +259,7 @@ describe("coalesceTurnInputs", () => {
   });
 });
 
-describe("normalizeUserContent", () => {
+describe("normalizeMessage", () => {
   it.each([
     ["empty string", ""],
     ["whitespace-only string", "   \n\t "],
@@ -267,19 +269,19 @@ describe("normalizeUserContent", () => {
   ] satisfies ReadonlyArray<readonly [string, string | UserContent]>)(
     "returns undefined for %s",
     (_name, content) => {
-      expect(normalizeUserContent(content)).toBeUndefined();
+      expect(normalizeMessage(content)).toBeUndefined();
     },
   );
 
   it("preserves visible text", () => {
-    expect(normalizeUserContent("hello")).toBe("hello");
+    expect(normalizeMessage("hello")).toBe("hello");
   });
 
   it("keeps file parts while removing blank text parts", () => {
     const attachment = textFilePart({ filename: "notes.txt", payload: "contents" });
 
     expect(
-      normalizeUserContent([{ text: "", type: "text" }, attachment, { text: "  ", type: "text" }]),
+      normalizeMessage([{ text: "", type: "text" }, attachment, { text: "  ", type: "text" }]),
     ).toEqual([attachment]);
   });
 

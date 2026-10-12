@@ -6,7 +6,7 @@
  * them back to full input responses inside the channel deliver hook.
  */
 
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
 import type { RequestSettlement } from "#channel/interaction-prompts.js";
@@ -171,7 +171,7 @@ export function telegramReplyAnswer(input: {
  */
 export function telegramReplyAnswers(
   replyToBotMessageId: unknown,
-  message: string | UserContent | undefined,
+  message: MessageContent | undefined,
 ): ValidatedAnswer[] {
   if (typeof replyToBotMessageId !== "string") return [];
   const text =

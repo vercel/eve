@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
@@ -60,7 +60,7 @@ export interface RouteHandlerArgs<TState = undefined> {
 }
 
 export interface SendPayload {
-  readonly message?: string | UserContent;
+  readonly message?: MessageContent;
   readonly [key: string]: unknown;
   readonly answers?: readonly Answer[];
   /**

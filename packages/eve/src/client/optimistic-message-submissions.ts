@@ -1,7 +1,7 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { LocalSubmission } from "#client/conversation.js";
 import type { PendingMessageSubmission } from "#client/eve-agent-store-state.js";
-import { createSubmissionId, summarizeUserContent } from "#client/eve-agent-store-helpers.js";
+import { createSubmissionId, summarizeMessage } from "#client/eve-agent-store-helpers.js";
 import type { SendTurnPayload } from "#client/types.js";
 
 interface ReconciledSubmissions {
@@ -37,7 +37,7 @@ export class OptimisticMessageSubmissions {
       createdAt: Date.now(),
       eventStartIndex,
       id: createSubmissionId(),
-      message: summarizeUserContent(input.message),
+      message: summarizeMessage(input.message),
       turnId,
       requiresDeliveryId: true,
     };
@@ -52,7 +52,7 @@ export class OptimisticMessageSubmissions {
   /** Re-echoes a submission whose payload `prepareSend` replaced, keeping its place in the stream. */
   resubmit(submissionId: string | undefined, input: SendTurnPayload): string | undefined {
     const pending = this.#pending.find((candidate) => candidate.id === submissionId);
-    const message = input.message === undefined ? undefined : summarizeUserContent(input.message);
+    const message = input.message === undefined ? undefined : summarizeMessage(input.message);
     if (pending?.message === message) return submissionId;
     if (pending !== undefined) this.#withdraw([pending.id]);
     return this.submit(input, pending?.eventStartIndex ?? 0, pending?.turnId);

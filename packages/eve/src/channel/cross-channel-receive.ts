@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
@@ -22,7 +22,7 @@ interface CrossChannelSendOptions {
 
 /** Message delivery bound to one channel-specific proactive target. */
 export interface CrossChannelTargetHandle {
-  send(message: string | UserContent, options: CrossChannelSendOptions): Promise<Session>;
+  send(message: MessageContent, options: CrossChannelSendOptions): Promise<Session>;
 }
 
 /** Selects another authored channel and one of its proactive targets. */
@@ -104,7 +104,7 @@ interface InvokeChannelReceiveInput {
   readonly runtime: Runtime;
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: {
-    readonly message: string | UserContent;
+    readonly message: MessageContent;
     readonly target: Readonly<Record<string, unknown>>;
     readonly auth: SessionAuthContext | null;
   };

@@ -507,9 +507,9 @@ Tokens must be nonempty. A session supports up to 256 addresses, including its s
 
 ## File uploads
 
-`from(address).send()` accepts a `message` containing `string | UserContent`, while
-`Session.send()` accepts `string | UserContent` directly. To include file
-attachments, pass a `UserContent` array mixing text and file parts:
+`from(address).send()` accepts a `message` containing `MessageContent` (a string, or
+text and file parts), while `Session.send()` accepts `MessageContent` directly. To
+include file attachments, pass an array mixing text and file parts:
 
 ```ts
 await from(continuationToken).send(
@@ -521,7 +521,7 @@ await from(continuationToken).send(
 );
 ```
 
-For platforms like Slack where files sit behind authenticated URLs, put a `URL` object in `FilePart.data` and declare `fetchFile` on the channel config:
+For platforms like Slack where files sit behind authenticated URLs, put a `URL` object in the file part's `data` and declare `fetchFile` on the channel config:
 
 ```ts
 defineChannel({

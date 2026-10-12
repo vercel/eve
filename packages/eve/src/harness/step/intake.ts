@@ -5,7 +5,8 @@ import {
   createUserMessage,
   frameworkMessageKindForStepInput,
   type HarnessModelMessage,
-  normalizeUserContent,
+  normalizeMessage,
+  userContentOf,
   TOOL_RESULT_BOUNDARY,
   type UserModelMessage,
 } from "#harness/messages.js";
@@ -91,10 +92,10 @@ export async function prepareTurnInput(
     createFrameworkUserMessage("context.instruction", entry),
   );
   const kind = frameworkMessageKindForStepInput(input);
-  const content = normalizeUserContent(input?.message);
+  const content = normalizeMessage(input?.message);
   const staged =
     content !== undefined && !options.consumedMessage
-      ? await stageAttachmentsToSandbox(content)
+      ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
   if (staged !== undefined) {
     messages.push(

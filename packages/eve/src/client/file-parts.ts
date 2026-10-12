@@ -1,26 +1,23 @@
-import type { FilePart, TextPart, UserContent } from "ai";
+import type { MessageFilePart, MessagePart, MessageTextPart } from "#shared/message-content.js";
 
 const BASE64_CHUNK_SIZE = 0x8000;
 
 /**
- * Creates an AI SDK `FilePart` whose data is an inline `data:` URL.
+ * Creates an AI SDK `MessageFilePart` whose data is an inline `data:` URL.
  */
 export function createDataUrlFilePart(input: {
   readonly bytes: Uint8Array;
   readonly filename?: string;
   readonly mediaType: string;
-}): FilePart {
-  const part: FilePart = {
+}): MessageFilePart {
+  const part: MessageFilePart = {
     data: `data:${input.mediaType};base64,${bytesToBase64(input.bytes)}`,
     mediaType: input.mediaType,
     type: "file",
   };
-
-  if (input.filename !== undefined && input.filename.length > 0) {
-    part.filename = input.filename;
-  }
-
-  return part;
+  return input.filename === undefined || input.filename.length === 0
+    ? part
+    : { ...part, filename: input.filename };
 }
 
 /**
@@ -31,8 +28,8 @@ export function createTextWithFileContent(input: {
   readonly filename?: string;
   readonly mediaType: string;
   readonly text: string;
-}): UserContent {
-  const textPart: TextPart = { text: input.text, type: "text" };
+}): MessagePart[] {
+  const textPart: MessageTextPart = { text: input.text, type: "text" };
   const filePart = createDataUrlFilePart(input);
   return [textPart, filePart];
 }
