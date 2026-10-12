@@ -133,53 +133,18 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
 
-    // Results the runtime ran for parked steps settle first; queued input waits for all of them.
-    const runtime = await settleRuntimeWork(step, input);
-    if (runtime === undefined) return { next: null, session: step.session };
-    await step.apply(openDeferredApprovals(step.view()));
-    // The delivery's answers are admitted, then decide what they answer.
-    const intake = await admitHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
-    if (intake.kind === "stop") return intake.result;
-    const decided = await settleHumanInput(step, intake);
-    let turnInput = intake.input;
-    let { message } = intake;
-    // The model reads what the answers decided before the delivery's own input, as the AI SDK
-    // ran it: the input waits a step.
-    if (decided.approved.length > 0 || decided.settledApprovals) {
-      await step.apply(queueInput(step.view(), turnInputOnly(turnInput)));
-      turnInput = withoutTurnInput(turnInput);
-      message = undefined;
-    }
-    // Nothing the answers decided can run: the turn's input waits, unreceived, behind them.
-    if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
-      await step.apply(queueInput(step.view(), compactInput(turnInput)));
-      return park(step);
-    }
-    const turn = await prepareTurnInput(step, turnInput, {
-      consumedMessage: intake.consumedMessage,
-    });
-    // A delivery an earlier step queued joins with the input the queue carried it in.
-    const deliveries = deliveriesOf(input, turnInput);
-    if (intake.opensTurn) {
-      const failed = await openTurn(step, {
-        deliveries,
-        input: [...turn.ephemeral, ...turn.messages],
-        message,
-      });
-      if (failed !== undefined) return failed;
-    } else if (deliveries !== undefined) {
-      // An answer joins the turn it resumes; between turns, it has nothing to join.
-      await step.apply(join(step.view(), { deliveries }));
-    }
-    // Input that opened no turn and found none open, such as a stale answer eve dropped,
-    // settled above and leaves nothing to run.
-    if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
-      return { next: null, session: step.session };
-    }
-    const stopped = await applyHumanDecisions(step, decided);
+    // A step takes what arrived, in order: the runtime's results, then people's answers, then
+    // the delivery's input. Then it acts: what the answers approved runs, or the turn waits on
+    // people, or the model runs.
+    const runtime = await runtimeResults(step, input);
+    if ("ended" in runtime) return runtime.ended;
+    const answered = await answers(step, runtime);
+    if ("ended" in answered) return answered.ended;
+    const turn = await turnInput(step, input, answered);
+    if ("ended" in turn) return turn.ended;
+    const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
     if (blocked(step.view(), step.session.state)) return park(step);
-
     return runModelStep(step, {
       onResponse: (response) => handleStepResult(step, response),
       generation,
@@ -188,6 +153,75 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   }
 
   return runStep;
+}
+
+/** A stage's result when the step ends there. */
+interface Ended {
+  readonly ended: StepResult;
+}
+
+/**
+ * Results the runtime ran for parked steps settle first, and approvals deferred behind the tasks
+ * that settled open; queued input waits for all of them.
+ */
+async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
+  const runtime = await settleRuntimeWork(step, input);
+  if (runtime === undefined) return { ended: { next: null, session: step.session } } as Ended;
+  await step.apply(openDeferredApprovals(step.view()));
+  return runtime;
+}
+
+/**
+ * The delivery's answers are admitted, then decide what they answer. The model reads what they
+ * decided before the delivery's own input, as the AI SDK ran it, so that input waits a step; and
+ * when nothing they decided can run, it waits, unreceived, behind them.
+ */
+async function answers(
+  step: Step,
+  runtime: NonNullable<Awaited<ReturnType<typeof settleRuntimeWork>>>,
+) {
+  const intake = await admitHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
+  if (intake.kind === "stop") return { ended: intake.result } as Ended;
+  const decided = await settleHumanInput(step, intake);
+  let { input, message } = intake;
+  if (decided.approved.length > 0 || decided.settledApprovals) {
+    await step.apply(queueInput(step.view(), turnInputOnly(input)));
+    input = withoutTurnInput(input);
+    message = undefined;
+  }
+  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+    await step.apply(queueInput(step.view(), compactInput(input)));
+    return { ended: await park(step) } as Ended;
+  }
+  return { decided, input, intake, message };
+}
+
+/**
+ * The delivery's input opens the turn, or joins the one its answers resume. Input that opened no
+ * turn and found none open, such as a stale answer eve dropped, settled and leaves nothing to run.
+ */
+async function turnInput(
+  step: Step,
+  input: HarnessStepInput | undefined,
+  { input: received, intake, message }: Exclude<Awaited<ReturnType<typeof answers>>, Ended>,
+) {
+  const turn = await prepareTurnInput(step, received, { consumedMessage: intake.consumedMessage });
+  // A delivery an earlier step queued joins with the input the queue carried it in.
+  const deliveries = deliveriesOf(input, received);
+  if (intake.opensTurn) {
+    const failed = await openTurn(step, {
+      deliveries,
+      input: [...turn.ephemeral, ...turn.messages],
+      message,
+    });
+    if (failed !== undefined) return { ended: failed } as Ended;
+  } else if (deliveries !== undefined) {
+    await step.apply(join(step.view(), { deliveries }));
+  }
+  if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
+    return { ended: { next: null, session: step.session } } as Ended;
+  }
+  return turn;
 }
 
 /**
