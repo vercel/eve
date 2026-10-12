@@ -158,14 +158,12 @@ jobs:
           if [ -n "${VERCEL_TOKEN:-}" ]; then
             token_args=(--token "$VERCEL_TOKEN")
           fi
-          team_args=()
-          scope_args=()
-          if [ -n "${VERCEL_ORG_ID:-}" ]; then
-            team_args=(--team "$VERCEL_ORG_ID")
-            scope_args=(--scope "$VERCEL_ORG_ID")
-          fi
+          # The CLI resolves the project from VERCEL_ORG_ID/VERCEL_PROJECT_ID
+          # when both are set, so `vercel link` only adds project lookups to
+          # every matrix job.
+          : "${VERCEL_ORG_ID:?VERCEL_ORG_ID is required}" "${VERCEL_PROJECT_ID:?VERCEL_PROJECT_ID is required}"
+          scope_args=(--scope "$VERCEL_ORG_ID")
 
-          vercel link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
           vercel env pull --yes --environment=preview "${token_args[@]}"
           VERCEL_OIDC_TOKEN="$(node --env-file=.env.local -p 'process.env.VERCEL_OIDC_TOKEN ?? ""')"
           # Sandbox templates key on VERCEL_PROJECT_ID (present at build and

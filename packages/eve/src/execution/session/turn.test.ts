@@ -1,3 +1,6 @@
+import * as workflowCore from "#compiled/@workflow/core/index.js";
+import * as workflowRuntime from "#internal/workflow/runtime.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -884,95 +887,116 @@ describe("SessionExecution checkpoints", () => {
     expect(queue.pendingCount).toBe(0);
   });
 
-  it("routes an answer to its question before the message beside it interrupts the waited call", async () => {
-    const base = { ...state(""), hasProxyInputRequests: true };
-    const sessionState: DurableSessionState = {
-      ...base,
-      snapshot: {
-        session: registerWorkflowToolRun(base.snapshot.session, {
-          address: { hookToken: "deploy-control", runId: "deploy-run" },
-          callId: "deploy-call",
-          origin: { stepIndex: 0, turnId: "turn_0" },
-          toolName: "deploy",
+  it.each([false, true])(
+    "routes an answer before steering the waited call (exhausted startup retries: %s)",
+    async (exhausted) => {
+      const base = { ...state(""), hasProxyInputRequests: true };
+      const sessionState: DurableSessionState = {
+        ...base,
+        snapshot: {
+          session: registerWorkflowToolRun(base.snapshot.session, {
+            address: { hookToken: "deploy-control", runId: "deploy-run" },
+            callId: "deploy-call",
+            origin: { stepIndex: 0, turnId: "turn_0" },
+            toolName: "deploy",
+          }),
+        },
+      };
+      const correction: DeliverHookPayload = {
+        kind: "deliver",
+        payloads: [{ message: "Also include Bob's service." }],
+      };
+      const answerAndCorrection: DeliverHookPayload = {
+        kind: "deliver",
+        payloads: [
+          { inputResponses: [{ requestId: "region", text: "us-east-1" }] },
+          { message: "Also include Bob's service." },
+        ],
+      };
+      const runtimePayloads: SessionInboxPayload[] = [answerAndCorrection, { kind: "cancel" }];
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: vi.fn(() => []),
+        hasPending: vi.fn(() => false),
+        whenPending: () => new Promise<void>(() => {}),
+        next: vi.fn(async () => runtimePayloads.shift()),
+        onDelivery: vi.fn(() => () => {}),
+        onInterrupt: vi.fn(() => () => {}),
+        restore: vi.fn(),
+      };
+      vi.mocked(turnStep)
+        .mockReset()
+        .mockImplementation(
+          turnStepWork(async () => ({
+            action: "park",
+            pendingCoordinationCallIds: ["deploy-call"],
+            serializedContext: {},
+            sessionState,
+          })),
+        );
+      vi.mocked(dispatchCoordinationStep)
+        .mockReset()
+        .mockImplementation(
+          dispatchWork(async () => ({
+            results: [],
+            serializedContext: {},
+            sessionState,
+          })),
+        );
+      const order: string[] = [];
+      vi.mocked(routeDeliverToChildren).mockImplementation(
+        routeWork(async (input) => {
+          order.push("route");
+          return {
+            kind: "continue",
+            remainder: correction,
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
         }),
-      },
-    };
-    const correction: DeliverHookPayload = {
-      kind: "deliver",
-      payloads: [{ message: "Also include Bob's service." }],
-    };
-    const answerAndCorrection: DeliverHookPayload = {
-      kind: "deliver",
-      payloads: [
-        { inputResponses: [{ requestId: "region", text: "us-east-1" }] },
-        { message: "Also include Bob's service." },
-      ],
-    };
-    const runtimePayloads: SessionInboxPayload[] = [answerAndCorrection, { kind: "cancel" }];
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
-      whenPending: () => new Promise<void>(() => {}),
-      next: vi.fn(async () => runtimePayloads.shift()),
-      onDelivery: vi.fn(() => () => {}),
-      onInterrupt: vi.fn(() => () => {}),
-      restore: vi.fn(),
-    };
-    vi.mocked(turnStep)
-      .mockReset()
-      .mockImplementation(
-        turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["deploy-call"],
-          serializedContext: {},
-          sessionState,
-        })),
       );
-    vi.mocked(dispatchCoordinationStep)
-      .mockReset()
-      .mockImplementation(
-        dispatchWork(async () => ({
-          results: [],
-          serializedContext: {},
-          sessionState,
-        })),
+      vi.mocked(interruptWorkflowToolRun)
+        .mockReset()
+        .mockImplementation(async () => {
+          order.push("interrupt");
+          if (exhausted) {
+            const real = await vi.importActual<
+              typeof import("#execution/tools/workflow/interrupt.js")
+            >("#execution/tools/workflow/interrupt.js");
+            vi.spyOn(workflowCore, "getStepMetadata").mockReturnValue({ attempt: 61 } as ReturnType<
+              typeof workflowCore.getStepMetadata
+            >);
+            vi.spyOn(workflowRuntime, "resumeHook").mockRejectedValue(
+              new HookNotFoundError("deploy-control"),
+            );
+            vi.spyOn(workflowRuntime, "getRun").mockReturnValue({
+              status: Promise.resolve("pending"),
+            } as ReturnType<typeof workflowRuntime.getRun>);
+            await real.interruptWorkflowToolRun({
+              hookToken: "deploy-control",
+              runId: "deploy-run",
+            });
+          }
+        });
+
+      await expect(
+        createExecution({ inbox, sessionState }).runTurn({
+          delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
+        }),
+      ).resolves.toEqual({ cancelled: true, kind: "park" });
+
+      expect(routeDeliverToChildren).toHaveBeenCalledWith(
+        expect.objectContaining({ delivery: answerAndCorrection }),
       );
-    const order: string[] = [];
-    vi.mocked(routeDeliverToChildren).mockImplementation(
-      routeWork(async (input) => {
-        order.push("route");
-        return {
-          kind: "continue",
-          remainder: correction,
-          serializedContext: input.serializedContext,
-          sessionState: input.sessionState,
-        };
-      }),
-    );
-    vi.mocked(interruptWorkflowToolRun)
-      .mockReset()
-      .mockImplementation(async () => {
-        order.push("interrupt");
+      expect(interruptWorkflowToolRun).toHaveBeenCalledWith({
+        hookToken: "deploy-control",
+        runId: "deploy-run",
       });
-
-    await expect(
-      createExecution({ inbox, sessionState }).runTurn({
-        delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
-      }),
-    ).resolves.toEqual({ cancelled: true, kind: "park" });
-
-    expect(routeDeliverToChildren).toHaveBeenCalledWith(
-      expect.objectContaining({ delivery: answerAndCorrection }),
-    );
-    expect(interruptWorkflowToolRun).toHaveBeenCalledWith({
-      hookToken: "deploy-control",
-      runId: "deploy-run",
-    });
-    expect(order).toEqual(["route", "interrupt"]);
-  });
+      expect(order).toEqual(["route", "interrupt"]);
+    },
+  );
 
   it("reports turn.waiting once when task_wait parks on a working task", async () => {
     const base = state("");

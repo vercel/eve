@@ -155,31 +155,41 @@ export class SelfModificationHarness {
   async request(
     prompt: string,
     session?: Pick<EveEvalSession, "start">,
+    options: { allowContinuations?: boolean } = {},
   ): Promise<SelfModificationRun> {
     const liveParent = await (session ?? (await this.#t.session())).start(prompt);
     this.#turns.add(liveParent);
     const parent = await liveParent.result();
     parent.expectOk();
-    const call = parent.requireToolCall(SELF_MODIFICATION_AGENT);
-    const taskId = typeof call.input.taskId === "string" ? call.input.taskId : undefined;
-    const message = taskId === undefined ? undefined : call.input.message;
-    if (taskId !== undefined && (typeof message !== "string" || message.length === 0))
+    const calls = parent.toolCalls.filter((call) => call.name === SELF_MODIFICATION_AGENT);
+    if (calls.length === 0 || calls.some((call) => call.status !== "completed"))
+      throw new Error("Self-modification delegation did not complete.");
+    // Only callers that do not inspect child-level tool calls may follow the last continuation.
+    if (!options.allowContinuations && calls.length !== 1)
+      throw new Error("Self-modification parent must make exactly one delegation call.");
+    const taskIds = new Set(
+      liveParent.events.flatMap((event) =>
+        event.type === "task.started" && event.data.name === SELF_MODIFICATION_AGENT
+          ? [event.data.taskId]
+          : [],
+      ),
+    );
+    if (taskIds.size !== 1)
+      throw new Error("Self-modification parent must delegate to exactly one child task.");
+    const [taskId] = taskIds;
+    const last = calls.at(-1)!;
+    const message = typeof last.input.taskId === "string" ? last.input.message : undefined;
+    if (
+      typeof last.input.taskId === "string" &&
+      (typeof message !== "string" || message.length === 0)
+    )
       throw new Error("Self-modification continuation omitted its message.");
 
     const sessionEvents = [...this.#turns]
       .filter((turn) => turn.sessionId === parent.sessionId)
       .flatMap((turn) => turn.events);
-    const task = sessionEvents.find(
-      (event) =>
-        event.type === "task.started" &&
-        event.data.name === SELF_MODIFICATION_AGENT &&
-        (taskId === undefined ? liveParent.events.includes(event) : event.data.taskId === taskId),
-    );
     const started = sessionEvents.find(
-      (event) =>
-        event.type === "agent.started" &&
-        task?.type === "task.started" &&
-        event.data.taskId === task.data.taskId,
+      (event) => event.type === "agent.started" && event.data.taskId === taskId,
     );
     if (started?.type !== "agent.started") {
       throw new Error("Self-modification parent turn did not start its child agent.");
