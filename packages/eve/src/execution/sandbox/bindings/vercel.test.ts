@@ -938,6 +938,8 @@ describe("createVercelSandbox", () => {
       sandboxName: "session-key",
     });
 
+    expect(handle.sandbox.name).toBe("session");
+
     await handle.sandbox.setNetworkPolicy({
       allow: {
         "github.com": [{ transform: [{ headers: { authorization: "Basic eC1hY2Nlc3M=" } }] }],

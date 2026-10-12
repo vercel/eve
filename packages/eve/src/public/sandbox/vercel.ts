@@ -3,6 +3,8 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 
 /** Live sandbox capabilities exposed by a Vercel environment. */
 export interface VercelSandboxSession extends SandboxSession {
+  /** Name of the live Vercel Sandbox (stable across stop/resume for the session). */
+  readonly name: string;
   /** Applies a firewall policy to the live Vercel Sandbox. */
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 }

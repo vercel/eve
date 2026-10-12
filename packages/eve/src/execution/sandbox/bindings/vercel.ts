@@ -1,7 +1,4 @@
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
+import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
@@ -90,7 +87,7 @@ export function createVercelSandboxProvider(
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
-  NetworkPolicySandboxSession
+  VercelSandboxSession
 > {
   const { prepare, ...authoredCreateOptions } = environmentOptions ?? {};
   return createVercelSandbox({ createOptions: authoredCreateOptions, prepare });
@@ -111,7 +108,7 @@ export function createVercelSandbox(
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
-  NetworkPolicySandboxSession
+  VercelSandboxSession
 > {
   const loadSandboxModule =
     input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
@@ -416,10 +413,13 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
   await ensureVercelSandboxBaseRuntime(sandbox);
   await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
 
-  const templateSession = buildSandboxSession(
-    createVercelInternalSandboxSession(sandbox, input.createOptions.env),
-    createVercelNetworkPolicySetter(sandbox),
-  );
+  const templateSession = {
+    ...buildSandboxSession(
+      createVercelInternalSandboxSession(sandbox, input.createOptions.env),
+      createVercelNetworkPolicySetter(sandbox),
+    ),
+    name: sandbox.name,
+  };
 
   await writeVercelSandboxSeedFiles({
     sandbox,
@@ -567,13 +567,16 @@ function createHandle(input: {
   readonly createOptions: VercelCreateOptions;
   readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly sandbox: VercelSandbox;
-}): SandboxProviderHandle<NetworkPolicySandboxSession> {
+}): SandboxProviderHandle<VercelSandboxSession> {
   const { sandbox } = input;
   return {
-    sandbox: buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox, input.createOptions.env),
-      createVercelNetworkPolicySetter(sandbox),
-    ),
+    sandbox: {
+      ...buildSandboxSession(
+        createVercelInternalSandboxSession(sandbox, input.createOptions.env),
+        createVercelNetworkPolicySetter(sandbox),
+      ),
+      name: sandbox.name,
+    },
     async onSandboxDelete(options) {
       await deleteVercelSandbox({
         createOptions: input.createOptions,
