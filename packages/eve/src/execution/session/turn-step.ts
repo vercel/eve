@@ -55,7 +55,7 @@ import { saveTransition, dropClosedRecords, sessionView } from "#harness/session
 import { matchSignIns } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
-import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
 import type {
   DurableStepResult,
@@ -327,7 +327,7 @@ async function runSessionStepBody(
     let resolved: HarnessStepInput | undefined;
     let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
-      const delivered: { payload: DeliverPayload; input: HarnessStepInput | undefined }[] = [];
+      const delivered: { payload: DeliverPayload; input: StepInput | undefined }[] = [];
       try {
         for (const payload of delivery.payloads) {
           const result = adapter.deliver
@@ -339,8 +339,6 @@ async function runSessionStepBody(
         await failChannelDeliveries(error);
         throw error;
       }
-      const results = delivered.flatMap(({ input }) => (input === undefined ? [] : [input]));
-      resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
       admission = admitDeliveries({
         channelKind: getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
@@ -348,6 +346,8 @@ async function runSessionStepBody(
         payloads: delivered,
         position: nextLinePosition(ctx),
       });
+      resolved =
+        admission.inputs.length === 0 ? undefined : admission.inputs.reduce(coalesceTurnInputs);
     }
     // A delivery without auth acts as the session's current identity, so
     // only a delivery that names its sender can be answered by someone else.
@@ -391,13 +391,6 @@ async function runSessionStepBody(
       ) {
         ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
       }
-    }
-    if (resolved !== undefined && admission !== undefined && admission.consumed.length > 0) {
-      resolved = {
-        ...resolved,
-        deliveries: admission.consumed,
-        responseBindings: [...(resolved.responseBindings ?? []), ...admission.responseBindings],
-      };
     }
     if (runtimeResults !== undefined) {
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {

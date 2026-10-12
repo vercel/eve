@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { answer, requireSignIn } from "#harness/hitl/approvals.js";
-import { getApprovalAuditState } from "#harness/hitl/candidates.js";
+import { requireSignIn, settleLimit } from "#harness/hitl/approvals.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import {
@@ -66,35 +65,23 @@ describe("the budget prompt", () => {
         type: "interaction.opened",
       },
     ]);
-    const binding = {
-      deliveryId: "d_1",
-      interactionId,
-      responseId: "r_1",
-      value: { optionId: "maybe" },
-    };
-    const answered = answer(viewOf(asked), {
-      approvalKey: () => undefined,
-      delivery: { answers: [{ interactionId, optionId: "maybe" }], responseBindings: [binding] },
-      policy: {
-        audit: getApprovalAuditState(asked.state),
-        challenges: [],
-        challengesAtStart: [],
-        feedback: [],
-        kind: "continue",
+    // The answer stands, admitted, as any answer to the prompt does.
+    const answered = withPublished(asked, [
+      {
+        data: { deliveryId: "d_1", interactionId, responseId: "r_1", value: { optionId: "maybe" } },
+        type: "response.submitted",
       },
-      searchable: () => false,
-      submitted: [binding],
-      takeQueued: false,
-    });
-
-    expect(answered.next).toBe("park");
-    expect(answered.events.map((event) => event.type)).toEqual([
-      "response.submitted",
-      "response.settled",
+      { data: { responseId: "r_1" }, type: "response.admitted" },
     ]);
-    expect(answered.events[1]).toMatchObject({ data: { outcome: "refused", responseId: "r_1" } });
-    // The refused answer isn't queued to run again.
-    expect(answered.turn?.queued?.answers ?? []).toEqual([]);
+    const settled = settleLimit(viewOf(answered));
+
+    expect(settled.limit).toBeUndefined();
+    expect(settled.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ outcome: "refused", responseId: "r_1" }),
+        type: "response.settled",
+      }),
+    ]);
   });
 });
 
@@ -112,6 +99,7 @@ describe("requireSignIn", () => {
       ],
     });
 
+    // The step pauses the turn once nothing it holds can run; the transition only asks.
     expect(events.map((event) => event.type)).toEqual(["call.settled", "interaction.opened"]);
     expect(events[0]).toMatchObject({
       data: { callId: "probe", outcome: "interrupted", reason: "authorization-required" },

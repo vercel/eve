@@ -6,8 +6,8 @@ import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-a
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
-import type { StepCoordinates } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
+import { park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
@@ -15,45 +15,42 @@ import type {
   StepResult,
 } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { ApprovalAsk } from "#harness/session-machine/view.js";
+import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
 import {
+  askApprovals,
   grantedApprovalKeys,
-  hasRunnableQueue,
-  parkOnApprovals as parkOnApprovalsTransition,
+  pendingApprovals,
   openLimit,
   requestLimit,
   requireSignIn,
 } from "./approvals.js";
 import { checkSessionUsageLimit } from "./budget.js";
-import { retireActiveCandidates } from "./candidates.js";
+import { writeHitlState } from "./requests.js";
 import { isEmptyInput } from "./delivery.js";
-import { holdForInput } from "./intake.js";
 
-// The session's human-in-the-loop lifecycle, behind the few points where the rest of the harness
-// meets it: a delivery's answers and sign-in callbacks before its turn runs (`acceptHumanInput`),
-// the work they approved once its model step starts (`runApprovedLocalCalls`), a model step's gated calls and
-// sign-ins, the budget gate before each model call, and what the model reads about pending
-// approvals. Outside readers use only the read-only requests view exported here.
+// The session's human-in-the-loop rules, behind the few points where the rest of the harness
+// meets them: a delivery's answers and sign-in callbacks before its turn runs
+// (`admitHumanInput`, `settleHumanInput`), the work they decided once the turn has the delivery
+// (`applyHumanDecisions`), a model step's gated calls and sign-ins, the budget gate before each
+// model call, and what the model reads about pending approvals. Outside readers use only the
+// read-only requests view exported here. Nothing here pauses the turn; the step's `park` does.
 
 export {
-  acceptHumanInput,
-  admitApprovedWork,
-  dispatchApprovedWorkflows,
-  hasApprovedWork,
-  runApprovedLocalCalls,
-  type ApprovedWork,
+  admitHumanInput,
+  applyHumanDecisions,
+  settleHumanInput,
+  type HumanDecisions,
   type HumanInputIntake,
 } from "./intake.js";
-export { hasRunnableQueue } from "./approvals.js";
+export { openDeferredApprovals, queueInput } from "./approvals.js";
 export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
 
 /**
- * A model step made calls that need a person's approval: the step parks on them beside any
- * runtime calls it made. The turn holds for the answers, unless the runtime runs calls for it
- * meanwhile, or queued input can already run.
+ * A model step made calls that need a person's approval: the step's response waits on them
+ * beside any runtime calls it made, asked as the turn's requester.
  */
-export async function parkOnApprovals(
+export async function askStepApprovals(
   step: Step,
   input: {
     readonly event: StepCoordinates;
@@ -62,22 +59,17 @@ export async function parkOnApprovals(
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
     /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
-    /** Runtime calls run first, or the caller will report a sibling sign-in hold. */
-    readonly waitsOn: "runtime" | "sign-in" | undefined;
   },
-): Promise<StepResult> {
-  const transition = parkOnApprovalsTransition(step.view(), {
+): Promise<void> {
+  const transition = askApprovals(step.view(), {
     event: input.event,
     messages: input.messages,
     requests: input.requests,
-    tasks: input.tasks,
     requester: currentRequester(step),
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
+    tasks: input.tasks,
   });
   await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
-  if (input.waitsOn !== undefined) return { next: null, session: step.session };
-  if (hasRunnableQueue(step.view())) return { next: step.runStep, session: step.session };
-  return holdForInput(step);
 }
 
 /**
@@ -96,7 +88,7 @@ export async function stopForToolSignIn(
     }),
     step.session.history,
   );
-  return { held: { kind: "request" }, next: null, session: step.session };
+  return park(step);
 }
 
 /**
@@ -119,8 +111,8 @@ export async function enforceBudget(
     // The prompt is asked once; a gate that finds it open still waits on it.
     if (openLimit(step.view())?.row.interactionId !== limit.ask.interactionId)
       await step.apply(requestLimit(step.view(), limit.ask), step.session.history);
-    // The turn pauses on the prompt; the answer resumes it or cancels it.
-    return { held: { kind: "request" }, next: null, session: step.session };
+    // The turn waits on the prompt; the answer resumes it or cancels it.
+    return park(step);
   }
   await step.apply(
     fail(step.view(), {
@@ -150,7 +142,7 @@ export function humanInputContext(
       tools.get(call.toolName)?.approvalKey?.(call.input),
     ),
     pendingApprovalsNote: renderPendingApprovalsInstruction(
-      view.turn.suspended.flatMap((parked) => parked.requests),
+      view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
     ),
   };
 }
@@ -178,12 +170,9 @@ function currentRequester(step: Step): SessionAuthContext | null {
   return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
 }
 
-/** The cancelled turn's responders stop checking its approvals: their candidates stale. */
+/** The cancelled turn's responders stop: the cancel closed the answers their policies weighed. */
 export function retireCancelledCandidates<T extends HarnessSessionBase>(session: T): T {
-  return {
-    ...session,
-    state: retireActiveCandidates(session.state, { completedAt: Date.now(), reason: "Cancelled." }),
-  };
+  return writeHitlState(session, { responders: { retire: "all" } });
 }
 
 /**

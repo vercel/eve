@@ -1,4 +1,5 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
+import type { HarnessStepInput } from "#harness/types.js";
 import { describe, expect, it } from "vitest";
 import {
   coalesceDeliveries,
@@ -99,12 +100,22 @@ describe("coalesceTurnInputs", () => {
       principalId: "bob",
       principalType: "user",
     };
-    const saved = { answers: [{ optionId: "approve", interactionId: "approval-1" }] };
-    const answer = { auth: bob, response: { optionId: "cancel", interactionId: "approval-2" } };
+    const first = {
+      deliveryId: "d1",
+      interactionId: "approval-1",
+      optionId: "approve",
+      responseId: "r1",
+    };
+    const second = {
+      deliveryId: "d2",
+      interactionId: "approval-2",
+      optionId: "cancel",
+      responder: bob,
+      responseId: "r2",
+    };
 
-    expect(coalesceTurnInputs(saved, { attributedAnswers: [answer] })).toEqual({
-      ...saved,
-      attributedAnswers: [answer],
+    expect(coalesceTurnInputs({ answers: [first] }, { answers: [second] })).toEqual({
+      answers: [first, second],
     });
   });
 
@@ -156,7 +167,7 @@ describe("coalesceTurnInputs", () => {
   });
 
   it("coalesces ephemeral context without making it durable context", () => {
-    const result = coalesceTurnInputs(
+    const result = coalesceTurnInputs<HarnessStepInput>(
       attachClientContext({}, ["first"]),
       attachClientContext({}, ["second"]),
     );

@@ -34,26 +34,15 @@ export function dropStaleSessionLimitContinuationResponses(input: {
   readonly stepInput?: HarnessStepInput;
 }): HarnessStepInput | undefined {
   if (input.stepInput === undefined) return undefined;
-  const responses = input.stepInput.answers ?? [];
-  const attributed = input.stepInput.attributedAnswers ?? [];
-  const keep = (interactionId: string) =>
-    input.pendingRequestIds.has(interactionId) ||
-    !isSessionLimitContinuationRequestId(interactionId);
-  const retained = responses.filter((answer) => keep(answer.interactionId));
-  const retainedAttributed = attributed.filter(({ response }) => keep(response.interactionId));
-  if (retained.length === responses.length && retainedAttributed.length === attributed.length) {
-    return input.stepInput;
-  }
-
-  const {
-    attributedAnswers: _attributed,
-    answers: _responses,
-    ...remainingInput
-  } = input.stepInput;
-  const result: { -readonly [K in keyof HarnessStepInput]: HarnessStepInput[K] } = remainingInput;
-  if (retained.length > 0) result.answers = retained;
-  if (retainedAttributed.length > 0) result.attributedAnswers = retainedAttributed;
-  return result;
+  const answers = input.stepInput.answers ?? [];
+  const retained = answers.filter(
+    ({ interactionId }) =>
+      input.pendingRequestIds.has(interactionId) ||
+      !isSessionLimitContinuationRequestId(interactionId),
+  );
+  if (retained.length === answers.length) return input.stepInput;
+  const { answers: _answers, ...rest } = input.stepInput;
+  return retained.length === 0 ? rest : { ...rest, answers: retained };
 }
 
 /**
@@ -76,28 +65,13 @@ export function convertStaleResponsesToUserMessage(input: {
   readonly stepInput?: HarnessStepInput;
 }): StaleResponseConversion {
   if (input.stepInput === undefined) return { kind: "unchanged" };
-  const responses = input.stepInput.answers ?? [];
-  const attributed = input.stepInput.attributedAnswers ?? [];
-  if (responses.length === 0 && attributed.length === 0) {
-    return { kind: "unchanged", stepInput: input.stepInput };
-  }
-
-  const currentResponses: Answer[] = [];
-  const currentAttributed: NonNullable<HarnessStepInput["attributedAnswers"]>[number][] = [];
-  const staleResponses: Answer[] = [];
-  for (const answer of responses) {
-    (input.pendingRequestIds.has(answer.interactionId) ? currentResponses : staleResponses).push(
-      answer,
-    );
-  }
-  for (const entry of attributed) {
-    if (input.pendingRequestIds.has(entry.response.interactionId)) {
-      currentAttributed.push(entry);
-    } else {
-      staleResponses.push(entry.response);
-    }
-  }
-
+  const answers = input.stepInput.answers ?? [];
+  const currentResponses = answers.filter(({ interactionId }) =>
+    input.pendingRequestIds.has(interactionId),
+  );
+  const staleResponses = answers.filter(
+    ({ interactionId }) => !input.pendingRequestIds.has(interactionId),
+  );
   if (staleResponses.length === 0) {
     return { kind: "unchanged", stepInput: input.stepInput };
   }
@@ -111,17 +85,11 @@ export function convertStaleResponsesToUserMessage(input: {
     input.stepInput.message,
     formatDisplayMessage(staleResponses, view),
   );
-  const {
-    attributedAnswers: _attributed,
-    answers: _responses,
-    ...remainingInput
-  } = input.stepInput;
-  const stepInput: { -readonly [K in keyof HarnessStepInput]: HarnessStepInput[K] } = {
-    ...remainingInput,
-    message: modelMessage,
-  };
-  if (currentResponses.length > 0) stepInput.answers = currentResponses;
-  if (currentAttributed.length > 0) stepInput.attributedAnswers = currentAttributed;
+  const { answers: _answers, ...rest } = input.stepInput;
+  const stepInput: HarnessStepInput =
+    currentResponses.length === 0
+      ? { ...rest, message: modelMessage }
+      : { ...rest, answers: currentResponses, message: modelMessage };
 
   return { displayMessage, kind: "converted", stepInput };
 }

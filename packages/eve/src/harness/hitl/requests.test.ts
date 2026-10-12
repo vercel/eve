@@ -71,7 +71,7 @@ describe("holdsHitlRequests", () => {
   it("is false for a session with no sign-in or relay records", () => {
     expect(holdsHitlRequests(undefined)).toBe(false);
     expect(holdsHitlRequests({ "eve.unrelated": true })).toBe(false);
-    expect(holdsHitlRequests({ "eve.runtime.hitl.requests": { approvals: {} } })).toBe(false);
+    expect(holdsHitlRequests({ "eve.runtime.hitl.requests": { responders: {} } })).toBe(false);
   });
 
   it("is true for a requests record it can't read", () => {
@@ -91,9 +91,9 @@ describe("holdsHitlRequests", () => {
 });
 
 describe("discardClearedHitlState", () => {
-  it("drops approvals and sign-ins and keeps relayed requests", () => {
+  it("drops responders and sign-ins and keeps relayed requests", () => {
     const state = save(
-      { "eve.runtime.hitl.requests": { approvals: { activeCandidates: {} } } },
+      { "eve.runtime.hitl.requests": { responders: { "response-1": { expiresAt: 1 } } } },
       {
         relays: {
           upsert: { "q-1": route("child") },

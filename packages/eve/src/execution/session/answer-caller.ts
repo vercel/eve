@@ -7,7 +7,7 @@ import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 /**
  * Answering a request does not make the responder the turn's caller. When
  * `stepInput` only answers pending requests, returns it with each approval
- * answer carrying its responder, so approval policies and the approved call
+ * answer naming its responder, so approval policies and the approved call
  * see the responder while the turn keeps its caller. Returns `undefined` when
  * the input carries anything else, such as a message or a stale answer; its
  * sender becomes the caller.
@@ -32,17 +32,14 @@ export function attributeAnswers(input: {
     ),
   );
   if (!responses.every((answer) => requests.has(answer.interactionId))) return undefined;
-  const approvals = responses.filter((answer) => requests.get(answer.interactionId) === "approval");
-  const others = responses.filter((answer) => requests.get(answer.interactionId) !== "approval");
   // An unauthenticated approval stays attributed to no one; it must never pass
   // as the turn's caller.
-  const { answers: _answered, ...rest } = stepInput;
-  const result: HarnessStepInput = {
-    ...rest,
-    attributedAnswers: [
-      ...(stepInput.attributedAnswers ?? []),
-      ...approvals.map((response) => ({ auth: input.responder, response })),
-    ],
+  return {
+    ...stepInput,
+    answers: responses.map((answer) =>
+      requests.get(answer.interactionId) === "approval"
+        ? { ...answer, responder: input.responder }
+        : answer,
+    ),
   };
-  return others.length === 0 ? result : { ...result, answers: others };
 }

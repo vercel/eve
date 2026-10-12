@@ -2,6 +2,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import type { PendingResponder } from "#harness/hitl/responders.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
@@ -34,6 +35,8 @@ export interface SessionView {
   readonly projection: SessionProjection;
   /** Requests this session relays for a child session or a workflow run, by `requestId`. */
   readonly relayedRequestIds: ReadonlySet<string>;
+  /** Who gave each answer a response policy still weighs, by response id. */
+  readonly responders: Readonly<Record<string, PendingResponder>>;
   /** The sign-in attempts the session waits on, with what completing them needs. */
   readonly signIns: readonly AuthorizationChallenge[];
   /** The session's token usage so far, which its waiting and terminal events report. */

@@ -12,10 +12,15 @@ import {
   type StepProjection,
 } from "#harness/session-machine/current.js";
 import {
-  acceptHumanInput,
-  admitApprovedWork,
+  admitHumanInput,
+  applyHumanDecisions,
   discardClearedHumanInput,
+  openDeferredApprovals,
+  queueInput,
+  settleHumanInput,
 } from "#harness/hitl/index.js";
+import { compactInput, turnInputOnly, withoutTurnInput } from "#harness/hitl/delivery.js";
+import { blocked, park } from "#harness/step/park.js";
 import {
   clear,
   controlDeliveryFor,
@@ -128,21 +133,38 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
 
+    // Results the runtime ran for parked steps settle first; queued input waits for all of them.
     const runtime = await settleRuntimeWork(step, input);
     if (runtime === undefined) return { next: null, session: step.session };
-    const intake = await acceptHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
+    await step.apply(openDeferredApprovals(step.view()));
+    // The delivery's answers are admitted, then decide what they answer.
+    const intake = await admitHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
     if (intake.kind === "stop") return intake.result;
-    const turn = await prepareTurnInput(step, intake.input, {
+    const decided = await settleHumanInput(step, intake);
+    let turnInput = intake.input;
+    let { message } = intake;
+    // The model reads what the answers decided before the delivery's own input, as the AI SDK
+    // ran it: the input waits a step.
+    if (decided.approved.length > 0 || decided.settledApprovals) {
+      await step.apply(queueInput(step.view(), turnInputOnly(turnInput)));
+      turnInput = withoutTurnInput(turnInput);
+      message = undefined;
+    }
+    // Nothing the answers decided can run: the turn's input waits, unreceived, behind them.
+    if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+      await step.apply(queueInput(step.view(), compactInput(turnInput)));
+      return park(step);
+    }
+    const turn = await prepareTurnInput(step, turnInput, {
       consumedMessage: intake.consumedMessage,
     });
-    // A delivery an earlier step queued, such as an answer that resolved approvals first, joins
-    // with the input the queue carried it in.
-    const deliveries = deliveriesOf(input, intake.input);
+    // A delivery an earlier step queued joins with the input the queue carried it in.
+    const deliveries = deliveriesOf(input, turnInput);
     if (intake.opensTurn) {
       const failed = await openTurn(step, {
         deliveries,
         input: [...turn.ephemeral, ...turn.messages],
-        message: intake.message,
+        message,
       });
       if (failed !== undefined) return failed;
     } else if (deliveries !== undefined) {
@@ -154,10 +176,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
       return { next: null, session: step.session };
     }
-    await admitApprovedWork(step, intake.approved);
+    const stopped = await applyHumanDecisions(step, decided);
+    if (stopped !== undefined) return stopped;
+    if (blocked(step.view(), step.session.state)) return park(step);
 
     return runModelStep(step, {
-      approved: intake.approved,
       onResponse: (response) => handleStepResult(step, response),
       generation,
       turn,
