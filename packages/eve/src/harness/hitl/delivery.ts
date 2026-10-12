@@ -140,10 +140,6 @@ export function canonicalize(responses: readonly InputResponse[]): readonly Inpu
   return [...byRequestId.values()];
 }
 
-export function hasInput(input: StepInput | undefined): boolean {
-  return input?.message !== undefined || (input?.inputResponses?.length ?? 0) > 0;
-}
-
 export function isEmptyInput(input: StepInput): boolean {
   return Object.keys(compactInput(input)).length === 0;
 }

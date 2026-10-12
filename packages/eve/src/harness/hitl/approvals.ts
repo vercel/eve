@@ -186,10 +186,9 @@ export interface Answered extends Transition {
   /**
    * `continue`: the step goes on. `park`: nothing can run until more input arrives.
    * `repeat`: a policy pass committed, so the next pass runs in a fresh step. `sign-in`: a
-   * responder must sign in first. `defer-message`: a message arrived while the session-limit
-   * prompt is open; it waits in its turn for the prompt.
+   * responder must sign in first.
    */
-  readonly next: "continue" | "park" | "repeat" | "sign-in" | "defer-message";
+  readonly next: "continue" | "park" | "repeat" | "sign-in";
   /** The turn's input, without the answers `answer` consumed. */
   readonly input?: StepInput;
   /** Whether a plain-text answer consumed the message. */
