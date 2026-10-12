@@ -10,7 +10,6 @@ import {
   normalizeEsmImportSpecifier,
   stringifyEsmImportSpecifier,
 } from "#internal/application/import-specifier.js";
-import { isVercelBuildEnvironment } from "#internal/application/paths.js";
 import {
   resolvePackageRoot,
   resolvePackageSourceFilePath,
@@ -441,10 +440,10 @@ export async function configureProductionNitroRoutes(
     resolveConfiguredWorkflowWorld(
       preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
     ) !== undefined;
-  const directHandlers =
-    !isVercelBuildEnvironment() && hasConfiguredWorkflowWorld
-      ? [createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath)]
-      : [];
+  // Queue consumer bundles must install the configured world even on Vercel.
+  const directHandlers = hasConfiguredWorkflowWorld
+    ? [createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath)]
+    : [];
   const workflowRoute = findWorkflowRoute(routeRegistry);
   if (workflowRoute !== undefined) {
     await registerWorkflowRoute(
