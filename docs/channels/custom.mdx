@@ -82,6 +82,26 @@ and `ctx.channel` is the channel's own context. `ctx.channel.continuation` expos
 current address and `alias()` when this channel needs to add another address. Handlers
 run after the line is written, so they observe facts and never shape them.
 
+A channel that keeps something in step with the session, such as a status line, a card, or the
+request a reply answers now, can handle `committed` instead of several facts. It runs once per
+committed line, after the line's fact handlers, with `(line, ctx)`: `line.facts` in order,
+`line.position`, and `ctx.view` as of the line. Render from `ctx.view` and compare with what you
+last showed, so the result is the same however the line's facts are split:
+
+```ts
+import { activity } from "eve/events";
+
+events: {
+  async committed(_line, { channel, view }) {
+    const now = activity(view);
+    const status = now.kind === "waiting-on-person" ? "Waiting for you" : now.kind;
+    if (status === channel.state.status) return;
+    channel.state.status = status;
+    await channel.setStatus(status);
+  },
+},
+```
+
 A channel that renders questions and approvals from `interaction.opened` can handle
 `interaction.settled` to learn when each request ends, however it ended: answered
 from the channel, answered by a plain-text reply, or withdrawn. A request that a

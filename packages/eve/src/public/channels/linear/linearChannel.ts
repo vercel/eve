@@ -1,4 +1,8 @@
-import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type {
+  ChannelEventContext,
+  ChannelEventOf,
+  CommittedLine,
+} from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
@@ -128,6 +132,11 @@ type LinearEventHandler<T extends SessionEvent["type"]> = (
 
 /** Event handlers supported by `linearChannel({ events })`. */
 export interface LinearChannelEvents {
+  /** Runs once per committed line; eve's default shows the request a reply answers now. */
+  readonly committed?: (
+    line: CommittedLine,
+    ctx: ChannelEventContext<LinearEventContext>,
+  ) => void | Promise<void>;
   readonly "turn.started"?: LinearEventHandler<"turn.started">;
   readonly "call.requested"?: LinearEventHandler<"call.requested">;
   readonly "call.progress"?: LinearEventHandler<"call.progress">;

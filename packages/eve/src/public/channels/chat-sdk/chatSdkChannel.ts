@@ -1,7 +1,7 @@
 import { failureNotice } from "#public/channels/reply.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
-import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
+import { type PromptQueueState, promptQueue } from "#channel/prompt-queue.js";
 import type { MessageContent } from "#shared/message-content.js";
 
 import type {
@@ -432,7 +432,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     }
   }
 
-  const prompts = promptQueueEvents(showPrompt);
+  const prompts = promptQueue(showPrompt);
   return {
     async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
@@ -484,7 +484,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     async "interaction.opened"(event, ctx) {
       const { data } = event;
       const { channel } = ctx;
-      await prompts["interaction.opened"](event, ctx);
       const signIns = chatSdkSignIns(channel);
       if (signIns !== undefined) await showSignIn(ctx.view, data.interactionId, signIns);
     },
@@ -497,9 +496,8 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       const resolution = requestSettlementOf(ctx.view, data);
       if (resolution !== undefined)
         await clearAnsweredCards({ resolutions: [resolution] }, channel);
-      await prompts["interaction.settled"](event, ctx);
     },
-    "response.admitted": prompts["response.admitted"],
+    committed: prompts,
     async "content.completed"({ data }, { channel }) {
       if (data.kind !== "text") return;
       const text = typeof data.value === "string" ? data.value : "";

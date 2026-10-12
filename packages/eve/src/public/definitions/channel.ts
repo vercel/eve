@@ -1,5 +1,10 @@
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { ChannelAdapter, ChannelInstrumentationMetadata } from "#channel/adapter.js";
+import type {
+  ChannelAdapter,
+  ChannelInstrumentationMetadata,
+  CommittedLine,
+} from "#channel/adapter.js";
+export type { CommittedLine } from "#channel/adapter.js";
 import {
   createMetadataAudienceProjector,
   type ChannelAudienceProjector,
@@ -213,12 +218,25 @@ export type ChannelEventHandler<T extends SessionEvent["type"], TCtx = void> = (
 ) => void | Promise<void>;
 
 /**
+ * Handles one committed line, once its events' handlers ran: the facts the channel heard, and the
+ * {@link ChannelEventContext} with the session's tables as of the line. For what a channel keeps
+ * in step with the tables, such as a status, a card, or the prompts still open, so it renders
+ * once per change rather than once per event.
+ */
+export type ChannelCommitHandler<TCtx = void> = (
+  line: CommittedLine,
+  ctx: ChannelEventContext<ChannelContext<TCtx>>,
+) => void | Promise<void>;
+
+/**
  * Optional handlers keyed by session event type: the session's facts and the progress records a
  * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the
  * event and a {@link ChannelEventContext} whose `channel` is the channel's own context. Handlers
- * run after the event is written, so they observe it and never shape it.
+ * run after the event is written, so they observe it and never shape it. `committed` runs once
+ * per committed line, after them.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly committed?: ChannelCommitHandler<TCtx>;
   readonly "session.started"?: ChannelEventHandler<"session.started", TCtx>;
   readonly "session.ended"?: ChannelEventHandler<"session.ended", TCtx>;
   readonly "delivery.admitted"?: ChannelEventHandler<"delivery.admitted", TCtx>;
@@ -337,6 +355,7 @@ export function defineChannel<
 // The Record type fails to compile if this map drifts from the ChannelEvents
 // keys in either direction.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  committed: null,
   "session.started": null,
   "session.ended": null,
   "delivery.admitted": null,

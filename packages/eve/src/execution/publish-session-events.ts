@@ -450,11 +450,26 @@ function createSessionEventDispatcher(input: {
     adapterCtx,
     async deliver(written) {
       if (written.length === 0) return;
-      for (const { event, position, view } of written) {
+      // Each committed line's facts, for its `committed` handler once the line's events ran.
+      let line: { facts: SessionEvent[]; position: FactPosition; view: SessionView } | undefined;
+      const committed = async () => {
+        if (line === undefined) return;
+        const { facts, position, view } = line;
+        line = undefined;
+        await callAdapterEventHandler(
+          adapter,
+          { facts, position: position.line },
+          { ...deliveryCtx, position, scope: undefined, view },
+        );
+      };
+      for (const { event, position, progress, view } of written) {
+        if (line !== undefined && line.position.line !== position.line) await committed();
         if (await forwardSessionInput(ctx, event, inputSource)) continue;
+        if (!progress) (line ??= { facts: [], position, view }).facts.push(event);
         const scope = "scope" in event ? event.scope : undefined;
         await callAdapterEventHandler(adapter, event, { ...deliveryCtx, position, scope, view });
       }
+      await committed();
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     },
     async runHooks(written, cancelTurnFor) {

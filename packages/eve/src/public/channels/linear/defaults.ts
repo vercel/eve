@@ -2,7 +2,7 @@ import { signInEndedText, signInOf } from "#channel/sign-in.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
-import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { promptQueue } from "#channel/prompt-queue.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
@@ -77,7 +77,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
   }
 
   // A reply can only answer the elicitation it sees, so they post one at a time.
-  const prompts = promptQueueEvents(showPrompt);
+  const prompts = promptQueue(showPrompt);
 
   return {
     async "turn.started"(_event, { channel }) {
@@ -131,7 +131,6 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     async "interaction.opened"(fact, ctx) {
       const { data } = fact;
       const { channel } = ctx;
-      await prompts["interaction.opened"](fact, ctx);
       const event = signInOf(ctx.view, data.interactionId);
       if (event === undefined) return;
       const { displayName, url } = event;
@@ -157,12 +156,11 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    "response.admitted": prompts["response.admitted"],
+    committed: prompts,
 
     async "interaction.settled"(fact, ctx) {
       const { data } = fact;
       const { channel } = ctx;
-      await prompts["interaction.settled"](fact, ctx);
       const event = signInOf(ctx.view, data.interactionId);
       if (event === undefined) return;
       const { displayName } = event;

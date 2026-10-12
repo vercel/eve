@@ -10,10 +10,14 @@ import {
   type RequestBatch,
   type RequestSettlement,
 } from "#channel/interaction-prompts.js";
-import { promptQueueEvents, type PromptQueueState } from "#channel/prompt-queue.js";
+import { promptQueue, type PromptQueueState } from "#channel/prompt-queue.js";
 import { settleSignIn, showSignIn, type SignInSurface } from "#channel/sign-in.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type {
+  ChannelEventContext,
+  ChannelEventOf,
+  CommittedLine,
+} from "#public/definitions/channel.js";
 import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 
 /** What a channel can do in its conversation, in its platform's terms. */
@@ -48,12 +52,12 @@ type Handler<T extends SessionEvent["type"], TChannel> = (
 ) => Promise<void>;
 
 export interface SurfaceEvents<TChannel> {
+  /** A text channel's: shows the request a typed reply answers now, as it changes. */
+  readonly committed?: (line: CommittedLine, ctx: ChannelEventContext<TChannel>) => Promise<void>;
   readonly "turn.started"?: Handler<"turn.started", TChannel>;
   readonly "call.requested"?: Handler<"call.requested", TChannel>;
   readonly "interaction.opened": Handler<"interaction.opened", TChannel>;
   readonly "interaction.settled": Handler<"interaction.settled", TChannel>;
-  /** A text channel's: an answer that waits for its batch moves it to the next request. */
-  readonly "response.admitted"?: Handler<"response.admitted", TChannel>;
   readonly "content.completed": Handler<"content.completed", TChannel>;
   readonly "turn.settled": Handler<"turn.settled", TChannel>;
   readonly "session.ended": Handler<"session.ended", TChannel>;
@@ -67,12 +71,10 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
   // A text channel's state keeps which request it showed.
   const queue =
     "showOne" in requests
-      ? (promptQueueEvents<TChannel & { state: PromptQueueState }>(requests.showOne) as {
-          readonly [K in "interaction.opened" | "interaction.settled" | "response.admitted"]: (
-            event: unknown,
-            ctx: ChannelEventContext<TChannel>,
-          ) => Promise<void>;
-        })
+      ? (promptQueue<TChannel & { state: PromptQueueState }>(requests.showOne) as (
+          line: CommittedLine,
+          ctx: ChannelEventContext<TChannel>,
+        ) => Promise<void>)
       : undefined;
   const { typing } = surface;
   const working =
@@ -84,10 +86,10 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
   };
   return {
     ...(working !== undefined && { "call.requested": working, "turn.started": working }),
+    ...(queue !== undefined && { committed: queue }),
     async "interaction.opened"(event, ctx) {
       const { channel, view } = ctx;
-      if (queue !== undefined) await queue["interaction.opened"](event, ctx);
-      else if ("show" in requests) {
+      if ("show" in requests) {
         const batch = requestBatchOf(view, event.data);
         for (const request of batch?.requests ?? []) await requests.show(channel, request, batch!);
       }
@@ -96,14 +98,12 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "interaction.settled"(event, ctx) {
       const { channel, view } = ctx;
-      if (queue !== undefined) await queue["interaction.settled"](event, ctx);
-      else if ("settle" in requests) {
+      if ("settle" in requests) {
         const settlement = requestSettlementOf(view, event.data);
         if (settlement !== undefined) await requests.settle(channel, settlement);
       }
       await settleSignIn(view, event.data, surface.signIns(channel));
     },
-    ...(queue !== undefined && { "response.admitted": queue["response.admitted"] }),
     async "content.completed"({ data }, { channel }) {
       await post(channel, replyTextOf(data));
     },
