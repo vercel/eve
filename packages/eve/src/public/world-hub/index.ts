@@ -117,10 +117,20 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
         .then(async () => {
           if (value.error) throw value.error;
           if (info.operations.includes("streams.writeMulti"))
-            await call("streams.writeMulti", [value.runId, value.name, chunks]);
+            await call("streams.writeMulti", [
+              value.runId,
+              value.name,
+              chunks,
+              { operationId: randomUUID() },
+            ]);
           else
             for (const chunk of chunks)
-              await call("streams.write", [value.runId, value.name, chunk]);
+              await call("streams.write", [
+                value.runId,
+                value.name,
+                chunk,
+                { operationId: randomUUID() },
+              ]);
         })
         .catch((error) => {
           value.error = error;
@@ -197,7 +207,7 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
       },
       async close(runId: string, name: string) {
         await flush(state(runId, name));
-        await call("streams.close", [runId, name]);
+        await call("streams.close", [runId, name, { operationId: randomUUID() }]);
       },
       async getChunks(runId: string, name: string, opts?: unknown) {
         await flush(state(runId, name));
