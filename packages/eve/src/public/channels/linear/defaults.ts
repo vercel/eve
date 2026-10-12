@@ -1,8 +1,7 @@
-import { signInEnding } from "#channel/interaction-prompts.js";
+import { signInEndedText, signInOf } from "#channel/sign-in.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
@@ -134,10 +133,9 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       const { data } = fact;
       const { channel } = ctx;
       await prompts["interaction.opened"](fact, ctx);
-      const event = signInPromptOf(data, fact.scope);
+      const event = signInOf(ctx.view, data.interactionId);
       if (event === undefined) return;
-      const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
-      const url = event.authorization?.url;
+      const { displayName, url } = event;
       const userId = linearUserId(ctx);
       let authSignal: Parameters<typeof postActivity>[3];
       if (url !== undefined) {
@@ -151,8 +149,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         {
           body: authorizationRequiredBody({
             displayName,
-            instructions: event.authorization?.instructions,
-            userCode: event.authorization?.userCode,
+            instructions: event.instructions,
+            userCode: event.userCode,
           }),
           type: "elicitation",
         },
@@ -166,10 +164,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       const { data } = fact;
       const { channel } = ctx;
       await prompts["interaction.settled"](fact, ctx);
-      const event = signInSettlementOf(ctx.view, data);
+      const event = signInOf(ctx.view, data.interactionId);
       if (event === undefined) return;
-      const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
-      if (event.outcome === "accepted") {
+      const { displayName } = event;
+      if (data.outcome === "accepted") {
         await postActivity(
           channel,
           options,
@@ -182,9 +180,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
 
-      const reason = event.reason === undefined ? "" : ` (${event.reason})`;
       await postActivity(channel, options, {
-        body: `${displayName} authorization ${signInEnding(event.outcome)}${reason}.`,
+        body: signInEndedText({ displayName, outcome: data.outcome, reason: data.reason }),
         type: "thought",
       });
     },
@@ -260,12 +257,6 @@ function requireAgentSessionId(agentSessionId: string | null): string {
 
 function linearUserLabel(user: LinearUser): string | undefined {
   return user.displayName ?? user.name ?? user.email;
-}
-
-function authorizationDisplayName(name: string, displayName: string | undefined): string {
-  if (displayName !== undefined) return displayName;
-  if (name.length === 0) return name;
-  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 function authorizationRequiredBody(input: {

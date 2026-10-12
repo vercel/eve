@@ -19,7 +19,6 @@ import {
   buildAuthEphemeralBlocks,
   buildAuthEphemeralText,
   buildAuthRequiredPublicText,
-  formatConnectionDisplayName,
 } from "#public/channels/slack/connections.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import {
@@ -31,11 +30,9 @@ import {
   refusedAnswerOf,
   requestBatchOf,
   requestSettlementOf,
-  signInPromptOf,
-  signInSettlementOf,
-  type SignInPrompt,
-  type SignInSettlement,
 } from "#channel/interaction-prompts.js";
+import { signInOf, type SignIn } from "#channel/sign-in.js";
+import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
@@ -211,13 +208,10 @@ function firstNonEmptyLine(text: string): string | undefined {
  * A sign-in: a public, link-free status for the thread, and the challenge, which is a credential,
  * privately to the person who must sign in.
  */
-export async function showSlackSignIn(
-  event: SignInPrompt,
-  channel: SlackEventContext,
-): Promise<void> {
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+export async function showSlackSignIn(event: SignIn, channel: SlackEventContext): Promise<void> {
+  const { displayName } = event;
   const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
-  const challengeUrl = event.authorization?.url;
+  const challengeUrl = event.url;
 
   // Post a public, link-free status so everyone in the thread can see
   // the session is blocked and later see it complete. The challenge
@@ -244,7 +238,7 @@ export async function showSlackSignIn(
   // The challenge is user-specific: the sign-in link (and device code)
   // must only ever be visible to the person who started the sign-in, never posted into
   // the shared thread.
-  const instructions = event.authorization?.instructions;
+  const { instructions } = event;
   if (recipientUserId && (challengeUrl || instructions)) {
     const { channelId, threadTs } = channel.state;
     // The turn's own sign-in holds it, so the prompt can cancel that turn.
@@ -257,7 +251,7 @@ export async function showSlackSignIn(
       displayName,
       instructions,
       url: challengeUrl,
-      userCode: event.authorization?.userCode,
+      userCode: event.userCode,
     };
     try {
       await channel.thread.postEphemeral(recipientUserId, {
@@ -274,11 +268,12 @@ export async function showSlackSignIn(
 }
 
 async function settleSlackSignIn(
-  event: SignInSettlement,
+  event: SignIn,
+  settled: InteractionSettledData,
   channel: SlackEventContext,
 ): Promise<void> {
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-  if (event.outcome === "accepted" && event.responseId === undefined) {
+  const { displayName } = event;
+  if (settled.outcome === "accepted" && event.responseId === undefined) {
     await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
   }
 
@@ -288,8 +283,8 @@ async function settleSlackSignIn(
 
   const text = buildAuthCompletedText({
     displayName,
-    outcome: event.outcome,
-    reason: event.reason,
+    outcome: settled.outcome,
+    reason: settled.reason,
   });
 
   try {
@@ -318,13 +313,13 @@ export function defaultInteractionOpenedHandler(
   approvalChannel?: SlackApprovalChannelResolver,
 ): NonNullable<SlackChannelInternalEvents["interaction.opened"]> {
   const showRequests = defaultInteractionsHandler(approvalChannel);
-  return async ({ data, scope }, ctx) => {
+  return async ({ data }, ctx) => {
     const batch = requestBatchOf(ctx.view, data);
     if (batch !== undefined) {
       await showRequests(batch, ctx);
       return;
     }
-    const signIn = signInPromptOf(data, scope);
+    const signIn = signInOf(ctx.view, data.interactionId);
     if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
   };
 }
@@ -339,9 +334,9 @@ export function defaultInteractionOpenedHandler(
 export const defaultEvents: SlackChannelInternalEvents = {
   async "interaction.settled"({ data }, ctx) {
     const { channel } = ctx;
-    const signIn = signInSettlementOf(ctx.view, data);
+    const signIn = signInOf(ctx.view, data.interactionId);
     if (signIn !== undefined) {
-      await settleSlackSignIn(signIn, channel);
+      await settleSlackSignIn(signIn, data, channel);
       return;
     }
     const resolution = requestSettlementOf(ctx.view, data);

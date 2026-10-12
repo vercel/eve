@@ -16,7 +16,7 @@
  * surface the outcome (`authorized` / `declined` / `failed` /
  * `timed-out`).
  */
-import { signInEnding } from "#channel/interaction-prompts.js";
+import { signInEnding } from "#protocol/session-reader.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import { truncatePlainText } from "#public/channels/slack/limits.js";
 import {

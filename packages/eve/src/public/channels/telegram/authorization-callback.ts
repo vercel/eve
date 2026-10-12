@@ -4,6 +4,7 @@ import type { Session } from "#channel/session.js";
 import { createLogger } from "#internal/logging.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openSignIns } from "#protocol/session-reader.js";
+import { signInOf } from "#channel/sign-in.js";
 import {
   TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
   renderTelegramAuthorizationPrompt,
@@ -48,10 +49,7 @@ export async function dispatchTelegramAuthorizationCallback(input: {
 
     await input.telegram.telegram.postEphemeral(
       input.query.from.id,
-      renderTelegramAuthorizationPrompt({
-        authorization: authorization.request.signIn,
-        name: authorization.request.signIn?.name ?? authorization.interactionId,
-      }),
+      renderTelegramAuthorizationPrompt(authorization),
       { callbackQueryId: input.query.id },
     );
     await input.telegram.telegram.answerCallbackQuery({
@@ -78,7 +76,8 @@ async function inactiveAuthorization(
 async function findOpenAuthorization(session: Session) {
   const view = emptySessionView();
   for await (const event of eventsToTail(session)) foldReceivedEvent(view, event);
-  return openSignIns(view).findLast((row) => !("responseId" in row.subject));
+  const row = openSignIns(view).findLast((entry) => !("responseId" in entry.subject));
+  return row === undefined ? undefined : signInOf(view, row.interactionId);
 }
 
 /** The session's events through the line at its tail when the read starts. */

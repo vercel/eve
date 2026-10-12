@@ -2,11 +2,14 @@ import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import { requestBatchOf, requestSettlementOf } from "#channel/interaction-prompts.js";
 import {
-  requestBatchOf,
-  requestSettlementOf,
-  signInSettlementOf,
-} from "#channel/interaction-prompts.js";
+  postedIn,
+  settleSignIn,
+  showSignIn,
+  signInChallengeText,
+  type SignInSurface,
+} from "#channel/sign-in.js";
 import { createLogger } from "#internal/logging.js";
 import {
   DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
@@ -65,6 +68,41 @@ export function defaultOnCommand(
   return { auth: defaultDiscordAuth(interaction) };
 }
 
+type DiscordEventChannel = Parameters<
+  NonNullable<DiscordChannelEvents["interaction.opened"]>
+>[1]["channel"];
+
+/**
+ * A Discord conversation as a sign-in shows on it: a DM gets the challenge; a server channel, a
+ * link-free status that points to a DM.
+ */
+function discordSignIns(channel: DiscordEventChannel): SignInSurface {
+  const { discord } = channel;
+  const post = async (content: string) => (await discord.post({ content })).id || undefined;
+  return {
+    // An interaction without a guild came from a DM. A session eve started itself knows no
+    // guild either, so without an interaction it isn't taken as private.
+    private: channel.state.guildId === null && channel.state.interactionToken !== null,
+    postChallenge: (signIn) => post(signInChallengeText(signIn)),
+    post,
+    async edit(messageId, content) {
+      try {
+        const response = await discord.request(
+          `/channels/${encodeURIComponent(discord.channelId)}/messages/${encodeURIComponent(messageId)}`,
+          { content },
+          { botAuth: true, method: "PATCH" },
+        );
+        if (!response.ok)
+          log.warn("Discord sign-in status edit failed", { status: response.status });
+      } catch (error) {
+        log.warn("Discord sign-in status edit failed", { error });
+      }
+    },
+    typing: () => discord.startTyping(),
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
+}
+
 /** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
 export const defaultEvents: DiscordChannelEvents = {
   async "turn.started"(_event, { channel }) {
@@ -92,16 +130,14 @@ export const defaultEvents: DiscordChannelEvents = {
         },
       };
     }
+    await showSignIn(ctx.view, data.interactionId, discordSignIns(channel));
   },
 
   // Covers every way a prompt ends: a press, a modal answer, or a withdrawal.
   // The bot token outlives the interaction token the prompt may have been posted with.
   async "interaction.settled"({ data }, ctx) {
     const { channel } = ctx;
-    if (signInSettlementOf(ctx.view, data)?.outcome === "accepted") {
-      await channel.discord.startTyping();
-      return;
-    }
+    await settleSignIn(ctx.view, data, discordSignIns(channel));
     const settled = requestSettlementOf(ctx.view, data);
     for (const resolution of settled === undefined ? [] : [settled]) {
       const prompt = channel.state.hitlPrompts?.[resolution.interactionId];

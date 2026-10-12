@@ -5,6 +5,7 @@ type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
 import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { postedIn, settleSignIn, showSignIn, type SignInSurface } from "#channel/sign-in.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
@@ -101,6 +102,7 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     await postCommentChunks(channel, sections.join("\n\n"));
   }
 
+  const prompts = promptQueueEvents(showPrompt);
   return {
     async "turn.started"(_event, ctx) {
       const { channel } = ctx;
@@ -122,7 +124,17 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     },
 
     // A comment can only answer the prompt it sees, so prompts post one at a time.
-    ...promptQueueEvents(showPrompt),
+    ...prompts,
+
+    async "interaction.opened"(event, ctx) {
+      await prompts["interaction.opened"](event, ctx);
+      await showSignIn(ctx.view, event.data.interactionId, gitHubSignIns(ctx.channel));
+    },
+
+    async "interaction.settled"(event, ctx) {
+      await prompts["interaction.settled"](event, ctx);
+      await settleSignIn(ctx.view, event.data, gitHubSignIns(ctx.channel));
+    },
 
     async "session.ended"({ data }, { channel }) {
       const notice = failureNotice(data, { restart: "comment" });
@@ -191,6 +203,27 @@ async function checkoutRepositoryForTurn(
   } catch (error) {
     logError(log, "GitHub checkout failed — swallowed", error);
   }
+}
+
+/**
+ * A GitHub conversation as a sign-in shows on it: comments are public and can't reach one person,
+ * so it shows only a link-free status saying who must sign in.
+ */
+function gitHubSignIns(channel: GitHubEventContext): SignInSurface {
+  const post = async (text: string) => {
+    await postCommentChunks(channel, text);
+    return undefined;
+  };
+  return {
+    private: false,
+    postChallenge: async () => undefined,
+    post,
+    postStatus: (signIn) =>
+      post(
+        `Authorization required for ${signIn.displayName}. The person who asked must sign in before I can continue.`,
+      ),
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
 }
 
 async function postCommentChunks(

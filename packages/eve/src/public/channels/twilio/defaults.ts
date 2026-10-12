@@ -1,7 +1,12 @@
-import { signInEnding } from "#channel/interaction-prompts.js";
 import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
+import {
+  postedIn,
+  settleSignIn,
+  showSignIn,
+  signInChallengeText,
+  type SignInSurface,
+} from "#channel/sign-in.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
@@ -17,8 +22,6 @@ import type {
   TwilioInboundResult,
   TwilioVoiceResult,
 } from "#public/channels/twilio/twilioChannel.js";
-import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
-import { displayProperName } from "#shared/display-name.js";
 import type { AskedInteraction } from "#channel/interaction-prompts.js";
 
 /** Default phone-number auth projection for Twilio webhook actors. */
@@ -81,6 +84,20 @@ const prompts = promptQueueEvents((channel: TwilioEventContext, request: AskedIn
 );
 
 /** Built-in Twilio event handlers for text delivery, sign-ins, and terminal errors. */
+/** An SMS thread is one person's, so the link and code go in the message; texts can't be edited. */
+function twilioSignIns(channel: TwilioEventContext): SignInSurface {
+  const send = async (text: string) => {
+    await channel.twilio.sendMessage(text);
+    return undefined;
+  };
+  return {
+    private: true,
+    postChallenge: (signIn) => send(signInChallengeText(signIn)),
+    post: send,
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
+}
+
 export const defaultEvents: TwilioChannelEvents = {
   async "content.completed"({ data }, { channel }) {
     const text = replyTextOf(data);
@@ -88,25 +105,11 @@ export const defaultEvents: TwilioChannelEvents = {
     await channel.twilio.sendMessage(text);
   },
 
-  // An SMS thread is one person's, so the link and code can go in the message.
   async "interaction.opened"(fact, ctx) {
     const { data } = fact;
     const { channel } = ctx;
     await prompts["interaction.opened"](fact, ctx);
-    const event = signInPromptOf(data, fact.scope);
-    if (event === undefined) return;
-    if (event.responseId !== undefined) return;
-    const challenge = event.authorization;
-    await channel.twilio.sendMessage(
-      [
-        `Sign in to ${challenge?.displayName ?? displayProperName(event.name)} to continue.`,
-        challenge?.instructions,
-        challenge?.userCode ? `Code: ${challenge.userCode}` : undefined,
-        challenge?.url,
-      ]
-        .filter((part): part is string => part !== undefined && part.length > 0)
-        .join("\n\n"),
-    );
+    await showSignIn(ctx.view, data.interactionId, twilioSignIns(channel));
   },
 
   "response.admitted": prompts["response.admitted"],
@@ -115,16 +118,7 @@ export const defaultEvents: TwilioChannelEvents = {
     const { data } = fact;
     const { channel } = ctx;
     await prompts["interaction.settled"](fact, ctx);
-    const event = signInSettlementOf(ctx.view, data);
-    if (event === undefined) return;
-    if (event.responseId !== undefined) return;
-    await channel.twilio.sendMessage(
-      renderAuthorizationOutcome({
-        displayName: event.authorization?.displayName ?? displayProperName(event.name),
-        outcome: event.outcome,
-        reason: event.reason,
-      }),
-    );
+    await settleSignIn(ctx.view, data, twilioSignIns(channel));
   },
 
   async "turn.settled"({ data }, { channel }) {
@@ -151,16 +145,4 @@ async function showPrompt(channel: TwilioEventContext, request: AskedInteraction
       ? "Reply with a number, or with your own answer."
       : "Reply with a number to choose.";
   await channel.twilio.sendMessage(`${body}\n\n${instruction}`);
-}
-
-function renderAuthorizationOutcome(input: {
-  readonly displayName: string;
-  readonly outcome: InteractionOutcome;
-  readonly reason?: string;
-}): string {
-  if (input.outcome === "accepted") return `${input.displayName} connected.`;
-  if (input.outcome === "declined") return `${input.displayName} sign-in cancelled.`;
-  const outcome = signInEnding(input.outcome);
-  const reason = input.reason === undefined ? "" : ` (${input.reason})`;
-  return `${input.displayName} sign-in ${outcome}${reason}.`;
 }

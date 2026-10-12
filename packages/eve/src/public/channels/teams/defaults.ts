@@ -1,19 +1,21 @@
-import { signInEnding } from "#channel/interaction-prompts.js";
 import {
   requestBatchOf,
   requestSettlementOf,
-  signInPromptOf,
-  signInSettlementOf,
   type RequestBatch,
   type RequestSettlement,
-  type SignInPrompt,
-  type SignInSettlement,
 } from "#channel/interaction-prompts.js";
+import {
+  postedIn,
+  settleSignIn,
+  showSignIn,
+  signInEndedText,
+  type SignIn,
+  type SignInSurface,
+} from "#channel/sign-in.js";
 import { failureNotice, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptAnswer } from "#channel/resolved-prompt.js";
-import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
 import {
   renderAnsweredInteractionMessage,
@@ -144,11 +146,26 @@ async function settleTeamsRequests(
   }
 }
 
-async function showTeamsSignIn(event: SignInPrompt, channel: TeamsHandlerChannel): Promise<void> {
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-  const url = event.authorization?.url;
-  const instructions = event.authorization?.instructions;
-  const userCode = event.authorization?.userCode;
+/**
+ * A Teams conversation as a sign-in shows on it: a personal chat gets the card with the sign-in
+ * link; a group or channel, which can't be messaged privately here, a link-free status.
+ */
+function teamsSignIns(channel: TeamsHandlerChannel): SignInSurface {
+  return {
+    private: channel.state.conversationType === "personal",
+    postChallenge: async (signIn) =>
+      (await channel.thread.post(teamsSignInCard(signIn, channel))).id,
+    post: async (text) => (await channel.thread.post({ text })).id,
+    async edit(activityId, text) {
+      await channel.thread.update(activityId, renderAnsweredInteractionMessage({ prompt: text }));
+    },
+    typing: () => channel.thread.startTyping(),
+    posted: postedIn(channel.state, "pendingAuthActivityIds"),
+  };
+}
+
+function teamsSignInCard(signIn: SignIn, channel: TeamsHandlerChannel) {
+  const { displayName, instructions, url, userCode } = signIn;
   const codeHint = userCode
     ? `If ${displayName} asks for a confirmation code, enter ${userCode}.`
     : undefined;
@@ -161,32 +178,19 @@ async function showTeamsSignIn(event: SignInPrompt, channel: TeamsHandlerChannel
   ]
     .filter(Boolean)
     .join(" ");
-  const posted = await channel.thread.post({
+  return {
     attachments: [
       {
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
           actions: url
-            ? [
-                {
-                  title: `Sign in with ${displayName}`,
-                  type: "Action.OpenUrl",
-                  url,
-                },
-              ]
+            ? [{ title: `Sign in with ${displayName}`, type: "Action.OpenUrl", url }]
             : [],
           body: [
             {
               text: `Authorization required for ${displayName}`,
               type: "TextBlock",
               weight: "Bolder",
-              wrap: true,
-            },
-            {
-              text: channel.state.triggeringUser
-                ? `Requested by ${channel.state.triggeringUser.name ?? channel.state.triggeringUser.id}.`
-                : "No triggering user is available for a private prompt.",
-              type: "TextBlock",
               wrap: true,
             },
             ...[instructions, codeHint]
@@ -200,30 +204,7 @@ async function showTeamsSignIn(event: SignInPrompt, channel: TeamsHandlerChannel
       },
     ],
     text,
-  });
-  if (posted.id) {
-    channel.state.pendingAuthActivityId = posted.id;
-  }
-}
-
-async function settleTeamsSignIn(
-  event: SignInSettlement,
-  channel: TeamsHandlerChannel,
-): Promise<void> {
-  if (event.outcome === "accepted") {
-    await channel.thread.startTyping();
-  }
-
-  const activityId = channel.state.pendingAuthActivityId;
-  if (!activityId) return;
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-  const text = buildAuthCompletedText({
-    displayName,
-    outcome: event.outcome,
-    reason: event.reason,
-  });
-  await channel.thread.update(activityId, renderAnsweredInteractionMessage({ prompt: text }));
-  channel.state.pendingAuthActivityId = null;
+  };
 }
 
 /** Built-in Teams event handlers for typing, replies, HITL, auth cards, and terminal errors. */
@@ -244,17 +225,12 @@ export const defaultEvents: TeamsChannelEvents = {
       await showTeamsRequests(batch, channel);
       return;
     }
-    const prompt = signInPromptOf(data, event.scope);
-    if (prompt !== undefined) await showTeamsSignIn(prompt, channel);
+    await showSignIn(ctx.view, data.interactionId, teamsSignIns(channel));
   },
 
   async "interaction.settled"({ data }, ctx) {
     const { channel } = ctx;
-    const signIn = signInSettlementOf(ctx.view, data);
-    if (signIn !== undefined) {
-      await settleTeamsSignIn(signIn, channel);
-      return;
-    }
+    await settleSignIn(ctx.view, data, teamsSignIns(channel));
     const resolution = requestSettlementOf(ctx.view, data);
     if (resolution === undefined) return;
     const pressed =
@@ -301,15 +277,7 @@ export function formatConnectionDisplayName(connectionName: string): string {
 }
 
 /** Builds final-state text for a completed connection authorization attempt. */
-export function buildAuthCompletedText(input: {
-  readonly displayName: string;
-  readonly outcome: InteractionOutcome;
-  readonly reason?: string;
-}): string {
-  if (input.outcome === "accepted") return `${input.displayName} connected.`;
-  const tail = input.reason !== undefined ? ` (${input.reason})` : "";
-  return `${input.displayName} authorization ${signInEnding(input.outcome)}${tail}.`;
-}
+export const buildAuthCompletedText = signInEndedText;
 
 /** Builds a Teams mention entity and matching text for one channel account. */
 export function teamsMentionUser(user: {

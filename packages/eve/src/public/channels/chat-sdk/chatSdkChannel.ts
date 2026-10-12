@@ -31,12 +31,9 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
-import { settleChatSdkSignIn, showChatSdkSignIn } from "#public/channels/chat-sdk/authorization.js";
-import {
-  requestSettlementOf,
-  signInPromptOf,
-  signInSettlementOf,
-} from "#channel/interaction-prompts.js";
+import { chatSdkSignIns } from "#public/channels/chat-sdk/authorization.js";
+import { requestSettlementOf } from "#channel/interaction-prompts.js";
+import { settleSignIn, showSignIn } from "#channel/sign-in.js";
 import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
 import { decodeInputAction, renderInteractions } from "#public/channels/chat-sdk/input-actions.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
@@ -489,15 +486,15 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       const { data } = event;
       const { channel } = ctx;
       await prompts["interaction.opened"](event, ctx);
-      const signIn = signInPromptOf(data, event.scope);
-      if (signIn !== undefined) await showChatSdkSignIn(signIn, channel);
+      const signIns = chatSdkSignIns(channel);
+      if (signIns !== undefined) await showSignIn(ctx.view, data.interactionId, signIns);
     },
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "interaction.settled"(event, ctx) {
       const { data } = event;
       const { channel } = ctx;
-      const signIn = signInSettlementOf(ctx.view, data);
-      if (signIn !== undefined) await settleChatSdkSignIn(signIn, channel);
+      const signIns = chatSdkSignIns(channel);
+      if (signIns !== undefined) await settleSignIn(ctx.view, data, signIns);
       const resolution = requestSettlementOf(ctx.view, data);
       if (resolution !== undefined)
         await clearAnsweredCards({ resolutions: [resolution] }, channel);
