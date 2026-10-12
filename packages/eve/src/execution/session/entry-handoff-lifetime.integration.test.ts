@@ -1,3 +1,4 @@
+import { SESSION_HOOK_HANDOVER_TIMEOUT_MS } from "#execution/session-inbox/hook-release.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { assert, describe, expect, it, vi } from "vitest";
@@ -93,7 +94,7 @@ describe("workflowEntry integration", () => {
                 (owner.startedAt ?? owner.createdAt).getTime() +
                   (sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
               );
-              await vi.waitFor(async () =>
+              await waitForHandoff(async () =>
                 expect((await world.runs.get(originalTimer.runId)).status).toBe("cancelled"),
               );
             }
@@ -104,7 +105,7 @@ describe("workflowEntry integration", () => {
             });
             // The successor can finish its turn before the old owner resumes
             // from activation and disposes its temporary handoff hook.
-            await vi.waitFor(async () => {
+            await waitForHandoff(async () => {
               const anchorHooks = await world.hooks.list({ runId: anchor.runId });
               expect(
                 anchorHooks.data
@@ -143,7 +144,7 @@ describe("workflowEntry integration", () => {
               sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
             );
             expect(nextOwner.runId).not.toBe(successor.runId);
-            await vi.waitFor(async () =>
+            await waitForHandoff(async () =>
               expect((await world.runs.get(successor.runId)).status).toBe("completed"),
             );
             expect((await world.runs.get(anchor.runId)).status).toBe("running");
@@ -162,7 +163,7 @@ describe("workflowEntry integration", () => {
                 (owner.startedAt ?? owner.createdAt).getTime() +
                   (sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
               );
-              await vi.waitFor(async () =>
+              await waitForHandoff(async () =>
                 expect((await world.runs.get(successorTimer.runId)).status).toBe("cancelled"),
               );
             } else {
@@ -184,7 +185,7 @@ describe("workflowEntry integration", () => {
               sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
             );
             expect(finalOwner.runId).not.toBe(nextOwner.runId);
-            await vi.waitFor(async () =>
+            await waitForHandoff(async () =>
               expect((await world.runs.get(nextOwner.runId)).status).toBe("completed"),
             );
             expect((await world.runs.get(anchor.runId)).status).toBe("running");
@@ -213,153 +214,163 @@ describe("workflowEntry integration", () => {
         );
         expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
       },
+      // Initial boot and three serial deployment handovers each get the
+      // same 30s window ingress allows in hook-release.ts.
+      4 * SESSION_HOOK_HANDOVER_TIMEOUT_MS,
     );
   });
 
   describe("compaction handoff", () => {
-    it("moves each compacted session to a fresh run on its deployment and keeps its deadline", async () => {
-      const output = captureConsoleOutput();
-      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-compaction" } });
+    it(
+      "moves each compacted session to a fresh run on its deployment and keeps its deadline",
+      async () => {
+        const output = captureConsoleOutput();
+        const runtime = await createTestRuntime({ agent: { name: "workflow-entry-compaction" } });
 
-      await runtime.run(async () => {
-        const world = await getWorld();
-        const createEvent = world.events.create.bind(world.events);
-        let delayedStart = false;
-        // Turbo begins execution before run_started is persisted. Force the
-        // first step to execute before the start event becomes durable.
-        const startWrite = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-          if (!delayedStart && args[1].eventType === "run_started") {
-            delayedStart = true;
-            await new Promise((resolve) => setTimeout(resolve, 250));
-          }
-          return createEvent(...args);
-        });
-        const anchor = await startSessionOwner(workflowEntry, [
-          {
-            kind: "initial",
-            sessionTimeoutMs: 60_000,
-            ownerDeploymentId: "dpl_a",
-            input: { message: "Alice starts a long planning session." },
-            serializedContext: buildSerializedContext({
-              acceptedDeploymentId: "dpl_a",
-              channelKind: "http",
-            }),
-          },
-        ]);
-        const stream = captureTurnEvents(anchor);
-        const workflowRuntime = createWorkflowRuntime({
-          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-        });
-        const inboxToken = sessionInboxHookToken(sessionCommandHookToken(anchor.runId));
-        const compactTo = async (previousOwnerRunId: string) => {
-          await workflowRuntime.dispatchSession({
-            command: { kind: "compact" },
-            sessionId: anchor.runId,
+        await runtime.run(async () => {
+          const world = await getWorld();
+          const createEvent = world.events.create.bind(world.events);
+          let delayedStart = false;
+          // Turbo begins execution before run_started is persisted. Force the
+          // first step to execute before the start event becomes durable.
+          const startWrite = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+            if (!delayedStart && args[1].eventType === "run_started") {
+              delayedStart = true;
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+            return createEvent(...args);
           });
-          const events = await stream.nextTurn();
-          expect(events.map((event) => event.type)).toContain("compaction.completed");
-          let owner: Awaited<ReturnType<typeof waitForCommandHookOwner>> | undefined;
-          await vi.waitFor(async () => {
-            owner = await waitForCommandHookOwner(inboxToken);
-            expect(owner.runId).not.toBe(previousOwnerRunId);
+          const anchor = await startSessionOwner(workflowEntry, [
+            {
+              kind: "initial",
+              sessionTimeoutMs: 60_000,
+              ownerDeploymentId: "dpl_a",
+              input: { message: "Alice starts a long planning session." },
+              serializedContext: buildSerializedContext({
+                acceptedDeploymentId: "dpl_a",
+                channelKind: "http",
+              }),
+            },
+          ]);
+          const stream = captureTurnEvents(anchor);
+          const workflowRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
           });
-          return owner!;
-        };
-        let completed = false;
-        try {
-          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-          await waitForParkedTurnStep(anchor.runId);
-          const originalTimer = await readSessionTimer(anchor.runId);
+          const inboxToken = sessionInboxHookToken(sessionCommandHookToken(anchor.runId));
+          const compactTo = async (previousOwnerRunId: string) => {
+            await workflowRuntime.dispatchSession({
+              command: { kind: "compact" },
+              sessionId: anchor.runId,
+            });
+            const events = await stream.nextTurn();
+            expect(events.map((event) => event.type)).toContain("compaction.completed");
+            let owner: Awaited<ReturnType<typeof waitForCommandHookOwner>> | undefined;
+            // The stream boundary precedes the owner release and successor boot.
+            // Match ingress's handover window (hook-release.ts), not Vitest's 1s default.
+            await waitForHandoff(async () => {
+              owner = await waitForCommandHookOwner(inboxToken);
+              expect(owner.runId).not.toBe(previousOwnerRunId);
+            });
+            return owner!;
+          };
+          let completed = false;
+          try {
+            expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            await waitForParkedTurnStep(anchor.runId);
+            const originalTimer = await readSessionTimer(anchor.runId);
 
-          const successor = await compactTo(anchor.runId);
-          expect((await readSessionTimer(successor.runId)).deadline).toEqual(
-            originalTimer.deadline,
-          );
-          await vi.waitFor(async () =>
-            expect((await world.runs.get(originalTimer.runId)).status).toBe("cancelled"),
-          );
-          await vi.waitFor(async () => {
-            const anchorHooks = await world.hooks.list({ runId: anchor.runId });
+            const successor = await compactTo(anchor.runId);
+            expect((await readSessionTimer(successor.runId)).deadline).toEqual(
+              originalTimer.deadline,
+            );
+            await waitForHandoff(async () =>
+              expect((await world.runs.get(originalTimer.runId)).status).toBe("cancelled"),
+            );
+            await waitForHandoff(async () => {
+              const anchorHooks = await world.hooks.list({ runId: anchor.runId });
+              expect(
+                anchorHooks.data
+                  .map((hook) => hook.token)
+                  .filter((token) => !token.startsWith("abrt_")),
+              ).toEqual([`${anchor.runId}:anchor`]);
+            });
+
+            // The next message on the same deployment runs on the successor and
+            // streams on the original run.
+            await workflowRuntime.dispatchSession({
+              command: handoffFollowUp("dpl_a", "Bob asks for the next milestone.", "delivery-b"),
+              sessionId: anchor.runId,
+            });
+            const followUp = await stream.nextTurn();
             expect(
-              anchorHooks.data
-                .map((hook) => hook.token)
-                .filter((token) => !token.startsWith("abrt_")),
-            ).toEqual([`${anchor.runId}:anchor`]);
-          });
+              followUp.some(
+                (event) =>
+                  event.type === "message.completed" &&
+                  event.data.message?.includes("Bob asks for the next milestone.") === true,
+              ),
+            ).toBe(true);
+            await waitForParkedTurnStep(successor.runId);
 
-          // The next message on the same deployment runs on the successor and
-          // streams on the original run.
-          await workflowRuntime.dispatchSession({
-            command: handoffFollowUp("dpl_a", "Bob asks for the next milestone.", "delivery-b"),
-            sessionId: anchor.runId,
-          });
-          const followUp = await stream.nextTurn();
-          expect(
-            followUp.some(
-              (event) =>
-                event.type === "message.completed" &&
-                event.data.message?.includes("Bob asks for the next milestone.") === true,
-            ),
-          ).toBe(true);
-          await waitForParkedTurnStep(successor.runId);
+            // A message sent right behind the compaction is answered, and
+            // the session still moves. An intermediate owner exits after its own
+            // compaction handoff.
+            await workflowRuntime.dispatchSession({
+              command: { kind: "compact" },
+              sessionId: anchor.runId,
+            });
+            await workflowRuntime.dispatchSession({
+              command: handoffFollowUp("dpl_a", "Alice confirms the milestone.", "delivery-c"),
+              sessionId: anchor.runId,
+            });
+            expect((await stream.nextTurn()).map((event) => event.type)).toContain(
+              "compaction.completed",
+            );
+            expect(
+              (await stream.nextTurn()).some(
+                (event) =>
+                  event.type === "message.completed" &&
+                  event.data.message?.includes("Alice confirms the milestone.") === true,
+              ),
+            ).toBe(true);
+            let nextOwner: Awaited<ReturnType<typeof waitForCommandHookOwner>> | undefined;
+            await waitForHandoff(async () => {
+              nextOwner = await waitForCommandHookOwner(inboxToken);
+              expect(nextOwner.runId).not.toBe(successor.runId);
+            });
+            assert(nextOwner !== undefined);
+            await waitForHandoff(async () =>
+              expect((await world.runs.get(successor.runId)).status).toBe("completed"),
+            );
+            expect((await world.runs.get(anchor.runId)).status).toBe("running");
+            expect((await readSessionTimer(nextOwner.runId)).deadline).toEqual(
+              originalTimer.deadline,
+            );
 
-          // A message sent right behind the compaction is answered, and
-          // the session still moves. An intermediate owner exits after its own
-          // compaction handoff.
-          await workflowRuntime.dispatchSession({
-            command: { kind: "compact" },
-            sessionId: anchor.runId,
-          });
-          await workflowRuntime.dispatchSession({
-            command: handoffFollowUp("dpl_a", "Alice confirms the milestone.", "delivery-c"),
-            sessionId: anchor.runId,
-          });
-          expect((await stream.nextTurn()).map((event) => event.type)).toContain(
-            "compaction.completed",
-          );
-          expect(
-            (await stream.nextTurn()).some(
-              (event) =>
-                event.type === "message.completed" &&
-                event.data.message?.includes("Alice confirms the milestone.") === true,
-            ),
-          ).toBe(true);
-          let nextOwner: Awaited<ReturnType<typeof waitForCommandHookOwner>> | undefined;
-          await vi.waitFor(async () => {
-            nextOwner = await waitForCommandHookOwner(inboxToken);
-            expect(nextOwner.runId).not.toBe(successor.runId);
-          });
-          assert(nextOwner !== undefined);
-          await vi.waitFor(async () =>
-            expect((await world.runs.get(successor.runId)).status).toBe("completed"),
-          );
-          expect((await world.runs.get(anchor.runId)).status).toBe("running");
-          expect((await readSessionTimer(nextOwner.runId)).deadline).toEqual(
-            originalTimer.deadline,
-          );
-
-          await workflowRuntime.dispatchSession({
-            command: { kind: "reset", reason: "compaction handoff test" },
-            sessionId: anchor.runId,
-          });
-          await expect(anchor.returnValue).resolves.toEqual({ output: "" });
-          completed = true;
-        } finally {
-          stream.dispose();
-          startWrite.mockRestore();
-          if (!completed) await anchor.cancel();
-        }
-      });
-      // Successors start on the test's synthetic deployment, not the local world's.
-      expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
-    });
+            await workflowRuntime.dispatchSession({
+              command: { kind: "reset", reason: "compaction handoff test" },
+              sessionId: anchor.runId,
+            });
+            await expect(anchor.returnValue).resolves.toEqual({ output: "" });
+            completed = true;
+          } finally {
+            stream.dispose();
+            startWrite.mockRestore();
+            if (!completed) await anchor.cancel();
+          }
+        });
+        // Successors start on the test's synthetic deployment, not the local world's.
+        expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
+      },
+      // Initial boot and two serial compaction handovers; see hook-release.ts.
+      3 * SESSION_HOOK_HANDOVER_TIMEOUT_MS,
+    );
   });
 });
 
 async function readSessionTimer(ownerRunId: string): Promise<{ runId: string; deadline: Date }> {
   const world = await getWorld();
   let timer: { runId: string; deadline: Date } | undefined;
-  await vi.waitFor(async () => {
+  await waitForHandoff(async () => {
     const steps = await world.steps.list({ runId: ownerRunId, resolveData: "all" });
     const start = steps.data.find((step) => step.stepName.endsWith("//startSessionTimeoutStep"));
     expect(start?.output).toBeDefined();
@@ -373,4 +384,12 @@ async function readSessionTimer(ownerRunId: string): Promise<{ runId: string; de
     timer = { runId: run.runId, deadline: input.deadline };
   });
   return timer!;
+}
+
+/** Handover includes successor boot, timer startup, and old-owner cleanup.
+ * Ingress permits 30s for ownership changes (session-inbox/hook-release.ts);
+ * stream publication and hook claims do not commit the remaining work.
+ */
+function waitForHandoff(callback: () => unknown | Promise<unknown>): Promise<unknown> {
+  return vi.waitFor(callback, { timeout: SESSION_HOOK_HANDOVER_TIMEOUT_MS });
 }
