@@ -47,7 +47,6 @@ import {
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -70,7 +69,7 @@ import {
   type InlineCallResults,
   NO_INLINE_CALLS,
 } from "#harness/call-executor.js";
-import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
+import { extractGatewayCostUsd, extractTokenUsageDelta, type TokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 
@@ -214,9 +213,6 @@ export class ModelCaller {
     // The cut response never reaches history, so the calls it announced never run, even once its
     // response ended and only their approvals were being decided.
     step.ctx?.set(HistoryStateKey, this.request.historyState);
-    if (this.interruptedUsage !== undefined) {
-      step.session = addTurnUsage(step.session, step.position().turnId, this.interruptedUsage);
-    }
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(

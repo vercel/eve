@@ -17,7 +17,7 @@ import { applyTransition, sessionView } from "#harness/session-machine/commit.js
 import { currentProjection } from "#harness/session-machine/current.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
@@ -76,7 +76,11 @@ export async function settleCancelledTurn(
         retireCancelledCandidates({ ...cancelled, outputSchema: undefined }),
         owningTurnId,
       );
-      if (!input.reportUsage || getTurnUsageState(cancelled.state) === undefined) {
+      const spent = sessionUsage(cancelled);
+      const spentNothing =
+        spent.inputTokens + spent.outputTokens + spent.cacheReadTokens + spent.cacheWriteTokens ===
+          0 && spent.costUsd === undefined;
+      if (!input.reportUsage || spentNothing) {
         return { session: cancelledSession };
       }
       // Reported like a settled turn, as usage since the last report, so the

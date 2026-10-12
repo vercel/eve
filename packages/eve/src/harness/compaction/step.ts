@@ -42,13 +42,11 @@ import {
   extractGatewayCostUsd,
   extractTokenUsageDelta,
   gatewayModelId,
+  type TokenUsageDelta,
 } from "#harness/model-call/usage.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
-import {
-  addTurnUsage,
-  addUsageOutsideTurns,
-  type TokenUsageDelta,
-} from "#harness/turn-tag-state.js";
+import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
+import { addTokenUsage } from "#shared/token-usage.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import {
   contextStarted,
@@ -159,18 +157,17 @@ export async function compactHistory(step: Step): Promise<StepResult> {
 function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage | undefined {
   const spent = deltas.filter((delta) => delta !== undefined);
   if (spent.length === 0) return undefined;
-  const sum = (field: "cacheReadTokens" | "cacheWriteTokens" | "inputTokens" | "outputTokens") =>
-    spent.reduce((total, delta) => total + (delta[field] ?? 0), 0);
-  const usage: { -readonly [K in keyof Usage]: Usage[K] } = {
-    cacheReadTokens: sum("cacheReadTokens"),
-    cacheWriteTokens: sum("cacheWriteTokens"),
-    inputTokens: sum("inputTokens"),
-    outputTokens: sum("outputTokens"),
-  };
-  if (spent.some((delta) => delta.sawCost === true)) {
-    usage.costUsd = spent.reduce((total, delta) => total + (delta.costUsd ?? 0), 0);
-  }
-  return usage;
+  return spent.reduce<Usage>(
+    (total, delta) =>
+      addTokenUsage(total, {
+        cacheReadTokens: delta.cacheReadTokens ?? 0,
+        cacheWriteTokens: delta.cacheWriteTokens ?? 0,
+        costUsd: delta.costUsd,
+        inputTokens: delta.inputTokens ?? 0,
+        outputTokens: delta.outputTokens ?? 0,
+      }),
+    NO_USAGE,
+  );
 }
 
 /** The summary run and its change failed; the run records what it spent. */
@@ -417,14 +414,11 @@ async function compactOnce(input: {
   } catch (error) {
     failure = { error };
   }
-  for (const usage of summaryUsage) {
-    session =
-      input.betweenTurns === true
-        ? addUsageOutsideTurns(session, usage)
-        : addTurnUsage(session, emissionState.turnId, usage);
-  }
-  // What the summary calls spent belongs to the summary run, in the commit that settles it.
+  // What the summary calls spent belongs to the summary run, in the commit that settles it. Spent
+  // between turns, no turn's report to a parent claims it.
   const usage = needsSummary ? summaryUsageOf(summaryUsage) : undefined;
+  if (usage !== undefined && input.betweenTurns === true)
+    session = markUsageReported(session, usage);
   const runId = change.summaryRunId;
   if (failure !== undefined) {
     await publish(

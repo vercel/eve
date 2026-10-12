@@ -16,7 +16,7 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import { getSessionUsage, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
 /** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
@@ -73,7 +73,7 @@ export async function finalizeSession(
     }
   }
   const session = sessionState?.snapshot.session;
-  const usage = session === undefined ? undefined : getSessionUsage(session);
+  const usage = session === undefined ? undefined : sessionUsage(session);
   const stored = storedProjection(session?.state);
   const latestTurnId = latestTurnIdOf(stored);
   const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
@@ -143,7 +143,7 @@ function settledResult(
     session === undefined || context.caller === undefined
       ? {}
       : {
-          sessionUsage: getSessionUsage(session),
+          sessionUsage: sessionUsage(session),
           turnUsage: takeSessionUsageDelta(session).delta,
         };
   switch (outcome.kind) {

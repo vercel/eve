@@ -74,7 +74,6 @@ import { createTurnEventHandler } from "#execution/session/turn-event-handler.js
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
   createDurableSessionValues,
   readDurableSession,
@@ -138,10 +137,6 @@ async function runSessionStepBody(
   const runtimeResults = input.input?.runtimeResults;
 
   let durableSession = readDurableSession(input.sessionState);
-  // An `execute` run's delegated spend counts in the step that hands the model its result.
-  for (const usage of Object.values(runtimeResults?.delegatedUsage ?? {})) {
-    durableSession = countRunUsage(durableSession, usage);
-  }
   const ctx = await deserializeContext(input.serializedContext);
   enterSessionProjection(ctx, durableSession.state);
   const adapter = ctx.require(ChannelKey);

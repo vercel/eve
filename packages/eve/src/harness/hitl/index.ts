@@ -104,6 +104,7 @@ export async function enforceBudget(
     canAsk: step.emit !== undefined && step.config.capabilities?.requestInput === true,
     session: step.session,
     turnSequence: step.position().sequence,
+    usage: step.view().projection.view.usage.total,
   });
   if (limit.kind === "within") return undefined;
   if (limit.kind === "ask") {

@@ -14,13 +14,13 @@ import {
 } from "#harness/hitl/budget-request.js";
 import {
   getSessionUsageLimitViolation,
-  getSessionTokenUsage,
   type SessionUsageLimitViolation,
-} from "#harness/turn-tag-state.js";
+} from "#harness/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
-export { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
+export { bumpSessionRuntimeUsageLimits } from "#harness/session-usage.js";
 
 const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
 const SESSION_TOKEN_COST_LIMIT_REACHED_CODE = "SESSION_TOKEN_COST_LIMIT_REACHED";
@@ -40,8 +40,11 @@ export function checkSessionUsageLimit(input: {
   readonly canAsk: boolean;
   readonly session: HarnessSession;
   readonly turnSequence: number;
+  /** What the session has spent: its step's view, which holds what the step published. */
+  readonly usage: TokenUsage;
 }): SessionUsageLimitCheck {
-  const violation = getSessionUsageLimitViolation(input.session);
+  const { usage } = input;
+  const violation = getSessionUsageLimitViolation(input.session, usage);
   if (violation === null) return { kind: "within" };
   // A zero limit is an exhausted quota inherited by a delegated task.
   // Approving would bump the runtime limit by the configured limit -- zero --
@@ -56,7 +59,6 @@ export function checkSessionUsageLimit(input: {
       }),
     };
   }
-  const usage = getSessionTokenUsage(input.session);
   return {
     code:
       violation.kind === "token-cost"
@@ -65,7 +67,7 @@ export function checkSessionUsageLimit(input: {
     details:
       violation.kind === "token-cost"
         ? {
-            costUsd: usage.costUsd,
+            costUsd: usage.costUsd ?? 0,
             kind: violation.kind,
             limitUsd: violation.limitUsd,
             usedCostUsd: violation.usedCostUsd,

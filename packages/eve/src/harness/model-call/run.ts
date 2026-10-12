@@ -110,7 +110,7 @@ export async function runModelStep(
     result = recovery.result;
   }
 
-  await recordModelUsage(step, { model: run.model, result });
+  await recordModelUsage(step, { model: run.model });
   caller.clearInterruptedUsage();
 
   let stepResult: StepResult;

@@ -1,5 +1,4 @@
 import type { SessionEvent } from "#protocol/session-event.js";
-import { getSessionUsage } from "#harness/turn-tag-state.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -57,7 +56,6 @@ export function sessionView(
     responders: hitl.responders,
     signIns: hitl.signIns,
     turn: readTurnState(state),
-    usage: getSessionUsage({ state }),
   };
 }
 

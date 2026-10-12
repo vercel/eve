@@ -1,5 +1,5 @@
 import type { RunSessionLimits } from "#channel/types.js";
-import { getSessionRemainingUsageQuota } from "#harness/turn-tag-state.js";
+import { getSessionRemainingUsageQuota } from "#harness/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
 
 /**

@@ -413,8 +413,11 @@ export interface SettledCall {
   readonly usage?: TokenUsage;
 }
 
-/** What the agent behind a call spent, recorded against the call. */
-export function delegatedUsageFact(callId: string, usage: TokenUsage): SessionEvent {
+/**
+ * What the agent behind a call spent, recorded against the call; without one, spend that arrived
+ * after its call settled, which no open entity owns (`delegated-late`).
+ */
+export function delegatedUsageFact(callId: string | undefined, usage: TokenUsage): SessionEvent {
   const recorded: { -readonly [K in keyof Usage]: Usage[K] } = {
     cacheReadTokens: usage.cacheReadTokens,
     cacheWriteTokens: usage.cacheWriteTokens,
@@ -423,7 +426,10 @@ export function delegatedUsageFact(callId: string, usage: TokenUsage): SessionEv
   };
   if (usage.costUsd !== undefined) recorded.costUsd = usage.costUsd;
   return {
-    data: { kind: "model", owner: { callId }, usage: recorded },
+    data:
+      callId === undefined
+        ? { kind: "delegated-late", usage: recorded }
+        : { kind: "model", owner: { callId }, usage: recorded },
     type: "usage.recorded",
   };
 }

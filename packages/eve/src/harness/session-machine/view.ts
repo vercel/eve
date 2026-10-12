@@ -1,4 +1,3 @@
-import type { TokenUsage } from "#shared/token-usage.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -39,8 +38,6 @@ export interface SessionView {
   readonly responders: Readonly<Record<string, PendingResponder>>;
   /** The sign-in attempts the session waits on, with what completing them needs. */
   readonly signIns: readonly AuthorizationChallenge[];
-  /** The session's token usage so far, which its waiting and terminal events report. */
-  readonly usage: TokenUsage;
 }
 
 /** Reads the authoritative lifecycle facts saved alongside execution state. */
