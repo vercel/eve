@@ -114,13 +114,6 @@ export function isStoredLine(value: unknown): value is StoredLine {
   return kind === "commit" || kind === "progress";
 }
 
-/** The records of one line, in order: a commit's facts, or the one progress record. */
-export function recordsOf<TFact, TProgress>(
-  line: StoredLine<TFact, TProgress>,
-): readonly (TFact | TProgress)[] {
-  return "facts" in line ? line.facts : [line.progress];
-}
-
 /** Encodes one stored line as NDJSON. */
 export function encodeLine(line: StoredLine | TransportRecord): string {
   return `${JSON.stringify(line)}\n`;
@@ -170,39 +163,6 @@ export type Cause =
   | { readonly changeId: string }
   | { readonly policy: string }
   | { readonly hook: string };
-
-/** The key that names a cause's kind. */
-export type CauseKind =
-  | "deliveryId"
-  | "turnId"
-  | "taskId"
-  | "callId"
-  | "interactionId"
-  | "responseId"
-  | "changeId"
-  | "policy"
-  | "hook";
-
-const CAUSE_KINDS: readonly CauseKind[] = [
-  "deliveryId",
-  "turnId",
-  "taskId",
-  "callId",
-  "interactionId",
-  "responseId",
-  "changeId",
-  "policy",
-  "hook",
-];
-
-/** A cause's kind, or `"system"` for a cause this reader doesn't know. */
-export function causeKind(cause: object | undefined): CauseKind | "system" {
-  if (cause === undefined) return "system";
-  for (const kind of CAUSE_KINDS) {
-    if (typeof (cause as Record<string, unknown>)[kind] === "string") return kind;
-  }
-  return "system";
-}
 
 /** Who submitted a delivery, as its channel authenticated them. */
 export interface Principal {

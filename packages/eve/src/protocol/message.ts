@@ -12,38 +12,6 @@ export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
 export const EVE_MESSAGE_STREAM_VERSION = "27";
 
 /**
- * Normalized completion status for one emitted runtime action result.
- *
- * `rejected` marks a tool call the user (or a policy) denied at a HITL
- * approval gate: it never executed, so it is neither a success nor a
- * runtime failure.
- */
-export type ActionResultStatus = "completed" | "failed" | "rejected";
-
-/**
- * Stable failure payload projected onto `call.settled`.
- *
- * This keeps UI consumers from having to parse provider- or tool-specific
- * output strings just to determine whether a tool call failed.
- */
-export interface ActionResultError {
-  readonly code: string;
-  readonly message: string;
-}
-
-/**
- * Invocation metadata attached to the `session.started` event for one child
- * subagent workflow session.
- */
-export interface SubagentSessionInvocationMetadata {
-  readonly kind: "subagent";
-  readonly parentCallId: string;
-  readonly parentSessionId: string;
-  readonly parentTurnId: string;
-  readonly name: string;
-}
-
-/**
  * The session this one replaced. Present on a session eve started in place of
  * one whose deployment was retired, when the next ordinary channel message
  * arrived before the earlier session timed out. This session has its own id,

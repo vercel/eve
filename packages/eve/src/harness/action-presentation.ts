@@ -1,6 +1,5 @@
 import type { ToolSet, TypedToolCall } from "ai";
 
-import type { ActionPresentationByCallId } from "#protocol/message.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolLookup } from "#harness/types.js";
@@ -38,15 +37,4 @@ export function projectToolStartLabel(
   } catch {
     return undefined;
   }
-}
-
-export function collectActionPresentation(
-  actions: readonly RuntimeActionRequestProjection[],
-): ActionPresentationByCallId | undefined {
-  const presentation = Object.fromEntries(
-    actions.flatMap(({ action, presentationLabel }) =>
-      presentationLabel === undefined ? [] : [[action.callId, { label: presentationLabel }]],
-    ),
-  );
-  return Object.keys(presentation).length === 0 ? undefined : presentation;
 }

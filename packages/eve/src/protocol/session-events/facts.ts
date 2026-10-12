@@ -1,6 +1,5 @@
 // The unions of every fact and progress type. Types only.
 
-import type { CommitLine, ProgressLine, StoredLine } from "./envelope.js";
 import type { CallFact, CallProgressRecord } from "./families/call.js";
 import type { ChildFact } from "./families/child.js";
 import type { ContentFact, ContentProgress } from "./families/content.js";
@@ -40,8 +39,3 @@ export type ProgressOf<TType extends Progress["type"]> = Extract<
   Progress,
   { readonly type: TType }
 >;
-
-/** One line of a v27 session stream. */
-export type SessionLine = StoredLine<Fact, Progress>;
-export type SessionCommit = CommitLine<Fact>;
-export type SessionProgress = ProgressLine<Progress>;

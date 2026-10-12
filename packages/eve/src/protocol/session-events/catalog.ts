@@ -13,9 +13,6 @@ import type { TaskOutcome } from "./families/task.js";
 import type { TurnOutcome } from "./families/turn.js";
 import type { Fact, Progress } from "./facts.js";
 
-/** The stream version this catalog describes. Readers refuse other majors. */
-export const STREAM_VERSION = "27";
-
 export type Family =
   | "session"
   | "delivery"

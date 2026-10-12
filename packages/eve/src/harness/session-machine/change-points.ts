@@ -6,14 +6,6 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 // v27 facts mark the points, and participants map each fact to the key their authors wrote. A
 // dynamic resolver's handler receives the point's `fact`; `data` is what eve itself keys on.
 
-export type ChangePointEvent =
-  | SessionStartedPoint
-  | TurnStartedPoint
-  | StepStartedPoint
-  | TurnCompletedPoint
-  | CompactionRequestedPoint
-  | CompactionCompletedPoint;
-
 /** The session's first turn starts. */
 export interface SessionStartedPoint {
   readonly type: "session.started";

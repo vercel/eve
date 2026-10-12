@@ -128,15 +128,6 @@ export function pendingApprovals(view: SessionView, step: SuspendedStep): readon
   });
 }
 
-/** Every approval a suspended step still waits on, by request id. */
-export function pendingApprovalIds(view: SessionView): ReadonlySet<string> {
-  return new Set(
-    view.turn.suspended.flatMap((step) =>
-      pendingApprovals(view, step).map((request) => request.interactionId),
-    ),
-  );
-}
-
 /** Approved workflow and agent calls join the runs their requesting steps wait on. */
 export function dispatch(
   view: SessionView,

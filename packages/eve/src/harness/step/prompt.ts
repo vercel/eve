@@ -48,19 +48,6 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
 }
 
 /**
- * The prompt a step starts on while approved calls wait to run: history and the turn's input,
- * without the task results and the client context's position a prompt settles, which wait for
- * the prompt the model reads once the calls have run.
- */
-export function previewPrompt(step: Step, turn: TurnInput): Prompt {
-  const messages = validateHarnessModelMessages([...step.session.history]);
-  return {
-    clientContext: turnClientContext(messages, turn),
-    messages: withTurnInput(messages, turn),
-  };
-}
-
-/**
  * The turn's input after `messages`, past a tool-result boundary when they end in tool results.
  * The client's context takes its position here, and never joins the messages.
  */
