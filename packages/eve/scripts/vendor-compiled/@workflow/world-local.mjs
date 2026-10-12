@@ -60,7 +60,7 @@ export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
   chunkGroup: "workflow",
-  fingerprintFiles: ["dist/fs.js"],
+  fingerprintFiles: ["dist/fs.js", "dist/streamer.js"],
   declaration: await loadDeclaration("workflow-world-local.d.ts"),
   plugins: [workflowWorldLocalVersionPlugin],
 };

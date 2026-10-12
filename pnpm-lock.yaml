@@ -280,6 +280,9 @@ catalogs:
 overrides:
   '@vercel/cli-config>zod': 4.5.4
 
+patchedDependencies:
+  '@workflow/world-local@5.1.0': cc0d5bc4b55dbe92ceb1c7bbfae4b38ed004defc907a65f4ef80e461d446b73d
+
 importers:
 
   .:
@@ -1918,7 +1921,7 @@ importers:
         version: 5.0.3
       '@workflow/world-local':
         specifier: 5.1.0
-        version: 5.1.0(@opentelemetry/api@1.9.1)
+        version: 5.1.0(patch_hash=cc0d5bc4b55dbe92ceb1c7bbfae4b38ed004defc907a65f4ef80e461d446b73d)(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel':
         specifier: 5.2.0
         version: 5.2.0(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
@@ -22305,7 +22308,7 @@ snapshots:
       '@workflow/serde': 5.0.0
       '@workflow/utils': 5.0.1
       '@workflow/world': 5.0.3
-      '@workflow/world-local': 5.1.0(@opentelemetry/api@1.9.1)
+      '@workflow/world-local': 5.1.0(patch_hash=cc0d5bc4b55dbe92ceb1c7bbfae4b38ed004defc907a65f4ef80e461d446b73d)(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel': 5.2.0(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       acorn: 8.15.0
       debug: 4.4.3(supports-color@10.2.2)
@@ -22341,7 +22344,7 @@ snapshots:
     dependencies:
       ms: 2.1.3
 
-  '@workflow/world-local@5.1.0(@opentelemetry/api@1.9.1)':
+  '@workflow/world-local@5.1.0(patch_hash=cc0d5bc4b55dbe92ceb1c7bbfae4b38ed004defc907a65f4ef80e461d446b73d)(@opentelemetry/api@1.9.1)':
     dependencies:
       '@vercel/queue': 0.8.0(@opentelemetry/api@1.9.1)
       '@workflow/errors': 5.0.3
@@ -22361,7 +22364,7 @@ snapshots:
       '@workflow/errors': 5.0.3
       '@workflow/utils': 5.0.1
       '@workflow/world': 5.0.3
-      '@workflow/world-local': 5.1.0(@opentelemetry/api@1.9.1)
+      '@workflow/world-local': 5.1.0(patch_hash=cc0d5bc4b55dbe92ceb1c7bbfae4b38ed004defc907a65f4ef80e461d446b73d)(@opentelemetry/api@1.9.1)
       cbor-x: 1.6.0
       dotenv: 17.3.1
       drizzle-orm: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.38.4)(pg@8.20.0)(sql.js@1.14.2)
