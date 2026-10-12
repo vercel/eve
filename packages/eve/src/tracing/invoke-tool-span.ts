@@ -278,28 +278,22 @@ function toolCallEvents(
               input: capturesInputs ? toolInput : undefined,
               scope,
               toolName: input.toolName,
-              type: "tool.call.started",
+              type: "call.requested",
             }),
           );
         },
         async executed(outcome) {
           spanState?.span.setAttribute("gen_ai.execute_tool.duration", outcome.durationMs / 1000);
-          const output =
-            outcome.type === "result"
-              ? capturesOutputs
-                ? { output: outcome.output, type: "result" as const }
-                : { type: "result" as const }
-              : capturesOutputs
-                ? { error: outcome.error, type: "error" as const }
-                : { type: "error" as const };
+          const completed = outcome.type === "result";
           await hooks.publish(
             Object.freeze({
               durationMs: outcome.durationMs,
+              error: capturesOutputs && !completed ? outcome.error : undefined,
               idempotencyKey,
-              output: Object.freeze(output),
+              outcome: completed ? ("completed" as const) : ("failed" as const),
+              output: capturesOutputs && completed ? outcome.output : undefined,
               scope,
-              type: "tool.call.completed",
-              outcome: outcome.type === "result" ? "completed" : "failed",
+              type: "call.settled",
             }),
           );
         },

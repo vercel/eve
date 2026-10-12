@@ -127,7 +127,7 @@ function sessionReleaseProvider(
     await Promise.all(processors.map((processor) => processor.releaseConversation(conversationId)));
   };
   return {
-    events: { "session.completed": release, "session.failed": release },
+    events: { "session.ended": release },
     name: "eve.conversation-release",
     stateNamespace: "internal:conversation-release",
   };

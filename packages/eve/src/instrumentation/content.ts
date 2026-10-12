@@ -26,9 +26,9 @@ export function withInstrumentationDecision(
       return decision.recordInputs ? event : Object.freeze({ ...event, title: undefined });
     case "channel.delivery.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
-    case "input.requested":
+    case "interaction.opened":
       return decision.recordOutputs ? event : Object.freeze({ ...event, request: undefined });
-    case "input.resolved":
+    case "interaction.settled":
       return decision.recordInputs && decision.recordOutputs
         ? event
         : Object.freeze({
@@ -36,12 +36,12 @@ export function withInstrumentationDecision(
             error: decision.recordOutputs ? event.error : undefined,
             answer: decision.recordInputs ? event.answer : undefined,
           });
-    case "tool.call.started":
+    case "call.requested":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
-    case "tool.call.completed":
+    case "call.settled":
       return decision.recordOutputs
         ? event
-        : Object.freeze({ ...event, output: Object.freeze({ type: event.output.type }) });
+        : Object.freeze({ ...event, error: undefined, output: undefined });
     case "model.call.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "model.call.completed":
@@ -57,10 +57,9 @@ export function withInstrumentationDecision(
           });
     case "model.call.failed":
     case "memory.operation.failed":
-    case "session.failed":
+    case "session.ended":
     case "step.attempt.failed":
-    case "tool.call.failed":
-    case "turn.failed":
+    case "turn.settled":
     case "channel.delivery.failed":
       return decision.recordOutputs ? event : Object.freeze({ ...event, error: undefined });
     default:

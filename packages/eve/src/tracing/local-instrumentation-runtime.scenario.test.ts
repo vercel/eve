@@ -135,7 +135,7 @@ describe("local instrumentation runtime", () => {
         kind: "tool-call",
         toolName: "weather",
         scope,
-        type: "tool.call.started",
+        type: "call.requested",
       });
       await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
         {
@@ -165,9 +165,9 @@ describe("local instrumentation runtime", () => {
       await hooks.publish({
         idempotencyKey: actionKey,
         outcome: "completed",
-        output: { output: { temperature: 72 }, type: "result" },
+        output: { temperature: 72 },
         scope,
-        type: "tool.call.completed",
+        type: "call.settled",
       });
       await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
@@ -178,14 +178,9 @@ describe("local instrumentation runtime", () => {
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         sessionId: "session-1",
         turnId: "turn-1",
-        type: "turn.completed",
-      });
-      // Settling the turn emits the turn span with the pre-allocated id.
-      await hooks.publish({
-        idempotencyKey: sessionIdempotencyKey("session-1"),
-        sessionId: "session-1",
-        turnId: "turn-1",
-        type: "session.waiting",
+        // Settling the turn emits the turn span with the pre-allocated id.
+        outcome: "completed",
+        type: "turn.settled",
       });
     };
     await runtimeContext.with(activeContext, () =>

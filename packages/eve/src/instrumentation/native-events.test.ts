@@ -145,8 +145,12 @@ describe("step attempts from the stream", () => {
 
     expect(
       heard
-        .filter((event) => event.type.startsWith("step.attempt.") || event.type.startsWith("tool."))
-        .map((event) => event.type),
-    ).toEqual(["tool.call.started", "tool.call.failed", "step.attempt.failed"]);
+        .filter((event) => event.type.startsWith("step.attempt.") || event.type.startsWith("call."))
+        .map((event) => [event.type, "outcome" in event ? event.outcome : undefined]),
+    ).toEqual([
+      ["call.requested", undefined],
+      ["call.settled", "interrupted"],
+      ["step.attempt.failed", undefined],
+    ]);
   });
 });

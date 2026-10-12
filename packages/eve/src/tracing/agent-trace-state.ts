@@ -5,8 +5,6 @@ import type {
   InstrumentationParentLineage,
   InstrumentationPrincipalSummary,
   InstrumentationTraceContext,
-  InstrumentationTurnFailedEvent,
-  InstrumentationTurnSettledEvent,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -42,9 +40,10 @@ export interface AgentTurnTraceState {
   readonly sequence: number;
   readonly startTimeMs: number;
   readonly subagentName?: string;
+  /** How the turn ended, named as the span event its invocation span records. */
   readonly terminal?:
-    | { readonly error: unknown; readonly type: InstrumentationTurnFailedEvent["type"] }
-    | { readonly type: InstrumentationTurnSettledEvent["type"] };
+    | { readonly error: unknown; readonly type: "turn.failed" }
+    | { readonly type: "turn.cancelled" | "turn.completed" };
 }
 
 export interface AgentTurnChannelDeliveryTraceState {

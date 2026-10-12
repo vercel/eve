@@ -6,7 +6,6 @@ import type {
   InstrumentationEvent,
   InstrumentationHooks,
   InstrumentationParentLineage,
-  InstrumentationToolCallOutcome,
   InstrumentationTraceContext,
 } from "#instrumentation/lifecycle.js";
 import {
@@ -155,16 +154,19 @@ function instrumentationEventsOf(
       const { cause } = event.data;
       const turnId =
         cause !== undefined && "turnId" in cause ? cause.turnId : latestTurnId(line.view);
+      const { outcome } = event.data;
       return [
-        event.data.outcome === "completed"
-          ? { idempotencyKey: session, sessionId, turnId, type: "session.completed" }
-          : {
-              error: new Error(event.data.error?.message ?? "The session failed."),
-              idempotencyKey: session,
-              sessionId,
-              turnId,
-              type: "session.failed",
-            },
+        {
+          error:
+            outcome === "failed"
+              ? new Error(event.data.error?.message ?? "The session failed.")
+              : undefined,
+          idempotencyKey: session,
+          outcome: outcome === "failed" ? "failed" : "completed",
+          sessionId,
+          turnId,
+          type: "session.ended",
+        },
       ];
     }
     case "turn.started":
@@ -183,24 +185,18 @@ function instrumentationEventsOf(
       ];
     case "turn.settled": {
       const { outcome, turnId } = event.data;
-      const idempotencyKey = turnIdempotencyKey(sessionId, turnId);
       return [
-        outcome === "failed"
-          ? {
-              error: new Error(event.data.error?.message ?? "The turn failed."),
-              idempotencyKey,
-              sessionId,
-              turnId,
-              type: "turn.failed",
-            }
-          : {
-              idempotencyKey,
-              sessionId,
-              turnId,
-              type: outcome === "cancelled" ? "turn.cancelled" : "turn.completed",
-            },
-        // Instrumentation still marks the session waiting once a turn ends.
-        { idempotencyKey: session, sessionId, turnId, type: "session.waiting" },
+        {
+          error:
+            outcome === "failed"
+              ? new Error(event.data.error?.message ?? "The turn failed.")
+              : undefined,
+          idempotencyKey: turnIdempotencyKey(sessionId, turnId),
+          outcome: outcome === "failed" || outcome === "cancelled" ? outcome : "completed",
+          sessionId,
+          turnId,
+          type: "turn.settled",
+        },
       ];
     }
     case "model.retried": {
@@ -255,7 +251,7 @@ function instrumentationEventsOf(
           scope,
           startedAtMs: line.startedAtMs,
           toolName: name,
-          type: "tool.call.started",
+          type: "call.requested",
         },
       ];
     }
@@ -265,38 +261,24 @@ function instrumentationEventsOf(
       const scope = row === undefined ? undefined : runAttempt(line, callRun(line.view!, row));
       if (scope === undefined) return [];
       const idempotencyKey = actionIdempotencyKey(sessionId, scope.turnId, callId);
-      const acceptedAtMs = line.settledAtMs?.[callId];
-      const usage = row?.usage === undefined ? undefined : { usage: row.usage };
-      if (outcome === "completed") {
-        return [
-          {
-            acceptedAtMs,
-            idempotencyKey,
-            outcome,
-            output: line.capturesOutputs
-              ? { output: event.data.output, type: "result" }
-              : { type: "result" },
-            scope,
-            type: "tool.call.completed",
-            ...usage,
-          },
-        ];
-      }
-      const error = !line.capturesOutputs
-        ? undefined
-        : event.data.error === undefined
-          ? event.data.output
-          : Object.assign(new Error(event.data.error.message), { code: event.data.error.code });
+      const output = outcome === "completed" ? event.data.output : undefined;
+      const error =
+        outcome === "completed"
+          ? undefined
+          : event.data.error === undefined
+            ? event.data.output
+            : Object.assign(new Error(event.data.error.message), { code: event.data.error.code });
       return [
         {
-          acceptedAtMs,
-          error,
+          acceptedAtMs: line.settledAtMs?.[callId],
+          error: line.capturesOutputs ? error : undefined,
           errorCode: event.data.error?.code,
           idempotencyKey,
-          outcome: CALL_FAILURES[outcome] ?? "failed",
+          outcome,
+          output: line.capturesOutputs ? output : undefined,
           scope,
-          type: "tool.call.failed",
-          ...usage,
+          type: "call.settled",
+          usage: row?.usage,
         },
       ];
     }
@@ -321,7 +303,7 @@ function instrumentationEventsOf(
               }
             : undefined,
           scope,
-          type: "input.requested",
+          type: "interaction.opened",
         },
       ];
     }
@@ -341,7 +323,7 @@ function instrumentationEventsOf(
           kind: row.request.kind,
           outcome: event.data.outcome,
           scope,
-          type: "input.resolved",
+          type: "interaction.settled",
         },
       ];
     }
@@ -349,13 +331,6 @@ function instrumentationEventsOf(
       return [];
   }
 }
-
-const CALL_FAILURES: Partial<Record<string, Exclude<InstrumentationToolCallOutcome, "completed">>> =
-  {
-    abandoned: "abandoned",
-    interrupted: "cancelled",
-    rejected: "rejected",
-  };
 
 /** A turn's run's current attempt; a context change's run is no step of a turn. */
 function runAttempt(

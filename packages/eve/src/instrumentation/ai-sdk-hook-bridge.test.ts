@@ -460,7 +460,7 @@ describe("createAiSdkHookBridge", () => {
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
       {
-        events: { "tool.call.failed": after },
+        events: { "call.settled": after },
         name: "after",
         tracePolicy: contentTracePolicy,
       },
@@ -634,8 +634,8 @@ describe("createAiSdkHookBridge", () => {
     const hooks = createInstrumentationHooks([
       {
         events: {
-          "tool.call.completed": after,
-          "tool.call.started": before,
+          "call.settled": after,
+          "call.requested": before,
         },
         name: "spy",
         tracePolicy: contentTracePolicy,
@@ -719,9 +719,9 @@ describe("createAiSdkHookBridge", () => {
     const metadataOnly = vi.fn();
     const wantsContent = vi.fn();
     const hooks = createInstrumentationHooks([
-      { events: { "tool.call.started": metadataOnly }, name: "metadata-only" },
+      { events: { "call.requested": metadataOnly }, name: "metadata-only" },
       {
-        events: { "tool.call.started": wantsContent },
+        events: { "call.requested": wantsContent },
         name: "wants-content",
         tracePolicy: contentTracePolicy,
       },

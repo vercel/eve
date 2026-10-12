@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { withInstrumentationDecision } from "#instrumentation/content.js";
 import type {
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
+  InstrumentationInteractionOpenedEvent,
+  InstrumentationInteractionSettledEvent,
   InstrumentationSessionStartedEvent,
 } from "#instrumentation/lifecycle.js";
 
@@ -46,8 +46,8 @@ describe("withInstrumentationDecision", () => {
         request: { prompt: "Approve?" },
         interactionId: "request-1",
         scope,
-        type: "input.requested",
-      } satisfies InstrumentationInputRequestedEvent,
+        type: "interaction.opened",
+      } satisfies InstrumentationInteractionOpenedEvent,
       { action: "record", recordInputs: true, recordOutputs: false },
     );
     const resolved = withInstrumentationDecision(
@@ -59,8 +59,8 @@ describe("withInstrumentationDecision", () => {
         interactionId: "request-1",
         answer: { text: "yes" },
         scope,
-        type: "input.resolved",
-      } satisfies InstrumentationInputResolvedEvent,
+        type: "interaction.settled",
+      } satisfies InstrumentationInteractionSettledEvent,
       { action: "record", recordInputs: true, recordOutputs: false },
     );
 
@@ -78,8 +78,8 @@ describe("withInstrumentationDecision", () => {
       request: { prompt: "Approve?" },
       interactionId: "request-1",
       scope,
-      type: "input.requested",
-    } satisfies InstrumentationInputRequestedEvent;
+      type: "interaction.opened",
+    } satisfies InstrumentationInteractionOpenedEvent;
     const error = new Error("failed");
     const resolved = {
       error,
@@ -89,8 +89,8 @@ describe("withInstrumentationDecision", () => {
       interactionId: "request-1",
       answer: { text: "no" },
       scope,
-      type: "input.resolved",
-    } satisfies InstrumentationInputResolvedEvent;
+      type: "interaction.settled",
+    } satisfies InstrumentationInteractionSettledEvent;
     const decision = { action: "record", recordInputs: false, recordOutputs: true } as const;
 
     expect(withInstrumentationDecision(requested, decision)).toBe(requested);

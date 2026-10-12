@@ -194,6 +194,15 @@ Read a row's `taskId` for a task, `callState(card.view, callId)` for its status,
 A channel that keeps something in step with the session can handle `committed`, once per
 committed line with the line's facts and `ctx.view`, instead of several facts.
 
+## Instrumentation
+
+Instrumentation events about what a session's stream records take the stream's names, and an
+operation's endings become one event with the fact's `outcome`: `session.ended`,
+`turn.settled`, `call.requested` and `call.settled`, `interaction.opened` and
+`interaction.settled`. `session.waiting` is gone; a turn's end is `turn.settled`. See the table
+in [Instrumentation](/docs/observability/instrumentation#lifecycle-events). The
+OpenTelemetry trace schema is unchanged.
+
 ## Clients and frontends
 
 - **Read v27 lines.** The client accepts stream version 27 only. Each stored line is a commit

@@ -7,8 +7,8 @@ import {
 
 import type {
   InstrumentationHandlerContext,
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
+  InstrumentationInteractionOpenedEvent,
+  InstrumentationInteractionSettledEvent,
   InstrumentationProviderDefinition,
 } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
@@ -51,10 +51,10 @@ export function createAgentApprovalInstrumentation(input: {
   readonly tracer: Tracer;
 }): Pick<
   NonNullable<InstrumentationProviderDefinition["events"]>,
-  "input.requested" | "input.resolved"
+  "interaction.opened" | "interaction.settled"
 > {
   const onRequested = async (
-    event: InstrumentationInputRequestedEvent,
+    event: InstrumentationInteractionOpenedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> => {
     const { call } = event;
@@ -90,7 +90,7 @@ export function createAgentApprovalInstrumentation(input: {
   };
 
   const onResolved = (
-    event: InstrumentationInputResolvedEvent,
+    event: InstrumentationInteractionSettledEvent,
     ctx: InstrumentationHandlerContext,
   ): void => {
     const state = readState(ctx.state.get());
@@ -143,8 +143,8 @@ export function createAgentApprovalInstrumentation(input: {
   };
 
   return {
-    "input.requested": onRequested,
-    "input.resolved": onResolved,
+    "interaction.opened": onRequested,
+    "interaction.settled": onResolved,
   };
 }
 
@@ -152,7 +152,9 @@ export function createAgentApprovalInstrumentation(input: {
  * Trace schema 4's approval outcomes. The instrumentation event carries the interaction's
  * outcome; the span keeps the values dashboards already query.
  */
-const APPROVAL_OUTCOMES: Partial<Record<InstrumentationInputResolvedEvent["outcome"], string>> = {
+const APPROVAL_OUTCOMES: Partial<
+  Record<InstrumentationInteractionSettledEvent["outcome"], string>
+> = {
   abandoned: "cancelled",
   accepted: "approved",
   declined: "denied",

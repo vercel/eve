@@ -4,6 +4,7 @@ import type {
   InteractionRequest,
 } from "#protocol/session-events/families/interaction.js";
 import type { ResponseValue } from "#protocol/session-events/families/response.js";
+import type { CallOutcome } from "#protocol/session-events/families/call.js";
 import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
 import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
@@ -88,16 +89,6 @@ export type InstrumentationContentPart =
       readonly input: unknown;
       readonly toolName: string;
     };
-
-/**
- * How one tool call ended.
- *
- * `type` survives a provider that declined content, so whether the tool errored
- * is answerable without seeing what it returned.
- */
-export type InstrumentationToolOutput =
-  | { readonly type: "result"; readonly output?: unknown }
-  | { readonly type: "error"; readonly error?: unknown };
 
 /**
  * Every event carries an `idempotencyKey` naming the operation it is about: a
@@ -215,8 +206,9 @@ export type InstrumentationAnswer = ResponseValue;
 /** How the request settled, as its `interaction.settled` says. */
 export type InstrumentationInputOutcome = InteractionOutcome;
 
-export interface InstrumentationInputRequestedEvent {
-  readonly type: "input.requested";
+/** A person was asked: the session's `interaction.opened`, never a sign-in. */
+export interface InstrumentationInteractionOpenedEvent {
+  readonly type: "interaction.opened";
   /** The call the request is about: the call an approval gates, or the call that asked. */
   readonly call?: {
     readonly callId: string;
@@ -230,8 +222,9 @@ export interface InstrumentationInputRequestedEvent {
   readonly scope: InstrumentationAttemptScope;
 }
 
-export interface InstrumentationInputResolvedEvent {
-  readonly type: "input.resolved";
+/** The request settled: the session's `interaction.settled`. */
+export interface InstrumentationInteractionSettledEvent {
+  readonly type: "interaction.settled";
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly kind: InstrumentationInputKind;
@@ -313,32 +306,17 @@ export interface InstrumentationParentLineage {
   readonly turnId: string;
 }
 
-/**
- * A session transition that carries no failure.
- *
- * `session.waiting` sits here rather than with the failed shape because it is
- * not terminal: the session suspends awaiting input or approval and may resume
- * with a new turn.
- */
-export interface InstrumentationSessionSettledEvent {
-  readonly type: "session.completed" | "session.waiting";
-  readonly idempotencyKey: string;
-  readonly sessionId: string;
-  readonly turnId?: string;
-}
-
-export interface InstrumentationSessionFailedEvent {
-  readonly type: "session.failed";
-  /** Content. Absent unless this provider's trace policy records this direction. */
+/** The session ended: its `session.ended`. */
+export interface InstrumentationSessionEndedEvent {
+  readonly type: "session.ended";
+  readonly outcome: "completed" | "failed";
+  /** A failed session's error. Content: absent unless this provider records outputs. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly sessionId: string;
+  /** The turn that failed it, when one did; otherwise the session's latest turn. */
   readonly turnId?: string;
 }
-
-export type InstrumentationSessionTransitionEvent =
-  | InstrumentationSessionSettledEvent
-  | InstrumentationSessionFailedEvent;
 
 export interface InstrumentationTurnStartedEvent {
   readonly traceSessionId?: string;
@@ -355,32 +333,16 @@ export interface InstrumentationTurnStartedEvent {
   readonly turnId: string;
 }
 
-/**
- * A turn that ended without a failure.
- *
- * `turn.cancelled` sits here rather than with the failed shape because
- * cancellation is not an error: the harness settles a cancelled turn as
- * `turn.cancelled` → `session.waiting`, with no failure surfaced anywhere.
- */
+/** The turn ended: its `turn.settled`. A cancelled turn is no failure. */
 export interface InstrumentationTurnSettledEvent {
-  readonly type: "turn.cancelled" | "turn.completed";
-  readonly idempotencyKey: string;
-  readonly sessionId: string;
-  readonly turnId: string;
-}
-
-export interface InstrumentationTurnFailedEvent {
-  readonly type: "turn.failed";
-  /** Content. Absent unless this provider's trace policy records this direction. */
+  readonly type: "turn.settled";
+  readonly outcome: "completed" | "cancelled" | "failed";
+  /** A failed turn's error. Content: absent unless this provider records outputs. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly sessionId: string;
   readonly turnId: string;
 }
-
-export type InstrumentationTurnTerminalEvent =
-  | InstrumentationTurnSettledEvent
-  | InstrumentationTurnFailedEvent;
 
 export interface InstrumentationStepAttemptCompletedEvent {
   readonly type: "step.attempt.completed";
@@ -453,56 +415,45 @@ export type InstrumentationToolCallKind =
   | "subagent-call"
   | "tool-call";
 
-export interface InstrumentationToolCallStartedEvent {
+/**
+ * A call was requested: the session's `call.requested`, or a tool a channel runs directly (with
+ * `invokeTool`), which no session stream records.
+ */
+export interface InstrumentationCallRequestedEvent {
   /** Durable dispatch metadata, when this call is owned by eve's tool loop. */
   readonly kind?: InstrumentationToolCallKind;
   readonly isWorkflowTool?: boolean;
   readonly frameworkTool?: boolean;
   readonly startedAtMs?: number;
-  readonly type: "tool.call.started";
+  readonly type: "call.requested";
   readonly callId: string;
   readonly idempotencyKey: string;
+  /** Content. Absent unless this provider's trace policy records inputs. */
   readonly input: unknown;
   readonly scope: InstrumentationAttemptScope;
   readonly toolName: string;
 }
 
-export interface InstrumentationToolCallCompletedEvent {
-  readonly outcome?: InstrumentationToolCallOutcome;
+/** How a call ended, as its `call.settled` says. */
+export type InstrumentationCallOutcome = CallOutcome;
+
+/** The call settled: the session's `call.settled`, or a direct call's end. */
+export interface InstrumentationCallSettledEvent {
+  readonly type: "call.settled";
+  readonly outcome: InstrumentationCallOutcome;
+  /** A completed call's output. Content: absent unless this provider records outputs. */
+  readonly output?: unknown;
+  /** Why it didn't complete. Content: absent unless this provider records outputs. */
+  readonly error?: unknown;
+  readonly errorCode?: string;
   readonly usage?: InstrumentationUsage;
   readonly acceptedAtMs?: number;
   readonly completedAtMs?: number;
-  readonly type: "tool.call.completed";
   /** How long the tool's `execute` ran, in milliseconds, when the publisher measured it. */
   readonly durationMs?: number;
   readonly idempotencyKey: string;
-  readonly output: InstrumentationToolOutput;
   readonly scope: InstrumentationAttemptScope;
 }
-
-export interface InstrumentationToolCallFailedEvent {
-  readonly outcome?: Exclude<InstrumentationToolCallOutcome, "completed">;
-  readonly usage?: InstrumentationUsage;
-  readonly acceptedAtMs?: number;
-  readonly errorCode?: string;
-  readonly completedAtMs?: number;
-  readonly type: "tool.call.failed";
-  /** Content. Absent unless this provider's trace policy records this direction. */
-  readonly error?: unknown;
-  readonly idempotencyKey: string;
-  readonly scope: InstrumentationAttemptScope;
-}
-
-export type InstrumentationToolCallTerminalEvent =
-  | InstrumentationToolCallCompletedEvent
-  | InstrumentationToolCallFailedEvent;
-
-export type InstrumentationToolCallOutcome =
-  | "abandoned"
-  | "cancelled"
-  | "completed"
-  | "failed"
-  | "rejected";
 
 /** The second argument to every handler. */
 export interface InstrumentationHandlerContext {
@@ -547,19 +498,14 @@ export interface InstrumentationProviderDefinition {
     readonly "memory.operation.started"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationStartedEvent>;
     readonly "memory.operation.completed"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationCompletedEvent>;
     readonly "memory.operation.failed"?: InstrumentationEventHandler<memory.InstrumentationMemoryOperationFailedEvent>;
-    readonly "input.requested"?: InstrumentationEventHandler<InstrumentationInputRequestedEvent>;
-    readonly "input.resolved"?: InstrumentationEventHandler<InstrumentationInputResolvedEvent>;
-    readonly "session.completed"?: InstrumentationEventHandler<InstrumentationSessionSettledEvent>;
-    readonly "session.failed"?: InstrumentationEventHandler<InstrumentationSessionFailedEvent>;
+    readonly "interaction.opened"?: InstrumentationEventHandler<InstrumentationInteractionOpenedEvent>;
+    readonly "interaction.settled"?: InstrumentationEventHandler<InstrumentationInteractionSettledEvent>;
     readonly "session.started"?: InstrumentationEventHandler<InstrumentationSessionStartedEvent>;
-    readonly "session.waiting"?: InstrumentationEventHandler<InstrumentationSessionSettledEvent>;
-    readonly "tool.call.started"?: InstrumentationEventHandler<InstrumentationToolCallStartedEvent>;
-    readonly "tool.call.completed"?: InstrumentationEventHandler<InstrumentationToolCallCompletedEvent>;
-    readonly "tool.call.failed"?: InstrumentationEventHandler<InstrumentationToolCallFailedEvent>;
-    readonly "turn.cancelled"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
-    readonly "turn.completed"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
-    readonly "turn.failed"?: InstrumentationEventHandler<InstrumentationTurnFailedEvent>;
+    readonly "session.ended"?: InstrumentationEventHandler<InstrumentationSessionEndedEvent>;
+    readonly "call.requested"?: InstrumentationEventHandler<InstrumentationCallRequestedEvent>;
+    readonly "call.settled"?: InstrumentationEventHandler<InstrumentationCallSettledEvent>;
     readonly "turn.started"?: InstrumentationEventHandler<InstrumentationTurnStartedEvent>;
+    readonly "turn.settled"?: InstrumentationEventHandler<InstrumentationTurnSettledEvent>;
   };
   /** Drains anything buffered. Driven by the runtime, not by the bus. */
   readonly flush?: () => void | PromiseLike<void>;
@@ -585,23 +531,23 @@ export type InstrumentationHooksInput =
 export type InstrumentationCorrelatedEvent =
   | InstrumentationChannelDeliveryStartedEvent
   | InstrumentationChannelDeliveryTerminalEvent
-  | InstrumentationInputRequestedEvent
-  | InstrumentationInputResolvedEvent
+  | InstrumentationInteractionOpenedEvent
+  | InstrumentationInteractionSettledEvent
   | memory.InstrumentationMemoryOperationStartedEvent
   | memory.InstrumentationMemoryOperationTerminalEvent
   | InstrumentationModelCallStartedEvent
   | InstrumentationModelCallTerminalEvent
-  | InstrumentationToolCallStartedEvent
-  | InstrumentationToolCallTerminalEvent;
+  | InstrumentationCallRequestedEvent
+  | InstrumentationCallSettledEvent;
 
 export type InstrumentationPointEvent =
   | InstrumentationStepAttemptStartedEvent
   | InstrumentationStepAttemptMetadataEvent
   | InstrumentationStepAttemptTerminalEvent
   | InstrumentationSessionStartedEvent
-  | InstrumentationSessionTransitionEvent
+  | InstrumentationSessionEndedEvent
   | InstrumentationTurnStartedEvent
-  | InstrumentationTurnTerminalEvent;
+  | InstrumentationTurnSettledEvent;
 
 export type InstrumentationEvent = InstrumentationCorrelatedEvent | InstrumentationPointEvent;
 

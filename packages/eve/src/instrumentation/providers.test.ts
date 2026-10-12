@@ -247,8 +247,8 @@ describe("finalizeInstrumentationProviders", () => {
       "audit",
       defineInstrumentation({
         events: {
-          "tool.call.started": started,
-          "tool.call.completed": completed,
+          "call.requested": started,
+          "call.settled": completed,
         },
       }),
     );
@@ -262,7 +262,7 @@ describe("finalizeInstrumentationProviders", () => {
       stepIndex: 0,
     };
     await hooks.publish({
-      type: "tool.call.started",
+      type: "call.requested",
       idempotencyKey: "call",
       callId: "call-1",
       toolName: "weather",
@@ -283,11 +283,10 @@ describe("finalizeInstrumentationProviders", () => {
     );
     await hooks.publish({ type: "step.attempt.completed", idempotencyKey: "attempt", scope });
     await hooks.publish({
-      type: "tool.call.completed",
+      type: "call.settled",
       idempotencyKey: "call",
       outcome: "completed",
       usage: { inputTokens: 10 },
-      output: { type: "result" },
       scope,
     });
     expect(started).toHaveBeenCalledOnce();

@@ -9,7 +9,7 @@ import type {
   InstrumentationModelCallCompletedEvent,
   InstrumentationModelCallStartedEvent,
   InstrumentationOperationRef,
-  InstrumentationToolCallStartedEvent,
+  InstrumentationCallRequestedEvent,
   InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import {
@@ -30,7 +30,7 @@ interface AttemptState {
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
   readonly toolKeys: Map<string, string>;
-  readonly toolCalls: Map<string, InstrumentationToolCallStartedEvent>;
+  readonly toolCalls: Map<string, InstrumentationCallRequestedEvent>;
   readonly isFrameworkTool?: (name: string) => boolean;
   operation?: InstrumentationOperationRef;
   // Only the number is kept: it disambiguates call identities within an attempt.
@@ -300,7 +300,7 @@ function toToolCallStarted(
   state: AttemptState,
   idempotencyKey: string,
   source: TelemetryEvent<"onToolExecutionStart">,
-): InstrumentationToolCallStartedEvent {
+): InstrumentationCallRequestedEvent {
   return Object.freeze({
     callId: source.toolCall.toolCallId,
     frameworkTool: state.isFrameworkTool?.(source.toolCall.toolName) === true,
@@ -309,6 +309,6 @@ function toToolCallStarted(
     scope: state.scope,
     toolName: source.toolCall.toolName,
     startedAtMs: Date.now(),
-    type: "tool.call.started",
+    type: "call.requested",
   });
 }

@@ -222,7 +222,10 @@ async function dispatchToProvider(
   handlerTimeoutMs: number,
   visibleEvent: () => InstrumentationEvent,
 ): Promise<void> {
-  const startedBoundary = event.type.endsWith(".started") || event.type === "input.requested";
+  const startedBoundary =
+    event.type.endsWith(".started") ||
+    event.type === "call.requested" ||
+    event.type === "interaction.opened";
   const owner = stateOwner(event);
   const providerName = provider.name;
   const stateNamespace = provider.stateNamespace ?? providerName;
@@ -306,7 +309,7 @@ function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
     return { sessionId: event.sessionId, turnId: event.turnId };
   }
   if (!("scope" in event)) return {};
-  if (event.type.startsWith("tool.call.") || event.type.startsWith("input.")) {
+  if (event.type.startsWith("call.") || event.type.startsWith("interaction.")) {
     return { sessionId: event.scope.sessionId, turnId: event.scope.turnId };
   }
   return event.type.startsWith("model.call.") || event.type.startsWith("step.attempt.")
@@ -319,10 +322,8 @@ function releaseTerminalState(event: InstrumentationEvent): void {
   if (event.type === "step.attempt.completed" || event.type === "step.attempt.failed") {
     releaseAllInstrumentationAttemptState(event.scope.attemptId);
   }
-  if (event.type === "session.completed" || event.type === "session.failed") {
-    releaseAllInstrumentationTurnState(event.sessionId);
-  }
-  if (event.type === "turn.cancelled" || event.type === "turn.failed") {
+  if (event.type === "session.ended") releaseAllInstrumentationTurnState(event.sessionId);
+  if (event.type === "turn.settled" && event.outcome !== "completed") {
     releaseAllInstrumentationTurnState(event.sessionId, event.turnId);
   }
 }
@@ -332,6 +333,7 @@ function isTerminal(type: InstrumentationEvent["type"]): boolean {
     type.endsWith(".completed") ||
     type.endsWith(".failed") ||
     type.endsWith(".cancelled") ||
-    type === "input.resolved"
+    type.endsWith(".settled") ||
+    type === "session.ended"
   );
 }

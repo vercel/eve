@@ -66,9 +66,9 @@ import type {
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
   InstrumentationTraceSeed,
-  InstrumentationSessionTransitionEvent,
+  InstrumentationSessionEndedEvent,
   InstrumentationTurnStartedEvent,
-  InstrumentationTurnTerminalEvent,
+  InstrumentationTurnSettledEvent,
 } from "#instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import {
@@ -279,87 +279,89 @@ export function createAgentOtelInstrumentation(
     steps.delete(scope);
   };
 
-  const onTurnTerminal = async (event: InstrumentationTurnTerminalEvent): Promise<void> => {
-    await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
-      ...turn,
-      terminal:
-        event.type === "turn.failed"
-          ? { error: event.error, type: event.type }
-          : { type: event.type },
-    }));
+  /** Ends the turn's invocation span, which carries how the turn ended. */
+  const endTurn = async (sessionId: string, turnId: string): Promise<void> => {
+    const turn = await input.stateStore.getTurn(sessionId, turnId);
+    if (turn === undefined) return;
+    {
+      const session = await input.stateStore.getSession(sessionId);
+      if (isSampledTrace(turn.context)) {
+        const agentName = session?.agentName ?? turn.subagentName;
+        const parentContext = withChannelAudience(
+          turn.caller === undefined || turn.caller.isRemote === true
+            ? ROOT_CONTEXT
+            : contextFromSpanContext(turn.caller),
+          session?.channelAudience,
+        );
+        const startSpan = () =>
+          input.tracer.startSpan(
+            agentInvocationSpanName(agentName),
+            {
+              attributes: runtimeAttributes.agentActivationAttributes({
+                agentName,
+                frameworkVersion: input.frameworkVersion,
+                session,
+                sessionId,
+                turnId,
+                turn,
+              }),
+              kind: SpanKind.INTERNAL,
+              links: agentActivationLinks(turn),
+              root: turn.caller === undefined || turn.caller.isRemote === true,
+              startTime: turn.startTimeMs,
+            },
+            parentContext,
+          );
+        const span = input.idGenerator.withSpanId(turn.context.spanId, () =>
+          input.idGenerator.withTraceId(turn.context.traceId, startSpan),
+        );
+        setAgentInvocationUsage(span, turn.modelUsage);
+        span.addEvent("turn.started", undefined, turn.startTimeMs);
+        if (turn.terminal !== undefined) {
+          span.setAttribute(
+            "agent.turn.outcome",
+            turn.terminal.type === "turn.completed"
+              ? "completed"
+              : turn.terminal.type === "turn.cancelled"
+                ? "cancelled"
+                : "failed",
+          );
+          span.addEvent(turn.terminal.type);
+          if (turn.terminal.type === "turn.failed") {
+            recordError(span, turn.terminal.error);
+          }
+        }
+        span.end();
+      }
+      await input.stateStore.deleteTurn(sessionId, turnId);
+    }
   };
 
-  const onSessionTransition = async (
-    event: InstrumentationSessionTransitionEvent,
-  ): Promise<void> => {
-    if (event.type === "session.failed" && event.turnId !== undefined) {
-      await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
-        ...turn,
-        terminal: turn.terminal ?? { error: event.error, type: "turn.failed" },
-      }));
-    }
+  const onTurnSettled = async (event: InstrumentationTurnSettledEvent): Promise<void> => {
+    const terminal =
+      event.outcome === "failed"
+        ? ({ error: event.error, type: "turn.failed" } as const)
+        : ({ type: event.outcome === "cancelled" ? "turn.cancelled" : "turn.completed" } as const);
+    await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
+      ...turn,
+      terminal,
+    }));
+    await endTurn(event.sessionId, event.turnId);
+  };
+
+  const onSessionEnded = async (event: InstrumentationSessionEndedEvent): Promise<void> => {
+    // A turn the session's end left open ends with it, failed when the session did.
     if (event.turnId !== undefined) {
-      const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
-      if (turn !== undefined) {
-        const session = await input.stateStore.getSession(event.sessionId);
-        if (isSampledTrace(turn.context)) {
-          const agentName = session?.agentName ?? turn.subagentName;
-          const parentContext = withChannelAudience(
-            turn.caller === undefined || turn.caller.isRemote === true
-              ? ROOT_CONTEXT
-              : contextFromSpanContext(turn.caller),
-            session?.channelAudience,
-          );
-          const startSpan = () =>
-            input.tracer.startSpan(
-              agentInvocationSpanName(agentName),
-              {
-                attributes: runtimeAttributes.agentActivationAttributes({
-                  agentName,
-                  frameworkVersion: input.frameworkVersion,
-                  session,
-                  sessionId: event.sessionId,
-                  turnId: event.turnId!,
-                  turn,
-                }),
-                kind: SpanKind.INTERNAL,
-                links: agentActivationLinks(turn),
-                root: turn.caller === undefined || turn.caller.isRemote === true,
-                startTime: turn.startTimeMs,
-              },
-              parentContext,
-            );
-          const span = input.idGenerator.withSpanId(turn.context.spanId, () =>
-            input.idGenerator.withTraceId(turn.context.traceId, startSpan),
-          );
-          setAgentInvocationUsage(span, turn.modelUsage);
-          span.addEvent("turn.started", undefined, turn.startTimeMs);
-          if (turn.terminal !== undefined) {
-            span.setAttribute(
-              "agent.turn.outcome",
-              turn.terminal.type === "turn.completed"
-                ? "completed"
-                : turn.terminal.type === "turn.cancelled"
-                  ? "cancelled"
-                  : "failed",
-            );
-            span.addEvent(turn.terminal.type);
-            if (turn.terminal.type === "turn.failed") {
-              recordError(span, turn.terminal.error);
-            }
-          }
-          span.end();
-        }
-        await input.stateStore.deleteTurn(event.sessionId, event.turnId);
+      if (event.outcome === "failed") {
+        await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
+          ...turn,
+          terminal: turn.terminal ?? { error: event.error, type: "turn.failed" },
+        }));
       }
+      await endTurn(event.sessionId, event.turnId);
     }
-    // `session.waiting` is not terminal — the session may resume with a new
-    // turn that still needs its metadata — so only release session-scoped
-    // state on terminal transitions.
-    if (event.type === "session.completed" || event.type === "session.failed") {
-      await tools.deleteForSession(event.sessionId);
-      await input.stateStore.deleteSession(event.sessionId);
-    }
+    await tools.deleteForSession(event.sessionId);
+    await input.stateStore.deleteSession(event.sessionId);
   };
 
   const onModelCallStarted = (
@@ -548,14 +550,10 @@ export function createAgentOtelInstrumentation(
         "model.call.completed": onModelCallTerminal,
         "model.call.failed": onModelCallTerminal,
         "model.call.started": onModelCallStarted,
-        "session.completed": onSessionTransition,
-        "session.failed": onSessionTransition,
+        "session.ended": onSessionEnded,
         "session.started": onSessionStarted,
-        "session.waiting": onSessionTransition,
         ...tools.events,
-        "turn.cancelled": onTurnTerminal,
-        "turn.completed": onTurnTerminal,
-        "turn.failed": onTurnTerminal,
+        "turn.settled": onTurnSettled,
         "turn.started": onTurnStarted,
       },
       name: "eve.otel",

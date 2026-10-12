@@ -12,8 +12,8 @@ import {
 import type {
   InstrumentationAttemptScope,
   InstrumentationExecutionOperation,
-  InstrumentationToolCallStartedEvent,
-  InstrumentationToolCallTerminalEvent,
+  InstrumentationCallRequestedEvent,
+  InstrumentationCallSettledEvent,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute, textContentAttribute } from "#tracing/agent-otel-content.js";
@@ -33,14 +33,14 @@ interface ToolSpanState {
   readonly attemptId: string;
   context: Context;
   readonly additionalAttributes: Attributes;
-  readonly event: InstrumentationToolCallStartedEvent;
+  readonly event: InstrumentationCallRequestedEvent;
   readonly fallbackParent: Context;
   readonly idempotencyKey: string;
   readonly spanId: string;
   readonly startTimeMs: number;
   finished?: true;
   span?: Span;
-  terminal?: InstrumentationToolCallTerminalEvent;
+  terminal?: InstrumentationCallSettledEvent;
   pendingError?: { readonly error: unknown; readonly errorType?: string };
   correlated?: true;
 }
@@ -61,9 +61,8 @@ interface AgentToolInstrumentation {
   contextFor(attemptId: string, idempotencyKey: string): Context | undefined;
   drain(attemptId: string, failure?: { readonly error: unknown }): void;
   readonly events: {
-    readonly "tool.call.completed": (event: InstrumentationToolCallTerminalEvent) => Promise<void>;
-    readonly "tool.call.failed": (event: InstrumentationToolCallTerminalEvent) => Promise<void>;
-    readonly "tool.call.started": (event: InstrumentationToolCallStartedEvent) => Promise<void>;
+    readonly "call.requested": (event: InstrumentationCallRequestedEvent) => Promise<void>;
+    readonly "call.settled": (event: InstrumentationCallSettledEvent) => Promise<void>;
   };
   runInContext<T>(
     operation: Extract<InstrumentationExecutionOperation, { type: "tool.call" }>,
@@ -76,13 +75,13 @@ interface AgentToolInstrumentation {
 export function createAgentToolInstrumentation(input: {
   readonly frameworkVersion: string;
   readonly resolveTraceContext: (
-    event: InstrumentationToolCallStartedEvent,
+    event: InstrumentationCallRequestedEvent,
   ) => SpanContext | undefined | PromiseLike<SpanContext | undefined>;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly recordInputs: boolean;
   readonly recordOutputs: boolean;
   readonly resolveFallback: (
-    event: InstrumentationToolCallStartedEvent,
+    event: InstrumentationCallRequestedEvent,
   ) => { readonly context: Context; readonly spanContext: SpanContext } | undefined;
   readonly tracer: Tracer;
   readonly stateStore: AgentTraceStateStore;
@@ -112,7 +111,7 @@ export function createAgentToolInstrumentation(input: {
     };
   }
 
-  async function onDispatchStarted(event: InstrumentationToolCallStartedEvent): Promise<void> {
+  async function onDispatchStarted(event: InstrumentationCallRequestedEvent): Promise<void> {
     const traceContext = await input.resolveTraceContext(event);
     if (traceContext === undefined || !isSampledTrace(traceContext)) return;
     const existing = await input.stateStore.getAction(event.idempotencyKey);
@@ -153,21 +152,19 @@ export function createAgentToolInstrumentation(input: {
     }
   }
 
-  async function onDispatchTerminal(event: InstrumentationToolCallTerminalEvent): Promise<void> {
+  async function onDispatchTerminal(event: InstrumentationCallSettledEvent): Promise<void> {
     const state = await input.stateStore.getAction(event.idempotencyKey);
     if (state === undefined) return;
     try {
       const span = startDispatchSpan(state);
-      const outcome = event.outcome ?? (event.type === "tool.call.failed" ? "failed" : "completed");
+      const { outcome } = event;
       span.setAttribute(
         "agent.action.outcome",
-        state.toolFailed === true && outcome === "completed" ? "failed" : outcome,
+        state.toolFailed === true && outcome === "completed" ? "failed" : actionOutcome(outcome),
       );
       if (event.usage !== undefined) setAgentUsage(span, event.usage);
-      if (event.type === "tool.call.failed") {
+      if (outcome !== "completed") {
         recordToolError(span, event.error, event.errorCode);
-      } else if (event.output.type === "error") {
-        recordToolError(span, event.output.error);
       } else if (state.toolFailed === true) {
         recordToolError(
           span,
@@ -177,7 +174,7 @@ export function createAgentToolInstrumentation(input: {
             : undefined,
         );
       } else if (input.recordOutputs) {
-        const result = contentAttribute(event.output.output);
+        const result = contentAttribute(event.output);
         if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
       }
       span.end(event.acceptedAtMs ?? state.toolEndTimeMs);
@@ -233,7 +230,7 @@ export function createAgentToolInstrumentation(input: {
     return span;
   }
 
-  const onStarted = async (event: InstrumentationToolCallStartedEvent): Promise<void> => {
+  const onStarted = async (event: InstrumentationCallRequestedEvent): Promise<void> => {
     if (byAttempt.get(event.scope.attemptId)?.has(event.idempotencyKey)) return;
     const actionKey = actionIdempotencyKey(event.scope.sessionId, event.scope.turnId, event.callId);
     const fallback = input.resolveFallback(event);
@@ -250,7 +247,7 @@ export function createAgentToolInstrumentation(input: {
     if (actionParent !== undefined) await correlate(state);
   };
 
-  const onTerminal = async (event: InstrumentationToolCallTerminalEvent): Promise<void> => {
+  const onTerminal = async (event: InstrumentationCallSettledEvent): Promise<void> => {
     const state = byAttempt.get(event.scope.attemptId)?.get(event.idempotencyKey);
     if (state === undefined) return;
     state.terminal = event;
@@ -298,9 +295,8 @@ export function createAgentToolInstrumentation(input: {
       byAttempt.delete(attemptId);
     },
     events: {
-      "tool.call.completed": onDispatchTerminal,
-      "tool.call.failed": onDispatchTerminal,
-      "tool.call.started": onDispatchStarted,
+      "call.requested": onDispatchStarted,
+      "call.settled": onDispatchTerminal,
     },
     async runInContext(operation, execute, recordOutputs) {
       if (operation.callId === undefined || operation.toolName === undefined) {
@@ -313,24 +309,28 @@ export function createAgentToolInstrumentation(input: {
         callId: operation.callId,
         toolName: operation.toolName,
         input: operation.input,
-        type: "tool.call.started",
+        type: "call.requested",
       });
       const state = byAttempt.get(operation.scope.attemptId)?.get(operation.idempotencyKey);
       const startedAtMs = operation.startedAtMs ?? Date.now();
       try {
         const result = await execute(state?.context);
         await onTerminal({
-          type: operation.failed ? "tool.call.failed" : "tool.call.completed",
+          type: "call.settled",
+          outcome: operation.failed ? "failed" : "completed",
           idempotencyKey: operation.idempotencyKey,
           scope: operation.scope,
           completedAtMs: operation.completedAtMs ?? Date.now(),
-          durationMs: (operation.completedAtMs ?? Date.now()) - startedAtMs,
-          output: { type: "result", output: recordOutputs ? result : undefined },
+          durationMs: operation.failed
+            ? undefined
+            : (operation.completedAtMs ?? Date.now()) - startedAtMs,
+          output: recordOutputs ? result : undefined,
         });
         return result;
       } catch (error) {
         await onTerminal({
-          type: "tool.call.failed",
+          type: "call.settled",
+          outcome: "failed",
           idempotencyKey: operation.idempotencyKey,
           scope: operation.scope,
           completedAtMs: Date.now(),
@@ -351,7 +351,7 @@ export function createAgentToolInstrumentation(input: {
   }
 
   function reserve(
-    event: InstrumentationToolCallStartedEvent,
+    event: InstrumentationCallRequestedEvent,
     actionKey: string,
     parent: { readonly context: Context; readonly spanContext: SpanContext },
   ): ToolSpanState {
@@ -439,17 +439,9 @@ export function createAgentToolInstrumentation(input: {
       }),
     );
     const terminal = state.terminal;
-    const toolFailed =
-      state.pendingError !== undefined ||
-      terminal?.type === "tool.call.failed" ||
-      terminal?.output.type === "error";
-    const error =
-      state.pendingError?.error ??
-      (terminal?.type === "tool.call.failed"
-        ? terminal.error
-        : terminal?.output.type === "error"
-          ? terminal.output.error
-          : undefined);
+    const failed = terminal !== undefined && terminal.outcome !== "completed";
+    const toolFailed = state.pendingError !== undefined || failed;
+    const error = state.pendingError?.error ?? (failed ? terminal.error : undefined);
     const attributes: Attributes = {
       ...action.toolAttributes,
       ...(state.event.scope.functionId === undefined ||
@@ -462,9 +454,9 @@ export function createAgentToolInstrumentation(input: {
       ...(state.pendingError?.errorType === undefined
         ? undefined
         : { "error.type": state.pendingError.errorType }),
-      ...(terminal?.type === "tool.call.completed" && terminal.durationMs !== undefined
-        ? { "gen_ai.execute_tool.duration": terminal.durationMs / 1000 }
-        : undefined),
+      ...(terminal?.durationMs === undefined
+        ? undefined
+        : { "gen_ai.execute_tool.duration": terminal.durationMs / 1000 }),
     };
     await input.stateStore.setAction(
       actionIdempotencyKey(action.sessionId, action.turnId, action.callId),
@@ -494,17 +486,15 @@ export function createAgentToolInstrumentation(input: {
     state.finished = true;
     const terminal = state.terminal;
     // As `@ai-sdk/otel` records it: execute's own run time, in seconds, success or error.
-    if (terminal?.type === "tool.call.completed" && terminal.durationMs !== undefined) {
+    if (terminal?.durationMs !== undefined) {
       span.setAttribute("gen_ai.execute_tool.duration", terminal.durationMs / 1000);
     }
     if (failure !== undefined) {
       recordError(span, failure.error);
-    } else if (terminal?.type === "tool.call.failed") {
+    } else if (terminal !== undefined && terminal.outcome !== "completed") {
       recordError(span, terminal.error);
-    } else if (terminal?.output.type === "error") {
-      recordError(span, terminal.output.error);
     } else if (terminal !== undefined && input.recordOutputs) {
-      const result = contentAttribute(terminal.output.output);
+      const result = contentAttribute(terminal.output);
       if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
     }
     span.end(terminal?.completedAtMs);
@@ -519,7 +509,7 @@ export function createAgentToolInstrumentation(input: {
   }
 }
 
-function toolAttributes(event: InstrumentationToolCallStartedEvent): Attributes {
+function toolAttributes(event: InstrumentationCallRequestedEvent): Attributes {
   return {
     "agent.tool.is_framework": event.frameworkTool === true,
     ...(event.scope.functionId === undefined
@@ -536,6 +526,11 @@ function toolAttributes(event: InstrumentationToolCallStartedEvent): Attributes 
       sessionId: event.scope.sessionId,
     }),
   };
+}
+
+/** The outcome a span reports: trace schema 4 says `cancelled` for a call the stream interrupted. */
+function actionOutcome(outcome: InstrumentationCallSettledEvent["outcome"]): string {
+  return outcome === "interrupted" ? "cancelled" : outcome;
 }
 
 function contextFromSpanContext(spanContext: SpanContext): Context {

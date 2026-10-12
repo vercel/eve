@@ -9,7 +9,7 @@ import type { JsonValue } from "#shared/json.js";
 import type {
   InstrumentationAttemptScope,
   InstrumentationHandlerContext,
-  InstrumentationInputResolvedEvent,
+  InstrumentationInteractionSettledEvent,
 } from "#instrumentation/lifecycle.js";
 import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-instrumentation.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -47,26 +47,26 @@ describe("approval spans", () => {
     const ctx: InstrumentationHandlerContext = {
       state: { get: () => staged, set: (value) => (staged = value) },
     };
-    await approvals["input.requested"]!(
+    await approvals["interaction.opened"]!(
       {
         call: { callId: "call-1", name: "deploy" },
         idempotencyKey: "input:session-1:turn_1:interaction-1",
         kind: "approval",
         interactionId: "interaction-1",
         scope,
-        type: "input.requested",
+        type: "interaction.opened",
       },
       ctx,
     );
-    const resolved: InstrumentationInputResolvedEvent = {
+    const resolved: InstrumentationInteractionSettledEvent = {
       idempotencyKey: "input:session-1:turn_1:interaction-1",
       kind: "approval",
       outcome,
       interactionId: "interaction-1",
       scope,
-      type: "input.resolved",
+      type: "interaction.settled",
     };
-    await approvals["input.resolved"]!(resolved, ctx);
+    await approvals["interaction.settled"]!(resolved, ctx);
 
     const [span] = exporter.getFinishedSpans();
     expect(span?.attributes).toMatchObject({
