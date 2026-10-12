@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { closedTaskCard, nextSegment, taskCardView, workingTaskNames } from "#channel/task-card.js";
+import { taskCards, workingTaskNames } from "#channel/task-card.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -54,7 +54,7 @@ const settled = (callId: string, output: JsonValue): SessionEvent => ({
 });
 
 describe("task cards read from the server's tables", () => {
-  it("shows a turn's tasks and actions, a task's request, and how each ended", () => {
+  it("holds a turn's own calls, blocked while a task asks someone, until its tasks end", () => {
     const working = serverView([
       ...opening,
       [requested("plan", "plan"), requested("research", "researcher", "agent")],
@@ -71,21 +71,13 @@ describe("task cards read from the server's tables", () => {
         },
       ],
     ]);
-    const card = taskCardView(working, turnId, { audience: "private" });
-    expect(card.state).toBe("blocked");
-    expect(card.actions.map((action) => [action.id, action.status])).toEqual([
-      ["plan", "completed"],
+    const [card] = taskCards(working, turnId, "private");
+    expect(card?.state).toBe("blocked");
+    expect(card?.calls.map((row) => [row.callId, row.taskId])).toEqual([
+      ["plan", undefined],
+      ["research", "t_1"],
     ]);
-    expect(card.tasks[0]).toMatchObject({
-      blockedOn: { kind: "input", label: "Which region?" },
-      id: "research",
-      kind: "agent",
-      status: "blocked",
-      taskId: "t_1",
-    });
-    expect(taskCardView(working, turnId, { audience: "public" }).tasks[0]?.blockedOn).toEqual({
-      kind: "input",
-    });
+    expect(card?.audience).toBe("private");
     expect(workingTaskNames(working, turnId)).toEqual(["researcher"]);
 
     // The turn settles while its task works; the card keeps its rows until the task ends.
@@ -99,14 +91,12 @@ describe("task cards read from the server's tables", () => {
       [settled("research", { message: "Use us-east. It is closest." })],
       [{ data: { outcome: "completed", taskId: "t_1" }, type: "task.ended" }],
     ]);
-    const done = taskCardView(finished, turnId, { audience: "private" });
-    expect(done.state).toBe("finished");
-    expect(done.actions.map((action) => action.id)).toEqual(["plan"]);
-    expect(done.tasks[0]).toMatchObject({ status: "completed", summary: "Use us-east." });
-    expect(done.tasks[0]?.settledAt).toBe("2026-10-13T00:00:07.000Z");
+    const [done] = taskCards(finished, turnId, "private");
+    expect(done?.state).toBe("finished");
+    expect(done?.calls.map((row) => row.callId)).toEqual(["plan", "research"]);
   });
 
-  it("ends a card whose tasks all settled when the turn starts another, carrying working calls", () => {
+  it("starts a new card for a task begun after the card's tasks ended, with calls still working", () => {
     const view = serverView([
       ...opening,
       [requested("first", "researcher", "agent"), requested("watch", "watch")],
@@ -115,20 +105,25 @@ describe("task cards read from the server's tables", () => {
       [requested("second", "researcher", "agent")],
       [...startsTask("second", "t_2", "researcher")],
     ]);
-    const card = taskCardView(view, turnId, { audience: "private" });
-    const closed = closedTaskCard({
-      ...card,
-      actions: card.actions,
-      tasks: card.tasks.filter((task) => task.id !== "second"),
-    });
-    expect(closed?.state).toBe("finished");
-    expect(closed?.tasks.map((task) => task.id)).toEqual(["first"]);
-    expect(closed?.actions).toEqual([]);
+    const cards = taskCards(view, turnId, "private");
+    expect(cards.map((card) => [card.since, card.state])).toEqual([
+      [0, "finished"],
+      [5, "working"],
+    ]);
+    expect(cards[0]?.calls.map((row) => row.callId)).toEqual(["first"]);
+    // `watch` was still working when the next card began, so it moved there.
+    expect(cards[1]?.calls.map((row) => row.callId)).toEqual(["watch", "second"]);
+  });
 
-    const segment = nextSegment(view, turnId, "second");
-    expect(segment.carried).toEqual(["watch"]);
-    const next = taskCardView(view, turnId, { audience: "private", segment });
-    expect(next.tasks.map((task) => task.id)).toEqual(["second"]);
-    expect(next.actions.map((action) => action.id)).toEqual(["watch"]);
+  it("keeps one card while an earlier task still works, and for one that ends in the same line", () => {
+    const view = serverView([
+      ...opening,
+      [requested("first", "researcher", "agent")],
+      [...startsTask("first", "t_1", "researcher")],
+      [settled("first", "Found it."), requested("second", "researcher", "agent")],
+      [...startsTask("second", "t_2", "researcher"), requested("third", "researcher", "agent")],
+      [...startsTask("third", "t_3", "researcher")],
+    ]);
+    expect(taskCards(view, turnId, "private").map((card) => card.calls.length)).toEqual([3]);
   });
 });

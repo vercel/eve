@@ -1,4 +1,8 @@
-import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type {
+  ChannelEventContext,
+  ChannelEventOf,
+  CommittedLine,
+} from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
@@ -596,6 +600,11 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  */
 export type SlackChannelInternalEvents = {
   readonly [T in SlackRenderedEvent]?: SlackEventHandler<T>;
+} & {
+  readonly committed?: (
+    line: CommittedLine,
+    ctx: Parameters<SlackEventHandler<"turn.started">>[1],
+  ) => void | Promise<void>;
 };
 
 export type SlackApprovalChannel = "direct-message" | "thread";

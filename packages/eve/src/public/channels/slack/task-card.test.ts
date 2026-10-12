@@ -9,7 +9,7 @@ import { renderDefaultSlackTaskCard, withTaskCards } from "./task-card.js";
 const turnId = "turn_0";
 const scope = { runId: "run_0", turnId };
 
-function harness() {
+function harness(audience: "private" | "public" = "private") {
   const requests: { method: string; body: Record<string, unknown> }[] = [];
   const channel = {
     slack: {
@@ -18,10 +18,7 @@ function harness() {
         return { ok: true, ts: method === "chat.postMessage" ? `ts_${requests.length}` : body.ts };
       },
     },
-    state: { audience: "private", channelId: "C1", taskCards: {}, threadTs: "1.0" } as Record<
-      string,
-      unknown
-    >,
+    state: { audience, channelId: "C1", taskCards: {}, threadTs: "1.0" } as Record<string, unknown>,
   };
   const view = emptySessionView();
   let position = 0;
@@ -31,13 +28,8 @@ function harness() {
     foldLine(view, { at: `2026-10-13T00:00:${String(10 + position)}.000Z`, facts }, position, {
       retention: "operational",
     });
+    await events.committed?.({ facts, position }, { channel, view } as never);
     position += 1;
-    for (const fact of facts) {
-      const handler = (events as Record<string, unknown>)[fact.type] as
-        | ((event: unknown, ctx: unknown) => Promise<void>)
-        | undefined;
-      await handler?.(fact, { channel, view });
-    }
     return view;
   }
   return { channel, commit, requests };
@@ -118,5 +110,38 @@ describe("Slack task cards", () => {
     expect(posts).toHaveLength(2);
     expect(JSON.stringify(posts[1]?.body.blocks)).not.toContain("c_1");
     expect(JSON.stringify(posts[1]?.body.blocks)).toContain("c_2");
+  });
+
+  it("names what a blocked task asks only in a private conversation", async () => {
+    const asked = async (audience: "private" | "public") => {
+      const { commit, requests } = harness(audience);
+      await commit(
+        { data: {}, type: "session.started" },
+        { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
+      );
+      await commit(
+        { data: { cause: { deliveryId: "d_0" }, follows: null, turnId }, type: "turn.started" },
+        { data: { owner: { turnId }, runId: "run_0" }, scope, type: "model.requested" },
+      );
+      await commit(
+        requested("c_1"),
+        ...started("c_1", "t_1"),
+        requested("c_2"),
+        ...started("c_2", "t_2"),
+      );
+      await commit({
+        data: {
+          interactionId: "ask_1",
+          request: { kind: "question", prompt: "Which region?" },
+          subject: { taskId: "t_1" },
+        },
+        type: "interaction.opened",
+      });
+      return JSON.stringify(requests.at(-1)?.body.blocks);
+    };
+    expect(await asked("private")).toContain("Waiting for a response: Which region?");
+    const shared = await asked("public");
+    expect(shared).toContain("Waiting for a response");
+    expect(shared).not.toContain("Which region?");
   });
 });

@@ -211,6 +211,11 @@ export type Waiting =
  * interaction; the line that makes a model call necessary requests the run; and every call
  * another run serves names its task when it starts.
  */
+export function waiting(view: SessionView, turnId: string): Waiting | undefined;
+export function waiting(
+  view: SessionView,
+  of: { readonly taskId: string } | { readonly callId: string },
+): Extract<Waiting, { readonly on: "person" }> | undefined;
 export function waiting(
   view: SessionView,
   of: string | { readonly taskId: string } | { readonly callId: string },
