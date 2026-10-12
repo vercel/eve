@@ -538,9 +538,7 @@ export class ConversationTranscript {
     const live = part.state === "streaming" && working;
     const id = `${part.type}:${part.id ?? `${message.id}:${index}`}`;
     return this.#memoize(id, [body, live], () =>
-      part.type === "text"
-        ? { kind: "assistant", body, live }
-        : { kind: "reasoning", body, collapsed: false, live },
+      part.type === "text" ? { kind: "assistant", body, live } : { kind: "reasoning", body, live },
     );
   }
 
