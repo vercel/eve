@@ -13,20 +13,14 @@ export default defineEval({
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "first-call".');
     const session = parked.session;
-    session.requireInputRequest({ toolName: "guarded-echo" });
+    session.requireInteraction({ toolName: "guarded-echo" });
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
 
     const approved = await session.respondAll("approve");
     approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          toolName: "guarded-echo",
-          output: new RegExp(GUARDED_ECHO_TOKEN),
-        },
-        status: "completed",
-      },
+    approved.calledTool("guarded-echo", {
+      output: new RegExp(GUARDED_ECHO_TOKEN),
+      status: "completed",
       count: 1,
     });
 

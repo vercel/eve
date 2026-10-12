@@ -29,25 +29,28 @@ export default defineEval({
     const request = approvalFor(await session.send(SAY.publish, asAlice), "publish-draft");
 
     const signing = await session.respond(answers("approve", request), asAlice);
-    expectResolved(signing, request, "approved");
+    expectResolved(signing, request, "accepted");
     expectHeld(signing);
-    signing.event("authorization.required", { count: 1, data: { principalId: ALICE } });
-    signing.notEvent("action.result", { data: { status: "completed" } });
+    signing.event("interaction.opened", {
+      count: 1,
+      data: { audience: { principalIds: [ALICE] }, request: { kind: "sign-in" } },
+    });
+    signing.notEvent("call.settled", { data: { outcome: "completed" } });
     const authorization = authorizationFrom(signing);
 
     const startIndex = session.state.streamIndex;
     await completeAuthorization(authorization.url);
     const resumed = (await follow(t, session, startIndex)).expectOk();
-    resumed.event("authorization.completed", {
+    resumed.event("interaction.settled", {
       count: 1,
-      data: { attemptId: authorization.attemptId, outcome: "authorized" },
+      data: { interactionId: authorization.attemptId, outcome: "accepted" },
     });
-    resumed.notEvent("input.requested");
+    resumed.notEvent("interaction.opened");
     resumed.calledTool("publish-draft", {
       status: "completed",
       output: { actor: ALICE, publications: 1 },
       count: 1,
     });
-    resumed.event("message.completed", { data: { message: /^Publish: done / } });
+    resumed.event("content.completed", { data: { phase: "reply", value: /^Publish: done / } });
   },
 });

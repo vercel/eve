@@ -1,3 +1,4 @@
+import { publicViewOf } from "#protocol/session-projection.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindSessionParticipants } from "#execution/participants.js";
@@ -7,6 +8,13 @@ import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import { runStep } from "#context/run-step.js";
+import { sessionProvider } from "#context/providers/session.js";
+import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
+import { sandboxProvider } from "#context/providers/sandbox.js";
+import {
+  drainDynamicInstructionUserMessages,
+  prepareDynamicInstructionPreamble,
+} from "#context/dynamic-instruction-lifecycle.js";
 import {
   AuthKey,
   ScheduleIdKey,
@@ -15,6 +23,9 @@ import {
   InitiatorAuthKey,
   SessionTitleKey,
   ParentSessionKey,
+  SandboxKey,
+  SessionPredecessorKey,
+  SessionKey,
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
@@ -38,12 +49,14 @@ import {
 import {
   currentProjection,
   enterSessionProjection,
+  nextLinePosition,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
 import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
 import { matchSignIns } from "#harness/session-machine/transitions.js";
+import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
 import type {
   DurableStepResult,
@@ -53,6 +66,11 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
+import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
+import { getAdapterKind } from "#channel/adapter.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
+import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
@@ -75,6 +93,7 @@ import {
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { waitsOnPerson } from "#execution/session/pending-turn-state.js";
 
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -121,7 +140,7 @@ async function runSessionStepBody(
 
   let durableSession = readDurableSession(input.sessionState);
   // An `execute` run's delegated spend counts in the step that hands the model its result.
-  for (const usage of runtimeResults?.delegatedUsage ?? []) {
+  for (const usage of Object.values(runtimeResults?.delegatedUsage ?? {})) {
     durableSession = countRunUsage(durableSession, usage);
   }
   const ctx = await deserializeContext(input.serializedContext);
@@ -193,7 +212,7 @@ async function runSessionStepBody(
           .requester
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
-  const initialSession: HarnessSession = {
+  let initialSession: HarnessSession = {
     ...hydrateDurableSession({
       compactionOverrides: {
         thresholdPercent: effectiveAgent.thresholdPercent,
@@ -290,34 +309,47 @@ async function runSessionStepBody(
       participants,
       publisher,
     });
-    const handleEvent: HandleEventFn = async (event, messages) => {
-      if (event.type === "compaction.completed") compacted = true;
-      await emitTurnEvent(event, messages);
+    const handleEvent: HandleEventFn = async (publication, messages) => {
+      const completesCompaction = eventsOf(publication).some(
+        (event) =>
+          event.type === "context.settled" &&
+          event.data.kind === "compaction" &&
+          event.data.outcome === "completed",
+      );
+      if (completesCompaction) compacted = true;
+      await emitTurnEvent(publication, messages);
     };
     const previousAdapterState =
       delivery !== undefined && !startedBetweenTurns
         ? structuredClone(adapterCtx.state)
         : undefined;
     // Run the adapter's deliver hook for each queued payload and coalesce
-    // the resulting StepInput values; runtime results ride the same input.
-    let resolved: StepInput | undefined;
+    // the resulting HarnessStepInput values; runtime results ride the same input.
+    let resolved: HarnessStepInput | undefined;
+    let admission: DeliveryAdmission | undefined;
     if (delivery !== undefined) {
-      const results: StepInput[] = [];
+      const delivered: { payload: DeliverPayload; input: HarnessStepInput | undefined }[] = [];
       try {
         for (const payload of delivery.payloads) {
           const result = adapter.deliver
             ? await adapter.deliver(payload, adapterCtx)
             : defaultDeliverResult(payload);
-
-          if (result !== undefined && result !== null) {
-            results.push(result);
-          }
+          delivered.push({ input: result ?? undefined, payload });
         }
       } catch (error) {
         await failChannelDeliveries(error);
         throw error;
       }
+      const results = delivered.flatMap(({ input }) => (input === undefined ? [] : [input]));
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+      admission = admitDeliveries({
+        channelKind: getAdapterKind(adapter),
+        delivery: rawDelivery ?? delivery,
+        admitted: (deliveryId) =>
+          publicViewOf(currentProjection(ctx)).deliveries[deliveryId] !== undefined,
+        payloads: delivered,
+        position: nextLinePosition(ctx),
+      });
     }
     // A delivery without auth acts as the session's current identity, so
     // only a delivery that names its sender can be answered by someone else.
@@ -362,11 +394,22 @@ async function runSessionStepBody(
         ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
       }
     }
+    if (resolved !== undefined && admission !== undefined && admission.consumed.length > 0) {
+      resolved = {
+        ...resolved,
+        deliveries: admission.consumed,
+        responseBindings: [...(resolved.responseBindings ?? []), ...admission.responseBindings],
+      };
+    }
     if (runtimeResults !== undefined) {
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {
         ctx.set(RuntimeActionSettlementTimesKey, runtimeResults.acceptedAtMsByCallId);
       }
-      resolved = { ...resolved, runtimeActionResults: runtimeResults.results };
+      resolved = {
+        ...resolved,
+        delegatedUsage: runtimeResults.delegatedUsage,
+        runtimeActionResults: runtimeResults.results,
+      };
     }
 
     if (rawDelivery !== undefined) {
@@ -374,7 +417,65 @@ async function runSessionStepBody(
       setChannelContext(ctx, updatedAdapter);
     }
 
+    /** Whether the admission changed the session: its history or its sandbox. */
+    let admissionChangedSession = false;
+    /** The admission commit: the session's start if it hasn't, then each delivery admitted. */
+    const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
+      if (admission === undefined || admission.facts.length === 0) return;
+      const facts: SessionEvent[] = [];
+      if (!turnPosition(currentProjection(ctx)).sessionStarted) {
+        const parent = ctx.get(ParentSessionKey);
+        const predecessor = ctx.get(SessionPredecessorKey);
+        const data: {
+          -readonly [
+            K in keyof FactOf<"session.started">["data"]
+          ]: FactOf<"session.started">["data"][K];
+        } = { runtime };
+        if (parent !== undefined) {
+          data.parent = { callId: parent.callId, sessionId: parent.sessionId };
+        }
+        if (predecessor !== undefined) data.predecessor = predecessor;
+        facts.push({ data, type: "session.started" });
+      }
+      // The admission commits before the step's framework context exists, and its hooks read
+      // the session (`ctx.session`) like every other commit's. The session's start resolves
+      // its dynamic connections into a registry, which the step's own scope rebuilds and
+      // rehydrates, and its dynamic skills write their files to the sandbox, whose state the
+      // step's scope resumes.
+      const created = sessionProvider.create(ctx, initialSession);
+      ctx.setVirtualContext(SessionKey, created.value);
+      const registry = await connectionProvider.create(ctx, initialSession);
+      if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
+      const sandbox = await sandboxProvider.create(ctx, initialSession);
+      if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.value);
+      // A user-role instruction the session's start resolves enters history ahead of the turn's
+      // input, as it would from the turn's own preamble.
+      prepareDynamicInstructionPreamble(ctx, history.initial.messages);
+      try {
+        await contextStorage.run(ctx, () => handleEvent([...facts, ...admission.facts]));
+      } finally {
+        const instructions = drainDynamicInstructionUserMessages(ctx);
+        if (instructions.length > 0) {
+          admissionChangedSession = true;
+          initialSession = {
+            ...initialSession,
+            history: validateHarnessModelMessages([...initialSession.history, ...instructions]),
+          };
+        }
+        if (sandbox !== undefined) {
+          const sandboxState = await sandbox.value.captureState();
+          if (
+            JSON.stringify(sandboxState) !== JSON.stringify(initialSession.sandboxState ?? null)
+          ) {
+            admissionChangedSession = true;
+            initialSession = { ...initialSession, sandboxState };
+          }
+        }
+      }
+    };
+
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
+      await publishAdmission(buildRuntimeIdentity(effectiveNode));
       await contextStorage.run(ctx, () =>
         instrumentation?.instrumentChannelDelivery({
           ctx,
@@ -389,7 +490,7 @@ async function runSessionStepBody(
       );
       const nextSerializedContext = serializeContext(ctx);
       const nextValues =
-        aliased === initialSession
+        aliased === initialSession && !admissionChangedSession
           ? { history: input.history, sessionState: input.sessionState }
           : createDurableSessionValues(aliased);
 
@@ -422,13 +523,20 @@ async function runSessionStepBody(
       throw error;
     }
 
+    try {
+      await publishAdmission(runtimeIdentity);
+    } catch (error) {
+      await failChannelDeliveries(error);
+      throw error;
+    }
+
     const modelCallsPerStep =
       bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
     const capabilities = ctx.get(CapabilitiesKey);
 
     const runHarnessStep = async (
       lifecycleSession: HarnessSession,
-      stepInput: StepInput | undefined,
+      stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const refreshedSession = refreshSessionFromTurnAgent({
@@ -446,6 +554,7 @@ async function runSessionStepBody(
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
+        controlDelivery: input.input?.controlDelivery,
         createRuntime: createWorkflowRuntime,
         handleEvent,
         participants,
@@ -508,7 +617,10 @@ async function runSessionStepBody(
               firstCall && completedAuths !== undefined
                 ? completedAuths.map(({ challenge }) => challenge)
                 : undefined;
-            return runHarnessStep(schemaSession, stepInput, completions);
+            const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
+            // Only the step knows whether it stopped for a person; the tables say who.
+            await publisher.finish({ announce: stoppedForPerson(harnessResult, ctx) });
+            return harnessResult;
           });
           // The waiting boundary may reach the client before this step returns.
           // Its settled result wins over a cancellation of that completed turn.
@@ -551,4 +663,20 @@ async function runSessionStepBody(
   } finally {
     publisher.writer.release();
   }
+}
+
+/**
+ * The step stopped for a person: it says so, or it stopped with nothing of its own to wait on
+ * while the session waits on someone, as when a message steered past what the turn still asks.
+ */
+function stoppedForPerson(
+  result: StepResult,
+  ctx: Parameters<typeof currentProjection>[0],
+): boolean {
+  if (result.held !== undefined) return result.held.kind === "request";
+  return (
+    result.next === null &&
+    result.settledTurn === undefined &&
+    waitsOnPerson(result.session, currentProjection(ctx))
+  );
 }

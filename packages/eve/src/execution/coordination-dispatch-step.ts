@@ -17,12 +17,16 @@ import {
   captureAgentSessionContext,
   resolveStepAgentLimits,
 } from "#execution/agent-sessions/context.js";
-import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { startTask } from "#harness/session-machine/transitions.js";
+import { startTask, type TaskCallStart } from "#harness/session-machine/transitions.js";
+import { publicViewOf } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { callSettledFrom, callStarted } from "#harness/call-facts.js";
+import { copyView, foldLine } from "#protocol/session-projection/fold.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
 export async function dispatchCoordinationStep(
   input: CoordinationDispatchInput,
@@ -49,8 +53,14 @@ async function dispatchCoordination(
   const { batch, session } = prepared;
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
-  const started: TaskStartedStreamEvent["data"][] = [];
+  const started: TaskCallStart[] = [];
+  const refused: SessionEvent[] = [];
+  const executing: SessionEvent[] = [];
   const agentLimits = resolveStepAgentLimits(prepared);
+  // Prospective facts for this admission batch use the same fold as committed facts. This
+  // shadow is never saved: limits count work actually started earlier in the batch without
+  // introducing a private lifecycle counter or treating undispatched intents as queued work.
+  const admissionView = copyView(publicViewOf(storedProjection(session.state)));
 
   for (const task of prepared.plan) {
     const start = {
@@ -65,12 +75,37 @@ async function dispatchCoordination(
       session: nextSession,
       task,
     };
-    const dispatched = await dispatchWorkflowCall(start);
+    const dispatched = await dispatchWorkflowCall(start, admissionView);
     nextSession = dispatched.session;
     if (dispatched.result !== undefined) results.push(dispatched.result);
-    if (dispatched.started !== undefined) started.push(dispatched.started);
+    // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
+    else if (task.entry.entryPoint === "execute") executing.push(callStarted(task.callId));
+    if (dispatched.started !== undefined) {
+      started.push(dispatched.started);
+      const shadow = sessionView(
+        { ...storedProjection(nextSession.state), view: admissionView },
+        nextSession.state,
+      );
+      foldLine(
+        admissionView,
+        { at: new Date().toISOString(), facts: startTask(shadow, dispatched.started).events },
+        admissionView.position,
+      );
+    }
+    if (dispatched.refusal !== undefined && dispatched.result !== undefined)
+      refused.push(
+        callSettledFrom(dispatched.result, {
+          rejected: true,
+          cause: { policy: dispatched.refusal },
+          scope: { turnId: batch.event.turnId },
+        }),
+      );
   }
 
+  const view = sessionView(storedProjection(nextSession.state), nextSession.state);
+  // One introduction per task in this commit, based on the public table and this batch's
+  // pending facts, not the private runtime address (which can exist before publication).
+  const introducedTasks = new Set(Object.keys(publicViewOf(view.projection).tasks));
   const published = await publishSessionEvents(
     {
       serializedContext: input.serializedContext,
@@ -80,10 +115,11 @@ async function dispatchCoordination(
           : createDurableSessionState({ session: nextSession }),
       sessionWritable: input.sessionWritable,
     },
-    started.flatMap(
-      (task) =>
-        startTask(sessionView(storedProjection(nextSession.state), nextSession.state), task).events,
-    ),
+    [
+      ...executing,
+      ...started.flatMap((task) => startTask(view, task, introducedTasks).events),
+      ...refused,
+    ],
   );
   return { results, ...published };
 }
@@ -92,10 +128,14 @@ async function dispatchCoordination(
  * Starts the run the call's entry point names, or sends a call with `taskId`
  * to the running `serve` task it names.
  */
-async function dispatchWorkflowCall(start: StartWorkflowTaskInput): Promise<{
+async function dispatchWorkflowCall(
+  start: StartWorkflowTaskInput,
+  admissionView: SessionView,
+): Promise<{
   readonly result?: RuntimeActionResult;
   readonly session: HarnessSessionBase;
-  readonly started?: TaskStartedStreamEvent["data"];
+  readonly started?: TaskCallStart;
+  readonly refusal?: "task-limit" | "task-unavailable";
 }> {
   const { entry } = start.task;
   switch (entry.entryPoint) {
@@ -103,8 +143,8 @@ async function dispatchWorkflowCall(start: StartWorkflowTaskInput): Promise<{
       return await startWorkflowTask(start);
     case "task":
     case "serve":
-      return await startTaskRun({ ...start, entry });
+      return await startTaskRun({ ...start, entry }, admissionView);
     case "receive":
-      return await sendToTask({ ...start, taskId: entry.taskId });
+      return await sendToTask({ ...start, taskId: entry.taskId }, admissionView);
   }
 }

@@ -1,15 +1,20 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 
-import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
+import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
-import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type {
   RuntimeSubagentChildResult,
   RuntimeSubagentDispatchFailure,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
+import type {
+  InteractionOpenedData,
+  InteractionSettledData,
+} from "#protocol/session-events/families/interaction.js";
+import type { ResponseOutcome } from "#protocol/session-events/families/response.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -164,7 +169,7 @@ export interface TurnCaller {
 /**
  * Base deliver payload crossing the runtime boundary.
  *
- * The runtime reads {@link message} and {@link inputResponses} for delivery
+ * The runtime reads {@link message} and {@link answers} for delivery
  * coalescing. Adapters extend this interface with their own typed fields (e.g.
  * Slack adapters add `interaction`) and receive the extended type through the
  * generic payload on their `deliver` hook.
@@ -174,7 +179,7 @@ export interface TurnCaller {
  * attachments and other multimodal input straight to the harness.
  */
 export interface DeliverPayload {
-  readonly inputResponses?: readonly InputResponse[];
+  readonly answers?: readonly Answer[];
   readonly message?: string | UserContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
@@ -201,13 +206,37 @@ export type SessionCommand =
       readonly requestId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
-  | {
+  | ({
       readonly kind: "cancel";
       readonly turnId?: string;
-    }
-  | { readonly kind: "compact" }
-  | { readonly kind: "clear" }
-  | { readonly kind: "reset"; readonly reason?: string };
+    } & SessionControlIdentity)
+  | ({ readonly kind: "compact" } & SessionControlIdentity)
+  | ({ readonly kind: "clear" } & SessionControlIdentity)
+  | ({ readonly kind: "reset"; readonly reason?: string } & SessionControlIdentity);
+
+/**
+ * A control is a delivery: its id, and who sent it, so the facts it causes name it. Both are
+ * optional for callers that predate them; such a control changes the session without a delivery.
+ */
+export interface SessionControlIdentity {
+  readonly deliveryId?: string;
+  readonly auth?: SessionAuthContext | null;
+}
+
+/** Who sends a control, so the delivery it arrives as names them. */
+export interface SessionControlOptions {
+  readonly auth?: SessionAuthContext | null;
+}
+
+/** A control command as one delivery: a fresh id, and the sender when known. */
+export function controlCommand<
+  TCommand extends { readonly kind: "cancel" | "clear" | "compact" | "reset" },
+>(command: TCommand, options?: SessionControlOptions): TCommand & SessionControlIdentity {
+  const deliveryId = crypto.randomUUID();
+  return options?.auth === undefined
+    ? { ...command, deliveryId }
+    : { ...command, auth: options.auth, deliveryId };
+}
 
 export type SessionSendCommandResult =
   | { readonly status: "accepted"; readonly sessionId: string; readonly deliveryId?: string }
@@ -307,71 +336,74 @@ export interface RuntimeActionResultHookPayload {
 }
 
 /**
- * Event coordinates attached to a proxied `input.requested` batch.
- *
- * Mirrors the `data` payload of the child's `input.requested` stream event so
- * the parent re-emits the same semantics without inventing new identifiers.
+ * A change to an interaction a delegated child session or workflow run owns, relayed to the
+ * session that serves it and keyed by the asker's ids: a request it opened, how it settled one,
+ * or how it settled an answer this session forwarded. The serving session mirrors each in its own
+ * stream; the asker's stream stays its own. An opened request names its origin from the asker's
+ * side: the asker, its interaction, and the call it asks about.
  */
-export interface SubagentInputRequestEvent {
-  readonly requests: readonly InputRequest[];
-  readonly sequence: number;
-  readonly stepIndex: number;
-  /** The task that asks, when a task's run forwards the request. */
-  readonly taskId?: string;
-  readonly turnId: string;
-}
+export type RelayedInteractionEvent =
+  | {
+      readonly type: "interaction.opened";
+      readonly data: InteractionOpenedData;
+    }
+  | {
+      readonly type: "interaction.settled";
+      readonly data: InteractionSettledData;
+    }
+  | {
+      readonly type: "response.admitted";
+      readonly data: RelayedResponseAdmission;
+    }
+  | {
+      readonly type: "response.settled";
+      readonly data: RelayedResponseSettlement;
+    };
 
 /**
- * Proxy payload sent from a child subagent to its parent when the child parks
- * on a pending input batch.
- *
- * Runtime-internal. Channel adapters and authored code never observe this
- * kind: it exists only on the durable hook between the subagent adapter's
- * `input.requested` handler and the parent's runtime loop.
+ * An asker admitted an answer it was forwarded: it stands, revisable, while the rest of its batch
+ * waits. Which interaction, and the delivery the asker received it in.
  */
-export interface SubagentInputRequestHookPayload {
+export interface RelayedResponseAdmission {
+  readonly interactionId: string;
+  /** The delivery the asker received the answer in, when it kept the forwarder's id. */
+  readonly deliveryId?: string;
+}
+
+/** How an asker settled an answer: which interaction, from which delivery, and how. */
+export interface RelayedResponseSettlement {
+  readonly interactionId: string;
+  /** The delivery the asker received the answer in, when it kept the forwarder's id. */
+  readonly deliveryId?: string;
+  readonly outcome: ResponseOutcome;
+  readonly reason?: string;
+}
+
+/** Where answers to a relayed request go: the asker's hook, inbox, and the source it reads. */
+export interface RelayRoute {
+  readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
+  /** Independent source when several requests share an answer destination. */
+  readonly inputSource?: string;
   readonly remote?: import("#eve-channel/support.js").RemoteAgentBinding & {
     readonly sessionId: string;
   };
-  /** Independent source when several requests share an answer destination. */
-  readonly inputSource?: string;
-  readonly callId: string;
-  readonly childContinuationToken: string;
-  readonly childSessionId: string;
-  readonly childSessionInbox?: SessionInboxAddress;
-  readonly event: SubagentInputRequestEvent;
-  readonly kind: "subagent-input-request";
-  readonly subagentName: string;
 }
 
 /**
- * Lifecycle event forwarded from a delegated child: responder and sign-in progress, and the
- * resolution of its requests. The parent relays it unchanged.
+ * Interaction facts one commit of a child session (or a workflow run) changed, relayed up to the
+ * session that serves it: the requests it opened together, or one other fact. Runtime-internal:
+ * channel adapters and authored code never observe this kind. `route` comes with requests a
+ * person answers.
  */
-export type SubagentAuthorizationEvent = Extract<
-  UnstampedMessageStreamEvent,
-  {
-    type:
-      | "approval.candidate"
-      | "approval.settled"
-      | "authorization.required"
-      | "authorization.completed"
-      | "input.resolved";
-  }
->;
-
-/**
- * Proxy payload sent from a child subagent while it waits for authorization.
- *
- * Runtime-internal. The parent re-emits the unchanged event through its own
- * channel; the authorization callback continues to target the child directly.
- */
-export interface SubagentAuthorizationEventHookPayload {
+export interface SubagentInteractionHookPayload {
+  readonly kind: "subagent-interaction";
+  /** The serving session's call that delegated to the asker. */
   readonly callId: string;
   readonly childSessionId: string;
-  readonly event: SubagentAuthorizationEvent;
-  readonly kind: "subagent-authorization-event";
   readonly subagentName: string;
+  readonly events: readonly RelayedInteractionEvent[];
+  readonly route?: RelayRoute;
 }
 
 /**
@@ -383,8 +415,7 @@ export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
-  | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload;
+  | SubagentInteractionHookPayload;
 
 /**
  * Initial caller callback attached to a delegated session at creation.
@@ -491,8 +522,11 @@ export interface RunInput {
    * caller for their own turn.
    */
   readonly callback?: SessionCallback;
-  /** Set when {@link callback} belongs to a remote agent protocol 1 caller. */
-  readonly legacyRemoteAgentCaller?: LegacyRemoteAgentCaller;
+  /**
+   * Set when {@link callback} belongs to a caller on an earlier remote agent protocol. The session
+   * reports its result to that caller, but relays none of its requests.
+   */
+  readonly earlierCallerProtocol?: number;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * add a continuation address during the first turn via
@@ -569,7 +603,7 @@ export interface DeliverInput {
 /**
  * Terminal outcome of a runtime run.
  *
- * The durable event stream's `session.completed` / `session.failed`
+ * The durable event stream's `session.ended`
  * events report terminal state on the workflow runtime.
  */
 export type RunResult =
@@ -583,7 +617,7 @@ export type RunResult =
  * Carries the identifiers needed for stream endpoints.
  */
 export interface RunHandle {
-  readonly events: ReadableStream<MessageStreamEvent>;
+  readonly events: ReadableStream<SessionStreamEvent>;
   /**
    * Runtime-owned identifier for this session. Stream and inspection APIs
    * key on it: workflow-backed runs expose the workflow run id.
@@ -648,7 +682,17 @@ export interface Runtime {
   getEventStream(
     sessionId: string,
     options?: GetEventStreamOptions,
-  ): Promise<ReadableStream<MessageStreamEvent>>;
+  ): Promise<ReadableStream<SessionStreamEvent>>;
+
+  /**
+   * Returns a session's stored lines from `options.startIndex`, one parsed record per line: a
+   * commit (`{at, facts}`) or a progress record (`{progress}`). A line's position is its index,
+   * counting every line, including ones this version can't read. Backs the HTTP stream route.
+   */
+  getLineStream(
+    sessionId: string,
+    options?: GetEventStreamOptions,
+  ): Promise<ReadableStream<unknown>>;
 
   /**
    * Resolves the durable tail of a session's event stream: the zero-based
@@ -657,6 +701,15 @@ export interface Runtime {
    * live stream.
    */
   getStreamTailIndex(sessionId: string): Promise<number>;
+
+  /**
+   * Reads where a remote child of `sessionId` runs, from the private record the parent wrote
+   * before linking it. Only the parent's stream proxy reads it.
+   */
+  readChildBinding?(
+    sessionId: string,
+    childSessionId: string,
+  ): Promise<RemoteChildBinding | undefined>;
 }
 
 /**

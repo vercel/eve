@@ -8,6 +8,7 @@ export {
   disableTool,
   isDisabledToolSentinel,
   type ToolLabelDefinition,
+  type ToolApproval,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,
@@ -32,7 +33,9 @@ export {
   toolResultFrom,
   type MatchedConnectionResult,
   type MatchedToolResult,
+  type SettledCallRow,
   type ToolResultFromFn,
+  type ToolResultSource,
 } from "#public/tools/result.js";
 
 export {
@@ -52,8 +55,4 @@ export {
   type AgentSession,
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
-export type {
-  ToolInputRequest,
-  ToolInputRequestOptions,
-  ToolInputResponse,
-} from "#tools/definition.js";
+export type { ToolQuestion, ToolAskOptions, ToolAnswer } from "#tools/definition.js";

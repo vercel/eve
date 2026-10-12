@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelOperations, type ChannelSource } from "#channel/channel-operations.js";
 import type { Runtime } from "#channel/types.js";
-import { type InputResponse, parseInputResponses } from "#shared/input.js";
+import { type Answer, parseAnswers } from "#shared/input.js";
 
 function authoredChannelRespondTypeChecks(source: ChannelSource): void {
   const responseWithMetadata = {
     kind: "tool-approval",
     optionId: "approve",
-    requestId: "approval-1",
+    interactionId: "approval-1",
   } as const;
   const responsesWithMetadata = [responseWithMetadata] as const;
 
@@ -17,13 +17,11 @@ function authoredChannelRespondTypeChecks(source: ChannelSource): void {
   // @ts-expect-error exactness must survive a preassembled response array.
   void source.respond(responsesWithMetadata, { auth: null });
 
-  const widenedResponses: readonly InputResponse[] = responsesWithMetadata;
+  const widenedResponses: readonly Answer[] = responsesWithMetadata;
   // @ts-expect-error widened responses must be schema-validated before delivery.
   void source.respond(widenedResponses, { auth: null });
 
-  const validatedResponses = parseInputResponses([
-    { optionId: "approve", requestId: "approval-1" },
-  ]);
+  const validatedResponses = parseAnswers([{ optionId: "approve", interactionId: "approval-1" }]);
   void source.respond(validatedResponses, { auth: null });
 }
 
@@ -38,6 +36,7 @@ function createRuntime(): Runtime {
     }),
     dispatchSession: vi.fn(),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };
@@ -70,7 +69,7 @@ describe("createChannelOperations", () => {
       successor: expect.objectContaining({ title: "Support thread" }),
     });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
   });
@@ -84,7 +83,7 @@ describe("createChannelOperations", () => {
     });
 
     await from("C1:T1").send("hello", { auth: null, state: { responder: "U_AUTHOR" } });
-    await from("C1:T1").respond([{ optionId: "approve", requestId: "approval-1" }], {
+    await from("C1:T1").respond([{ optionId: "approve", interactionId: "approval-1" }], {
       auth: null,
       state: { responder: "U_APPROVER" },
     });
@@ -107,7 +106,7 @@ describe("createChannelOperations", () => {
         auth: null,
         kind: "send",
         payload: {
-          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+          answers: [{ optionId: "approve", interactionId: "approval-1" }],
           state: { responder: "U_APPROVER" },
         },
         requestId: undefined,
@@ -135,19 +134,19 @@ describe("createChannelOperations", () => {
     await source.reset({ reason: "fresh start" });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
-      command: { kind: "cancel", turnId: "turn_1" },
+      command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_1" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(2, {
-      command: { kind: "compact" },
+      command: { deliveryId: expect.any(String), kind: "compact" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(3, {
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(4, {
-      command: { kind: "reset", reason: "fresh start" },
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "fresh start" },
       continuationToken: "slack:C1:T1",
     });
   });
@@ -166,7 +165,7 @@ describe("createChannelOperations", () => {
 
     expect(runtime.resolveContinuation).toHaveBeenCalledWith("slack:C1:T1");
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_2",
     });
   });

@@ -1,7 +1,13 @@
+import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  requestBatchOf,
+  requestSettlementOf,
+  signInSettlementOf,
+} from "#channel/interaction-prompts.js";
+import { createLogger, formatErrorHint } from "#internal/logging.js";
 import {
   DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
   splitDiscordMessageContent,
@@ -10,7 +16,7 @@ import type {
   DiscordCommandInteraction,
   DiscordInteractionBase,
 } from "#public/channels/discord/inbound.js";
-import { renderInputRequestComponents } from "#public/channels/discord/hitl.js";
+import { renderInteractionComponents } from "#public/channels/discord/hitl.js";
 import type {
   DiscordChannelEvents,
   DiscordCommandResult,
@@ -61,29 +67,25 @@ export function defaultOnCommand(
 
 /** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
 export const defaultEvents: DiscordChannelEvents = {
-  async "turn.started"(_event, channel, _ctx) {
+  async "turn.started"(_event, { channel }) {
     await channel.discord.startTyping();
   },
 
-  async "authorization.completed"(event, channel, _ctx) {
-    if (event.outcome === "authorized") {
-      await channel.discord.startTyping();
-    }
-  },
-
-  async "actions.requested"(_event, channel, _ctx) {
+  async "call.requested"(_event, { channel }) {
     await channel.discord.startTyping();
   },
 
-  async "input.requested"(event, channel, _ctx) {
-    for (const request of event.requests) {
+  async "interaction.opened"({ data }, ctx) {
+    const { channel } = ctx;
+    const event = requestBatchOf(ctx.view, data);
+    for (const request of event?.requests ?? []) {
       const content = splitDiscordMessageContent(request.prompt)[0] ?? request.prompt;
-      const components = renderInputRequestComponents(request);
+      const components = renderInteractionComponents(request);
       const posted = await channel.discord.post({ components, content });
       if (components.length === 0 || !posted.id) continue;
       channel.state.hitlPrompts = {
         ...channel.state.hitlPrompts,
-        [request.requestId]: {
+        [request.interactionId]: {
           content,
           messageId: posted.id,
           options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
@@ -94,11 +96,17 @@ export const defaultEvents: DiscordChannelEvents = {
 
   // Covers every way a prompt ends: a press, a modal answer, or a withdrawal.
   // The bot token outlives the interaction token the prompt may have been posted with.
-  async "input.resolved"(event, channel, _ctx) {
-    for (const resolution of event.resolutions) {
-      const prompt = channel.state.hitlPrompts?.[resolution.requestId];
+  async "interaction.settled"({ data }, ctx) {
+    const { channel } = ctx;
+    if (signInSettlementOf(ctx.view, data)?.outcome === "accepted") {
+      await channel.discord.startTyping();
+      return;
+    }
+    const settled = requestSettlementOf(ctx.view, data);
+    for (const resolution of settled === undefined ? [] : [settled]) {
+      const prompt = channel.state.hitlPrompts?.[resolution.interactionId];
       if (prompt === undefined) continue;
-      const { [resolution.requestId]: _, ...rest } = channel.state.hitlPrompts ?? {};
+      const { [resolution.interactionId]: _, ...rest } = channel.state.hitlPrompts ?? {};
       channel.state.hitlPrompts = rest;
       const label = resolvedPromptLabel(resolution, prompt.options);
       const content = `${prompt.content}\n\n${label}`.slice(0, DISCORD_MESSAGE_CONTENT_MAX_LENGTH);
@@ -110,24 +118,29 @@ export const defaultEvents: DiscordChannelEvents = {
         );
         if (!response.ok) {
           log.warn("Discord answered prompt edit failed", {
-            requestId: resolution.requestId,
+            requestId: resolution.interactionId,
             status: response.status,
           });
         }
       } catch (error) {
-        log.warn("Discord answered prompt edit failed", { error, requestId: resolution.requestId });
+        log.warn("Discord answered prompt edit failed", {
+          error,
+          requestId: resolution.interactionId,
+        });
       }
     }
   },
 
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
-    await channel.discord.post(event.message);
+  async "content.completed"({ data }, { channel }) {
+    const text = replyTextOf(data);
+    if (text === undefined) return;
+    await channel.discord.post(text);
   },
 
-  async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "session.ended"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.discord.post(
       [
         `This session could not recover from an error${hint}.`,
@@ -138,10 +151,10 @@ export const defaultEvents: DiscordChannelEvents = {
     );
   },
 
-  async "turn.failed"(event, channel, _ctx) {
-    if (event.terminal) return;
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "turn.settled"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.discord.post(
       [
         `I hit an error while handling your request${hint}.`,

@@ -1,9 +1,10 @@
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import type { SessionStateMap, StepInput } from "#harness/types.js";
+import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
+import type { JsonObject } from "#shared/json.js";
 
 // Execution state the session machine keeps between steps. Lifecycle facts (whether a turn is
 // open, whether a request is answered, how a call ended) are the projection's; this holds only
@@ -18,6 +19,13 @@ export interface StepCoordinates {
   readonly turnId: string;
 }
 
+/** A call that needs a person's approval, and what they're asked. */
+export interface ApprovalAsk {
+  readonly interactionId: string;
+  readonly call: { readonly callId: string; readonly toolName: string; readonly input: JsonObject };
+  readonly request: InteractionRequest;
+}
+
 /**
  * A model step whose calls can't all settle yet: some await an approval, others the runtime.
  * Its response stays out of history until every call it made has a result there, so a call
@@ -28,12 +36,12 @@ export interface SuspendedStep {
   /** The withheld response. Results join it as they arrive. */
   readonly messages: readonly ModelMessage[];
   /** Approvals the step still waits on. */
-  readonly requests: readonly InputRequest[];
+  readonly requests: readonly ApprovalAsk[];
   /**
    * Calls a person approved that haven't run. They run when the turn next calls the model, after
    * its step starts and its budget allows it, as calls the model makes do.
    */
-  readonly approved?: readonly InputRequest[];
+  readonly approved?: readonly ApprovalAsk[];
   /** Workflow and agent calls the runtime runs for the step. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
@@ -43,7 +51,7 @@ export interface SuspendedStep {
 
 export interface TurnState {
   /** Input that arrived before it could run: a partial answer, or input behind a policy pass. */
-  readonly queued?: StepInput;
+  readonly queued?: HarnessStepInput;
   readonly suspended: readonly SuspendedStep[];
   /** Approval keys a `once()` approval granted for the rest of the session. */
   readonly grants: readonly string[];

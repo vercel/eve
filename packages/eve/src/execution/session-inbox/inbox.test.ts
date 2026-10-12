@@ -333,7 +333,7 @@ describe("createSessionInbox", () => {
     expect(hookTokens(inbox)).toEqual(["stable", "channel"]);
     expect(createHookMock).toHaveBeenCalledTimes(2);
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionId: "session-1" },
+      metadata: { inboxVersion: 27, sessionId: "session-1" },
       token: sessionInboxHookToken("stable"),
     });
     await inbox.dispose();

@@ -34,6 +34,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     clear: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     reset: vi.fn().mockResolvedValue({ previousSessionId: "wrun_A", status: "reset" }),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     ...overrides,
   };
@@ -413,7 +414,7 @@ describe("eve ID-addressed session routes", () => {
     const response = await route("POST", "/eve/v1/session")(
       new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({
-          inputResponses: [{ optionId: "approve", requestId: "request_1" }],
+          answers: [{ optionId: "approve", requestId: "request_1" }],
         }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -423,7 +424,7 @@ describe("eve ID-addressed session routes", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "'inputResponses' is only accepted for an existing session.",
+      error: "'answers' is only accepted for an existing session.",
       ok: false,
     });
     expect(createSession).not.toHaveBeenCalled();
@@ -520,7 +521,7 @@ describe("eve ID-addressed session routes", () => {
     expect(session[operation]).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards the turn guard without changing the response", async () => {
+  it("forwards the turn guard and the caller without changing the response", async () => {
     const session = createFixedSession();
     const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
       new Request("https://eve.test/eve/v1/session/wrun_A/cancel", {
@@ -530,7 +531,10 @@ describe("eve ID-addressed session routes", () => {
       createArgs(session),
     );
 
-    expect(session.cancel).toHaveBeenCalledWith({ turnId: "turn_1" });
+    expect(session.cancel).toHaveBeenCalledWith({
+      auth: expect.objectContaining({ principalId: "anonymous", principalType: "anonymous" }),
+      turnId: "turn_1",
+    });
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
       ok: true,

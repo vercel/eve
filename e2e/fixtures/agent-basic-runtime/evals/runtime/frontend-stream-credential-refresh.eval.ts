@@ -1,4 +1,4 @@
-import { EveAgentStore, defaultMessageReducer } from "eve/client";
+import { EveAgentStore } from "eve/client";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -16,7 +16,6 @@ export default defineEval({
     const store = new EveAgentStore({
       host,
       initialSession: session.state,
-      reducer: defaultMessageReducer(),
     });
 
     globalThis.fetch = async (input, init) => {

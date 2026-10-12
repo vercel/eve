@@ -14,36 +14,49 @@ export default defineEval({
   async test(t) {
     const drafted = await t.send("WORKFLOW-PLAN-START");
     drafted.expectOk();
-    drafted.calledTool("revise_plan", {
-      count: 1,
-      output: /^Started task revise_plan-\w{6}\. .* call revise_plan again with taskId/u,
-    });
+    // The model reads a receipt naming the task; the call settles with the task's reply.
+    drafted.calledTool("revise_plan", { count: 1, output: { revisions: ["draft"] } });
     drafted.messageIncludes('WORKFLOW-PLAN-RESULT {"revisions":["draft"]}');
 
     const revised = await drafted.session.send("WORKFLOW-PLAN-REVISE");
     revised.expectOk();
-    revised.calledTool("revise_plan", { count: 2, output: /^Sent to task revise_plan-\w{6}\. /u });
+    // Both calls reach the task by its id: the held one is interrupted, the final one completes.
+    for (const status of ["interrupted", "completed"] as const) {
+      revised.calledTool("revise_plan", {
+        count: 1,
+        input: { taskId: /^revise_plan-\w{6}$/u },
+        status,
+      });
+    }
     revised.calledTool("eve__task_wait", { output: /^Stopped waiting after/u });
     revised.calledTool("eve__task_cancel", {
       count: 1,
       output: /^Stopped revise_plan-\w{6}'s current work;/u,
     });
-    revised.event("task.settled", { count: 1, data: { callId: "plan-hold", status: "cancelled" } });
-    revised.event("task.settled", {
+    revised.event("call.settled", {
+      count: 1,
+      data: { callId: "plan-hold", outcome: "interrupted" },
+    });
+    revised.event("call.settled", {
       count: 1,
       data: {
         callId: "plan-final",
         output: { revisions: ["draft", "final"] },
-        status: "completed",
+        outcome: "completed",
       },
     });
     revised.messageIncludes('WORKFLOW-PLAN-RESULT {"revisions":["draft","final"]}');
 
     t.eventsSatisfy("every call reaches the one task the draft started", (events) => {
-      const taskIds = events.flatMap((event) =>
+      const started = events.flatMap((event) =>
         event.type === "task.started" ? [event.data.taskId] : [],
       );
-      return taskIds.length === 3 && new Set(taskIds).size === 1;
+      const reached = events.flatMap((event) =>
+        event.type === "call.started" && event.data.taskId !== undefined ? [event.data.taskId] : [],
+      );
+      return (
+        started.length === 1 && reached.length === 3 && reached.every((id) => id === started[0])
+      );
     });
     t.noFailedActions();
   },

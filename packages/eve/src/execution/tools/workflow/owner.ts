@@ -2,7 +2,7 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunRequestMessage,
-  WorkflowToolAuthorizationRequest,
+  WorkflowToolRelay,
 } from "#execution/tools/workflow/messages.js";
 import {
   createChannelReader,
@@ -45,8 +45,8 @@ export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
 }
 
 /** Acknowledge only step-owned events, after delivery or deliberate discard. */
-export async function deliverWorkflowAuthorization(
-  message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolAuthorizationRequest },
+export async function deliverWorkflowRelay(
+  message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolRelay },
   deliver: () => Promise<void>,
 ): Promise<void> {
   await deliver();

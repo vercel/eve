@@ -1,14 +1,14 @@
-import { renderTextInputRequest } from "#channel/resolve-text.js";
-import type { InputRequest } from "#shared/input.js";
+import { renderTextInteraction } from "#channel/resolve-text.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import type { JsonObject } from "#shared/json.js";
 
 /** Renders eve input requests as one user-visible Linear elicitation body. */
-export function renderLinearInputRequests(requests: readonly InputRequest[]): string {
-  return requests.map(renderLinearInputRequest).join("\n\n");
+export function renderLinearInteractions(requests: readonly AskedInteraction[]): string {
+  return requests.map(renderLinearInteraction).join("\n\n");
 }
 
 /** Builds native Linear select metadata for a single input request with options. */
-export function linearInputRequestSignal(requests: readonly InputRequest[]): {
+export function linearInteractionSignal(requests: readonly AskedInteraction[]): {
   readonly signal?: "select";
   readonly signalMetadata?: JsonObject;
 } {
@@ -26,8 +26,8 @@ export function linearInputRequestSignal(requests: readonly InputRequest[]): {
   };
 }
 
-function renderLinearInputRequest(request: InputRequest): string {
-  const body = renderTextInputRequest(request);
+function renderLinearInteraction(request: AskedInteraction): string {
+  const body = renderTextInteraction(request);
   return request.allowFreeform === true
     ? `${body}\n\nYou can also reply with a custom answer.`
     : body;

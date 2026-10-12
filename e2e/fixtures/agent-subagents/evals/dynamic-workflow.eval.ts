@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const SUBAGENT_TOKEN = "SUBAGENT_TOKEN=echo-marker-9F2X";
@@ -26,11 +26,11 @@ export default defineEval({
     const parent = await session.start(
       "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through ctx.agent calls to echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
     );
-    const firstStarted = await parent.waitForEvent("agent.started", {
+    const firstStarted = await parent.waitForEvent("child.opened", {
       data: { name: "echo-marker" },
     });
     const firstChild = t.target.watchTurn(firstStarted.data.sessionId).result();
-    const secondStarted = await parent.waitForEvent("agent.started", {
+    const secondStarted = await parent.waitForEvent("child.opened", {
       data: {
         name: "echo-marker",
         sessionId: (sessionId) => sessionId !== firstStarted.data.sessionId,
@@ -45,7 +45,7 @@ export default defineEval({
     // Each child's own turn start, not the parent's `agent.started`: the parent
     // publishes that at its next step boundary, which can be after a quick child
     // finished.
-    const childStartedAt = (events: readonly MessageStreamEvent[]) =>
+    const childStartedAt = (events: readonly SessionStreamEvent[]) =>
       (events.find((event) => event.type === "turn.started") ?? events[0])!.meta.at;
     const latestCallAt = [
       childStartedAt(firstChildTurn.events),
@@ -56,16 +56,26 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
-    turn.event("agent.started", { count: 2, data: { name: "echo-marker" } });
+    turn.event("child.opened", { count: 2, data: { name: "echo-marker" } });
     firstChildTurn.eventsSatisfy(
       "first child does not complete before both children start",
       (events) =>
-        events.some((event) => event.type === "turn.completed" && event.meta.at > latestCallAt),
+        events.some(
+          (event) =>
+            event.type === "turn.settled" &&
+            event.data.outcome === "completed" &&
+            event.meta.at > latestCallAt,
+        ),
     );
     secondChildTurn.eventsSatisfy(
       "second child does not complete before both children start",
       (events) =>
-        events.some((event) => event.type === "turn.completed" && event.meta.at > latestCallAt),
+        events.some(
+          (event) =>
+            event.type === "turn.settled" &&
+            event.data.outcome === "completed" &&
+            event.meta.at > latestCallAt,
+        ),
     );
     firstChildTurn.messageIncludes(SUBAGENT_TOKEN);
     secondChildTurn.messageIncludes(SUBAGENT_TOKEN);

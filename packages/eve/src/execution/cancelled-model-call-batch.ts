@@ -7,7 +7,7 @@ import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
 import { appliedSession, saveSessionProjection } from "#harness/session-machine/current.js";
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
@@ -29,7 +29,7 @@ export interface CompletedModelCallCheckpoint {
 async function cancelledWithoutCheckpoint(
   ctx: ContextContainer,
   initial: HarnessSession,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
 ): Promise<HarnessSession> {
   const applied = appliedSession<HarnessSession>(ctx);
   let session = applied ?? initial;
@@ -57,7 +57,7 @@ async function cancelledWithoutCheckpoint(
   return await contextStorage.run(ctx, () => preserveCancelledTurnMessage(session, preserved));
 }
 
-function hasFileParts(message: StepInput["message"]): boolean {
+function hasFileParts(message: HarnessStepInput["message"]): boolean {
   return Array.isArray(message) && message.some((part) => part.type === "file");
 }
 
@@ -67,7 +67,7 @@ export async function createCancelledModelCallBatchResult(input: {
   readonly checkpoint: CompletedModelCallCheckpoint | undefined;
   readonly ctx: ContextContainer;
   readonly initialSession: HarnessSession;
-  readonly stepInput: StepInput | undefined;
+  readonly stepInput: HarnessStepInput | undefined;
 }): Promise<DurableStepResult> {
   const interruptedContext = serializeContext(input.ctx);
   // Without a completed call, the batch keeps what its last call applied before the cut, such as

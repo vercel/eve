@@ -141,7 +141,7 @@ export interface ConnectionAuthorizationContext {
  * 1. **`getToken`-only**: the runtime probes {@link getToken} per
  *    tool invocation. Throwing
  *    {@link ConnectionAuthorizationRequiredError} emits a
- *    `authorization.required` event; the workflow does
+ *    sign-in `interaction.opened` event; the workflow does
  *    not suspend on a webhook. Works for both `"app"` and `"user"`
  *    principal types.
  * 2. **Full interactive OAuth**: all three methods provided. The
@@ -306,7 +306,7 @@ export interface NonInteractiveAuthorizationDefinition extends AuthorizationDefi
    * tool invocation. Throw
    * {@link ConnectionAuthorizationRequiredError} to signal that the
    * user must complete authorization out of band; the runtime emits
-   * `authorization.required` and does not suspend on a
+   * sign-in `interaction.opened` and does not suspend on a
    * webhook.
    */
   getToken(opts: {
@@ -340,7 +340,7 @@ export interface InteractiveAuthorizationDefinition<
    * a {@link TokenResult} lets the tool run. Throwing
    * {@link ConnectionAuthorizationRequiredError} signals that the
    * user must complete an authorization flow; the runtime emits a
-   * `authorization.required` event and suspends the turn
+   * sign-in `interaction.opened` event and suspends the turn
    * on a framework-owned webhook while it runs
    * {@link startAuthorization}.
    */
@@ -352,7 +352,7 @@ export interface InteractiveAuthorizationDefinition<
   /**
    * Start an authorization flow. Invoked inside a durable step after the
    * runtime mints a framework-owned callback URL. Returns the user-facing
-   * `challenge` (forwarded verbatim on `authorization.required`) and an
+   * `challenge` (forwarded verbatim on sign-in `interaction.opened`) and an
    * optional serializable `resume` value (e.g. a PKCE verifier) that the
    * runtime journals and hands back to {@link completeAuthorization} when
    * the callback URL receives the provider redirect. Omit `resume` when

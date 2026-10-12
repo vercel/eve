@@ -56,8 +56,8 @@ export default defineEval({
     const previousSessionId = initial.sessionId!;
 
     const initialTurn = await t.target.watchTurn(previousSessionId).result();
-    initialTurn.notEvent("turn.failed");
-    initialTurn.notEvent("session.failed");
+    initialTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    initialTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     initialTurn.messageIncludes(/RESET-INITIAL-OK/i);
 
     const reset = await postJson<ResetResponse>(t.target, `/threads/${threadId}/new`, {});
@@ -96,8 +96,8 @@ export default defineEval({
     );
 
     const replacementTurn = await t.target.watchTurn(replacement.sessionId!).result();
-    replacementTurn.notEvent("turn.failed");
-    replacementTurn.notEvent("session.failed");
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     replacementTurn.messageIncludes(/RESET-REPLACEMENT-OK/i);
 
     t.succeeded();

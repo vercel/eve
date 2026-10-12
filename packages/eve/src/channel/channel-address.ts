@@ -20,7 +20,8 @@ import type {
   SessionCommand,
   TurnPolicy,
 } from "#channel/types.js";
-import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
+import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 
 interface BaseChannelAddressDeliveryOptions {
@@ -50,13 +51,15 @@ interface ChannelAddress<TState = undefined> {
     options: ChannelAddressDeliveryOptions<TState>,
   ): Promise<Session>;
   respond(
-    inputResponses: SendPayload["inputResponses"],
+    answers: SendPayload["answers"],
     options: ChannelAddressDeliveryOptions<TState>,
   ): Promise<Session>;
-  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
-  compact(): Promise<CompactSessionResult>;
-  clear(): Promise<ClearSessionResult>;
-  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
+  cancel(options?: { readonly turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
+  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
+  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
+  reset(
+    options?: { readonly reason?: string } & SessionControlOptions,
+  ): Promise<ResetSessionResult>;
   resolveSession(): Promise<Session | undefined>;
 }
 
@@ -139,9 +142,9 @@ export function createChannelAddress<TState = undefined>(input: {
         successor: runInput,
       });
       if (result.status === "accepted") return toSession(result.sessionId);
-      if (payload.inputResponses && payload.inputResponses.length > 0) {
+      if (payload.answers && payload.answers.length > 0) {
         throw new Error(
-          "Cannot deliver inputResponses — the target session was not found via continuation token.",
+          "Cannot deliver answers — the target session was not found via continuation token.",
         );
       }
       return toSession((await input.runtime.createSession(runInput)).sessionId);
@@ -149,33 +152,33 @@ export function createChannelAddress<TState = undefined>(input: {
     async send(message, options) {
       return await this.deliver({ message }, options);
     },
-    async respond(inputResponses, options) {
-      if (inputResponses === undefined || inputResponses.length === 0) {
-        throw new Error("respond() requires at least one input response.");
+    async respond(answers, options) {
+      if (answers === undefined || answers.length === 0) {
+        throw new Error("respond() requires at least one answer.");
       }
-      return await this.deliver({ inputResponses }, options);
+      return await this.deliver({ answers }, options);
     },
     async cancel(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "cancel", turnId: options?.turnId },
+        command: controlCommand({ kind: "cancel", turnId: options?.turnId }, options),
         continuationToken: namespacedToken,
       });
     },
-    async compact() {
+    async compact(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "compact" },
+        command: controlCommand({ kind: "compact" }, options),
         continuationToken: namespacedToken,
       });
     },
-    async clear() {
+    async clear(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "clear" },
+        command: controlCommand({ kind: "clear" }, options),
         continuationToken: namespacedToken,
       });
     },
     async reset(options) {
       return await input.runtime.dispatchContinuation({
-        command: { kind: "reset", reason: options?.reason },
+        command: controlCommand({ kind: "reset", reason: options?.reason }, options),
         continuationToken: namespacedToken,
       });
     },

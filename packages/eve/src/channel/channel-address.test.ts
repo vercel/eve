@@ -9,6 +9,7 @@ function createRuntime(): Runtime {
     dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
     dispatchSession: vi.fn(),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };
@@ -58,7 +59,7 @@ describe("createChannelAddress", () => {
     expect(runtime.resolveContinuation).not.toHaveBeenCalled();
     expect(runtime.createSession).not.toHaveBeenCalled();
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
   });
@@ -75,7 +76,7 @@ describe("createChannelAddress", () => {
 
     await address.send("queued", { auth: null });
     await address.send("replace", { auth: null, turnPolicy: "steer" });
-    await address.respond([{ optionId: "yes", requestId: "input-1" }], { auth: null });
+    await address.respond([{ optionId: "yes", interactionId: "input-1" }], { auth: null });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(
       1,
@@ -138,19 +139,19 @@ describe("createChannelAddress", () => {
     await address.reset({ reason: "fresh start" });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
-      command: { kind: "cancel", turnId: "turn_1" },
+      command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_1" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(2, {
-      command: { kind: "compact" },
+      command: { deliveryId: expect.any(String), kind: "compact" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(3, {
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(4, {
-      command: { kind: "reset", reason: "fresh start" },
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "fresh start" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.resolveContinuation).not.toHaveBeenCalled();
@@ -171,7 +172,7 @@ describe("createChannelAddress", () => {
 
     expect(runtime.resolveContinuation).toHaveBeenCalledWith("slack:C1:T1");
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_2",
     });
   });

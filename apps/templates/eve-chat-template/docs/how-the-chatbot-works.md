@@ -338,12 +338,13 @@ For every event:
 3. Yield it to `useEveAgent`.
 4. Stop if the event settles the turn.
 
-A turn is considered settled when `apps/web/lib/chat/events.ts` sees one of:
+A turn is considered settled when `apps/web/lib/chat/events.ts` sees an event that
+`endsTurn` from `eve/client` reports:
 
 ```ts
-session.completed;
-session.failed;
-session.waiting;
+turn.settled; // the turn ended
+session.ended; // the session ended
+turn.paused; // awaiting a person, such as a sign-in
 ```
 
 The stream reader retries a few times for transient stream-open failures:
@@ -514,19 +515,19 @@ snapshot catches up.
 
 ## Authorization Flow For Connections
 
-Connections are not string-parsed from assistant text. eve emits structured
-authorization events.
+Connections are not string-parsed from assistant text. eve opens a structured
+sign-in interaction.
 
 When a connection requires auth, eve emits:
 
 ```txt
-authorization.required
+interaction.opened   (request.kind: "sign-in")
 ```
 
 `getPendingAuthorizations(displayEvents)` scans the current event log:
 
-- add a pending authorization for each `authorization.required`
-- remove it when a matching `authorization.completed` appears
+- add a pending authorization for each sign-in `interaction.opened`
+- remove it when a matching `interaction.settled` appears
 
 For each pending authorization, the UI renders `ConnectionAuthorizationPrompt`.
 
@@ -555,8 +556,8 @@ Skip is a local way to end the authorization wait without connecting the service
 `handleSkipAuthorization`:
 
 1. Stops the current agent stream.
-2. Creates an `authorization.completed` event with outcome `declined`.
-3. Creates a local `session.waiting` event.
+2. Creates a local `interaction.settled` event with outcome `declined`.
+3. Creates a local `turn.settled` event with outcome `cancelled`.
 4. Applies those events to the persisted browser session.
 5. Saves them through `skipChatAuthorizationAction`.
 6. Clears pending user message state.
@@ -843,7 +844,7 @@ looked complete", inspect these pieces first:
 - whether two events were written to the same local `eventIndex`
 - whether `preserveKnownInitialEvents` duplicated or dropped a prefix
 - whether `pendingUserMessage` was left on the chat row after a settled event
-- whether the eve stream ended with `session.waiting` before the UI expected it
+- whether the eve stream ended its turn (`turn.settled`) before the UI expected it
 - whether a local optimistic message was cleared before the real user event
   appeared
 
@@ -875,7 +876,7 @@ To add another Vercel Connect-backed MCP connection:
 8. Verify auth-required events render correctly.
 
 Do not parse assistant text to detect auth requirements. Rely on
-`authorization.required` and `authorization.completed` events.
+sign-in `interaction.opened` and `interaction.settled` events.
 
 ## Adding A New Channel
 

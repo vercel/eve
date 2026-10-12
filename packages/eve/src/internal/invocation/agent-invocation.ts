@@ -1,13 +1,35 @@
-import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
-import type { InputRequest } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 
-export interface AgentInvocationAuthorizationRequest {
-  readonly authorization?: ConnectionAuthorizationChallenge;
-  readonly description: string;
-  readonly name: string;
-  readonly webhookUrl?: string;
+/**
+ * An open interaction as an invocation reports it, under its `interactionId`: what the person is
+ * asked, the call it's about, and a sign-in's challenge. Its own shape, so the MCP contract
+ * changes only when this does.
+ */
+export interface AgentInvocationInteraction {
+  readonly kind: string;
+  readonly prompt: string;
+  readonly title?: string;
+  readonly options?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly description?: string;
+  }[];
+  readonly allowFreeform?: boolean;
+  readonly display?: string;
+  readonly call?: { readonly callId: string; readonly name: string; readonly input?: JsonValue };
+  readonly signIn?: {
+    readonly name: string;
+    readonly displayName?: string;
+    readonly url?: string;
+    readonly userCode?: string;
+    readonly expiresAt?: string;
+    readonly instructions?: string;
+    readonly callbackUrl?: string;
+  };
 }
+
+/** Open interactions by `interactionId`. */
+export type AgentInvocationInteractions = Readonly<Record<string, AgentInvocationInteraction>>;
 
 interface AgentInvocationBase {
   readonly invocationId: string;
@@ -23,15 +45,13 @@ export type AgentInvocation =
     })
   | (AgentInvocationBase & {
       readonly status: "input_required";
-      readonly inputRequests: Readonly<Record<string, InputRequest>>;
+      readonly interactions: AgentInvocationInteractions;
       readonly result?: JsonValue;
     })
   | (AgentInvocationBase & {
       readonly status: "authorization_required";
-      readonly authorizations: readonly [
-        AgentInvocationAuthorizationRequest,
-        ...AgentInvocationAuthorizationRequest[],
-      ];
+      /** The sign-ins the task waits on, which complete elsewhere: polling sees them end. */
+      readonly interactions: AgentInvocationInteractions;
       readonly pollAfterMs: number;
       readonly result?: JsonValue;
     })

@@ -49,8 +49,13 @@ function context(
   };
 }
 
+/** What a `step.started` handler receives: the turn's request for a model run. */
 function event(turnId = "turn_1") {
-  return { type: "step.started", data: { turnId } };
+  return {
+    data: { owner: { turnId }, runId: "run_0" },
+    scope: { runId: "run_0", turnId },
+    type: "model.requested",
+  };
 }
 
 function decisionModel(choice = "openai/small", modelId = "fixture-decider") {

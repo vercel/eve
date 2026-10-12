@@ -139,10 +139,10 @@ describe("mcpChannel", () => {
             items: {
               properties: {
                 optionId: { type: "string" },
-                requestId: { type: "string" },
+                interactionId: { type: "string" },
                 text: { type: "string" },
               },
-              required: ["requestId"],
+              required: ["interactionId"],
             },
           },
         },
@@ -151,17 +151,17 @@ describe("mcpChannel", () => {
         oneOf: expect.arrayContaining([
           expect.objectContaining({
             properties: expect.objectContaining({
-              inputRequests: expect.any(Object),
+              interactions: expect.any(Object),
               status: { const: "input_required", type: "string" },
             }),
-            required: expect.arrayContaining(["inputRequests"]),
+            required: expect.arrayContaining(["interactions"]),
           }),
           expect.objectContaining({
             properties: expect.objectContaining({
-              authorizations: expect.objectContaining({ minItems: 1 }),
+              interactions: expect.any(Object),
               status: { const: "authorization_required", type: "string" },
             }),
-            required: expect.arrayContaining(["authorizations"]),
+            required: expect.arrayContaining(["interactions"]),
           }),
           expect.objectContaining({
             properties: expect.objectContaining({
@@ -255,7 +255,7 @@ describe("mcpChannel", () => {
         params: {
           arguments: {
             invocationId: "inv",
-            responses: [{ requestId: "r", text: "日".repeat(6 * 1_024) }],
+            responses: [{ interactionId: "r", text: "日".repeat(6 * 1_024) }],
           },
           name: "agent_update",
         },

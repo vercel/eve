@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  linearInputRequestSignal,
-  renderLinearInputRequests,
-} from "#public/channels/linear/hitl.js";
-import type { InputRequest } from "#shared/input.js";
+import { linearInteractionSignal, renderLinearInteractions } from "#public/channels/linear/hitl.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
 
-function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
+function makeRequest(overrides: Partial<AskedInteraction> = {}): AskedInteraction {
   return {
-    action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+    call: { callId: "call_1", input: {}, name: "ask_question" },
     prompt: "Approve deployment?",
-    requestId: "call_1",
+    interactionId: "call_1",
     ...overrides,
     kind: overrides.kind ?? "question",
   };
@@ -18,7 +15,7 @@ function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
 
 describe("Linear HITL helpers", () => {
   it("renders only user-visible input request text", () => {
-    const rendered = renderLinearInputRequests([
+    const rendered = renderLinearInteractions([
       makeRequest({
         options: [
           { id: "approve", label: "Approve" },
@@ -36,7 +33,7 @@ describe("Linear HITL helpers", () => {
 
   it("uses user-facing option IDs as native Linear select values", () => {
     expect(
-      linearInputRequestSignal([
+      linearInteractionSignal([
         makeRequest({
           allowFreeform: true,
           options: [
@@ -57,6 +54,6 @@ describe("Linear HITL helpers", () => {
   });
 
   it("does not emit a select signal for requests without options", () => {
-    expect(linearInputRequestSignal([makeRequest({ allowFreeform: true })])).toEqual({});
+    expect(linearInteractionSignal([makeRequest({ allowFreeform: true })])).toEqual({});
   });
 });

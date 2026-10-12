@@ -1,6 +1,6 @@
 import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
-import type { InputResolution } from "#protocol/message.js";
-import type { InputRequest } from "#shared/input.js";
+import { optionStyle, type RequestSettlement } from "#channel/interaction-prompts.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import type { CardChild } from "#compiled/chat/index.js";
 import { Actions, Button, Card, CardText } from "#compiled/chat/index.js";
 
@@ -13,13 +13,13 @@ const FREEFORM_HINT = "Reply with your answer.";
  * plus fallback text for adapters without cards (such as Photon iMessage). A
  * request in `resolved` shows its outcome in place of its buttons.
  */
-export function renderInputRequests(
-  requests: readonly InputRequest[],
+export function renderInteractions(
+  requests: readonly AskedInteraction[],
   inputActionPrefix: string,
-  resolved: Readonly<Record<string, InputResolution>> = {},
+  resolved: Readonly<Record<string, RequestSettlement>> = {},
 ) {
-  const outcome = (request: InputRequest) => {
-    const resolution = resolved[request.requestId];
+  const outcome = (request: AskedInteraction) => {
+    const resolution = resolved[request.interactionId];
     return resolution === undefined ? undefined : resolvedPromptLabel(resolution, request.options);
   };
   return {
@@ -27,7 +27,7 @@ export function renderInputRequests(
       children: requests.flatMap((request) => {
         const label = outcome(request);
         return label === undefined
-          ? renderInputRequest(request, inputActionPrefix)
+          ? renderInteraction(request, inputActionPrefix)
           : [CardText(request.prompt), CardText(label)];
       }),
     }),
@@ -35,7 +35,7 @@ export function renderInputRequests(
       .map((request) => {
         const label = outcome(request);
         return label === undefined
-          ? renderInputRequestText(request)
+          ? renderInteractionText(request)
           : `${request.prompt}\n\n${label}`;
       })
       .join("\n\n"),
@@ -43,7 +43,7 @@ export function renderInputRequests(
 }
 
 // The SDK's card fallback drops buttons, so the options are numbered instead.
-function renderInputRequestText(request: InputRequest): string {
+function renderInteractionText(request: AskedInteraction): string {
   const options = request.options ?? [];
   if (options.length === 0) return `${request.prompt}\n\n${FREEFORM_HINT}`;
   return [
@@ -60,16 +60,16 @@ function renderInputRequestText(request: InputRequest): string {
   ].join("\n");
 }
 
-function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
+function renderInteraction(request: AskedInteraction, inputActionPrefix: string) {
   const children: CardChild[] = [CardText(request.prompt)];
   if (request.options && request.options.length > 0) {
     children.push(
       Actions(
         request.options.map((option) =>
           Button({
-            id: encodeInputAction(inputActionPrefix, request.requestId, option.id),
+            id: encodeInputAction(inputActionPrefix, request.interactionId, option.id),
             label: option.label,
-            style: option.style,
+            style: optionStyle(option),
             value: option.id,
           }),
         ),
@@ -91,7 +91,7 @@ export function decodeInputAction(
   actionId: string,
   prefix: string,
   value: string | undefined,
-): { optionId: string; requestId: string } | null {
+): { interactionId: string; optionId: string } | null {
   if (!actionId.startsWith(prefix)) return null;
   const encoded = actionId.slice(prefix.length);
   const separator = encoded.indexOf(":");
@@ -99,7 +99,7 @@ export function decodeInputAction(
   try {
     const requestId = decodeURIComponent(encoded.slice(0, separator));
     const optionId = value ?? decodeURIComponent(encoded.slice(separator + 1));
-    return { optionId, requestId };
+    return { interactionId: requestId, optionId };
   } catch {
     return null;
   }

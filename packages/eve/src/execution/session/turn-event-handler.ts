@@ -1,6 +1,7 @@
 import type { SessionParticipants } from "#execution/participants.js";
 import type { SessionEventPublisher } from "#execution/publish-session-events.js";
 import { throwIfTurnAborted, TurnCancelledError } from "#harness/turn-cancellation.js";
+import { readsHistory } from "#harness/session-machine/commit.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { HookEventType } from "#public/definitions/hook.js";
 /**
@@ -9,40 +10,37 @@ import type { HookEventType } from "#public/definitions/hook.js";
  * Settlement events stay false: cancelling there would give the turn a second terminal.
  */
 const HOOK_CANCELLABLE_EVENTS = {
-  "action.input.appended": true,
-  "action.partial": true,
-  "action.result": true,
-  "actions.requested": true,
-  "agent.started": false,
-  "approval.candidate": true,
-  "approval.settled": true,
-  "authorization.completed": true,
-  "authorization.required": true,
-  "compaction.completed": true,
-  "compaction.requested": true,
-  "context.cleared": false,
-  "input.requested": true,
-  "input.resolved": true,
-  "message.appended": true,
-  "message.completed": true,
-  "message.received": true,
-  "reasoning.appended": true,
-  "reasoning.completed": true,
-  "result.completed": true,
-  "session.completed": false,
-  "session.failed": false,
+  "call.input": true,
+  "child.opened": false,
+  "interaction.opened": true,
+  // A settlement is a terminal fact: cancelling there would give its work a second terminal.
+  "interaction.settled": false,
+  "call.progress": true,
+  "call.requested": true,
+  "call.settled": true,
+  "call.started": true,
+  "content.completed": true,
+  "content.delta": true,
+  "context.settled": true,
+  "context.started": true,
+  "delivery.admitted": true,
+  "delivery.consumed": true,
+  "delivery.settled": false,
+  "response.admitted": true,
+  "response.settled": false,
+  "response.submitted": true,
+  "model.requested": true,
+  "model.settled": true,
+  "model.started": true,
+  "model.retried": true,
+  "session.ended": false,
   "session.started": true,
-  "session.waiting": false,
-  "step.completed": true,
-  "step.failed": false,
-  "step.started": true,
-  "task.settled": false,
+  "task.ended": false,
   "task.started": false,
-  "turn.cancelled": false,
-  "turn.completed": false,
-  "turn.failed": false,
+  "turn.paused": false,
+  "turn.settled": false,
   "turn.started": true,
-  "turn.waiting": false,
+  "usage.recorded": true,
 } as const satisfies Record<HookEventType, boolean>;
 
 /** True when a hook on this event type may cancel the running turn. */
@@ -51,9 +49,9 @@ export function isHookCancellableEvent(type: string): boolean {
 }
 
 /**
- * Publishes one turn event, runs its hooks, then the participants that receive it. A hook's
- * `ctx.cancel()` aborts the turn signal at once; the event's remaining hooks still run, then the
- * turn stops before its participants or its next model call.
+ * Publishes one turn event or commit, runs its hooks, then the participants that receive each
+ * event. A hook's `ctx.cancel()` aborts the turn signal at once; the commit's remaining hooks
+ * still run, then the turn stops before its participants or its next model call.
  */
 export function createTurnEventHandler(input: {
   /** False for clear and compact requests, which run outside any turn. */
@@ -63,14 +61,19 @@ export function createTurnEventHandler(input: {
   readonly publisher: SessionEventPublisher;
 }): HandleEventFn {
   const { participants, publisher } = input;
-  return async (event, messages) => {
-    const emitted = await publisher.emit(event);
-    const cancelTurn =
-      input.canCancelTurn && isHookCancellableEvent(emitted.type)
-        ? () => input.hookCancellation.abort(new TurnCancelledError())
-        : undefined;
-    await publisher.dispatcher.runHooks(emitted, cancelTurn);
-    if (cancelTurn !== undefined) throwIfTurnAborted(input.hookCancellation.signal);
-    await participants.receive(emitted, messages);
+  const cancelTurn = () => input.hookCancellation.abort(new TurnCancelledError());
+  return async (publication, messages) => {
+    const written = await publisher.emit(publication);
+    // A commit that ended the turn or the session leaves nothing for a hook to stop.
+    const ends = written.some(
+      ({ event }) => event.type === "turn.settled" || event.type === "session.ended",
+    );
+    await publisher.dispatcher.runHooks(written, (event) =>
+      input.canCancelTurn && !ends && isHookCancellableEvent(event.type) ? cancelTurn : undefined,
+    );
+    throwIfTurnAborted(input.hookCancellation.signal);
+    for (const { event } of written) {
+      await participants.receive(event, readsHistory(event.type) ? messages : undefined);
+    }
   };
 }

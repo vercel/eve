@@ -1,3 +1,5 @@
+import { failureOf } from "#client/session-utils.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { UserContent } from "ai";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
@@ -6,30 +8,30 @@ import type { ChannelFrom } from "#channel/channel-operations.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import type {
   AgentInvocation,
-  AgentInvocationAuthorizationRequest,
+  AgentInvocationInteraction,
+  AgentInvocationInteractions,
   AgentInvocationMutationResult,
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
 import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
-  invocationInputRequestId,
   invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
-import type {
-  AuthorizationRequiredStreamEvent,
-  HandleMessageStreamEvent,
-} from "#protocol/message.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import {
-  foldSessionEvents,
-  openInputs,
-  type SessionProjection,
-} from "#protocol/session-projection.js";
-import { type InputRequest, type InputResponse, parseInputResponses } from "#shared/input.js";
+  openRequests,
+  openSignIns,
+  askedInteraction,
+  readerInteraction,
+} from "#protocol/session-reader.js";
+import { interactionBatches, reply, replyText } from "#protocol/session-projection/selectors.js";
+import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import { type Answer, parseAnswers } from "#shared/input.js";
+import type { AskedInteraction } from "#protocol/session-reader.js";
 import type { JsonValue } from "#shared/json.js";
-import { parseJsonValue } from "#shared/json.js";
 
 export class WorkflowAgentInvocationExecution {
   readonly #createSession: RouteSessionCreator;
@@ -77,7 +79,7 @@ export class WorkflowAgentInvocationExecution {
   async update(input: {
     readonly auth: SessionAuthContext | null;
     readonly invocationId: string;
-    readonly responses: readonly InputResponse[];
+    readonly responses: readonly Answer[];
   }): Promise<AgentInvocationMutationResult> {
     const current = await this.#readCurrent(input);
     if (current === undefined) return { type: "not_found" };
@@ -92,21 +94,21 @@ export class WorkflowAgentInvocationExecution {
       return conflict("Invocation is not waiting for input.");
     }
     const responseIds = new Set<string>();
-    const deliveredResponses: InputResponse[] = [];
+    const deliveredResponses: Answer[] = [];
     for (const response of input.responses) {
-      const request = pendingBatch.get(response.requestId);
+      const request = pendingBatch.get(response.interactionId);
       if (request === undefined) {
-        return conflict(`Unknown input request: ${response.requestId}`);
+        return conflict(`Unknown input request: ${response.interactionId}`);
       }
-      responseIds.add(response.requestId);
-      deliveredResponses.push({ ...response, requestId: request.requestId });
+      responseIds.add(response.interactionId);
+      deliveredResponses.push(response);
     }
     if (responseIds.size !== input.responses.length || responseIds.size !== pendingBatch.size) {
       return conflict("Responses must answer the complete pending input batch exactly once.");
     }
     if (token === undefined) return { type: "not_found" };
     try {
-      await this.#from(token).respond(parseInputResponses(deliveredResponses), {
+      await this.#from(token).respond(parseAnswers(deliveredResponses), {
         auth: input.auth,
       });
     } catch (error) {
@@ -177,106 +179,126 @@ export class WorkflowAgentInvocationExecution {
   }
 }
 
-/** The requests one `input.requested` introduced, by the batch-scoped id clients answer. */
-type InputBatch = ReadonlyMap<string, InputRequest>;
+/**
+ * The requests one commit opened, by `interactionId`. An id belongs to one interaction for the
+ * session's life, so an answer naming one outside the pending batch can't reach a later one.
+ */
+type InputBatch = ReadonlyMap<string, AskedInteraction>;
 
-type InvocationFailureEvent = Extract<
-  HandleMessageStreamEvent,
-  { type: "session.failed" | "turn.failed" }
->;
+interface InvocationFailure {
+  readonly error: ErrorInfo;
+  readonly terminal: boolean;
+}
 
-/** The session's shared projection, plus what an invocation shows that it doesn't keep. */
+/** The session's shared tables, plus what an invocation shows that they don't keep. */
 interface InvocationStream {
-  readonly projection: SessionProjection;
+  readonly view: SessionView;
   /** The batches in the order they were requested, each holding the requests it introduced. */
   readonly batches: readonly InputBatch[];
   /** The latest batch with requests still open, narrowed to them. */
   readonly pending: InputBatch | undefined;
-  /** The prompt of each sign-in still open, in the order they were required. */
-  readonly signIns: readonly AuthorizationRequiredStreamEvent["data"][];
+  /** Each sign-in still open, in the order they opened. */
+  readonly signIns: readonly InteractionRow[];
   /** The latest turn's final message. */
   readonly result: JsonValue | undefined;
   /** How the latest turn ended; reset when a turn starts or a park resumes. */
-  readonly settled: "completed" | "cancelled" | InvocationFailureEvent | undefined;
+  readonly settled: "completed" | "cancelled" | InvocationFailure | undefined;
 }
 
 async function readInvocationStream(invocationId: string): Promise<InvocationStream> {
-  const batches: InputBatch[] = [];
-  let result: JsonValue | undefined;
+  const view = emptySessionView();
   let settled: InvocationStream["settled"];
-  const events = streamSessionEvents(invocationId, { follow: false });
-  const { projection, signIns } = await foldSessionEvents(events, (event, before) => {
+  for await (const event of streamSessionEvents(invocationId, { follow: false })) {
+    foldReceivedEvent(view, event);
     switch (event.type) {
       case "turn.started":
-        result = undefined;
+      case "turn.paused":
+      case "interaction.settled":
         settled = undefined;
         break;
-      case "input.requested": {
-        // The projection keeps the first request under an id, so a batch claims only new ids.
-        const introduced = event.data.requests.filter(
-          (request) => before.inputs[request.requestId] === undefined,
-        );
-        if (introduced.length === 0) break;
-        batches.push(
-          new Map(
-            introduced.map((request) => [
-              invocationInputRequestId(event.meta.id, request.requestId),
-              request,
-            ]),
-          ),
-        );
+      case "turn.settled": {
+        const error = failureOf(event);
+        if (error !== undefined) settled = { error, terminal: false };
+        else settled = event.data.outcome === "cancelled" ? "cancelled" : "completed";
         break;
       }
-      case "input.resolved":
-      case "authorization.completed":
-        settled = undefined;
+      case "session.ended": {
+        const error = failureOf(event);
+        if (error !== undefined) settled = { error, terminal: true };
+        else settled ??= "completed";
         break;
-      case "message.completed":
-        // Only tool-call narration continues the turn; any other finish is the reply.
-        if (event.data.finishReason !== "tool-calls") result = safeJson(event.data.message);
-        break;
-      case "turn.waiting":
-        // Text completed before the turn parked was interim; the reply comes after it resumes.
-        result = undefined;
-        break;
-      case "turn.completed":
-        settled = "completed";
-        break;
-      case "turn.cancelled":
-        settled = "cancelled";
-        break;
-      case "turn.failed":
-      case "session.failed":
-        settled = event;
-        break;
+      }
     }
-  });
-  const open = new Set(openInputs(projection).map((input) => input.request.requestId));
-  let pending: InputBatch | undefined;
-  for (const batch of batches.toReversed()) {
-    const stillOpen = new Map([...batch].filter(([, request]) => open.has(request.requestId)));
-    if (stillOpen.size === 0) continue;
-    pending = stillOpen;
-    break;
   }
-  return { batches, pending, projection, result, settled, signIns };
+  const batches = interactionBatches(view).map(
+    (batch): InputBatch =>
+      new Map(
+        batch.flatMap((row) => {
+          const asked = askedInteraction(view, row);
+          return asked === undefined ? [] : [[row.interactionId, asked] as const];
+        }),
+      ),
+  );
+  const open = new Set(openRequests(view).map((row) => row.interactionId));
+  const pending = batches
+    .map((batch) => new Map([...batch].filter(([id]) => open.has(id))))
+    .findLast((batch) => batch.size > 0);
+  return {
+    batches,
+    pending,
+    result: latestResult(view),
+    settled,
+    signIns: openSignIns(view),
+    view,
+  };
+}
+
+/** What the latest turn replied once it settled: its structured result, or else its text. */
+function latestResult(view: SessionView): JsonValue | undefined {
+  const turnId = view.session.latestTurnId;
+  if (turnId === undefined || view.turns[turnId]?.status !== "settled") return undefined;
+  const structured = reply(view, turnId).find((part) => part.kind === "result");
+  return structured !== undefined ? structured.value : replyText(view, turnId);
+}
+
+/** An open interaction as the invocation API reports it, from what readers render. */
+function invocationInteraction(asked: AskedInteraction): AgentInvocationInteraction {
+  const shown: {
+    -readonly [K in keyof AgentInvocationInteraction]: AgentInvocationInteraction[K];
+  } = { kind: asked.kind, prompt: asked.prompt };
+  if (asked.title !== undefined) shown.title = asked.title;
+  if (asked.options !== undefined)
+    shown.options = asked.options.map(({ description, id, label }) =>
+      description === undefined ? { id, label } : { description, id, label },
+    );
+  if (asked.allowFreeform !== undefined) shown.allowFreeform = asked.allowFreeform;
+  if (asked.display !== undefined) shown.display = asked.display;
+  if (asked.call !== undefined) shown.call = asked.call;
+  if (asked.signIn !== undefined) shown.signIn = asked.signIn;
+  return shown;
+}
+
+function invocationInteractions(
+  entries: Iterable<readonly [string, AskedInteraction | undefined]>,
+): AgentInvocationInteractions {
+  const shown: Record<string, AgentInvocationInteraction> = {};
+  for (const [id, asked] of entries)
+    if (asked !== undefined) shown[id] = invocationInteraction(asked);
+  return shown;
 }
 
 /** True when `responses` exactly repeats the answers eve accepted for the latest batch. */
-function replaysSettledBatch(
-  stream: InvocationStream,
-  responses: readonly InputResponse[],
-): boolean {
+function replaysSettledBatch(stream: InvocationStream, responses: readonly Answer[]): boolean {
   const batch = stream.batches.at(-1);
   if (batch === undefined || responses.length !== batch.size) return false;
   const seen = new Set<string>();
   for (const response of responses) {
-    const rawRequestId = batch.get(response.requestId)?.requestId;
-    if (rawRequestId === undefined || seen.has(rawRequestId)) return false;
-    seen.add(rawRequestId);
-    const input = stream.projection.inputs[rawRequestId];
-    if (input?.status !== "settled" || input.response === undefined) return false;
-    if (input.response.optionId !== response.optionId || input.response.text !== response.text) {
+    const { interactionId } = response;
+    if (!batch.has(interactionId) || seen.has(interactionId)) return false;
+    seen.add(interactionId);
+    const input = readerInteraction(stream.view, interactionId);
+    if (input?.status !== "settled" || input.answer === undefined) return false;
+    if (input.answer.optionId !== response.optionId || input.answer.text !== response.text) {
       return false;
     }
   }
@@ -285,7 +307,7 @@ function replaysSettledBatch(
 
 /**
  * Projects the invocation from its session. The session parks after the
- * turn settles, so `turn.completed` or a failure event — not the run
+ * turn settles, so `turn.settled` or a failure — not the run
  * status — is what completes the invocation. An open sign-in or input
  * request outranks how the turn ended.
  */
@@ -298,37 +320,21 @@ function projectInvocation(
   const failure = typeof settled === "object" ? settled : undefined;
   const failed = (): AgentInvocation => ({
     ...base,
-    error: publicInvocationFailure(base.invocationId, failure),
+    error: publicInvocationFailure(base.invocationId, failure?.error),
     status: "failed",
   });
   // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
-  if (runStatus === "failed" || failure?.type === "session.failed") return failed();
+  if (runStatus === "failed" || failure?.terminal === true) return failed();
   if (runStatus === "completed") return { ...base, result, status: "completed" };
-  const authorizations = stream.signIns.map(
-    ({ authorization, description, name, webhookUrl }): AgentInvocationAuthorizationRequest => ({
-      description,
-      name,
-      ...(authorization !== undefined && { authorization }),
-      ...(webhookUrl !== undefined && { webhookUrl }),
-    }),
-  );
-  if (authorizations.length > 0) {
-    return {
-      ...base,
-      authorizations: authorizations as [
-        AgentInvocationAuthorizationRequest,
-        ...AgentInvocationAuthorizationRequest[],
-      ],
-      pollAfterMs: 1_000,
-      result,
-      status: "authorization_required",
-    };
+  if (stream.signIns.length > 0) {
+    const interactions = invocationInteractions(
+      stream.signIns.map((row) => [row.interactionId, askedInteraction(stream.view, row)] as const),
+    );
+    return { ...base, interactions, pollAfterMs: 1_000, result, status: "authorization_required" };
   }
   if (stream.pending !== undefined) {
-    const inputRequests = Object.fromEntries(
-      [...stream.pending].map(([requestId, request]) => [requestId, { ...request, requestId }]),
-    );
-    return { ...base, inputRequests, result, status: "input_required" };
+    const interactions = invocationInteractions(stream.pending);
+    return { ...base, interactions, result, status: "input_required" };
   }
   if (failure !== undefined) return failed();
   if (settled === "cancelled") return { ...base, status: "cancelled" };
@@ -344,96 +350,19 @@ function workingInvocation(
   return { createdAt, expiresAt, invocationId, pollAfterMs: 1_000, status: "working" };
 }
 
-function safeJson(value: unknown): JsonValue {
-  try {
-    return parseJsonValue(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function publicInvocationFailure(
   runId: string,
-  event: InvocationFailureEvent | undefined,
+  error: ErrorInfo | undefined,
 ): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
   const data: Record<string, string> = { runId };
-  if (event !== undefined) data.eveCode = event.data.code;
-
   const deploymentId = vercelDeploymentId();
   if (deploymentId !== undefined) data.vercelDeploymentId = deploymentId;
-  if (typeof event?.data.details?.errorId === "string") data.errorId = event.data.details.errorId;
-
-  const semantic = event === undefined ? null : semanticFailure(event.data);
-  if (semantic === null) {
-    const fallback = event === undefined ? null : fallbackFailure(event.data);
-    if (fallback === null) return { code: -32603, data, message: "Invocation failed." };
-    if (fallback.name !== undefined) data.name = fallback.name;
-    return { code: -32603, data, message: fallback.message };
+  if (error !== undefined) {
+    data.eveCode = error.code;
+    if (error.id !== undefined) data.errorId = error.id;
+    if (error.hint !== undefined) data.hint = error.hint;
   }
-
-  data.semanticErrorId = semantic.id;
-  data.name = semantic.name;
-  if (semantic.hint !== undefined) data.hint = semantic.hint;
-  return { code: -32603, data, message: semantic.message };
-}
-
-function semanticFailure(event: InvocationFailureEvent["data"]): {
-  readonly hint?: string;
-  readonly id: string;
-  readonly message: string;
-  readonly name: string;
-} | null {
-  const details = event.details;
-  if (
-    typeof details?.semanticErrorId !== "string" ||
-    details.semanticErrorId.trim().length === 0 ||
-    typeof details.name !== "string" ||
-    details.name.trim().length === 0
-  ) {
-    return null;
-  }
-
-  const message =
-    typeof details.message === "string" && details.message.trim().length > 0
-      ? details.message.trim()
-      : event.message.trim();
-  if (message.length === 0) return null;
-
-  const hint =
-    typeof details.hint === "string" && details.hint.trim().length > 0
-      ? details.hint.trim()
-      : undefined;
-  const summary: {
-    hint?: string;
-    id: string;
-    message: string;
-    name: string;
-  } = {
-    id: details.semanticErrorId,
-    message,
-    name: details.name,
-  };
-  if (hint !== undefined) summary.hint = hint;
-  return summary;
-}
-
-function fallbackFailure(event: InvocationFailureEvent["data"]): {
-  readonly message: string;
-  readonly name?: string;
-} | null {
-  const message = event.message.trim();
-  const name = typeof event.details?.name === "string" ? event.details.name.trim() : "";
-  if (message.length === 0 && name.length === 0) return null;
-  const fallback: { message: string; name?: string } = {
-    message: message.length === 0 ? name : truncateForDisplay(message),
-  };
-  if (name.length > 0) fallback.name = name;
-  return fallback;
-}
-
-function truncateForDisplay(value: string, maxChars = 160): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars - 1).trimEnd()}…`;
+  return { code: -32603, data, message: error?.message ?? "Invocation failed." };
 }
 
 function vercelDeploymentId(): string | undefined {

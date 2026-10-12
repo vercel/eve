@@ -525,7 +525,7 @@ function makeEvalResult(id: string) {
     result: {
       derived: {
         failureCode: undefined,
-        inputRequests: [],
+        interactions: [],
         messageCount: 1,
         models: [],
         parked: false,

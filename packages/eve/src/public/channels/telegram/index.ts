@@ -70,12 +70,12 @@ export {
   TELEGRAM_REPLY_RESPONSE_PREFIX,
   isTelegramSyntheticResponse,
   registerTelegramFreeformPrompt,
-  renderTelegramInputRequest,
-  resolveTelegramInputResponses,
-  telegramCallbackInputResponse,
-  telegramReplyInputResponse,
+  renderTelegramInteraction,
+  resolveTelegramAnswers,
+  telegramCallbackAnswer,
+  telegramReplyAnswer,
   type TelegramHitlState,
-  type TelegramInputRequestMessage,
+  type TelegramInteractionMessage,
 } from "#public/channels/telegram/hitl.js";
 
 export {

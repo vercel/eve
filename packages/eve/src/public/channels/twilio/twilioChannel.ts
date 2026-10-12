@@ -1,13 +1,13 @@
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callTwilioApi,
   createTwilioFetchFile,
@@ -50,9 +50,6 @@ import { readNonEmptyString } from "#shared/guards.js";
 import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("twilio.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Twilio context passed to the inbound text, voice, and voice-transcription hooks. */
 export interface TwilioContext {
@@ -145,36 +142,25 @@ export type TwilioVoiceResultOrPromise =
   | undefined
   | Promise<TwilioVoiceResult | null | undefined>;
 
-type TwilioEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: TwilioEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type TwilioSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TwilioEventContext,
+type TwilioEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TwilioEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `twilioChannel({ events })`. */
 export interface TwilioChannelEvents {
   readonly "turn.started"?: TwilioEventHandler<"turn.started">;
-  readonly "actions.requested"?: TwilioEventHandler<"actions.requested">;
-  readonly "action.partial"?: TwilioEventHandler<"action.partial">;
-  readonly "action.result"?: TwilioEventHandler<"action.result">;
-  readonly "message.completed"?: TwilioEventHandler<"message.completed">;
-  readonly "message.appended"?: TwilioEventHandler<"message.appended">;
-  readonly "input.requested"?: TwilioEventHandler<"input.requested">;
-  readonly "input.resolved"?: TwilioEventHandler<"input.resolved">;
-  readonly "approval.settled"?: TwilioEventHandler<"approval.settled">;
-  readonly "turn.failed"?: TwilioEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TwilioEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TwilioEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TwilioSessionFailedHandler;
-  readonly "session.completed"?: TwilioEventHandler<"session.completed">;
-  readonly "session.waiting"?: TwilioEventHandler<"session.waiting">;
-  readonly "authorization.required"?: TwilioEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TwilioEventHandler<"authorization.completed">;
+  readonly "call.requested"?: TwilioEventHandler<"call.requested">;
+  readonly "call.progress"?: TwilioEventHandler<"call.progress">;
+  readonly "call.settled"?: TwilioEventHandler<"call.settled">;
+  readonly "content.completed"?: TwilioEventHandler<"content.completed">;
+  readonly "content.delta"?: TwilioEventHandler<"content.delta">;
+  readonly "interaction.opened"?: TwilioEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TwilioEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: TwilioEventHandler<"response.admitted">;
+  readonly "turn.settled"?: TwilioEventHandler<"turn.settled">;
+  readonly "session.ended"?: TwilioEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TwilioEventHandler<"delivery.settled">;
 }
 
 /** SMS/Messaging defaults for Twilio outbound replies. */

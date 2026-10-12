@@ -1,3 +1,6 @@
+import { EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-protocol.js";
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -20,7 +23,6 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
-import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import {
   batchAgentStarts,
@@ -45,18 +47,22 @@ import {
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import {
-  startTaskToolCallsStep,
-  traceTaskToolCallStep,
-} from "#execution/session/task-tool-tracing-step.js";
+import { startTaskToolCallsStep } from "#execution/session/task-tool-tracing-step.js";
 
 /** True when a delegating parent (local or remote) receives this session's input requests. */
 export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
+  if (earlierRemoteCaller(serializedContext) !== undefined) return false;
   if (serializedContext["eve.sessionCallback"] !== undefined) return true;
   const channel = serializedContext["eve.channel"];
   return (
     typeof channel === "object" && channel !== null && Reflect.get(channel, "kind") === "subagent"
   );
+}
+
+/** The protocol of a remote caller this session can't relay requests to, when it has one. */
+function earlierRemoteCaller(serializedContext: Record<string, unknown>): number | undefined {
+  const version = serializedContext[EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME];
+  return typeof version === "number" ? version : undefined;
 }
 
 const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
@@ -235,6 +241,10 @@ export class SessionExecution {
     turn: ActiveTurn,
     paused: TurnPause,
   ): Promise<TurnStepPayload | undefined | "cancelled"> {
+    const earlierCaller = earlierRemoteCaller(this.input.cursor.serializedContext);
+    if (paused.on === "person" && earlierCaller !== undefined) {
+      throw new Error(formatEarlierRemoteCallerInputError(earlierCaller));
+    }
     if (
       paused.on === "person" &&
       paused.requestIds.length > 0 &&
@@ -249,52 +259,47 @@ export class SessionExecution {
         : undefined;
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
     let interrupted = false;
-    try {
-      while (true) {
-        if (person !== undefined) {
-          const callbacks = this.input.queue.takeAuthorizations(person.attemptIds);
-          if (callbacks !== undefined)
-            return { delivery: { kind: "deliver", payloads: callbacks } };
-          const answer = await turn.takeInputResponses(person.requestIds);
-          if (answer !== undefined) return { delivery: answer };
-          const steering = await turn.takeSteering({ heldOnPerson: true });
-          if (steering !== undefined) return { delivery: steering };
-        }
-        if (
-          paused.on === "tasks" &&
-          taskWaitResult(sessionTaskTable(this.input.cursor), { interrupted, timedOut: false }) !==
-            undefined
-        ) {
-          return await this.withSteering(turn, {});
-        }
-        const runtimeResults = await calls?.ready(interrupted);
-        if (runtimeResults !== undefined) return await this.withSteering(turn, { runtimeResults });
-
-        const next = await turn.nextRuntimeEvent(calls?.timers() ?? []);
-        if (next === "cancelled") return next;
-        switch (next.kind) {
-          case "steering":
-            // Only the first steering message interrupts; later ones wait for the calls anyway.
-            if (!interrupted) await calls?.interrupt();
-            interrupted = true;
-            continue;
-          case "timeout":
-            calls?.timedOut(next.callId);
-            continue;
-          case "runtime-action-result":
-            calls?.acceptInbox(next.results);
-            continue;
-          case "workflow": {
-            const result = await this.handleWorkflowMessage(next.message);
-            if (result !== undefined) calls?.acceptRun(result, next.message);
-            continue;
-          }
-          case "input":
-            continue;
-        }
+    while (true) {
+      if (person !== undefined) {
+        const callbacks = this.input.queue.takeAuthorizations(person.attemptIds);
+        if (callbacks !== undefined) return { delivery: { kind: "deliver", payloads: callbacks } };
+        const answer = await turn.takeAnswers(person.requestIds);
+        if (answer !== undefined) return { delivery: answer };
+        const steering = await turn.takeSteering({ heldOnPerson: true });
+        if (steering !== undefined) return { delivery: steering };
       }
-    } finally {
-      await calls?.dispose();
+      if (
+        paused.on === "tasks" &&
+        taskWaitResult(sessionTaskTable(this.input.cursor), { interrupted, timedOut: false }) !==
+          undefined
+      ) {
+        return await this.withSteering(turn, {});
+      }
+      const runtimeResults = await calls?.ready(interrupted);
+      if (runtimeResults !== undefined) return await this.withSteering(turn, { runtimeResults });
+
+      const next = await turn.nextRuntimeEvent(calls?.timers() ?? []);
+      if (next === "cancelled") return next;
+      switch (next.kind) {
+        case "steering":
+          // Only the first steering message interrupts; later ones wait for the calls anyway.
+          if (!interrupted) await calls?.interrupt();
+          interrupted = true;
+          continue;
+        case "timeout":
+          calls?.timedOut(next.callId);
+          continue;
+        case "runtime-action-result":
+          calls?.acceptInbox(next.results);
+          continue;
+        case "workflow": {
+          const result = await this.handleWorkflowMessage(next.message);
+          if (result !== undefined) calls?.acceptRun(result, next.message);
+          continue;
+        }
+        case "input":
+          continue;
+      }
     }
   }
 
@@ -352,7 +357,10 @@ export class SessionExecution {
     // A child a run opened before the cancel appears before its task settles as cancelled.
     await this.handleBoundaryMessages(turn.takeBoundaryMessages("agent-started"));
     await this.cancelTurnWork();
-    return { cancelled: true, kind: "park" };
+    const by = turn.cancelledBy;
+    return by === undefined
+      ? { cancelled: true, kind: "park" }
+      : { cancelled: true, cancelledBy: controlDeliveryOf(by), kind: "park" };
   }
 }
 
@@ -390,13 +398,13 @@ class CallWait {
     if (ready === undefined) return undefined;
     const delegatedUsage = ready.flatMap((result) => {
       const usage = this.delegatedUsage.get(result.callId);
-      return usage === undefined ? [] : [usage];
+      return usage === undefined ? [] : [[result.callId, usage] as const];
     });
     return {
       acceptedAtMsByCallId: Object.fromEntries(
         ready.map((result) => [result.callId, this.acceptedAtMs.get(result.callId)!]),
       ),
-      ...(delegatedUsage.length > 0 && { delegatedUsage }),
+      ...(delegatedUsage.length > 0 && { delegatedUsage: Object.fromEntries(delegatedUsage) }),
       results: ready,
     };
   }
@@ -445,16 +453,11 @@ class CallWait {
     await Promise.all(runs.map((run) => interruptWorkflowToolRun(run)));
   }
 
-  /** Traces the `eve__task_wait` calls the turn stopped waiting on. */
-  async dispose(): Promise<void> {
-    for (const wait of this.taskWaits) await this.traceTaskWait(wait, undefined, true);
-  }
-
   /**
    * `eve__task_cancel` is answered at once, and so is each `eve__task_wait` that can
    * return now: a timeout of 0, a result already waiting, or nothing working.
    * Any other `eve__task_wait` parks the open turn, reported once as
-   * `turn.waiting`, and the turn resolves it alongside the step's other
+   * `turn.paused`, and the turn resolves it alongside the step's other
    * workflow tool calls.
    */
   async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {
@@ -465,30 +468,10 @@ class CallWait {
         waits.push(startTaskWait(call, startedAtMs));
         continue;
       }
-      const trace = (outcome: { readonly failed: true } | { readonly output: unknown }) =>
-        this.cursor.advance((state) =>
-          traceTaskToolCallStep(state, {
-            callId: call.callId,
-            toolName: call.kind,
-            startedAtMs,
-            completedAtMs: Date.now(),
-            input: { taskId: call.taskId },
-            ...outcome,
-          }),
-        );
-      let result: RuntimeActionResult;
-      try {
-        result = await answerTaskCancel(this.cursor, call);
-      } catch (error) {
-        await trace({ failed: true });
-        throw error;
-      }
-      await trace({ output: result.output });
-      this.accept(result);
+      this.accept(await answerTaskCancel(this.cursor, call));
     }
     this.taskWaits = waits;
     this.taskWaits = await this.resolveTaskWaits(false);
-    if (this.taskWaits.length > 0) await this.cursor.advance(publishTurnWaitingStep);
   }
 
   private accept(result: RuntimeActionResult, acceptedAtMs = Date.now()): void {
@@ -507,24 +490,9 @@ class CallWait {
         continue;
       }
       const text = renderTaskWaitResult(result, Date.now() - wait.startedAtMs);
-      await this.traceTaskWait(wait, text, interrupted);
       this.accept(taskToolResult(wait.callId, TASK_WAIT_TOOL_NAME, text));
     }
     return waiting;
-  }
-
-  private async traceTaskWait(wait: TaskWait, output?: string, failed = false): Promise<void> {
-    await this.cursor.advance((state) =>
-      traceTaskToolCallStep(state, {
-        callId: wait.callId,
-        toolName: TASK_WAIT_TOOL_NAME,
-        startedAtMs: wait.startedAtMs,
-        completedAtMs: Date.now(),
-        input: wait.input,
-        output,
-        failed,
-      }),
-    );
   }
 }
 
@@ -533,7 +501,6 @@ class CallWait {
  * the turn races against the inbox; nothing polls.
  */
 interface TaskWait {
-  readonly input: { readonly timeoutSeconds?: number };
   readonly callId: string;
   readonly startedAtMs: number;
   /** Resolves with the call's id once the timeout passes; absent without a timeout. */
@@ -550,7 +517,6 @@ function startTaskWait(
   return {
     callId,
     startedAtMs,
-    input: timeoutMs === undefined ? {} : { timeoutSeconds: timeoutMs / 1_000 },
     timedOut: timeoutMs === 0,
     timer,
   };

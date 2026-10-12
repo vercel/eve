@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
+import { isStoredLine, type StoredLine } from "#protocol/session-events/envelope.js";
 
 const RUNS_PAGE_LIMIT = 100;
 /**
@@ -158,39 +159,42 @@ function parseSessionEventLines(
   window: DevSessionEventWindow,
 ): DevSessionEventLine[] {
   const lines: DevSessionEventLine[] = [];
+  // A progress record has no time of its own; it streamed after the latest commit.
+  let lastAt = run.createdAt.toISOString();
   for (const raw of text.split("\n")) {
-    const event = parseSessionEvent(raw);
-    if (event === undefined) continue;
-    const at = event.at ?? run.createdAt.toISOString();
-    if (at < window.from.toISOString() || at > window.to.toISOString()) continue;
-    const line: { -readonly [Key in keyof DevSessionEventLine]: DevSessionEventLine[Key] } = {
-      at,
-      source: "event",
-      runId: run.runId,
-      type: event.type,
-    };
-    if (event.data !== undefined) line.data = event.data;
-    lines.push(line);
+    const parsed = parseStoredLine(raw);
+    if (parsed === undefined) continue;
+    if ("facts" in parsed) lastAt = parsed.at;
+    const records: readonly unknown[] = "facts" in parsed ? parsed.facts : [parsed.progress];
+    for (const value of records) {
+      const record = readRecord(value);
+      if (record === undefined) continue;
+      if (lastAt < window.from.toISOString() || lastAt > window.to.toISOString()) continue;
+      const line: { -readonly [Key in keyof DevSessionEventLine]: DevSessionEventLine[Key] } = {
+        at: lastAt,
+        source: "event",
+        runId: run.runId,
+        type: record.type,
+      };
+      if (record.data !== undefined) line.data = record.data;
+      lines.push(line);
+    }
   }
   return lines;
 }
 
-function parseSessionEvent(raw: string): { type: string; at?: string; data?: unknown } | undefined {
+function parseStoredLine(raw: string): StoredLine | undefined {
   if (raw.trim().length === 0) return undefined;
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (parsed === null || typeof parsed !== "object") return undefined;
-    const { type, data, meta } = parsed as { type?: unknown; data?: unknown; meta?: unknown };
-    if (typeof type !== "string") return undefined;
-    const at =
-      meta !== null && typeof meta === "object" && typeof (meta as { at?: unknown }).at === "string"
-        ? (meta as { at: string }).at
-        : undefined;
-    const event: { type: string; at?: string; data?: unknown } = { type };
-    if (at !== undefined) event.at = at;
-    if (data !== undefined) event.data = data;
-    return event;
+    return isStoredLine(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+
+function readRecord(value: unknown): { type: string; data?: unknown } | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const { type, data } = value as { type?: unknown; data?: unknown };
+  return typeof type === "string" ? { data, type } : undefined;
 }

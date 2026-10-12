@@ -19,12 +19,7 @@ export default defineEval({
   async test(t) {
     const session = await t.session();
     const live = await session.start("Please wait for cancellation.");
-    await live.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-      },
-    });
+    await live.waitForEvent("call.requested", { data: { capability: { name: TOOL_NAME } } });
     t.log(`Tool call observed mid-turn; cancelling session ${live.sessionId}.`);
 
     const cancelled = await live.cancel();
@@ -38,17 +33,17 @@ export default defineEval({
     );
 
     const cancelledTurn = await live.result();
-    cancelledTurn.event("turn.cancelled", { count: 1 });
-    cancelledTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelledTurn.notEvent("turn.failed");
-    cancelledTurn.notEvent("step.failed");
-    cancelledTurn.notEvent("session.failed");
+    cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelledTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    cancelledTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cancelledTurn.notEvent("model.settled", { data: { outcome: "failed" } });
+    cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const followUp = await session.send("Reply with exactly CANCELLATION-FOLLOW-UP-OK.");
     followUp.expectOk();
-    followUp.notEvent("turn.cancelled");
-    followUp.notEvent("turn.failed");
-    followUp.notEvent("session.failed");
+    followUp.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+    followUp.notEvent("turn.settled", { data: { outcome: "failed" } });
+    followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/CANCELLATION-FOLLOW-UP-OK/i);
 
     const late = await session.cancel();
@@ -62,11 +57,11 @@ export default defineEval({
 
     const afterLateCancel = await session.send("Reply with exactly CANCELLATION-LATE-NOOP-OK.");
     afterLateCancel.expectOk();
-    afterLateCancel.notEvent("turn.cancelled");
-    afterLateCancel.notEvent("turn.failed");
-    afterLateCancel.notEvent("session.failed");
+    afterLateCancel.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+    afterLateCancel.notEvent("turn.settled", { data: { outcome: "failed" } });
+    afterLateCancel.notEvent("session.ended", { data: { outcome: "failed" } });
     afterLateCancel.messageIncludes(/CANCELLATION-LATE-NOOP-OK/i);
 
-    t.event("turn.cancelled", { count: 1 });
+    t.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
   },
 });

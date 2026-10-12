@@ -1,4 +1,4 @@
-import { defineEval } from "eve/evals";
+import { defineEval, toolCallsOf } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
 export default defineEval({
@@ -19,13 +19,8 @@ export default defineEval({
 
     const { sessionId } = await post("Please wait for cancellation.", "alice");
     const active = t.target.watchTurn(sessionId);
-    await active.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some(
-            (action) => action.kind === "tool-call" && action.toolName === "wait-for-cancellation",
-          ),
-      },
+    await active.waitForEvent("call.requested", {
+      data: { capability: { name: "wait-for-cancellation" } },
     });
 
     const groups = [
@@ -48,8 +43,8 @@ export default defineEval({
     const stop = await t.target.fetch(`/threads/${threadId}/stop`, { method: "POST" });
     if (!stop.ok) throw new Error(`Stop failed (${stop.status}).`);
     const cancelled = await active.result();
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.notEvent("turn.failed");
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.notEvent("turn.settled", { data: { outcome: "failed" } });
 
     let cursor = active.session.state?.streamIndex;
     if (cursor === undefined) throw new Error("Missing stream cursor after cancellation.");
@@ -60,30 +55,32 @@ export default defineEval({
       const turn = await live.result();
       turn.expectOk();
       turn.calledTool("record-request", { count: markers.length, status: "completed" });
-      const message = markers.map(messageFor).join("\n\n");
-      turn.event("message.received", { count: 1, data: { message } });
-      for (const marker of markers) {
-        turn.event("action.result", {
-          count: 1,
-          data: {
-            status: "completed",
-            result: {
-              kind: "tool-result",
-              toolName: "record-request",
-              output: `request=${marker};actor=${actor ?? "anonymous"}`,
-            },
-          },
-        });
+      const outputs = toolCallsOf(turn.events).flatMap((call) =>
+        call.name === "record-request" && call.status === "completed" ? [call.output] : [],
+      );
+      t.check(
+        outputs,
+        equals(markers.map((marker) => `request=${marker};actor=${actor ?? "anonymous"}`)),
+      ).label("each request records under its own identity");
+      turn.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+      turn.notEvent("turn.settled", { data: { outcome: "failed" } });
+      // Each batched delivery is consumed into the one turn, in order.
+      const received = turn.events.flatMap((event) =>
+        event.type === "delivery.consumed" ? [event.data] : [],
+      );
+      await t.require(
+        received.map(({ parts }) =>
+          parts.map((part) => (part.kind === "text" ? part.text : "")).join(""),
+        ),
+        equals(markers.map(messageFor)),
+      );
+      for (const delivery of received) {
+        turnIds.add(delivery.turnId);
+        deliveryIds.add(delivery.deliveryId);
       }
-      turn.notEvent("turn.cancelled");
-      turn.notEvent("turn.failed");
-      const received = turn.events.find((event) => event.type === "message.received");
-      if (received === undefined) throw new Error("Missing queued message event.");
-      await t.require(received.data.message, equals(message));
-      turnIds.add(received.data.turnId);
-      const ids = received.meta.deliveryIds ?? [];
-      t.check(ids.length, equals(markers.length)).label("the turn retains every batched delivery");
-      for (const id of ids) deliveryIds.add(id);
+      t.check(new Set(received.map((delivery) => delivery.turnId)).size, equals(1)).label(
+        "the batch shares one turn",
+      );
       cursor = live.session.state?.streamIndex;
       if (cursor === undefined) throw new Error("Missing stream cursor after queued turn.");
     }

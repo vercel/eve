@@ -79,12 +79,17 @@ export default defineChannel({
     }),
   ],
   events: {
-    "turn.started"(event, channel) {
-      channel.state.turnIds.push(event.turnId);
+    "turn.started"(event, { channel }) {
+      channel.state.turnIds.push(event.data.turnId);
     },
-    "message.completed"(event, channel) {
+    "content.completed"(event, { channel }) {
+      if (event.data.phase !== "reply" || event.data.kind !== "text") return;
+      channel.state.completedMessages.push(
+        typeof event.data.value === "string" ? event.data.value : "",
+      );
+    },
+    "turn.settled"(_event, { channel }) {
       channel.state.completedTurns += 1;
-      channel.state.completedMessages.push(event.message ?? "");
 
       const anchorToken = channel.state.anchorToken;
       const continuation = channel.continuation;

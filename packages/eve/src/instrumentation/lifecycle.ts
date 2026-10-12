@@ -1,3 +1,9 @@
+import type {
+  InteractionOption,
+  InteractionOutcome,
+  InteractionRequest,
+} from "#protocol/session-events/families/interaction.js";
+import type { ResponseValue } from "#protocol/session-events/families/response.js";
 import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
 import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
@@ -131,8 +137,12 @@ export function toolCallIdempotencyKey(
   return `tool:${scope.attemptId}:${callId}:${String(stepNumber)}`;
 }
 
-export function inputIdempotencyKey(sessionId: string, turnId: string, requestId: string): string {
-  return `input:${sessionId}:${turnId}:${requestId}`;
+export function inputIdempotencyKey(
+  sessionId: string,
+  turnId: string,
+  interactionId: string,
+): string {
+  return `input:${sessionId}:${turnId}:${interactionId}`;
 }
 
 export function channelDeliveryIdempotencyKey(sessionId: string, deliveryId: string): string {
@@ -151,7 +161,7 @@ export interface InstrumentationChannelDeliveryRef {
 /** Known framework delivery input; adapter-specific fields are never projected. */
 export interface InstrumentationChannelDeliveryInput {
   readonly context?: readonly string[];
-  readonly inputResponses?: readonly InstrumentationInputResponse[];
+  readonly answers?: readonly InstrumentationAnswer[];
   readonly message?: unknown;
   readonly outputSchema?: unknown;
 }
@@ -188,50 +198,35 @@ export interface InstrumentationChannelDeliveryTerminalEvent extends Instrumenta
   readonly outcome: InstrumentationChannelDeliveryOutcome;
 }
 
-/** Framework-owned reason an agent suspended for user input. */
-export type InstrumentationInputKind = "question" | "session-limit" | "tool-approval";
+/** What a person is asked for: an approval, a question, or the budget prompt (never a sign-in). */
+export type InstrumentationInputKind = InteractionRequest["kind"];
 
-export interface InstrumentationInputOption {
-  readonly description?: string;
-  readonly id: string;
-  readonly label: string;
-  readonly style?: "danger" | "default" | "primary";
-}
+export type InstrumentationInputOption = InteractionOption;
 
-/** User-facing input request content projected without runtime-owned types. */
-export interface InstrumentationInputRequest {
-  readonly allowFreeform?: boolean;
-  readonly display?: "confirmation" | "select" | "text";
-  readonly options?: readonly InstrumentationInputOption[];
-  readonly prompt: string;
-}
+/** User-facing input request content. */
+export type InstrumentationInputRequest = Pick<
+  InteractionRequest,
+  "allowFreeform" | "display" | "options" | "prompt"
+>;
 
-/** User response content projected without runtime-owned types. */
-export interface InstrumentationInputResponse {
-  readonly optionId?: string;
-  readonly text?: string;
-}
+/** What a person answered. */
+export type InstrumentationAnswer = ResponseValue;
 
-export type InstrumentationInputOutcome =
-  | "answered"
-  | "approved"
-  | "cancelled"
-  | "denied"
-  | "failed"
-  | "ignored"
-  | "invalid";
+/** How the request settled, as its `interaction.settled` says. */
+export type InstrumentationInputOutcome = InteractionOutcome;
 
 export interface InstrumentationInputRequestedEvent {
   readonly type: "input.requested";
-  readonly action: {
+  /** The call the request is about: the call an approval gates, or the call that asked. */
+  readonly call?: {
     readonly callId: string;
     readonly name: string;
   };
   readonly idempotencyKey: string;
+  readonly interactionId: string;
   readonly kind: InstrumentationInputKind;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly request?: InstrumentationInputRequest;
-  readonly requestId: string;
   readonly scope: InstrumentationAttemptScope;
 }
 
@@ -240,10 +235,10 @@ export interface InstrumentationInputResolvedEvent {
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly kind: InstrumentationInputKind;
+  readonly interactionId: string;
   readonly outcome: InstrumentationInputOutcome;
-  readonly requestId: string;
   /** Content. Absent unless this provider's trace policy records this direction. */
-  readonly response?: InstrumentationInputResponse;
+  readonly answer?: InstrumentationAnswer;
   readonly scope: InstrumentationAttemptScope;
 }
 

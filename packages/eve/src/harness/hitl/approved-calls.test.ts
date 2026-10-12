@@ -7,18 +7,13 @@ import {
 } from "#harness/hitl/approved-calls.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { InputRequest } from "#shared/input.js";
+import type { ApprovalAsk } from "#harness/session-machine/view.js";
 
-function approval(callId: string, toolName: string): InputRequest {
+function approval(callId: string, toolName: string): ApprovalAsk {
   return {
-    action: { callId, input: {}, kind: "tool-call", toolName },
-    kind: "tool-approval",
-    options: [
-      { id: "approve", label: "Yes" },
-      { id: "cancel", label: "No" },
-    ],
-    prompt: `Approve tool call: ${toolName}`,
-    requestId: `approval-${callId}`,
+    call: { callId, input: {}, toolName },
+    interactionId: `approval-${callId}`,
+    request: { kind: "approval", prompt: `Approve tool call: ${toolName}` },
   };
 }
 
@@ -47,7 +42,7 @@ it("settles calls a cancellation cut short, and keeps their siblings' results", 
     messages: [],
     position: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
     publish: async () => {},
-    requests: [approval("call-finished", "finished"), approval("call-cut", "cut")],
+    approvals: [approval("call-finished", "finished"), approval("call-cut", "cut")],
     tools: new Map([
       ["finished", finished],
       ["cut", cut],
@@ -73,7 +68,7 @@ it("leaves a call the cancellation stopped before it started without a result", 
     messages: [],
     position: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
     publish: async () => {},
-    requests: [approval("call-unstarted", "unstarted")],
+    approvals: [approval("call-unstarted", "unstarted")],
     tools: new Map([["unstarted", unstarted]]),
   });
 

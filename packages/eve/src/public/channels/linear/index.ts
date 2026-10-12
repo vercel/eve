@@ -23,10 +23,7 @@ export {
 } from "#public/channels/linear/auth.js";
 export { LINEAR_CHANNEL_DEFAULT_ROUTE } from "#public/channels/linear/constants.js";
 export { defaultLinearAuth, defaultOnAgentSession } from "#public/channels/linear/defaults.js";
-export {
-  linearInputRequestSignal,
-  renderLinearInputRequests,
-} from "#public/channels/linear/hitl.js";
+export { linearInteractionSignal, renderLinearInteractions } from "#public/channels/linear/hitl.js";
 export {
   formatLinearContextBlock,
   linearContinuationToken,

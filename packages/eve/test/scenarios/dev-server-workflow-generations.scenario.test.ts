@@ -204,10 +204,10 @@ function readCompletedMessages(
 ): string {
   return events
     .flatMap((event) => {
-      if (event.type !== "message.completed" || !isRecord(event.data)) {
+      if (event.type !== "content.completed" || !isRecord(event.data)) {
         return [];
       }
-      return typeof event.data.message === "string" ? [event.data.message] : [];
+      return typeof event.data.value === "string" ? [event.data.value] : [];
     })
     .join("\n");
 }

@@ -2,18 +2,20 @@ import type { UserContent } from "ai";
 
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
 import { isSessionLimitContinuationRequestId } from "#harness/hitl/budget-request.js";
-import type { StepInput } from "#harness/types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { HarnessStepInput } from "#harness/types.js";
+import { askedCall } from "#protocol/session-reader.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import type { Answer } from "#shared/input.js";
 
 type StaleResponseConversion =
   | {
       readonly kind: "unchanged";
-      readonly stepInput?: StepInput;
+      readonly stepInput?: HarnessStepInput;
     }
   | {
       readonly displayMessage: string | UserContent;
       readonly kind: "converted";
-      readonly stepInput: StepInput;
+      readonly stepInput: HarnessStepInput;
     };
 
 /**
@@ -29,27 +31,28 @@ type StaleResponseConversion =
  */
 export function dropStaleSessionLimitContinuationResponses(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
-  readonly stepInput?: StepInput;
-}): StepInput | undefined {
+  readonly stepInput?: HarnessStepInput;
+}): HarnessStepInput | undefined {
   if (input.stepInput === undefined) return undefined;
-  const responses = input.stepInput.inputResponses ?? [];
-  const attributed = input.stepInput.attributedInputResponses ?? [];
-  const keep = (requestId: string) =>
-    input.pendingRequestIds.has(requestId) || !isSessionLimitContinuationRequestId(requestId);
-  const retained = responses.filter((response) => keep(response.requestId));
-  const retainedAttributed = attributed.filter(({ response }) => keep(response.requestId));
+  const responses = input.stepInput.answers ?? [];
+  const attributed = input.stepInput.attributedAnswers ?? [];
+  const keep = (interactionId: string) =>
+    input.pendingRequestIds.has(interactionId) ||
+    !isSessionLimitContinuationRequestId(interactionId);
+  const retained = responses.filter((answer) => keep(answer.interactionId));
+  const retainedAttributed = attributed.filter(({ response }) => keep(response.interactionId));
   if (retained.length === responses.length && retainedAttributed.length === attributed.length) {
     return input.stepInput;
   }
 
   const {
-    attributedInputResponses: _attributed,
-    inputResponses: _responses,
+    attributedAnswers: _attributed,
+    answers: _responses,
     ...remainingInput
   } = input.stepInput;
-  const result: { -readonly [K in keyof StepInput]: StepInput[K] } = remainingInput;
-  if (retained.length > 0) result.inputResponses = retained;
-  if (retainedAttributed.length > 0) result.attributedInputResponses = retainedAttributed;
+  const result: { -readonly [K in keyof HarnessStepInput]: HarnessStepInput[K] } = remainingInput;
+  if (retained.length > 0) result.answers = retained;
+  if (retainedAttributed.length > 0) result.attributedAnswers = retainedAttributed;
   return result;
 }
 
@@ -68,27 +71,27 @@ export function dropStaleSessionLimitContinuationResponses(input: {
  */
 export function convertStaleResponsesToUserMessage(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
-  /** Requests the session still knows, by id, closed ones included. */
-  readonly requests: ReadonlyMap<string, InputRequest>;
-  readonly stepInput?: StepInput;
+  /** The session's tables: the requests it still knows, closed ones included. */
+  readonly view: SessionView;
+  readonly stepInput?: HarnessStepInput;
 }): StaleResponseConversion {
   if (input.stepInput === undefined) return { kind: "unchanged" };
-  const responses = input.stepInput.inputResponses ?? [];
-  const attributed = input.stepInput.attributedInputResponses ?? [];
+  const responses = input.stepInput.answers ?? [];
+  const attributed = input.stepInput.attributedAnswers ?? [];
   if (responses.length === 0 && attributed.length === 0) {
     return { kind: "unchanged", stepInput: input.stepInput };
   }
 
-  const currentResponses: InputResponse[] = [];
-  const currentAttributed: NonNullable<StepInput["attributedInputResponses"]>[number][] = [];
-  const staleResponses: InputResponse[] = [];
-  for (const response of responses) {
-    (input.pendingRequestIds.has(response.requestId) ? currentResponses : staleResponses).push(
-      response,
+  const currentResponses: Answer[] = [];
+  const currentAttributed: NonNullable<HarnessStepInput["attributedAnswers"]>[number][] = [];
+  const staleResponses: Answer[] = [];
+  for (const answer of responses) {
+    (input.pendingRequestIds.has(answer.interactionId) ? currentResponses : staleResponses).push(
+      answer,
     );
   }
   for (const entry of attributed) {
-    if (input.pendingRequestIds.has(entry.response.requestId)) {
+    if (input.pendingRequestIds.has(entry.response.interactionId)) {
       currentAttributed.push(entry);
     } else {
       staleResponses.push(entry.response);
@@ -99,36 +102,34 @@ export function convertStaleResponsesToUserMessage(input: {
     return { kind: "unchanged", stepInput: input.stepInput };
   }
 
-  const { requests } = input;
+  const { view } = input;
   const modelMessage = appendOptionalUserContent(
     input.stepInput.message,
-    formatModelMessage(staleResponses, requests),
+    formatModelMessage(staleResponses, view),
   );
   const displayMessage = appendOptionalUserContent(
     input.stepInput.message,
-    formatDisplayMessage(staleResponses, requests),
+    formatDisplayMessage(staleResponses, view),
   );
   const {
-    attributedInputResponses: _attributed,
-    inputResponses: _responses,
+    attributedAnswers: _attributed,
+    answers: _responses,
     ...remainingInput
   } = input.stepInput;
-  const stepInput: { -readonly [K in keyof StepInput]: StepInput[K] } = {
+  const stepInput: { -readonly [K in keyof HarnessStepInput]: HarnessStepInput[K] } = {
     ...remainingInput,
     message: modelMessage,
   };
-  if (currentResponses.length > 0) stepInput.inputResponses = currentResponses;
-  if (currentAttributed.length > 0) stepInput.attributedInputResponses = currentAttributed;
+  if (currentResponses.length > 0) stepInput.answers = currentResponses;
+  if (currentAttributed.length > 0) stepInput.attributedAnswers = currentAttributed;
 
   return { displayMessage, kind: "converted", stepInput };
 }
 
-function formatModelMessage(
-  responses: readonly InputResponse[],
-  requests: ReadonlyMap<string, InputRequest>,
-): string {
+function formatModelMessage(responses: readonly Answer[], view: SessionView): string {
   const resolvedResponses = responses.map((response) => {
-    const request = requests.get(response.requestId);
+    const row = view.interactions[response.interactionId];
+    const request = row?.request;
     const option = request?.options?.find((candidate) => candidate.id === response.optionId);
 
     const responseDetails: {
@@ -159,12 +160,13 @@ function formatModelMessage(
       requestType?: "approval";
       response: typeof responseDetails;
       toolName?: string;
-    } = { requestId: response.requestId, response: responseDetails };
-    if (request?.kind === "tool-approval") {
-      resolved.prompt = request.prompt;
+    } = { requestId: response.interactionId, response: responseDetails };
+    if (row !== undefined && row.request.kind === "approval") {
+      resolved.prompt = row.request.prompt;
       resolved.requestType = "approval";
       // The prompt is display text; the model needs the tool's real name.
-      resolved.toolName = request.action.toolName;
+      const toolName = askedCall(view, row)?.name;
+      if (toolName !== undefined) resolved.toolName = toolName;
     }
 
     return resolved;
@@ -178,19 +180,16 @@ function formatModelMessage(
   ].join("\n");
 }
 
-function formatDisplayMessage(
-  responses: readonly InputResponse[],
-  requests: ReadonlyMap<string, InputRequest>,
-): string {
+function formatDisplayMessage(responses: readonly Answer[], view: SessionView): string {
   return responses
     .map((response) => {
       if (response.text !== undefined && response.text.length > 0) {
         return response.text;
       }
 
-      const option = requests
-        .get(response.requestId)
-        ?.options?.find((candidate) => candidate.id === response.optionId);
+      const option = view.interactions[response.interactionId]?.request.options?.find(
+        (candidate) => candidate.id === response.optionId,
+      );
       return option?.label ?? response.optionId ?? "Response to an earlier interactive prompt";
     })
     .join("\n");

@@ -14,8 +14,8 @@ export default defineEval({
     const message = "Reply with current-report-ready.";
     const current = await resumed.send(message);
     current.expectOk();
-    current.event("message.received", { count: 1, data: { message } });
-    current.event("turn.started", { count: 1, data: { sequence: 2 } });
-    current.event("session.waiting", { count: 1 });
+    current.event("delivery.consumed", { count: 1, data: { parts: [{ text: message }] } });
+    current.event("turn.started", { count: 1, data: { turnId: "turn_2" } });
+    current.event("turn.settled", { count: 1, data: { outcome: "completed" } });
   },
 });

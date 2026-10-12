@@ -1,9 +1,21 @@
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ApprovalResponseAuth } from "#approval/definition.js";
-import type { ToolAuthOptions, ToolContext, ToolExecuteOptions } from "#tools/definition.js";
+import type {
+  ToolApproval,
+  ToolAuthOptions,
+  ToolContext,
+  ToolExecuteOptions,
+} from "#tools/definition.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
-import { handleAuthorizationError } from "#runtime/connections/scoped-authorization.js";
+import {
+  handleAuthorizationError,
+  isScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
+import {
+  ConnectionAuthorizationFailedError,
+  isConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
 
 type ToolExecuteWithAuthInput<TInput> = {
   readonly scope: string;
@@ -19,10 +31,40 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
       messages: options.messages,
       getToken: auth.getToken,
       requireAuth: auth.requireAuth,
+      ...(options.approval !== undefined && {
+        approval: approvalOf(options.approval.responder, input.scope),
+      }),
     };
     return auth.run(() => {
       return input.execute(toolInput, ctx);
     });
+  };
+}
+
+/** What an approved call reads about the person who approved it. */
+function approvalOf(responder: SessionAuthContext, scope: string): ToolApproval {
+  const auth = buildApprovalResponseAuth({ responder, scope });
+  return {
+    // The approver isn't in this call, so a missing token fails the call rather than
+    // reaching the enclosing boundary, which would start a sign-in.
+    getToken: async (provider, options) => {
+      try {
+        return await auth.getToken(provider, options);
+      } catch (error) {
+        if (
+          isScopedAuthorizationRequiredError(error) ||
+          isConnectionAuthorizationRequiredError(error)
+        ) {
+          throw new ConnectionAuthorizationFailedError(scope, {
+            message: `The approver of "${scope}" has no token for this provider, and an approved call doesn't start a sign-in.`,
+            reason: "approver_authorization_required",
+            retryable: false,
+          });
+        }
+        throw error;
+      }
+    },
+    responder,
   };
 }
 

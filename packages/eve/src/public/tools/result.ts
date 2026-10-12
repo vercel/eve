@@ -1,11 +1,11 @@
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { CallRow } from "#protocol/session-projection/tables.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
 import { readDefinitionSource } from "#internal/authored-definition/source-identity.js";
 import type { ToolDefinition } from "#tools/definition.js";
 
 /**
  * Narrowed tool result returned by {@link toolResultFrom} when the
- * action result matches an authored {@link ToolDefinition}.
+ * settled call matches an authored {@link ToolDefinition}.
  *
  * `TOutput` is inferred from the tool definition's `execute` return type.
  */
@@ -17,7 +17,7 @@ export interface MatchedToolResult<TOutput> {
 
 /**
  * Narrowed tool result returned by {@link toolResultFrom} when the
- * action result matches an MCP connection.
+ * settled call matches an MCP connection.
  *
  * `output` stays `unknown` because MCP tool schemas are remote.
  * `connectionToolName` is the unqualified MCP tool name (e.g.
@@ -34,49 +34,72 @@ export interface MatchedConnectionResult {
 const CONNECTION_TOOL_SEPARATOR = "__";
 
 /**
+ * A call as the session's tables hold it, such as `ctx.view.calls[event.data.callId]` in a
+ * `call.settled` hook. Absent rows match nothing.
+ */
+export type SettledCallRow = Pick<CallRow, "callId" | "capability" | "outcome" | "output">;
+
+/** What {@link toolResultFrom} matches: a settled call's row, or nothing. */
+export type ToolResultSource = SettledCallRow | undefined;
+
+/**
  * Overloaded signature for {@link toolResultFrom}.
  */
 export interface ToolResultFromFn {
   <TInput, TOutput>(
-    result: RuntimeActionResult,
+    result: ToolResultSource,
     tool: ToolDefinition<TInput, TOutput>,
   ): MatchedToolResult<TOutput> | undefined;
 
   (
-    result: RuntimeActionResult,
+    result: ToolResultSource,
     connection: McpClientConnectionDefinition,
   ): MatchedConnectionResult | undefined;
 }
 
 /**
- * Narrows a {@link RuntimeActionResult} to a typed tool or connection
- * result by matching against an authored definition object.
+ * Narrows a settled call's row from the session's tables to a typed tool or connection result by
+ * matching against an authored definition object.
  *
  * Pass a `ToolDefinition` to get a typed `output`; pass a
  * `McpClientConnectionDefinition` to match any tool from that
  * connection (`output` stays `unknown`).
  *
- * Returns `undefined` when the result doesn't match, or when
- * `isError` is `true`.
+ * Returns `undefined` when the call doesn't match, isn't a tool's, or
+ * didn't complete.
+ *
+ * ```ts
+ * "call.settled"(event, ctx) {
+ *   const match = toolResultFrom(ctx.view.calls[event.data.callId], weather);
+ * }
+ * ```
  */
 export const toolResultFrom: ToolResultFromFn = toolResultFromImpl;
 
+/** The tool name and output of a completed tool call. */
+function completedToolCall(
+  source: ToolResultSource,
+): { readonly callId: string; readonly output: unknown; readonly toolName: string } | undefined {
+  if (source?.capability.kind !== "tool" || source.outcome !== "completed") return undefined;
+  return { callId: source.callId, output: source.output, toolName: source.capability.name };
+}
+
 function toolResultFromImpl<TInput, TOutput>(
-  result: RuntimeActionResult,
+  result: ToolResultSource,
   tool: ToolDefinition<TInput, TOutput>,
 ): MatchedToolResult<TOutput> | undefined;
 function toolResultFromImpl(
-  result: RuntimeActionResult,
+  result: ToolResultSource,
   connection: McpClientConnectionDefinition,
 ): MatchedConnectionResult | undefined;
 function toolResultFromImpl(
-  result: RuntimeActionResult,
-  source: ToolDefinition<unknown, unknown> | McpClientConnectionDefinition,
+  source: ToolResultSource,
+  definition: ToolDefinition<unknown, unknown> | McpClientConnectionDefinition,
 ): MatchedToolResult<unknown> | MatchedConnectionResult | undefined {
-  if (result.kind !== "tool-result") return undefined;
-  if (result.isError === true) return undefined;
+  const result = completedToolCall(source);
+  if (result === undefined) return undefined;
 
-  const entry = readDefinitionSource(source);
+  const entry = readDefinitionSource(definition);
   if (entry === undefined) return undefined;
   if (entry.kind === "ambiguous") return undefined;
 

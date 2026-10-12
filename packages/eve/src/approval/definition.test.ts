@@ -30,7 +30,7 @@ describe("approval definitions", () => {
         getToken: (...args: any[]) => Promise<unknown>;
         requireAuth: (...args: any[]) => never;
       };
-      request: { callId: string; principal: unknown; requestId: string; toolName: string };
+      request: { callId: string; interactionId: string; principal: unknown; toolName: string };
       response: { decision: "approve" | "cancel"; principal: { principalId: string } };
       session: { id: string; initiator: unknown; turn: unknown };
     }>();

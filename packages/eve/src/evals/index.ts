@@ -6,19 +6,20 @@ export { defineEval } from "#evals/define-eval.js";
 export { defineEvalConfig } from "#evals/define-eval-config.js";
 export { EveEvalTurnFailedError } from "#evals/session.js";
 export { mockModel } from "#evals/mock-model.js";
+export { toolCallsOf } from "#evals/tool-calls.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
-export type { InputRequest } from "#shared/input.js";
+export type { AskedInteraction } from "#protocol/session-reader.js";
 export type { CancelSessionResult } from "#client/types.js";
 
 export type {
   EveEvalCountMatcher,
   EveEvalEventMatch,
-  EveEvalInputRequestMatchOptions,
+  EveEvalInteractionMatchOptions,
   EveEvalValueMatcher,
   EveEvalToolCallMatchOptions,
   EveEvalSkillLoadMatchOptions,
@@ -50,6 +51,7 @@ export type {
   EveEvalDefinition,
   EveEvalInput,
   EveEvalLiveTurn,
+  EveEvalWatchOptions,
   EveEvalResult,
   EveEvalTarget,
   EveEvalTargetCapabilities,

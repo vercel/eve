@@ -1,6 +1,15 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import {
+  requestBatchOf,
+  requestSettlementOf,
+  signInPromptOf,
+  signInSettlementOf,
+  type RequestSettlement,
+} from "#channel/interaction-prompts.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
 
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { createLogger, formatErrorHint } from "#internal/logging.js";
+import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import {
   formatTelegramAuthorizationDisplayName,
   renderTelegramAuthorizationCompleted,
@@ -10,7 +19,7 @@ import {
 import {
   registerTelegramFreeformPrompt,
   registerTelegramHitlPrompt,
-  renderTelegramInputRequest,
+  renderTelegramInteraction,
   takeTelegramResolvedPrompt,
 } from "#public/channels/telegram/hitl.js";
 import type { TelegramMessage } from "#public/channels/telegram/inbound.js";
@@ -79,14 +88,66 @@ export function isTelegramBotMentioned(
   return new RegExp(`(?:^|[^A-Za-z0-9_])@${escapedUsername}(?=$|[^A-Za-z0-9_])`, "iu").test(text);
 }
 
+async function postTelegramRequests(
+  requests: readonly AskedInteraction[],
+  channel: Parameters<NonNullable<TelegramChannelEvents["interaction.opened"]>>[1]["channel"],
+): Promise<void> {
+  for (const request of requests) {
+    const rendered = renderTelegramInteraction(request, channel.state);
+    const posted = await channel.telegram.post({
+      reply_markup: rendered.replyMarkup,
+      text: rendered.text,
+    });
+    if (!posted.id) continue;
+    if (rendered.freeformRequestId !== undefined) {
+      registerTelegramFreeformPrompt(channel.state, {
+        messageId: posted.id,
+        requestId: rendered.freeformRequestId,
+      });
+    } else {
+      registerTelegramHitlPrompt(channel.state, request, {
+        messageId: posted.id,
+        text: rendered.text,
+      });
+    }
+  }
+}
+
+async function editTelegramResolvedPrompt(
+  resolution: RequestSettlement,
+  channel: Parameters<NonNullable<TelegramChannelEvents["interaction.settled"]>>[1]["channel"],
+): Promise<void> {
+  const edit = takeTelegramResolvedPrompt(channel.state, resolution);
+  if (edit === undefined) return;
+  try {
+    await channel.telegram.editMessageText({
+      ...edit,
+      replyMarkup: { inline_keyboard: [] },
+    });
+  } catch (error) {
+    log.warn("Telegram answered prompt edit failed", {
+      error,
+      requestId: resolution.interactionId,
+    });
+  }
+}
+
 /** Built-in Telegram event handlers for typing, replies, HITL, and terminal errors. */
 export const defaultEvents: TelegramChannelEvents = {
-  async "turn.started"(_event, channel, _ctx) {
+  async "turn.started"(_event, { channel }) {
     await channel.telegram.startTyping();
   },
 
-  async "authorization.required"(event, channel, _ctx) {
-    if (event.candidateId !== undefined) return;
+  async "interaction.opened"(fact, ctx) {
+    const { data } = fact;
+    const { channel } = ctx;
+    const batch = requestBatchOf(ctx.view, data);
+    if (batch !== undefined) {
+      await postTelegramRequests(batch.requests, channel);
+      return;
+    }
+    const event = signInPromptOf(data, fact.scope);
+    if (event === undefined || event.responseId !== undefined) return;
 
     const displayName = formatTelegramAuthorizationDisplayName(
       event.name,
@@ -124,11 +185,20 @@ export const defaultEvents: TelegramChannelEvents = {
     }
   },
 
-  async "authorization.completed"(event, channel, _ctx) {
-    if (event.outcome === "authorized" && event.candidateId === undefined) {
+  // Covers every way a prompt ends: a press, a typed answer, or a withdrawal.
+  async "interaction.settled"({ data }, ctx) {
+    const { channel } = ctx;
+    const resolution = requestSettlementOf(ctx.view, data);
+    if (resolution !== undefined) {
+      await editTelegramResolvedPrompt(resolution, channel);
+      return;
+    }
+    const event = signInSettlementOf(ctx.view, data);
+    if (event === undefined) return;
+    if (event.outcome === "accepted" && event.responseId === undefined) {
       await channel.telegram.startTyping();
     }
-    if (event.candidateId !== undefined) return;
+    if (event.responseId !== undefined) return;
 
     const pending = channel.state.pendingAuthMessageIds ?? {};
     const messageId = pending[event.name];
@@ -155,60 +225,20 @@ export const defaultEvents: TelegramChannelEvents = {
     channel.state.pendingAuthMessageIds = next;
   },
 
-  async "actions.requested"(_event, channel, _ctx) {
+  async "call.requested"(_event, { channel }) {
     await channel.telegram.startTyping();
   },
 
-  async "input.requested"(event, channel, _ctx) {
-    for (const request of event.requests) {
-      const rendered = renderTelegramInputRequest(request, channel.state);
-      const posted = await channel.telegram.post({
-        reply_markup: rendered.replyMarkup,
-        text: rendered.text,
-      });
-      if (!posted.id) continue;
-      if (rendered.freeformRequestId !== undefined) {
-        registerTelegramFreeformPrompt(channel.state, {
-          messageId: posted.id,
-          requestId: rendered.freeformRequestId,
-        });
-      } else {
-        registerTelegramHitlPrompt(channel.state, request, {
-          messageId: posted.id,
-          text: rendered.text,
-        });
-      }
-    }
+  async "content.completed"({ data }, { channel }) {
+    const text = replyTextOf(data);
+    if (text === undefined) return;
+    await channel.telegram.post(text);
   },
 
-  // Covers every way a prompt ends: a press, a typed answer, or a withdrawal.
-  async "input.resolved"(event, channel, _ctx) {
-    for (const resolution of event.resolutions) {
-      const edit = takeTelegramResolvedPrompt(channel.state, resolution);
-      if (edit === undefined) continue;
-      try {
-        await channel.telegram.editMessageText({
-          ...edit,
-          replyMarkup: { inline_keyboard: [] },
-        });
-      } catch (error) {
-        log.warn("Telegram answered prompt edit failed", {
-          error,
-          requestId: resolution.requestId,
-        });
-      }
-    }
-  },
-
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
-    await channel.telegram.post(event.message);
-  },
-
-  async "turn.failed"(event, channel, _ctx) {
-    if (event.terminal) return;
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "turn.settled"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.telegram.post(
       [
         `I hit an error while handling your request${hint}.`,
@@ -219,9 +249,10 @@ export const defaultEvents: TelegramChannelEvents = {
     );
   },
 
-  async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
+  async "session.ended"({ data }, { channel }) {
+    if (data.outcome !== "failed") return;
+    const hint = formatErrorHint(errorHintOf(data.error));
+    const errorId = data.error?.id;
     await channel.telegram.post(
       [
         `This session could not recover from an error${hint}.`,

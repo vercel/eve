@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { InputRequest } from "#shared/input.js";
+import type { AskedInteraction } from "#protocol/session-reader.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlActionId,
-  formatInputRequestFallbackText,
+  formatInteractionFallbackText,
   HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
@@ -17,18 +17,18 @@ import {
 import {
   deriveHitlResponse,
   HITL_ACTION_PREFIX,
-  renderInputRequestBlocks,
+  renderInteractionBlocks,
 } from "#public/channels/slack/index.js";
 import {
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
 } from "#public/channels/slack/limits.js";
 
-function makeRequest(overrides: Partial<InputRequest>): InputRequest {
+function makeRequest(overrides: Partial<AskedInteraction>): AskedInteraction {
   return {
-    action: { kind: "tool-call", callId: "call_abc123", toolName: "ask_question", input: {} },
+    call: { callId: "call_abc123", name: "ask_question", input: {} },
     prompt: "Pick one",
-    requestId: "call_abc123",
+    interactionId: "call_abc123",
     ...overrides,
     kind: overrides.kind ?? "question",
   };
@@ -36,14 +36,14 @@ function makeRequest(overrides: Partial<InputRequest>): InputRequest {
 
 describe("private HITL routes", () => {
   it("renders and decodes one typed return route", () => {
-    const blocks = renderInputRequestBlocks(
+    const blocks = renderInteractionBlocks(
       makeRequest({
-        kind: "tool-approval",
+        kind: "approval",
         options: [
           { id: "approve", label: "Approve" },
           { id: "cancel", label: "Cancel" },
         ],
-        requestId: "approval_abc123",
+        interactionId: "approval_abc123",
       }),
       { channelId: "C123", threadTs: "111.222" },
     );
@@ -57,7 +57,7 @@ describe("private HITL routes", () => {
     });
     expect(deriveHitlResponse({ actionId, value: "approve" })).toMatchObject({
       kind: "tool-approval",
-      response: { optionId: "approve", requestId: "approval_abc123" },
+      response: { optionId: "approve", interactionId: "approval_abc123" },
       route: { channelId: "C123", threadTs: "111.222" },
     });
   });
@@ -68,10 +68,10 @@ describe("deriveHitlResponse", () => {
     const derived: NonNullable<ReturnType<typeof deriveHitlResponse>> = {
       kind: "tool-approval",
       response: {
-        // @ts-expect-error Slack classification is not part of InputResponse.
+        // @ts-expect-error Slack classification is not part of Answer.
         kind: "tool-approval",
         optionId: "approve",
-        requestId: "approval_abc123",
+        interactionId: "approval_abc123",
       },
     };
 
@@ -89,7 +89,7 @@ describe("deriveHitlResponse", () => {
     });
 
     expect(response).toEqual({
-      response: { requestId: "call_abc123", optionId: "approve" },
+      response: { interactionId: "call_abc123", optionId: "approve" },
     });
   });
 
@@ -99,7 +99,7 @@ describe("deriveHitlResponse", () => {
       selectedOptionValue: "weekly",
     });
 
-    expect(response).toEqual({ response: { requestId: "call_xyz", optionId: "weekly" } });
+    expect(response).toEqual({ response: { interactionId: "call_xyz", optionId: "weekly" } });
   });
 
   it("preserves tool-approval metadata from a button action id", () => {
@@ -112,7 +112,7 @@ describe("deriveHitlResponse", () => {
       kind: "tool-approval",
       response: {
         optionId: "approve",
-        requestId: "approval_abc123",
+        interactionId: "approval_abc123",
       },
     });
   });
@@ -147,9 +147,9 @@ describe("isHitlAction", () => {
   });
 });
 
-describe("renderInputRequestBlocks", () => {
+describe("renderInteractionBlocks", () => {
   it("emits a card block for an option list with no display hint", () => {
-    const blocks = renderInputRequestBlocks(
+    const blocks = renderInteractionBlocks(
       makeRequest({
         options: [
           { id: "approve", label: "Approve", style: "primary" },
@@ -189,10 +189,9 @@ describe("renderInputRequestBlocks", () => {
 
   it("shows tool input for confirmation approval requests in a collapsible container", () => {
     const request = makeRequest({
-      action: {
-        kind: "tool-call",
+      call: {
         callId: "call_mongo",
-        toolName: "mongodb-mutate",
+        name: "mongodb-mutate",
         input: {
           operation: "deleteOne",
           collection: "org_members",
@@ -200,16 +199,16 @@ describe("renderInputRequestBlocks", () => {
         },
       },
       display: "confirmation",
-      kind: "tool-approval",
+      kind: "approval",
       prompt: "Approve tool call: mongodb-mutate",
-      requestId: "approval_1",
+      interactionId: "approval_1",
       options: [
         { id: "approve", label: "Approve" },
         { id: "cancel", label: "Cancel" },
       ],
     });
 
-    const blocks = renderInputRequestBlocks(request);
+    const blocks = renderInteractionBlocks(request);
 
     expect(blocks).toHaveLength(2);
     const card = blocks[0] as {
@@ -256,16 +255,15 @@ describe("renderInputRequestBlocks", () => {
   });
 
   it("keeps long approval input details within the collapsible container section limit", () => {
-    const blocks = renderInputRequestBlocks(
+    const blocks = renderInteractionBlocks(
       makeRequest({
-        action: {
-          kind: "tool-call",
+        call: {
           callId: "call_long",
-          toolName: "dangerous_tool",
+          name: "dangerous_tool",
           input: { value: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500) },
         },
         display: "confirmation",
-        kind: "tool-approval",
+        kind: "approval",
         options: [
           { id: "approve", label: "Approve" },
           { id: "cancel", label: "Cancel" },
@@ -284,7 +282,7 @@ describe("renderInputRequestBlocks", () => {
   });
 
   it("renders a radio_buttons widget for select-display requests with ≤6 options", () => {
-    const blocks = renderInputRequestBlocks(
+    const blocks = renderInteractionBlocks(
       makeRequest({
         display: "select",
         options: [
@@ -319,7 +317,7 @@ describe("renderInputRequestBlocks", () => {
   it("falls back to a static_select dropdown when the option count exceeds the radio limit", () => {
     const options = Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, label: `Option ${i}` }));
 
-    const blocks = renderInputRequestBlocks(
+    const blocks = renderInteractionBlocks(
       makeRequest({
         display: "select",
         options,
@@ -340,7 +338,7 @@ describe("renderInputRequestBlocks", () => {
   });
 
   it("renders a 'Type your answer' freeform button when the request has no options", () => {
-    const blocks = renderInputRequestBlocks(makeRequest({ prompt: "What's the date range?" }));
+    const blocks = renderInteractionBlocks(makeRequest({ prompt: "What's the date range?" }));
 
     expect(blocks).toHaveLength(2);
     const actions = blocks[1] as { type: string; elements: Array<Record<string, unknown>> };
@@ -357,7 +355,7 @@ describe("renderInputRequestBlocks", () => {
   });
 
   it("uses option buttons when allowFreeform is set alongside options", () => {
-    const blocks = renderInputRequestBlocks(
+    const blocks = renderInteractionBlocks(
       makeRequest({
         allowFreeform: true,
         options: [{ id: "yes", label: "Approve" }],
@@ -376,18 +374,18 @@ describe("renderInputRequestBlocks", () => {
 
   it("round-trips a button click without parsing collisions on underscore-bearing call ids", () => {
     const request = makeRequest({
-      requestId: "call_with_many_underscores_99",
+      interactionId: "call_with_many_underscores_99",
       options: [{ id: "yes_please", label: "Yes please" }],
     });
 
-    const blocks = renderInputRequestBlocks(request);
+    const blocks = renderInteractionBlocks(request);
     const button = (blocks[0] as { actions: Array<{ action_id: string; value: string }> })
       .actions[0]!;
 
     const response = deriveHitlResponse({ actionId: button.action_id, value: button.value });
     expect(response).toEqual({
       response: {
-        requestId: "call_with_many_underscores_99",
+        interactionId: "call_with_many_underscores_99",
         optionId: "yes_please",
       },
     });
@@ -399,8 +397,8 @@ describe("renderInputRequestBlocks", () => {
   });
 
   it("preserves the return route on a freeform question", () => {
-    const blocks = renderInputRequestBlocks(
-      makeRequest({ requestId: "question_freeform", options: undefined }),
+    const blocks = renderInteractionBlocks(
+      makeRequest({ interactionId: "question_freeform", options: undefined }),
       { channelId: "C777", threadTs: "7.7" },
     );
     const actionId = (blocks[1] as { elements: Array<{ action_id: string }> }).elements[0]!
@@ -412,7 +410,7 @@ describe("renderInputRequestBlocks", () => {
 
   it("truncates section-block prompts past the Slack 3000-char cap", () => {
     const longPrompt = "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500);
-    const blocks = renderInputRequestBlocks(makeRequest({ prompt: longPrompt }));
+    const blocks = renderInteractionBlocks(makeRequest({ prompt: longPrompt }));
     const promptBlock = blocks[0] as { text: { text: string } };
     expect(promptBlock.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
     expect(promptBlock.text.text.endsWith("...")).toBe(true);
@@ -420,12 +418,12 @@ describe("renderInputRequestBlocks", () => {
 
   it("round-trips a radio click without parsing collisions on underscore-bearing call ids", () => {
     const request = makeRequest({
-      requestId: "call_with_many_underscores_99",
+      interactionId: "call_with_many_underscores_99",
       display: "select",
       options: [{ id: "weekly_report", label: "Weekly report" }],
     });
 
-    const blocks = renderInputRequestBlocks(request);
+    const blocks = renderInteractionBlocks(request);
     const widget = (
       blocks[1] as { elements: Array<{ action_id: string; options: Array<{ value: string }> }> }
     ).elements[0]!;
@@ -436,21 +434,20 @@ describe("renderInputRequestBlocks", () => {
     });
     expect(response).toEqual({
       response: {
-        requestId: "call_with_many_underscores_99",
+        interactionId: "call_with_many_underscores_99",
         optionId: "weekly_report",
       },
     });
   });
 });
 
-describe("formatInputRequestFallbackText", () => {
+describe("formatInteractionFallbackText", () => {
   it("includes approval tool input in Slack fallback text", () => {
-    const text = formatInputRequestFallbackText(
+    const text = formatInteractionFallbackText(
       makeRequest({
-        action: {
-          kind: "tool-call",
+        call: {
           callId: "call_mongo",
-          toolName: "mongodb-mutate",
+          name: "mongodb-mutate",
           input: {
             operation: "deleteOne",
             collection: "orgs",
@@ -458,7 +455,7 @@ describe("formatInputRequestFallbackText", () => {
           },
         },
         display: "confirmation",
-        kind: "tool-approval",
+        kind: "approval",
         prompt: "Approve tool call: mongodb-mutate",
         options: [
           { id: "approve", label: "Approve" },
@@ -473,7 +470,7 @@ describe("formatInputRequestFallbackText", () => {
   });
 
   it("leaves non-approval fallback text unchanged", () => {
-    expect(formatInputRequestFallbackText(makeRequest({ prompt: "Pick one" }))).toBe("Pick one");
+    expect(formatInteractionFallbackText(makeRequest({ prompt: "Pick one" }))).toBe("Pick one");
   });
 });
 

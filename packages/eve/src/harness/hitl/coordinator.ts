@@ -31,11 +31,12 @@ import {
   isAuthorizationSignal,
   type AuthorizationChallenge,
 } from "#harness/authorization.js";
-import { isApprovalRequest } from "#harness/input-request-class.js";
 import { suspendedSteps } from "#harness/session-machine/view.js";
-import type { HarnessSession, HarnessToolLookup, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessToolLookup, HarnessStepInput } from "#harness/types.js";
+import { responseBindingFor } from "#harness/response-bindings.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
+import type { ApprovalAsk } from "#harness/session-machine/state.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
 const REQUESTER_ONLY_APPROVAL_FEEDBACK =
@@ -49,9 +50,16 @@ const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 
 const log = createLogger("harness.hitl");
 
+/** A response a check refused before any policy ran: who answered may not answer it. */
+export interface RefusedResponse {
+  readonly responseId: string;
+  readonly reason: string;
+}
+
 interface ApprovalDeliveryResult {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
+  readonly refused: readonly RefusedResponse[];
   readonly kind:
     | "continue"
     | "continue-coordination"
@@ -59,7 +67,7 @@ interface ApprovalDeliveryResult {
     | "responses-completed"
     | "park";
   readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
 }
 
 /**
@@ -82,9 +90,9 @@ interface ApprovalDeliveryResult {
 export async function coordinateApprovalDelivery(input: {
   readonly now?: number;
   readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
+  readonly stepInput?: HarnessStepInput;
   readonly tools: HarnessToolLookup;
-  readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolLookup>;
+  readonly prepareTools?: (request: ApprovalAsk) => Promise<HarnessToolLookup>;
 }): Promise<ApprovalDeliveryResult> {
   const now = input.now ?? Date.now();
   const expiredCandidates = getApprovalAuditState(input.session.state).activeCandidates.filter(
@@ -104,7 +112,7 @@ export async function coordinateApprovalDelivery(input: {
   const audit = getApprovalAuditState(session.state);
   const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);
   const pendingRequestIds = new Set(
-    batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
+    batches.flatMap((batch) => batch.requests.map((request) => request.interactionId)),
   );
   const pendingSettlements = audit.settlements.filter((settlement) =>
     pendingRequestIds.has(settlement.requestId),
@@ -135,22 +143,28 @@ export async function coordinateApprovalDelivery(input: {
     batches.flatMap((batch) => batch.responseAuthRequiredRequestIds ?? []),
   );
   const allRequests = batches.flatMap((batch) => batch.requests);
-  const requests = new Map(allRequests.map((request) => [request.requestId, request]));
+  const requests = new Map(allRequests.map((request) => [request.interactionId, request]));
   const challenges: AuthorizationChallenge[] = [];
   const feedback: string[] = [];
+  const refused: RefusedResponse[] = [];
+  const refuse = (response: Answer, reason: string) => {
+    feedback.push(reason);
+    const binding = responseBindingFor(stepInput, response);
+    if (binding !== undefined) refused.push({ reason, responseId: binding.responseId });
+  };
   const consumed = new Set<string>();
   let didCommit = false;
   const candidatesAtStart = getApprovalAuditState(session.state).activeCandidates;
 
   const deliveredResponses = [
-    ...(stepInput?.attributedInputResponses ?? []),
-    ...(stepInput?.inputResponses ?? []).map((response) => ({ auth: undefined, response })),
+    ...(stepInput?.attributedAnswers ?? []),
+    ...(stepInput?.answers ?? []).map((response) => ({ auth: undefined, response })),
   ];
   for (const { auth: attributedResponder, response } of deliveredResponses) {
-    const request = requests.get(response.requestId);
-    if (request === undefined || !isApprovalRequest(request)) continue;
+    const request = requests.get(response.interactionId);
+    if (request === undefined) continue;
 
-    const requiresAuthorization = authorizationRequiredRequestIds.has(response.requestId);
+    const requiresAuthorization = authorizationRequiredRequestIds.has(response.interactionId);
     if (!requiresAuthorization) {
       const context = contextStorage.getStore();
       const responder =
@@ -164,7 +178,7 @@ export async function coordinateApprovalDelivery(input: {
       // defining `approval.response`.
       const requester =
         suspendedSteps(session.state).find((step) =>
-          step.requests.some((request) => request.requestId === response.requestId),
+          step.requests.some((request) => request.interactionId === response.interactionId),
         )?.requester ?? null;
       if (
         responder !== null &&
@@ -172,15 +186,18 @@ export async function coordinateApprovalDelivery(input: {
         requester !== null &&
         !sameResponder(requester, responder)
       ) {
-        consumed.add(response.requestId);
-        feedback.push(REQUESTER_ONLY_APPROVAL_FEEDBACK);
+        consumed.add(response.interactionId);
+        refuse(response, REQUESTER_ONLY_APPROVAL_FEEDBACK);
         continue;
       }
       if (responder !== null && decision !== undefined) {
+        // The batch is still open, so a later answer revises this one.
         const settled = settleDirectApprovalResponse({
           actor: responder,
           outcome: decision === "approve" ? "allowed" : "cancelled",
-          requestId: response.requestId,
+          requestId: response.interactionId,
+          responseId: responseBindingFor(stepInput, response)?.responseId,
+          revisionPending: true,
           settledAt: now,
           state: session.state,
         });
@@ -189,7 +206,7 @@ export async function coordinateApprovalDelivery(input: {
       }
       continue;
     }
-    consumed.add(response.requestId);
+    consumed.add(response.interactionId);
 
     // A response policy decides Cancel as well as Approve, so a responder it
     // rejects can neither approve nor cancel someone else's request.
@@ -200,16 +217,18 @@ export async function coordinateApprovalDelivery(input: {
         ? attributedResponder
         : buildCallbackContext().session.auth.current;
     if (responder === null) {
-      feedback.push(UNAUTHENTICATED_APPROVAL_FEEDBACK);
+      refuse(response, UNAUTHENTICATED_APPROVAL_FEEDBACK);
       continue;
     }
 
     const created = createApprovalCandidate({
-      candidateIdPrefix: approvalCandidateIdPrefix(request.requestId, responder, decision),
+      candidateId: responseBindingFor(stepInput, response)?.responseId,
+      candidateIdPrefix: approvalCandidateIdPrefix(request.interactionId, responder, decision),
+      revisionPending: true,
       createdAt: now,
       decision,
       expiresAt: now + APPROVAL_CANDIDATE_TTL_MS,
-      requestId: request.requestId,
+      requestId: request.interactionId,
       responder,
       state: session.state,
     });
@@ -225,10 +244,11 @@ export async function coordinateApprovalDelivery(input: {
       didCommit ? "continue-coordination" : "continue",
       [],
       feedback,
+      refused,
     );
   }
   if (didCommit) {
-    return deliveryResult(session, remainingStepInput, "continue", [], feedback);
+    return deliveryResult(session, remainingStepInput, "continue", [], feedback, refused);
   }
 
   // Candidates are persisted in an earlier pass. Run pending candidates and
@@ -301,7 +321,7 @@ async function authorizeCandidate(input: {
   readonly candidateId: string;
   readonly decision: ApprovalCandidateDecision;
   readonly now: number;
-  readonly request: InputRequest;
+  readonly request: ApprovalAsk;
   readonly responder: ActiveApprovalCandidate["responder"];
   /** The entries of the step that asked, restored by running its resolvers. */
   readonly restoreTools: () => Promise<HarnessToolLookup>;
@@ -326,11 +346,11 @@ async function authorizeCandidate(input: {
   } catch (error) {
     // A resolver or its infrastructure failed: the entry may still exist, so the request waits.
     logError(log, "approval tools could not be restored", error, {
-      requestId: input.request.requestId,
+      requestId: input.request.interactionId,
     });
     return failCandidate({ ...input, reason: TEMPORARILY_UNAVAILABLE_APPROVAL_REASON, session });
   }
-  const definition = tools.get(input.request.action.toolName);
+  const definition = tools.get(input.request.call.toolName);
   // Gone from the restored catalog: no response can approve the call, and it can't run.
   if (definition === undefined) {
     const settled = settleUnavailableCandidate({
@@ -361,14 +381,16 @@ async function authorizeCandidate(input: {
           scope: input.candidateId,
         }),
         request: {
-          callId: input.request.action.callId,
-          requestId: input.request.requestId,
+          callId: input.request.call.callId,
+          interactionId: input.request.interactionId,
           principal:
             suspendedSteps(session.state).find((step) =>
-              step.requests.some((request) => request.requestId === input.request.requestId),
+              step.requests.some(
+                (request) => request.interactionId === input.request.interactionId,
+              ),
             )?.requester ?? null,
-          toolInput: input.request.action.input,
-          toolName: input.request.action.toolName,
+          toolInput: input.request.call.input,
+          toolName: input.request.call.toolName,
         },
         response: { decision: input.decision, principal: input.responder },
         session: {
@@ -398,6 +420,7 @@ async function authorizeCandidate(input: {
 
     const settled = settleAllowedCandidate({
       candidateId: input.candidateId,
+      revisionPending: true,
       settledAt: input.now,
       state: session.state,
     });
@@ -441,7 +464,7 @@ async function authorizeCandidate(input: {
 function failCandidate(input: {
   readonly candidateId: string;
   readonly now: number;
-  readonly request: InputRequest;
+  readonly request: ApprovalAsk;
   readonly reason?: string;
   readonly session: HarnessSession;
 }): {
@@ -467,34 +490,33 @@ function failCandidate(input: {
 }
 
 function hasResponseForRequest(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   requestIds: ReadonlySet<string>,
 ): boolean {
   return (
-    stepInput?.attributedInputResponses?.some(({ response }) =>
-      requestIds.has(response.requestId),
-    ) === true ||
-    stepInput?.inputResponses?.some((response) => requestIds.has(response.requestId)) === true
+    stepInput?.attributedAnswers?.some(({ response }) => requestIds.has(response.interactionId)) ===
+      true ||
+    stepInput?.answers?.some((response) => requestIds.has(response.interactionId)) === true
   );
 }
 
-function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
+function hasMeaningfulInput(stepInput: HarnessStepInput | undefined): boolean {
   return (
     stepInput?.message !== undefined ||
-    (stepInput?.attributedInputResponses?.length ?? 0) > 0 ||
-    (stepInput?.inputResponses?.length ?? 0) > 0 ||
+    (stepInput?.attributedAnswers?.length ?? 0) > 0 ||
+    (stepInput?.answers?.length ?? 0) > 0 ||
     (stepInput?.runtimeActionResults?.length ?? 0) > 0
   );
 }
 
 function appendSettledResponses(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   settlements: readonly ApprovalSettlementAuditRecord[],
-): StepInput | undefined {
+): HarnessStepInput | undefined {
   if (settlements.length === 0) return stepInput;
   const existingRequestIds = new Set([
-    ...(stepInput?.inputResponses ?? []).map((response) => response.requestId),
-    ...(stepInput?.attributedInputResponses ?? []).map(({ response }) => response.requestId),
+    ...(stepInput?.answers ?? []).map((response) => response.interactionId),
+    ...(stepInput?.attributedAnswers ?? []).map(({ response }) => response.interactionId),
   ]);
   const missingSettlements = settlements.filter(
     (settlement) => !existingRequestIds.has(settlement.requestId),
@@ -502,44 +524,45 @@ function appendSettledResponses(
   if (missingSettlements.length === 0) return stepInput;
   return {
     ...stepInput,
-    inputResponses: [
-      ...(stepInput?.inputResponses ?? []),
+    answers: [
+      ...(stepInput?.answers ?? []),
       // An unavailable request answers as cancel, so nothing runs; `answer` reports it unavailable.
       ...missingSettlements.map((settlement) => ({
+        interactionId: settlement.requestId,
         optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
-        requestId: settlement.requestId,
       })),
     ],
   };
 }
 
 function removeConsumedResponses(
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   consumed: ReadonlySet<string>,
-): StepInput | undefined {
+): HarnessStepInput | undefined {
   if (stepInput === undefined) return undefined;
-  const attributed = (stepInput.attributedInputResponses ?? []).filter(
-    ({ response }) => !consumed.has(response.requestId),
+  const attributed = (stepInput.attributedAnswers ?? []).filter(
+    ({ response }) => !consumed.has(response.interactionId),
   );
-  const plain = (stepInput.inputResponses ?? []).filter(
-    (response) => !consumed.has(response.requestId),
+  const plain = (stepInput.answers ?? []).filter(
+    (response) => !consumed.has(response.interactionId),
   );
-  const inputResponses = [...plain, ...attributed.map(({ response }) => response)];
+  const answers = [...plain, ...attributed.map(({ response }) => response)];
   return {
     ...stepInput,
-    attributedInputResponses: undefined,
-    inputResponses,
+    attributedAnswers: undefined,
+    answers,
   };
 }
 
 function deliveryResult(
   session: HarnessSession,
-  stepInput: StepInput | undefined,
+  stepInput: HarnessStepInput | undefined,
   kind: ApprovalDeliveryResult["kind"] = "continue",
   challenges: readonly AuthorizationChallenge[] = [],
   feedback: readonly string[] = [],
+  refused: readonly RefusedResponse[] = [],
 ): ApprovalDeliveryResult {
-  return { challenges, feedback, kind, session, stepInput };
+  return { challenges, feedback, kind, refused, session, stepInput };
 }
 
 function toCandidateDecision(optionId: string | undefined): ApprovalCandidateDecision | undefined {

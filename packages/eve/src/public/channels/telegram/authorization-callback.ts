@@ -1,8 +1,9 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ChannelResolveSession } from "#channel/channel-operations.js";
 import type { Session } from "#channel/session.js";
 import { createLogger } from "#internal/logging.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
-import { foldSessionEvents } from "#protocol/session-projection.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { openSignIns } from "#protocol/session-reader.js";
 import {
   TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
   renderTelegramAuthorizationPrompt,
@@ -47,7 +48,10 @@ export async function dispatchTelegramAuthorizationCallback(input: {
 
     await input.telegram.telegram.postEphemeral(
       input.query.from.id,
-      renderTelegramAuthorizationPrompt(authorization),
+      renderTelegramAuthorizationPrompt({
+        authorization: authorization.request.signIn,
+        name: authorization.request.signIn?.name ?? authorization.interactionId,
+      }),
       { callbackQueryId: input.query.id },
     );
     await input.telegram.telegram.answerCallbackQuery({
@@ -72,18 +76,19 @@ async function inactiveAuthorization(
 
 /** The latest sign-in still open. An approval responder's sign-in has its own prompt. */
 async function findOpenAuthorization(session: Session) {
-  const { signIns } = await foldSessionEvents(eventsToTail(session));
-  return signIns.findLast((prompt) => prompt.candidateId === undefined);
+  const view = emptySessionView();
+  for await (const event of eventsToTail(session)) foldReceivedEvent(view, event);
+  return openSignIns(view).findLast((row) => !("responseId" in row.subject));
 }
 
-/** The session's events up to its tail when the read starts. Its stream follows the session. */
-async function* eventsToTail(session: Session): AsyncGenerator<MessageStreamEvent> {
+/** The session's events through the line at its tail when the read starts. */
+async function* eventsToTail(session: Session): AsyncGenerator<SessionStreamEvent> {
   const tailIndex = await session.getStreamTailIndex();
   if (tailIndex < 0) return;
-  let index = 0;
   // Leaving the loop cancels the stream.
   for await (const event of await session.getEventStream({ startIndex: 0 })) {
     yield event;
-    if (++index > tailIndex) return;
+    const { endOfLine, position } = event.meta;
+    if (position.line >= tailIndex && endOfLine !== false) return;
   }
 }

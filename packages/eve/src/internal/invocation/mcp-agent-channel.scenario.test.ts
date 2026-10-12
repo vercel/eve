@@ -83,9 +83,9 @@ describe("MCP agent channel", () => {
         const pending = await pollInvocation(server.url, "alice", "modern", invocationId, [
           "input_required",
         ]);
-        const requestId = requiredString(
-          Object.keys(requiredRecord(pending.inputRequests, "inputRequests"))[0],
-          "requestId",
+        const interactionId = requiredString(
+          Object.keys(requiredRecord(pending.interactions, "interactions"))[0],
+          "interactionId",
         );
 
         const hidden = await callToolResult(server.url, "bob", "modern", "agent_get", {
@@ -93,7 +93,7 @@ describe("MCP agent channel", () => {
         });
         expect(hidden.isError).toBe(true);
 
-        const responses = [{ optionId: "Yes", requestId }];
+        const responses = [{ interactionId, optionId: "Yes" }];
         await expect(
           callTool(server.url, "alice", "modern", "agent_update", {
             invocationId,
@@ -144,7 +144,7 @@ describe("MCP agent channel", () => {
         expect(unknown.isError).toBe(true);
         const notPending = await callToolResult(server.url, "alice", "modern", "agent_update", {
           invocationId,
-          responses: [{ optionId: "yes", requestId: "stale" }],
+          responses: [{ interactionId: "stale", optionId: "yes" }],
         });
         expect(notPending.isError).toBe(true);
       } catch (error) {

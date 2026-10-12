@@ -5,12 +5,13 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 
 import type { Approval } from "#approval/definition.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
-import type { InputOption } from "#shared/input.js";
+import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 import {
   collectDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
@@ -23,7 +24,10 @@ type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unkn
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
 
-export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
+export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context"> & {
+  /** Who approved the call, when it runs after a person approved it. */
+  readonly approval?: { readonly responder: SessionAuthContext };
+};
 
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
@@ -111,7 +115,7 @@ export interface InternalToolDefinitionWithExecuteFn<
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
  * way they render tool approvals.
  */
-export interface ToolInputRequest {
+export interface ToolQuestion {
   /**
    * Whether the user may answer with free text instead of one of the
    * {@link options}.
@@ -120,19 +124,19 @@ export interface ToolInputRequest {
   /** Rendering hint: confirmation buttons, a selection list, or a text field. */
   readonly display?: "confirmation" | "select" | "text";
   /** Selectable answers. */
-  readonly options?: readonly InputOption[];
+  readonly options?: readonly InteractionOption[];
   readonly prompt: string;
 }
 
 /** Public identity fields for the authenticated person who answered a question. */
-export interface ToolInputResponseResponder {
+export interface ToolResponder {
   readonly authenticator: string;
   readonly principalId: string;
   readonly principalType: string;
 }
 
 /**
- * The outcome of a {@link ToolInputRequest}.
+ * The outcome of a {@link ToolQuestion}.
  *
  * - `answered`: the user picked an option or typed an answer. An answer the
  *   session accepted before a withdrawal wins, even after a signal aborted.
@@ -141,13 +145,13 @@ export interface ToolInputResponseResponder {
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
-export type ToolInputResponse =
+export type ToolAnswer =
   | {
       readonly status: "answered";
       /** The selected option's `id`, when the user picked one. */
       readonly optionId?: string;
       /** Authenticated identity of the responder, without channel attributes. */
-      readonly responder?: ToolInputResponseResponder;
+      readonly responder?: ToolResponder;
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }
@@ -155,7 +159,7 @@ export type ToolInputResponse =
   | { readonly status: "unavailable" };
 
 /** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
-export interface ToolInputRequestOptions {
+export interface ToolAskOptions {
   /**
    * Withdraws the request when it aborts: the channel stops offering the
    * question and the ask resolves as `cancelled`, unless the session accepted
@@ -216,7 +220,29 @@ export type ToolContext = SessionContext & {
    * token returned by {@link getToken}.
    */
   requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
+  /**
+   * The person who approved this call. Present only when the call runs after a
+   * person approved it; absent for calls that needed no approval.
+   */
+  readonly approval?: ToolApproval;
 };
+
+/**
+ * The approval behind an approved tool call. The call still runs as the
+ * requester, `ctx.session.auth.current`; this only lets it read who approved
+ * it and act with their credentials where the tool chooses to.
+ */
+export interface ToolApproval {
+  /** Who approved the call: the same principal its response policy saw. */
+  readonly responder: SessionAuthContext;
+  /**
+   * Resolves the responder's token for an inline provider, as
+   * {@link ToolContext.getToken} does for the requester. It never starts a
+   * sign-in: when the responder has no token, the call fails with the
+   * provider's error.
+   */
+  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
+}
 
 /**
  * Public tool definition authored in `agent/tools/*.ts`.
@@ -266,7 +292,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    *
    * When omitted, the model sees the full `execute` return value
    * (default AI SDK serialization). Channel event handlers
-   * (`action.result`) always receive the full output regardless.
+   * (`call.settled`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }

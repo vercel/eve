@@ -70,10 +70,10 @@
     }
   }
 
-  function handleInputResponses(
+  function handleAnswers(
     responses: readonly {
       readonly optionId?: string;
-      readonly requestId: string;
+      readonly interactionId: string;
       readonly text?: string;
     }[],
   ) {
@@ -82,7 +82,7 @@
   }
 
   function partKey(part: EveMessagePart, index: number): string {
-    if (part.type === "dynamic-tool") return part.toolCallId;
+    if (part.type === "tool") return part.callId;
     return `${part.type}:${index}`;
   }
 
@@ -234,11 +234,11 @@
                         </span>
                       </div>
                     {/if}
-                  {:else if part.type === "dynamic-tool"}
+                  {:else if part.type === "tool"}
                     <ToolBlock
                       {part}
                       canRespond={!isInputDisabled}
-                      onInputResponses={handleInputResponses}
+                      onAnswers={handleAnswers}
                     />
                   {/if}
                 {/each}

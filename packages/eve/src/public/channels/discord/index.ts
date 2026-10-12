@@ -29,9 +29,9 @@ export {
   type DiscordContext,
   type DiscordEventContext,
   type DiscordHandle,
-  type DiscordInputResponseContext,
-  type DiscordInputResponseInteraction,
-  type DiscordInputResponseResult,
+  type DiscordAnswerContext,
+  type DiscordAnswerInteraction,
+  type DiscordAnswerResult,
   type DiscordReceiveTarget,
   type DiscordRequestOptions,
 } from "#public/channels/discord/discordChannel.js";
@@ -83,10 +83,10 @@ export {
   DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX,
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
   buildFreeformModalResponse,
-  deriveComponentInputResponses,
-  deriveModalInputResponses,
+  deriveComponentAnswers,
+  deriveModalAnswers,
   isDiscordFreeformComponent,
-  renderInputRequestComponents,
+  renderInteractionComponents,
 } from "#public/channels/discord/hitl.js";
 
 export { defaultDiscordAuth } from "#public/channels/discord/defaults.js";

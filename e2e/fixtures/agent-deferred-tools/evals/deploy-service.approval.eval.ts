@@ -12,18 +12,10 @@ export default defineEval({
     const parked = await t.send("DEFERRED-DEPLOY Alice asks to deploy the billing service.");
     const session = parked.session;
     parked.expectOk();
-    session.requireInputRequest({ optionIds: ["approve", "cancel"], toolName: "deploy_service" });
+    session.requireInteraction({ optionIds: ["approve", "cancel"], toolName: "deploy_service" });
     parked.calledTool("deploy_service", { count: 1, status: "pending" });
-    // notCalledTool rejects CALL_TOOL because no call is reported under it, so check the raw actions.
-    parked.eventsSatisfy(`no action is reported under ${CALL_TOOL}`, (events) =>
-      events.every(
-        (event) =>
-          event.type !== "actions.requested" ||
-          event.data.actions.every(
-            (action) => !("toolName" in action) || action.toolName !== CALL_TOOL,
-          ),
-      ),
-    );
+    // notCalledTool rejects CALL_TOOL because no call is reported under it, so check the raw calls.
+    parked.notEvent("call.requested", { data: { capability: { name: CALL_TOOL } } });
 
     const approved = await session.respondAll("approve");
 

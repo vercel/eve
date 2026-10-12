@@ -18,8 +18,8 @@ const CATALOG_ENTRIES = new Set([
  */
 export function calledTools(events: Events): string[] {
   return events.flatMap((event) =>
-    event.type === "actions.requested"
-      ? event.data.actions.map((action) => ("toolName" in action ? action.toolName : action.kind))
+    event.type === "call.requested"
+      ? [event.data.capability.kind === "skill" ? "load-skill" : event.data.capability.name]
       : [],
   );
 }

@@ -1,3 +1,4 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -12,7 +13,6 @@ import {
 import { contextStorage } from "#context/container.js";
 import { ScheduleIdKey } from "#context/keys.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import { truncateMessageText } from "#public/channels/slack/limits.js";
@@ -285,24 +285,18 @@ export interface SlackTaskCardState {
 }
 
 const TRACKED_EVENTS = [
-  "actions.requested",
-  "action.result",
-  "task.started",
-  "task.settled",
-  "input.requested",
-  "input.resolved",
-  "authorization.required",
-  "authorization.completed",
-  "turn.completed",
-  "turn.failed",
-  "turn.cancelled",
+  "call.requested",
+  "call.started",
+  "call.settled",
+  "interaction.opened",
+  "interaction.settled",
+  "turn.settled",
 ] as const;
 
 type TrackedEvent = (typeof TRACKED_EVENTS)[number];
 type TrackedHandler = (
-  data: Extract<UnstampedMessageStreamEvent, { readonly type: TrackedEvent }>["data"],
-  channel: SlackEventContext,
-  ctx: Parameters<NonNullable<SlackChannelInternalEvents["task.started"]>>[2],
+  event: Extract<SessionEvent, { readonly type: TrackedEvent }>,
+  ctx: Parameters<NonNullable<SlackChannelInternalEvents["call.started"]>>[1],
 ) => Promise<void>;
 
 /**
@@ -318,18 +312,21 @@ export function withTaskCards(
   const wrapped: Partial<Record<TrackedEvent, TrackedHandler>> = {};
   for (const type of TRACKED_EVENTS) {
     const handler = events[type] as TrackedHandler | undefined;
-    wrapped[type] = async (data, channel, ctx) => {
-      const event = { data, type } as UnstampedMessageStreamEvent;
-      if (event.type === "task.started") await closeSettledCard(channel, event.data, taskCard);
+    wrapped[type] = async (event, ctx) => {
+      const { channel } = ctx;
+      const turnId = event.scope?.turnId;
+      if (event.type === "call.started" && event.data.taskId !== undefined && turnId !== undefined)
+        await closeSettledCard(channel, { callId: event.data.callId, turnId }, taskCard);
       const changed = trackTaskCardEvent(
         trackedTurns(channel.state),
         event,
         new Date().toISOString(),
+        ctx.view,
       );
       for (const [turnId, turn] of Object.entries(changed))
         rememberTurn(channel.state, turnId, turn);
       try {
-        await handler?.(data, channel, ctx);
+        await handler?.(event, ctx);
       } finally {
         for (const turnId of Object.keys(changed)) await writeTaskCard(channel, turnId, taskCard);
       }

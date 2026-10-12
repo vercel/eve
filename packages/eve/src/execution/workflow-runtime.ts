@@ -1,3 +1,5 @@
+import { readRemoteChildBinding } from "#execution/child-binding.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
@@ -38,7 +40,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent, SessionPredecessor } from "#protocol/message.js";
+import type { SessionPredecessor } from "#protocol/message.js";
 import { SessionPredecessorKey } from "#context/keys.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
@@ -49,6 +51,8 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import {
   readSessionEventHistory,
   readSessionEventStream,
+  readSessionRecordHistory,
+  readSessionRecords,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
 import {
@@ -220,7 +224,7 @@ export function createWorkflowRuntime(config: {
       throw error;
     }
 
-    let events: ReadableStream<MessageStreamEvent> | undefined;
+    let events: ReadableStream<SessionStreamEvent> | undefined;
     const getEvents = () => {
       events ??= readSessionEventStream(run.runId);
       return events;
@@ -251,7 +255,7 @@ export function createWorkflowRuntime(config: {
           return await settleStrandedCommand(continuationToken, command, error);
         }
         // A successor has no request for these answers, so they cannot be delivered anywhere.
-        if ((command.payload.inputResponses?.length ?? 0) > 0) {
+        if ((command.payload.answers?.length ?? 0) > 0) {
           throw sessionStrandedError(
             error,
             "Its pending requests can no longer be answered; send a new message to start a fresh session.",
@@ -275,22 +279,28 @@ export function createWorkflowRuntime(config: {
     async getEventStream(
       sessionId: string,
       options?: GetEventStreamOptions,
-    ): Promise<ReadableStream<MessageStreamEvent>> {
+    ): Promise<ReadableStream<SessionStreamEvent>> {
       // Recorded history needs no owner, so reading it never inspects the session's lifecycle.
       if (options?.follow === false) return readSessionEventHistory(sessionId, options.startIndex);
-      // An ended session has no inbox, and a dormant `eve dev` run may resume;
-      // either recorded stream stays readable. Only a stranded owner refuses.
-      try {
-        await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
-      } catch (error) {
-        if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
-        throw error;
-      }
+      await assertFollowableSession(sessionId);
       return readSessionEventStream(sessionId, options?.startIndex);
+    },
+
+    async getLineStream(
+      sessionId: string,
+      options?: GetEventStreamOptions,
+    ): Promise<ReadableStream<unknown>> {
+      if (options?.follow === false) return readSessionRecordHistory(sessionId, options.startIndex);
+      await assertFollowableSession(sessionId);
+      return readSessionRecords(sessionId, options?.startIndex);
     },
 
     async getStreamTailIndex(sessionId: string): Promise<number> {
       return await readSessionStreamTailIndex(sessionId);
+    },
+
+    async readChildBinding(sessionId: string, childSessionId: string) {
+      return await readRemoteChildBinding(sessionId, childSessionId);
     },
 
     async resolveContinuation(
@@ -411,6 +421,19 @@ async function settleStrandedCommand<TCommand extends SessionCommand>(
       throw sessionStrandedError(stranded);
     default:
       return inactiveCommandResult(command);
+  }
+}
+
+/**
+ * An ended session has no inbox, and a dormant `eve dev` run may resume; either recorded stream
+ * stays readable. Only a stranded owner refuses a follow.
+ */
+async function assertFollowableSession(sessionId: string): Promise<void> {
+  try {
+    await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
+  } catch (error) {
+    if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
+    throw error;
   }
 }
 

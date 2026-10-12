@@ -24,8 +24,6 @@ import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 
-const REQUEST_EVENT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
-
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
 
 describe("createRuntimeActionRequestFromToolCall", () => {
@@ -299,37 +297,14 @@ describe("runtime results", () => {
       address: { runId: "run-1", hookToken: "eve:workflow-tool-run:op-1" },
     });
     const answerToken = "eve:workflow-tool-run-answer:run-1:0";
-    const session = withRelays(
-      withRelays(withRun, {
-        entries: [
-          [
-            answerToken,
-            {
-              runId: "run-1",
-              workflowAsk: { control: "control" },
-              reply: {},
-              childContinuationToken: answerToken,
-              event: REQUEST_EVENT,
-              kind: "question",
-            },
-          ],
-        ],
-        forChildContinuationToken: answerToken,
-      }),
-      {
-        entries: [
-          [
-            "other-request",
-            {
-              childContinuationToken: CHILD_CONTINUATION_TOKEN,
-              event: REQUEST_EVENT,
-              kind: "question",
-            },
-          ],
-        ],
-        forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
+    const session = withRelays(withRun, {
+      [answerToken]: {
+        childContinuationToken: answerToken,
+        runId: "run-1",
+        workflowAsk: { control: "control" },
       },
-    );
+      "other-request": { childContinuationToken: CHILD_CONTINUATION_TOKEN },
+    });
 
     const finished = forgetFinishedRuns(
       session,

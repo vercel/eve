@@ -3,11 +3,11 @@
  * such as hooks, tools, schedules, and channel routes.
  */
 
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import {
   type SessionEventStreamOptions,
   streamSessionEvents,
 } from "#execution/session-event-stream.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 
 /** Options for {@link ServerSession.stream}. */
 export type ServerSessionStreamOptions = SessionEventStreamOptions;
@@ -19,7 +19,7 @@ export interface ServerSession {
    * Reads the session's events in stream order. With `follow: false`, the read
    * ends at the durable tail observed when it opens.
    */
-  stream(options?: ServerSessionStreamOptions): AsyncIterable<MessageStreamEvent>;
+  stream(options?: ServerSessionStreamOptions): AsyncIterable<SessionStreamEvent>;
 }
 
 /**

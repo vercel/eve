@@ -1,3 +1,5 @@
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { UserContent } from "ai";
@@ -18,13 +20,8 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { attachInputText } from "#internal/input-text.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type {
-  InputRequest,
-  InputResponse,
-  StrictInputResponses,
-  ValidatedInputResponse,
-} from "#shared/input.js";
+import type { Answer, StrictAnswers, ValidatedAnswer } from "#shared/input.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -44,9 +41,9 @@ import {
   collectInboundFileParts,
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
-import { defaultInputRequestedHandler } from "#public/channels/slack/approval-cards.js";
 import {
   defaultEvents,
+  defaultInteractionOpenedHandler,
   defaultOnMessage,
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
@@ -116,9 +113,6 @@ export type {
 const log = createLogger("slack.channel");
 const PRIVATE_SLACK_RUN_TITLE = "Private message";
 
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 /**
  * Base Slack context for inbound webhook handlers. These hooks run before the
  * runtime hydrates session state, so `state` is absent here.
@@ -158,14 +152,13 @@ export type {
 } from "#public/channels/slack/api.js";
 export type { SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 
-type SlackEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: SlackEventContext,
-  ctx: SessionContext,
+type SlackEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<SlackEventContext>,
 ) => void | Promise<void>;
 
 /**
- * Delivery surface handed to a renderer's `authorization.required` handler. The
+ * Delivery surface handed to a renderer's sign-in `interaction.opened` handler. The
  * connection challenge is a credential: anyone who completes the sign-in
  * binds their identity to this session's connection. So the only
  * delivery capabilities here are private ones, an ephemeral reply in the
@@ -191,11 +184,6 @@ export interface SlackAuthorizationEventContext {
    */
   readonly state: SlackChannelState;
 }
-
-type SlackSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: SlackEventContext,
-) => void | Promise<void>;
 
 /**
  * JSON-serializable per-session state, stored verbatim across workflow
@@ -233,8 +221,7 @@ export interface SlackChannelState {
    */
   triggeringUserId?: string | null;
   /**
-   * Buffered text from a `message.completed` event whose `finishReason`
-   * was `"tool-calls"`. The default `actions.requested` handler uses the
+   * Buffered narration from a `content.completed` event (`phase: "narration"`). The default `call.requested` handler uses the
    * first non-empty line as the next typing indicator, surfacing the
    * model's pre-tool narration instead of the action label. Cleared at
    * `turn.started` and after use.
@@ -248,15 +235,15 @@ export interface SlackChannelState {
   /**
    * Connection name to Slack message ts. Each entry is the public
    * link-free status post created by the default
-   * `authorization.required` handler; the matching
-   * `authorization.completed` handler edits it in place to surface the
+   * sign-in `interaction.opened` handler; the matching
+   * sign-in `interaction.settled` handler edits it in place to surface the
    * resolution outcome.
    */
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
   /**
    * Each recent turn's tool calls and the task card eve last wrote for it, by
-   * turn id. The default `turn.waiting` handler names the working tasks.
+   * turn id. The default `turn.paused` handler names the working tasks.
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
   /**
@@ -271,7 +258,7 @@ export interface SlackChannelState {
   /**
    * Principal id to Slack user id, recorded as each message or input response
    * is delivered. Default handlers use it to address the principal named on
-   * `authorization.required` and approval events.
+   * sign-in `interaction.opened` and approval events.
    */
   slackUsersByPrincipal?: Record<string, string>;
   /**
@@ -380,8 +367,8 @@ export type SlackEventSendFn = (
 ) => Promise<Session>;
 
 /** Answers pending input requests on one Slack thread. */
-export type SlackEventRespondFn = <const TResponses extends readonly InputResponse[]>(
-  inputResponses: StrictInputResponses<TResponses>,
+export type SlackEventRespondFn = <const TResponses extends readonly Answer[]>(
+  answers: StrictAnswers<TResponses>,
   options: SlackEventRespondOptions,
 ) => ReturnType<SlackSessionOperations["respond"]>;
 
@@ -463,8 +450,8 @@ export interface SlackSlashCommandContext {
   readonly slack: SlackWorkspaceHandle;
 }
 
-/** Context handed to `slackChannel({ onInputResponse })` before eve resumes HITL. */
-export interface SlackInputResponseContext extends SlackContext {
+/** Context handed to `slackChannel({ onAnswers })` before eve resumes HITL. */
+export interface SlackAnswerContext extends SlackContext {
   /** Auth derived from the Slack user who submitted the signed interaction. */
   readonly defaultAuth: SessionAuthContext;
 }
@@ -559,23 +546,23 @@ export type SlackShortcut =
     };
 
 /** Decoded eve-owned HITL response submitted through Slack interactivity. */
-export type SlackInputResponseSubmission =
+export type SlackAnswerSubmission =
   | {
       readonly type: "block_actions";
-      readonly inputResponses: readonly ValidatedInputResponse[];
+      readonly answers: readonly ValidatedAnswer[];
       readonly actions: readonly SlackInteractionAction[];
       readonly messageTs?: string;
       readonly user: SlackInteractionUser;
     }
   | {
       readonly type: "view_submission";
-      readonly inputResponses: readonly ValidatedInputResponse[];
+      readonly answers: readonly ValidatedAnswer[];
       readonly messageTs: string;
       readonly user: SlackInteractionUser;
     };
 
 /** Result of a Slack HITL response admission hook. Return `null` to reject. */
-export type SlackInputResponseResult = { readonly auth: SessionAuthContext | null } | null;
+export type SlackAnswerResult = { readonly auth: SessionAuthContext | null } | null;
 
 /**
  * Result of an `onAppMention` or `onDirectMessage` callback. Return an
@@ -603,20 +590,18 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
 
 /**
  * eve's full-context Slack event handlers: the innermost link of every
- * channel's renderer chain. The default `authorization.required` handler keeps
+ * channel's renderer chain. The default sign-in `interaction.opened` handler keeps
  * the full {@link SlackEventContext} because it owns the public link-free
  * status, which authored renderers, limited to private delivery, can't post.
  */
 export type SlackChannelInternalEvents = {
-  readonly [T in Exclude<SlackRenderedEvent, "session.failed">]?: SlackEventHandler<T>;
-} & {
-  readonly "session.failed"?: SlackSessionFailedHandler;
+  readonly [T in SlackRenderedEvent]?: SlackEventHandler<T>;
 };
 
 export type SlackApprovalChannel = "direct-message" | "thread";
 
 /** Input request passed to a {@link SlackApprovalChannelResolver}. */
-export type SlackApprovalRequest = InputRequest;
+export type SlackApprovalRequest = AskedInteraction;
 
 /** Chooses the Slack destination for one input request. */
 export type SlackApprovalChannelResolver = (
@@ -771,10 +756,10 @@ export interface SlackChannelConfig {
    * accepts the response with the submitting user's auth, regardless of other
    * authored handlers.
    */
-  onInputResponse?(
-    ctx: SlackInputResponseContext,
-    submission: SlackInputResponseSubmission,
-  ): SlackInputResponseResult | Promise<SlackInputResponseResult>;
+  onAnswers?(
+    ctx: SlackAnswerContext,
+    submission: SlackAnswerSubmission,
+  ): SlackAnswerResult | Promise<SlackAnswerResult>;
 
   /**
    * Renderers that wrap eve's default Slack rendering, outermost first. Omit
@@ -836,11 +821,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     botToken: config.credentials?.botToken,
     maxBytes: maxBytesOf(uploadPolicy),
   });
-  const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
+  const onAnswers = config.onAnswers ?? defaultOnAnswers;
   const rendering = composeSlackRenderers(config.renderers ?? [], {
     events: {
       ...defaultEvents,
-      "input.requested": defaultInputRequestedHandler(config.approvalChannel),
+      "interaction.opened": defaultInteractionOpenedHandler(config.approvalChannel),
     },
     received: defaultReceived,
     taskCard: renderDefaultSlackTaskCard,
@@ -849,13 +834,14 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const events = withTaskCards(
     {
       ...rendering.events,
-      "message.completed": withFinalReplyDelivery(rendering.events["message.completed"]),
-      async "turn.started"(data, channel, ctx) {
+      "content.completed": withFinalReplyDelivery(rendering.events["content.completed"]),
+      async "turn.started"(event, ctx) {
+        const { channel } = ctx;
         const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
         if (triggeringUserId !== undefined) {
           channel.state.triggeringUserId = triggeringUserId;
         }
-        await renderTurnStarted?.(data, channel, ctx);
+        await renderTurnStarted?.(event, ctx);
       },
     },
     rendering.taskCard,
@@ -924,7 +910,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           return handleInteractionPost(
             body,
             { from, resolveSession, waitUntil },
-            { api, config, onInputResponse },
+            { api, config, onAnswers },
           );
         }
         return handleEventPost({
@@ -957,7 +943,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   return channel;
 }
 
-function defaultOnInputResponse(ctx: SlackInputResponseContext): SlackInputResponseResult {
+function defaultOnAnswers(ctx: SlackAnswerContext): SlackAnswerResult {
   return { auth: ctx.defaultAuth };
 }
 
@@ -1126,10 +1112,9 @@ async function handleEventPost(input: {
         kind,
         message,
         received: input.received,
-        // A typed reply would bypass a custom `onInputResponse` and could answer
+        // A typed reply would bypass a custom `onAnswers` and could answer
         // a request `approvalChannel` sent privately, so either one disables it.
-        resolvesTypedInput:
-          config.onInputResponse === undefined && config.approvalChannel === undefined,
+        resolvesTypedInput: config.onAnswers === undefined && config.approvalChannel === undefined,
         threadContext: config.threadContext,
         uploadPolicy: input.uploadPolicy,
       });
@@ -1366,8 +1351,8 @@ async function dispatchSlackEvent(input: {
     reset: ({ reason, target }) => sourceFor(target).reset({ reason }),
     resolveSession: ({ target }) =>
       input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
-    respond: (inputResponses, { auth, target }) =>
-      sourceFor(target).respond(inputResponses, {
+    respond: (answers, { auth, target }) =>
+      sourceFor(target).respond(answers, {
         auth,
         state: withSlackResponder(
           undefined,

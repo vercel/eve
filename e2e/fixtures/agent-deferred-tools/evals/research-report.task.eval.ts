@@ -12,9 +12,9 @@ export default defineEval({
 
     turn.expectOk();
     turn.noFailedActions();
-    turn.calledTool("research_report", { count: 1, output: /^Started task research_report-/u });
+    turn.calledTool("research_report", { count: 1, output: "RESEARCH-FINDINGS:refunds" });
     turn.event("task.started", { count: 1 });
-    turn.event("task.settled", { count: 1, data: { output: "RESEARCH-FINDINGS:refunds" } });
+    turn.event("call.settled", { count: 1, data: { output: "RESEARCH-FINDINGS:refunds" } });
     t.messageIncludes("RESEARCH-RESULT RESEARCH-FINDINGS:refunds");
   },
 });

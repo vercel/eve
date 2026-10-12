@@ -1,5 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
-import { defineEval } from "eve/evals";
+import type { SessionStreamEvent } from "eve/client";
+import { defineEval, toolCallsOf } from "eve/evals";
 
 const TOOL_NAME = "web_search";
 const MIN_COMPLETED_SEARCHES = 8;
@@ -15,19 +15,12 @@ const EXPECTED_WINNERS = [
   /Raptors/iu,
 ];
 
-function completedToolResultCount(events: readonly MessageStreamEvent[], toolName: string) {
-  const callIds = new Set<string>();
-  for (const event of events) {
-    if (
-      event.type === "action.result" &&
-      event.data.status === "completed" &&
-      event.data.result.kind === "tool-result" &&
-      event.data.result.toolName === toolName
-    ) {
-      callIds.add(event.data.result.callId);
-    }
-  }
-  return callIds.size;
+function completedToolResultCount(events: readonly SessionStreamEvent[], toolName: string) {
+  return new Set(
+    toolCallsOf(events)
+      .filter((call) => call.name === toolName && call.status === "completed")
+      .map((call) => call.callId),
+  ).size;
 }
 
 export default defineEval({

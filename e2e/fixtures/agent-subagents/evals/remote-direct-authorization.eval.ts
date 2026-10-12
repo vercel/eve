@@ -15,35 +15,55 @@ export default defineEval({
     );
     // The child's sign-in holds the parent's turn, so the response stops there.
     const held = await live.result();
-    const required = held.events.find((event) => event.type === "authorization.required");
-    if (required?.type !== "authorization.required" || required.data.webhookUrl === undefined)
+    const required = held.events.find(
+      (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+    );
+    const callbackUrl =
+      required?.type === "interaction.opened"
+        ? required.data.request.signIn?.callbackUrl
+        : undefined;
+    if (required?.type !== "interaction.opened" || callbackUrl === undefined)
       throw new Error("Direct remote authorization has no callback URL.");
-    held.event("turn.waiting", { data: { on: "input" } });
-    held.event("authorization.required", {
+    held.event("turn.paused", {
+      data: { awaiting: [{ interactionId: required.data.interactionId }] },
+    });
+    held.event("interaction.opened", {
       data: {
-        name: "direct-release-authorization",
-        authorization: { userCode: "direct-release-code" },
-        principalId: ALICE,
+        audience: { principalIds: [ALICE] },
+        request: {
+          kind: "sign-in",
+          signIn: { name: "direct-release-authorization", userCode: "direct-release-code" },
+        },
       },
     });
     const resumed = t.target.watchTurn(live.session.sessionId, {
       startIndex: live.session.state?.streamIndex,
     });
-    const callback = new URL(required.data.webhookUrl);
+    const callback = new URL(callbackUrl);
     callback.searchParams.set("code", "direct-release-code");
     const response = await fetch(callback);
     if (!response.ok) throw new Error(`Direct authorization callback returned ${response.status}.`);
     const turn = await resumed.result();
     turn.expectOk();
     turn.notEvent("turn.started");
-    turn.event("authorization.completed", {
-      data: { name: "direct-release-authorization", outcome: "authorized", principalId: ALICE },
+    turn.event("interaction.settled", {
+      data: { interactionId: required.data.interactionId, outcome: "accepted" },
     });
     turn.messageIncludes("PARENT-DIRECT-COMPLETE: DIRECT-AUTHORIZATION-COMPLETE");
     // The call starts in the held segment and settles in the resumed one.
-    turn.event("task.settled", {
-      count: 1,
-      data: { name: "remote-loopback", status: "completed" },
+    t.eventsSatisfy("the remote call settles once, in the resumed segment", (events) => {
+      const requested = events.flatMap((event) =>
+        event.type === "call.requested" && event.data.capability.name === "remote-loopback"
+          ? [event.data.callId]
+          : [],
+      );
+      const settled = turn.events.filter(
+        (event) =>
+          event.type === "call.settled" &&
+          requested.includes(event.data.callId) &&
+          event.data.outcome === "completed",
+      );
+      return requested.length === 1 && settled.length === 1;
     });
     t.noFailedActions();
   },

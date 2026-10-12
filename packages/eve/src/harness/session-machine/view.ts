@@ -3,10 +3,11 @@ import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
-import type { SessionStateMap, StepInput } from "#harness/types.js";
+import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   initialSessionProjection,
+  openRunOf,
   turnCoordinates,
   type SessionProjection,
 } from "#protocol/session-projection.js";
@@ -22,7 +23,7 @@ import {
 // publishes; execution comes from `TurnState`. Workflow bodies import this module, so it stays
 // free of runtime dependencies; a step reads the live projection through `current.ts`.
 
-export type { StepCoordinates, SuspendedStep, TurnState } from "./state.js";
+export type { ApprovalAsk, StepCoordinates, SuspendedStep, TurnState } from "./state.js";
 
 export const SESSION_PROJECTION_STATE_KEY = "eve.harness.sessionProjection";
 
@@ -55,6 +56,8 @@ export interface TurnPosition {
   readonly turnId: string;
   /** The open turn streamed assistant output, so steering can no longer restart it. */
   readonly assistantOutputStarted?: boolean;
+  /** The open turn's latest open model run, which content and calls belong to. */
+  readonly runId?: string;
 }
 
 export function turnPosition(projection: SessionProjection): TurnPosition {
@@ -68,6 +71,8 @@ export function turnPosition(projection: SessionProjection): TurnPosition {
     turnId: turn?.turnId ?? "",
   };
   if (turn?.outputStarted === true) position.assistantOutputStarted = true;
+  const runId = turn === undefined ? undefined : openRunOf(projection, turn.turnId);
+  if (runId !== undefined) position.runId = runId;
   return position;
 }
 
@@ -88,7 +93,7 @@ export function nextStepIndex(projection: SessionProjection): number {
 }
 
 /** Input the session holds until it can run. */
-export function queuedInput(state: SessionStateMap | undefined): StepInput | undefined {
+export function queuedInput(state: SessionStateMap | undefined): HarnessStepInput | undefined {
   return readTurnState(state).queued;
 }
 

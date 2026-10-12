@@ -50,23 +50,23 @@ export default defineEval({
       t.target.watchTurn(otherIssuer.sessionId).result(),
     ]);
     // A real model may take extra tool steps on the opaque marker message, so
-    // duplicate execution is detected by a repeated first step, not a step count.
+    // duplicate execution is detected by a repeated turn, not a model run count.
     firstTurn.expectOk();
-    firstTurn.event("message.received", { count: 1, data: { message } });
-    firstTurn.event("step.started", { count: 1, data: { stepIndex: 0 } });
+    firstTurn.event("delivery.consumed", { count: 1, data: { parts: [{ text: message }] } });
+    firstTurn.event("turn.started", { count: 1 });
     issuerTurn.expectOk();
-    issuerTurn.event("message.received", { count: 1, data: { message } });
-    issuerTurn.event("step.started", { count: 1, data: { stepIndex: 0 } });
+    issuerTurn.event("delivery.consumed", { count: 1, data: { parts: [{ text: message }] } });
+    issuerTurn.event("turn.started", { count: 1 });
 
     const probe = `CREATE-ONCE-PROBE-${crypto.randomUUID()}`;
     const liveProbe = t.target.watchTurn(firstTurn.sessionId, {
-      startIndex: firstTurn.events.length,
+      startIndex: (firstTurn.events.at(-1)?.meta.position.line ?? -1) + 1,
     });
     await continueSession(t.target, PRINCIPAL_A, firstTurn.sessionId, probe);
     const probeTurn = await liveProbe.result();
     probeTurn.expectOk();
-    probeTurn.event("message.received", { count: 1, data: { message: probe } });
-    probeTurn.event("step.started", { count: 1, data: { stepIndex: 0 } });
+    probeTurn.event("delivery.consumed", { count: 1, data: { parts: [{ text: probe }] } });
+    probeTurn.event("turn.started", { count: 1 });
   },
 });
 

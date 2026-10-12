@@ -4,7 +4,7 @@ import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { isObject } from "#shared/guards.js";
 
 import type { ActiveApprovalCandidate, DurableApprovalState } from "./candidates.js";
-import { parseProxyInputRequest, type ProxyInputRequest } from "./relays.js";
+import { parseRelay, type Relay } from "./relays.js";
 
 // Storage stays in hitl/ to keep the rule 50 import seam around the request codecs.
 // Sign-ins and relays use machine transitions; approval writes through candidates.ts remain
@@ -31,14 +31,14 @@ export const LEGACY_HITL_STATE_KEYS = {
 export interface HitlState {
   /** The sign-in attempts the session waits on. */
   readonly signIns: readonly AuthorizationChallenge[];
-  /** Requests this session relays for a child session or a workflow run, by `requestId`. */
-  readonly relays: ReadonlyMap<string, ProxyInputRequest>;
+  /** Where answers go for the requests this session relays, by interaction id. */
+  readonly relays: ReadonlyMap<string, Relay>;
 }
 
 /** Each record is parsed on first read: most readers want one. */
 export function readHitlState(state: SessionStateMap | undefined): HitlState {
   let signIns: readonly AuthorizationChallenge[] | undefined;
-  let relays: ReadonlyMap<string, ProxyInputRequest> | undefined;
+  let relays: ReadonlyMap<string, Relay> | undefined;
   return {
     get signIns() {
       return (signIns ??= readSignIns(state));
@@ -72,13 +72,9 @@ export interface HitlStateChange {
 
 /** Relay routes a transition records or retires. */
 export interface RelayChange {
-  /** A child's fresh batch: it replaces the routes that child's input source held. */
-  readonly upsert?: {
-    readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-    readonly forChildContinuationToken: string;
-    readonly inputSource?: string;
-  };
-  /** Routes whose answers went down to the asker, or whose request closed. */
+  /** Routes of requests that opened, by interaction id. */
+  readonly upsert?: Readonly<Record<string, Relay>>;
+  /** Routes whose request closed. */
   readonly retire?: readonly string[];
 }
 
@@ -250,52 +246,39 @@ function writeSignIns(
 // Relayed requests
 // ---------------------------------------------------------------------------
 
-function readRelays(
-  state: SessionStateMap | undefined,
-): Readonly<Record<string, ProxyInputRequest>> {
+function readRelays(state: SessionStateMap | undefined): Readonly<Record<string, Relay>> {
   const raw = readRequests(state).relays;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const result: Record<string, ProxyInputRequest> = {};
-  for (const [requestId, value] of Object.entries(raw)) {
-    const request = parseProxyInputRequest(value, requestId);
-    if (request !== undefined) result[requestId] = request;
+  const result: Record<string, Relay> = {};
+  for (const [interactionId, value] of Object.entries(raw)) {
+    const relay = parseRelay(value);
+    if (relay !== undefined) result[interactionId] = relay;
   }
   return result;
 }
 
 function writeRelays(
   state: SessionStateMap | undefined,
-  relays: Readonly<Record<string, ProxyInputRequest>>,
+  relays: Readonly<Record<string, Relay>>,
 ): SessionStateMap | undefined {
   return writeRequests(state, "relays", Object.keys(relays).length > 0 ? relays : undefined);
 }
 
-/**
- * A child raising a fresh batch replaces the routes it held for that input source, so the parent
- * never keeps stale request metadata. Other sources' routes stay independently answerable.
- */
 function upsertRelays(
   state: SessionStateMap | undefined,
-  upsert: NonNullable<RelayChange["upsert"]>,
+  upsert: Readonly<Record<string, Relay>>,
 ): SessionStateMap | undefined {
-  const kept = Object.entries(readRelays(state)).filter(
-    ([, route]) =>
-      route.childContinuationToken !== upsert.forChildContinuationToken ||
-      route.inputSource !== upsert.inputSource,
-  );
-  return writeRelays(state, Object.fromEntries([...kept, ...upsert.entries]));
+  return writeRelays(state, { ...readRelays(state), ...upsert });
 }
 
 function retireRelays(
   state: SessionStateMap | undefined,
-  requestIds: readonly string[],
+  interactionIds: readonly string[],
 ): SessionStateMap | undefined {
   const relays = readRelays(state);
-  if (!requestIds.some((requestId) => Object.hasOwn(relays, requestId))) return state;
+  if (!interactionIds.some((id) => Object.hasOwn(relays, id))) return state;
   return writeRelays(
     state,
-    Object.fromEntries(
-      Object.entries(relays).filter(([requestId]) => !requestIds.includes(requestId)),
-    ),
+    Object.fromEntries(Object.entries(relays).filter(([id]) => !interactionIds.includes(id))),
   );
 }

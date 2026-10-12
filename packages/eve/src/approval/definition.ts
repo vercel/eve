@@ -42,7 +42,7 @@ export type ApprovalPolicy<TInput = Record<string, unknown>> = (
 /** Stable tool request passed to a response authorizer. */
 export interface ApprovalRequest<TInput = Record<string, unknown>> {
   readonly callId: string;
-  readonly requestId: string;
+  readonly interactionId: string;
   /**
    * Who requested the tool call: the auth of the caller whose turn made it,
    * captured when the approval was requested. It stays the same while the

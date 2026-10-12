@@ -1,9 +1,11 @@
-import type { AuthorizationOutcome, AuthorizationRequiredStreamEvent } from "#protocol/message.js";
+import { signInEnding } from "#channel/interaction-prompts.js";
+import type { SignInPrompt } from "#channel/interaction-prompts.js";
+import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 
 export const TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX = "eve_auth:";
 
 export function renderTelegramAuthorizationPrompt(
-  authorization: AuthorizationRequiredStreamEvent["data"],
+  authorization: Pick<SignInPrompt, "authorization" | "name">,
 ): { readonly reply_markup?: Readonly<Record<string, unknown>>; readonly text: string } {
   const displayName = formatTelegramAuthorizationDisplayName(
     authorization.name,
@@ -57,11 +59,11 @@ export function formatTelegramAuthorizationDisplayName(
 
 export function renderTelegramAuthorizationCompleted(input: {
   readonly displayName: string;
-  readonly outcome: AuthorizationOutcome;
+  readonly outcome: InteractionOutcome;
   readonly reason?: string;
 }): string {
-  if (input.outcome === "authorized") return `${input.displayName} connected.`;
+  if (input.outcome === "accepted") return `${input.displayName} connected.`;
   const reason = input.reason === undefined ? "" : ` (${input.reason})`;
-  const outcome = input.outcome === "timed-out" ? "timed out" : input.outcome;
+  const outcome = signInEnding(input.outcome);
   return `${input.displayName} authorization ${outcome}${reason}.`;
 }

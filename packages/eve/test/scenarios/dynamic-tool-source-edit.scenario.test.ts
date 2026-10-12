@@ -103,7 +103,7 @@ describe("dynamic tool source edits across a restart", () => {
         const client = new Client({ host: server.url });
         const created = await client.sessions.create({ message: "Hello." });
         await expect(created.response.result()).resolves.toMatchObject({
-          inputRequests: [],
+          interactions: [],
           status: "waiting",
         });
 
@@ -111,7 +111,7 @@ describe("dynamic tool source edits across a restart", () => {
           await created.session.send("Call tools in parallel: alpha_marker, beta_marker")
         ).result();
         expect(waiting.status).toBe("waiting");
-        expect(waiting.inputRequests).toHaveLength(2);
+        expect(waiting.interactions).toHaveLength(2);
 
         // Edit the callback module while approvals are parked: pad the top of
         // the file (shifting every byte offset below — the old identity scheme
@@ -141,9 +141,9 @@ describe("dynamic tool source edits across a restart", () => {
         );
         const resumed = await (
           await resumedSession.respond(
-            waiting.inputRequests.map((request) => ({
+            waiting.interactions.map((request) => ({
               optionId: "approve",
-              requestId: request.requestId,
+              interactionId: request.interactionId,
             })),
           )
         ).result();

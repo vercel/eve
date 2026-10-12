@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   createSessionLimitContinuationRequest,
-  isSessionLimitContinuationRequest,
   isSessionLimitContinuationRequestId,
-  resolveSessionLimitContinuation,
+  limitDecision,
 } from "#harness/hitl/budget-request.js";
 
 const VIOLATION = { kind: "input", limit: 40_000_000, usedTokens: 40_120_500 } as const;
@@ -24,34 +23,30 @@ describe("createSessionLimitContinuationRequest", () => {
 
     expect(first).toEqual(second);
     expect(first).toEqual({
-      action: {
-        callId: "sess-test:0:limit:input:40120500",
-        input: { kind: "input", limit: 40_000_000, usedTokens: 40_120_500 },
-        kind: "tool-call",
-        toolName: "session_limit_continuation",
+      interactionId: "sess-test:0:limit:input:40120500",
+      request: {
+        allowFreeform: false,
+        display: "confirmation",
+        kind: "budget",
+        options: [
+          {
+            description: "Grant a fresh token budget",
+            id: "continue",
+            label: "Approve",
+            style: "primary",
+          },
+          {
+            description: "Stop now",
+            id: "stop",
+            label: "Stop",
+            style: "danger",
+          },
+        ],
+        prompt:
+          "This session has hit the input-token limit (40M) per session. This is a guardrail " +
+          "against defective long-running sessions. If session activity looks fine, just " +
+          "approve to keep going.",
       },
-      allowFreeform: false,
-      display: "confirmation",
-      kind: "session-limit",
-      options: [
-        {
-          description: "Grant a fresh token budget",
-          id: "continue",
-          label: "Approve",
-          style: "primary",
-        },
-        {
-          description: "Stop now",
-          id: "stop",
-          label: "Stop",
-          style: "danger",
-        },
-      ],
-      prompt:
-        "This session has hit the input-token limit (40M) per session. This is a guardrail " +
-        "against defective long-running sessions. If session activity looks fine, just " +
-        "approve to keep going.",
-      requestId: "sess-test:0:limit:input:40120500",
     });
   });
 
@@ -63,15 +58,13 @@ describe("createSessionLimitContinuationRequest", () => {
     });
 
     expect(request).toMatchObject({
-      action: {
-        callId: "sess-test:0:limit:token-cost:1.5123",
-        input: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.5123 },
+      interactionId: "sess-test:0:limit:token-cost:1.5123",
+      request: {
+        prompt:
+          "This session has hit the $1.5 model token-cost limit per session. This is a guardrail " +
+          "against defective long-running sessions. If session activity looks fine, just " +
+          "approve to keep going.",
       },
-      prompt:
-        "This session has hit the $1.5 model token-cost limit per session. This is a guardrail " +
-        "against defective long-running sessions. If session activity looks fine, just " +
-        "approve to keep going.",
-      requestId: "sess-test:0:limit:token-cost:1.5123",
     });
   });
 
@@ -81,7 +74,7 @@ describe("createSessionLimitContinuationRequest", () => {
         sessionId: "sess-test",
         turnSequence: 0,
         violation: { kind: "input", limit, usedTokens: limit + 1 },
-      }).prompt;
+      }).request.prompt;
 
     expect(promptFor(2_000_000)).toContain("(2M)");
     expect(promptFor(1_872_014)).toContain("(1.9M)");
@@ -94,8 +87,8 @@ describe("createSessionLimitContinuationRequest", () => {
       turnSequence: 0,
       violation: { kind: "token-cost", limitUsd: 5e-7, usedCostUsd: 6e-7 },
     });
-    expect(tinyCost.prompt).toContain("$5e-7 model token-cost limit");
-    expect(isSessionLimitContinuationRequestId(tinyCost.requestId)).toBe(true);
+    expect(tinyCost.request.prompt).toContain("$5e-7 model token-cost limit");
+    expect(isSessionLimitContinuationRequestId(tinyCost.interactionId)).toBe(true);
   });
 
   it("gives each violation instance its own id as the session total grows", () => {
@@ -107,15 +100,11 @@ describe("createSessionLimitContinuationRequest", () => {
       violation: { ...VIOLATION, usedTokens: 80_500_000 },
     });
 
-    expect(later.requestId).not.toBe(createTestRequest().requestId);
-  });
-
-  it("is recognized by isSessionLimitContinuationRequest", () => {
-    expect(isSessionLimitContinuationRequest(createTestRequest())).toBe(true);
+    expect(later.interactionId).not.toBe(createTestRequest().interactionId);
   });
 
   it("mints ids recognized by isSessionLimitContinuationRequestId", () => {
-    expect(isSessionLimitContinuationRequestId(createTestRequest().requestId)).toBe(true);
+    expect(isSessionLimitContinuationRequestId(createTestRequest().interactionId)).toBe(true);
     expect(isSessionLimitContinuationRequestId("sess-test:0:limit:output:12")).toBe(true);
     expect(isSessionLimitContinuationRequestId("sess-test:0:limit:token-cost:1.5123")).toBe(true);
     expect(isSessionLimitContinuationRequestId("approval-1")).toBe(false);
@@ -123,43 +112,10 @@ describe("createSessionLimitContinuationRequest", () => {
   });
 });
 
-describe("resolveSessionLimitContinuation", () => {
-  const request = createTestRequest();
-
-  it("grants on the continue option", () => {
-    expect(
-      resolveSessionLimitContinuation({
-        requests: [request],
-        responses: [{ optionId: "continue", requestId: request.requestId }],
-      }),
-    ).toEqual({ granted: true });
-  });
-
-  it("declines on the stop option", () => {
-    expect(
-      resolveSessionLimitContinuation({
-        requests: [request],
-        responses: [{ optionId: "stop", requestId: request.requestId }],
-      }),
-    ).toEqual({ granted: false });
-  });
-
-  it("treats an unanswered or unrecognized response as ignored", () => {
-    expect(resolveSessionLimitContinuation({ requests: [request], responses: [] })).toBeUndefined();
-    expect(
-      resolveSessionLimitContinuation({
-        requests: [request],
-        responses: [{ requestId: request.requestId, text: "hmm" }],
-      }),
-    ).toBeUndefined();
-  });
-
-  it("returns undefined when the batch has no continuation request", () => {
-    expect(
-      resolveSessionLimitContinuation({
-        requests: [],
-        responses: [{ optionId: "continue", requestId: "other" }],
-      }),
-    ).toBeUndefined();
+describe("limitDecision", () => {
+  it("grants on continue, declines on stop, and decides nothing otherwise", () => {
+    expect(limitDecision({ optionId: "continue" })).toEqual({ granted: true });
+    expect(limitDecision({ optionId: "stop" })).toEqual({ granted: false });
+    expect(limitDecision({ text: "sure" })).toBeUndefined();
   });
 });

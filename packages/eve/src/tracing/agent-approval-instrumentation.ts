@@ -57,16 +57,18 @@ export function createAgentApprovalInstrumentation(input: {
     event: InstrumentationInputRequestedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> => {
-    if (event.kind !== "tool-approval" || readState(ctx.state.get()) !== undefined) return;
+    const { call } = event;
+    if (event.kind !== "approval" || call === undefined || readState(ctx.state.get()) !== undefined)
+      return;
     const parent = await input.actionContextFor(
       event.scope.sessionId,
       event.scope.turnId,
-      event.action.callId,
+      call.callId,
     );
     if (parent === undefined) return;
     const state: Record<string, JsonValue> = {
-      actionCallId: event.action.callId,
-      actionName: event.action.name,
+      actionCallId: call.callId,
+      actionName: call.name,
       attemptIndex: event.scope.attemptIndex,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       parent: {
@@ -74,7 +76,7 @@ export function createAgentApprovalInstrumentation(input: {
         traceFlags: parent.spanContext.traceFlags,
         traceId: parent.spanContext.traceId,
       },
-      requestId: event.requestId,
+      requestId: event.interactionId,
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
       traceSessionId: traceSessionIdOf(event.scope),
       sessionId: event.scope.sessionId,
@@ -103,7 +105,7 @@ export function createAgentApprovalInstrumentation(input: {
               "gen_ai.tool.call.id": state.actionCallId,
               "agent.action.name": state.actionName,
               "agent.approval.kind": "tool-approval",
-              "agent.approval.outcome": event.outcome,
+              "agent.approval.outcome": APPROVAL_OUTCOMES[event.outcome] ?? event.outcome,
               "agent.approval.request_id": state.requestId,
               "agent.framework.name": "eve",
               "agent.framework.version": input.frameworkVersion,
@@ -132,8 +134,8 @@ export function createAgentApprovalInstrumentation(input: {
     if (state.requestAttribute !== undefined) {
       span.setAttribute("agent.approval.request", state.requestAttribute);
     }
-    if (event.response !== undefined) {
-      const response = contentAttribute(event.response);
+    if (event.answer !== undefined) {
+      const response = contentAttribute(event.answer);
       if (response !== undefined) span.setAttribute("agent.approval.response", response);
     }
     if (event.outcome === "failed") recordError(span, event.error);
@@ -145,6 +147,19 @@ export function createAgentApprovalInstrumentation(input: {
     "input.resolved": onResolved,
   };
 }
+
+/**
+ * Trace schema 4's approval outcomes. The instrumentation event carries the interaction's
+ * outcome; the span keeps the values dashboards already query.
+ */
+const APPROVAL_OUTCOMES: Partial<Record<InstrumentationInputResolvedEvent["outcome"], string>> = {
+  abandoned: "cancelled",
+  accepted: "approved",
+  declined: "denied",
+  expired: "cancelled",
+  interrupted: "cancelled",
+  withdrawn: "ignored",
+};
 
 function readState(value: unknown): AgentApprovalSpanState | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;

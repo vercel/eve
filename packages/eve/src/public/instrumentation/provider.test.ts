@@ -60,7 +60,7 @@ describe("defineInstrumentation", () => {
   it("exposes durable input request and resolution events", () => {
     const provider = defineInstrumentation({
       events: {
-        "input.requested": (event) => void event.action.callId,
+        "input.requested": (event) => void event.call?.callId,
         "input.resolved": (event) => void event.outcome,
       },
     });

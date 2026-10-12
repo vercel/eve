@@ -1,9 +1,4 @@
-import {
-  EveAgentStore,
-  defaultMessageReducer,
-  type EveDynamicToolPart,
-  type EveMessageData,
-} from "eve/client";
+import { EveAgentStore, type EveToolPart } from "eve/client";
 import { defineEval, type EveEvalContext } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -13,13 +8,12 @@ const ALICE = {
 };
 const TOOL = "authorized-change";
 
-type Store = EveAgentStore<EveMessageData>;
+type Store = EveAgentStore;
 
-function toolPart(store: Store, callId: string): EveDynamicToolPart {
+function toolPart(store: Store, callId: string): EveToolPart {
   const parts = store.snapshot.data.messages.flatMap((message) => message.parts);
   const matches = parts.filter(
-    (part): part is EveDynamicToolPart =>
-      part.type === "dynamic-tool" && part.toolCallId === callId,
+    (part): part is EveToolPart => part.type === "tool" && part.callId === callId,
   );
   if (matches.length !== 1) throw new Error(`Expected one projected tool part for ${callId}.`);
   return matches[0]!;
@@ -43,57 +37,55 @@ async function expectAnswerable(
   t: EveEvalContext,
   store: Store,
   callId: string,
-  requestId: string,
+  interactionId: string,
 ) {
   // The approval holds its turn open, and the store keeps following it live.
   await t.require(store.snapshot.status, equals("streaming"));
   await t.require(store.snapshot.error, equals(undefined));
   const part = toolPart(store, callId);
-  await t.require(part.state, equals("approval-requested"));
-  await t.require(part.approval?.id, equals(requestId));
-  await t.require(part.toolMetadata?.eve?.inputRequest?.requestId, equals(requestId));
-  await t.require(part.toolMetadata?.eve?.inputResponse, equals(undefined));
+  await t.require(part.status, equals("requested"));
+  await t.require(part.interaction?.status, equals("open"));
+  await t.require(part.interaction?.request.interactionId, equals(interactionId));
+  await t.require(part.interaction?.answer, equals(undefined));
 }
 
-async function refuse(t: EveEvalContext, store: Store, callId: string, requestId: string) {
+async function refuse(t: EveEvalContext, store: Store, callId: string, interactionId: string) {
   const start = store.snapshot.events.length;
   await settles(
     "Refused approval submission",
     store.send({
       headers: ALICE,
-      inputResponses: [{ requestId, optionId: "approve" }],
+      answers: [{ interactionId, optionId: "approve" }],
       signal: t.signal,
     }),
   );
   const events = store.snapshot.events.slice(start);
-  const candidates = events
-    .filter((event) => event.type === "approval.candidate")
-    .filter((event) => event.data.requestId === requestId);
-  await t.require(
-    candidates.map((event) => event.data.outcome),
-    equals(["pending", "rejected"]),
+  const submitted = events.filter(
+    (event) => event.type === "response.submitted" && event.data.interactionId === interactionId,
   );
-  await t.require(candidates.at(-1)?.data.reason, equals("Wrong responder."));
+  await t.require(submitted.length, equals(1));
+  const responseId =
+    submitted[0]?.type === "response.submitted" ? submitted[0].data.responseId : undefined;
+  const settled = events.filter(
+    (event) => event.type === "response.settled" && event.data.responseId === responseId,
+  );
+  await t.require(
+    settled.map((event) => (event.type === "response.settled" ? event.data : undefined)),
+    equals([{ outcome: "refused", reason: "Wrong responder.", responseId }]),
+  );
   // The approval holds the turn, so a refused answer leaves it held.
-  await t.require(
-    events
-      .filter((event) => event.type === "approval.candidate" || event.type === "turn.waiting")
-      .map((event) => event.type),
-    equals(["approval.candidate", "approval.candidate", "turn.waiting"]),
-  );
-  await t.require(events.at(-1)?.type, equals("turn.waiting"));
   await t.require(
     events.filter(
       (event) =>
         event.type === "turn.started" ||
-        event.type === "input.resolved" ||
-        event.type === "approval.settled" ||
-        event.type === "action.result",
+        event.type === "turn.settled" ||
+        event.type === "interaction.settled" ||
+        event.type === "call.settled",
     ).length,
     equals(0),
   );
-  await expectAnswerable(t, store, callId, requestId);
-  return candidates.at(-1)?.data.candidateId;
+  await expectAnswerable(t, store, callId, interactionId);
+  return responseId;
 }
 
 export default defineEval({
@@ -123,7 +115,6 @@ export default defineEval({
           host,
           headers: ALICE,
           initialSession: session.state,
-          reducer: defaultMessageReducer(),
         });
         stores.push(page);
         await settles(
@@ -131,14 +122,14 @@ export default defineEval({
           page.send({ message: "Prepare an authorized change.", signal: t.signal }),
         );
         const parked = (await t.target.watchTurn(session.sessionId).result()).expectOk();
-        const approval = parked.session.requireInputRequest({ toolName: TOOL });
-        const { requestId } = approval;
-        const callId = approval.action.callId;
-        await expectAnswerable(t, page, callId, requestId);
+        const approval = parked.session.requireInteraction({ toolName: TOOL });
+        const { interactionId } = approval;
+        const callId = approval.call!.callId;
+        await expectAnswerable(t, page, callId, interactionId);
 
-        const firstCandidate = await refuse(t, page, callId, requestId);
+        const firstCandidate = await refuse(t, page, callId, interactionId);
         // Retrying on the same page must reach the policy again, not reuse the refused candidate.
-        const retryCandidate = await refuse(t, page, callId, requestId);
+        const retryCandidate = await refuse(t, page, callId, interactionId);
         await t.require(retryCandidate !== firstCandidate, equals(true));
         page.reset();
 
@@ -146,21 +137,17 @@ export default defineEval({
           host,
           headers: ALICE,
           initialSession: { sessionId: session.sessionId, streamIndex: 0 },
-          reducer: defaultMessageReducer(),
         });
         stores.push(reload);
         await settles("Reload resume", reload.resume());
-        await expectAnswerable(t, reload, callId, requestId);
+        await expectAnswerable(t, reload, callId, interactionId);
         await t.require(
           reload.snapshot.events.filter(
-            (event) =>
-              event.type === "approval.candidate" &&
-              event.data.requestId === requestId &&
-              event.data.outcome === "rejected",
+            (event) => event.type === "response.settled" && event.data.outcome === "refused",
           ).length,
           equals(2),
         );
-        const reloadedCandidate = await refuse(t, reload, callId, requestId);
+        const reloadedCandidate = await refuse(t, reload, callId, interactionId);
         await t.require(reloadedCandidate !== retryCandidate, equals(true));
 
         t.log(
@@ -174,7 +161,7 @@ export default defineEval({
           reload.send({
             headers:
               decision === "approve" ? { "x-eve-fixture-user": "e2e-approval-responder" } : ALICE,
-            inputResponses: [{ requestId, optionId: decision }],
+            answers: [{ interactionId, optionId: decision }],
             signal: t.signal,
           }),
         );
@@ -183,31 +170,20 @@ export default defineEval({
         const finished = (
           await t.target.watchTurn(session.sessionId, { startIndex }).result()
         ).expectOk();
-        finished.event("approval.settled", {
-          data: { requestId, outcome: decision === "approve" ? "approved" : "cancelled" },
-          count: 1,
-        });
-        finished.event("input.resolved", {
+        finished.event("interaction.settled", {
           data: {
-            resolutions: (items) =>
-              items.some(
-                (item) =>
-                  item.requestId === requestId &&
-                  item.outcome === (decision === "approve" ? "approved" : "denied"),
-              ),
+            interactionId: interactionId,
+            outcome: decision === "approve" ? "accepted" : "declined",
           },
           count: 1,
         });
         if (decision === "approve") {
           finished.calledTool(TOOL, { status: "completed", output: { executions: 1 }, count: 1 });
         } else {
-          finished.event("action.result", {
-            data: { result: { callId, toolName: TOOL }, status: "rejected" },
-            count: 1,
-          });
+          finished.event("call.settled", { data: { callId, outcome: "rejected" }, count: 1 });
           finished.calledTool(TOOL, { status: "completed", count: 0 });
         }
-        await t.require(toolPart(reload, callId).state === "approval-requested", equals(false));
+        await t.require(toolPart(reload, callId).interaction?.status, equals("settled"));
         reload.reset();
       }
     } finally {

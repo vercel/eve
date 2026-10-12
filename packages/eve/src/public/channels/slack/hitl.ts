@@ -20,12 +20,8 @@ import {
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import {
-  type InputRequest,
-  type InputResponse,
-  parseInputResponse,
-  type ValidatedInputResponse,
-} from "#shared/input.js";
+import { type Answer, parseAnswer, type ValidatedAnswer } from "#shared/input.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -38,7 +34,7 @@ export const HITL_ACTION_PREFIX = "eve_input:";
  * `action_id` prefix for the "Type your answer" button that opens a
  * freeform-answer modal. Splitting the prefix from {@link HITL_ACTION_PREFIX}
  * lets the route handler differentiate "this click is a final answer"
- * (resolve via `inputResponses`) from "this click needs a modal first"
+ * (resolve via `answers`) from "this click needs a modal first"
  * (call `views.open`, then resolve on `view_submission`).
  */
 export const HITL_FREEFORM_ACTION_PREFIX = "eve_input_freeform:";
@@ -81,8 +77,8 @@ const TOOL_INPUT_SUFFIX = "\n```";
 const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
 const ANSWERED_TEXT_SUFFIX = "*";
 
-type InputRequestOption = NonNullable<InputRequest["options"]>[number];
-type CardButtonOption = Pick<InputRequestOption, "id" | "label" | "style">;
+type SlackInteractionOption = NonNullable<AskedInteraction["options"]>[number];
+type CardButtonOption = Pick<SlackInteractionOption, "id" | "label" | "style">;
 
 /**
  * Subset of one Slack interactivity action the HITL decoder reads.
@@ -103,13 +99,13 @@ export interface SlackHitlAction {
  */
 export interface DerivedHitlResponse {
   readonly kind?: "tool-approval";
-  readonly response: InputResponse;
+  readonly response: Answer;
   readonly route?: SlackHitlRoute;
 }
 
 /** A derived response whose input response already passed schema validation. */
 interface ValidatedHitlResponse extends DerivedHitlResponse {
-  readonly response: ValidatedInputResponse;
+  readonly response: ValidatedAnswer;
 }
 
 interface DecodedHitlActionId {
@@ -121,7 +117,7 @@ interface DecodedHitlActionId {
 
 /**
  * Decodes one Slack interactivity action on a widget from
- * {@link renderInputRequestBlocks} into an HITL response, or returns `null`
+ * {@link renderInteractionBlocks} into an HITL response, or returns `null`
  * when the action does not match an HITL widget eve rendered.
  */
 export const deriveHitlResponse: (action: SlackHitlAction) => DerivedHitlResponse | null = (
@@ -136,9 +132,9 @@ export function decodeHitlResponse(action: SlackHitlAction): ValidatedHitlRespon
   if (optionId === undefined || (action.value !== undefined && !decoded.button)) return null;
   const derived: {
     kind?: "tool-approval";
-    response: ValidatedInputResponse;
+    response: ValidatedAnswer;
     route?: SlackHitlRoute;
-  } = { response: parseInputResponse({ optionId, requestId: decoded.requestId }) };
+  } = { response: parseAnswer({ interactionId: decoded.requestId, optionId }) };
   if (decoded.kind !== undefined) derived.kind = decoded.kind;
   if (decoded.route !== undefined) derived.route = decoded.route;
   return derived;
@@ -189,15 +185,15 @@ export function decodeHitlActionId(actionId: string): DecodedHitlActionId | null
   return decoded;
 }
 
-function encodeHitlActionId(request: InputRequest, route?: SlackHitlRoute): string {
-  const requestIdentity = `${request.kind === "tool-approval" ? "tool-approval:" : ""}${request.requestId}`;
+function encodeHitlActionId(request: AskedInteraction, route?: SlackHitlRoute): string {
+  const requestIdentity = `${request.kind === "approval" ? "tool-approval:" : ""}${request.interactionId}`;
   return route === undefined
     ? `${HITL_ACTION_PREFIX}${requestIdentity}`
     : `${HITL_ROUTE_PREFIX}${route.channelId}:${route.threadTs}:${requestIdentity}`;
 }
 
 /**
- * Renders one `InputRequest` as Block Kit blocks. Clicks on the rendered
+ * Renders one `AskedInteraction` as Block Kit blocks. Clicks on the rendered
  * widgets decode with {@link deriveHitlResponse}:
  *
  * - `display === "select"` with ≤ {@link RADIO_SELECT_OPTION_LIMIT}
@@ -211,19 +207,19 @@ function encodeHitlActionId(request: InputRequest, route?: SlackHitlRoute): stri
  * - No options (or `allowFreeform: true`) → a single "Type your answer"
  *   button that opens a Slack modal with a plain_text_input. The modal
  *   submission comes back as a `view_submission` webhook the channel
- *   resolves into an {@link InputResponse} carrying `text`.
+ *   resolves into an {@link Answer} carrying `text`.
  *
  * Always emits at least the prompt section.
  */
-export function renderInputRequestBlocks(
-  request: InputRequest,
+export function renderInteractionBlocks(
+  request: AskedInteraction,
   route?: SlackHitlRoute,
 ): BlockKitBlock[] {
   const prompt = {
     text: { text: truncateSectionText(request.prompt), type: "mrkdwn" },
     type: "section",
   };
-  const details = renderInputRequestDetailBlocks(request);
+  const details = renderInteractionDetailBlocks(request);
   const actionId = encodeHitlActionId(request, route);
 
   const options = request.options;
@@ -243,7 +239,7 @@ export function renderInputRequestBlocks(
   }
 
   if (options && options.length > 0) {
-    const card = renderInputRequestCardBlock(request, actionId);
+    const card = renderInteractionCardBlock(request, actionId);
     const details = renderToolInputContainerBlock(request);
     return details === undefined ? [card] : [card, details];
   }
@@ -261,7 +257,7 @@ export function renderInputRequestBlocks(
             action_id: freeformActionId,
             text: { type: "plain_text", text: "Type your answer" },
             style: "primary",
-            value: request.requestId,
+            value: request.interactionId,
           },
         ],
       },
@@ -271,7 +267,7 @@ export function renderInputRequestBlocks(
   return [prompt];
 }
 
-export interface SlackInputRequestPostPart {
+export interface SlackInteractionPostPart {
   readonly blocks: unknown[];
   readonly text: string;
 }
@@ -281,18 +277,18 @@ export interface SlackInputRequestPostPart {
  * originating message in `block_actions`, so putting large tool input beside
  * the buttons makes the callback body grow with model-authored input.
  */
-export function renderInputRequestPostParts(
-  request: InputRequest,
+export function renderInteractionPostParts(
+  request: AskedInteraction,
   route?: SlackHitlRoute,
 ): {
-  readonly controls: SlackInputRequestPostPart;
-  readonly details?: SlackInputRequestPostPart;
+  readonly controls: SlackInteractionPostPart;
+  readonly details?: SlackInteractionPostPart;
 } {
-  const blocks = renderInputRequestBlocks(request, route);
+  const blocks = renderInteractionBlocks(request, route);
   const firstBlock = blocks[0];
   if (!isApprovalRequest(request) || !isBlockType(firstBlock, "card") || blocks.length === 1) {
     return {
-      controls: { blocks, text: formatInputRequestFallbackText(request) },
+      controls: { blocks, text: formatInteractionFallbackText(request) },
     };
   }
 
@@ -300,7 +296,7 @@ export function renderInputRequestPostParts(
     controls: { blocks: [firstBlock], text: request.prompt },
     details: {
       blocks: blocks.slice(1),
-      text: formatInputRequestFallbackText(request),
+      text: formatInteractionFallbackText(request),
     },
   };
 }
@@ -310,7 +306,7 @@ export function renderInputRequestPostParts(
  * outside the rich Block Kit surface, so include the same approval details
  * that appear in the blocks.
  */
-export function formatInputRequestFallbackText(request: InputRequest): string {
+export function formatInteractionFallbackText(request: AskedInteraction): string {
   const details = formatToolInputDetails(request);
   return details === undefined ? request.prompt : `${request.prompt}\n${details}`;
 }
@@ -404,7 +400,7 @@ function buildCardButton(
   return button;
 }
 
-function buildOption(opt: InputRequestOption): Record<string, unknown> {
+function buildOption(opt: SlackInteractionOption): Record<string, unknown> {
   const option: Record<string, unknown> = {
     text: { text: truncatePlainText(opt.label), type: "plain_text" },
     value: opt.id,
@@ -416,8 +412,8 @@ function buildOption(opt: InputRequestOption): Record<string, unknown> {
   return option;
 }
 
-function renderInputRequestCardBlock(
-  request: InputRequest,
+function renderInteractionCardBlock(
+  request: AskedInteraction,
   actionId: string,
 ): Record<string, unknown> {
   const card: Record<string, unknown> = {
@@ -436,7 +432,7 @@ function renderInputRequestCardBlock(
   return card;
 }
 
-function cardButtonOptions(request: InputRequest): CardButtonOption[] {
+function cardButtonOptions(request: AskedInteraction): CardButtonOption[] {
   const options = request.options ?? [];
   if (!isApprovalRequest(request)) return options.map(toCardButtonOption);
 
@@ -450,7 +446,7 @@ function cardButtonOptions(request: InputRequest): CardButtonOption[] {
   ];
 }
 
-function toCardButtonOption(option: InputRequestOption): CardButtonOption {
+function toCardButtonOption(option: SlackInteractionOption): CardButtonOption {
   const result: CardButtonOption = { id: option.id, label: option.label };
   if (option.style === "primary" || option.style === "danger") {
     return { ...result, style: option.style };
@@ -498,14 +494,16 @@ export function buildAnsweredBlocks(input: {
   return blocks;
 }
 
-function renderInputRequestDetailBlocks(request: InputRequest): BlockKitBlock[] {
+function renderInteractionDetailBlocks(request: AskedInteraction): BlockKitBlock[] {
   const details = formatToolInputDetails(request);
   return details === undefined
     ? []
     : [{ type: "section", text: { type: "mrkdwn", text: details } }];
 }
 
-function renderToolInputContainerBlock(request: InputRequest): Record<string, unknown> | undefined {
+function renderToolInputContainerBlock(
+  request: AskedInteraction,
+): Record<string, unknown> | undefined {
   const details = formatToolInputContainerText(request);
   if (details === undefined) return undefined;
 
@@ -518,10 +516,10 @@ function renderToolInputContainerBlock(request: InputRequest): Record<string, un
   };
 }
 
-function formatToolInputContainerText(request: InputRequest): string | undefined {
+function formatToolInputContainerText(request: AskedInteraction): string | undefined {
   if (!isApprovalRequest(request)) return undefined;
 
-  const json = JSON.stringify(request.action.input, null, 2);
+  const json = JSON.stringify(request.call?.input ?? {}, null, 2);
   if (json === "{}") return undefined;
 
   const bodyBudget =
@@ -530,10 +528,10 @@ function formatToolInputContainerText(request: InputRequest): string | undefined
   return `${TOOL_INPUT_CODE_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
 }
 
-function formatToolInputDetails(request: InputRequest): string | undefined {
+function formatToolInputDetails(request: AskedInteraction): string | undefined {
   if (!isApprovalRequest(request)) return undefined;
 
-  const json = JSON.stringify(request.action.input, null, 2);
+  const json = JSON.stringify(request.call?.input ?? {}, null, 2);
   if (json === "{}") return undefined;
 
   const bodyBudget =
@@ -552,6 +550,6 @@ function isBlockType(value: unknown, type: string): boolean {
   return typeof value === "object" && value !== null && (value as { type?: unknown }).type === type;
 }
 
-function isApprovalRequest(request: InputRequest): boolean {
-  return request.kind === "tool-approval";
+function isApprovalRequest(request: AskedInteraction): boolean {
+  return request.kind === "approval";
 }

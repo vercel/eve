@@ -9,9 +9,9 @@ import {
   stampToolDefinition,
   type PublicToolDefinition,
   type ToolContext,
-  type ToolInputRequest,
-  type ToolInputRequestOptions,
-  type ToolInputResponse,
+  type ToolQuestion,
+  type ToolAskOptions,
+  type ToolAnswer,
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 import {
@@ -93,7 +93,7 @@ export type WorkflowSharedContext = Pick<
    * run. The request is withdrawn, resolving as `cancelled`, when
    * `options.signal` or the call's `abortSignal` aborts.
    */
-  ask(request: ToolInputRequest, options?: ToolInputRequestOptions): PromiseLike<ToolInputResponse>;
+  ask(request: ToolQuestion, options?: ToolAskOptions): PromiseLike<ToolAnswer>;
 };
 
 /**

@@ -10,7 +10,8 @@ import {
 } from "#execution/session/state-delta.js";
 import { retireCancelledCandidates } from "#harness/hitl/index.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { cancel } from "#harness/session-machine/transitions.js";
+import { cancel, controlled } from "#harness/session-machine/transitions.js";
+import type { ControlDelivery } from "#harness/types.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
@@ -33,6 +34,8 @@ interface CancelledTurnSettleInput extends SessionHistoryStepState {
    * reported; otherwise the next settled turn reports it.
    */
   readonly reportUsage: boolean;
+  /** The cancel control that stopped the turn, when it named its delivery. */
+  readonly control?: ControlDelivery;
 }
 
 /**
@@ -60,7 +63,9 @@ export async function settleCancelledTurn(
     publish: (emit, session) =>
       applyTransition(
         session,
-        cancel(sessionView(currentProjection(step.ctx), session.state)),
+        controlled(input.control, "cancel", (cause) =>
+          cancel(sessionView(currentProjection(step.ctx), session.state), { cause }),
+        ),
         emit,
       ),
     updateSession(_session, cancelled) {

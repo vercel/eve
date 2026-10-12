@@ -38,13 +38,13 @@ describe("coalesceDeliverPayloads", () => {
     const result = coalesceDeliverPayloads([
       {
         adapterMetadata: { callbackKind: "button", deliverySequence: 1 },
-        inputResponses: [{ optionId: "approve", requestId: "approval_synthetic_release" }],
+        answers: [{ optionId: "approve", interactionId: "approval_synthetic_release" }],
         preservedAdapterMetadata: { source: "synthetic-callback" },
       },
       {
         adapterMetadata: { callbackKind: "message", deliverySequence: 2 },
-        inputResponses: [
-          { requestId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
+        answers: [
+          { interactionId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
         ],
         nextAdapterMetadata: { callbackVersion: 2 },
         preservedAdapterMetadata: undefined,
@@ -53,9 +53,9 @@ describe("coalesceDeliverPayloads", () => {
 
     expect(result).toEqual({
       adapterMetadata: { callbackKind: "message", deliverySequence: 2 },
-      inputResponses: [
-        { optionId: "approve", requestId: "approval_synthetic_release" },
-        { requestId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
+      answers: [
+        { optionId: "approve", interactionId: "approval_synthetic_release" },
+        { interactionId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
       ],
       nextAdapterMetadata: { callbackVersion: 2 },
       preservedAdapterMetadata: { source: "synthetic-callback" },

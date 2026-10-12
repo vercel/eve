@@ -13,18 +13,13 @@ export default defineEval({
     const parent = await session.start(
       "Use the workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
     );
-    const started = await parent.waitForEvent("agent.started", {
+    const started = await parent.waitForEvent("child.opened", {
       data: { name: "sleeper" },
     });
 
     const child = t.target.watchTurn(started.data.sessionId);
-    await child.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some(
-            (action) => action.kind === "tool-call" && action.toolName === "wait-for-cancellation",
-          ),
-      },
+    await child.waitForEvent("call.requested", {
+      data: { capability: { name: "wait-for-cancellation" } },
     });
 
     const cancelled = await parent.cancel();
@@ -37,24 +32,28 @@ export default defineEval({
     );
 
     const [parentTurn, childTurn] = await Promise.all([parent.result(), child.result()]);
-    childTurn.event("turn.cancelled", { count: 1 });
-    childTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    childTurn.notEvent("turn.failed");
-    childTurn.notEvent("session.failed");
+    childTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    childTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    childTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    childTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    parentTurn.event("turn.cancelled", { count: 1 });
-    parentTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    parentTurn.notEvent("turn.failed");
-    parentTurn.notEvent("session.failed");
+    parentTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    parentTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    parentTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    parentTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const followUp = await session.send("Reply with exactly CANCELLATION-SUBAGENT-FOLLOW-UP-OK.");
     followUp.expectOk();
-    followUp.notEvent("turn.cancelled");
+    followUp.notEvent("turn.settled", { data: { outcome: "cancelled" } });
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);
 
     // The eval watches both the parent and the sleeper session; each one's turn is cancelled once.
-    t.event("turn.cancelled", { count: 2 });
-    t.event("agent.started", { count: 1, data: { name: "sleeper" } });
-    t.event("task.settled", { count: 1, data: { status: "cancelled" } });
+    t.event("turn.settled", { count: 2, data: { outcome: "cancelled" } });
+    t.event("child.opened", { count: 1, data: { name: "sleeper" } });
+    t.event("call.settled", {
+      count: 1,
+      data: { outcome: "interrupted" },
+      scope: { taskId: /./u },
+    });
   },
 });

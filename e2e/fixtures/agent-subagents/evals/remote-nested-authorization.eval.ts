@@ -15,18 +15,31 @@ export default defineEval({
     );
     // The nested worker's sign-in holds the parent's turn, so the response stops there.
     const held = await live.result();
-    const required = held.events.find((event) => event.type === "authorization.required");
-    if (required?.type !== "authorization.required" || required.data.webhookUrl === undefined) {
+    const required = held.events.find(
+      (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+    );
+    const callbackUrl =
+      required?.type === "interaction.opened"
+        ? required.data.request.signIn?.callbackUrl
+        : undefined;
+    if (required?.type !== "interaction.opened" || callbackUrl === undefined) {
       throw new Error("Nested authorization challenge has no callback URL.");
     }
-    held.event("turn.waiting", { data: { on: "input" } });
-    held.event("authorization.required", {
-      data: { name: AUTHORIZATION_NAME, authorization: { userCode: AUTHORIZATION_CODE } },
+    held.event("turn.paused", {
+      data: { awaiting: [{ interactionId: required.data.interactionId }] },
+    });
+    held.event("interaction.opened", {
+      data: {
+        request: {
+          kind: "sign-in",
+          signIn: { name: AUTHORIZATION_NAME, userCode: AUTHORIZATION_CODE },
+        },
+      },
     });
     const resumed = t.target.watchTurn(live.session.sessionId, {
       startIndex: live.session.state?.streamIndex,
     });
-    const callback = new URL(required.data.webhookUrl);
+    const callback = new URL(callbackUrl);
     callback.searchParams.set("code", AUTHORIZATION_CODE);
     const response = await fetch(callback);
     if (!response.ok) throw new Error(`Nested authorization callback returned ${response.status}.`);
@@ -34,8 +47,8 @@ export default defineEval({
     const turn = await resumed.result();
     turn.expectOk();
     turn.notEvent("turn.started");
-    turn.event("authorization.completed", {
-      data: { name: AUTHORIZATION_NAME, outcome: "authorized" },
+    turn.event("interaction.settled", {
+      data: { interactionId: required.data.interactionId, outcome: "accepted" },
     });
     if (!turn.message?.includes("PARENT-NESTED-COMPLETE: CHILD-NESTED-AUTHORIZATION-COMPLETE")) {
       throw new Error("Nested authorization result did not reach the parent.");

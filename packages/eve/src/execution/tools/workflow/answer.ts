@@ -5,12 +5,12 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { InputResponse } from "#shared/input.js";
-import type { ToolInputResponseResponder } from "#tools/definition.js";
+import type { Answer } from "#shared/input.js";
+import type { ToolResponder } from "#tools/definition.js";
 
-export function toToolInputResponseResponder(
+export function toToolResponder(
   auth: SessionAuthContext | null | undefined,
-): ToolInputResponseResponder | undefined {
+): ToolResponder | undefined {
   return auth === null || auth === undefined
     ? undefined
     : {
@@ -27,8 +27,8 @@ export function toToolInputResponseResponder(
  */
 export async function sendWorkflowAskAnswers(
   route: WorkflowAskRoute,
-  responses: readonly InputResponse[] | undefined,
-  responder?: ToolInputResponseResponder,
+  responses: readonly Answer[] | undefined,
+  responder?: ToolResponder,
 ): Promise<void> {
   for (const response of responses ?? []) {
     const { optionId, text } = response;
@@ -38,7 +38,7 @@ export async function sendWorkflowAskAnswers(
         : { optionId, responder, status: "answered", text };
     const answer: WorkflowToolRunControlMessage = {
       kind: "answer",
-      requestId: response.requestId,
+      requestId: response.interactionId,
       response: answered,
     };
     await resumeHook(route.control, answer);

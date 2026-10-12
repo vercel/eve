@@ -18,12 +18,7 @@ export default defineEval({
     const live = await session.start(
       "Call the wait-for-cancellation tool and wait until this turn is cancelled.",
     );
-    await live.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-      },
-    });
+    await live.waitForEvent("call.requested", { data: { capability: { name: TOOL_NAME } } });
 
     const cancelled = await live.cancel();
     await t.require(
@@ -36,10 +31,10 @@ export default defineEval({
     );
 
     const cancelledTurn = await live.result();
-    cancelledTurn.event("turn.cancelled", { count: 1 });
-    cancelledTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    cancelledTurn.notEvent("turn.failed");
-    cancelledTurn.notEvent("session.failed");
+    cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelledTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    cancelledTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const resumed = await session.send(
       'Reply with exactly the text "session model after cancellation" and nothing else.',
@@ -50,7 +45,7 @@ export default defineEval({
       "the resumed turn reuses the session selection without restarting the session",
       (events) =>
         events.some(
-          (event) => event.type === "step.started" && event.data.modelId === selectedModel,
+          (event) => event.type === "model.started" && event.data.modelId === selectedModel,
         ) && events.every((event) => event.type !== "session.started"),
     );
 

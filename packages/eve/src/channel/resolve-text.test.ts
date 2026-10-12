@@ -1,22 +1,21 @@
 import { describe, expect, it } from "vitest";
-import type { InputRequest } from "#shared/input.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
 
-const APPROVAL_REQUEST: InputRequest = {
-  action: { callId: "call-1", input: { command: "rm -rf" }, kind: "tool-call", toolName: "bash" },
+const asked = (interactionId: string, request: InteractionRequest) => ({ interactionId, request });
+
+const APPROVAL_REQUEST = asked("req-1", {
   allowFreeform: false,
   display: "confirmation",
-  kind: "tool-approval",
+  kind: "approval",
   options: [
     { id: "approve", label: "Approve", style: "primary" },
     { id: "cancel", label: "Cancel", style: "danger" },
   ],
   prompt: 'Approve tool "bash"?',
-  requestId: "req-1",
-};
+});
 
-const SELECT_REQUEST: InputRequest = {
-  action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask_question" },
+const SELECT_REQUEST = asked("req-2", {
   display: "select",
   kind: "question",
   options: [
@@ -25,20 +24,16 @@ const SELECT_REQUEST: InputRequest = {
     { id: "sqlite", label: "SQLite" },
   ],
   prompt: "Which database?",
-  requestId: "req-2",
-};
+});
 
-const FREEFORM_REQUEST: InputRequest = {
-  action: { callId: "call-3", input: {}, kind: "tool-call", toolName: "ask_question" },
+const FREEFORM_REQUEST = asked("req-3", {
   allowFreeform: true,
   display: "text",
   kind: "question",
   prompt: "What is your name?",
-  requestId: "req-3",
-};
+});
 
-const SELECT_WITH_FREEFORM_REQUEST: InputRequest = {
-  action: { callId: "call-4", input: {}, kind: "tool-call", toolName: "ask_question" },
+const SELECT_WITH_FREEFORM_REQUEST = asked("req-4", {
   allowFreeform: true,
   display: "select",
   kind: "question",
@@ -47,8 +42,7 @@ const SELECT_WITH_FREEFORM_REQUEST: InputRequest = {
     { id: "blue", label: "Blue" },
   ],
   prompt: "Pick a color or enter a custom one.",
-  requestId: "req-4",
-};
+});
 
 describe("resolveTextToResponse", () => {
   it("returns undefined for empty text", () => {
@@ -61,33 +55,33 @@ describe("resolveTextToResponse", () => {
 
   it("matches option by exact ID (case-insensitive)", () => {
     expect(resolveTextToResponse("approve", APPROVAL_REQUEST)).toEqual({
-      requestId: "req-1",
+      interactionId: "req-1",
       optionId: "approve",
     });
     expect(resolveTextToResponse("APPROVE", APPROVAL_REQUEST)).toEqual({
-      requestId: "req-1",
+      interactionId: "req-1",
       optionId: "approve",
     });
   });
 
   it("matches option by exact label (case-insensitive)", () => {
     expect(resolveTextToResponse("Postgres", SELECT_REQUEST)).toEqual({
-      requestId: "req-2",
+      interactionId: "req-2",
       optionId: "postgres",
     });
     expect(resolveTextToResponse("mysql", SELECT_REQUEST)).toEqual({
-      requestId: "req-2",
+      interactionId: "req-2",
       optionId: "mysql",
     });
   });
 
   it("matches option by 1-based numeric index", () => {
     expect(resolveTextToResponse("1", SELECT_REQUEST)).toEqual({
-      requestId: "req-2",
+      interactionId: "req-2",
       optionId: "postgres",
     });
     expect(resolveTextToResponse("3", SELECT_REQUEST)).toEqual({
-      requestId: "req-2",
+      interactionId: "req-2",
       optionId: "sqlite",
     });
   });
@@ -105,38 +99,33 @@ describe("resolveTextToResponse", () => {
 
   it("falls back to freeform text when allowFreeform is true", () => {
     expect(resolveTextToResponse("Alice", FREEFORM_REQUEST)).toEqual({
-      requestId: "req-3",
+      interactionId: "req-3",
       text: "Alice",
     });
   });
 
   it("matches option first, freeform second when both available", () => {
     expect(resolveTextToResponse("red", SELECT_WITH_FREEFORM_REQUEST)).toEqual({
-      requestId: "req-4",
+      interactionId: "req-4",
       optionId: "red",
     });
     expect(resolveTextToResponse("green", SELECT_WITH_FREEFORM_REQUEST)).toEqual({
-      requestId: "req-4",
+      interactionId: "req-4",
       text: "green",
     });
   });
 
   it("falls back to freeform for requests with no options", () => {
-    const noOptions: InputRequest = {
-      action: { callId: "call-5", input: {}, kind: "tool-call", toolName: "ask_question" },
-      kind: "question",
-      prompt: "Tell me something.",
-      requestId: "req-5",
-    };
+    const noOptions = asked("req-5", { kind: "question", prompt: "Tell me something." });
     expect(resolveTextToResponse("anything", noOptions)).toEqual({
-      requestId: "req-5",
+      interactionId: "req-5",
       text: "anything",
     });
   });
 
   it("trims whitespace from input", () => {
     expect(resolveTextToResponse("  approve  ", APPROVAL_REQUEST)).toEqual({
-      requestId: "req-1",
+      interactionId: "req-1",
       optionId: "approve",
     });
   });
@@ -146,8 +135,8 @@ describe("resolveTextToResponses", () => {
   it("resolves text against multiple requests", () => {
     const responses = resolveTextToResponses("approve", [APPROVAL_REQUEST, FREEFORM_REQUEST]);
     expect(responses).toEqual([
-      { requestId: "req-1", optionId: "approve" },
-      { requestId: "req-3", text: "approve" },
+      { interactionId: "req-1", optionId: "approve" },
+      { interactionId: "req-3", text: "approve" },
     ]);
   });
 

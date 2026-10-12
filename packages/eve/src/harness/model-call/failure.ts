@@ -10,14 +10,15 @@ import { createErrorId, createLogger, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
 import type { StepResult } from "#harness/types.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 
 const log = createLogger("harness.tool-loop");
 /**
- * Projects a model-call failure into the `step.failed` / `turn.failed`
- * `details` payload. Three mutually exclusive branches:
+ * Projects a model-call failure into the failure `details` the stream's
+ * `model.settled` and `turn.settled` errors are read from. Three mutually exclusive branches:
  *
  * 1. Catalog match → the rule's curated `name`/`message`/`hint` plus its
  *    registered `semanticErrorId`, no SDK inspector dump.
@@ -98,6 +99,15 @@ export function buildModelCallFailureLogFields(input: {
  * the workflow's failure, not the model's: the session parks for the user to retry. A terminal
  * failure ends the session; any other fails the turn recoverably.
  */
+/** A failed model call as the stream reports it: what a reader can act on, not the SDK's dump. */
+export function modelCallErrorInfo(error: unknown): ErrorInfo {
+  const message =
+    summarizeKnownError(error)?.message ??
+    extractUpstreamRejectionMessage(error)?.message ??
+    toErrorMessage(error);
+  return { code: "MODEL_CALL_FAILED", message };
+}
+
 export async function reportModelCallFailure(step: Step, error: unknown): Promise<StepResult> {
   // Surface the full cause chain and upstream response body to OTel via the turn span: the AI
   // SDK's own span records only `error.stack`, without `cause`.
@@ -174,7 +184,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
       }),
     );
     // A delegated run's caller needs a failed result to report; a conversation already ended
-    // with `session.failed`.
+    // with `session.ended`.
     return {
       next: step.hasDelegatedCaller
         ? { done: true, isError: true, output: taskFailureOutput }

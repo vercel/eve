@@ -1,5 +1,7 @@
+import type { ControlDelivery } from "#harness/types.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import {
   endSessionSandboxStep,
@@ -19,7 +21,7 @@ import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 /** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
 export type SessionTerminalOutcome =
   | { readonly kind: "done"; readonly action: TurnOutcome & { readonly kind: "done" } }
-  | { readonly kind: "expired" }
+  | { readonly kind: "expired"; readonly control?: ControlDelivery }
   | { readonly kind: "failed"; readonly error: unknown; readonly turnId?: string };
 
 interface SessionFinalizationContext {
@@ -51,7 +53,8 @@ export async function finalizeSession(
   const { serializedContext, sessionState } = context.cursor;
   // Most sessions end with no run to stop, so the step that would find nothing is skipped.
   if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
-    await terminateChildSessionsStep({ sessionState });
+    // Best effort: a failed teardown must not keep the session from ending and closing its stream.
+    await terminateChildSessionsStep({ sessionState }).catch(() => undefined);
   }
   if (sessionState !== undefined) {
     try {
@@ -70,9 +73,12 @@ export async function finalizeSession(
   }
   const session = sessionState?.snapshot.session;
   const usage = session === undefined ? undefined : getSessionUsage(session);
-  const latest = storedProjection(session?.state).latestTurn;
+  const stored = storedProjection(session?.state);
+  const latest = stored.latestTurn;
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
+      control: outcome.control,
+      projection: stored,
       sessionWritable: context.sessionWritable,
       serializedContext,
       turn: latest && { id: latest.turnId, sequence: latest.sequence },
@@ -81,11 +87,15 @@ export async function finalizeSession(
   } else if (outcome.kind === "failed") {
     await emitTerminalSessionFailureStep({
       error: normalizeSerializableError(outcome.error),
+      projection: stored,
       sessionWritable: context.sessionWritable,
       serializedContext,
       turnId: outcome.turnId ?? latest?.turnId,
       usage,
     });
+  } else {
+    // The turn published the session's end; the run still closes the stream.
+    await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
   }
 
   const settled = settledResult(outcome, context);

@@ -1,14 +1,18 @@
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
-import type { RuntimeIdentity, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/message.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -142,15 +146,22 @@ export interface SessionLimits {
  * channels. The harness resolves any pending input batch at the start of
  * `runStep` before the model call.
  */
-export interface AttributedInputResponse {
+export interface AttributedAnswer {
   readonly auth: SessionAuthContext | null;
-  readonly response: InputResponse;
+  readonly response: Answer;
 }
 
+/** The delivery a control arrived as: its id, and who sent it, as the wire names them. */
+export interface ControlDelivery {
+  readonly deliveryId: string;
+  readonly principal?: Principal;
+}
+
+/** What a channel's `deliver` hook makes of one payload: the input a turn receives. */
 export interface StepInput {
   /** Internal responder-bound input produced at the delivery boundary. */
-  readonly attributedInputResponses?: readonly AttributedInputResponse[];
-  readonly inputResponses?: readonly InputResponse[];
+  readonly attributedAnswers?: readonly AttributedAnswer[];
+  readonly answers?: readonly Answer[];
   readonly message?: string | UserContent;
   /** Internal actor attribution for `message`. */
   readonly messageAuth?: SessionAuthContext | null;
@@ -172,6 +183,25 @@ export interface StepInput {
    * produced by channels.
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
+}
+
+/**
+ * A turn step's input inside the session: what `deliver` made, plus the identities eve attaches
+ * at the delivery boundary. Never produced by channels.
+ */
+export interface HarnessStepInput extends StepInput {
+  /**
+   * Stable public response and delivery identities carried across policy and sign-in passes.
+   * Routing and auth stay private; lifecycle status belongs only to the public fold.
+   */
+  readonly responseBindings?: readonly ResponseSubmittedData[];
+  /**
+   * What the agents behind some of {@link runtimeActionResults} spent, by call id. Each call's
+   * settlement records it, so the session counts a child's usage once.
+   */
+  readonly delegatedUsage?: Readonly<Record<string, TokenUsage>>;
+  /** The deliveries this input carries, each with what its person sent, which the turn consumes. */
+  readonly deliveries?: readonly ConsumedDelivery[];
 }
 
 /**
@@ -237,7 +267,7 @@ export type TurnHold =
  * A single step of AI work. Takes the current session and optional user input,
  * returns the updated session and an instruction for the runtime.
  */
-export type StepFn = (session: HarnessSession, input?: StepInput) => Promise<StepResult>;
+export type StepFn = (session: HarnessSession, input?: HarnessStepInput) => Promise<StepResult>;
 
 /**
  * Map from tool name to its harness-owned definition.
@@ -266,16 +296,13 @@ export interface ResolvedCall<T extends ToolCallLike> {
 export type CallResolver = <T extends ToolCallLike>(toolCall: T) => ResolvedCall<T> | undefined;
 
 /**
- * Callback that writes one event to the event stream.
- *
- * Composed by the runtime from the underlying writable and the channel's
- * event handler, then injected into the harness so it can emit lifecycle
- * events without knowing about writables or handlers.
+ * What one publish writes: one event, or every event of one transition, which the writer commits
+ * as one line so readers never see half of it.
  */
-export type HarnessEmitFn = (
-  event: UnstampedMessageStreamEvent,
-  messages?: readonly import("ai").ModelMessage[],
-) => Promise<void>;
+export type SessionPublication = SessionEvent | readonly SessionEvent[];
+
+/** The sink the harness emits to: see {@link HandleEventFn}. */
+export type HarnessEmitFn = HandleEventFn;
 
 /** Where a model call stands: its turn and its step within the turn. */
 export interface StepCoordinates {
@@ -305,14 +332,12 @@ export interface StepParticipants {
 }
 
 /**
- * Unified event handler: emits the event to the stream, then dispatches it to hook subscribers
- * and the session's participants.
- *
- * Same signature as {@link HarnessEmitFn} but semantically broader — every event goes through
- * channel adapter, stream write, hooks, and participants in one call.
+ * Publishes one event or one commit to the session: the stream write, then the channel, hooks,
+ * and participants. Composed by the runtime and injected into the harness, so the harness emits
+ * lifecycle without knowing about writables or handlers.
  */
 export type HandleEventFn = (
-  event: UnstampedMessageStreamEvent,
+  publication: SessionPublication,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
@@ -333,6 +358,8 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /** The delivery a clear or compact control arrived as; its facts name it. */
+  readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;

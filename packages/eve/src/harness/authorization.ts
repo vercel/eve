@@ -115,7 +115,7 @@ export interface AuthorizationResult {
  * Creates an authorization signal. Return this from a tool's execute
  * to suspend the session for OAuth or other external authorization.
  *
- * The harness emits `authorization.required` events for each challenge
+ * The harness emits sign-in `interaction.opened` events for each challenge
  * and parks the session. Channels render sign-in buttons.
  */
 export function requestAuthorization(
@@ -227,7 +227,7 @@ export function isAuthorizationPendingModelOutput(
 
 /**
  * JSON-safe pending authorization output for model-facing tool results and
- * wire surfaces (`action.result`, telemetry). Omits OAuth URLs and user
+ * wire surfaces (`call.settled`, telemetry). Omits OAuth URLs and user
  * codes — connection names only.
  */
 export function authorizationPendingAsJsonObject(input: {

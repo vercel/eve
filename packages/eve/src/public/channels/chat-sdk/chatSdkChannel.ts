@@ -1,3 +1,6 @@
+import { errorHintOf } from "#public/channels/reply.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
 import type { UserContent } from "ai";
 
@@ -13,16 +16,13 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { assertWithinLimit } from "#internal/attachments/limited-read.js";
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { InputResolution, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createLogger, formatErrorHint } from "#internal/logging.js";
+import type { RequestSettlement } from "#channel/interaction-prompts.js";
 import type { FetchFileResult } from "#shared/channel-definition.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
-import type { InputRequest } from "#shared/input.js";
-import {
-  type InputResponse,
-  parseInputResponses,
-  type StrictInputResponses,
-} from "#shared/input.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import { displayTitle } from "#shared/display-name.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
+import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type {
   ActionEvent,
   Adapter,
@@ -32,9 +32,14 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
-import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
+import { settleChatSdkSignIn, showChatSdkSignIn } from "#public/channels/chat-sdk/authorization.js";
+import {
+  requestSettlementOf,
+  signInPromptOf,
+  signInSettlementOf,
+} from "#channel/interaction-prompts.js";
 import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
-import { decodeInputAction, renderInputRequests } from "#public/channels/chat-sdk/input-actions.js";
+import { decodeInputAction, renderInteractions } from "#public/channels/chat-sdk/input-actions.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
@@ -57,9 +62,6 @@ const MAX_TYPING_STATUS = 80;
 const streamTextByState = new WeakMap<ChatSdkChannelState, string>();
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 interface ActiveWebhookContext {
   readonly from: ChannelFrom<ChatSdkChannelState>;
 }
@@ -90,13 +92,13 @@ export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueu
   usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
-  streamStepIndex?: number | null;
+  streamPartId?: string | null;
 }
 
 /** One posted card's requests and the resolutions eve has reported for them so far. */
 export interface ChatSdkPendingInputCard {
-  readonly requests: readonly InputRequest[];
-  readonly resolved: Readonly<Record<string, InputResolution>>;
+  readonly requests: readonly AskedInteraction[];
+  readonly resolved: Readonly<Record<string, RequestSettlement>>;
 }
 
 /**
@@ -251,8 +253,8 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
    * Answers pending input requests on the thread's session from inside a Chat
    * SDK webhook handler. Never creates a session.
    */
-  respond<const TResponses extends readonly InputResponse[]>(
-    inputResponses: StrictInputResponses<TResponses>,
+  respond<const TResponses extends readonly Answer[]>(
+    answers: StrictAnswers<TResponses>,
     options: ChatSdkRespondOptions,
   ): Promise<Session>;
 }
@@ -371,8 +373,8 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     send(message, options) {
       return bridgeSend(bot, message, options);
     },
-    respond(inputResponses, options) {
-      return bridgeRespond(bot, inputResponses, options);
+    respond(answers, options) {
+      return bridgeRespond(bot, answers, options);
     },
   };
 }
@@ -381,12 +383,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
   type EventChannel = Parameters<
-    NonNullable<ChatSdkChannelEvents<TAdapters>["input.requested"]>
-  >[1];
+    NonNullable<ChatSdkChannelEvents<TAdapters>["interaction.opened"]>
+  >[1]["channel"];
 
-  async function showPrompt(channel: EventChannel, request: InputRequest) {
+  async function showPrompt(channel: EventChannel, request: AskedInteraction) {
     if (!channel.thread) return false;
-    const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
+    const posted = await channel.thread.post(renderInteractions([request], inputActionPrefix));
     if (!posted.id || channel.state.editSupported === false) return;
     channel.state.pendingInputCards = {
       ...channel.state.pendingInputCards,
@@ -395,23 +397,25 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   }
 
   async function clearAnsweredCards(
-    event: { readonly resolutions: readonly InputResolution[] },
+    event: { readonly resolutions: readonly RequestSettlement[] },
     channel: EventChannel,
   ) {
     const thread = channel.thread;
     if (!thread) return;
     for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
       const resolutions = event.resolutions.filter((resolution) =>
-        card.requests.some((request) => request.requestId === resolution.requestId),
+        card.requests.some((request) => request.interactionId === resolution.interactionId),
       );
       if (resolutions.length === 0) continue;
       const resolved = {
         ...card.resolved,
-        ...Object.fromEntries(resolutions.map((resolution) => [resolution.requestId, resolution])),
+        ...Object.fromEntries(
+          resolutions.map((resolution) => [resolution.interactionId, resolution]),
+        ),
       };
       const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
       channel.state.pendingInputCards = card.requests.every(
-        (request) => resolved[request.requestId] !== undefined,
+        (request) => resolved[request.interactionId] !== undefined,
       )
         ? rest
         : { ...rest, [messageId]: { requests: card.requests, resolved } };
@@ -419,7 +423,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await thread.adapter.editMessage(
           thread.id,
           messageId,
-          renderInputRequests(card.requests, inputActionPrefix, resolved),
+          renderInteractions(card.requests, inputActionPrefix, resolved),
         );
       } catch (error) {
         if (!isNotImplemented(error)) {
@@ -435,39 +439,37 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
 
   const prompts = promptQueueEvents(showPrompt);
   return {
-    ...defaultAuthorizationEvents(),
-    async "turn.started"(_event, channel, _ctx) {
+    async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
       await safeStartTyping(channel.thread, "Working...");
     },
-    async "actions.requested"(event, channel, _ctx) {
+    async "call.requested"({ data }, { channel }) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      const labels = visibleActions(event.actions).map((action) =>
-        actionLabel(action, event.presentation),
-      );
-      if (labels.length === 0) return;
-      await safeStartTyping(channel.thread, truncate(`${labels.join(", ")}...`));
+      // eve's own task controls stay out of view.
+      if (isTaskControlTool(data.capability.name)) return;
+      const label = data.capability.title ?? displayTitle(data.capability.name);
+      await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
-    async "message.appended"(event, channel, _ctx) {
+    async "content.delta"({ data }, { channel }) {
       if (!channel.thread || !canStream(channel)) return;
-      const currentText =
-        channel.state.streamStepIndex === event.stepIndex
-          ? streamTextByState.get(channel.state)
-          : undefined;
-      const message = (currentText ?? "") + event.messageDelta;
+      // Only text streams: a part announces its kind with its first delta.
+      const streaming = channel.state.streamPartId === data.partId;
+      if (data.kind === undefined ? !streaming : data.kind !== "text") return;
+      const currentText = streaming ? streamTextByState.get(channel.state) : undefined;
+      const message = (currentText ?? "") + data.delta;
       if (!message) return;
       streamTextByState.set(channel.state, message);
       const anchor = channel.state.anchorMessageId;
-      if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
+      if (!anchor || !streaming) {
         const sent = await channel.thread.post({ markdown: message });
         channel.state.anchorMessageId = sent.id;
-        channel.state.streamStepIndex = event.stepIndex;
+        channel.state.streamPartId = data.partId;
         channel.state.lastEditAtMs = Date.now();
         return;
       }
@@ -484,50 +486,64 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     },
     // Some adapters show only text, where a reply can answer only the request
     // it sees, so cards post one at a time.
-    ...prompts,
-    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
-    async "input.resolved"(event, channel, _ctx) {
-      await clearAnsweredCards(event, channel);
-      await prompts["input.resolved"](event, channel);
+    async "interaction.opened"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
+      await prompts["interaction.opened"](event, ctx);
+      const signIn = signInPromptOf(data, event.scope);
+      if (signIn !== undefined) await showChatSdkSignIn(signIn, channel);
     },
-    async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls") {
-        channel.state.pendingToolCallMessage = event.message
-          ? (firstNonEmptyLine(event.message) ?? null)
-          : null;
+    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
+    async "interaction.settled"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
+      const signIn = signInSettlementOf(ctx.view, data);
+      if (signIn !== undefined) await settleChatSdkSignIn(signIn, channel);
+      const resolution = requestSettlementOf(ctx.view, data);
+      if (resolution !== undefined)
+        await clearAnsweredCards({ resolutions: [resolution] }, channel);
+      await prompts["interaction.settled"](event, ctx);
+    },
+    "response.admitted": prompts["response.admitted"],
+    async "content.completed"({ data }, { channel }) {
+      if (data.kind !== "text") return;
+      const text = typeof data.value === "string" ? data.value : "";
+      if (contentPhase(data.phase) === "narration") {
+        channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
         // Finalize the streamed anchor so it shows the complete pre-tool-call
         // text rather than the last throttled edit. Pass `false` so nothing new
         // is posted when nothing was streamed — intermediate tool-call narration
         // must not become a standalone message on non-streaming surfaces.
-        if (event.message) {
-          await finalizeStreamedMessage(channel, event.message, false);
+        if (text) {
+          await finalizeStreamedMessage(channel, text, false);
         } else {
           clearStream(channel.state);
         }
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.message) {
+      if (!text) {
         clearStream(channel.state);
         return;
       }
-      await finalizeStreamedMessage(channel, event.message, true);
+      await finalizeStreamedMessage(channel, text, true);
     },
-    async "turn.failed"(event, channel, _ctx) {
-      if (event.terminal) return;
+    async "turn.settled"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
       await postFailure(
         channel.thread,
         "I hit an error while handling your request",
         "Please try again, rephrase, or reach out if it keeps failing.",
-        event,
+        data.error,
       );
     },
-    async "session.failed"(event, channel) {
+    async "session.ended"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
       await postFailure(
         channel.thread,
         "This session could not recover from an error",
         "Start a new conversation to continue.",
-        event,
+        data.error,
       );
     },
   };
@@ -598,7 +614,7 @@ function canStream(channel: ChatSdkChannelContext): boolean {
 function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
   state.lastEditAtMs = null;
-  state.streamStepIndex = null;
+  state.streamPartId = null;
   streamTextByState.delete(state);
 }
 
@@ -620,11 +636,11 @@ async function postFailure(
   thread: Thread | null,
   prefix: string,
   nextStep: string,
-  event: EventData<"turn.failed"> | EventData<"session.failed">,
+  error: ErrorInfo | undefined,
 ): Promise<void> {
   if (!thread) return;
-  const hint = formatErrorHint(event);
-  const errorId = extractErrorId(event.details);
+  const hint = formatErrorHint(errorHintOf(error));
+  const errorId = error?.id;
   await thread.post(
     [`${prefix}${hint}.`, nextStep, ...(errorId ? [`Error id: ${errorId}`] : [])].join("\n\n"),
   );
@@ -647,13 +663,13 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
 
 async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
-  inputResponses: readonly InputResponse[],
+  answers: readonly Answer[],
   options: ChatSdkRespondOptions,
 ): Promise<Session> {
   const from = activeFrom("respond");
   const { adapterName, auth, thread: threadInput, ...respondOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
-  return from(thread.id).respond(parseInputResponses(inputResponses), {
+  return from(thread.id).respond(parseAnswers(answers), {
     ...respondOptions,
     auth: auth ?? null,
   });

@@ -8,14 +8,16 @@
  * machine's `answer`: a grant bumps the runtime limits with
  * {@link bumpSessionRuntimeUsageLimits}; a decline cancels the turn tree.
  */
-import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
+import {
+  createSessionLimitContinuationRequest,
+  type LimitAsk,
+} from "#harness/hitl/budget-request.js";
 import {
   getSessionUsageLimitViolation,
   getSessionTokenUsage,
   type SessionUsageLimitViolation,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 
 export { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
@@ -25,7 +27,7 @@ const SESSION_TOKEN_COST_LIMIT_REACHED_CODE = "SESSION_TOKEN_COST_LIMIT_REACHED"
 
 export type SessionUsageLimitCheck =
   | { readonly kind: "within" }
-  | { readonly kind: "ask"; readonly request: InputRequest }
+  | { readonly kind: "ask"; readonly ask: LimitAsk }
   | {
       readonly kind: "fail";
       readonly code: string;
@@ -47,7 +49,7 @@ export function checkSessionUsageLimit(input: {
   if (violationWindow(violation) > 0 && input.canAsk) {
     return {
       kind: "ask",
-      request: createSessionLimitContinuationRequest({
+      ask: createSessionLimitContinuationRequest({
         sessionId: input.session.sessionId,
         turnSequence: input.turnSequence,
         violation,

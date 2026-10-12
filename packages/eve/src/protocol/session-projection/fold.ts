@@ -7,7 +7,15 @@
 // run to many thousands of lines; take `copyView` before a fold to keep the state before it.
 
 import { FACT_CATALOG, isFactType, isProgressType } from "#protocol/session-events/catalog.js";
-import { isOpen, parentOf, type Ref, refOf, tableOf } from "#protocol/session-projection/tree.js";
+import {
+  type Family,
+  isOpen,
+  parentOf,
+  type Ref,
+  refOf,
+  tableOf,
+  turnOf,
+} from "#protocol/session-projection/tree.js";
 import type { StoredLine, Usage } from "#protocol/session-events/envelope.js";
 import type { Fact, Progress } from "#protocol/session-events/facts.js";
 import type {
@@ -20,8 +28,10 @@ import type {
 
 /**
  * How much a fold keeps. `complete` keeps everything, for clients and history reads.
- * `operational` keeps the session, everything still open and its ownership ancestors, and what the latest line touched,
- * for server checkpoints and observers; it drops the rest when the next line arrives.
+ * `operational` keeps the session, everything still open and its ownership ancestors, what the
+ * latest line touched, and the rows of the latest turn and of any turn whose calls still work, for
+ * server checkpoints and observers; it drops the rest when the next line arrives. A channel shows
+ * what a turn did from its rows, so they stay until the next turn starts, or its tasks finish.
  */
 export type Retention = "complete" | "operational";
 
@@ -506,31 +516,77 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
     pinPath({ family: "response", id: row.responseId });
     pinPath({ family: "delivery", id: row.deliveryId });
   }
-  const retained = (table: TableName, id: string) =>
-    pinned.has(`${table}:${id}`) || keep?.(table, id) === true;
+  const turns = liveTurns(view);
+  const retained = (family: Family, id: string) => {
+    if (pinned.has(`${tableOf(family)}:${id}`) || keep?.(tableOf(family), id) === true) return true;
+    const turnId = family === "part" ? undefined : turnOf(view, { family, id });
+    return turnId !== undefined && turns.has(turnId);
+  };
   const dropWhere = <TRow>(
-    table: TableName,
+    family: Family,
     rows: Record<string, TRow>,
     closed: (row: TRow) => boolean,
   ) => {
     for (const [id, row] of Object.entries(rows)) {
-      if (closed(row) && !retained(table, id)) delete rows[id];
+      if (closed(row) && !retained(family, id)) delete rows[id];
     }
   };
-  dropWhere("deliveries", view.deliveries, (row) => row.status === "settled");
-  dropWhere("turns", view.turns, (row) => row.status === "settled");
-  dropWhere("runs", view.runs, (row) => row.status === "settled");
-  dropWhere("parts", view.parts, () => true);
-  dropWhere("calls", view.calls, (row) => row.status === "settled");
-  dropWhere("tasks", view.tasks, (row) => row.status === "ended");
-  dropWhere("interactions", view.interactions, (row) => row.status === "settled");
-  dropWhere("responses", view.responses, (row) => row.status === "settled");
-  dropWhere("changes", view.changes, (row) => row.status === "settled");
-  dropWhere("children", view.children, (row) =>
-    "callId" in row.owner
-      ? view.calls[row.owner.callId] === undefined
-      : view.tasks[row.owner.taskId] === undefined,
-  );
+  dropWhere("delivery", view.deliveries, (row) => row.status === "settled");
+  dropWhere("turn", view.turns, (row) => row.status === "settled");
+  dropWhere("run", view.runs, (row) => row.status === "settled");
+  dropWhere("part", view.parts, () => true);
+  dropWhere("call", view.calls, (row) => row.status === "settled");
+  dropWhere("task", view.tasks, (row) => row.status === "ended");
+  dropWhere("interaction", view.interactions, (row) => row.status === "settled");
+  dropWhere("response", view.responses, (row) => row.status === "settled");
+  dropWhere("change", view.changes, (row) => row.status === "settled");
+  for (const [id, row] of Object.entries(view.children)) {
+    const owner =
+      "callId" in row.owner ? view.calls[row.owner.callId] : view.tasks[row.owner.taskId];
+    if (owner === undefined) delete view.children[id];
+  }
+  for (const row of Object.values(view.calls)) {
+    if (row.status === "settled" && !pinned.has(`calls:${row.callId}`)) withholdLarge(view, row);
+  }
+}
+
+/** The latest turn, and every turn with calls still working, such as calls its tasks serve. */
+function liveTurns(view: SessionView): ReadonlySet<string> {
+  const turns = new Set<string>();
+  if (view.session.latestTurnId !== undefined) turns.add(view.session.latestTurnId);
+  for (const row of Object.values(view.calls)) {
+    if (row.status === "settled") continue;
+    const turnId = turnOf(view, { family: "call", id: row.callId });
+    if (turnId !== undefined) turns.add(turnId);
+  }
+  return turns;
+}
+
+/** A finished call's input or output past this many characters of JSON is withheld once kept. */
+const MAX_KEPT_VALUE_LENGTH = 16_384;
+
+/**
+ * A finished call kept for its turn keeps what channels show of it, not a large value: one past
+ * {@link MAX_KEPT_VALUE_LENGTH} reads as withheld (a reference with no `ref`), as the stream
+ * itself can write it. The session's history holds the value the model reads.
+ */
+function withholdLarge(view: MutableView, row: SessionView["calls"][string]): void {
+  const size = (value: unknown) => (value === undefined ? 0 : (JSON.stringify(value)?.length ?? 0));
+  const inputSize = size(row.input);
+  const outputSize = size(row.output);
+  if (inputSize <= MAX_KEPT_VALUE_LENGTH && outputSize <= MAX_KEPT_VALUE_LENGTH) return;
+  const { input, output, ...rest } = row;
+  view.calls[row.callId] = {
+    ...rest,
+    ...(inputSize <= MAX_KEPT_VALUE_LENGTH
+      ? { input }
+      : { inputRef: { size: inputSize, mediaType: "application/json" } }),
+    ...(outputSize <= MAX_KEPT_VALUE_LENGTH
+      ? output === undefined
+        ? {}
+        : { output }
+      : { outputRef: { size: outputSize, mediaType: "application/json" } }),
+  };
 }
 
 function addUsage(a: Usage | undefined, b: Usage): Usage {

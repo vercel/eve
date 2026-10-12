@@ -1,11 +1,11 @@
-import { conversationProjection } from "#client/conversation-projection.js";
-import type { EveAuthorizationPart, EveMessageData } from "#client/message-reducer-types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import { conversationView } from "#client/conversation.js";
+import type { EveMessage } from "#client/message-types.js";
 import {
+  type ReaderInteraction,
   type ConversationTask,
   type ConversationTaskCall,
   openSignIns,
-} from "#protocol/session-projection.js";
+} from "#protocol/session-reader.js";
 
 export type { ConversationTask, ConversationTaskCall };
 
@@ -16,16 +16,14 @@ export interface ConversationTurn {
   readonly waiting?: boolean;
 }
 
-export interface ConversationInput {
-  readonly request: InputRequest;
-  readonly turnId: string;
-  readonly stepIndex: number;
-  /** The task whose run asks, when a task asks. */
-  readonly taskId?: string;
-  readonly status: "open" | "responded" | "settled";
-  readonly response?: InputResponse;
-  readonly outcome?: string;
-}
+/**
+ * A request as this client shows it: as the session's tables show it, or "responded" once this
+ * client sent an answer the stream hasn't settled yet. `answer` is the deciding answer, or the
+ * one this client sent.
+ */
+export type ConversationInteraction = Omit<ReaderInteraction, "status"> & {
+  readonly status: ReaderInteraction["status"] | "responded";
+};
 
 export type AgentObservation =
   | { readonly status: "not-followed" }
@@ -38,7 +36,7 @@ export type AgentObservation =
       readonly conversation?: ConversationState;
     };
 
-/** A session a run opened with `ctx.agent`, as its `agent.started` announced it. */
+/** A session a run opened with `ctx.agent`, as its `child.opened` linked it. */
 export interface ConversationAgentSession {
   readonly sessionId: string;
   readonly name: string;
@@ -51,37 +49,30 @@ export interface ConversationAgentSession {
 }
 
 /**
- * Renderable conversation state. Root and agent-session input IDs occupy separate scopes.
+ * A session as a client renders it: its messages, turns, interactions, tasks, and the sessions its
+ * calls opened. Root and agent-session interaction ids occupy separate scopes.
  */
-export interface ConversationState extends EveMessageData {
+export interface ConversationState {
+  readonly messages: readonly EveMessage[];
   readonly activeTurnId?: string;
   readonly turns: Readonly<Record<string, ConversationTurn>>;
-  readonly inputs: Readonly<Record<string, ConversationInput>>;
+  readonly interactions: Readonly<Record<string, ConversationInteraction>>;
   readonly tasks: Readonly<Record<string, ConversationTask>>;
   /** Sessions opened by this session's runs, by session ID. */
   readonly agents: Readonly<Record<string, ConversationAgentSession>>;
 }
 
-/** Inputs awaiting an answer, including requests introduced in earlier turns. */
-export function openConversationInputs(state: ConversationState): readonly ConversationInput[] {
-  return Object.values(state.inputs).filter((input) => input.status === "open");
-}
-
-/** Authorization attempts remain visible across turns, including parked callbacks. */
-export function conversationAuthorizations(
+/** Interactions still open, including those introduced in earlier turns, sign-ins among them. */
+export function openConversationInteractions(
   state: ConversationState,
-): readonly EveAuthorizationPart[] {
-  return state.messages.flatMap((message) =>
-    message.role === "assistant"
-      ? message.parts.filter((part): part is EveAuthorizationPart => part.type === "authorization")
-      : [],
-  );
+): readonly ConversationInteraction[] {
+  return Object.values(state.interactions).filter((input) => input.status === "open");
 }
 
 /** A sign-in the session still waits on, which resumes its work when the callback arrives. */
 export function hasPendingAuthorizations(state: ConversationState): boolean {
-  return openSignIns(conversationProjection(state)).some(
-    (attempt) => attempt.awaitsCallback === true,
+  return openSignIns(conversationView(state)).some(
+    (row) => row.request.signIn?.callbackUrl !== undefined,
   );
 }
 
@@ -123,13 +114,13 @@ export function isAgentSessionCaughtUp(
   const task = agentToolTask(state, agent);
   if (task === undefined) return false;
   const calls = Object.values(task.calls);
-  if (calls.some((call) => call.status === "working")) return false;
+  if (calls.some((call) => call.status !== "settled")) return false;
   const child = agent.observation.conversation;
   if (child.activeTurnId !== undefined) return false;
-  if (Object.values(child.inputs).some((input) => input.status !== "settled")) return false;
+  if (Object.values(child.interactions).some((input) => input.status !== "settled")) return false;
   if (hasPendingAuthorizations(child)) return false;
   const received = child.messages.filter((message) => message.role === "user").length;
-  return received >= calls.filter((call) => call.status === "completed").length;
+  return received >= calls.filter((call) => call.outcome === "completed").length;
 }
 
 /**
@@ -174,7 +165,7 @@ export function isAgentCallContentPending(
   const turnIds = agentCallTurns(task, conversation).get(call.callId) ?? [];
   const { activeTurnId } = conversation;
   if (activeTurnId !== undefined && turnIds.includes(activeTurnId)) return true;
-  if (call.status !== "completed") return false;
+  if (call.outcome !== "completed") return false;
   const received = conversation.messages.filter((message) => message.role === "user").length;
   return received <= Object.keys(task.calls).indexOf(call.callId);
 }

@@ -1,17 +1,19 @@
+import { signInEnding } from "#channel/interaction-prompts.js";
+import { errorHintOf } from "#public/channels/reply.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
 import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import { formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
-import {
-  linearInputRequestSignal,
-  renderLinearInputRequests,
-} from "#public/channels/linear/hitl.js";
+import { linearInteractionSignal, renderLinearInteractions } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { actionLabel, visibleActions } from "#shared/action-label.js";
-import type { InputRequest } from "#shared/input.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import { displayTitle } from "#shared/display-name.js";
+import type { AskedInteraction } from "#channel/interaction-prompts.js";
 import type {
   LinearChannelEvents,
   LinearEventContext,
@@ -68,17 +70,20 @@ interface LinearDefaultEventOptions {
 
 /** Built-in Linear event handlers for Agent Activity progress, replies, HITL, and errors. */
 export function createDefaultEvents(options: LinearDefaultEventOptions = {}): LinearChannelEvents {
-  async function showPrompt(channel: LinearEventContext, request: InputRequest): Promise<void> {
+  async function showPrompt(channel: LinearEventContext, request: AskedInteraction): Promise<void> {
     await postActivity(
       channel,
       options,
-      { body: renderLinearInputRequests([request]), type: "elicitation" },
-      linearInputRequestSignal([request]),
+      { body: renderLinearInteractions([request]), type: "elicitation" },
+      linearInteractionSignal([request]),
     );
   }
 
+  // A reply can only answer the elicitation it sees, so they post one at a time.
+  const prompts = promptQueueEvents(showPrompt);
+
   return {
-    async "turn.started"(_event, channel, _ctx) {
+    async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
       await postActivity(
         channel,
@@ -93,7 +98,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "actions.requested"(event, channel, _ctx) {
+    async "call.requested"({ data }, { channel }) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
@@ -110,45 +115,28 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         );
         return;
       }
-
-      const actions = visibleActions(event.actions);
-      if (actions.length === 0) return;
-      if (actions.length > 1) {
-        await postActivity(
-          channel,
-          options,
-          {
-            action: "Running",
-            parameter: actions.map((action) => actionLabel(action, event.presentation)).join(", "),
-            type: "action",
-          },
-          {
-            ephemeral: true,
-          },
-        );
-        return;
-      }
-
-      for (const action of actions) {
-        await postActivity(
-          channel,
-          options,
-          {
-            action: actionLabel(action, event.presentation),
-            parameter: actionParameter(action),
-            type: "action",
-          },
-          {
-            ephemeral: true,
-          },
-        );
-      }
+      // eve's own task controls stay out of view.
+      if (isTaskControlTool(data.capability.name)) return;
+      await postActivity(
+        channel,
+        options,
+        {
+          action: data.capability.title ?? displayTitle(data.capability.name),
+          parameter: actionParameter({ input: data.input }),
+          type: "action",
+        },
+        {
+          ephemeral: true,
+        },
+      );
     },
 
-    // A reply can only answer the elicitation it sees, so they post one at a time.
-    ...promptQueueEvents(showPrompt),
-
-    async "authorization.required"(event, channel, ctx) {
+    async "interaction.opened"(fact, ctx) {
+      const { data } = fact;
+      const { channel } = ctx;
+      await prompts["interaction.opened"](fact, ctx);
+      const event = signInPromptOf(data, fact.scope);
+      if (event === undefined) return;
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
       const url = event.authorization?.url;
       const userId = linearUserId(ctx);
@@ -173,9 +161,16 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    async "authorization.completed"(event, channel, _ctx) {
+    "response.admitted": prompts["response.admitted"],
+
+    async "interaction.settled"(fact, ctx) {
+      const { data } = fact;
+      const { channel } = ctx;
+      await prompts["interaction.settled"](fact, ctx);
+      const event = signInSettlementOf(ctx.view, data);
+      if (event === undefined) return;
       const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
-      if (event.outcome === "authorized") {
+      if (event.outcome === "accepted") {
         await postActivity(
           channel,
           options,
@@ -190,29 +185,32 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
 
       const reason = event.reason === undefined ? "" : ` (${event.reason})`;
       await postActivity(channel, options, {
-        body: `${displayName} authorization ${formatAuthorizationOutcome(event.outcome)}${reason}.`,
+        body: `${displayName} authorization ${signInEnding(event.outcome)}${reason}.`,
         type: "thought",
       });
     },
 
-    async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls") {
-        channel.state.pendingToolCallMessage = event.message
-          ? (firstNonEmptyLine(event.message) ?? null)
+    async "content.completed"({ data }, { channel }) {
+      if (data.kind !== "text" || typeof data.value !== "string") return;
+      // Narration before calls posts as a thought with the next call.
+      if (contentPhase(data.phase) === "narration") {
+        channel.state.pendingToolCallMessage = data.value
+          ? (firstNonEmptyLine(data.value) ?? null)
           : null;
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.message) return;
+      if (!data.value) return;
       await postActivity(channel, options, {
-        body: event.message,
+        body: data.value,
         type: "response",
       });
     },
 
-    async "session.failed"(event, channel) {
-      const hint = formatErrorHint(event);
-      const errorId = extractErrorId(event.details);
+    async "session.ended"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(data.error));
+      const errorId = data.error?.id;
       await postActivity(channel, options, {
         body: [
           `This session could not recover from an error${hint}.`,
@@ -224,10 +222,10 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       });
     },
 
-    async "turn.failed"(event, channel, _ctx) {
-      if (event.terminal) return;
-      const hint = formatErrorHint(event);
-      const errorId = extractErrorId(event.details);
+    async "turn.settled"({ data }, { channel }) {
+      if (data.outcome !== "failed") return;
+      const hint = formatErrorHint(errorHintOf(data.error));
+      const errorId = data.error?.id;
       await postActivity(channel, options, {
         body: [
           `I hit an error while handling your request${hint}.`,
@@ -242,7 +240,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
 }
 
 function postActivity(
-  channel: Parameters<NonNullable<LinearChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<LinearChannelEvents["turn.started"]>>[1]["channel"],
   options: LinearDefaultEventOptions,
   content: Parameters<typeof createLinearAgentActivity>[0]["activity"]["content"],
   activityOptions: {
@@ -300,10 +298,6 @@ function authorizationRequiredBody(input: {
 function linearUserId(ctx: SessionContext): string | undefined {
   const auth = ctx.session.auth.current;
   return auth?.authenticator === "linear-agent-webhook" ? auth.subject : undefined;
-}
-
-function formatAuthorizationOutcome(outcome: "declined" | "failed" | "timed-out"): string {
-  return outcome === "timed-out" ? "timed out" : outcome;
 }
 
 function firstNonEmptyLine(text: string): string | undefined {

@@ -23,8 +23,10 @@ import {
   SESSION_INBOX_CONTEXT_KEY,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
+import {
+  EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME,
+  SESSION_CALLBACK_CONTEXT_KEY_NAME,
+} from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
 import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
@@ -164,9 +166,12 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
 
-/** Present when a remote agent protocol 1 caller created the session. */
-export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller>(
-  "eve.legacyRemoteAgentCaller",
+/**
+ * The remote agent protocol of a {@link SessionCallbackKey} caller that speaks an earlier one. That
+ * caller gets the session's result, but the session relays none of its requests to it.
+ */
+export const EarlierRemoteCallerKey = new ContextKey<number>(
+  EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME,
 );
 
 // ---------------------------------------------------------------------------

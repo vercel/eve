@@ -1,13 +1,14 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { UserContent } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
+import type { AskedInteraction } from "#protocol/session-reader.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 export type { HealthResult } from "#client/health-schema.js";
@@ -172,11 +173,11 @@ export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
 /** @internal Transport envelope used by stores and command adapters. */
 export type SendTurnPayload<TOutput = unknown> =
   | (SendTurnOptions<TOutput> & {
-      readonly inputResponses?: never;
+      readonly answers?: never;
       readonly message: string | UserContent;
     })
   | (RespondTurnOptions<TOutput> & {
-      readonly inputResponses: readonly InputResponse[];
+      readonly answers: readonly Answer[];
       readonly message?: never;
     });
 
@@ -194,11 +195,12 @@ export interface StreamReconnectRetryPolicy {
 
 /** Configurable policy used when automatic stream reconnection is enabled. */
 export interface ResolvedStreamReconnectPolicy {
-  /** Retry policy for opening an HTTP stream connection. */
+  /**
+   * Retry policy for opening an HTTP stream connection. Its `maxAttempts` also bounds how many
+   * consecutive transport failures a bounded read (`follow: false`) retries. A read that follows
+   * retries failures for as long as it runs, and stops on what it reads.
+   */
   readonly streamOpenReconnectPolicy?: StreamReconnectRetryPolicy;
-
-  /** Retry policy for reconnecting streams that make no progress. */
-  readonly streamIdleReconnectPolicy?: StreamReconnectRetryPolicy;
 
   /** HTTP response statuses that may be retried while opening a stream. */
   readonly retryableErrorStatuses?: readonly number[];
@@ -218,9 +220,8 @@ export interface StreamOptions {
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
 
   /**
-   * Absolute event index to start from. Negative values read relative to the
-   * current tail (`-1` starts at the latest event). Relative-tail streams do
-   * not reconnect automatically because their absolute cursor is unknown.
+   * Position of the line to start from. Negative values read relative to the
+   * current tail (`-1` starts at the latest line).
    */
   readonly startIndex?: number;
 
@@ -289,21 +290,21 @@ export interface MessageResult<TOutput = unknown> {
   readonly data: TOutput | undefined;
 
   /**
-   * The final completed assistant message text, or `undefined` if no terminal
-   * `message.completed` event was observed.
+   * The reply's text: the text parts the turn's `turn.settled` lists as its reply, or `undefined`
+   * when the response ended without one.
    */
   readonly message: string | undefined;
 
   /**
    * All events received during this turn.
    */
-  readonly events: MessageStreamEvent[];
+  readonly events: SessionStreamEvent[];
 
   /**
    * HITL input requests emitted in this response and still open at its boundary.
    * Earlier requests may remain open in the same session.
    */
-  readonly inputRequests: readonly InputRequest[];
+  readonly interactions: readonly AskedInteraction[];
 
   /**
    * The session ID for this turn. Always populated; the post-turn handler
@@ -312,12 +313,12 @@ export interface MessageResult<TOutput = unknown> {
   readonly sessionId: string;
 
   /**
-   * How the turn ended.
+   * How the response ended.
    *
-   * - `"completed"`: the session finished (`session.completed`).
-   * - `"waiting"`: the session is parked for the next user message
-   *   (`session.waiting`).
-   * - `"failed"`: the session ended in a terminal failure (`session.failed`).
+   * - `"waiting"`: the session stays open, for the next message or for a person's answer
+   *   (`interactions`).
+   * - `"completed"`: the session ended (`session.ended`).
+   * - `"failed"`: its turn or the session failed.
    */
   readonly status: "completed" | "failed" | "waiting";
 }
@@ -338,7 +339,7 @@ export interface ClientSessionState {
  */
 export interface SessionSnapshot {
   /** Events from the start of the session through the durable tail observed when the read opened. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
 
   /** Session cursor advanced exactly past {@link events}. */
   readonly session: ClientSessionState;
