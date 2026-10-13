@@ -6,7 +6,10 @@ import type {
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
+import {
+  connectionDefinitionKey,
+  stampDefinitionKey,
+} from "#internal/authored-definition/source-identity.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 
 /**
@@ -132,10 +135,10 @@ export function defineOpenAPIConnection(
   if (definition.auth !== undefined && typeof definition.auth !== "function") {
     definition.auth = normalizeAuthorizationSpec(definition.auth, "defineOpenAPIConnection:");
   }
-  const definitionKey =
-    definition.baseUrl ??
-    (typeof definition.spec === "string" ? definition.spec : definition.description);
-  stampDefinitionKey(definition, `connection:${definitionKey}`);
+  stampDefinitionKey(
+    definition,
+    connectionDefinitionKey(definition.baseUrl ?? "", definition.description),
+  );
   stampConnectionProtocol(definition, "openapi");
   return definition;
 }

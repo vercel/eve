@@ -7,7 +7,10 @@ import {
   normalizeOpenApiConnectionDefinition,
 } from "#internal/authored-definition/connection.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
-import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";
+import {
+  connectionDefinitionKey,
+  registerDefinitionSource,
+} from "#internal/authored-definition/source-identity.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
   ConnectionAuthResolver,
@@ -48,14 +51,10 @@ export async function resolveConnectionDefinition(
       `Expected the connection export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to return an object.`,
     );
 
-    // Use the compiled `url` (the MCP endpoint or OpenAPI base URL) as
-    // the fallback key so it matches the authoring-time key stamped by
-    // the `define*` factory for both protocols. The live record only
-    // carries `url` for MCP connections.
     registerDefinitionSource(
       resolvedRecord,
       { kind: "connection", logicalPath: definition.logicalPath, name: definition.connectionName },
-      `connection:${definition.url}`,
+      connectionDefinitionKey(definition.url, definition.description),
     );
 
     const hasAuth = resolvedRecord.auth !== undefined;

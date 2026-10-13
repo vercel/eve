@@ -4,7 +4,10 @@ import { z } from "#compiled/zod/index.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineTool } from "#tools/definition.js";
-import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";
+import {
+  connectionDefinitionKey,
+  registerDefinitionSource,
+} from "#internal/authored-definition/source-identity.js";
 import {
   toolResultFrom,
   type MatchedConnectionResult,
@@ -63,7 +66,7 @@ describe("toolResultFrom", () => {
   registerDefinitionSource(
     linearConnection,
     { kind: "connection", name: "linear" },
-    "connection:https://mcp.linear.app",
+    connectionDefinitionKey("https://mcp.linear.app", "Linear"),
   );
 
   it("matches an authored tool result and returns typed output", () => {
@@ -219,32 +222,32 @@ describe("toolResultFrom", () => {
     expect(result).toBeUndefined();
   });
 
-  it("uses loaded definitions to distinguish connections with the same URL", () => {
+  it("uses loaded definitions to distinguish connections with the same URL and description", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const first = defineMcpClientConnection({
       url: "https://mcp.example.test",
-      description: "First",
+      description: "Shared",
     });
     const second = defineMcpClientConnection({
       url: "https://mcp.example.test",
-      description: "Second",
+      description: "Shared",
     });
 
     registerDefinitionSource(
       first,
       { kind: "connection", logicalPath: "connections/first.ts", name: "first" },
-      "connection:https://mcp.example.test",
+      connectionDefinitionKey("https://mcp.example.test", "Shared"),
     );
     registerDefinitionSource(
       second,
       { kind: "connection", logicalPath: "connections/second.ts", name: "second" },
-      "connection:https://mcp.example.test",
+      connectionDefinitionKey("https://mcp.example.test", "Shared"),
     );
 
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining(
-        'eve could not assign a unique toolResultFrom identity for "connection:https://mcp.example.test"',
+        `eve could not assign a unique toolResultFrom identity for ${JSON.stringify(connectionDefinitionKey("https://mcp.example.test", "Shared"))}`,
       ),
     );
     expect(warn).toHaveBeenCalledWith(
