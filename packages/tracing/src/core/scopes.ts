@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { boundedTraceError } from "../adapters/serialization.js";
 import { createSpanWriter, type TraceOperation } from "./writer.js";
 import { usageAttributes } from "./attributes.js";
 import {
@@ -121,6 +122,15 @@ export function createScopes(input: {
       input.onError?.(error, context);
     } catch {}
   };
+
+  function snapshotContent(value: unknown): unknown {
+    const json = serializer.json(value);
+    try {
+      return json === undefined ? undefined : JSON.parse(json);
+    } catch {
+      return undefined;
+    }
+  }
 
   function reserve(
     data: ScopeData,
@@ -450,7 +460,8 @@ export function createScopes(input: {
                 kind: known.kind ?? next.options.kind,
                 // Earlier arguments were recorded with consent; new ones need it now.
                 arguments:
-                  known.arguments ?? (current().recordInputs ? next.options.arguments : undefined),
+                  known.arguments ??
+                  (current().recordInputs ? snapshotContent(next.options.arguments) : undefined),
               },
             },
             actualCapture,
@@ -659,7 +670,11 @@ export function createScopes(input: {
         terminalResult = {
           ...terminalResult,
           failed: true,
-          error: current().recordOutputs ? error : undefined,
+          error: current().recordOutputs
+            ? error instanceof Error
+              ? boundedTraceError(error)
+              : snapshotContent(error)
+            : undefined,
           errorCode: errorType ?? (error instanceof Error ? error.name : undefined),
         };
         if (operation !== undefined) operation.fail(terminalResult.error, terminalResult.errorCode);
