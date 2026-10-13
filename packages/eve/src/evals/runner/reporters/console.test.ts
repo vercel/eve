@@ -56,7 +56,7 @@ describe("Console", () => {
     expect(lines).toContain('    answer: {"type":"boolean","probability":0}');
   });
 
-  it("warns when repeated assertion names merge different scores", () => {
+  it("warns when repeated soft assertions merge different scores and leaves gates quiet", () => {
     const lines: string[] = [];
     const reporter = Console({ color: false, log: (line) => lines.push(line) });
 
@@ -66,7 +66,14 @@ describe("Console", () => {
         { name: "judge.boolean", passed: true, errored: false, score: 0.4, severity: "soft" },
         { name: "judge.boolean", passed: true, errored: false, score: 1, severity: "gate" },
         { name: "succeeded", passed: true, errored: false, score: 1, severity: "gate" },
-        { name: "succeeded", passed: true, errored: false, score: 1, severity: "gate" },
+        {
+          name: "succeeded",
+          passed: false,
+          errored: false,
+          score: 0,
+          severity: "gate",
+          threshold: 1,
+        },
       ],
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "quality",
@@ -79,12 +86,13 @@ describe("Console", () => {
         traceContexts: [],
       },
       startedAt: "2026-01-01T00:00:00.000Z",
-      verdict: "passed",
+      verdict: "failed",
     });
 
     expect(lines).toEqual([
-      "✓  quality  gates 3/3  judge.boolean: 90%  judge.boolean: 40%",
-      "  ⚠ judge.boolean recorded 2 times with different scores; reporters keep only the lowest. Add .label() to tell them apart.",
+      "✗  quality  gates 2/3  judge.boolean: 90%  judge.boolean: 40%",
+      "  ✗ succeeded (0% < 100%)",
+      "  ⚠ judge.boolean recorded 2 times with different scores; Braintrust and Datadog keep only the lowest. Add .label() to tell them apart.",
     ]);
   });
 

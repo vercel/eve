@@ -202,6 +202,9 @@ export interface AssertionEvaluation {
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
+/** A score from 0 to 1, or an evaluation carrying one, accepted by `t.score`; may be a promise. */
+export type ScoreInput = number | AssertionEvaluation | Promise<number | AssertionEvaluation>;
+
 /**
  * A value-level assertion produced by the builders in `eve/evals/expect`
  * (e.g. `includes`, `equals`, `similarity`) and applied to an explicit value
@@ -509,13 +512,11 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;
   /**
-   * Record a score. Chain `.label(key)` to name it, `.gate(0.9)` to fail the
-   * eval below 0.9, or `.atLeast(0.9)` to mark it `scored`. Without a rule the
-   * score has no verdict.
+   * Record a score from 0 to 1. Chain `.label(key)` to name it, `.gate(0.9)`
+   * to fail the eval below 0.9, or `.atLeast(0.9)` to mark it `scored`.
+   * Without a rule the score has no verdict.
    */
-  score(
-    evaluation: number | AssertionEvaluation | Promise<number | AssertionEvaluation>,
-  ): AssertionHandle;
+  score(evaluation: ScoreInput): AssertionHandle;
   /** Record an immediate gate and abort dependent control flow when it fails. */
   require<T>(value: T, assertion: Assertion): Promise<T>;
   /** Mark this eval as intentionally skipped and stop executing its test body. */

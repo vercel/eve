@@ -25,7 +25,7 @@ score is a measurement; an assertion is a rule applied to it.
 `t.score(evaluation)` records a score and returns the ordinary
 `AssertionHandle`; `.label(key)` names it, as for every other assertion.
 `evaluation` is a number or `{ score, message?, metadata? }`, or a promise of
-either. Scores are numeric; boolean assertions keep scoring 0 or 1.
+either. Scores are numbers from 0 to 1; boolean assertions keep scoring 0 or 1.
 
 ```ts
 const grade = await evaluator.evaluate({ input, output, reference });

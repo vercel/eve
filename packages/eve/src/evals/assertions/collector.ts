@@ -6,14 +6,12 @@ import type {
   AssertionResult,
   AssertionSeverity,
   EveEvalTaskResult,
+  ScoreInput,
 } from "#evals/types.js";
 import type { TargetTools } from "#evals/target.js";
 import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
 export type AssertionOutcome = AssertionEvaluation;
-
-/** A score or evaluation accepted by `t.score`, possibly still pending. */
-export type ScoreInput = number | AssertionOutcome | Promise<number | AssertionOutcome>;
 
 /**
  * A scoped assertion evaluated lazily after `test(t)` returns. The selected
@@ -194,8 +192,8 @@ function computePassed(entry: MutableEntry): boolean | undefined {
 
 function toOutcome(value: number | AssertionOutcome): AssertionOutcome {
   const outcome = typeof value === "number" ? { score: value } : value;
-  if (typeof outcome.score !== "number" || !Number.isFinite(outcome.score)) {
-    throw new TypeError(`Scores must be finite numbers; received ${String(outcome.score)}.`);
+  if (typeof outcome.score !== "number" || !(outcome.score >= 0 && outcome.score <= 1)) {
+    throw new TypeError(`Scores must be numbers from 0 to 1; received ${String(outcome.score)}.`);
   }
   return outcome;
 }

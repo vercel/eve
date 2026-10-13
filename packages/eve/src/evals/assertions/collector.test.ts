@@ -120,15 +120,18 @@ describe("AssertionCollector.recordScore", () => {
     expect(computeEvalVerdict({ assertions })).toBe("failed");
   });
 
-  it("treats a non-finite score as an errored outcome", async () => {
+  it("treats a score outside 0 to 1 as an errored outcome", async () => {
     const collector = new AssertionCollector();
     collector.recordScore(Number.NaN);
+    collector.recordScore(1200);
 
-    const [assertion] = await collector.finalize(taskResult());
+    const [nan, latency] = await collector.finalize(taskResult());
 
-    expect(assertion).toMatchObject({ errored: true, passed: false });
-    expect(assertion?.score).toBeUndefined();
-    expect(assertion?.message).toContain("finite");
+    for (const assertion of [nan, latency]) {
+      expect(assertion).toMatchObject({ errored: true, passed: false });
+      expect(assertion?.score).toBeUndefined();
+      expect(assertion?.message).toContain("from 0 to 1");
+    }
   });
 });
 

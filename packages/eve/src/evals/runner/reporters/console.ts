@@ -86,13 +86,15 @@ class ConsoleReporter implements EvalReporter {
       }
     }
 
-    // Reporters keep one score per exported name, the lowest. Warn only when
-    // that merge drops information: repeated names whose scores differ.
-    for (const [name, group] of groupAssertionScores(assertions, exportedAssertionName)) {
+    // Braintrust and Datadog keep one score per exported name, the lowest. For
+    // gates that aggregate is exact and the failure line above already names
+    // the failing member, so warn only for soft groups whose scores differ.
+    for (const group of groupAssertionScores(softs, exportedAssertionName).values()) {
       if (group.assertions.every((assertion) => assertion.score === group.score)) continue;
+      const name = group.assertions[0]!.name;
       this.#log(
         `  ${this.#colors.yellow(
-          `⚠ ${name} recorded ${group.assertions.length} times with different scores; reporters keep only the lowest. Add .label() to tell them apart.`,
+          `⚠ ${name} recorded ${group.assertions.length} times with different scores; Braintrust and Datadog keep only the lowest. Add .label() to tell them apart.`,
         )}`,
       );
     }

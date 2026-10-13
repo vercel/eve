@@ -66,6 +66,7 @@ export type {
   JudgeQuestion,
   JudgeContext,
   JudgeOpts,
+  ScoreInput,
 } from "#evals/types.js";
 
 export type {

@@ -506,12 +506,17 @@ function resolveEvaluationMetrics(result: EveEvalResult): DatadogEvaluationMetri
 
   for (const [label, group] of groups) {
     if (group.score === undefined) continue;
+    const verdicts = group.assertions.flatMap((assertion) =>
+      assertion.passed === undefined ? [] : [assertion.passed],
+    );
     metrics.push({
       label: reserveDatadogMetricLabel(label, usedLabels),
       value: group.score,
       tags: {
         assertion_severity: group.assertions[0]?.severity ?? "soft",
-        assertion_passed: String(group.assertions.every((assertion) => assertion.passed !== false)),
+        ...(verdicts.length > 0 && {
+          assertion_passed: String(verdicts.every((passed) => passed)),
+        }),
         assertion_count: String(group.assertions.length),
       },
     });
