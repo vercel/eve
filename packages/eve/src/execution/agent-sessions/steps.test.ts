@@ -62,7 +62,13 @@ const context = {
 } as AgentSessionContext;
 
 const session = {
-  address: { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId: "child-1" },
+  address: {
+    continuationToken: "child-continuation",
+    kind: "local",
+    name: "reviewer",
+    nodeId: "reviewer",
+    sessionId: "child-1",
+  },
   context,
   key: "run-1:0",
 } as const;
@@ -85,7 +91,13 @@ describe("openAgentSessionStep", () => {
   it("returns the session it started without waiting for the session to boot", async () => {
     mocks.createSession.mockResolvedValue({ sessionId: "child-1" });
 
-    await expect(open()).resolves.toMatchObject({ kind: "local", sessionId: "child-1" });
+    await expect(open()).resolves.toEqual({
+      continuationToken: "subagent:run-1:0",
+      kind: "local",
+      name: "reviewer",
+      nodeId: "reviewer",
+      sessionId: "child-1",
+    });
     expect(mocks.waitForCommandHookOwner).not.toHaveBeenCalled();
   });
 
@@ -145,8 +157,7 @@ describe("commands to a session that opened without waiting", () => {
 
     await sendAgentSessionMessageStep(message);
 
-    // The session's continuation is named for the handle that opened it.
-    expect(mocks.resolveSessionInbox).toHaveBeenCalledWith("subagent:run-1:0");
+    expect(mocks.resolveSessionInbox).toHaveBeenCalledWith("child-continuation");
     expect(mocks.dispatch).toHaveBeenLastCalledWith(
       expect.objectContaining({ sessionId: "child-2" }),
     );
@@ -155,7 +166,7 @@ describe("commands to a session that opened without waiting", () => {
   it("fails a message to a session that ended", async () => {
     mocks.dispatch.mockResolvedValue({ status: "session_not_active" });
     mocks.waitForSessionInbox.mockResolvedValue(false);
-    mocks.resolveSessionInbox.mockRejectedValue(new HookNotFoundError("subagent:run-1:0"));
+    mocks.resolveSessionInbox.mockRejectedValue(new HookNotFoundError("child-continuation"));
 
     await expect(sendAgentSessionMessageStep(message)).rejects.toThrow(
       'Agent "reviewer" can no longer receive messages; its session ended.',

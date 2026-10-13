@@ -1,11 +1,12 @@
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
-import type {
-  WorkflowToolAskRequest,
-  WorkflowToolRunMessage,
-  WorkflowToolRunOutcomeMessage,
-  WorkflowToolRunRequestMessage,
-  WorkflowToolRunWithdrawMessage,
+import {
+  runMessageBatchBudget,
+  type WorkflowToolAskRequest,
+  type WorkflowToolRunMessage,
+  type WorkflowToolRunOutcomeMessage,
+  type WorkflowToolRunRequestMessage,
+  type WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
 import {
   withdrawFinishedRunQuestionsStep,
@@ -35,11 +36,17 @@ export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is
   return message.kind === "agent-started" || message.kind === "report" || isTaskRunMessage(message);
 }
 
-/** Removes the applied run messages at the front of the inbox, in arrival order. */
-export function takeLeadingAppliedRunMessages(inbox: SessionInboxReader): AppliedRunMessage[] {
+/**
+ * Removes the applied run messages at the front of the inbox, in arrival
+ * order, while `admits` takes them. One batch's caller passes its budget on.
+ */
+export function takeLeadingAppliedRunMessages(
+  inbox: SessionInboxReader,
+  admits = runMessageBatchBudget(),
+): AppliedRunMessage[] {
   return inbox.takeLeading(
     (payload): payload is AppliedRunMessage =>
-      isWorkflowMessage(payload) && isAppliedRunMessage(payload),
+      isWorkflowMessage(payload) && isAppliedRunMessage(payload) && admits(payload),
   );
 }
 

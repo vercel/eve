@@ -1,7 +1,8 @@
-import type {
-  WorkflowToolRunMessage,
-  WorkflowToolRunRequestMessage,
-  WorkflowToolAuthorizationRequest,
+import {
+  runMessageBatchBudget,
+  type WorkflowToolRunMessage,
+  type WorkflowToolRunRequestMessage,
+  type WorkflowToolAuthorizationRequest,
 } from "#execution/tools/workflow/messages.js";
 import {
   createChannelReader,
@@ -25,7 +26,7 @@ type WorkflowToolRunBodyMessage = Exclude<WorkflowToolRunMessage, { readonly kin
 
 export interface WorkflowToolRunOwnerInbox {
   readonly owner: WorkflowToolRunInbox;
-  /** Everything sent since the last read, in the order it was sent. */
+  /** What was sent since the last read, in order, up to a batch's size cap. */
   readonly reader: ChannelReader<"workflow", WorkflowToolRunBodyMessage[]>;
 }
 
@@ -33,8 +34,8 @@ export interface WorkflowToolRunOwnerInbox {
  * Receives body messages before routing them to the waiting turn. The body
  * and the run share one workflow, which replays both deterministically, so
  * the inbox is an in-memory queue; a durable hop would add a step and a
- * replay to every message. The run relays what queued up together, so a
- * fan-out's messages share a relay. A relay can run before hooks created in
+ * replay to every message. The run relays what queued up together, within a
+ * size cap, so a fan-out's messages share a relay. A relay can run before hooks created in
  * the same suspension are registered, so a body that hands the session a
  * hook token registers that hook before sending it.
  */
@@ -45,7 +46,9 @@ export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
   async function* read(): AsyncGenerator<WorkflowToolRunBodyMessage[]> {
     for (;;) {
       if (queued.length > 0) {
-        yield queued.splice(0);
+        const admits = runMessageBatchBudget();
+        const overflow = queued.findIndex((message) => !admits(message));
+        yield queued.splice(0, overflow === -1 ? queued.length : overflow);
         continue;
       }
       await new Promise<void>((resolve) => {

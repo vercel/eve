@@ -63,11 +63,8 @@ export async function startTaskRun(
   const dispatch = { ...input, taskId };
   const receipt = startReceipt(dispatch, entry.entryPoint === "serve");
   const table = readTaskTable(session.state);
-  const record = findTask(table, taskId);
-  // Cancelled before the session could start it: there is nothing to run.
-  if (record === undefined || !isTaskWorking(record)) {
-    return { result: receipt, session };
-  }
+  const record = startableTask(table, taskId);
+  if (record === undefined) return { result: receipt, session };
 
   const overCap = tooManyTasks(dispatch, table);
   if (overCap !== undefined) {
@@ -143,13 +140,17 @@ export function runEntryToStart(
     case "execute":
       return { entryPoint: "execute" };
     case "task":
-    case "serve": {
-      const record = findTask(table, entry.taskId);
-      return record !== undefined && isTaskWorking(record) ? entry : undefined;
-    }
+    case "serve":
+      return startableTask(table, entry.taskId) === undefined ? undefined : entry;
     case "receive":
       return undefined;
   }
+}
+
+/** The task's record while it still needs its run, which it doesn't once cancelled. */
+function startableTask(table: TaskTable, taskId: string): TaskRecord | undefined {
+  const record = findTask(table, taskId);
+  return record !== undefined && isTaskWorking(record) ? record : undefined;
 }
 
 /**
@@ -165,11 +166,16 @@ export function startsEveryRun(
   const starting = tasks.filter(
     (task) => task.entry.entryPoint !== "execute" && runEntryToStart(table, task) !== undefined,
   );
-  return runningTasks(table).length + starting.length <= MAX_WORKING_TASKS;
+  return hasTaskSlots(table, starting.length);
 }
 
 function runningTasks(table: TaskTable): readonly TaskRecord[] {
   return workingTasks(table).filter((candidate) => candidate.run !== undefined);
+}
+
+/** Whether the task cap leaves room to run `count` more tasks. */
+function hasTaskSlots(table: TaskTable, count: number): boolean {
+  return runningTasks(table).length + count <= MAX_WORKING_TASKS;
 }
 
 /** The `TOO_MANY_TASKS` error when the session already runs as many tasks as it may. */
@@ -177,9 +183,8 @@ function tooManyTasks(
   input: TaskDispatchInput,
   table: TaskTable,
 ): RuntimeToolResultActionResult | undefined {
-  const running = runningTasks(table);
-  if (running.length < MAX_WORKING_TASKS) return undefined;
-  const runningIds = running.map((candidate) => candidate.id);
+  if (hasTaskSlots(table, 1)) return undefined;
+  const runningIds = runningTasks(table).map((candidate) => candidate.id);
   return createRuntimeToolResultFromValue({
     callId: input.task.callId,
     isError: true,

@@ -17,12 +17,10 @@ import {
   createWorkflowRuntime,
   dispatchWorkflowSessionCommand,
   waitForCommandHookOwner,
+  resolveContinuation,
   waitForSessionInbox,
 } from "#execution/workflow-runtime.js";
-import { resolveSessionInbox } from "#execution/session-inbox/resume.js";
-import { mintSubagentContinuationToken } from "#execution/session.js";
 import type { SessionCommand, SessionCommandResult } from "#channel/types.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
@@ -53,6 +51,8 @@ export type AgentSessionAddress =
       readonly name: string;
       readonly nodeId: string;
       readonly sessionId: string;
+      /** Names the session to whichever run holds its inbox. */
+      readonly continuationToken: string;
     }
   | {
       readonly callbackBaseUrl: string;
@@ -242,23 +242,14 @@ async function commandLocalSession<TCommand extends SessionCommand>(
   opened: LocalAgentSession,
   command: TCommand,
 ): Promise<SessionCommandResult<TCommand>> {
-  const { sessionId } = opened.address;
+  const { continuationToken, sessionId } = opened.address;
   const result = await dispatchWorkflowSessionCommand({ command, sessionId });
   if (result.status === "accepted" || result.status === "reset") return result;
   const current = (await waitForSessionInbox(sessionId))
     ? sessionId
-    : await findContinuationSession(mintSubagentContinuationToken(opened.key));
+    : (await resolveContinuation(continuationToken))?.sessionId;
   if (current === undefined) return result;
   return await dispatchWorkflowSessionCommand({ command, sessionId: current });
-}
-
-async function findContinuationSession(continuationToken: string): Promise<string | undefined> {
-  try {
-    return (await resolveSessionInbox(continuationToken)).sessionId;
-  } catch (error) {
-    if (HookNotFoundError.is(error)) return undefined;
-    throw error;
-  }
 }
 
 interface SessionStart<Target extends SubagentStartTarget> {
@@ -325,7 +316,13 @@ async function startLocalSession(
       sessionInboxHookToken(childContinuationToken),
     ));
   }
-  return { kind: "local", name: action.name, nodeId: action.nodeId, sessionId };
+  return {
+    continuationToken: childContinuationToken,
+    kind: "local",
+    name: action.name,
+    nodeId: action.nodeId,
+    sessionId,
+  };
 }
 
 async function startRemoteSession(

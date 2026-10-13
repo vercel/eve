@@ -16,7 +16,6 @@ import {
   startWorkflowToolCallRun,
   type StartWorkflowTaskInput,
 } from "#execution/tools/workflow/start.js";
-import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
 import {
   runEntryToStart,
   sendToTask,
@@ -67,26 +66,24 @@ async function dispatchCoordination(
   const started: TaskStartedStreamEvent["data"][] = [];
   const agentLimits = resolveStepAgentLimits(prepared);
 
-  const starts: StartWorkflowTaskInput[] = prepared.plan.map((task) => ({
-    agentContext: captureAgentSessionContext(prepared, task.callId, agentLimits),
-    auth: {
-      current: prepared.auth,
-      initiator: prepared.initiatorAuth,
-    },
-    batchEvent: batch.event,
-    owner: input.workflowToolRunOwner,
-    parentSession: prepared.parentSession,
-    session,
-    task,
-  }));
-  const runs = startRunsTogether(starts, readTaskTable(session.state));
+  const starts = withPrestartedRuns(
+    prepared.plan.map((task) => ({
+      agentContext: captureAgentSessionContext(prepared, task.callId, agentLimits),
+      auth: {
+        current: prepared.auth,
+        initiator: prepared.initiatorAuth,
+      },
+      batchEvent: batch.event,
+      owner: input.workflowToolRunOwner,
+      parentSession: prepared.parentSession,
+      session,
+      task,
+    })),
+    readTaskTable(session.state),
+  );
 
-  for (const [index, start] of starts.entries()) {
-    const dispatched = await dispatchWorkflowCall({
-      ...start,
-      run: runs[index],
-      session: nextSession,
-    });
+  for (const start of starts) {
+    const dispatched = await dispatchWorkflowCall({ ...start, session: nextSession });
     nextSession = dispatched.session;
     if (dispatched.result !== undefined) results.push(dispatched.result);
     if (dispatched.started !== undefined) started.push(dispatched.started);
@@ -114,21 +111,22 @@ async function dispatchCoordination(
  * dispatching it in order is sure to record every one of them. Otherwise
  * each dispatch starts its own run, as the task cap and earlier calls allow.
  */
-function startRunsTogether(
+function withPrestartedRuns(
   starts: readonly StartWorkflowTaskInput[],
   table: TaskTable,
-): readonly (Promise<WorkflowToolRunAddress> | undefined)[] {
+): readonly StartWorkflowTaskInput[] {
   const tasks = starts.map((start) => start.task);
   const entries = tasks.map((task) => runEntryToStart(table, task));
   const together =
     entries.filter((entry) => entry !== undefined).length > 1 && startsEveryRun(table, tasks);
+  if (!together) return starts;
   return starts.map((start, index) => {
     const entry = entries[index];
-    if (!together || entry === undefined) return undefined;
+    if (entry === undefined) return start;
     const run = startWorkflowToolCallRun(start, entry);
     // Each dispatch awaits its own run in order, so a later failure waits unhandled until then.
     run.catch(() => {});
-    return run;
+    return { ...start, prestarted: { entry, run } };
   });
 }
 

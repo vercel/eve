@@ -63,7 +63,7 @@ export interface SessionInboxReader {
   /** Observes deliveries without consuming them; replays unread deliveries on subscription. */
   onDelivery(handler: (payload: SessionInboxPayload) => void): () => void;
   /** Requeues payloads a successor handed back, ahead of everything pumped since. */
-  restore(payloads: readonly (SessionInboxPayload | WorkflowToolRunMessageBatch)[]): void;
+  restore(payloads: readonly SessionInboxPayload[]): void;
 }
 
 export interface SessionInboxOwnership {
@@ -122,7 +122,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         const payload = result.value;
         if (payload.kind === "workflow-batch") {
           // A run's messages carry no deliveries or interrupts.
-          queue.push(...expandBatch(payload));
+          queue.push(...payload.messages);
           notify();
           continue;
         }
@@ -230,9 +230,8 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       if (sources.length === 0)
         throw new Error("Cannot restore session commands before reclaiming the session hooks.");
       // Restored payloads were accepted before anything the reclaimed pumps
-      // have enqueued since, so they must precede the current queue. A failed
-      // successor's pump may hand back a run's batch unread.
-      queue.unshift(...payloads.flatMap(expandBatch));
+      // have enqueued since, so they must precede the current queue.
+      queue.unshift(...payloads);
       notify();
     },
     async dispose() {
@@ -252,13 +251,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       return await stop();
     },
   };
-}
-
-/** The messages a run relayed together, in order; any other payload as is. */
-function expandBatch(
-  payload: SessionInboxPayload | WorkflowToolRunMessageBatch,
-): readonly SessionInboxPayload[] {
-  return payload.kind === "workflow-batch" ? payload.messages : [payload];
 }
 
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {

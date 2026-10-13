@@ -111,6 +111,9 @@ class RunAgentSession implements AgentSession {
     const outputSchema = normalizeRequestedOutputSchema(
       serializeOutputSchema(options.outputSchema),
     );
+    // Unlike hooks the session can answer at once, this one isn't registered
+    // before its token goes out: the child resumes it only after booting and
+    // finishing a turn, long after this suspension writes the hook.
     const reply = this.#awaitReply(outputSchema !== undefined);
     try {
       await this.#deliver({

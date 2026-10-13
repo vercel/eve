@@ -165,6 +165,40 @@ export interface WorkflowToolRunMessageBatch {
 }
 
 /**
+ * Approximate size cap for one batch of run messages, both a run's relay and
+ * the session step that applies them. Workflow keeps a hook payload or step
+ * input up to 64 KB inline in the event log and moves a larger one to blob
+ * storage, which every replay then reads back.
+ */
+const RUN_MESSAGE_BATCH_MAX_CHARS = 64_000;
+
+/**
+ * Returns a predicate that admits messages, in order, while their batch stays
+ * under the size cap. The first message always fits, so one larger than the
+ * cap still goes, alone.
+ */
+export function runMessageBatchBudget(): (message: WorkflowToolRunMessage) => boolean {
+  let used = 0;
+  let admitted = false;
+  return (message) => {
+    const size = serializedLength(message);
+    if (admitted && used + size > RUN_MESSAGE_BATCH_MAX_CHARS) return false;
+    used += size;
+    admitted = true;
+    return true;
+  };
+}
+
+function serializedLength(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    // Values JSON can't encode, such as a bigint, still serialize for the workflow.
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
  * A later call to a `serve` task, which its run hands to `receive()`. It
  * carries everything the session knew of the call when it admitted it, as a
  * run's input does for the call that started it: the coordinates of the model

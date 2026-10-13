@@ -1168,7 +1168,13 @@ describe("SessionExecution checkpoints", () => {
     const opened = (sessionId: string): SessionInboxPayload => ({
       from: from(),
       kind: "agent-started",
-      session: { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId },
+      session: {
+        continuationToken: `subagent:${sessionId}`,
+        kind: "local",
+        name: "reviewer",
+        nodeId: "reviewer",
+        sessionId,
+      },
     });
     // Alice's triage opens two reviewers and reports, then Bob cancels the turn.
     const payloads: SessionInboxPayload[] = [
@@ -1615,7 +1621,13 @@ function boundaryRunMessages() {
   const opened = (callId: string, name: string): WorkflowToolRunMessage => ({
     from: from(callId),
     kind: "agent-started",
-    session: { kind: "local", name, nodeId: name, sessionId: `${name}-session` },
+    session: {
+      continuationToken: `subagent:${name}`,
+      kind: "local",
+      name,
+      nodeId: name,
+      sessionId: `${name}-session`,
+    },
   });
   const inbox: SessionInbox = {
     claimedTokens: [],

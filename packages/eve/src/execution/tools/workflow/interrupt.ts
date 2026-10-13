@@ -1,11 +1,13 @@
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { SESSION_HOOK_HANDOVER_TIMEOUT_MS } from "#execution/session-inbox/hook-release.js";
-import { hasRunEnded } from "#execution/workflow-runtime.js";
+import { hasRunEnded, pollUntil } from "#execution/workflow-runtime.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 const INTERRUPT: WorkflowToolRunControlMessage = { kind: "interrupt" };
+
+/** How long a steered turn waits for a run that is still starting to take its interrupt. */
+const RUN_START_TIMEOUT_MS = 30_000;
 
 /**
  * Aborts the `execute` call's `abortSignal`. A turn steered right after it
@@ -16,15 +18,13 @@ const INTERRUPT: WorkflowToolRunControlMessage = { kind: "interrupt" };
 export async function interruptWorkflowToolRun(run: WorkflowToolRunAddress): Promise<void> {
   "use step";
 
-  const deadline = Date.now() + SESSION_HOOK_HANDOVER_TIMEOUT_MS;
-  for (let delayMs = 20; ; delayMs = Math.min(delayMs * 2, 200)) {
+  await pollUntil(async () => {
     try {
       await resumeHook(run.hookToken, INTERRUPT);
-      return;
+      return true;
     } catch (error) {
       if (!isTaskWorkflowTargetGone(error)) throw error;
     }
-    if (Date.now() >= deadline || (await hasRunEnded(run.runId))) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-  }
+    return (await hasRunEnded(run.runId)) ? true : undefined;
+  }, RUN_START_TIMEOUT_MS);
 }

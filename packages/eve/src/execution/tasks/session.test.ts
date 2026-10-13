@@ -98,6 +98,48 @@ describe("answerTaskCancel", () => {
 });
 
 describe("applyRunMessagesStep", () => {
+  it("publishes a batch's reports and task results in the order they arrived", async () => {
+    const research = startedTask(readTaskTable(undefined), "research");
+    const summarize = startedTask(research.table, "summarize");
+    const cursor = cursorFor(
+      writeTaskTable(
+        createTestSessionState({ sessionId: "session-1" }).snapshot.session,
+        summarize.table,
+      ),
+    );
+    const from = (name: string, taskId: string) => ({
+      callId: `${name}-call`,
+      input: {},
+      runId: `${name}-run`,
+      sequence: 3,
+      stepIndex: 1,
+      taskId,
+      toolName: name,
+      turnId: "turn_1",
+    });
+
+    await cursor.advance((state) =>
+      applyRunMessagesStep({
+        ...state,
+        messages: [
+          { from: from("research", research.taskId), kind: "report", update: "sources found" },
+          {
+            from: from("research", research.taskId),
+            kind: "outcome",
+            result: { output: "Alice's brief", status: "completed" },
+          },
+          { from: from("summarize", summarize.taskId), kind: "report", update: "drafting" },
+        ],
+      }),
+    );
+
+    expect(published.map((entry) => (entry as { event: { type: string } }).event.type)).toEqual([
+      "action.partial",
+      "task.settled",
+      "action.partial",
+    ]);
+  });
+
   it("withdraws the questions of a task() run that fails on its own, and only those", async () => {
     const research = startedTask(readTaskTable(undefined), "research");
     const summarize = startedTask(research.table, "summarize");

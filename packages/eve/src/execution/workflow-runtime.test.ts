@@ -554,7 +554,7 @@ describe("waitForSessionInbox", () => {
 
       const waiting = waitForSessionInbox("child-session");
       const settled = expect(waiting).rejects.toThrow(
-        'Timed out waiting for session "child-session" to open its inbox.',
+        'Session "child-session" did not start taking commands within 30 seconds.',
       );
       await vi.advanceTimersByTimeAsync(31_000);
       await settled;

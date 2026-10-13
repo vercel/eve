@@ -30,7 +30,13 @@ function opened(sessionId: string): Extract<WorkflowToolRunMessage, { kind: "age
   return {
     from,
     kind: "agent-started",
-    session: { kind: "local", name: "reviewer", nodeId: "reviewer", sessionId },
+    session: {
+      continuationToken: `subagent:${sessionId}`,
+      kind: "local",
+      name: "reviewer",
+      nodeId: "reviewer",
+      sessionId,
+    },
   };
 }
 
@@ -52,6 +58,37 @@ it("relays what a fan-out sent between relays as one delivery, in order", async 
     kind: "workflow-batch",
     messages: [opened("child-1"), opened("child-2"), opened("child-3")],
   });
+});
+
+it("splits what queued up into deliveries of at most 64,000 characters, in order", async () => {
+  const inbox = openWorkflowToolRunOwnerInbox();
+  const report = (
+    label: string,
+    size: number,
+  ): Extract<WorkflowToolRunMessage, { kind: "report" }> => ({
+    from,
+    kind: "report",
+    update: label.padEnd(size, "."),
+  });
+  // Alice's reviewers report long findings faster than the run relays them.
+  const sent = [
+    report("first", 25_000),
+    report("second", 25_000),
+    report("third", 25_000),
+    report("oversized", 70_000),
+    report("fifth", 10),
+    report("sixth", 10),
+  ];
+  for (const message of sent) await inbox.owner.send(message);
+
+  const deliveries: WorkflowToolRunMessage[][] = [];
+  while (deliveries.flat().length < sent.length) {
+    const read = await raceChannelReads([inbox.reader]);
+    if (read.next.done) throw new Error("The inbox ended.");
+    deliveries.push(read.next.value);
+  }
+
+  expect(deliveries).toEqual([sent.slice(0, 2), sent.slice(2, 3), sent.slice(3, 4), sent.slice(4)]);
 });
 
 it("relays a lone message as itself", async () => {

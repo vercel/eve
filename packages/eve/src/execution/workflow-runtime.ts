@@ -292,21 +292,7 @@ export function createWorkflowRuntime(config: {
       return await readSessionStreamTailIndex(sessionId);
     },
 
-    async resolveContinuation(
-      continuationToken: string,
-    ): Promise<{ sessionId: string } | undefined> {
-      try {
-        return await resolveSessionInbox(continuationToken);
-      } catch (error) {
-        if (HookNotFoundError.is(error)) {
-          return undefined;
-        }
-        logError(log, "failed to resolve session by continuation token", error, {
-          continuationToken,
-        });
-        throw error;
-      }
-    },
+    resolveContinuation,
   };
 }
 
@@ -489,21 +475,39 @@ function isInactiveCommandTarget(error: unknown): boolean {
   return false;
 }
 
+/** The session holding a continuation token's inbox, if any does. */
+export async function resolveContinuation(
+  continuationToken: string,
+): Promise<{ sessionId: string } | undefined> {
+  try {
+    return await resolveSessionInbox(continuationToken);
+  } catch (error) {
+    if (HookNotFoundError.is(error)) {
+      return undefined;
+    }
+    logError(log, "failed to resolve session by continuation token", error, {
+      continuationToken,
+    });
+    throw error;
+  }
+}
+
 /**
  * Resolves hook ownership for replay-idempotent work already running inside a
  * durable step. Request handlers must return from start/resume acceptance and
  * leave ownership arbitration to the workflow.
  */
 export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
-  const deadline = Date.now() + SESSION_HOOK_HANDOVER_TIMEOUT_MS;
-  while (true) {
+  const owner = await pollUntil(async () => {
     try {
       return normalizeWorkflowHook(await getHookByToken(token));
     } catch (error) {
-      if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      if (!HookNotFoundError.is(error)) throw error;
+      return undefined;
     }
-  }
+  }, SESSION_HOOK_HANDOVER_TIMEOUT_MS);
+  if (owner === undefined) throw new HookNotFoundError(token);
+  return owner;
 }
 
 /**
@@ -513,13 +517,30 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
  */
 export async function waitForSessionInbox(sessionId: string): Promise<boolean> {
   const token = sessionInboxHookToken(sessionCommandHookToken(sessionId));
-  const deadline = Date.now() + SESSION_HOOK_HANDOVER_TIMEOUT_MS;
-  for (let delayMs = 20; ; delayMs = Math.min(delayMs * 2, 200)) {
+  const opened = await pollUntil(async () => {
     if ((await findSessionHookHolder(token)) !== undefined) return true;
-    if (await hasRunEnded(sessionId)) return false;
-    if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for session "${sessionId}" to open its inbox.`);
-    }
+    return (await hasRunEnded(sessionId)) ? false : undefined;
+  }, SESSION_HOOK_HANDOVER_TIMEOUT_MS);
+  if (opened === undefined) {
+    throw new Error(
+      `Session "${sessionId}" did not start taking commands within ${SESSION_HOOK_HANDOVER_TIMEOUT_MS / 1000} seconds.`,
+    );
+  }
+  return opened;
+}
+
+/**
+ * Calls `check` until it returns a value, backing off from 20 ms to 200 ms
+ * between calls, and resolves `undefined` once `timeoutMs` passes without one.
+ */
+export async function pollUntil<T>(
+  check: () => Promise<T | undefined>,
+  timeoutMs: number,
+): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (let delayMs = 20; ; delayMs = Math.min(delayMs * 2, 200)) {
+    const value = await check();
+    if (value !== undefined || Date.now() >= deadline) return value;
     await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
   }
 }
