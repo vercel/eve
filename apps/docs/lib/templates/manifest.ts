@@ -156,7 +156,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "eve-vercel-drives-starter",
-    title: "Vercel Drives Agent",
+    title: "Team Knowledge Assistant",
     setupPrompt:
       "Set up the eve Vercel Drives starter in my current workspace using https://github.com/vercel-labs/eve-vercel-drives-starter as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the Slack and Vercel setup steps.",
     description:
@@ -178,7 +178,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   },
   {
     slug: "eve-memory-agent-template",
-    title: "Preference Memory Assistant",
+    title: "Memory Agent",
     setupPrompt:
       "Set up the eve memory agent template in my current workspace using https://github.com/vercel-labs/eve-memory-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required Slack and Vercel setup steps.",
     description:
