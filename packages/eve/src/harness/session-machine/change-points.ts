@@ -100,18 +100,24 @@ export function stepStartedForResolvers(
 }
 
 /**
- * The session's start, as a restored step knows it: its runtime. The parent and trace the start
- * recorded aren't kept past it.
+ * The session's start, rebuilt from the session's row when a restored step needs it again: its
+ * parent and runtime, as the live start recorded them. The trace isn't kept past the start.
  */
-export function sessionStartedFact(runtime?: RuntimeIdentity): FactOf<"session.started"> {
-  return { data: runtime === undefined ? {} : { runtime }, type: "session.started" };
+export function sessionStartedFact(view: SessionView): FactOf<"session.started"> {
+  const { parent, runtime } = view.session;
+  return {
+    data: { ...(parent !== undefined && { parent }), ...(runtime !== undefined && { runtime }) },
+    type: "session.started",
+  };
 }
 
 /** A turn's start, rebuilt from the turn's row when a restored step needs it again. */
 export function turnStartedFact(view: SessionView, turnId: string): FactOf<"turn.started"> {
   const row = view.turns[turnId];
+  // A restored step runs only for a turn its view holds, as `restoredRun` requires of its run.
+  if (row === undefined) throw new Error(`Turn ${turnId} is missing from the session view.`);
   return {
-    data: { cause: row?.cause ?? { turnId }, follows: row?.follows ?? null, turnId },
+    data: { cause: row.cause, follows: row.follows, turnId },
     scope: { turnId },
     type: "turn.started",
   };

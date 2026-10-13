@@ -106,8 +106,8 @@ export interface DynamicResolveContext {
  * validated at runtime by the respective resolver.
  *
  * Each handler receives the session fact behind its key: `session.started` and `turn.started`
- * get those facts, and `step.started` gets the turn's `model.requested`, whose `scope` names the
- * turn and its model run.
+ * get those facts, and `step.started` gets the run's `model.requested`, whose `scope` names its
+ * model run and the turn it serves, or the context change for a compaction's summary run.
  */
 export type DynamicEvents<TResult = unknown> = {
   readonly [K in DynamicToolEventName]?: (

@@ -45,7 +45,6 @@ import { turnCoordinates } from "#protocol/session-projection.js";
 import type { StepCoordinates, StepParticipants } from "#harness/types.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
-import type { RuntimeIdentity } from "#protocol/message.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 
@@ -66,17 +65,13 @@ export interface SessionParticipants extends StepParticipants {
    * and subagents resolve again, and a running turn's tools rebind their callbacks.
    */
   restore(input: {
-    readonly runtime: RuntimeIdentity;
     readonly runtimeRevision: string;
     readonly sessionStarted: boolean;
     readonly turn: TurnRef | undefined;
     readonly messages: readonly ModelMessage[];
   }): Promise<void>;
   /** Connections aren't recorded, so they resolve again before each model call. */
-  rehydrateConnections(input: {
-    readonly runtime: RuntimeIdentity;
-    readonly turn: TurnRef | undefined;
-  }): Promise<void>;
+  rehydrateConnections(input: { readonly turn: TurnRef | undefined }): Promise<void>;
 }
 
 /** Binds the bundle's participants to one turn step. */
@@ -266,13 +261,13 @@ export function bindSessionParticipants(input: {
       });
     },
 
-    async restore({ messages, runtime, runtimeRevision, sessionStarted, turn }) {
+    async restore({ messages, runtimeRevision, sessionStarted, turn }) {
       if (!sessionStarted) {
         ctx.set(SessionDynamicSubagentRuntimeRevisionKey, runtimeRevision);
         ctx.set(SessionDynamicToolRuntimeRevisionKey, runtimeRevision);
         return;
       }
-      const event = sessionStartedForResolvers(sessionStartedFact(runtime));
+      const event = sessionStartedForResolvers(sessionStartedFact(currentView(ctx)));
       await Promise.all([
         refreshDynamicSessionSubagentsForRuntimeRevision({
           ctx,
@@ -300,10 +295,10 @@ export function bindSessionParticipants(input: {
       });
     },
 
-    async rehydrateConnections({ runtime, turn }) {
+    async rehydrateConnections({ turn }) {
       await resolveDynamicConnections({
         ctx,
-        event: sessionStartedForResolvers(sessionStartedFact(runtime)),
+        event: sessionStartedForResolvers(sessionStartedFact(currentView(ctx))),
         resolvers: connections,
       });
       if (turn === undefined) return;

@@ -179,6 +179,22 @@ describe("auto", () => {
     ]);
   });
 
+  it("decides for a compaction's summary run by its context change", async () => {
+    const decider = decisionModel();
+    const handler = auto({ model: decider.model, options }).events["step.started"]!;
+    const summary = {
+      data: { owner: { changeId: "change_1" }, runId: "run_1" },
+      scope: { changeId: "change_1", runId: "run_1" },
+      type: "model.requested",
+    };
+
+    await handler(summary, context());
+    await handler(summary, context());
+    await handler(event(), context());
+
+    expect(decider.doDecide).toHaveBeenCalledTimes(2);
+  });
+
   it("uses and retains the fallback model when decision fails", async () => {
     const providerError = new Error("decision unavailable");
     const doDecide = vi.fn(async () => {

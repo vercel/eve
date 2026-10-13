@@ -506,7 +506,6 @@ async function runSessionStepBody(
       ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
       await participants.restore({
         messages: history.initial.messages,
-        runtime: runtimeIdentity,
         runtimeRevision: deploymentId
           ? `deployment:${deploymentId}`
           : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource),
@@ -596,7 +595,6 @@ async function runSessionStepBody(
             try {
               if (connectionState.sessionStarted) {
                 await participants.rehydrateConnections({
-                  runtime: runtimeIdentity,
                   turn: isBetweenTurns(currentProjection(ctx))
                     ? undefined
                     : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
