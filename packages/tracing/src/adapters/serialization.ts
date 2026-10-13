@@ -8,7 +8,7 @@
 
 /** Content attributes are capped so a giant payload cannot bloat a span segment. */
 export const CONTENT_ATTRIBUTE_LIMIT = 32 * 1024;
-import type { ContentSerializer } from "../core/types.js";
+import type { ContentSerializer, InputMessagesContent } from "../core/types.js";
 
 export const aiSdkContentSerializer: ContentSerializer = {
   json: contentAttribute,
@@ -74,7 +74,7 @@ export function contentAttribute(value: unknown): string | undefined {
 export function genAiInputMessagesAttribute(
   messages: unknown,
   messageKind?: (value: unknown) => string | undefined,
-): string | undefined {
+): InputMessagesContent | undefined {
   if (!Array.isArray(messages)) return undefined;
   const formatted = messages.flatMap((message) => {
     if (!isRecord(message) || message.role === "system" || typeof message.role !== "string") {
@@ -89,9 +89,11 @@ export function genAiInputMessagesAttribute(
   });
   for (let start = 0; start < formatted.length; start += 1) {
     const json = semanticJsonAttribute(formatted.slice(start));
-    if (json !== undefined) return json;
+    if (json !== undefined) return { json, omitted: start };
   }
-  return truncateSingleSemanticMessage(formatted) ?? semanticJsonAttribute([]);
+  const newest = truncateSingleSemanticMessage(formatted);
+  if (newest !== undefined) return { json: newest, omitted: formatted.length - 1 };
+  return { json: "[]", omitted: formatted.length };
 }
 
 /** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */

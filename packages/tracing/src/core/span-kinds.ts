@@ -153,6 +153,10 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
   model: {
     parents: ["step"],
     prepare({ options }, context) {
+      const inputMessages =
+        context.capture.recordInputs && options.messages !== undefined
+          ? context.serializer.inputMessages(options.messages)
+          : undefined;
       return {
         name: modelName(options.modelId),
         kind: "CLIENT",
@@ -166,7 +170,8 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           ...runtimeContextAttributes(options.runtimeContext),
           ...(context.capture.recordInputs && options.messages !== undefined
             ? {
-                "gen_ai.input.messages": context.serializer.inputMessages(options.messages),
+                "gen_ai.input.messages": inputMessages?.json,
+                "agent.input.messages.omitted": inputMessages?.omitted || undefined,
                 "gen_ai.system_instructions": context.serializer.instructions(options.instructions),
               }
             : undefined),
