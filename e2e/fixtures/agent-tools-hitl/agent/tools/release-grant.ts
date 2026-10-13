@@ -22,7 +22,7 @@ export default defineTool({
   },
   async execute(_input, ctx) {
     const requesterToken = await ctx.getToken(releaseAuth);
-    const responderToken = await ctx.approval?.getToken(releaseAuth);
+    const responderToken = await ctx.approval?.responder.getToken(releaseAuth);
     return {
       requester: ctx.session.auth.current?.principalId ?? "none",
       requesterToken: requesterToken.token,
