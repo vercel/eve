@@ -30,6 +30,7 @@ export const WORLD_OPERATIONS = [
   "runs.cancelMany",
   "runs.waitForTerminalStatus",
   "events.createBatch",
+  "events.createHookBatch",
   "experimental_snapshots.save",
   "experimental_snapshots.load",
   "experimental_snapshots.delete",
