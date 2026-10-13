@@ -78,7 +78,7 @@ the evals above by `expectNoModelCallWhileOpen` and
 - **A fresh relayed batch replacing an older one.** This needs a child or
   remote agent to ask again from the same source while its earlier batch is
   open. Each workflow `ctx.ask()` is its own source. Covered by
-  `harness/proxy-input-requests.test.ts` ("replaces prior entries for the same
+  `harness/hitl/relays.test.ts` ("replaces prior entries for the same
   child continuation token").
 - **Handoff blocked while a request is open.** This needs a deployment
   handoff, which only the Vercel redeploy suite performs.

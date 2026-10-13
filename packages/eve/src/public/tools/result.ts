@@ -1,5 +1,6 @@
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
+import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
 import { readDefinitionSource } from "#internal/authored-definition/source-identity.js";
 import type { ToolDefinition } from "#tools/definition.js";
 
@@ -17,10 +18,10 @@ export interface MatchedToolResult<TOutput> {
 
 /**
  * Narrowed tool result returned by {@link toolResultFrom} when the
- * action result matches an MCP connection.
+ * action result matches an MCP or OpenAPI connection.
  *
- * `output` stays `unknown` because MCP tool schemas are remote.
- * `connectionToolName` is the unqualified MCP tool name (e.g.
+ * `output` stays `unknown` because connection tool schemas are remote.
+ * `connectionToolName` is the unqualified connection tool name (e.g.
  * `"list_issues"`) while `toolName` is the full qualified name
  * (e.g. `"linear__list_issues"`).
  */
@@ -33,6 +34,8 @@ export interface MatchedConnectionResult {
 
 const CONNECTION_TOOL_SEPARATOR = "__";
 
+type ConnectionDefinition = McpClientConnectionDefinition | OpenAPIConnectionDefinition;
+
 /**
  * Overloaded signature for {@link toolResultFrom}.
  */
@@ -44,7 +47,7 @@ export interface ToolResultFromFn {
 
   (
     result: RuntimeActionResult,
-    connection: McpClientConnectionDefinition,
+    connection: ConnectionDefinition,
   ): MatchedConnectionResult | undefined;
 }
 
@@ -52,9 +55,9 @@ export interface ToolResultFromFn {
  * Narrows a {@link RuntimeActionResult} to a typed tool or connection
  * result by matching against an authored definition object.
  *
- * Pass a `ToolDefinition` to get a typed `output`; pass a
- * `McpClientConnectionDefinition` to match any tool from that
- * connection (`output` stays `unknown`).
+ * Pass a `ToolDefinition` to get a typed `output`; pass an MCP or OpenAPI
+ * connection definition to match any tool from that connection (`output`
+ * stays `unknown`).
  *
  * Returns `undefined` when the result doesn't match, or when
  * `isError` is `true`.
@@ -67,11 +70,11 @@ function toolResultFromImpl<TInput, TOutput>(
 ): MatchedToolResult<TOutput> | undefined;
 function toolResultFromImpl(
   result: RuntimeActionResult,
-  connection: McpClientConnectionDefinition,
+  connection: ConnectionDefinition,
 ): MatchedConnectionResult | undefined;
 function toolResultFromImpl(
   result: RuntimeActionResult,
-  source: ToolDefinition<unknown, unknown> | McpClientConnectionDefinition,
+  source: ToolDefinition<unknown, unknown> | ConnectionDefinition,
 ): MatchedToolResult<unknown> | MatchedConnectionResult | undefined {
   if (result.kind !== "tool-result") return undefined;
   if (result.isError === true) return undefined;

@@ -5,6 +5,7 @@ import { grantedApprovalKeys, parkOnApprovals } from "#harness/hitl/approvals.js
 import { suspendStep } from "#harness/session-machine/transitions.js";
 import { withoutApprovalParts } from "#harness/step/after-model.js";
 import { sessionView } from "#harness/session-machine/commit.js";
+import { writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import {
   ensureSessionProjection,
@@ -171,4 +172,12 @@ export function grantedKeys(
     sessionView(storedProjection(session.state), session.state),
     approvalKey,
   );
+}
+
+/** `session` relaying requests for a child, as the session machine records them. */
+export function withRelays<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  upsert: NonNullable<RelayChange["upsert"]>,
+): T {
+  return writeHitlState(session, { relays: { upsert } });
 }

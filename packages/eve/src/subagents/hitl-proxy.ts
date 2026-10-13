@@ -4,8 +4,9 @@ import { resolveInputOutcome } from "#harness/input-request-resolution.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import { getProxyInputRequests, resolvedByChild } from "#harness/proxy-input-requests.js";
-import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
+import { readHitlState } from "#harness/hitl/index.js";
+import { resolvedByChild } from "#harness/hitl/relays.js";
+import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/hitl/relays.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { InputResolution } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
@@ -85,7 +86,7 @@ export function routeDeliverPayload(input: {
   readonly resolveMessage?: boolean;
   readonly state: SessionStateMap | undefined;
 }): RoutedDeliverPayload {
-  const entries = getProxyInputRequests(input.state);
+  const entries = readHitlState(input.state).relays;
   const routable = (requestId: string, route: ProxyInputRequest | undefined) =>
     route !== undefined && input.allowRoute?.(requestId, route) !== false;
   const message = resolveMessageAgainstFirstRequest({

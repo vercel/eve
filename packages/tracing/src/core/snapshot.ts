@@ -12,8 +12,11 @@ export function boundedSerializer(
   onError?: import("./types.js").TraceErrorHandler,
 ): ContentSerializer {
   function invoke(method: keyof ContentSerializer, args: unknown[]): string | undefined {
+    return bounded(() => Reflect.apply(serializer[method], serializer, args) as string | undefined);
+  }
+  function bounded(serialize: () => string | undefined): string | undefined {
     try {
-      const value = Reflect.apply(serializer[method], serializer, args) as string | undefined;
+      const value = serialize();
       return value === undefined || new TextEncoder().encode(value).length > SERIALIZED_BYTES
         ? undefined
         : value;
@@ -27,7 +30,15 @@ export function boundedSerializer(
   return {
     json: (value) => invoke("json", [value]),
     text: (value) => invoke("text", [value]),
-    inputMessages: (value) => invoke("inputMessages", [value]),
+    inputMessages: (value) => {
+      let omitted = 0;
+      const json = bounded(() => {
+        const content = serializer.inputMessages(value);
+        omitted = content?.omitted ?? 0;
+        return content?.json;
+      });
+      return json === undefined ? undefined : { json, omitted };
+    },
     instructions: (value) => invoke("instructions", [value]),
     toolDefinitions: (value) => invoke("toolDefinitions", [value]),
     outputMessages: (value, reason) => invoke("outputMessages", [value, reason]),

@@ -49,8 +49,8 @@ import { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/hitl/approved-calls.
 import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { openInputs } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
-import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { withSignIns } from "#harness/hitl/sign-ins.js";
+import { readHitlState, writeHitlState } from "#harness/hitl/requests.js";
 import {
   parkedSteps,
   positionOf,
@@ -59,6 +59,7 @@ import {
   withParkedStep,
   withPublished,
   withQueuedInput,
+  withRelays,
 } from "#internal/testing/session-machine.js";
 import type { HarnessSession, StepFn, StepInput, StepResult } from "#harness/types.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -389,24 +390,26 @@ afterEach(() => {
 
 describe("routeProxiedDeliverStep", () => {
   it("replies to the saved child inbox after its continuation alias changes", async () => {
-    const session = upsertProxyInputRequests({
-      entries: [
-        [
-          "request-1",
-          {
-            childContinuationToken: "stale-alias",
-            childSessionInbox: { sessionId: "original-child" },
-            event: REQUEST_EVENT,
-            kind: "question",
-          },
-        ],
-      ],
-      forChildContinuationToken: "stale-alias",
-      session: createStubSession({
+    const session = withRelays(
+      createStubSession({
         continuationToken: "parent-token",
         sessionId: "parent-session",
       }),
-    });
+      {
+        entries: [
+          [
+            "request-1",
+            {
+              childContinuationToken: "stale-alias",
+              childSessionInbox: { sessionId: "original-child" },
+              event: REQUEST_EVENT,
+              kind: "question",
+            },
+          ],
+        ],
+        forChildContinuationToken: "stale-alias",
+      },
+    );
     installSessionStoreMocks([session]);
 
     await routeProxiedDeliverStep({
@@ -453,7 +456,7 @@ describe("routeProxiedDeliverStep", () => {
   });
 
   it("answers a root question once when one delivery carries several messages", async () => {
-    const session = upsertProxyInputRequests({
+    const session = withRelays(createStubSession(), {
       entries: [
         [
           "ask-1",
@@ -468,7 +471,6 @@ describe("routeProxiedDeliverStep", () => {
         ],
       ],
       forChildContinuationToken: "ask-1",
-      session: createStubSession(),
     });
     installSessionStoreMocks([session]);
 
@@ -501,7 +503,7 @@ describe("routeProxiedDeliverStep", () => {
       principalId: "alice",
       principalType: "user",
     };
-    const session = upsertProxyInputRequests({
+    const session = withRelays(createStubSession(), {
       entries: [
         [
           "approval-1",
@@ -514,7 +516,6 @@ describe("routeProxiedDeliverStep", () => {
         ],
       ],
       forChildContinuationToken: "child-token",
-      session: createStubSession(),
     });
     installSessionStoreMocks([session]);
 
@@ -567,11 +568,13 @@ describe("routeProxiedDeliverStep", () => {
           requestId,
         })),
       });
-      const session = upsertProxyInputRequests({
-        entries: requestIds.map((requestId) => [requestId, approvalRoute] as const),
-        forChildContinuationToken: "child-token",
-        session: withPublished(withOpenTurn(createStubSession(), REQUEST_EVENT), [relayed]),
-      });
+      const session = withRelays(
+        withPublished(withOpenTurn(createStubSession(), REQUEST_EVENT), [relayed]),
+        {
+          entries: requestIds.map((requestId) => [requestId, approvalRoute] as const),
+          forChildContinuationToken: "child-token",
+        },
+      );
       // Read back what each step persists, so a later step sees the routes it left.
       vi.mocked(readDurableSession).mockImplementation((state) => state.snapshot!.session);
       return replaceDurableSessionSnapshot({ session, state: createStubSessionState() });
@@ -633,7 +636,7 @@ describe("routeProxiedDeliverStep", () => {
       },
     ],
   ])("does not answer a delegated %s question from steering text", async (_, serializedContext) => {
-    const session = upsertProxyInputRequests({
+    const session = withRelays(createStubSession(), {
       entries: [
         [
           "ask-1",
@@ -651,7 +654,6 @@ describe("routeProxiedDeliverStep", () => {
         ],
       ],
       forChildContinuationToken: "ask-1",
-      session: createStubSession(),
     });
     installSessionStoreMocks([session]);
 
@@ -676,23 +678,33 @@ describe("routeProxiedDeliverStep", () => {
       principalId: "user-1",
       principalType: "user",
     };
-    const session = upsertProxyInputRequests({
-      entries: [
-        [
-          "request-1",
-          { childContinuationToken: "child-token", event: REQUEST_EVENT, kind: "tool-approval" },
-        ],
-        [
-          "request-2",
-          { childContinuationToken: "child-token", event: REQUEST_EVENT, kind: "tool-approval" },
-        ],
-      ],
-      forChildContinuationToken: "child-token",
-      session: createStubSession({
+    const session = withRelays(
+      createStubSession({
         continuationToken: "parent-token",
         sessionId: "parent-session",
       }),
-    });
+      {
+        entries: [
+          [
+            "request-1",
+            {
+              childContinuationToken: "child-token",
+              event: REQUEST_EVENT,
+              kind: "tool-approval",
+            },
+          ],
+          [
+            "request-2",
+            {
+              childContinuationToken: "child-token",
+              event: REQUEST_EVENT,
+              kind: "tool-approval",
+            },
+          ],
+        ],
+        forChildContinuationToken: "child-token",
+      },
+    );
     installSessionStoreMocks([session]);
 
     const result = await routeProxiedDeliverStep({
@@ -735,19 +747,8 @@ describe("routeProxiedDeliverStep", () => {
       replyTo: { kind: "hook" as const, token: "parent-turn" },
       subagentName: "research",
     };
-    const session = upsertProxyInputRequests({
-      entries: [
-        [
-          "child-a",
-          { childContinuationToken: "child-token-a", event: REQUEST_EVENT, kind: "question" },
-        ],
-        [
-          "child-b",
-          { childContinuationToken: "child-token-b", event: REQUEST_EVENT, kind: "question" },
-        ],
-      ],
-      forChildContinuationToken: "child-token-a",
-      session: upsertProxyInputRequests({
+    const session = withRelays(
+      withRelays(createStubSession(), {
         entries: [
           [
             "child-b",
@@ -755,9 +756,21 @@ describe("routeProxiedDeliverStep", () => {
           ],
         ],
         forChildContinuationToken: "child-token-b",
-        session: createStubSession(),
       }),
-    });
+      {
+        entries: [
+          [
+            "child-a",
+            { childContinuationToken: "child-token-a", event: REQUEST_EVENT, kind: "question" },
+          ],
+          [
+            "child-b",
+            { childContinuationToken: "child-token-b", event: REQUEST_EVENT, kind: "question" },
+          ],
+        ],
+        forChildContinuationToken: "child-token-a",
+      },
+    );
     installSessionStoreMocks([session]);
 
     const delivery = {
@@ -2713,19 +2726,22 @@ describe("turnStep", () => {
     const bob: SessionAuthContext = { ...alice, principalId: "slack:bob" };
     installSessionStoreMocks([
       createStubSession({
-        state: setPendingAuthorization(undefined, {
-          challenges: [
-            {
-              attemptId: "attempt-linear",
-              challenge: { url: "https://idp.example/authorize" },
-              hookUrl: "https://agent.example/callback",
-              name: "linear",
-              principal: { id: "slack:alice", issuer: "slack", type: "user" },
-              principalId: "slack:alice",
-              requester: alice,
-            },
-          ],
-        }),
+        state: writeHitlState(
+          { state: undefined },
+          {
+            signIns: [
+              {
+                attemptId: "attempt-linear",
+                challenge: { url: "https://idp.example/authorize" },
+                hookUrl: "https://agent.example/callback",
+                name: "linear",
+                principal: { id: "slack:alice", issuer: "slack", type: "user" },
+                principalId: "slack:alice",
+                requester: alice,
+              },
+            ],
+          },
+        ).state,
       }),
     ]);
     const ctx = new ContextContainer();
@@ -2769,20 +2785,23 @@ describe("turnStep", () => {
       name: "authorization",
       withPending: (session: HarnessSession): HarnessSession => ({
         ...session,
-        state: setPendingAuthorization(session.state, {
-          challenges: [
-            {
-              attemptId: "attempt-statuspage",
-              challenge: {
-                instructions: "Sign in to continue",
-                url: "https://idp.example/authorize",
+        state: writeHitlState(
+          { state: session.state },
+          {
+            signIns: withSignIns(readHitlState(session.state).signIns, [
+              {
+                attemptId: "attempt-statuspage",
+                challenge: {
+                  instructions: "Sign in to continue",
+                  url: "https://idp.example/authorize",
+                },
+                hookUrl: "https://app.example/callback",
+                name: "statuspage",
+                principal: { type: "app" },
               },
-              hookUrl: "https://app.example/callback",
-              name: "statuspage",
-              principal: { type: "app" },
-            },
-          ],
-        }),
+            ]),
+          },
+        ).state,
       }),
     },
     {
@@ -3218,7 +3237,7 @@ describe("turnStep", () => {
       };
       const session = createStubSession({
         history: [{ content: "visible", kind: "user", role: "user" }],
-        state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
+        state: writeHitlState({ state: { retained: "yes" } }, { signIns: [challenge] }).state,
       });
       const turnInput = {
         context: ["Current context"],
@@ -3252,7 +3271,7 @@ describe("turnStep", () => {
       let observedStepInput: unknown = "not-called";
       vi.mocked(createExecutionNodeStep).mockImplementation(() => {
         return async (session, stepInput): Promise<StepResult> => {
-          observedPendingAuth = getPendingAuthorization(session.state);
+          observedPendingAuth = readHitlState(session.state).signIns;
           observedStepInput = stepInput;
           return { next: null, session };
         };
@@ -3278,7 +3297,7 @@ describe("turnStep", () => {
         sessionState: createStubSessionState(),
       });
 
-      expect(observedPendingAuth).toBeUndefined();
+      expect(observedPendingAuth).toEqual([]);
       expect(observedStepInput).toEqual(
         inputKind === "current"
           ? { message: `thread=unset; user=${turnInput.message}` }
@@ -3291,7 +3310,7 @@ describe("turnStep", () => {
       ]);
       const persistedSession = vi.mocked(createDurableSessionValues).mock.calls.at(-1)?.[0];
       expect(persistedSession?.state?.retained).toBe("yes");
-      expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
+      expect(readHitlState(persistedSession?.state).signIns).toEqual([]);
     },
   );
 });

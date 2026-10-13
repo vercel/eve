@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import { gateway, type LanguageModel, type LanguageModelMiddleware, wrapLanguageModel } from "ai";
 
 import type { CompactionConfig, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -25,6 +25,28 @@ export function buildGatewayAttributionHeaders(
   if (title) headers["x-title"] = title;
   if (referer) headers["http-referer"] = referer;
   return headers;
+}
+
+/** Injects the active model-call context when a Gateway request reaches the provider boundary. */
+export function withGatewayTraceContext(
+  model: LanguageModel,
+  profile: ModelProfile,
+  createTraceContextHeaders?: () => Record<string, string> | undefined,
+): LanguageModel {
+  if (!profile.gateway || createTraceContextHeaders === undefined) return model;
+  const provider = globalThis.AI_SDK_DEFAULT_PROVIDER ?? gateway;
+  if (typeof model === "string" && typeof provider.languageModel !== "function") return model;
+  const gatewayModel = typeof model === "string" ? provider.languageModel(model) : model;
+  if (gatewayModel.provider.split(".")[0] !== "gateway") return model;
+  const middleware: LanguageModelMiddleware = {
+    async transformParams({ params }) {
+      const traceHeaders = createTraceContextHeaders();
+      return traceHeaders === undefined
+        ? params
+        : { ...params, headers: { ...params.headers, ...traceHeaders } };
+    },
+  };
+  return wrapLanguageModel({ model: gatewayModel, middleware });
 }
 
 export async function resolveEffectiveRuntimeModel(input: {

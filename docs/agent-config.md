@@ -75,6 +75,54 @@ prefix. Each subagent session gets its own key. An authored
 in the `session-id` header, which the Codex backend uses for cache routing.
 Gateway-routed calls do not receive the option.
 
+### Use a local model
+
+To test against a model running on your own machine, point the AI SDK
+[OpenAI-compatible provider](https://ai-sdk.dev/providers/openai-compatible-providers)
+at a local server. This works with any server that implements the OpenAI Chat
+Completions API, such as Ollama, LM Studio, llama.cpp, or vLLM. With
+[Ollama](https://docs.ollama.com/api/openai-compatibility):
+
+```bash
+pnpm add @ai-sdk/openai-compatible
+ollama pull gpt-oss:20b
+OLLAMA_CONTEXT_LENGTH=64000 ollama serve
+```
+
+```ts title="agent/agent.ts"
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { defineAgent } from "eve";
+
+const ollama = createOpenAICompatible({
+  name: "ollama",
+  baseURL: "http://localhost:11434/v1",
+  includeUsage: true, // report token usage while streaming
+});
+
+export default defineAgent({
+  model: ollama("gpt-oss:20b"),
+  modelContextWindowTokens: 64_000,
+});
+```
+
+- **Context window.** AI Gateway has no metadata for local models, so set
+  `modelContextWindowTokens` to the context length your server allocates, not
+  the model's maximum. eve uses it to decide when to compact. Ollama allocates
+  as little as 4K tokens by default; raise it to at least 64K for agents, as
+  above.
+- **Tool calling.** eve agents call tools on most turns, so pick a model with
+  native tool-calling support. `gpt-oss:20b`, `qwen3`, and `gemma4` are good
+  starting points on Ollama.
+- **Usage.** `includeUsage: true` lets token usage reach eve's
+  [session limits](#runtime-limits). Local models report no cost, so
+  `maxTokenCostUsdPerSession` does not apply.
+- **Other servers.** Change `baseURL`, for example to
+  `http://localhost:1234/v1` for LM Studio. Pass `apiKey` for a remote
+  OpenAI-compatible server that requires one.
+
+A deployment cannot reach a server on your machine, so use a Gateway or hosted
+provider model when you deploy.
+
 ### Choose the model dynamically
 
 To select a model from the incoming prompt with an AI SDK decision model, use

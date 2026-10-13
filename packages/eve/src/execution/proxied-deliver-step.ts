@@ -1,6 +1,4 @@
-import { sessionView } from "#harness/session-machine/commit.js";
-import { routeAnswer, hold, receiveRelayedAnswer } from "#harness/session-machine/transitions.js";
-import { storedProjection } from "#harness/session-machine/view.js";
+import { receiveRelayedAnswer, routeAnswer } from "#harness/session-machine/transitions.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -8,14 +6,9 @@ import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
-import {
-  type DurableSessionState,
-  readDurableSession,
-  replaceDurableSessionSnapshot,
-} from "#execution/durable-session-store.js";
+import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import {
   publishSessionEvents,
-  relaySessionEvents,
   type PublishedSessionEvents,
   type SessionStepState,
 } from "#execution/publish-session-events.js";
@@ -36,9 +29,10 @@ import {
   toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
-import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
+import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { readHitlState } from "#harness/hitl/index.js";
+import { commitSessionStep } from "#execution/publish-session-events.js";
 import type { InputResponse } from "#shared/input.js";
 
 export type RoutedDeliverResult =
@@ -56,9 +50,7 @@ export type RoutedDeliverResult =
 
 interface ChildBucket {
   readonly workflowAsk?: WorkflowAskRoute;
-  readonly remote?: NonNullable<
-    import("#harness/proxy-input-requests.js").ProxyInputRequest["remote"]
-  >;
+  readonly remote?: NonNullable<import("#harness/hitl/relays.js").ProxyInputRequest["remote"]>;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly event: PendingInputBatchEvent;
@@ -83,12 +75,12 @@ export async function routeProxiedDeliverStep(
 async function routeProxiedDeliver(
   input: SessionStepState & { readonly delivery: DeliverHookPayload },
 ): Promise<RoutedDeliverResult> {
-  const requests = getProxyInputRequests(readDurableSession(input.sessionState).state);
+  const requests = readHitlState(readDurableSession(input.sessionState).state).relays;
   const { delivery: sourceDelivery, serializedContext } = await deliverChannelInputResponses({
     ...input,
     routable: (response) => requests.has(response.requestId),
   });
-  let durableSession = readDurableSession(input.sessionState);
+  const durableSession = readDurableSession(input.sessionState);
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
@@ -165,7 +157,6 @@ async function routeProxiedDeliver(
     }
   }
 
-  let retired = false;
   const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
   for (const child of children.values()) {
     if (child.workflowAsk !== undefined) {
@@ -203,37 +194,24 @@ async function routeProxiedDeliver(
         );
       }
     }
+    // Only answers that went down to their child retire its routes.
     answered.push({ event: child.event, resolutions: [...child.resolutions.values()] });
-    // Successfully forwarded request IDs are retired so later deliveries
-    // cannot route through stale entries.
-    durableSession = retireProxyInputRequests(durableSession, [...child.resolutions.keys()]);
-    retired = true;
   }
-  const view = sessionView(storedProjection(durableSession.state), durableSession.state);
-  const resolvedEvents = [...routeAnswer(view, { children: answered }).events];
-  // Answers that leave other requests pending, and nothing for the turn itself, keep the
-  // open turn held, so it parks again as after a partial approval answer. A forwarded approval
-  // stays open until its child settles it, but it no longer waits on the person.
+  // A forwarded approval stays open until its child settles it, but it no longer waits on the
+  // person.
   const forwarded = new Set(
     [...children.values()].flatMap((child) =>
       child.payloads.flatMap((payload) => (payload.inputResponses ?? []).map((r) => r.requestId)),
     ),
   );
-  if (
+  const retired = new Set(answered.flatMap((child) => child.resolutions.map((r) => r.requestId)));
+  const holds =
     children.size > 0 &&
     parentPayloads.size === 0 &&
     parentAction === undefined &&
-    [...getProxyInputRequests(durableSession.state).keys()].some((id) => !forwarded.has(id))
-  ) {
-    resolvedEvents.push(...hold(view, { on: "input" }).events);
-  }
+    [...requests.keys()].some((id) => !retired.has(id) && !forwarded.has(id));
 
-  let published: PublishedSessionEvents = {
-    serializedContext,
-    sessionState: retired
-      ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
-      : input.sessionState,
-  };
+  let published: PublishedSessionEvents = { serializedContext, sessionState: input.sessionState };
   if (answerMessages.length > 0) {
     // Like a steering message, the answer joins the open turn, so the turn's
     // later events carry its delivery ids too.
@@ -246,9 +224,10 @@ async function routeProxiedDeliver(
       answerMessages,
     );
   }
-  const context = await relaySessionEvents(
+  const context = await commitSessionStep(
     { ...published, sessionWritable: input.sessionWritable },
-    resolvedEvents,
+    (view) => [routeAnswer(view, { children: answered, holds })],
+    { origin: "relayed" },
   );
   if (parentAction !== undefined) return { ...context, ...parentAction };
   const orderedParentPayloads = [...parentPayloads].sort(([a], [b]) => a - b);

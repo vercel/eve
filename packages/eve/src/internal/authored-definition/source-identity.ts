@@ -44,6 +44,15 @@ export function stampDefinitionKey(definition: object, key: string): void {
 }
 
 /**
+ * Fallback key shared by the connection factories and the resolver. The
+ * description keeps connections on one host, such as Jira and Confluence,
+ * distinct.
+ */
+export function connectionDefinitionKey(url: string, description: string): string {
+  return `connection:${JSON.stringify([url, description])}`;
+}
+
+/**
  * Records a definition object eve loaded under one mounted name. The same
  * object can be mounted more than once, for example when a subagent re-exports
  * an extension tool, so every mounted name matches it.

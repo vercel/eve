@@ -28,9 +28,9 @@ the request. Non-affine Worlds and older owners safely skip preparation.
 
 Validation covers ingress rollout/no-op behavior, authenticated transport, client failures
 and Send races, and real Workflow owner transfer before a message with preserved expiry.
-The Evo clone exercises two deployments and real Gateway timing. Checkpoint version 15
+The Evo clone exercises two deployments and real Gateway timing. Checkpoint version 16
 protects the new idle startup reason: older targets reject it instead of renewing expiry;
-version 14 state needs no changes when upgraded by a newer successor.
+newer successors retain the existing upgrade path for older checkpoint state.
 
 Implemented on `codex/typing-session-prewarm`, based on main at `de7a408e4`.
 Validation passed after endpoint consolidation: 326 focused route, client, and React unit

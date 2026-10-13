@@ -1,18 +1,9 @@
+import { stripEveTraceBaggage } from "#protocol/baggage.js";
 import { createMcpTraceFetch as traceFetch } from "#tracing/eve/mcp.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
-import { replaceBaggageMember } from "#protocol/baggage.js";
 
 export function createMcpTraceFetch(input: Parameters<typeof traceFetch>[0]): typeof fetch {
-  return traceFetch({
-    ...input,
-    filterCarrier(carrier) {
-      let baggage = carrier.baggage;
-      for (const key of ["eve.audience", "eve.conversation.id", "eve.parent_session"])
-        baggage = replaceBaggageMember(baggage, key, undefined);
-      if (baggage === undefined) delete carrier.baggage;
-      else carrier.baggage = baggage;
-    },
-  });
+  return traceFetch({ ...input, filterCarrier: stripEveTraceBaggage });
 }
 
 export function withMcpToolsListSpan<T>(input: {

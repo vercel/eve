@@ -147,10 +147,15 @@ export interface Usage {
 
 /** `subagent-call` and `remote-agent-call` delegate to another agent. */
 export type ToolKind = string;
+/** Capped GenAI input messages and how many of the oldest were dropped to fit. */
+export interface InputMessagesContent {
+  readonly json: string;
+  readonly omitted: number;
+}
 export interface ContentSerializer {
   json(value: unknown): string | undefined;
   text(value: string): string | undefined;
-  inputMessages(value: unknown): string | undefined;
+  inputMessages(value: unknown): InputMessagesContent | undefined;
   instructions(value: unknown): string | undefined;
   toolDefinitions(value: unknown): string | undefined;
   outputMessages(value: readonly ContentPart[], finishReason: string): string | undefined;

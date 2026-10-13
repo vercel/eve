@@ -95,8 +95,8 @@ jobs:
       - name: Run unit tests
         run: pnpm test:unit
 
-      - name: Test workflow helpers
-        run: node --test .github/scripts/*.test.mjs
+      - name: Test workflow and guard helpers
+        run: node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs
 
   test-integration:
     name: test-integration (${{ matrix.os }})

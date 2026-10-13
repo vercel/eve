@@ -1,4 +1,4 @@
-import { getPendingAuthorization } from "#harness/authorization.js";
+import { readHitlState } from "#harness/hitl/index.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { runtimeWait } from "#harness/session-machine/view.js";
@@ -23,11 +23,14 @@ export function derivePendingState(
   readonly pendingCoordinationCallIds?: readonly string[];
   readonly pendingTaskToolCalls?: readonly TaskToolCall[];
 } {
-  const pendingAuth = getPendingAuthorization(session.state);
+  const { signIns } = readHitlState(session.state);
   const base = {
-    authorizationAttemptIds: pendingAuth?.challenges.flatMap((challenge) =>
-      challenge.attemptId === undefined ? [] : [challenge.attemptId],
-    ),
+    authorizationAttemptIds:
+      signIns.length === 0
+        ? undefined
+        : signIns.flatMap((challenge) =>
+            challenge.attemptId === undefined ? [] : [challenge.attemptId],
+          ),
     hasPendingAuthorization: openSignIns(projection).length > 0,
     hasPendingInputBatch: ownOpenRequestIds(sessionView(projection, session.state)).size > 0,
   };

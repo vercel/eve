@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { readHitlState } from "#harness/hitl/requests.js";
+
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
@@ -16,7 +18,7 @@ import { openSessionEventPublisher } from "#execution/publish-session-events.js"
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+
 import { createAuthorizationRequiredEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -238,7 +240,7 @@ describe("proxied stream hooks", () => {
     });
     expect(f.events.at(-1)).toMatchObject({ data: event.data, type: event.type });
     const after = closed.sessionState.snapshot.session.state;
-    expect(getProxyInputRequests(after).has("approval-1")).toBe(false);
+    expect(readHitlState(after).relays.has("approval-1")).toBe(false);
     expect(routeDeliverPayload({ ...answer, state: after })).toMatchObject({
       forChildren: [],
       forSelf: { message: "approve" },
@@ -531,7 +533,7 @@ describe("proxied stream hooks", () => {
           inputSource: JSON.stringify([`child-${name}`, null]),
         })),
       );
-      expect([...getProxyInputRequests(session.state).keys()]).toEqual([
+      expect([...readHitlState(session.state).relays.keys()]).toEqual([
         "approval-Alice",
         "approval-Bob",
       ]);
@@ -577,7 +579,7 @@ describe("proxied stream hooks", () => {
       expect(f.order).not.toContain("channel:input.requested");
       expect(f.events).toHaveLength(0);
       expect(f.sessionWritable.locked).toBe(false);
-      expect(getProxyInputRequests(f.durableSession.state).size).toBe(0);
+      expect(readHitlState(f.durableSession.state).relays.size).toBe(0);
     } finally {
       vi.unstubAllGlobals();
     }

@@ -1,3 +1,4 @@
+import { readHitlState, writeHitlState } from "./requests.js";
 import { describe, expect, it, vi } from "vitest";
 import { jsonSchema } from "ai";
 import type { ApprovalResponsePolicy } from "#approval/definition.js";
@@ -214,6 +215,34 @@ describe("coordinateApprovalDelivery", () => {
     expect(getApprovalAuditState(result.session.state).candidateHistory[0]?.status).toBe(
       "timed-out",
     );
+  });
+
+  it("withdraws only the expired candidate's sign-ins through a transition", async () => {
+    const ingested = await ingest();
+    const candidate = getApprovalAuditState(ingested.session.state).activeCandidates[0]!;
+    const expired = {
+      name: "expired",
+      hookUrl: "https://example.com/expired",
+      challenge: { url: "https://example.com/login" },
+    };
+    const retained = {
+      name: "retained",
+      hookUrl: "https://example.com/retained",
+      challenge: { url: "https://example.com/login" },
+    };
+    const session = writeHitlState(
+      {
+        ...ingested.session,
+        state: markApprovalCandidateAuthorizationRequired({
+          candidateId: candidate.candidateId,
+          state: ingested.session.state,
+          authorizationChallenges: [expired],
+        }),
+      },
+      { signIns: [expired, retained] },
+    );
+    const result = await coordinateApprovalDelivery({ now: 600_100, session, tools: new Map() });
+    expect(readHitlState(result.session.state).signIns).toEqual([retained]);
   });
 
   it("completes a failed authorizer timeout", async () => {

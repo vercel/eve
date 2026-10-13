@@ -1,5 +1,37 @@
-/** Converts Gateway response metadata to cost data. */
 import type { Attributes } from "#compiled/@eve/tracing/index.js";
+import {
+  context as otelContext,
+  createContextKey,
+  propagation,
+  trace,
+  type TextMapSetter,
+} from "#compiled/@opentelemetry/api/index.js";
+
+import { stripEveTraceBaggage } from "#protocol/baggage.js";
+
+const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
+const traceContextSetter: TextMapSetter<Record<string, string>> = {
+  set(carrier, key, value) {
+    carrier[key] = value;
+  },
+};
+
+export function createGatewayTraceContextHeaders(): Record<string, string> | undefined {
+  const activeContext = otelContext.active();
+  if (
+    activeContext.getValue(SUPPRESS_TRACING_KEY) === true ||
+    trace.getSpan(activeContext) === undefined
+  ) {
+    return undefined;
+  }
+
+  const headers: Record<string, string> = {};
+  propagation.inject(activeContext, headers, traceContextSetter);
+  stripEveTraceBaggage(headers);
+  return Object.keys(headers).length === 0 ? undefined : headers;
+}
+
+/** Converts Gateway response metadata to cost data. */
 export function gatewayCostAttributes(input: {
   cost?: number;
   gatewayCost?: number;
