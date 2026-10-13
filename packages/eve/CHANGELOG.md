@@ -1,5 +1,21 @@
 # eve
 
+## 0.78.0
+
+### Minor Changes
+
+- 9559de8: Approved calls now always run as the requester. This closes a privilege escalation: when another person approved a call, it ran with the approver's identity and credentials, so a requester could get a tool to act with access they don't have. The call now keeps the identity and credentials of the person whose turn requested it, and approved workflow and agent calls are rechecked before dispatch. This reverses the execution-identity rule from #4368. Tools that should only proceed for certain approvers can still check `response.principal` in their `approval.response` policy.
+
+### Patch Changes
+
+- db71190: A dynamic resolver no longer adds the catalog tools (`eve__search`, `eve__tool`, and `eve__skill`) on its own. eve adds the catalog tools once a session reaches something they find, call, or load, such as a deferred entry a resolver returns, and keeps them for the rest of the session. Agents whose resolvers return only listed tools no longer see these tools or spend steps searching.
+- 4ef1ad9: Workflow tools and the agents they open start faster. Tasks begin work sooner, `ctx.agent().send()` no longer waits for the agent's session to boot, a model step that starts several workflow tool runs starts them in parallel, and a fan-out's agent starts, progress, and results reach the session in batches instead of one at a time.
+- f3dbd0c: Keep an over-budget turn waiting for input until its continuation question is answered. Continue resumes the same turn, queued messages wait for the answer, and cancellation withdraws the question.
+- 7f87e28: Emit sign-in requests for executing tools even when a sibling call in the same model step needs approval.
+- 3e7bbb2: Emit `turn.waiting` with `on: "tasks"` when a model step parks on blocking workflow execute calls, including calls dispatched after approval. Task and agent receipt dispatches do not emit a wait; their actual task waits report the park.
+- 3445e89: Sandbox commands now run with `AI_AGENT=eve` by default, so agent-aware CLIs such as `vercel` switch to their non-interactive agent mode. Set `AI_AGENT` in the environment's `env` option, or in the `env` of one `run()` or `spawn()` call, to override it.
+- db71190: `eve__search` results now include `searched`, the number of entries the query covered, and `remaining`, the number of matches past `limit`, so the model can tell after one search how much is left to find. Its description now tells the model to search only when nothing in its tool list fits the request.
+
 ## 0.77.0
 
 ### Minor Changes
