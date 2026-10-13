@@ -669,8 +669,8 @@ describe("EveAgentStore prewarming", () => {
   it("deduplicates existing-session preparation and sends while it is pending or fails", async () => {
     const preparation = Promise.withResolvers<Response>();
     const stream = controlledStreamResponse();
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      if (String(url).endsWith("/prewarm")) return preparation.promise;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.method === "POST" && init.body === undefined) return preparation.promise;
       if (init?.method === "POST") return startedResponse();
       return stream.response;
     });
@@ -685,7 +685,11 @@ describe("EveAgentStore prewarming", () => {
     await vi.waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
-          ([url, init]) => String(url) === "/eve/v1/session/session_1" && init?.method === "POST",
+          ([url, init]) =>
+            String(url) === "/eve/v1/session/session_1" &&
+            init?.method === "POST" &&
+            typeof init.body === "string" &&
+            JSON.parse(init.body).message === "Hello",
         ),
       ).toBe(true),
     );

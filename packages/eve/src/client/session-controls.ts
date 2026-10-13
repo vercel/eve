@@ -1,5 +1,4 @@
 import { PrewarmResponseSchema, type PrewarmSessionResult } from "#protocol/prewarm-session.js";
-import { createEveSessionPrewarmRoutePath } from "#protocol/routes.js";
 import { createClientError } from "#client/client-error.js";
 import type {
   CancelSessionResult,
@@ -18,6 +17,7 @@ import {
   createEveSessionClearRoutePath,
   createEveSessionCompactRoutePath,
   createEveSessionResetRoutePath,
+  createEveSessionRoutePath,
 } from "#protocol/routes.js";
 
 interface SessionControlContext {
@@ -34,7 +34,7 @@ export async function prewarmClientSession(input: {
   const { payload } = await postJson({
     context: input.context,
     operation: "Prewarm",
-    path: createEveSessionPrewarmRoutePath(input.sessionId),
+    path: createEveSessionRoutePath(input.sessionId),
     signal: input.signal,
   });
   const result = PrewarmResponseSchema.safeParse(payload);

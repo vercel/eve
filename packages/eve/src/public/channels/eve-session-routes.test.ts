@@ -55,33 +55,54 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
 describe("eve ID-addressed session routes", () => {
   it("does not prepare a session when resource authentication rejects the request", async () => {
     const session = createFixedSession();
-    const response = await route("POST", "/eve/v1/session/:sessionId/prewarm", {
+    const response = await route("POST", "/eve/v1/session/:sessionId", {
       auth: () => null,
     })(
-      new Request("https://eve.test/eve/v1/session/wrun_A/prewarm", { method: "POST" }),
+      new Request("https://eve.test/eve/v1/session/wrun_A", { method: "POST" }),
       createArgs(session),
     );
     expect(response.status).toBe(401);
     expect(session.prewarm).not.toHaveBeenCalled();
   });
-  it.each([undefined, '{"targetDeploymentId":"dpl_injected"}', '{"message":"injected"}'])(
-    "prewarms only the authenticated fixed session, with body %s",
+  it.each([undefined, "{}"])(
+    "prepares the authenticated fixed session without starting a turn, with body %s",
     async (body) => {
       const session = createFixedSession();
       const onMessage = vi.fn();
-      const response = await route("POST", "/eve/v1/session/:sessionId/prewarm", {
+      const response = await route("POST", "/eve/v1/session/:sessionId", {
         auth: none(),
         onMessage,
       })(
-        new Request("https://eve.test/eve/v1/session/wrun_A/prewarm", { method: "POST", body }),
+        new Request("https://eve.test/eve/v1/session/wrun_A", { method: "POST", body }),
         createArgs(session),
       );
-      expect(response.status).toBe(body === undefined ? 202 : 400);
-      expect(session.prewarm).toHaveBeenCalledTimes(body === undefined ? 1 : 0);
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ ok: true, status: "accepted" });
+      expect(session.prewarm).toHaveBeenCalledOnce();
       expect(onMessage).not.toHaveBeenCalled();
       expect(session.send).not.toHaveBeenCalled();
+      expect(session.respond).not.toHaveBeenCalled();
     },
   );
+  it.each([
+    ["deployment-only payload", '{"targetDeploymentId":"dpl_injected"}'],
+    ["empty message", '{"message":""}'],
+    ["invalid message", '{"message":null}'],
+    ["empty input responses", '{"inputResponses":[]}'],
+    ["continuation token", '{"continuationToken":"wrun_B"}'],
+    ["malformed JSON", "{"],
+    ["non-object JSON", "[]"],
+  ])("rejects %s rather than treating it as preparation", async (_description, body) => {
+    const session = createFixedSession();
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", { method: "POST", body }),
+      createArgs(session),
+    );
+    expect(response.status).toBe(400);
+    expect(session.prewarm).not.toHaveBeenCalled();
+    expect(session.send).not.toHaveBeenCalled();
+    expect(session.respond).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["without a request body", undefined],

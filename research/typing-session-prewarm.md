@@ -11,7 +11,9 @@ handoff of an existing idle session to the exact deployment serving the request.
 call it when typing starts; no second flag, webhook, project sweep, or promotion subscription
 is required. React's live `prewarm` option and the Vue/Svelte imperative helpers share it.
 
-The authenticated `POST /eve/v1/session/:sessionId/prewarm` accepts no body fields. Ingress
+The existing authenticated `POST /eve/v1/session/:sessionId` prepares the session with no
+body or `{}`. Non-empty bodies retain message and input-response validation and delivery;
+there is no separate preparation route. Ingress
 compares the current inbox owner's run deployment, avoiding a wake-up for the same owner.
 A reserved support attribute prevents sending new control payloads to older deployments.
 A differing supported owner receives a durable hint scoped to its run ID. The owner reuses
@@ -31,9 +33,10 @@ protects the new idle startup reason: older targets reject it instead of renewin
 version 14 state needs no changes when upgraded by a newer successor.
 
 Implemented on `codex/typing-session-prewarm`, based on main at `de7a408e4`.
-Validation passed: 61 distinct focused unit tests, three Workflow integration tests,
-eve typecheck, invariant guard, lint, docs checks, package build, and clone build.
-The fixture-owned prewarm eval is updated for CI; it was not run locally.
+Validation passed after endpoint consolidation: 326 focused route, client, and React unit
+tests, repository typecheck, invariant guard, lint, and docs checks. Earlier validation
+covered three Workflow integration tests, package build, and clone build. The fixture-owned
+prewarm eval now uses the shared endpoint and runs in CI; it was not run locally.
 
 The controlled Evo clone experiment promoted A to B during an idle period, then compared
 three direct turns with three prepared turns for each cohort. Server POST-to-Gateway median
@@ -44,3 +47,5 @@ prepared owners activated B before Send without new session events; all follow-u
 history. A tab loaded on A prepared B on typing, and immediate Send during preparation
 succeeded. These are small clone samples, not production percentiles. Preparation moves
 handoff work before Send and needs a typing head start to hide it fully.
+These measurements used the preparation protocol before its HTTP endpoint was consolidated;
+the route change does not alter the transfer protocol, and the latency experiment was not rerun.
