@@ -199,9 +199,9 @@ export interface SessionStartedStreamEvent {
   type: "session.started";
 }
 
-/** One message seeded into a new session, as `history.imported` publishes it. */
+/** One message a delivery added with `history`, as `history.imported` publishes it. */
 export interface HistoryImportedMessage {
-  /** App-owned id from the seeded history, when one was supplied. */
+  /** App-owned id the history entry carried, when one was supplied. */
   readonly id?: string;
   readonly role: "user" | "assistant";
   readonly text: string;
