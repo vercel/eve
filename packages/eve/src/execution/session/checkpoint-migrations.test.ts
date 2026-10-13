@@ -209,6 +209,19 @@ describe("migrateSessionCheckpoint", () => {
     });
   });
 
+  it.each([
+    [11, { "eve.tasks": {} }],
+    [11, { "eve.runtime.workflowToolRuns": [] }],
+    [13, { "eve.tasks": {}, "eve.taskTable": { version: 1, tasks: [] } }],
+    [13, { "eve.runtime.workflowToolRuns": [] }],
+  ])("refuses a v%s checkpoint holding running work in a retired store (%j)", (version, state) => {
+    const checkpoint = version === 11 ? v11Checkpoint(state) : v13Checkpoint(state);
+    expect(migrateSessionCheckpoint(checkpoint)).toEqual({
+      kind: "incompatible",
+      detail: `checkpoint version ${version}: session holds running work in a retired store`,
+    });
+  });
+
   it.each([7, SESSION_CHECKPOINT_VERSION + 1])("refuses checkpoint version %s", (version) => {
     expect(migrateSessionCheckpoint({ ...eve066Checkpoint(), version })).toMatchObject({
       kind: "incompatible",

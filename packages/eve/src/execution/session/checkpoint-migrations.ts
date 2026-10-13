@@ -234,6 +234,7 @@ function upgradeRunningWork(checkpoint: CheckpointRecord): CheckpointRecord {
   const session = readRecord(snapshot, "session");
   if (session.state === undefined) return checkpoint;
   const state = readRecord(session, "state");
+  refuseRetiredStores(state);
   if (state["eve.taskTable"] === undefined && state["eve.workflowTool"] === undefined) {
     return checkpoint;
   }
@@ -259,18 +260,22 @@ function upgradeRunningWork(checkpoint: CheckpointRecord): CheckpointRecord {
 
 /** The runs of a version-4 workflow tool run registry, as checkpoints 11 through 13 hold it. */
 function readWorkflowToolRuns(state: CheckpointRecord): unknown[] {
+  refuseRetiredStores(state);
   const registry = state["eve.workflowTool"];
   if (registry === undefined) return [];
-  if (
-    state["eve.tasks"] !== undefined ||
-    state["eve.runtime.workflowToolRuns"] !== undefined ||
-    !isObject(registry) ||
-    registry.version !== 4 ||
-    !Array.isArray(registry.runs)
-  ) {
+  if (!isObject(registry) || registry.version !== 4 || !Array.isArray(registry.runs)) {
     refuse("workflow tool run registry is incompatible");
   }
   return Array.from(registry.runs as unknown[]);
+}
+
+/**
+ * Stores of running work that checkpoints 11 and later no longer hold. No step moves them, so a
+ * checkpoint holding one stays with its owner, whether or not it also holds a current store.
+ */
+function refuseRetiredStores(state: CheckpointRecord): void {
+  if (state["eve.tasks"] !== undefined || state["eve.runtime.workflowToolRuns"] !== undefined)
+    refuse("session holds running work in a retired store");
 }
 
 /** The tasks of a version-1 task table, as checkpoint 13 holds it. */

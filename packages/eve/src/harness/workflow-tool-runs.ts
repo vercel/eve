@@ -3,10 +3,8 @@ import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { readRunningWork, writeRunningWork } from "#harness/running-work.js";
 
-/**
- * The workflow runs a turn waits on, by the call each serves: the calls part of the session's
- * record of running work (`running-work.ts`), which also holds its tasks.
- */
+// The workflow runs a turn waits on, by the call each serves: the calls part of the session's
+// record of running work (`running-work.ts`), which also holds its tasks.
 
 /** One workflow tool call the originating turn waits on. */
 export interface BlockingWorkflowToolRun {
