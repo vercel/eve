@@ -69,8 +69,8 @@ export function createImportedHistoryMessages(
 ): HarnessModelMessage[] {
   return history.map((message) =>
     message.role === "user"
-      ? createUserMessage("user", message.content, { [IMPORTED_MESSAGE_METADATA_KEY]: true })
-      : { content: message.content, role: "assistant" },
+      ? createUserMessage("user", message.text, { [IMPORTED_MESSAGE_METADATA_KEY]: true })
+      : { content: message.text, role: "assistant" },
   );
 }
 

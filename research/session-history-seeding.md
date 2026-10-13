@@ -34,7 +34,7 @@ export interface SessionHistoryMessage {
   readonly id?: string;
   readonly role: "user" | "assistant";
   /** Plain text. Channels render speaker attribution into this text when needed. */
-  readonly content: string;
+  readonly text: string;
 }
 ```
 
@@ -47,7 +47,7 @@ POST("/conversations/:id/session", async (req, { from, params }) => {
   const conversation = await db.conversations.findForUser(params.id!, auth);
   const { created, session } = await from(`conversation:${conversation.id}`).create({
     auth,
-    history: conversation.messages.map((m) => ({ id: m.id, role: m.role, content: m.body })),
+    history: conversation.messages.map((m) => ({ id: m.id, role: m.role, text: m.body })),
   });
   if (!created) return Response.json({ error: "Already started." }, { status: 409 });
   return Response.json({ sessionId: session.id });
@@ -80,15 +80,17 @@ when the session it started won the claim; a concurrent `create()` or `send()` t
 this run to exit without forwarding its history, and the caller sees `created: false`. The history
 waits in session state and joins the first message's turn, so it reaches model history through
 the same path as `send()` history. It leaves session state only once a deliver result carries it,
-so a first message the channel drops does not lose it.
+so a first message the channel drops does not lose it. A stranded owner makes `create()` throw
+`SessionStrandedError` rather than replace it, since that session may hold the conversation being
+imported; the caller resets the address and calls `create()` again.
 
 **Server-resolved only.** History comes from authored code. The eve HTTP request body does not
 accept it, and no client SDK option sets it. Code that loads stored history must authorize the
 caller against that conversation.
 
 **Validation.** `send()` and `create()` throw `InvalidSessionHistoryError`, exported from
-`eve/channels` with the caps, before anything is enqueued. The error names the offending entry and rule: unknown role, empty content, an overlong
-or duplicate id, or exceeding 500 messages or 512 KiB of content per call. These caps are
+`eve/channels` with the caps, before anything is enqueued. The error names the offending entry and rule: unknown role, empty text, an overlong
+or duplicate id, or exceeding 500 messages or 512 KiB of text per call. These caps are
 placeholders until measured against Workflow payload limits.
 
 **Model history.** User entries become `kind: "user"` messages with
@@ -96,9 +98,11 @@ placeholders until measured against Workflow payload limits.
 calls, results, files, reasoning, or provider options are created.
 
 **Display history.** `history.imported` carries `messages` in the input shape (`id?`, `role`,
-`content`), `sequence`, and `turnId`, and precedes the `message.received` of the turn the entries joined. The default
+`text`), `sequence`, and `turnId`, and precedes the `message.received` of the turn the entries joined. The default
 reducer places them before that turn's message, ahead of any unconfirmed optimistic message.
-Imported messages carry `metadata.imported` and no `turnId`, so a turn's response never streams
+`transcriptReducer()` includes the entries, and its `{ role, text }` messages are valid `history`, so
+a transcript of a seeded session can seed a branch. Imported messages carry `metadata.imported`
+and no `turnId`, so a turn's response never streams
 into one. Message ids derive from the event, since app ids are unique only within one call; the app
 id rides in `metadata.historyId`.
 

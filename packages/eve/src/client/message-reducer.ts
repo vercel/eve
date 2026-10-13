@@ -432,8 +432,8 @@ function importHistory(data: EveMessageData, event: HistoryImportedEvent): EveMe
         : { historyId: message.id, imported: true, status: "complete" },
     parts: [
       message.role === "assistant"
-        ? { state: "done", text: message.content, type: "text" }
-        : { text: message.content, type: "text" },
+        ? { state: "done", text: message.text, type: "text" }
+        : { text: message.text, type: "text" },
     ],
     role: message.role,
   }));

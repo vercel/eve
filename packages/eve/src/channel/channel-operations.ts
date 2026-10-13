@@ -77,7 +77,8 @@ export interface ChannelSource<TState = undefined> {
    * Creates a session that waits for its first message, without running a
    * turn. When another session owns the address, or claims it concurrently,
    * returns that session unchanged with `created: false`; its `history` was not
-   * added.
+   * added. Throws `SessionStrandedError` when the owner is stranded; reset the
+   * address, then create again.
    */
   create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
   /** Answers pending input requests. Never creates a session. */

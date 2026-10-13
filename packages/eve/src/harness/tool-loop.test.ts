@@ -1502,13 +1502,13 @@ describe("createToolLoopHarness", () => {
     const first = await runStep(createTestSession(), {
       context: ["Current context"],
       history: [
-        { content: "What is the code word?", id: "m1", role: "user" },
-        { content: "It is heron.", role: "assistant" },
+        { id: "m1", role: "user", text: "What is the code word?" },
+        { role: "assistant", text: "It is heron." },
       ],
       message: "Repeat it.",
     });
     await runStep(first.session, {
-      history: [{ content: "Bob: it changed to egret.", role: "user" }],
+      history: [{ role: "user", text: "Bob: it changed to egret." }],
       message: "And now?",
     });
 
@@ -1547,8 +1547,8 @@ describe("createToolLoopHarness", () => {
     ]);
     expect(received[0]?.data).toMatchObject({
       messages: [
-        { content: "What is the code word?", id: "m1", role: "user" },
-        { content: "It is heron.", role: "assistant" },
+        { id: "m1", role: "user", text: "What is the code word?" },
+        { role: "assistant", text: "It is heron." },
       ],
     });
   });

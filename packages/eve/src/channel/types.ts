@@ -630,9 +630,13 @@ export interface Runtime {
   /**
    * Resolves the session that currently owns a continuation token without
    * delivering input or starting a run. Returns `undefined` when no session
-   * owns the token.
+   * owns the token. With `runnable`, throws `SessionStrandedError` when the
+   * owner is stranded and can run nothing.
    */
-  resolveContinuation(continuationToken: string): Promise<{ sessionId: string } | undefined>;
+  resolveContinuation(
+    continuationToken: string,
+    options?: { readonly runnable?: boolean },
+  ): Promise<{ sessionId: string } | undefined>;
 
   /**
    * Returns a readable stream of lifecycle events for an existing session.

@@ -34,8 +34,8 @@ describe("pending session history", () => {
           ownerDeploymentId: "dpl_inline",
           input: {
             history: [
-              { role: "user", content: "Earlier question" },
-              { role: "assistant", content: "Earlier answer" },
+              { role: "user", text: "Earlier question" },
+              { role: "assistant", text: "Earlier answer" },
             ],
           },
           serializedContext: buildSerializedContext({
@@ -61,8 +61,8 @@ describe("pending session history", () => {
             "history.imported",
             expect.objectContaining({
               messages: [
-                { content: "Earlier question", role: "user" },
-                { content: "Earlier answer", role: "assistant" },
+                { text: "Earlier question", role: "user" },
+                { text: "Earlier answer", role: "assistant" },
               ],
               turnId: "turn_0",
             }),

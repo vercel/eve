@@ -11,14 +11,14 @@ export interface SessionHistoryMessage {
   readonly id?: string;
   readonly role: "user" | "assistant";
   /** Plain text. Channels render speaker attribution into this text when needed. */
-  readonly content: string;
+  readonly text: string;
 }
 
 /** Most messages one seeded history may contain. */
 export const MAX_SESSION_HISTORY_MESSAGES = 500;
 
-/** Most UTF-8 bytes of `content`, summed across one seeded history. */
-export const MAX_SESSION_HISTORY_CONTENT_BYTES = 512 * 1024;
+/** Most UTF-8 bytes of `text`, summed across one seeded history. */
+export const MAX_SESSION_HISTORY_TEXT_BYTES = 512 * 1024;
 
 const MAX_SESSION_HISTORY_ID_LENGTH = 256;
 
@@ -29,9 +29,9 @@ export class InvalidSessionHistoryError extends Error {
 
 const textEncoder = new TextEncoder();
 
-/** UTF-8 size of one message's content, as counted against the history cap. */
-export function sessionHistoryContentBytes(message: SessionHistoryMessage): number {
-  return textEncoder.encode(message.content).byteLength;
+/** UTF-8 size of one message's text, as counted against the history cap. */
+export function sessionHistoryTextBytes(message: SessionHistoryMessage): number {
+  return textEncoder.encode(message.text).byteLength;
 }
 
 /**
@@ -56,15 +56,15 @@ export function validateSessionHistory(
   const normalized = history.map((entry: unknown, index): SessionHistoryMessage => {
     const at = `history[${index}]`;
     if (!isObject(entry)) throw new InvalidSessionHistoryError(`${at} must be an object.`);
-    const { content, id, role } = entry;
+    const { id, role, text } = entry;
     if (role !== "user" && role !== "assistant") {
       throw new InvalidSessionHistoryError(`${at}.role must be "user" or "assistant".`);
     }
-    if (typeof content !== "string" || content.trim().length === 0) {
-      throw new InvalidSessionHistoryError(`${at}.content must be a non-empty string.`);
+    if (typeof text !== "string" || text.trim().length === 0) {
+      throw new InvalidSessionHistoryError(`${at}.text must be a non-empty string.`);
     }
-    const message: SessionHistoryMessage = { content, role };
-    bytes += sessionHistoryContentBytes(message);
+    const message: SessionHistoryMessage = { role, text };
+    bytes += sessionHistoryTextBytes(message);
     if (id === undefined) return message;
     if (typeof id !== "string" || id.length === 0 || id.length > MAX_SESSION_HISTORY_ID_LENGTH) {
       throw new InvalidSessionHistoryError(
@@ -76,9 +76,9 @@ export function validateSessionHistory(
     return { ...message, id };
   });
 
-  if (bytes > MAX_SESSION_HISTORY_CONTENT_BYTES) {
+  if (bytes > MAX_SESSION_HISTORY_TEXT_BYTES) {
     throw new InvalidSessionHistoryError(
-      `history content is ${bytes} bytes; the limit is ${MAX_SESSION_HISTORY_CONTENT_BYTES}.`,
+      `history text is ${bytes} bytes; the limit is ${MAX_SESSION_HISTORY_TEXT_BYTES}.`,
     );
   }
   return normalized;

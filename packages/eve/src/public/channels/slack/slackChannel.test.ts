@@ -3356,7 +3356,7 @@ describe("slackChannel() inbound mention pipeline", () => {
 
     const [, input] = send.mock.calls[0]! as [
       string,
-      { history?: readonly { id?: string; role: string; content: string }[]; message: string },
+      { history?: readonly { id?: string; role: string; text: string }[]; message: string },
     ];
     expect(input.message).not.toContain("<slack_thread_context>");
     expect(input.history?.map(({ id, role }) => ({ id, role }))).toEqual([
@@ -3364,8 +3364,8 @@ describe("slackChannel() inbound mention pipeline", () => {
       { id: "1700000000.000002", role: "assistant" },
       { id: "1700000000.000003", role: "user" },
     ]);
-    expect(input.history?.[0]?.content).toContain("sender_id: U_ROOT");
-    expect(input.history?.[1]?.content).toBe("Deploys are green.");
+    expect(input.history?.[0]?.text).toContain("sender_id: U_ROOT");
+    expect(input.history?.[1]?.text).toBe("Deploys are green.");
   });
 
   it("does not dispatch when onAppMention resolves to null", async () => {
@@ -3854,7 +3854,7 @@ describe("slackChannel() generic Events API pipeline", () => {
       async onEvent(ctx) {
         await ctx.send("follow up", {
           auth: null,
-          history: [{ content: "Earlier question", role: "user" }],
+          history: [{ role: "user", text: "Earlier question" }],
           target: { channelId: "C01", threadTs: "1700000000.000001" },
           title: "Reaction follow-up",
         });
@@ -3866,7 +3866,7 @@ describe("slackChannel() generic Events API pipeline", () => {
 
     expect(send).toHaveBeenCalledWith("C01:1700000000.000001", {
       auth: null,
-      history: [{ content: "Earlier question", role: "user" }],
+      history: [{ role: "user", text: "Earlier question" }],
       message: "follow up",
       state: {
         channelId: "C01",

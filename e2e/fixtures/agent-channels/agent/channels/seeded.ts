@@ -11,14 +11,14 @@ const ALICE_EARLIER = [
   {
     id: "alice-1",
     role: "user",
-    content: "Hi, this is Alice. Which code word should the launch checklist use?",
+    text: "Hi, this is Alice. Which code word should the launch checklist use?",
   },
-  { id: "agent-1", role: "assistant", content: "Alice, the launch checklist code word is heron." },
+  { id: "agent-1", role: "assistant", text: "Alice, the launch checklist code word is heron." },
 ] as const;
 
 const BOB_LATER = [
-  { id: "bob-1", role: "user", content: "Hi, this is Bob. Please rotate the checklist code word." },
-  { id: "agent-2", role: "assistant", content: "Done, Bob. The checklist code word is now egret." },
+  { id: "bob-1", role: "user", text: "Hi, this is Bob. Please rotate the checklist code word." },
+  { id: "agent-2", role: "assistant", text: "Done, Bob. The checklist code word is now egret." },
 ] as const;
 
 /**

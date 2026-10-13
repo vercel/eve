@@ -110,8 +110,8 @@ describe("defaultMessageReducer", () => {
     data = reduceServerEvents(reducer, data, [
       createHistoryImportedEvent({
         messages: [
-          { content: "Earlier question", id: "m1", role: "user" },
-          { content: "Earlier answer", role: "assistant" },
+          { text: "Earlier question", id: "m1", role: "user" },
+          { text: "Earlier answer", role: "assistant" },
         ],
         sequence: 0,
         turnId: "turn_0",
@@ -131,12 +131,12 @@ describe("defaultMessageReducer", () => {
     // App ids are unique only within one call: a later call reusing one keeps both messages.
     data = reduceServerEvents(reducer, reducer.initial(), [
       createHistoryImportedEvent({
-        messages: [{ content: "Earlier question", id: "m1", role: "user" }],
+        messages: [{ text: "Earlier question", id: "m1", role: "user" }],
         sequence: 0,
         turnId: "turn_0",
       }),
       createHistoryImportedEvent({
-        messages: [{ content: "Later question", id: "m1", role: "user" }],
+        messages: [{ text: "Later question", id: "m1", role: "user" }],
         sequence: 1,
         turnId: "turn_1",
       }),
@@ -155,7 +155,7 @@ describe("defaultMessageReducer", () => {
         turnId: "turn_1",
       }),
       createHistoryImportedEvent({
-        messages: [{ content: "Bob: meanwhile", role: "user" }],
+        messages: [{ text: "Bob: meanwhile", role: "user" }],
         sequence: 2,
         turnId: "turn_1",
       }),

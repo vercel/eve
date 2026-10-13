@@ -177,7 +177,7 @@ describe("createChannelAddress", () => {
   });
 
   it("reports whether create() started the session that owns the address", async () => {
-    const history = [{ content: "Earlier", role: "user" as const }];
+    const history = [{ text: "Earlier", role: "user" as const }];
     const create = async (owners: readonly (string | undefined)[]) => {
       const runtime = createRuntime();
       vi.mocked(runtime.createSession).mockResolvedValue({

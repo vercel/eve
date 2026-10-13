@@ -70,7 +70,7 @@ export type {
 } from "#shared/channel-definition.js";
 export {
   InvalidSessionHistoryError,
-  MAX_SESSION_HISTORY_CONTENT_BYTES,
+  MAX_SESSION_HISTORY_TEXT_BYTES,
   MAX_SESSION_HISTORY_MESSAGES,
   type SessionHistoryMessage,
 } from "#shared/session-history.js";

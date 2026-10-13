@@ -9,6 +9,7 @@ import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
+import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
 import type {
   CancelTurnResult,
   ClearSessionResult,
@@ -173,7 +174,20 @@ export function createChannelAddress<TState = undefined>(input: {
       const history = validateSessionHistory(options.history);
       const toSession = (sessionId: string) =>
         createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
-      const owner = await input.runtime.resolveContinuation(namespacedToken);
+      let owner: { readonly sessionId: string } | undefined;
+      try {
+        owner = await input.runtime.resolveContinuation(namespacedToken, { runnable: true });
+      } catch (error) {
+        // Replacing a stranded session would end a conversation the caller may mean to import.
+        if (!SessionStrandedError.is(error)) throw error;
+        throw new SessionStrandedError(
+          error.owner,
+          describeStrandedSession(
+            error.owner,
+            "Call reset() on the address, then create() again to start a session from your history.",
+          ),
+        );
+      }
       if (owner !== undefined) return { created: false, session: toSession(owner.sessionId) };
       const state = (options as { readonly state?: TState }).state;
       const started = await input.runtime.createSession({

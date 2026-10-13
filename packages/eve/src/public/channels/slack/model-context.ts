@@ -2,10 +2,10 @@ import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 import {
-  MAX_SESSION_HISTORY_CONTENT_BYTES,
+  MAX_SESSION_HISTORY_TEXT_BYTES,
   MAX_SESSION_HISTORY_MESSAGES,
   type SessionHistoryMessage,
-  sessionHistoryContentBytes,
+  sessionHistoryTextBytes,
 } from "#shared/session-history.js";
 
 interface SlackModelMessageInput {
@@ -124,8 +124,8 @@ export function slackThreadSessionHistory(
     if (history.length === MAX_SESSION_HISTORY_MESSAGES) break;
     const entry = slackThreadHistoryMessage(messages[index]!);
     if (entry === undefined) continue;
-    bytes += sessionHistoryContentBytes(entry);
-    if (bytes > MAX_SESSION_HISTORY_CONTENT_BYTES) break;
+    bytes += sessionHistoryTextBytes(entry);
+    if (bytes > MAX_SESSION_HISTORY_TEXT_BYTES) break;
     history.push(entry);
   }
   return history.reverse();
@@ -133,16 +133,16 @@ export function slackThreadSessionHistory(
 
 function slackThreadHistoryMessage(message: SlackThreadMessage): SessionHistoryMessage | undefined {
   if (message.markdown.trim().length === 0) return undefined;
-  if (message.isMe) return { content: message.markdown, id: message.ts, role: "assistant" };
+  if (message.isMe) return { id: message.ts, role: "assistant", text: message.markdown };
   return {
-    content: formatSlackModelMessage({
+    id: message.ts,
+    role: "user",
+    text: formatSlackModelMessage({
       content: message.markdown,
       senderId: message.user ?? message.botId,
       senderType: slackThreadSenderType(message),
       threadTs: message.threadTs,
       ts: message.ts,
     }),
-    id: message.ts,
-    role: "user",
   };
 }
