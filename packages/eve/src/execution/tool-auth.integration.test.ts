@@ -929,7 +929,7 @@ describe("tool-hosted authorization", () => {
     const runtime = await createTestRuntime({ tools: [] });
     const execute = createToolExecuteWithAuth({
       scope: "grant-tool",
-      execute: async (_input, ctx) => await ctx.approval!.getToken(provider),
+      execute: async (_input, ctx) => await ctx.approval!.responder.getToken(provider),
     });
 
     const outcome = runtime.runAsSession({ sessionId: "session_approver_token" }, async () => {

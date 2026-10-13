@@ -234,7 +234,11 @@ export type ToolContext = SessionContext & {
  */
 export interface ApprovedCall {
   /** Who approved the call: the same principal its response policy saw. */
-  readonly responder: SessionAuthContext;
+  readonly responder: ApprovalResponder;
+}
+
+/** The person who approved a call, with access to their own credentials. */
+export interface ApprovalResponder extends SessionAuthContext {
   /**
    * Resolves the responder's token for an inline provider, as
    * {@link ToolContext.getToken} does for the requester. It never starts a

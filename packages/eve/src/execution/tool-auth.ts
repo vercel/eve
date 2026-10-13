@@ -38,9 +38,11 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
 function approvalOf(responder: SessionAuthContext, scope: string): ApprovedCall {
   const auth = createAuthorizationContext({ scope, boundResponder: responder });
   return {
-    getToken: (provider, options) =>
-      auth.getResponderToken(provider, namespaceApprovalAuthOptions(scope, options)),
-    responder,
+    responder: {
+      ...responder,
+      getToken: (provider, options) =>
+        auth.getResponderToken(provider, namespaceApprovalAuthOptions(scope, options)),
+    },
   };
 }
 
