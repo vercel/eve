@@ -67,18 +67,6 @@ describe("buildStepCatalog", () => {
   });
 
   describe("which catalog tools the agent gets", () => {
-    /** The tool list of an agent that declares one dynamic resolver of `kind`. */
-    function advertisedWithResolver(
-      kind: "dynamicConnectionResolvers" | "dynamicSkillResolvers" | "dynamicToolResolvers",
-    ) {
-      const bundle = catalogBundle();
-      const ctx = new ContextContainer();
-      ctx.set(BundleKey, { ...bundle, resolvedAgent: { ...bundle.resolvedAgent, [kind]: [{}] } });
-      return names(
-        buildStepCatalog({ agentTools: toolMap(), ctx, endsTurn: true, session: {} }).advertised,
-      );
-    }
-
     it("counts only the deferred tools the session sees, so a delegated session doesn't search for root-only ones", () => {
       const tools = [inlineTool("archive", { availableInSubagents: false, deferred: true })];
 
@@ -172,7 +160,6 @@ describe("buildStepCatalog", () => {
       ["a deferred tool", { tools: [inlineTool("refund_invoice", { deferred: true })] }],
       ["a deferred agent", { tools: [subagentTool("researcher", { deferred: true })] }],
       ["a connection", { connections: [fakeConnection({ name: "linear", tools: [] })] }],
-      ["a dynamic subagent resolver", { dynamicSubagents: ["helper"] }],
     ])("gives an agent with %s search and eve__tool", (_, declared) => {
       // A subagent also brings the task tools; the catalog tools come last.
       expect(names(catalogContext(declared).catalog.advertised).slice(-2)).toEqual([
@@ -181,16 +168,54 @@ describe("buildStepCatalog", () => {
       ]);
     });
 
-    it.each([
-      ["dynamicToolResolvers", [SEARCH_TOOL_NAME, CALL_TOOL_NAME]],
-      ["dynamicConnectionResolvers", [SEARCH_TOOL_NAME, CALL_TOOL_NAME]],
-      ["dynamicSkillResolvers", [SEARCH_TOOL_NAME, SKILL_TOOL_NAME]],
-    ] as const)(
-      "gives an agent with %s its catalog tools, whatever they resolve",
-      (kind, tools) => {
-        expect(advertisedWithResolver(kind)).toEqual(tools);
-      },
-    );
+    it("gives an agent no catalog tools for dynamic resolvers that returned nothing they reach", () => {
+      const bundle = catalogBundle({ dynamicSubagents: ["helper"] });
+      const ctx = new ContextContainer();
+      ctx.set(BundleKey, {
+        ...bundle,
+        resolvedAgent: {
+          ...bundle.resolvedAgent,
+          dynamicConnectionResolvers: [{}],
+          dynamicSkillResolvers: [{}],
+          dynamicToolResolvers: [{}],
+        } as never,
+      });
+      const catalog = buildStepCatalog({
+        agentTools: toolMap(inlineTool("add")),
+        ctx,
+        endsTurn: true,
+        session: {},
+      });
+
+      // A dynamic subagent resolver still brings the task tools.
+      expect(names(catalog.advertised)).toEqual([
+        "add",
+        TASK_WAIT_TOOL_NAME,
+        TASK_CANCEL_TOOL_NAME,
+      ]);
+    });
+
+    it("keeps the catalog tools earlier steps offered, unchanged, once nothing reaches them", () => {
+      const reachingEverything = catalogContext({
+        connections: [fakeConnection({ name: "linear", tools: [] })],
+        skills: [{ deferred: true, name: "pdf-forms" }],
+        tools: [inlineTool("refund_invoice", { deferred: true })],
+      }).catalog;
+      const later = catalogContext({
+        offered: reachingEverything.offered,
+        tools: [inlineTool("add")],
+      }).catalog;
+      const catalogTools = (catalog: StepCatalog) =>
+        [SEARCH_TOOL_NAME, CALL_TOOL_NAME, SKILL_TOOL_NAME].map((tool) => shape(catalog, tool));
+
+      expect(names(later.advertised)).toEqual([
+        "add",
+        SEARCH_TOOL_NAME,
+        CALL_TOOL_NAME,
+        SKILL_TOOL_NAME,
+      ]);
+      expect(catalogTools(later)).toEqual(catalogTools(reachingEverything));
+    });
   });
 
   it("hides root-only entries, direct or deferred, from delegated sessions", async () => {

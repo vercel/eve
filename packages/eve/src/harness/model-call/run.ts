@@ -1,7 +1,11 @@
 import type { LanguageModel, ModelMessage } from "ai";
 
 import { HistoryStateKey } from "#context/keys.js";
-import { buildStepCatalog, type StepCatalog } from "#execution/catalog/step-catalog.js";
+import {
+  buildStepCatalog,
+  recordOfferedCatalogTools,
+  type StepCatalog,
+} from "#execution/catalog/step-catalog.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
@@ -109,6 +113,7 @@ export async function runModelStep(
     endsTurn,
     session: step.session,
   });
+  recordOfferedCatalogTools(step.ctx, catalog);
   step.frameworkToolNames = frameworkToolNames(catalog);
   const { approvedTools, pendingApprovalsNote } = humanInputContext(step, catalog);
   const caller = new ModelCaller(step, prompt, {

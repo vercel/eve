@@ -1,6 +1,6 @@
 /**
  * The step's catalog: one table of every entry a model step can reach. Direct
- * entries go into the model's tool list next to the catalog tools the agent
+ * entries go into the model's tool list next to the catalog tools the session
  * has: `eve__search` finds entries, `eve__tool` calls deferred entries and
  * connection tools, and `eve__skill` loads skills. A call resolves to its entry
  * here and then runs exactly as a direct call would, so only model history
@@ -11,7 +11,8 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import { connectionToolName } from "#connections/ownership.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
-import type { ContextReader } from "#context/key.js";
+import type { ContextAccessor, ContextReader } from "#context/key.js";
+import { OfferedCatalogToolsKey, type OfferedCatalogTools } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
 import { withTaskTools } from "#execution/tasks/model-step.js";
@@ -33,7 +34,7 @@ import {
 } from "#protocol/catalog-tools.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isObject } from "#shared/guards.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
@@ -61,54 +62,45 @@ const LISTED_SKILL_DESCRIPTION =
   "Load a skill's instructions when the request clearly matches one of your listed skills or the user asks for it, then follow them.";
 const SEARCHABLE_SKILL_DESCRIPTION = `Load a skill's instructions when the request clearly matches a listed skill or one ${SEARCH_TOOL_NAME} found, or the user asks for it, then follow them.`;
 
-/** Which catalog tools an agent gets, and what they reach. */
-interface CatalogTools {
-  /** A static connection or a dynamic connection resolver. */
-  readonly connections: boolean;
+/** Which catalog tools a step offers, and what they reach. */
+interface CatalogTools extends OfferedCatalogTools {
   readonly search: boolean;
-  /** A deferred skill or a dynamic skill resolver, which `eve__search` can find. */
-  readonly searchableSkills: boolean;
-  /** Any skill, static or from a dynamic skill resolver: `eve__skill` loads it. */
-  readonly skills: boolean;
-  /** Anything `eve__tool` can call: a deferred tool or agent, or a connection. */
-  readonly tools: boolean;
 }
 
 /**
  * Each catalog tool comes with what it reaches: `eve__tool` with a deferred
- * tool or agent, a connection, or a resolver that may add one; `eve__skill`
- * with any skill; and `eve__search` with anything it could find, which is
- * whatever `eve__tool` calls plus deferred and dynamic skills. All follow from
- * what the agent declares, never from what a step's resolvers returned, so the
- * tool list is fixed for a deployment and never changes within a session. An
- * agent with none of these has no catalog tools, and pays nothing for them.
+ * tool or agent, or a connection; `eve__skill` with any skill; and
+ * `eve__search` with anything it could find, which is whatever `eve__tool`
+ * calls plus deferred skills. What a step reaches includes what its dynamic
+ * resolvers returned, so a resolver that returns only listed tools adds none.
+ * Once a session's tool list offers a catalog tool it keeps it, so the tool
+ * list changes at most once for each and never drops one that earlier calls
+ * named. A session that reaches none of these has no catalog tools, and pays
+ * nothing for them.
  */
-function catalogToolsFor(
-  agentTools: readonly HarnessToolDefinition[],
-  bundle: CompiledBundle | undefined,
-): CatalogTools {
-  const agent = bundle?.resolvedAgent;
-  const skills = agent?.skills ?? [];
-  const dynamicSkills = (agent?.dynamicSkillResolvers.length ?? 0) > 0;
-  const connections =
-    (agent?.connections ?? []).length > 0 || (agent?.dynamicConnectionResolvers?.length ?? 0) > 0;
-  const searchableSkills = dynamicSkills || skills.some((skill) => skill.deferred === true);
-  const tools =
-    connections ||
-    agentTools.some((definition) => definition.deferred === true) ||
-    (agent?.dynamicToolResolvers.length ?? 0) > 0 ||
-    (bundle?.subagentRegistry.dynamicResolvers.length ?? 0) > 0;
+function catalogToolsFor(input: {
+  readonly connections: readonly ResolvedConnectionDefinition[];
+  readonly deferred: ReadonlyMap<string, HarnessToolDefinition>;
+  readonly offered: OfferedCatalogTools | undefined;
+  readonly skills: ReadonlyMap<string, CatalogSkill>;
+}): CatalogTools {
+  const { offered } = input;
+  const skills = [...input.skills.values()];
+  const connections = offered?.connections === true || input.connections.length > 0;
+  const searchableSkills =
+    offered?.searchableSkills === true || skills.some((skill) => skill.deferred);
+  const tools = offered?.tools === true || connections || input.deferred.size > 0;
   return {
     connections,
     search: tools || searchableSkills,
     searchableSkills,
-    skills: skills.length > 0 || dynamicSkills,
+    skills: offered?.skills === true || skills.length > 0,
     tools,
   };
 }
 
 export interface StepCatalog extends HarnessToolLookup {
-  /** The model's tool list: direct entries, then the catalog tools the agent has. */
+  /** The model's tool list: direct entries, then the catalog tools the session has. */
   readonly advertised: HarnessToolMap;
   readonly connections: readonly ResolvedConnectionDefinition[];
   /** Entries reached only through `eve__tool`, connection tools aside. */
@@ -117,6 +109,8 @@ export interface StepCatalog extends HarnessToolLookup {
   readonly entries: HarnessToolMap;
   /** Every skill the session can load, deferred or not. */
   readonly skills: ReadonlyMap<string, CatalogSkill>;
+  /** The catalog tools the tool list offers; see {@link recordOfferedCatalogTools}. */
+  readonly offered: OfferedCatalogTools;
   /**
    * Whether the session offers tasks: one of the agent's own tools it sees
    * starts them, or the agent resolves subagents at runtime. Both are fixed by
@@ -148,9 +142,6 @@ export function buildStepCatalog(input: {
 }): StepCatalog {
   const visible = (definition: HarnessToolDefinition) => isVisible(definition, input.session);
   const bundle = input.ctx?.get(BundleKey);
-  // Only the tools this session sees count, so a delegated session of the same
-  // agent doesn't search for root-only entries it can't reach.
-  const catalogTools = catalogToolsFor([...input.agentTools.values()].filter(visible), bundle);
   const offersTasks =
     (bundle?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
     [...input.agentTools.values()].some(
@@ -168,6 +159,14 @@ export function buildStepCatalog(input: {
   const registry = input.ctx?.get(ConnectionRegistryKey);
   const connections = registry?.getConnections() ?? [];
   const skills = sessionSkills(input.ctx);
+  // Entries hold only what this session sees, so a delegated session of the
+  // same agent doesn't search for root-only entries it can't reach.
+  const catalogTools = catalogToolsFor({
+    connections,
+    deferred,
+    offered: input.ctx?.get(OfferedCatalogToolsKey),
+    skills,
+  });
   const skillLoader = createSkillLoader(skills);
   const advertised = new Map(direct);
   // Listed tools include the catalog tools, so `eve__tool` naming one of them
@@ -184,6 +183,12 @@ export function buildStepCatalog(input: {
     describe,
     entries,
     get: (name) => (name === SKILL_ENTRY_NAME ? skillLoader : toolEntry(name)),
+    offered: {
+      connections: catalogTools.connections,
+      searchableSkills: catalogTools.searchableSkills,
+      skills: catalogTools.skills,
+      tools: catalogTools.tools,
+    },
     offersTasks,
     resolve: (toolCall) => {
       if (toolCall.toolName === CALL_TOOL_NAME && catalogTools.tools) {
@@ -226,6 +231,18 @@ export function buildStepCatalog(input: {
     advertised.set(SKILL_TOOL_NAME, createSkillTool(catalog, toolEntry, catalogTools));
   }
   return catalog;
+}
+
+/**
+ * Keeps the catalog tools `catalog` offers for every later step of the
+ * session. The step that calls the model records them; a step rebuilt to
+ * resume a parked call only reads them.
+ */
+export function recordOfferedCatalogTools(
+  ctx: ContextAccessor | undefined,
+  { offered }: StepCatalog,
+): void {
+  if (Object.values(offered).includes(true)) ctx?.set(OfferedCatalogToolsKey, offered);
 }
 
 /** The entry an `eve__tool` or `eve__skill` input names, if it names one. */

@@ -188,9 +188,9 @@ function toolResultParts(
 }
 
 /** A dynamic tool, stamped with the durable callback the bundler adds to authored resolvers. */
-function dynamicTool(description: string) {
+function dynamicTool(description: string, { deferred = true } = {}) {
   const entry = defineTool({
-    deferred: true,
+    deferred,
     description,
     execute: async () => ({ synced: true }),
     inputSchema: { type: "object" },
@@ -779,6 +779,68 @@ describe("step catalog in the harness (real AI SDK)", () => {
       expect(catalogMessages(request)).toEqual([]);
     }
     expect(toolResult(requests[1]!, "load-rules")).toBe("# house-rules");
+  });
+
+  it("adds search and eve__tool once a resolver returns a deferred tool, then keeps them", async () => {
+    const ctx = createSessionContext();
+    let exportAvailable = false;
+    const surfaceTools = {
+      eventNames: ["session.started"],
+      events: {
+        "session.started": () => ({
+          send_reply: dynamicTool("Reply on Alice's surface.", { deferred: false }),
+          ...(exportAvailable ? { export_report: dynamicTool("Export the billing report.") } : {}),
+        }),
+      },
+      logicalPath: "agent/tools/surface.ts",
+      slug: "surface",
+      sourceId: "tools/surface.ts",
+      sourceKind: "module" as const,
+    };
+    const bundle = catalogBundle();
+    ctx.set(BundleKey, {
+      ...bundle,
+      resolvedAgent: { ...bundle.resolvedAgent, dynamicToolResolvers: [surfaceTools] } as never,
+    });
+    const resolve = () =>
+      dispatchDynamicToolEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        messages: [],
+        resolvers: [surfaceTools],
+      });
+    const driver = createDriver(ctx, toolMap(inlineTool("add")));
+
+    // Alice's surface resolves only a listed tool, so there is nothing to search.
+    await resolve();
+    driver.reply(text("Hello, Alice."));
+    await driver.drive({ message: "Alice says hello." });
+
+    // The resolver adds a deferred export tool, and Alice's next request uses it.
+    exportAvailable = true;
+    await resolve();
+    driver.reply(
+      calls(call("export", CALL_TOOL_NAME, { name: "export_report" })),
+      text("Exported the billing report."),
+    );
+    await driver.drive({ message: "Alice asks for the billing report." });
+
+    // The export tool goes away, and the catalog tools stay.
+    exportAvailable = false;
+    await resolve();
+    driver.reply(text("Anything else, Alice?"));
+    await driver.drive({ message: "Alice says thanks." });
+
+    const requests = driver.requests();
+    expect(requests.map((request) => request.tools?.map((tool) => tool.name))).toEqual([
+      ["add", "send_reply"],
+      ["add", "send_reply", SEARCH_TOOL_NAME, CALL_TOOL_NAME],
+      ["add", "send_reply", SEARCH_TOOL_NAME, CALL_TOOL_NAME],
+      ["add", "send_reply", SEARCH_TOOL_NAME, CALL_TOOL_NAME],
+    ]);
+    // The tool list changes once, when the catalog tools join it.
+    for (const request of requests.slice(2)) expect(request.tools).toEqual(requests[1]!.tools);
+    expect(toolResult(requests[2]!, "export")).toEqual({ synced: true });
   });
 
   it("validates a connection tool's input before asking anyone to approve the call", async () => {

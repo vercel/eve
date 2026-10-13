@@ -195,7 +195,9 @@ arguments, and approval options as static [MCP](../connections/mcp) and
 [OpenAPI](../connections/openapi) connections. Each resolved connection joins
 the per-step connection registry. eve announces it to the model in an
 append-only context message, and the model reaches its tools through
-`eve__search` and `eve__tool`, so the tool list never changes.
+`eve__search` and `eve__tool`. If the session doesn't have those two tools yet,
+eve adds them when its first connection resolves and keeps them for the rest of
+the session, so later connections don't change the tool list.
 
 Set `instanceKey` on every authenticated dynamic connection. Use a stable,
 non-secret account or tenant identifier, and change it whenever the endpoint,
@@ -273,6 +275,8 @@ export default defineDynamic({
   },
 });
 ```
+
+An entry with `deferred: true` stays out of the model's tool list, like a static [deferred tool](../tools#keep-a-tool-out-of-the-tool-list). The model finds it with `eve__search` and calls it with `eve__tool`. If the session doesn't have those two tools yet, eve adds them on the first step where a resolver returns a deferred entry, and keeps them for the rest of the session. A resolver whose entries are all listed adds neither, so the model doesn't spend steps searching for tools it already has.
 
 ### Author replayable callbacks
 

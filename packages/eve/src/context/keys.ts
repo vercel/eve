@@ -121,6 +121,24 @@ export interface HistoryState {
   readonly announcements?: Readonly<Record<string, string>>;
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
+/**
+ * The catalog tools a session's tool list has offered. Each stays offered for
+ * the rest of the session, so the tool list never drops a catalog tool that
+ * earlier calls named. Compaction keeps it, unlike {@link HistoryStateKey}.
+ */
+export interface OfferedCatalogTools {
+  /** `eve__tool` mentions connected services, and `eve__search` their sign-in entries. */
+  readonly connections: boolean;
+  /** `eve__search` finds skills. */
+  readonly searchableSkills: boolean;
+  /** `eve__skill`. */
+  readonly skills: boolean;
+  /** `eve__tool`. */
+  readonly tools: boolean;
+}
+export const OfferedCatalogToolsKey = new ContextKey<OfferedCatalogTools>(
+  "eve.offeredCatalogTools",
+);
 export interface ActiveChannelDelivery {
   readonly traceSessionId: string;
   readonly agentName?: string;

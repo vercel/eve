@@ -37,8 +37,8 @@ export interface SearchReach {
 
 /**
  * `eve__search`'s description, saying which tool takes each kind of result.
- * It mentions only the catalog tools the agent has, so it is fixed for a
- * deployment.
+ * It mentions only the catalog tools the session has, so it changes only when
+ * the session first gains one.
  */
 function searchDescription({ connections, skills, tools }: SearchReach): string {
   return [
