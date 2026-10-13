@@ -1,6 +1,6 @@
 ---
 name: pr-shepherd
-description: Takes a finished eve branch through review to green CI. Opens the PR early, runs a fresh-context reviewer subagent, fixes critical findings, addresses, replies to, and resolves review comments, pushes, and monitors CI, rerunning flaky jobs or fixing real failures. Use after the initial implementation is complete, or when asked to open, babysit, land, or "get a PR green".
+description: Takes a finished eve branch from review to merge. Opens the PR early, runs a fresh-context reviewer subagent, fixes critical findings, addresses, replies to, and resolves review comments, pushes, monitors CI (rerunning flaky jobs or fixing real failures), then squash-merges or enables auto-merge. Use after the initial implementation is complete, or when asked to open, babysit, land, or "get a PR green".
 metadata:
   internal: true
 ---
@@ -9,7 +9,7 @@ metadata:
 
 Start after the first implementation is complete and checked locally. Finish
 when the PR has no unresolved review threads, no unanswered comments, and green
-CI on the latest head commit.
+CI on the latest head commit, and it is merged or set to auto-merge.
 
 Open the PR first. Review bots and teammates comment while the rest of the work
 runs, so an early PR gets more feedback in each round.
@@ -66,7 +66,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
       reviewThreads(first: 100) {
         nodes {
           id isResolved isOutdated path line
-          comments(first: 50) { nodes { databaseId author { login } body url } }
+          comments(first: 50) { nodes { author { login } body url } }
         }
       }
     }
@@ -115,20 +115,23 @@ needs a product or design decision only the user can make, ask the user.
    - `Not changing this: <reason grounded in the code or a repo rule>.`
    - `Agreed, this is a real gap. Tracking it in a follow-up: <scope>.`
 
+   Reply by thread ID. The REST replies endpoint accepts only a thread's first
+   comment, so it fails on later rounds.
+
    ```sh
-   gh api repos/{owner}/{repo}/pulls/<n>/comments/<databaseId>/replies -f body='Fixed in abc1234. ...'
+   gh api graphql -f id='<thread id>' -f body='Fixed in abc1234. ...' -f query='
+   mutation($id: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $id, body: $body }) { comment { url } } }'
    ```
 
-5. Resolve each thread once it is fixed and pushed, declined with a reason, or
-   deferred:
+5. Resolve threads that are fixed and pushed. Also resolve bot threads that
+   you declined or deferred, after you reply. Leave declined or deferred human
+   threads open, so the reviewer can accept the reason before merge, and list
+   them in the final report.
 
    ```sh
    gh api graphql -f id='<thread id>' -f query='
    mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }'
    ```
-
-   Leave a human reviewer's thread open only when it still waits on their
-   decision, and list it in the final report.
 
 6. Answer top-level comments that ask for a change or a question with
    `gh pr comment <n> --body-file <file>`.
@@ -161,24 +164,25 @@ teardown error, hang, or timeout.
 
 Classify the failure:
 
-- Real: the failure relates to the diff, reproduces locally with the tier
-  config from `AGENTS.md`, or fails the same way on rerun. Fix it, then go back
-  to step 4.
+- Real: the failure relates to the diff or reproduces locally with the tier
+  config from `AGENTS.md`. Fix it, then go back to step 4.
+- Already failing on `main`: the same job fails the same way on recent `main`
+  runs (`gh run list --branch main --workflow <file> --limit 10`). A rerun
+  cannot pass, and the fix does not belong in this PR. Do not rerun it; report
+  it to the user as unrelated.
 - Flaky: the failure does not relate to the diff, and it shows timeouts,
-  network, provider, or deploy errors. It also counts as flaky when the same
-  job fails on `main` (`gh run list --branch main --workflow <file> --limit 10`).
-  Most flakes come from `test-integration` on either OS, `test-scenario`, and
-  `e2e-vercel` or `e2e-postgres` fixture deploys. `e2e-local` uses live models,
-  so it can also vary between runs.
+  network, provider, or deploy errors. Most flakes come from `test-integration`
+  on either OS, `test-scenario`, and `e2e-vercel` or `e2e-postgres` fixture
+  deploys. `e2e-local` uses live models, so it can also vary between runs.
 
-Rerun only the failed jobs. GitHub refuses a rerun while any job in that
-workflow run is still in progress, so wait for the run to finish:
+Rerun only the failed jobs of a flaky failure. GitHub refuses a rerun while any
+job in that workflow run is still in progress, so wait for the run to finish:
 
 ```sh
 gh run rerun <run-id> --failed
 ```
 
-Rerun a flaky job at most twice per head commit. If it fails a third time,
+Rerun a flaky job at most twice per head commit. If it still fails the same way,
 treat it as real, or report it to the user with the failing test names. Do not
 run whole integration, scenario, or e2e tiers locally. Scope local runs to the
 failing file and test name.
@@ -195,6 +199,41 @@ the latest head commit:
   decision.
 - No new comments arrived since your last pass.
 
+## 7. Merge
+
+When step 6 is done, merge the PR, unless the user asked you not to merge. Check
+the review state and whether auto-merge is already on:
+
+```sh
+gh pr view <n> --json reviewDecision,mergeStateStatus,autoMergeRequest,headRefOid
+```
+
+PRs to `main` are squash-merged. GitHub uses the PR title as the commit subject
+and leaves the body blank, so pass the DCO sign-off as the body. Pin the head
+commit so a push that arrives after your last check cannot merge unseen.
+
+- `APPROVED`, with green required checks: squash-merge now.
+
+  ```sh
+  gh pr merge <n> --squash --match-head-commit <headRefOid> \
+    --body "Signed-off-by: $(git config user.name) <$(git config user.email)>"
+  ```
+
+- `REVIEW_REQUIRED`: enable auto-merge, so GitHub merges once a code owner
+  approves. Skip this when `autoMergeRequest` is already set.
+
+  ```sh
+  gh pr merge <n> --squash --auto --match-head-commit <headRefOid> \
+    --body "Signed-off-by: $(git config user.name) <$(git config user.email)>"
+  ```
+
+- `CHANGES_REQUESTED`: do not merge or enable auto-merge. Report the review to
+  the user.
+
+Do not pass `--delete-branch`. GitHub deletes the remote branch after the
+merge, and the local cleanup can fail in a worktree. Confirm the result with
+`gh pr view <n> --json state,mergedAt,autoMergeRequest`.
+
 ## Final report
 
 Give the user the PR URL and a short account of the work:
@@ -203,3 +242,5 @@ Give the user the PR URL and a short account of the work:
 - Comments you addressed, declined, or deferred, plus threads still open.
 - CI status on the head SHA, flaky reruns with job names, and real failures
   you fixed.
+- Merge state: merged with the squash commit SHA, auto-merge enabled and waiting
+  on approval, or not merged and why.

@@ -43,8 +43,8 @@ skill when drafting or updating one.
 
 Once the first implementation is done, use the
 [`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill to open the PR
-early, run a fresh-context review, address and resolve comments, and get CI
-green.
+early, run a fresh-context review, address and resolve comments, get CI green,
+and merge.
 
 ## Commands
 
