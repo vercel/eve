@@ -151,6 +151,24 @@ describe("summarizeTurnEvents", () => {
       status: "waiting",
     });
   });
+
+  it("keeps the answer the turn completed before it waited on tasks", () => {
+    const events = [
+      { type: "turn.started", data: { sequence: 1, turnId: "turn_1" } },
+      {
+        type: "message.completed",
+        data: { ...eventData, finishReason: "stop", message: "The requested answer." },
+      },
+      { type: "turn.waiting", data: { on: "tasks", sequence: 1, turnId: "turn_1" } },
+      { type: "turn.completed", data: { sequence: 1, turnId: "turn_1" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ] satisfies UnstampedMessageStreamEvent[];
+
+    expect(summarizeTurnEvents(events).message).toBe("The requested answer.");
+  });
 });
 
 describe("collectTurnEvents", () => {
