@@ -1,7 +1,11 @@
 import type { FilePart, UserContent } from "ai";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import { describe, expect, it, vi } from "vitest";
-import { WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  RunExpiredError,
+  StreamExpiredError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -642,6 +646,19 @@ describe("eveChannel — stream cursor", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Session not found.", ok: false });
+  });
+
+  it.each([
+    ["stream", new StreamExpiredError("Stream expired.", "test-session-id")],
+    ["run", new RunExpiredError("Run expired.", "test-session-id")],
+  ])("returns a terminal 410 when the session %s passed retention", async (_, error) => {
+    const handler = createEveStreamHandler({ auth: none() });
+    handler.getStreamTailIndex.mockRejectedValueOnce(error);
+
+    const response = await handler.fetch("https://eve.test/eve/v1/session/test-session-id/stream");
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ code: "session_expired", ok: false });
   });
 
   it("cancels the early-opened event stream when the tail lookup fails", async () => {
