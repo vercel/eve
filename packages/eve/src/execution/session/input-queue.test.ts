@@ -27,4 +27,24 @@ describe("SessionInputQueue", () => {
     ]);
     expect(queue.takeAuthorizations(held)).toBeUndefined();
   });
+
+  it("lets a queued message steer a held turn only when it arrived after the hold", () => {
+    const queue = new SessionInputQueue();
+    const turn = { callerCallId: undefined, principal: "user:test:alice" };
+    const send = (message: string) =>
+      queue.enqueueDelivery({
+        kind: "deliver",
+        payloads: [{ message }],
+        turnPolicy: "queue",
+      }).sequence;
+
+    const before = send("approve");
+    const heldSince = queue.nextAdmission;
+    const after = send("never mind");
+    const admitted = new Set([before, after]);
+
+    expect(queue.takeSteering(admitted, turn)).toBeUndefined();
+    expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
+    expect(queue.takeNext()).toMatchObject({ sequences: [before] });
+  });
 });

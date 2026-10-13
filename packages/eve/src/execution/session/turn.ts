@@ -352,7 +352,9 @@ export class SessionExecution {
    * The turn waits on a sign-in or tool approval it raised. It wakes with the
    * delivery its next step reads: the sign-in callback, an approval answer
    * from any responder, or a message from the turn's own person, which steers
-   * the turn and cancels the request. Anyone else's message queues behind it.
+   * the turn and cancels the request. Anyone else's message queues behind it,
+   * as does a queued message admitted before the hold: it was sent before the
+   * request existed, so it must not answer it.
    */
   private async waitForHeldRequest(
     turn: ActiveTurn,
@@ -363,12 +365,13 @@ export class SessionExecution {
   ): Promise<DeliverHookPayload | "cancelled"> {
     const attemptIds = new Set(held.authorizationAttemptIds);
     const requestIds = new Set(held.inputRequestIds);
+    const heldSince = this.input.queue.nextAdmission;
     while (true) {
       const callbacks = this.input.queue.takeAuthorizations(attemptIds);
       if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
       const answer = await turn.takeInputResponses(requestIds);
       if (answer !== undefined) return answer;
-      const steering = await turn.takeSteering({ heldOnPerson: true });
+      const steering = await turn.takeSteering({ heldSince });
       if (steering !== undefined) return steering;
       const next = await turn.nextRuntimeEvent([]);
       if (next === "cancelled") return next;
