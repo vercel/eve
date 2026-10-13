@@ -238,8 +238,9 @@ export interface ApprovedCall {
   /**
    * Resolves the responder's token for an inline provider, as
    * {@link ToolContext.getToken} does for the requester. It never starts a
-   * sign-in: when the responder has no token, the call fails with the
-   * provider's error.
+   * sign-in: when the responder has no token, it throws a non-retryable
+   * `ConnectionAuthorizationFailedError` with
+   * `reason: "approver_authorization_required"`.
    */
   getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
 }

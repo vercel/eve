@@ -1,5 +1,5 @@
 ---
-"eve": minor
+"eve": patch
 ---
 
-Approved tool calls can read who approved them. While an approved call runs, `ctx.approval.responder` is the approver's principal and `ctx.approval.getToken()` resolves the approver's token for an inline provider. The call itself still runs as the requester: `ctx.session.auth.current` and `ctx.getToken()` stay the requester's. `ctx.approval` is absent for calls that needed no approval.
+Approved `defineTool` calls can read who approved them: `ctx.approval.responder` is the approver and `ctx.approval.getToken(provider)` resolves the approver's token, while the call still runs as the requester.

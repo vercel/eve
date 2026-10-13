@@ -63,7 +63,7 @@ export async function runApprovedCalls(input: {
   /** The step attempt's telemetry, which hears each execution as the AI SDK reports it. */
   readonly telemetry?: TelemetryOptions;
   /** Who approved each request, which the call reads as `ctx.approval`; it still runs as the requester. */
-  readonly responderOf?: (request: InputRequest) => SessionAuthContext | undefined;
+  readonly responderOf: (request: InputRequest) => SessionAuthContext | undefined;
 }): Promise<{
   readonly settled: readonly ApprovedCallResult[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
@@ -148,7 +148,7 @@ export async function runApprovedCalls(input: {
             const startedAt = performance.now();
             try {
               started = true;
-              const responder = input.responderOf?.(request);
+              const responder = input.responderOf(request);
               const executed = execute(args, {
                 ...(responder !== undefined && { approval: { responder } }),
                 abortSignal: input.abortSignal,
