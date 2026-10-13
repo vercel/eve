@@ -960,6 +960,85 @@ describe("tool-hosted authorization", () => {
     },
   );
 
+  describe("when the requester approves their own call", () => {
+    const selfApproval = {
+      responder: {
+        attributes: {},
+        authenticator: "test-idp",
+        issuer: "test-idp",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    } as const;
+    const tokenProvider = (token: string, fetched: string[]): AuthorizationDefinition => ({
+      principalType: "user",
+      async getToken() {
+        fetched.push(token);
+        return { token };
+      },
+    });
+    const run = async (
+      read: (
+        ctx: ToolContext,
+        github: AuthorizationDefinition,
+        linear: AuthorizationDefinition,
+      ) => Promise<unknown>,
+    ) => {
+      const fetched: string[] = [];
+      const github = tokenProvider("github-secret", fetched);
+      const linear = tokenProvider("linear-secret", fetched);
+      const runtime = await createTestRuntime({ tools: [] });
+      const execute = createToolExecuteWithAuth({
+        scope: "grant-tool",
+        execute: async (_input, ctx) => await read(ctx, github, linear),
+      });
+      const outcome = runtime.runAsSession({ sessionId: "session_mixed_providers" }, async () => {
+        seedUserPrincipal();
+        return await execute(
+          {},
+          { messages: [], toolCallId: "call_grant", approval: selfApproval },
+        );
+      });
+      return { fetched, outcome };
+    };
+
+    it.each([
+      [
+        "requester first",
+        async (ctx: ToolContext, a: AuthorizationDefinition, b: AuthorizationDefinition) => {
+          await ctx.getToken(a);
+          await ctx.approval!.responder.getToken(b);
+        },
+      ],
+      [
+        "approver first",
+        async (ctx: ToolContext, a: AuthorizationDefinition, b: AuthorizationDefinition) => {
+          await ctx.approval!.responder.getToken(a);
+          await ctx.getToken(b);
+        },
+      ],
+    ] as const)(
+      "rejects two anonymous providers across both getters (%s)",
+      async (_order, read) => {
+        const { fetched, outcome } = await run(read);
+        await expect(outcome).rejects.toThrow(/explicit auth keys/);
+        expect(fetched).toEqual(["github-secret"]);
+      },
+    );
+
+    it("returns each provider's own token under distinct explicit keys", async () => {
+      const { fetched, outcome } = await run(async (ctx, github, linear) => ({
+        requester: (await ctx.getToken(github, { authKey: "github" })).token,
+        approver: (await ctx.approval!.responder.getToken(linear, { authKey: "linear" })).token,
+      }));
+      await expect(outcome).resolves.toEqual({
+        requester: "github-secret",
+        approver: "linear-secret",
+      });
+      expect(fetched).toEqual(["github-secret", "linear-secret"]);
+    });
+  });
+
   it("fails an approved call's approver token lookup without starting a sign-in", async () => {
     let starts = 0;
     const provider: AuthorizationDefinition = {

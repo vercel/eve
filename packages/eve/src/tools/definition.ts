@@ -248,7 +248,9 @@ export interface ApprovalResponder extends SessionAuthContext {
    * {@link ToolContext.getToken} does for the requester. It never starts a
    * sign-in: when the responder has no token, it throws a non-retryable
    * `ConnectionAuthorizationFailedError` with
-   * `reason: "approver_authorization_required"`.
+   * `reason: "approver_authorization_required"`. It shares the call's
+   * providers with `ctx.getToken`, so two inline providers without provider
+   * metadata need `options.authKey` across both getters too.
    */
   getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
 }

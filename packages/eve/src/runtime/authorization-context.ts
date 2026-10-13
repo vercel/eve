@@ -22,12 +22,19 @@ export function createAuthorizationContext(input: {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
       return await execution.getToken(resolve(provider, options));
     },
-    /** The bound responder's stored token; never starts or completes a sign-in. */
+    /**
+     * The given responder's stored token, resolved through this execution's
+     * providers; never starts or completes a sign-in.
+     */
     async getResponderToken(
+      responder: SessionAuthContext,
       provider: ToolAuthProvider,
       options?: ToolAuthOptions,
     ): Promise<TokenResult> {
-      return await execution.getResponderToken(resolve(provider, options));
+      return await execution.getResponderToken({
+        ...resolve(provider, options),
+        boundResponder: responder,
+      });
     },
     requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
       if (provider === undefined) throw missingProviderError("ctx.requireAuth");

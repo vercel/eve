@@ -25,7 +25,7 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
       getToken: auth.getToken,
       requireAuth: auth.requireAuth,
       ...(options.approval !== undefined && {
-        approval: approvalOf(options.approval.responder, input.scope),
+        approval: approvalOf(options.approval.responder, auth),
       }),
     };
     return auth.run(() => {
@@ -35,12 +35,14 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
 }
 
 /** What an approved call reads about the person who approved it. */
-function approvalOf(responder: SessionAuthContext, scope: string): ApprovedCall {
-  const auth = createAuthorizationContext({ scope, boundResponder: responder });
+function approvalOf(
+  responder: SessionAuthContext,
+  auth: ReturnType<typeof createAuthorizationContext>,
+): ApprovedCall {
   return {
     responder: {
       ...responder,
-      getToken: (provider, options) => auth.getResponderToken(provider, options),
+      getToken: (provider, options) => auth.getResponderToken(responder, provider, options),
     },
   };
 }
