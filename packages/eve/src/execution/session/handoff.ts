@@ -30,6 +30,7 @@ import {
   watchRunEnd,
   type RunWatch,
 } from "#execution/session/run-watch.js";
+import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import { isObject } from "#shared/guards.js";
 
@@ -281,6 +282,7 @@ export class SessionHandoff {
     if (this.worldUnsupported) return { kind: "retained", reason: "unsupported-world" };
     // The previous attempt's payloads have not come back yet.
     if (inbox.awaitingHandover) return { kind: "retained", reason: "busy" };
+    if (!isSessionStateIdleForHandoff(state)) return { kind: "retained", reason: "not-idle" };
     const ownerRunId = getWorkflowMetadata().workflowRunId;
     const attempt = this.attempts++;
     const attemptKey = `${ownerRunId}:${String(attempt)}`;
