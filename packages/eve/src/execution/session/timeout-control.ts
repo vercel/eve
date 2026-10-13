@@ -10,6 +10,7 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 export interface SessionTimeoutControl {
   dispose(): Promise<void>;
   start(): Promise<void>;
+  getDeadline(): Promise<Date>;
 }
 
 /** Creates a timer controller for one stable session command inbox. */
@@ -17,10 +18,14 @@ export function createSessionTimeoutControl(input: {
   readonly deadline: Date;
   readonly sessionId: string;
 }): SessionTimeoutControl {
-  let active: { readonly runId: string } | undefined;
+  let active: { readonly runId: string; readonly deadline?: Date } | undefined;
   let startup: Promise<void> | undefined;
 
   return {
+    async getDeadline(): Promise<Date> {
+      await this.start();
+      return active?.deadline ?? input.deadline;
+    },
     async dispose(): Promise<void> {
       try {
         await startup;

@@ -4,7 +4,10 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 
+import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
+
 type DecodedSessionInbox =
+  | SessionPrewarmPayload
   | DeliverHookPayload
   | SessionTimeoutHookPayload
   | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
@@ -48,6 +51,15 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
       }
       return value as DeliverHookPayload;
     }
+    case "session-prewarm":
+      if (
+        typeof payload.expectedOwnerRunId !== "string" ||
+        typeof payload.targetDeploymentId !== "string" ||
+        payload.targetDeploymentId.length === 0 ||
+        payload.targetDeploymentId === "latest"
+      )
+        throw new SessionInboxPayloadError("Invalid session prewarm hint.");
+      return value as SessionPrewarmPayload;
     case "cancel":
     case "clear":
     case "compact":

@@ -22,7 +22,10 @@ export interface SessionFailurePayload {
   readonly error: string;
 }
 
+import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
+
 export type SessionInboxPayload =
+  | SessionPrewarmPayload
   | SessionFailurePayload
   | HookPayload
   | SessionCommand

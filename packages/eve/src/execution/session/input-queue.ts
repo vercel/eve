@@ -53,12 +53,24 @@ export type SessionInputSelection =
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private nextSequence = 0;
+  private prewarmDeploymentId: string | undefined;
+
+  prepareOnDeployment(deploymentId: string): void {
+    this.prewarmDeploymentId = deploymentId;
+  }
+  takePrewarmDeployment(): string | undefined {
+    const target = this.prewarmDeploymentId;
+    this.prewarmDeploymentId = undefined;
+    return target;
+  }
 
   get pendingCount(): number {
     return this.entries.length;
   }
 
   enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission {
+    // A real message selects its deployment and supersedes any speculative hint.
+    this.prewarmDeploymentId = undefined;
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
     return admission;
