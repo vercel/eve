@@ -203,6 +203,8 @@ Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/
 
 Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before a reset. A reset attempts to append `session.failed` with code `session_stranded` and close the stream. Existing readers finish when they receive that terminal event.
 
+After a session ends, the World keeps its stream only for its retention period. Reading a stream past that point returns `410 session_expired`. The history is gone, so the TypeScript client fails on the first response with a `ClientError` whose `code` is `"session_expired"`, without retrying.
+
 ### Cancel a turn
 
 Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`.
