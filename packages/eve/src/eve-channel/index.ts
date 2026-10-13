@@ -102,15 +102,21 @@ const log = createLogger("eve.channel");
  * {@link defineChannel} directly only for a custom transport.
  */
 /** A delegating caller checks that this deployment serves its remote agent protocol. */
-function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryId?: string) {
+function createdSessionBody(
+  sessionId: string,
+  body: ParsedCreateBody,
+  handle?: { deliveryId?: string; existing?: boolean },
+) {
   const created: {
     ok: true;
     protocolVersion?: number;
     status?: "accepted";
     sessionId: string;
     deliveryId?: string;
+    existing?: boolean;
   } = { ok: true, sessionId };
-  if (deliveryId !== undefined) created.deliveryId = deliveryId;
+  if (handle?.deliveryId !== undefined) created.deliveryId = handle.deliveryId;
+  if (handle?.existing) created.existing = true;
   // Supported delegated protocols still require this wire acknowledgement.
   if (body.callback !== undefined) created.status = "accepted";
   if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
@@ -252,17 +258,21 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                 operationId: body.operationId,
               });
         const initialDeliveryId =
-          operationToken === undefined ? undefined : `delivery:${operationToken}`;
-        if (operationToken !== undefined) {
+          body.deliveryId ??
+          (operationToken === undefined ? undefined : `delivery:${operationToken}`);
+        if (operationToken !== undefined && body.sessionId === undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            return Response.json(createdSessionBody(owner.id, body, initialDeliveryId), {
-              headers: {
-                "cache-control": "no-store",
-                [EVE_SESSION_ID_HEADER]: owner.id,
+            return Response.json(
+              createdSessionBody(owner.id, body, { deliveryId: initialDeliveryId }),
+              {
+                headers: {
+                  "cache-control": "no-store",
+                  [EVE_SESSION_ID_HEADER]: owner.id,
+                },
+                status: 202,
               },
-              status: 202,
-            });
+            );
           }
         }
 
@@ -352,6 +362,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
             },
             ({ conversationId, parentTraceContext: inheritedTrace }) => {
               return createSession({
+                sessionId: body.sessionId,
                 deliveryId: initialDeliveryId,
                 audienceAuth: auth,
                 toolStubs:
@@ -403,13 +414,16 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         }
 
         return Response.json(
-          createdSessionBody(handle.sessionId, body, initialDeliveryId ?? handle.deliveryId),
+          createdSessionBody(handle.sessionId, body, {
+            deliveryId: handle.deliveryId ?? initialDeliveryId,
+            existing: handle.existing,
+          }),
           {
             headers: {
               "cache-control": "no-store",
               [EVE_SESSION_ID_HEADER]: handle.sessionId,
             },
-            status: 202,
+            status: handle.existing ? 200 : 202,
           },
         );
       }),
@@ -481,6 +495,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
             {
               auth: dispatchAuth,
               inbox: body.inbox,
+              deliveryId: body.deliveryId,
               callback: body.callback,
               context,
               history,

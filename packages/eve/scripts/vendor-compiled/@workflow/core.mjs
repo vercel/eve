@@ -1,4 +1,4 @@
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 
 import {
@@ -172,11 +172,27 @@ function stubCoreQuickJSEntrypoint() {
   };
 }
 
+function honorReservedRunId() {
+  return {
+    name: "eve:reserved-run-id",
+    transform(source, id) {
+      if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/runtime/start.js")) return null;
+      const search = "const runId = `wrun_${world.createRunId";
+      if (source.split(search).length !== 2)
+        throw new Error("Recheck the reserved Workflow run id transform.");
+      return {
+        code: source.replace(search, "const runId = opts.runId ?? `wrun_${world.createRunId"),
+        map: null,
+      };
+    },
+  };
+}
+
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
+  plugins: [honorReservedRunId(), stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
   entries: [
     { entry: "dist/util.js", outputPath: "util" },
     { entry: "dist/serialization.js", outputPath: "serialization" },
@@ -207,5 +223,18 @@ export default {
       const portable = source.replace(/Request\[(?:"duplex"|'duplex')\]/g, '"half"');
       if (source !== portable) await writeFile(path, portable);
     }
+    const startDeclarations = join(context.destinationRoot, "runtime/start.d.ts");
+    const startSource = await readFile(startDeclarations, "utf8");
+    const search = "export interface StartOptionsBase {";
+    if (startSource.split(search).length !== 2) {
+      throw new Error("Recheck the reserved Workflow run id declaration transform.");
+    }
+    await writeFile(
+      startDeclarations,
+      startSource.replace(
+        search,
+        `${search}\n    /** Caller-reserved durable run identity. */\n    runId?: string;`,
+      ),
+    );
   },
 };

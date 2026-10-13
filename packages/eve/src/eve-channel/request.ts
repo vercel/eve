@@ -105,6 +105,26 @@ export async function deriveOperationContinuationToken(input: {
   return `eve:op:${hex.slice(0, 32)}`;
 }
 
+function validateReservedIds(
+  input: Record<string, unknown>,
+  create: boolean,
+): Response | undefined {
+  if (
+    create &&
+    input.sessionId !== undefined &&
+    (typeof input.sessionId !== "string" ||
+      !/^wrun_[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(input.sessionId))
+  ) {
+    return Response.json({ ok: false, error: "Invalid sessionId." }, { status: 400 });
+  }
+  if (
+    input.deliveryId !== undefined &&
+    (typeof input.deliveryId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(input.deliveryId))
+  ) {
+    return Response.json({ ok: false, error: "Invalid deliveryId." }, { status: 400 });
+  }
+}
+
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
   // A newer protocol may introduce fields; preserve upgrade guidance before checking this one's envelope.
   const protocolVersion =
@@ -120,11 +140,15 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     "capabilities",
     "stubs",
     "forwardedPrincipal",
+    "sessionId",
+    "deliveryId",
   ];
   // Supported callers can still send this retired advisory field when delegating.
   if (input.callback !== undefined) fields.push("activityObserver");
   const rejection = rejectUnknownFields(input, fields);
   if (rejection !== undefined) return rejection;
+  const reservedError = validateReservedIds(input, true);
+  if (reservedError) return reservedError;
   const payload = input;
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
@@ -158,6 +182,8 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   }
 
   const result: ParsedCreateBody = {
+    sessionId: input.sessionId as string | undefined,
+    deliveryId: input.deliveryId as string | undefined,
     callback,
     capabilities,
     context,
@@ -181,6 +207,8 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
 interface ParsedSessionMessageBody {
   inbox?: string;
+  /** Caller-assigned delivery identity, as the hub names it in its own records. */
+  deliveryId?: string;
   callback?: SessionCallback;
   /** Names the delivery: a repeat with the same key is the same delivery, with the same receipt. */
   idempotencyKey?: string;
@@ -204,10 +232,13 @@ export function parseSessionMessageBody(
     "callback",
     "forwardedPrincipal",
     "idempotencyKey",
+    "deliveryId",
   ];
   if (input.callback !== undefined) fields.push("activityObserver");
   const rejection = rejectUnknownFields(input, fields);
   if (rejection !== undefined) return rejection;
+  const reservedError = validateReservedIds(input, false);
+  if (reservedError) return reservedError;
   const payload = input;
   const idempotencyKey = parseIdempotencyKeyField(payload.idempotencyKey);
   if (idempotencyKey instanceof Response) return idempotencyKey;
@@ -251,6 +282,7 @@ export function parseSessionMessageBody(
     outputSchema,
     turnPolicy,
     ...(idempotencyKey !== undefined && { idempotencyKey }),
+    ...(input.deliveryId !== undefined && { deliveryId: input.deliveryId as string }),
   };
 }
 
