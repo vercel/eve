@@ -90,12 +90,68 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
     for (const part of parts.slice(0, -1)) owner = (owner[part] ??= {}) as Record<string, unknown>;
     owner[parts.at(-1)!] = (...args: unknown[]) => call(operation, args);
   }
+  // The SDK's createBatch contract excludes hook events. Use an explicitly
+  // advertised extension instead: per-item SINGLE-create params/results keep
+  // snapshot guards, inline deltas, force-claim victim details, and errors intact.
+  // No client retries: a lost response must recover through workflow replay.
+  type HookCreate = {
+    args: Parameters<World["events"]["create"]>;
+    resolve(value: unknown): void;
+    reject(error: unknown): void;
+  };
+  const hookBatches = new Map<string, HookCreate[]>();
+  if (info.operations.includes("events.createHookBatch")) {
+    const events = forwarded.events as Record<string, unknown>;
+    const singleCreate = events.create as (...args: unknown[]) => Promise<unknown>;
+    events.create = (...args: Parameters<World["events"]["create"]>) => {
+      const [runId, event] = args;
+      if (event.eventType !== "hook_created" || !runId) return singleCreate(...args);
+      return new Promise((resolve, reject) => {
+        const queued = hookBatches.get(runId);
+        const item = { args, resolve, reject };
+        if (queued) {
+          queued.push(item);
+          return;
+        }
+        const batch = [item];
+        hookBatches.set(runId, batch);
+        // Hook metadata dehydration is asynchronous. Collect independent token
+        // claims across this microtask wave without adding a timed flush delay.
+        setImmediate(async () => {
+          hookBatches.delete(runId);
+          try {
+            const response = (await call("events.createHookBatch", [
+              runId,
+              batch.map(({ args: [, event, params] }) => ({ event, params })),
+            ])) as { results: ({ value: unknown } | { error: unknown })[] };
+            if (!Array.isArray(response?.results) || response.results.length !== batch.length)
+              throw new Error("Invalid world hook batch response");
+            // Validate all envelopes before resolving any claim.
+            const outcomes = response.results.map((result) => {
+              if ("error" in result) {
+                const error = deserializeDevelopmentWorldError(result.error);
+                if (!error) throw new Error("Invalid world hook batch error");
+                return { error };
+              }
+              if (!("value" in result)) throw new Error("Invalid world hook batch result");
+              return { value: result.value };
+            });
+            outcomes.forEach((result, index) => {
+              if ("error" in result) batch[index]!.reject(result.error);
+              else batch[index]!.resolve(result.value);
+            });
+          } catch (error) {
+            for (const item of batch) item.reject(error);
+          }
+        });
+      });
+    };
+  }
   type BufferState = {
     runId: string;
     name: string;
     chunks: (string | Uint8Array)[];
-    pending: Promise<void>;
-    timer?: ReturnType<typeof setTimeout>;
+    pending?: Promise<void>;
     error?: unknown;
   };
   const buffers = new Map<string, BufferState>();
@@ -103,40 +159,51 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
     const key = JSON.stringify([runId, name]);
     let value = buffers.get(key);
     if (!value) {
-      value = { runId, name, chunks: [], pending: Promise.resolve() };
+      value = { runId, name, chunks: [] };
       buffers.set(key, value);
     }
     return value;
   }
-  async function flush(value: BufferState) {
-    clearTimeout(value.timer);
-    value.timer = undefined;
-    const chunks = value.chunks.splice(0);
-    if (chunks.length)
-      value.pending = value.pending
-        .then(async () => {
-          if (value.error) throw value.error;
-          if (info.operations.includes("streams.writeMulti"))
-            await call("streams.writeMulti", [
+  // One drain per stream. Start an idle stream immediately; only chunks that
+  // arrive during its RPC coalesce, and the next batch follows without a timer.
+  function drain(value: BufferState): Promise<void> {
+    if (value.pending) return value.pending;
+    value.pending = (async () => {
+      while (value.chunks.length && !value.error) {
+        const chunks = value.chunks.splice(0);
+        if (info.operations.includes("streams.writeMulti"))
+          await call("streams.writeMulti", [
+            value.runId,
+            value.name,
+            chunks,
+            { operationId: randomUUID() },
+          ]);
+        else
+          for (const chunk of chunks)
+            await call("streams.write", [
               value.runId,
               value.name,
-              chunks,
+              chunk,
               { operationId: randomUUID() },
             ]);
-          else
-            for (const chunk of chunks)
-              await call("streams.write", [
-                value.runId,
-                value.name,
-                chunk,
-                { operationId: randomUUID() },
-              ]);
-        })
-        .catch((error) => {
-          value.error = error;
-        });
-    await value.pending;
-    if (value.error) throw value.error;
+      }
+    })()
+      .catch((error) => {
+        value.error = error;
+      })
+      .finally(() => {
+        value.pending = undefined;
+      });
+    return value.pending;
+  }
+  async function flush(value: BufferState) {
+    // A write can arrive as an existing drain's final promise settles. Recheck
+    // after awaiting so read/close barriers do not strand accepted chunks.
+    do {
+      if (value.error) throw value.error;
+      await drain(value);
+      if (value.error) throw value.error;
+    } while (value.chunks.length);
   }
   async function flushAll() {
     await Promise.all([...buffers.values()].map(flush));
@@ -193,10 +260,10 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
         if (value.error) throw value.error;
         if (statsEnabled()) stats.streamChunks++;
         value.chunks.push(chunk);
-        if (!value.timer)
-          value.timer = setTimeout(() => {
-            void flush(value).catch(() => {});
-          }, options.streamFlushIntervalMs ?? 30);
+        void drain(value).then(() => {
+          // Cover a write accepted during the drain's promise-finalization gap.
+          if (value.chunks.length && !value.error) void drain(value);
+        });
       },
       async writeMulti(runId: string, name: string, chunks: (string | Uint8Array)[]) {
         const value = state(runId, name);
@@ -224,8 +291,11 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
     },
     async start() {},
     async close() {
-      await flushAll();
-      process.removeListener("beforeExit", beforeExit);
+      try {
+        await flushAll();
+      } finally {
+        process.removeListener("beforeExit", beforeExit);
+      }
     },
   } as unknown as World;
   function beforeExit() {
