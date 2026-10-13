@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/91
 status: in-progress
-last_updated: "2026-10-07"
+last_updated: "2026-10-13"
 ---
 
 # Adding prior history to sessions
@@ -45,10 +45,11 @@ migration, app-owned persistence, and branching:
 POST("/conversations/:id/session", async (req, { from, params }) => {
   const auth = await authenticate(req);
   const conversation = await db.conversations.findForUser(params.id!, auth);
-  const session = await from(`conversation:${conversation.id}`).create({
+  const { created, session } = await from(`conversation:${conversation.id}`).create({
     auth,
-    history: conversation.messages.map((m) => ({ id: m.id, role: m.role, content: m.text })),
+    history: conversation.messages.map((m) => ({ id: m.id, role: m.role, content: m.body })),
   });
+  if (!created) return Response.json({ error: "Already started." }, { status: 409 });
   return Response.json({ sessionId: session.id });
 });
 ```
@@ -72,18 +73,21 @@ continues it. Payloads coalesced into one turn contribute their history in order
 the same paths as `context`: a message consumed as a plain-text answer to a pending question drops
 both.
 
-**`create()`.** If a session owns the address, `create()` returns it unchanged. Otherwise it
-starts a session without a message and waits, bounded, until that session claims the address, so
-an immediate `send()` finds it and concurrent `create()` calls settle on the winner. The history
+**`create()`.** Returns `{ session, created }`. If a session owns the address, it returns that
+session with `created: false`. Otherwise it starts a session without a message and waits, bounded,
+until some session claims the address, so an immediate `send()` finds it. `created` is `true` only
+when the session it started won the claim; a concurrent `create()` or `send()` that wins leaves
+this run to exit without forwarding its history, and the caller sees `created: false`. The history
 waits in session state and joins the first message's turn, so it reaches model history through
-the same path as `send()` history.
+the same path as `send()` history. It leaves session state only once a deliver result carries it,
+so a first message the channel drops does not lose it.
 
 **Server-resolved only.** History comes from authored code. The eve HTTP request body does not
 accept it, and no client SDK option sets it. Code that loads stored history must authorize the
 caller against that conversation.
 
-**Validation.** `send()` and `create()` throw `InvalidSessionHistoryError` before anything is
-enqueued. The error names the offending entry and rule: unknown role, empty content, an overlong
+**Validation.** `send()` and `create()` throw `InvalidSessionHistoryError`, exported from
+`eve/channels` with the caps, before anything is enqueued. The error names the offending entry and rule: unknown role, empty content, an overlong
 or duplicate id, or exceeding 500 messages or 512 KiB of content per call. These caps are
 placeholders until measured against Workflow payload limits.
 
@@ -91,11 +95,12 @@ placeholders until measured against Workflow payload limits.
 `metadata: { "eve.imported": true }`. Assistant entries become plain assistant text. No tool
 calls, results, files, reasoning, or provider options are created.
 
-**Display history.** `history.imported` carries `messages` (`id?`, `role`, `text`), `sequence`,
-and `turnId`, and precedes the `message.received` of the turn the entries joined. The default
+**Display history.** `history.imported` carries `messages` in the input shape (`id?`, `role`,
+`content`), `sequence`, and `turnId`, and precedes the `message.received` of the turn the entries joined. The default
 reducer places them before that turn's message, ahead of any unconfirmed optimistic message.
 Imported messages carry `metadata.imported` and no `turnId`, so a turn's response never streams
-into one.
+into one. Message ids derive from the event, since app ids are unique only within one call; the app
+id rides in `metadata.historyId`.
 
 **Everything else is unchanged.** Session state, sandbox, memory, and pending input are untouched.
 After joining history, entries are ordinary messages: pre-model compaction counts them, compaction
@@ -154,7 +159,7 @@ approximate it.
 | Real roles instead of a transcript blob       | #91, #75          | Covered          |                                                                     |
 | Initialize without execution                  | #3524             | Covered          | `create()` runs no model or tool.                                   |
 | Empty history                                 | #3524             | Covered          |                                                                     |
-| Map imported ids                              | #3524             | Covered          | App ids become message ids.                                         |
+| Map imported ids                              | #3524             | Covered          | App ids ride in `metadata.historyId`.                               |
 | Preserve tool calls and results               | #3524             | Follow-up        |                                                                     |
 | Clear errors for invalid history              | #3524             | Covered          |                                                                     |
 | Settled-history export, fork, or rewind       | #3524, #75        | Not covered      | Userland can build history from the event stream.                   |

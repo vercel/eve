@@ -206,7 +206,8 @@ async function runSessionStepBody(
           .requester
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
-  // History left by `create()` joins the first message's turn, so a message takes it out of state.
+  // History left by `create()` joins the first message's turn. It leaves state only once a
+  // deliver result carries it, so a dropped first message does not lose it.
   const pendingHistory =
     delivery?.payloads.some((payload) => payload.message !== undefined) === true
       ? readPendingHistory(durableSession.state)
@@ -218,9 +219,8 @@ async function runSessionStepBody(
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
-  const initialSession: HarnessSession = {
+  let initialSession: HarnessSession = {
     ...hydrated,
-    ...(pendingHistory.length > 0 && { state: withoutPendingHistory(hydrated.state) }),
     history: validateHarnessModelMessages(input.history),
   };
   const history = createExecutionHistoryView(initialSession);
@@ -340,6 +340,9 @@ async function runSessionStepBody(
       } catch (error) {
         await failChannelDeliveries(error);
         throw error;
+      }
+      if (results.length > 0 && pendingHistory.length > 0) {
+        initialSession = { ...initialSession, state: withoutPendingHistory(initialSession.state) };
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
     }

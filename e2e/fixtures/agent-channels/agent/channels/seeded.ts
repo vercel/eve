@@ -36,13 +36,17 @@ export default defineChannel({
         withBob?: boolean;
       };
       const address = from(`seeded:${body.sessionRef ?? crypto.randomUUID()}`);
-      const session =
-        body.mode === "create"
-          ? await address.create({ auth: AUTH, history: [...ALICE_EARLIER] })
-          : await address.send(body.message ?? "What did we agree on?", {
-              auth: AUTH,
-              history: body.withBob === true ? [...BOB_LATER] : undefined,
-            });
+      if (body.mode === "create") {
+        const { created, session } = await address.create({
+          auth: AUTH,
+          history: [...ALICE_EARLIER],
+        });
+        return Response.json({ created, ok: true, sessionId: session.id });
+      }
+      const session = await address.send(body.message ?? "What did we agree on?", {
+        auth: AUTH,
+        history: body.withBob === true ? [...BOB_LATER] : undefined,
+      });
       return Response.json({ ok: true, sessionId: session.id });
     }),
   ],

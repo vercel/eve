@@ -27,6 +27,7 @@ export {
   type ChannelResolveSession,
   type ChannelRespondOptions,
   type ChannelCreateOptions,
+  type ChannelCreateResult,
   type ChannelSendOptions,
   type ChannelSource,
   type ChannelCors,
@@ -67,7 +68,12 @@ export type {
   FetchFileFunction,
   FetchFileResult,
 } from "#shared/channel-definition.js";
-export type { SessionHistoryMessage } from "#shared/session-history.js";
+export {
+  InvalidSessionHistoryError,
+  MAX_SESSION_HISTORY_CONTENT_BYTES,
+  MAX_SESSION_HISTORY_MESSAGES,
+  type SessionHistoryMessage,
+} from "#shared/session-history.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

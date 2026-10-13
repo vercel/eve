@@ -204,7 +204,7 @@ export interface HistoryImportedMessage {
   /** App-owned id from the seeded history, when one was supplied. */
   readonly id?: string;
   readonly role: "user" | "assistant";
-  readonly text: string;
+  readonly content: string;
 }
 
 /**

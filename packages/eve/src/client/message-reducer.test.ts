@@ -110,19 +110,39 @@ describe("defaultMessageReducer", () => {
     data = reduceServerEvents(reducer, data, [
       createHistoryImportedEvent({
         messages: [
-          { id: "m1", role: "user", text: "Earlier question" },
-          { role: "assistant", text: "Earlier answer" },
+          { content: "Earlier question", id: "m1", role: "user" },
+          { content: "Earlier answer", role: "assistant" },
         ],
         sequence: 0,
         turnId: "turn_0",
       }),
     ]);
     expect(data.messages.map(({ id }) => id)).toEqual([
-      "m1",
+      expect.stringContaining(":imported:0"),
       expect.stringContaining(":imported:1"),
       "optimistic:first:user",
     ]);
-    expect(data.messages[1]?.metadata).toEqual({ imported: true, status: "complete" });
+    expect(data.messages.map(({ metadata }) => metadata)).toEqual([
+      { historyId: "m1", imported: true, status: "complete" },
+      { imported: true, status: "complete" },
+      expect.anything(),
+    ]);
+
+    // App ids are unique only within one call: a later call reusing one keeps both messages.
+    data = reduceServerEvents(reducer, reducer.initial(), [
+      createHistoryImportedEvent({
+        messages: [{ content: "Earlier question", id: "m1", role: "user" }],
+        sequence: 0,
+        turnId: "turn_0",
+      }),
+      createHistoryImportedEvent({
+        messages: [{ content: "Later question", id: "m1", role: "user" }],
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ]);
+    expect(data.messages.map(({ metadata }) => metadata?.historyId)).toEqual(["m1", "m1"]);
+    expect(new Set(data.messages.map(({ id }) => id)).size).toBe(2);
 
     // Steering into an active turn: added history lands before that turn's response, which keeps
     // streaming into its own message.
@@ -135,7 +155,7 @@ describe("defaultMessageReducer", () => {
         turnId: "turn_1",
       }),
       createHistoryImportedEvent({
-        messages: [{ role: "user", text: "Bob: meanwhile" }],
+        messages: [{ content: "Bob: meanwhile", role: "user" }],
         sequence: 2,
         turnId: "turn_1",
       }),

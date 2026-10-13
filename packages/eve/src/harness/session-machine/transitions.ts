@@ -132,9 +132,7 @@ export function receive(
   if (input.imported !== undefined && input.imported.length > 0) {
     events.push(
       createHistoryImportedEvent({
-        messages: input.imported.map(({ content, id, role }) =>
-          id === undefined ? { role, text: content } : { id, role, text: content },
-        ),
+        messages: input.imported,
         sequence: position.sequence,
         turnId,
       }),

@@ -418,20 +418,22 @@ function reduceContent(data: EveMessageData, event: EveAgentReducerEvent): EveMe
 
 /**
  * Added history precedes its turn's message: before that turn's response and any message the
- * client submitted and the stream hasn't confirmed. App ids become message ids so annotations can
- * rejoin.
+ * client submitted and the stream hasn't confirmed. App ids are unique only within one call, so
+ * message ids derive from the event and the app id rides in metadata for rejoining annotations.
  */
 function importHistory(data: EveMessageData, event: HistoryImportedEvent): EveMessageData {
+  const eventId = event.meta.id ?? `${event.data.turnId}:${event.data.sequence}`;
   const imported = event.data.messages.map((message, index): EveMessage => ({
-    id:
-      message.id ??
-      `${event.meta.id ?? `${event.data.turnId}:${event.data.sequence}`}:imported:${index}`,
+    id: `${eventId}:imported:${index}`,
     // No `turnId`: the turn's response must never stream into an imported assistant message.
-    metadata: { imported: true, status: "complete" },
+    metadata:
+      message.id === undefined
+        ? { imported: true, status: "complete" }
+        : { historyId: message.id, imported: true, status: "complete" },
     parts: [
       message.role === "assistant"
-        ? { state: "done", text: message.text, type: "text" }
-        : { text: message.text, type: "text" },
+        ? { state: "done", text: message.content, type: "text" }
+        : { text: message.content, type: "text" },
     ],
     role: message.role,
   }));

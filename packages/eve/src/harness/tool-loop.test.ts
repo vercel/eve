@@ -1547,8 +1547,8 @@ describe("createToolLoopHarness", () => {
     ]);
     expect(received[0]?.data).toMatchObject({
       messages: [
-        { id: "m1", role: "user", text: "What is the code word?" },
-        { role: "assistant", text: "It is heron." },
+        { content: "What is the code word?", id: "m1", role: "user" },
+        { content: "It is heron.", role: "assistant" },
       ],
     });
   });

@@ -2,7 +2,9 @@ import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
-import { createChannelAddressFn } from "#channel/channel-address.js";
+import { type ChannelCreateResult, createChannelAddressFn } from "#channel/channel-address.js";
+
+export type { ChannelCreateResult } from "#channel/channel-address.js";
 import type { Session } from "#channel/session.js";
 import type {
   CancelTurnResult,
@@ -73,9 +75,11 @@ export interface ChannelSource<TState = undefined> {
   send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
   /**
    * Creates a session that waits for its first message, without running a
-   * turn. Returns the existing session, unchanged, when one owns the address.
+   * turn. When another session owns the address, or claims it concurrently,
+   * returns that session unchanged with `created: false`; its `history` was not
+   * added.
    */
-  create(options: ChannelCreateOptions<TState>): Promise<Session>;
+  create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
   /** Answers pending input requests. Never creates a session. */
   respond<const TResponses extends readonly InputResponse[]>(
     inputResponses: StrictInputResponses<TResponses>,

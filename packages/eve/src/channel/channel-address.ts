@@ -44,6 +44,15 @@ interface BaseChannelAddressDeliveryOptions {
   readonly turnPolicy?: TurnPolicy;
 }
 
+/**
+ * Result of `create()`. `created` is `false` when another session already owned the address, or
+ * won it concurrently; that session is returned unchanged and any `history` was not added.
+ */
+export interface ChannelCreateResult {
+  readonly created: boolean;
+  readonly session: Session;
+}
+
 /** Delivery options for a channel address whose continuation token is already bound. */
 export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends [undefined]
   ? BaseChannelAddressDeliveryOptions
@@ -51,15 +60,15 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
 
 /**
  * Dynamic handle for whichever durable session currently owns one channel-local address.
- * Only {@link send} may create a session: when the address is unowned, or in
- * place of a stranded session that another eve version built. Sends to a session whose
+ * Only {@link create} and {@link send} may create a session: when the address is unowned, and
+ * `send` also in place of a stranded session that another eve version built. Sends to a session whose
  * owner is only unavailable throw `SessionStrandedError` and deliver nothing.
  * Responses to an address no session holds throw `SessionNotActiveError`.
  */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
-  create(options: ChannelAddressCreateOptions<TState>): Promise<Session>;
+  create(options: ChannelAddressCreateOptions<TState>): Promise<ChannelCreateResult>;
   send(
     message: string | UserContent,
     options: ChannelAddressDeliveryOptions<TState>,
@@ -162,15 +171,12 @@ export function createChannelAddress<TState = undefined>(input: {
     },
     async create(options) {
       const history = validateSessionHistory(options.history);
+      const toSession = (sessionId: string) =>
+        createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
       const owner = await input.runtime.resolveContinuation(namespacedToken);
-      if (owner !== undefined) {
-        return createSession(owner.sessionId, input.runtime, {
-          ...metadata,
-          turnPolicy: input.turnPolicy,
-        });
-      }
+      if (owner !== undefined) return { created: false, session: toSession(owner.sessionId) };
       const state = (options as { readonly state?: TState }).state;
-      await input.runtime.createSession({
+      const started = await input.runtime.createSession({
         adapter:
           state === undefined
             ? input.adapter
@@ -187,14 +193,18 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       });
-      // The new run claims the address asynchronously. Returning its owner, rather than the run
-      // just started, lets an immediate `send()` find it and settles concurrent creates on the
-      // winner.
-      const claimed = await waitForContinuationOwner(input.runtime, namespacedToken);
-      return createSession(claimed.sessionId, input.runtime, {
-        ...metadata,
-        turnPolicy: input.turnPolicy,
-      });
+      // The new run claims the address asynchronously, and a concurrent `create()` or `send()`
+      // may claim it first. Waiting for the owner lets an immediate `send()` find it, and tells
+      // the caller whether its history landed: a losing run exits without forwarding anything.
+      const claimed = await waitForContinuationOwner(
+        input.runtime,
+        namespacedToken,
+        started.sessionId,
+      );
+      return {
+        created: claimed.sessionId === started.sessionId,
+        session: toSession(claimed.sessionId),
+      };
     },
     async send(message, options) {
       return await this.deliver({ message }, options);
@@ -263,14 +273,17 @@ const CREATE_CLAIM_TIMEOUT_MS = 15_000;
 async function waitForContinuationOwner(
   runtime: Runtime,
   continuationToken: string,
+  startedSessionId: string,
 ): Promise<{ readonly sessionId: string }> {
   const deadline = Date.now() + CREATE_CLAIM_TIMEOUT_MS;
   for (let delayMs = 25; ; delayMs = Math.min(delayMs * 2, 500)) {
     const owner = await runtime.resolveContinuation(continuationToken);
     if (owner !== undefined) return owner;
     if (Date.now() + delayMs > deadline) {
+      // Unclaimed, the address may still go to this run or to a concurrent one, so neither
+      // `created` value would be true yet.
       throw new Error(
-        `create() started a session for "${continuationToken}", but it did not claim the address within ${CREATE_CLAIM_TIMEOUT_MS / 1000}s.`,
+        `create() started session "${startedSessionId}" for "${continuationToken}", but no session claimed the address within ${CREATE_CLAIM_TIMEOUT_MS / 1000}s. Call resolveSession() on the address to find its owner once one does.`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs));

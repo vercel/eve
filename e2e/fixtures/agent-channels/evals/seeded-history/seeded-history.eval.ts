@@ -3,7 +3,7 @@ import { equals, satisfies } from "eve/evals/expect";
 
 import { postChannel } from "../custom-channels/shared";
 
-type MessageResponse = { ok: boolean; sessionId?: string };
+type MessageResponse = { created?: boolean; ok: boolean; sessionId?: string };
 
 function importedBeforeReceived(types: readonly string[]): boolean {
   const imported = types.indexOf("history.imported");
@@ -27,8 +27,9 @@ export default defineEval({
     await t.require(
       created,
       satisfies(
-        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
-        "create() returns a session",
+        (value: MessageResponse) =>
+          value.ok === true && value.created === true && typeof value.sessionId === "string",
+        "create() creates a session",
       ),
     );
 
