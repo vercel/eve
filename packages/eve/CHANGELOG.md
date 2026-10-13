@@ -1,5 +1,19 @@
 # eve
 
+## 0.79.0
+
+### Minor Changes
+
+- bc2be45: Adds `t.score(evaluation)` for recording a score from 0 to 1, named with `.label(key)` and gated with `.gate()` or `.atLeast()`. `AssertionResult` gains `key`, and `score`, `threshold`, and `passed` are now optional: `score` is absent when the scorer threw, and `threshold` and `passed` are absent when no rule applies, so custom reporters should treat `passed === false` as the failure signal. `eve eval` warns when soft assertions in one eval share a name with different scores.
+
+### Patch Changes
+
+- 76f6854: eve's agent spans now come from the shared tracing library, and durable turns recover from one checkpoint per turn. Each tool call is still one `execute_tool` span, a local subagent's first turn still nests under its caller, and trace schema version 4 is unchanged.
+- f5e5183: Connection approval policies now receive `toolAnnotations`, the hints an MCP server declared for the called tool (such as `readOnlyHint` and `destructiveHint`), so a policy can skip approval for read-only tools. It is `undefined` when the server declares none.
+- 302a4d3: Tools can now define `approval.prompt` to show a human-readable, input-aware summary in approval requests. Slack keeps the complete tool input available in a collapsed block below the approval card.
+- 422b628: Extract reusable agent tracing with wrapped execution, model stream completion, remote delegation, and durable turns that save and resume themselves through a checkpointer. Preserve trace schema version 4 while sharing one span lifecycle with eve.
+- 485d0f5: The agent tracing library now writes schema 4's `agent.action.kind`, `agent.action.name`, and `agent.action.outcome` on tool and approval spans itself, so hosts other than eve render correctly in Agent Runs. eve's trace output is unchanged.
+
 ## 0.78.0
 
 ### Minor Changes
