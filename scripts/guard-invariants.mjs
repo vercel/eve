@@ -131,11 +131,11 @@
  *   rule 51 — Only the session machine (`harness/session-machine/`) and the
  *             human-in-the-loop lifecycle it delegates to
  *             (`harness/hitl/`) build lifecycle events and read the
- *             machine's private state. Every change to a turn, request,
- *             sign-in, task, or call outcome is a transition that returns its
- *             events, so nothing changes without readers hearing it. The model
- *             step's streamed content (its calls and their inline results) is
- *             built where it streams.
+ *             machine's private state. The guard checks only those imports;
+ *             it does not prove every state change emits events (approval
+ *             candidates are still written directly, and `matchSignIns`
+ *             emits none). The model step's streamed content (its calls and
+ *             their inline results) is built where it streams.
  *   rule 52 — The tracing library in `packages/tracing/src/` imports only
  *             itself and external packages. eve reaches it only through the
  *             vendored root, delegation, otel, and ai-sdk entrypoints under
