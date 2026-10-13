@@ -1,186 +1,195 @@
-import type {
-  Client,
-  ClientSession,
-  InputRequest,
-  InputResponse,
-  MessageResponse,
-  MessageStreamEvent,
-} from "eve/client";
+import type { InputOption, InputRequest, MessageStreamEvent } from "eve/client";
+import type { UseEveAgentHelpers } from "eve/react";
 import { VOICE_CLIENT_CONTEXT } from "./voice-config";
 
 /** GPT-Live-1 context channels: `thinking` is silent, `commentary` is spoken. */
 export type LiveContextChannel = "commentary" | "thinking";
 
-export type DelegationStatus = "running" | "needs-input" | "done" | "failed";
-
-export type Delegation = {
-  readonly id: string;
-  readonly request: string;
-  readonly status: DelegationStatus;
-  readonly steps: readonly string[];
-  readonly answer?: string;
-  readonly inputRequests?: readonly InputRequest[];
-};
-
-type Job = { delegation: Delegation; response?: MessageResponse };
+type Agent = Pick<UseEveAgentHelpers<unknown>, "cancel" | "respond" | "send">;
 
 // GPT-Live-1 rejects context appends over 500 tokens.
 const MAX_APPEND_CHARS = 1500;
+// Speech wraps an answer in words a typed reply wouldn't have.
+const FILLER = new Set(["it", "ok", "okay", "please", "that", "yeah", "yes"]);
 
 /**
- * Runs GPT-Live-1 delegations through one durable eve session per call.
+ * Relays GPT-Live-1 delegations to one eve session and the agent's progress
+ * back into the call. The page renders the session itself; this class only
+ * decides what the voice model hears.
  *
- * Delegations run one at a time so each answer can be matched to the
- * delegation that asked for it. Approvals pause a delegation until the user
- * answers on screen; the voice model is never allowed to approve anything.
+ * Delegations run one at a time so each answer reaches the delegation that
+ * asked for it. A turn parked on input holds the queue, because eve treats a
+ * message sent then as steering and would withdraw the prompt. Instead, what
+ * the user says is checked against the first open prompt, the way eve answers
+ * a typed reply that names an option. Anything else waits for the prompt.
  */
 export class VoiceDelegate {
-  private session: ClientSession | null = null;
-  private queue: Promise<void> = Promise.resolve();
-  private readonly jobs = new Map<string, Job>();
+  private current: string | undefined;
+  private answer: string | undefined;
+  private prompts: string[] = [];
+  /** Open prompts in the order eve asked them; eve answers the first one first. */
+  private open: InputRequest[] = [];
+  private held = false;
+  /** Whether the hook has no turn in flight, so a send starts a new turn. */
+  private idle = true;
+  private readonly queue: { readonly id: string; readonly request: string }[] = [];
   private disposed = false;
 
   constructor(
     private readonly options: {
-      readonly client: Client;
+      readonly agent: Agent;
       readonly appendContext: (
         delegationId: string,
         channel: LiveContextChannel,
         content: string,
       ) => Promise<void>;
-      readonly onChange: (delegations: readonly Delegation[]) => void;
     },
   ) {}
 
   delegate(id: string, request: string): void {
-    this.track({ delegation: { id, request, status: "running", steps: [] } });
-    this.enqueue(id, () => this.send(id, request));
+    const prompt = this.held ? this.open[0] : undefined;
+    if (prompt?.options?.length) {
+      this.answerAloud(id, request, prompt);
+      return;
+    }
+    this.queue.push({ id, request });
+    this.drain();
   }
 
-  respond(id: string, responses: readonly InputResponse[]): void {
-    const job = this.jobs.get(id);
-    if (!job || job.delegation.status !== "needs-input" || !this.session) return;
-
-    const session = this.session;
-    this.update(id, { inputRequests: undefined, status: "running" });
-    this.enqueue(id, async () => this.consume(id, await session.respond(responses)));
+  /** Call from the hook's `onFinish`, once its turn has fully settled. */
+  settled(): void {
+    this.idle = true;
+    this.drain();
   }
 
-  /** Stops in-flight eve turns. Closing the call alone would leave them running. */
+  /** Forward every eve stream event here. */
+  observe(event: MessageStreamEvent): void {
+    const id = this.current;
+    if (id === undefined || this.disposed) return;
+
+    switch (event.type) {
+      case "actions.requested": {
+        const tools = event.data.actions.map(
+          (action) =>
+            event.data.presentation?.[action.callId]?.label ??
+            ("toolName" in action ? action.toolName : action.name),
+        );
+        this.append(id, "thinking", `The agent is running ${tools.join(", ")}.`);
+        return;
+      }
+      case "message.completed":
+        if (event.data.finishReason !== "tool-calls") this.answer = event.data.message;
+        return;
+      case "input.requested":
+        this.open.push(...event.data.requests);
+        this.prompts.push(...event.data.requests.map((request) => request.prompt));
+        return;
+      case "input.resolved": {
+        const resolved = new Set(event.data.resolutions.map((resolution) => resolution.requestId));
+        this.open = this.open.filter((request) => !resolved.has(request.requestId));
+        return;
+      }
+      case "turn.waiting": {
+        if (event.data.on !== "input") return;
+        this.held = true;
+        const choices = (this.open[0]?.options ?? []).map((option) => option.label).join(" or ");
+        this.speak(
+          id,
+          // A sign-in also parks the turn, without an input request.
+          this.prompts.length === 0
+            ? "The agent needs the user to finish a step on screen, such as signing in."
+            : `The agent needs the user's answer: ${this.prompts.join(" ")} ` +
+                (choices ? `The user can say ${choices}, or use the buttons on screen.` : ""),
+        );
+        this.prompts = [];
+        return;
+      }
+      case "step.started":
+        this.held = false;
+        this.idle = false;
+        return;
+      case "turn.completed":
+        this.speak(id, this.answer?.trim() || "The agent finished without a reply.");
+        this.current = undefined;
+        return;
+      case "turn.failed":
+        this.fail();
+        return;
+      case "turn.cancelled":
+        this.current = undefined;
+        return;
+    }
+  }
+
+  /** Call when a send fails before eve streams anything back. */
+  fail(): void {
+    if (this.current === undefined || this.disposed) return;
+    this.speak(this.current, "The agent could not finish that request.");
+    this.current = undefined;
+  }
+
+  /** Stops the running eve turn. Closing the call alone would leave it running. */
   async dispose(): Promise<void> {
     this.disposed = true;
-    await Promise.allSettled(
-      [...this.jobs.values()]
-        .filter((job) => job.delegation.status === "running" && job.response)
-        .map((job) => job.response!.cancel()),
-    );
+    this.queue.length = 0;
+    if (this.current !== undefined && !this.held) {
+      await this.options.agent.cancel().catch(() => {});
+    }
   }
 
-  private enqueue(id: string, task: () => Promise<void>): void {
-    this.queue = this.queue.then(async () => {
-      if (this.disposed) return;
-      try {
-        await task();
-      } catch (error) {
-        console.error("eve delegation failed", error);
-        this.update(id, { status: "failed" });
-        await this.speak(id, "Something went wrong while the agent was working on that.");
-      }
-    });
-  }
-
-  private async send(id: string, request: string): Promise<void> {
-    const turn = { clientContext: VOICE_CLIENT_CONTEXT };
-
-    if (this.session) {
-      await this.consume(id, await this.session.send(request, turn));
+  private answerAloud(id: string, reply: string, prompt: InputRequest): void {
+    const option = spokenOption(reply, prompt);
+    if (!option) {
+      this.queue.push({ id, request: reply });
+      this.speak(id, "The agent will get to this once the user answers the open prompt.");
       return;
     }
 
-    const { response, session } = await this.options.client.sessions.create({
-      ...turn,
-      message: request,
-    });
-    this.session = session;
-    await this.consume(id, response);
+    this.open.shift();
+    void this.options.agent.respond([{ optionId: option.id, requestId: prompt.requestId }]);
+    this.speak(id, `The user's answer was recorded: ${option.label}.`);
   }
 
-  private async consume(id: string, response: MessageResponse): Promise<void> {
-    const job = this.jobs.get(id)!;
-    job.response = response;
-    let answer: string | undefined;
-    let inputRequests: readonly InputRequest[] | undefined;
-    let failed = false;
+  // Sending while the hook's previous turn is still settling would steer it,
+  // so the next delegation waits for `settled()`.
+  private drain(): void {
+    if (!this.idle || this.current !== undefined || this.disposed) return;
+    const next = this.queue.shift();
+    if (!next) return;
 
-    // Read to the turn boundary even after a pause or failure so the session
-    // cursor lands where the next send or respond expects it.
-    for await (const event of response) {
-      const step = describeStep(event);
-      if (step) {
-        this.update(id, { steps: [...job.delegation.steps, step] });
-        await this.append(id, "thinking", `The agent is ${step.toLowerCase()}.`);
-      }
-
-      if (event.type === "message.completed" && event.data.finishReason !== "tool-calls") {
-        answer = event.data.message;
-      } else if (event.type === "input.requested") {
-        inputRequests = event.data.requests;
-      } else if (event.type === "turn.failed" || event.type === "session.failed") {
-        failed = true;
-      }
-    }
-    job.response = undefined;
-
-    if (failed) {
-      this.update(id, { status: "failed" });
-      await this.speak(id, "The agent could not finish that request.");
-    } else if (inputRequests) {
-      this.update(id, { inputRequests, status: "needs-input" });
-      const prompts = inputRequests.map((request) => request.prompt).join(" ");
-      await this.speak(id, `The agent needs the user to answer on screen: ${prompts}`);
-    } else {
-      this.update(id, { answer, status: "done" });
-      await this.speak(id, answer?.trim() || "The agent finished without a reply.");
-    }
+    this.current = next.id;
+    this.answer = undefined;
+    this.prompts = [];
+    this.open = [];
+    this.held = false;
+    this.idle = false;
+    // eve reports failures through the stream or the hook's onError.
+    void this.options.agent.send(next.request, { clientContext: VOICE_CLIENT_CONTEXT });
   }
 
-  private speak(id: string, content: string): Promise<void> {
-    return this.append(id, "commentary", content);
+  private speak(id: string, content: string): void {
+    this.append(id, "commentary", content);
   }
 
-  private async append(id: string, channel: LiveContextChannel, content: string): Promise<void> {
+  private append(id: string, channel: LiveContextChannel, content: string): void {
     if (this.disposed) return;
-    await this.options.appendContext(id, channel, truncate(content));
-  }
-
-  private track(job: Job): void {
-    this.jobs.set(job.delegation.id, job);
-    this.emit();
-  }
-
-  private update(id: string, patch: Partial<Delegation>): void {
-    const job = this.jobs.get(id);
-    if (!job) return;
-    job.delegation = { ...job.delegation, ...patch };
-    this.emit();
-  }
-
-  private emit(): void {
-    this.options.onChange([...this.jobs.values()].map((job) => job.delegation));
+    const text =
+      content.length <= MAX_APPEND_CHARS ? content : `${content.slice(0, MAX_APPEND_CHARS - 1)}…`;
+    void this.options.appendContext(id, channel, text).catch((error: unknown) => {
+      console.error("Could not append context to the voice session", error);
+    });
   }
 }
 
-function describeStep(event: MessageStreamEvent): string | undefined {
-  if (event.type !== "actions.requested") return undefined;
-
-  const names = event.data.actions.map(
-    (action) =>
-      event.data.presentation?.[action.callId]?.label ??
-      ("toolName" in action ? action.toolName : action.name),
+/**
+ * eve answers a typed reply that is exactly an option's id or label. Speech
+ * adds punctuation and filler ("Approve it, please."), so those are dropped
+ * first; anything else, such as "don't approve", is not an answer.
+ */
+function spokenOption(reply: string, prompt: InputRequest): InputOption | undefined {
+  const words = reply.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
+  const answer = words.filter((word) => !FILLER.has(word)).join(" ");
+  return prompt.options?.find(
+    (option) => option.id.toLowerCase() === answer || option.label.toLowerCase() === answer,
   );
-  return `Running ${names.join(", ")}`;
-}
-
-function truncate(text: string): string {
-  return text.length <= MAX_APPEND_CHARS ? text : `${text.slice(0, MAX_APPEND_CHARS - 1)}…`;
 }

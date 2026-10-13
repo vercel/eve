@@ -1,0 +1,9 @@
+# Copied unchanged from apps/docs/registry by `pnpm sync:template-registry`.
+# GitHub collapses these in diffs; review changes in the registry instead.
+apps/templates/eve-voice-template/apps/web/app/_components/agent-message.tsx linguist-generated
+apps/templates/eve-voice-template/apps/web/app/globals.css linguist-generated
+apps/templates/eve-voice-template/apps/web/components/ai-elements/** linguist-generated
+apps/templates/eve-voice-template/apps/web/components/ui/** linguist-generated
+apps/templates/eve-voice-template/apps/web/css.d.ts linguist-generated
+apps/templates/eve-voice-template/apps/web/lib/utils.ts linguist-generated
+apps/templates/eve-voice-template/apps/web/postcss.config.mjs linguist-generated

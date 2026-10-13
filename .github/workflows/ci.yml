@@ -44,6 +44,9 @@ jobs:
       - name: Guard mechanical code invariants
         run: pnpm guard:invariants
 
+      - name: Check templates match vendored registry files
+        run: pnpm check:template-registry
+
       - name: Validate /docs/public frontmatter and nav
         run: pnpm docs:check
 

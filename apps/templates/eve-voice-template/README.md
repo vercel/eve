@@ -6,34 +6,35 @@ A Next.js voice app for [eve](https://eve.dev). You talk to an eve agent in the 
 
 ## Quick start
 
-1. Create an [AI Gateway API key](https://vercel.com/docs/ai-gateway/authentication). GPT-Live-1 client secrets can only be minted with an API key; Vercel OIDC is not accepted for that endpoint.
+1. Create an [AI Gateway API key](https://vercel.com/docs/ai-gateway/authentication).
 2. Click **Deploy with Vercel** and enter `AI_GATEWAY_API_KEY` and a strong `EVE_VOICE_PASSWORD`.
 3. Open the deployed app, enter the password, and click **Start call**.
 
-Try "What's the weather in Paris?" or "Remind me to call Bob tomorrow." The reminder tool asks for approval on screen before it runs.
+Try "What's the weather in Paris?" or "Remind me to call Bob tomorrow." The reminder tool asks for approval before it runs; say "approve" or click the button.
 
-Voice sessions cost $3 per hour, billed by the second, including silence and time spent waiting on the agent. The agent's own model calls are billed separately. The app ends each call after 10 minutes (`MAX_CALL_SECONDS` in `apps/web/lib/voice-config.ts`).
+Voice sessions are billed per second, including silence and time spent waiting on the agent; see [AI Gateway pricing](https://vercel.com/docs/ai-gateway/pricing). The agent's own model calls are billed separately. The app ends each call after 10 minutes.
 
 ## How it works
 
 ```
 Browser
- ├─ @ai-sdk/react useRealtime ── WebSocket ──▶ AI Gateway (openai/gpt-live-1)
- │     microphone and speaker audio            delegation: client
- │     delegation-created ─┐
- │                         ▼
- ├─ eve/client ── /eve/v1/session ──▶ eve agent (tools, approvals, durable session)
- │     agent progress  ──▶ context-append (thinking, silent)
- │     agent answer    ──▶ context-append (commentary, spoken)
+ ├─ useRealtime (@ai-sdk/react) ── WebSocket ──▶ AI Gateway (openai/gpt-live-1)
+ │     │ delegations and the user's words   ▲ progress (silent), answers (spoken)
+ │     ▼                                    │
+ ├─ VoiceDelegate ──────────────────────────┘
+ │     │ requests and spoken approvals
+ │     ▼
+ ├─ useEveAgent (eve/react) ── /eve/v1/session ──▶ eve agent (tools, approvals, durable session)
+ │     renders the session with eve Web Chat components
  └─ POST /api/live/client-secret ──▶ single-use Gateway client secret
 ```
 
-- **Audio goes directly from the browser to AI Gateway.** The server only mints a short-lived, single-use client secret (`apps/web/app/api/live/client-secret/route.ts`). The browser passes it as a WebSocket subprotocol, and the Gateway API key never leaves the server. No server holds the audio stream open.
-- **GPT-Live-1 delegates instead of answering.** Its instructions (`LIVE_INSTRUCTIONS`) tell it to hand off anything beyond small talk. A delegation event has an ID but no request text, so the app sends eve whatever the user said since the previous delegation.
-- **One call is one durable eve session.** `apps/web/lib/voice-delegate.ts` creates the session on the first delegation and continues it for later ones, one at a time. Each turn carries ephemeral `clientContext` that asks for short, spoken-style answers. The agent's `instructions.md` therefore doesn't need to know about voice.
-- **Progress is silent; answers are spoken.** Tool calls are appended on GPT-Live-1's `thinking` channel, which the model can use while it fills the wait. The agent's final answer is appended on the `commentary` channel, which the model says out loud in its own words.
-- **Approvals stay on screen.** When eve asks for input, the app shows the prompt in the browser and tells the voice model to point the user at it. The voice model never answers approvals.
-- **Hanging up stops the agent.** Interrupting GPT-Live-1 only changes what it says; eve keeps working. Ending the call cancels any in-flight eve turn.
+- **Audio goes directly from the browser to AI Gateway.** The server only mints a single-use client secret, so the Gateway API key never reaches the browser.
+- **GPT-Live-1 talks; eve works.** GPT-Live-1 delegates anything beyond small talk, and the app sends eve what the user said. One call is one durable eve session.
+- **Progress is silent; answers are spoken.** The app tells GPT-Live-1 what the agent is doing, then gives it the agent's answer to say in its own words.
+- **The screen shows the eve session** with the same components as [eve Web Chat](https://eve.dev/docs/channels/eve).
+- **Approvals work by voice or on screen.** The user clicks an option or says its name, such as "approve" or "cancel it, please"; anything else waits until the prompt is answered. The voice model's own words never answer a prompt.
+- **Hanging up stops the agent.** Ending the call cancels any in-flight eve turn.
 
 ## Deployment modes
 
@@ -68,13 +69,15 @@ Open http://localhost:3000 and allow microphone access. `pnpm dev` starts only t
 
 ## Customize
 
-- **Agent:** `agent/agent.ts` (model), `agent/instructions.md`, and `agent/tools/`. Every voice request waits on this model, so a fast model keeps calls responsive.
+- **Agent:** `agent/agent.ts` (model), `agent/instructions.md`, and `agent/tools/`.
 - **Voice behavior:** `apps/web/lib/voice-config.ts` holds GPT-Live-1's instructions, the per-turn voice context sent to eve, and the call length cap.
-- **Delegation:** `apps/web/lib/voice-delegate.ts` decides what reaches GPT-Live-1 while eve works. Each append must stay under GPT-Live-1's 500-token limit.
+- **Delegation and approvals:** `apps/web/lib/voice-delegate.ts` decides what reaches eve and GPT-Live-1, and how spoken replies answer prompts.
+- **Chat UI:** `apps/web/app/_components/agent-message.tsx`, `apps/web/components/`, and `apps/web/app/globals.css` come from the [eve Web Chat registry](https://eve.dev/docs/channels/eve).
 
 ## Limitations
 
 - GPT-Live-1 on AI Gateway supports WebSocket transport with client delegation only. WebRTC, hosted Responses delegation, and live session updates are not available.
+- GPT-Live-1 client secrets can only be minted with an AI Gateway API key; Vercel OIDC is not accepted.
 - The browser enforces the call length cap. A modified client could keep a session open up to GPT-Live-1's own session limit, so keep the token route behind authentication and rate limiting.
 - Calls are not persisted. Reloading the page ends the call, and the next call starts a new eve session.
-- Connection sign-in prompts (`authorization.required`) are not handled, because the template's agent has no connections.
+- Spoken replies answer prompts with options, such as approvals. Free-text questions and connection sign-ins are answered on screen.

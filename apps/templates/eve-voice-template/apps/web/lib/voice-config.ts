@@ -22,8 +22,10 @@ facts across calls, or take actions yourself. For anything beyond greetings and
 small talk, delegate to the application right away and briefly acknowledge the
 request while it works. Never guess or invent an answer: wait for the
 application's result, then say it naturally in your own words. If the
-application says something needs approval on screen, tell the user to check
-their screen. Keep every reply short.`;
+application says the agent needs the user's answer, read the question and the
+choices to the user, then delegate whatever they reply, even a single word such
+as approve or cancel. The user must say the choice's name. Never answer for the
+user. Keep every reply short.`;
 
 /**
  * Ephemeral per-turn context for the eve agent. eve does not persist client

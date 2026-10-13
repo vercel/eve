@@ -6,17 +6,23 @@ import {
 } from "@ai-sdk/openai";
 import { experimental_useRealtime as useRealtime } from "@ai-sdk/react";
 import type { Experimental_RealtimeServerEvent as RealtimeServerEvent } from "ai";
-import { Client, type InputRequest } from "eve/client";
+import { useEveAgent } from "eve/react";
 import { LoaderCircleIcon, MicIcon, MicOffIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AgentMessage } from "@/app/_components/agent-message";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import { Button } from "@/components/ui/button";
 import {
   LIVE_INSTRUCTIONS,
   LIVE_MODEL,
   LIVE_WEBSOCKET_URL,
   MAX_CALL_SECONDS,
 } from "@/lib/voice-config";
-import { type Delegation, VoiceDelegate } from "@/lib/voice-delegate";
-import { cn } from "@/lib/utils";
+import { VoiceDelegate } from "@/lib/voice-delegate";
 
 // The browser only uses the provider as the Live protocol codec. The single-use
 // client secret travels as a WebSocket subprotocol, so no API key ships here.
@@ -42,13 +48,18 @@ type Turn = { speaker: "user" | "assistant"; text: string };
 
 export function VoiceCall() {
   const [protocols, setProtocols] = useState<string[] | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [delegations, setDelegations] = useState<readonly Delegation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  // The spoken transcript only feeds delegations; the page renders the eve session.
   const turnsRef = useRef<Turn[]>([]);
   const delegatedTurnsRef = useRef(0);
   const delegateRef = useRef<VoiceDelegate | null>(null);
+
+  const agent = useEveAgent({
+    onError: () => delegateRef.current?.fail(),
+    onEvent: (event) => delegateRef.current?.observe(event),
+    onFinish: () => delegateRef.current?.settled(),
+  });
 
   const rt = useRealtime({
     api: { protocols: protocols ?? [], websocket: LIVE_WEBSOCKET_URL },
@@ -87,10 +98,12 @@ export function VoiceCall() {
   async function startCall() {
     setError(null);
     setStarting(true);
-    setTurns((turnsRef.current = []));
-    setDelegations([]);
+    // One call is one eve session.
+    agent.reset();
+    turnsRef.current = [];
     delegatedTurnsRef.current = 0;
     delegateRef.current = new VoiceDelegate({
+      agent: { cancel: agent.cancel, respond: agent.respond, send: agent.send },
       appendContext: (delegationId, channel, content) =>
         sendEvent({
           content,
@@ -98,17 +111,15 @@ export function VoiceCall() {
           providerOptions: { openai: { channel } },
           type: "context-append",
         }),
-      client: new Client({ host: "" }),
-      onChange: setDelegations,
     });
 
-    const response = await fetch("/api/live/client-secret", { method: "POST" });
-    const body = (await response.json().catch(() => ({}))) as {
+    const response = await fetch("/api/live/client-secret", { method: "POST" }).catch(() => null);
+    const body = ((await response?.json().catch(() => null)) ?? {}) as {
       readonly error?: string;
       readonly token?: string;
     };
 
-    if (!response.ok || !body.token) {
+    if (!response?.ok || !body.token) {
       setError(body.error ?? "Could not start a voice session.");
       setStarting(false);
       return;
@@ -140,7 +151,6 @@ export function VoiceCall() {
       last?.speaker === speaker
         ? [...current.slice(0, -1), { speaker, text: last.text + delta }]
         : [...current, { speaker, text: delta.trimStart() }];
-    setTurns(turnsRef.current);
   }
 
   /** Everything the user said since the previous delegation. */
@@ -153,148 +163,70 @@ export function VoiceCall() {
   }
 
   const muted = rt.session?.isInputMuted ?? false;
+  // Same input wiring as the Web Chat registry's agent-chat.
+  const canRespond = (requestId: string) => agent.data.inputs[requestId]?.status === "open";
+  const questionsFor = (callId: string) =>
+    Object.values(agent.data.inputs).filter(
+      (input) => input.request.kind === "question" && input.request.action.callId === callId,
+    );
 
   return (
-    <div className="flex w-full max-w-2xl flex-col gap-6">
-      <div className="flex items-center justify-center gap-3">
-        {active ? (
-          <>
-            <button
-              aria-label={muted ? "Unmute microphone" : "Mute microphone"}
-              className="flex size-12 items-center justify-center rounded-full border border-border bg-card"
-              onClick={() =>
-                void sendEvent({ type: muted ? "input-audio-unmute" : "input-audio-mute" })
-              }
-              type="button"
-            >
-              {muted ? <MicOffIcon className="size-5" /> : <MicIcon className="size-5" />}
-            </button>
-            <button
-              className="flex h-12 items-center gap-2 rounded-full bg-destructive px-6 font-medium text-white"
-              onClick={() => void endCall()}
-              type="button"
-            >
-              <PhoneOffIcon className="size-4" />
-              End call
-            </button>
-          </>
-        ) : (
-          <button
-            className="flex h-12 items-center gap-2 rounded-full bg-primary px-6 font-medium text-primary-foreground disabled:opacity-60"
-            disabled={starting}
-            onClick={() => void startCall()}
-            type="button"
-          >
-            {starting ? (
-              <LoaderCircleIcon className="size-4 animate-spin" />
-            ) : (
-              <PhoneIcon className="size-4" />
-            )}
-            Start call
-          </button>
-        )}
-      </div>
-
-      <p className="text-center text-sm text-muted-foreground">
-        {rt.status === "connected"
-          ? "On call. Talk naturally; you can interrupt at any time."
-          : rt.status === "connecting"
-            ? "Connecting…"
-            : "Calls end automatically after 10 minutes."}
-      </p>
-
-      {error ? (
-        <p className="rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-
-      {delegations
-        .filter((delegation) => delegation.status === "needs-input")
-        .map((delegation) => (
-          <InputPrompt
-            delegation={delegation}
-            key={delegation.id}
-            onRespond={(responses) => delegateRef.current?.respond(delegation.id, responses)}
-          />
-        ))}
-
-      <section className="flex flex-col gap-2">
-        {turns.map((turn, index) => (
-          <p
-            className={cn(
-              "max-w-[85%] rounded-lg px-3 py-2 text-sm",
-              turn.speaker === "user" ? "self-end bg-primary text-primary-foreground" : "bg-card",
-            )}
-            key={index}
-          >
-            {turn.text}
-          </p>
-        ))}
-      </section>
-
-      {delegations.length > 0 ? (
-        <section className="flex flex-col gap-2 border-t border-border pt-4">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            eve agent activity
-          </h2>
-          {delegations.map((delegation) => (
-            <div className="rounded-md bg-card px-3 py-2 text-sm" key={delegation.id}>
-              <p className="font-medium">{delegation.request || "(no transcript)"}</p>
-              {delegation.steps.map((step, index) => (
-                <p className="text-muted-foreground" key={index}>
-                  {step}
-                </p>
-              ))}
-              <p className="text-muted-foreground">
-                {delegation.status === "done"
-                  ? delegation.answer
-                  : delegation.status === "failed"
-                    ? "Failed"
-                    : delegation.status === "needs-input"
-                      ? "Waiting for you"
-                      : "Working…"}
-              </p>
-            </div>
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      <Conversation className="min-h-0 flex-1">
+        <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-6 pb-10 sm:px-6">
+          {agent.data.messages.map((message, index) => (
+            <AgentMessage
+              canRespond={canRespond}
+              isStreaming={agent.status === "streaming" && index === agent.data.messages.length - 1}
+              key={message.id}
+              message={message}
+              onInputResponses={(responses) => agent.respond(responses)}
+              questionsFor={questionsFor}
+            />
           ))}
-        </section>
-      ) : null}
-    </div>
-  );
-}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
-function InputPrompt({
-  delegation,
-  onRespond,
-}: {
-  readonly delegation: Delegation;
-  readonly onRespond: (responses: { requestId: string; optionId: string }[]) => void;
-}) {
-  const requests: readonly InputRequest[] = delegation.inputRequests ?? [];
-
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      {requests.map((request) => (
-        <div className="flex flex-col gap-3" key={request.requestId}>
-          <p className="text-sm font-medium">{request.prompt}</p>
-          <div className="flex gap-2">
-            {(request.options ?? []).map((option) => (
-              <button
-                className={cn(
-                  "rounded-md border border-border px-3 py-1.5 text-sm",
-                  option.style === "primary" && "bg-primary text-primary-foreground",
-                  option.style === "danger" && "text-destructive",
-                )}
-                key={option.id}
-                onClick={() => onRespond([{ optionId: option.id, requestId: request.requestId }])}
-                type="button"
+      <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-3 px-4 pt-4 pb-6">
+        {error ? (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex items-center gap-3">
+          {active ? (
+            <>
+              <Button
+                aria-label={muted ? "Unmute microphone" : "Mute microphone"}
+                onClick={() =>
+                  void sendEvent({ type: muted ? "input-audio-unmute" : "input-audio-mute" })
+                }
+                size="icon-lg"
+                variant="outline"
               >
-                {option.label}
-              </button>
-            ))}
-          </div>
+                {muted ? <MicOffIcon /> : <MicIcon />}
+              </Button>
+              <Button onClick={() => void endCall()} size="lg" variant="destructive">
+                <PhoneOffIcon />
+                End call
+              </Button>
+            </>
+          ) : (
+            <Button disabled={starting} onClick={() => void startCall()} size="lg">
+              {starting ? <LoaderCircleIcon className="animate-spin" /> : <PhoneIcon />}
+              Start call
+            </Button>
+          )}
         </div>
-      ))}
+        <p className="text-sm text-muted-foreground">
+          {rt.status === "connected"
+            ? "On call. Talk naturally; you can interrupt at any time."
+            : rt.status === "connecting"
+              ? "Connecting…"
+              : "Calls end automatically after 10 minutes."}
+        </p>
+      </div>
     </div>
   );
 }

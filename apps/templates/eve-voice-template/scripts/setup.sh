@@ -134,7 +134,13 @@ provision_integration "Upstash Redis" upstash-kv KV_REST_API_URL
 
 # --- 5. Better Auth secret --------------------------------------------------
 step "Setting BETTER_AUTH_SECRET"
-set_env BETTER_AUTH_SECRET "$(openssl rand -base64 32)" encrypted '["production","preview","development"]'
+# Rotating the secret signs everyone out and breaks stored OAuth tokens, so a
+# re-run keeps the existing one.
+if vercel env ls $SCOPE_FLAGS 2>/dev/null | grep -q 'BETTER_AUTH_SECRET'; then
+  echo "  BETTER_AUTH_SECRET already set, skipping"
+else
+  set_env BETTER_AUTH_SECRET "$(openssl rand -base64 32)" encrypted '["production","preview","development"]'
+fi
 
 # --- 6. Sign in with Vercel OAuth app ---------------------------------------
 step "Sign in with Vercel OAuth app"
@@ -239,4 +245,4 @@ fi
 
 # --- 11. Done ---------------------------------------------------------------
 step "Setup complete"
-bold "Start the app:  pnpm dev"
+bold "Start the app:  pnpm dev:all"

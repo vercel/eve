@@ -2,8 +2,8 @@ import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
 
-// Approval shows up on screen in the voice app. The voice model can tell the
-// user to check their screen, but only the user can approve.
+// The voice app shows the approval on screen and reads it aloud. The user
+// answers with a button or by saying an option; the voice model never answers.
 export default defineTool({
   description: "Create a reminder for the user.",
   inputSchema: z.object({
