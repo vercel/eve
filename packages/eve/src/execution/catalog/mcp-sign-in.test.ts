@@ -189,10 +189,12 @@ describe("MCP connections sign in only when the server asks", () => {
     const output = await kennel.search("kennel");
 
     expect(output).toEqual({
+      remaining: 0,
       results: [
         expect.objectContaining({ tool: "kennel__find_pet" }),
         expect.objectContaining({ tool: "kennel__pet_invoice" }),
       ],
+      searched: 2,
     });
     expect(kennel.startAuthorization).not.toHaveBeenCalled();
     expect(kennel.seen.every((request) => request.authorization === null)).toBe(true);
@@ -240,7 +242,9 @@ describe("MCP connections sign in only when the server asks", () => {
   it("finds a server that rejects anonymous listing as its sign-in result, which signs in", async () => {
     const kennel = setup("token-everywhere");
 
+    // Until sign-in, the search counts the sign-in entry, not the tools behind it.
     expect(await kennel.search("kennel__")).toEqual({
+      remaining: 0,
       results: [
         {
           description: "Sign in to use the Kennel tools: Pet boarding.",
@@ -248,6 +252,7 @@ describe("MCP connections sign in only when the server asks", () => {
           tool: "kennel",
         },
       ],
+      searched: 1,
     });
     expect(kennel.startAuthorization).not.toHaveBeenCalled();
 
@@ -258,6 +263,7 @@ describe("MCP connections sign in only when the server asks", () => {
     );
     expect(await kennel.search("kennel__")).toMatchObject({
       results: [{ tool: "kennel__find_pet" }, { tool: "kennel__pet_invoice" }],
+      searched: 2,
     });
   });
 });

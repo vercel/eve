@@ -42,16 +42,17 @@ export interface SearchReach {
  */
 function searchDescription({ connections, skills, tools }: SearchReach): string {
   return [
-    "Find your own tools, agents, skills, and connected services by keyword; this searches what you can do, not the web.",
+    "Search your own catalog for tools, agents, skills, and connected services that aren't in your tool list. Use it when nothing in your tool list fits the request; it doesn't search the web.",
     tools
       ? `A result with \`tool\` has the exact name, description, and TypeScript signature: call it with ${CALL_TOOL_NAME}({ name, input }).`
       : undefined,
     skills
       ? `A result with \`skill\` has the name and description: load it with ${SKILL_TOOL_NAME}({ name }).`
       : undefined,
+    "`searched` counts the entries the query covered, and `remaining` counts the matches past `limit`. When `remaining` is 0, you have every match; when `searched` is small, there is little else to find.",
     'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
     connections
-      ? `A connection that needs sign-in appears as a tool named after the connection: calling it with ${CALL_TOOL_NAME}({ name }) asks the user to sign in.`
+      ? `A connection that needs sign-in appears as a tool named after the connection: calling it with ${CALL_TOOL_NAME}({ name }) asks the user to sign in. \`searched\` counts its tools only after sign-in.`
       : undefined,
   ]
     .filter((sentence) => sentence !== undefined)
@@ -95,6 +96,13 @@ interface UnavailableConnection {
 
 interface SearchOutput {
   readonly results: readonly SearchResult[];
+  /** Matches past `limit`. */
+  readonly remaining: number;
+  /**
+   * Entries the query covered: the whole catalog, or one namespace. An
+   * unavailable connection's tools, or tools behind sign-in, aren't counted.
+   */
+  readonly searched: number;
   readonly unavailable?: readonly UnavailableConnection[];
 }
 
@@ -189,10 +197,14 @@ async function search(
   }
 
   const limit = clampInteger(input.limit, 1, MAX_LIMIT, DEFAULT_LIMIT);
-  const results = rankCandidates(query, candidates)
-    .slice(0, limit)
-    .map((candidate) => candidate.result());
-  return unavailable.length > 0 ? { results, unavailable } : { results };
+  const matches = rankCandidates(query, candidates);
+  const results = matches.slice(0, limit).map((candidate) => candidate.result());
+  const found = {
+    results,
+    remaining: matches.length - results.length,
+    searched: candidates.length,
+  };
+  return unavailable.length > 0 ? { ...found, unavailable } : found;
 }
 
 /**

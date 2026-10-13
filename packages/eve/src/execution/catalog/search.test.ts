@@ -15,7 +15,9 @@ import {
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 interface SearchOutput {
+  readonly remaining: number;
   readonly results: readonly Record<string, unknown>[];
+  readonly searched: number;
   readonly unavailable?: readonly Record<string, unknown>[];
 }
 
@@ -114,7 +116,8 @@ describe("search", () => {
   it("finds only deferred entries; direct tools and listed skills are already in context", async () => {
     const search = searchFor(tools, { skills });
 
-    expect(await search({ query: "add" })).toEqual({ results: [] });
+    // Four deferred tools and agents, and one deferred skill.
+    expect(await search({ query: "add" })).toEqual({ remaining: 0, results: [], searched: 5 });
     expect(names(await search({ query: "refund voice" }))).not.toContain("refund-voice");
   });
 
@@ -134,13 +137,20 @@ describe("search", () => {
     await expect(search({})).rejects.toThrow(needsWords);
   });
 
-  it("returns the best matches up to limit, 10 by default, and takes no paging", async () => {
-    const many = Array.from({ length: 60 }, (_, index) =>
-      inlineTool(`report_${String(index).padStart(2, "0")}`, { deferred: true }),
-    );
+  it("returns the best matches up to limit, 10 by default, with how many it searched and left out", async () => {
+    const many = [
+      ...Array.from({ length: 60 }, (_, index) =>
+        inlineTool(`report_${String(index).padStart(2, "0")}`, { deferred: true }),
+      ),
+      inlineTool("export_ledger", { deferred: true, description: "Export the ledger." }),
+    ];
     const search = searchFor(many);
 
-    const best = names(await search({ limit: 50, query: "report" }));
+    const top = await search({ limit: 50, query: "report" });
+    // `searched` counts every entry, matching or not; `remaining` counts only matches.
+    expect(top).toMatchObject({ remaining: 10, searched: 61 });
+    expect(await search({ query: "ledger" })).toMatchObject({ remaining: 0, searched: 61 });
+    const best = names(top);
     expect(best).toHaveLength(50);
     // A smaller limit keeps the best matches, in rank order.
     expect(names(await search({ limit: 3, query: "report" }))).toEqual(best.slice(0, 3));
@@ -205,7 +215,14 @@ describe("search", () => {
         signature: "notion(input: {}): Promise<unknown>",
         tool: "notion",
       };
-      expect(await search({ query: "notion" })).toEqual({ results: [signIn] });
+      // The sign-in entry stands in for the tools it can't list yet.
+      expect(await search({ query: "notion" })).toEqual({
+        remaining: 0,
+        results: [signIn],
+        searched: 7,
+      });
+      // A namespace query counts only that namespace.
+      expect(await search({ query: "linear__" })).toMatchObject({ searched: 2 });
       // Found by the connection's description too, while its tools can't be listed.
       expect((await search({ query: "pages" })).results).toEqual([signIn]);
       expect(names(await search({ query: "notion__" }))).toEqual(["notion"]);
