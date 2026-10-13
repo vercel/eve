@@ -6,7 +6,7 @@ export default defineEval({
   async test(t) {
     const session = await t.session();
     const sessionId = session.sessionId;
-    const prepare = await t.target.fetch(`/eve/v1/session/${sessionId}/prewarm`, {
+    const prepare = await t.target.fetch(`/eve/v1/session/${sessionId}`, {
       method: "POST",
     });
     await t.require(prepare.ok, equals(true));

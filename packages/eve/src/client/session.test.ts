@@ -102,6 +102,20 @@ function createBoundedStreamResponse(events: readonly unknown[]) {
 }
 
 describe("ClientSession", () => {
+  it("prepares the fixed session with a bodyless POST to its existing input endpoint", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true, status: "accepted" }, { status: 202 }));
+    const session = createSession({ sessionId: "session/1", streamIndex: 4 });
+
+    await expect(session.prewarm()).resolves.toEqual({ status: "accepted" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://eve.test/eve/v1/session/session%2F1");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(session.state).toEqual({ sessionId: "session/1", streamIndex: 4 });
+  });
+
   it("cancels an accepted turn before its stream settles with freshly resolved auth", async () => {
     let headerResolution = 0;
     const requests: Array<{ headers: Headers; method: string; url: string }> = [];

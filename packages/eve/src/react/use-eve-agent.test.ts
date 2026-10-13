@@ -241,7 +241,7 @@ describe("useEveAgent", () => {
   it("prewarms when the option changes from false to true without replacing the session", async () => {
     let creates = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
-      if (String(_request).endsWith("/prewarm"))
+      if (String(_request) === "/eve/v1/session/session_1" && init?.method === "POST")
         return Response.json({ ok: true, status: "ready" });
       if (init?.method === "POST") return createStartedMessageResponse(`session_${++creates}`, "");
       return createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]);
