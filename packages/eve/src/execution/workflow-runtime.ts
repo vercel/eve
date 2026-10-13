@@ -1,3 +1,4 @@
+import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
@@ -22,6 +23,7 @@ import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
   EVE_VERSION_ATTRIBUTE,
+  EVE_PREWARM_ATTRIBUTE,
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -194,6 +196,7 @@ export function createWorkflowRuntime(config: {
           });
     const attributes = {
       ...sessionAttributes,
+      [EVE_PREWARM_ATTRIBUTE]: "1",
       ...(input.externalInvocation === undefined
         ? {}
         : buildInvocationAttributes(input.externalInvocation)),
@@ -336,6 +339,13 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   token: string | SessionInboxAddress,
   command: TCommand,
 ): Promise<SessionCommandResult<TCommand>> {
+  if (command.kind === "prewarm") {
+    return (
+      typeof token === "string"
+        ? { status: "unsupported" }
+        : await prewarmWorkflowSession(token.sessionId, command.targetDeploymentId)
+    ) as SessionCommandResult<TCommand>;
+  }
   let hook: SessionInboxOwnerRecord;
   try {
     const resumed = await resumeSessionInbox(token, command);

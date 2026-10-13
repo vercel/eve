@@ -229,7 +229,8 @@ async function runSessionLoop(
   const sessionTimeout = boot.sessionTimeoutControl;
 
   const nextParkedActivity = async (): Promise<
-    Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
+    | Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" | "prewarm" }>
+    | { readonly kind: "transferred" }
   > => {
     while (true) {
       const next = await nextTurnDelivery({
@@ -238,6 +239,23 @@ async function runSessionLoop(
         inbox,
         queue,
       });
+      if (next.kind === "prewarm") {
+        if (
+          progress.caller === undefined &&
+          workingTasks(sessionTaskTable(cursor)).length === 0 &&
+          queue.pendingCount === 0 &&
+          !inbox.hasPending()
+        ) {
+          const deadline = await sessionTimeout?.getDeadline();
+          const result = await handoff.tryPrewarmTransfer(
+            transferState(),
+            next.targetDeploymentId,
+            deadline,
+          );
+          if (result.kind === "transferred") return result;
+        }
+        continue;
+      }
       if (next.kind === "workflow") {
         await execution.handleWorkflowMessage(next.message);
         continue;
@@ -309,6 +327,8 @@ async function runSessionLoop(
     while (true) {
       const next = await nextParkedActivity();
       switch (next.kind) {
+        case "transferred":
+          return next;
         case "expired":
         case "reset":
         case "closed":
@@ -380,6 +400,8 @@ async function runSessionLoop(
       const next = await nextParkedActivity();
 
       switch (next.kind) {
+        case "transferred":
+          return next;
         case "expired":
         case "reset":
         case "closed":

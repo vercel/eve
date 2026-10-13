@@ -28,6 +28,8 @@ export const EVE_SESSION_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId`;
 /** Stable route pattern for cancelling one exact session ID. */
 export const EVE_SESSION_CANCEL_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/cancel`;
 
+export const EVE_SESSION_PREWARM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/prewarm`;
+
 /** Stable route pattern for compacting one exact session ID. */
 export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/compact`;
 
@@ -135,6 +137,10 @@ export function createEveSubagentStreamRoutePath(input: {
   readonly parentSessionId: string;
 }): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(input.parentSessionId)}/subagents/${encodeURIComponent(input.callId)}/${encodeURIComponent(input.childSessionId)}/stream`;
+}
+
+export function createEveSessionPrewarmRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/prewarm`;
 }
 
 /** Builds the ID-addressed compact route for one session. */

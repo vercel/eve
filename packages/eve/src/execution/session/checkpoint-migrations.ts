@@ -97,6 +97,9 @@ const CHECKPOINT_UPGRADES: Readonly<
   // Version 14 prevents older deployments from dropping the batched messages
   // workflow tool runs relay. Existing checkpoints need no data changes.
   13: (checkpoint) => checkpoint,
+  // Version 15 prevents older targets from renewing expiry for preparation handoffs.
+  // The checkpoint state is unchanged; only the startup contract adds an idle reason.
+  14: (checkpoint) => checkpoint,
 };
 
 /**

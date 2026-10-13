@@ -19,11 +19,11 @@ import { walkCauseChain } from "#shared/errors.js";
 /** Starts the durable timer that signals one session deadline. */
 export async function startSessionTimeoutStep(
   input: SessionTimeoutWorkflowInput,
-): Promise<{ readonly runId: string }> {
+): Promise<{ readonly runId: string; readonly deadline?: Date }> {
   "use step";
 
   const run = await startWorkflowOnCurrentDeployment(sessionTimeoutWorkflowReference, [input]);
-  return { runId: run.runId };
+  return { runId: run.runId, deadline: input.deadline };
 }
 
 /** Resumes the owning session when its durable timer elapses. */

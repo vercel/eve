@@ -30,6 +30,7 @@ import {
   EVE_SESSION_CANCEL_ROUTE_PATTERN,
   EVE_SESSION_CLEAR_ROUTE_PATTERN,
   EVE_SESSION_COMPACT_ROUTE_PATTERN,
+  EVE_SESSION_PREWARM_ROUTE_PATTERN,
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
@@ -519,6 +520,36 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             status: result.status === "accepted" ? 202 : 200,
           },
         );
+      }),
+
+      POST(EVE_SESSION_PREWARM_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(params);
+        if (sessionId instanceof Response) return sessionId;
+        const body = await parseSessionControlBody(req);
+        if (body instanceof Response) return body;
+        if (Object.keys(body).length > 0)
+          return Response.json(
+            { ok: false, error: "Session prewarm does not accept body fields." },
+            { status: 400 },
+          );
+        try {
+          const result = await attachSession(sessionId).prewarm();
+          return Response.json(
+            { ok: true, ...result },
+            {
+              headers: { "cache-control": "no-store" },
+              status: result.status === "accepted" ? 202 : 200,
+            },
+          );
+        } catch (error) {
+          const errorId = logError(log, "session-prewarm request failed", error, { sessionId });
+          return Response.json(
+            { ok: false, error: "Failed to prewarm the session.", errorId },
+            { status: 500 },
+          );
+        }
       }),
 
       POST(EVE_SESSION_COMPACT_ROUTE_PATTERN, async (req, { attachSession, params }) => {

@@ -26,7 +26,7 @@ import { isObject } from "#shared/guards.js";
  * A newer successor must always accept older checkpoints: every bump adds the
  * upgrade from the previous version in `checkpoint-migrations.ts`.
  */
-export const SESSION_CHECKPOINT_VERSION = 14;
+export const SESSION_CHECKPOINT_VERSION = 15;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
@@ -161,6 +161,21 @@ export class SessionHandoff {
     if (this.incompatibleTargetDeploymentIds.has(deploymentId))
       return { kind: "retained", reason: "known-incompatible" };
     return await this.transfer(state, deploymentId, { ...compaction, reason: "compaction" });
+  }
+
+  async tryPrewarmTransfer(
+    state: SessionTransferState,
+    targetDeploymentId: string,
+    sessionTimeoutDeadline: Date | undefined,
+  ): Promise<SessionTransferOutcome> {
+    if (targetDeploymentId === this.input.deploymentId)
+      return { kind: "retained", reason: "same-deployment" };
+    if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
+      return { kind: "retained", reason: "known-incompatible" };
+    return await this.transfer(state, targetDeploymentId, {
+      reason: "prewarm",
+      sessionTimeoutDeadline,
+    });
   }
 
   private async transfer(

@@ -133,7 +133,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly optimistic?: boolean;
   /** Follow each subagent call's session into `conversation.agents` while mounted. @default false */
   readonly followSubagents?: boolean;
-  /** Prewarm an owned session on mount and after reset. @default false */
+  /** Create a session or prepare its existing idle owner on mount and after reset. @default false */
   readonly prewarm?: boolean;
   /**
    * Projects stream events into `TData`.

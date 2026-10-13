@@ -52,6 +52,10 @@ export async function admitSessionInboxPayload(
   }
 
   switch (command.kind) {
+    case "session-prewarm":
+      if (command.expectedOwnerRunId === getWorkflowMetadata().workflowRunId)
+        input.queue.prepareOnDeployment(command.targetDeploymentId);
+      return { kind: "consumed" };
     case "deliver":
       return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
     case "clear":
