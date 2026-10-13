@@ -27,6 +27,9 @@ export function mockChannelContext<TState = undefined>(
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },
+        async create() {
+          return { id: `session:${continuationToken}` } as never;
+        },
         async respond(inputResponses, options) {
           return (await observeDelivery(continuationToken, {
             ...options,

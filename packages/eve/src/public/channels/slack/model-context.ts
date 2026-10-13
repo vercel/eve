@@ -1,6 +1,12 @@
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import {
+  MAX_SESSION_HISTORY_TEXT_BYTES,
+  MAX_SESSION_HISTORY_MESSAGES,
+  type SessionHistoryMessage,
+  sessionHistoryTextBytes,
+} from "#shared/session-history.js";
 
 interface SlackModelMessageInput {
   readonly botUserId?: string;
@@ -101,4 +107,42 @@ function slackThreadSenderType(message: SlackThreadMessage): SlackModelMessageIn
   if (message.botId) return "bot";
   if (message.user) return "user";
   return "unknown";
+}
+
+/**
+ * Maps fetched thread replies to seeded session history. This app's own replies become assistant
+ * turns; everyone else stays an attributed user message. Slack shows rendered output, so assistant
+ * turns approximate what the model said. The newest messages are kept when the thread exceeds the
+ * history caps.
+ */
+export function slackThreadSessionHistory(
+  messages: readonly SlackThreadMessage[],
+): SessionHistoryMessage[] {
+  const history: SessionHistoryMessage[] = [];
+  let bytes = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (history.length === MAX_SESSION_HISTORY_MESSAGES) break;
+    const entry = slackThreadHistoryMessage(messages[index]!);
+    if (entry === undefined) continue;
+    bytes += sessionHistoryTextBytes(entry);
+    if (bytes > MAX_SESSION_HISTORY_TEXT_BYTES) break;
+    history.push(entry);
+  }
+  return history.reverse();
+}
+
+function slackThreadHistoryMessage(message: SlackThreadMessage): SessionHistoryMessage | undefined {
+  if (message.markdown.trim().length === 0) return undefined;
+  if (message.isMe) return { id: message.ts, role: "assistant", text: message.markdown };
+  return {
+    id: message.ts,
+    role: "user",
+    text: formatSlackModelMessage({
+      content: message.markdown,
+      senderId: message.user ?? message.botId,
+      senderType: slackThreadSenderType(message),
+      threadTs: message.threadTs,
+      ts: message.ts,
+    }),
+  };
 }

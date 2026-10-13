@@ -478,9 +478,11 @@ function isInactiveCommandTarget(error: unknown): boolean {
 /** The session holding a continuation token's inbox, if any does. */
 export async function resolveContinuation(
   continuationToken: string,
+  options?: { readonly runnable?: boolean },
 ): Promise<{ sessionId: string } | undefined> {
+  let owner: { sessionId: string };
   try {
-    return await resolveSessionInbox(continuationToken);
+    owner = await resolveSessionInbox(continuationToken);
   } catch (error) {
     if (HookNotFoundError.is(error)) {
       return undefined;
@@ -490,6 +492,16 @@ export async function resolveContinuation(
     });
     throw error;
   }
+  if (options?.runnable !== true) return owner;
+  try {
+    await assertRunnableSessionInbox(
+      sessionInboxHookToken(sessionCommandHookToken(owner.sessionId)),
+    );
+  } catch (error) {
+    if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
+    throw error;
+  }
+  return owner;
 }
 
 /**

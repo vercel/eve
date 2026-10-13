@@ -14,6 +14,8 @@ import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { withPendingHistory } from "#execution/session/pending-history.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /**
  * Result returned by {@link createSessionStep}.
@@ -36,6 +38,8 @@ export async function createSessionStep(input: {
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
+  /** History from `create()`, held until the first message's turn adds it. */
+  readonly history?: readonly SessionHistoryMessage[];
   readonly inheritedLimits?: RunSessionLimits;
   readonly outputSchema?: JsonObject;
   readonly nodeId?: string;
@@ -84,6 +88,9 @@ export async function createSessionStep(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
 
-  const { history, sessionState } = createDurableSessionValues(session);
+  const state = withPendingHistory(session.state, input.history);
+  const { history, sessionState } = createDurableSessionValues(
+    state === session.state ? session : { ...session, state },
+  );
   return { history, state: sessionState };
 }
