@@ -222,7 +222,8 @@ export async function createWorldHubWorld(options: WorldHubOptions): Promise<Wor
       ])) as World["queue"],
     specVersion: info.specVersion,
     capabilities: info.capabilities,
-    streamFlushIntervalMs: options.streamFlushIntervalMs ?? 30,
+    // 0: the SDK sends the first chunk at once and coalesces only while a write is in flight.
+    streamFlushIntervalMs: options.streamFlushIntervalMs ?? 0,
     createQueueHandler: ((prefix, handler) => async (req: Request) => {
       const body = await req.text();
       const url = new URL(req.url);
