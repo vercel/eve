@@ -215,7 +215,8 @@ describe("search", () => {
         signature: "notion(input: {}): Promise<unknown>",
         tool: "notion",
       };
-      // The sign-in entry stands in for the tools it can't list yet.
+      // Four deferred tools and agents, Linear's two tools, and Notion's sign-in
+      // entry, which stands in for the tools it can't list yet.
       expect(await search({ query: "notion" })).toEqual({
         remaining: 0,
         results: [signIn],

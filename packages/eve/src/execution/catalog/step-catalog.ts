@@ -167,6 +167,7 @@ export function buildStepCatalog(input: {
     offered: input.ctx?.get(OfferedCatalogToolsKey),
     skills,
   });
+  const { search: _search, ...offered } = catalogTools;
   const skillLoader = createSkillLoader(skills);
   const advertised = new Map(direct);
   // Listed tools include the catalog tools, so `eve__tool` naming one of them
@@ -183,12 +184,7 @@ export function buildStepCatalog(input: {
     describe,
     entries,
     get: (name) => (name === SKILL_ENTRY_NAME ? skillLoader : toolEntry(name)),
-    offered: {
-      connections: catalogTools.connections,
-      searchableSkills: catalogTools.searchableSkills,
-      skills: catalogTools.skills,
-      tools: catalogTools.tools,
-    },
+    offered,
     offersTasks,
     resolve: (toolCall) => {
       if (toolCall.toolName === CALL_TOOL_NAME && catalogTools.tools) {

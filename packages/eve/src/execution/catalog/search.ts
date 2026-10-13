@@ -49,7 +49,7 @@ function searchDescription({ connections, skills, tools }: SearchReach): string 
     skills
       ? `A result with \`skill\` has the name and description: load it with ${SKILL_TOOL_NAME}({ name }).`
       : undefined,
-    "`searched` counts the entries the query covered, and `remaining` counts the matches past `limit`. When `remaining` is 0, you have every match; when `searched` is small, there is little else to find.",
+    "`searched` counts the entries the query covered, and `remaining` counts the matches past `limit`: when `remaining` is 0, nothing else the query covered matched. Connections under `unavailable` weren't searched.",
     'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
     connections
       ? `A connection that needs sign-in appears as a tool named after the connection: calling it with ${CALL_TOOL_NAME}({ name }) asks the user to sign in. \`searched\` counts its tools only after sign-in.`
@@ -100,7 +100,8 @@ interface SearchOutput {
   readonly remaining: number;
   /**
    * Entries the query covered: the whole catalog, or one namespace. An
-   * unavailable connection's tools, or tools behind sign-in, aren't counted.
+   * unavailable connection counts as none, and one behind sign-in as its one
+   * sign-in entry.
    */
   readonly searched: number;
   readonly unavailable?: readonly UnavailableConnection[];

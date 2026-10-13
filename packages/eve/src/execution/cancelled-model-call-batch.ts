@@ -1,6 +1,6 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { createLogger } from "#internal/logging.js";
-import { AuthKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import { AuthKey, OfferedCatalogToolsKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { withContextScope } from "#context/run-step.js";
 import { serializeContext } from "#context/serialize.js";
@@ -79,6 +79,8 @@ export async function createCancelledModelCallBatchResult(input: {
   const checkpointContext = {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [AuthKey.name]: interruptedContext[AuthKey.name],
+    // The cut calls may name catalog tools in history, and the record only grows.
+    [OfferedCatalogToolsKey.name]: interruptedContext[OfferedCatalogToolsKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
   };
 

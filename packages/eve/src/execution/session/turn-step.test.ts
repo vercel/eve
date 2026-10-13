@@ -29,6 +29,7 @@ import {
   TurnDynamicToolMetadataKey,
   TurnDeliveryIdsKey,
   HistoryStateKey,
+  OfferedCatalogToolsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -1976,7 +1977,13 @@ describe("turnStep", () => {
     expect(observedSchedule).toBeUndefined();
   });
 
-  it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
+  it("keeps the dynamic model selection and offered catalog tools a cancelled first turn set", async () => {
+    const CATALOG_TOOLS = {
+      connections: false,
+      searchableSkills: false,
+      skills: false,
+      tools: true,
+    };
     const announcement = "Available skills\n- policy: Tenant policy";
     const session = createStubSession({
       history: [{ role: "user", content: announcement, kind: "user" }],
@@ -2008,6 +2015,7 @@ describe("turnStep", () => {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,
         });
+        ctx.set(OfferedCatalogToolsKey, CATALOG_TOOLS);
         ctx.set(ThreadKey, "discard this turn-scoped mutation");
         ctx.delete(HistoryStateKey);
         throw new TurnCancelledError();
@@ -2042,6 +2050,7 @@ describe("turnStep", () => {
       serializedContext: {
         [TurnDeliveryIdsKey.name]: ["cancelled-delivery"],
         [HistoryStateKey.name]: { announcements: { skills: announcement } },
+        [OfferedCatalogToolsKey.name]: CATALOG_TOOLS,
         [SessionDynamicModelReferenceKey.name]: {
           id: "anthropic/claude-opus-4.6",
           contextWindowTokens: 1_000_000,
