@@ -4,6 +4,7 @@
 export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing";
 
 export type TemplateIntegration =
+  | "Contentful"
   | "Datadog"
   | "GitHub"
   | "HTTP API"
@@ -11,6 +12,7 @@ export type TemplateIntegration =
   | "Linq"
   | "Mux"
   | "Notion"
+  | "Postgres"
   | "Resend"
   | "Sanity"
   | "Sentry"
@@ -115,7 +117,7 @@ export const templateManifest: TemplateManifestEntry[] = [
     sourceHref: "https://github.com/vercel-labs/eve-data-analyst-template/tree/main",
     category: "Collaboration",
     model: "anthropic/claude-opus-5.5",
-    integrations: ["Slack", "Vercel"],
+    integrations: ["Slack", "Postgres", "Vercel"],
     source: "Vercel Templates",
     github: { owner: "vercel-labs", repo: "eve-data-analyst-template", ref: "main" },
     files: [
@@ -138,7 +140,7 @@ export const templateManifest: TemplateManifestEntry[] = [
     sourceHref: "https://github.com/vercel-labs/eve-contentful-agent-template/tree/main",
     category: "Collaboration",
     model: "openai/gpt-6.1-sol-fast",
-    integrations: ["Slack", "Vercel"],
+    integrations: ["Slack", "Contentful", "Vercel"],
     source: "Vercel Templates",
     github: { owner: "vercel-labs", repo: "eve-contentful-agent-template", ref: "main" },
     files: [

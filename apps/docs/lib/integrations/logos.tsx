@@ -6,6 +6,7 @@ import {
   SiClickhouse,
   SiCloudinary,
   SiCoda,
+  SiContentful,
   SiDatadog,
   SiEgnyte,
   SiGooglechat,
@@ -22,6 +23,7 @@ import {
   SiPlanetscale,
   SiPosthog,
   SiPostman,
+  SiPostgresql,
   SiRazorpay,
   SiSanity,
   SiSentry,
@@ -294,6 +296,10 @@ const posthogLogo = (props: LogoProps) => <SiPosthog {...props} />;
 const postmanLogo = (props: LogoProps) => <SiPostman color="default" {...props} />;
 
 const razorpayLogo = (props: LogoProps) => <SiRazorpay {...props} />;
+
+export const contentfulLogo = (props: LogoProps) => <SiContentful {...props} />;
+
+export const postgresLogo = (props: LogoProps) => <SiPostgresql {...props} />;
 
 export const sanityLogo = (props: LogoProps) => <SiSanity {...props} />;
 
