@@ -13,12 +13,13 @@ const RUN_START_TIMEOUT_MS = 30_000;
  * Aborts the `execute` call's `abortSignal`. A turn steered right after it
  * started the run can get here before the run registers its control hook, so
  * a live run's missing hook is waited for. A run that ended has nothing left
- * to interrupt.
+ * to interrupt. A run still without its hook at the deadline fails the step,
+ * which the runtime retries, since the interrupt was not delivered.
  */
 export async function interruptWorkflowToolRun(run: WorkflowToolRunAddress): Promise<void> {
   "use step";
 
-  await pollUntil(async () => {
+  const settled = await pollUntil(async () => {
     try {
       await resumeHook(run.hookToken, INTERRUPT);
       return true;
@@ -27,4 +28,9 @@ export async function interruptWorkflowToolRun(run: WorkflowToolRunAddress): Pro
     }
     return (await hasRunEnded(run.runId)) ? true : undefined;
   }, RUN_START_TIMEOUT_MS);
+  if (settled === undefined) {
+    throw new Error(
+      `Workflow tool run "${run.runId}" did not start taking commands within ${RUN_START_TIMEOUT_MS / 1000} seconds, so it has not received the interrupt yet.`,
+    );
+  }
 }

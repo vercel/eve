@@ -39,3 +39,32 @@ it("leaves a run that already ended alone", async () => {
 
   expect(mocks.resumeHook).toHaveBeenCalledOnce();
 });
+
+it("fails instead of dropping the interrupt when the run registers its hook after the deadline", async () => {
+  vi.useFakeTimers();
+  try {
+    // Bob's deploy run is slow to start and registers its control hook only after 40 seconds.
+    const registeredAt = Date.now() + 40_000;
+    mocks.resumeHook.mockImplementation(async () => {
+      if (Date.now() < registeredAt) throw new HookNotFoundError("hold-control");
+      return { runId: "hold-run" };
+    });
+    mocks.getRun.mockReturnValue({ status: Promise.resolve("running") });
+
+    const attempt = expect(interruptWorkflowToolRun(run)).rejects.toThrow(
+      'Workflow tool run "hold-run" did not start taking commands within 30 seconds',
+    );
+    await vi.advanceTimersByTimeAsync(31_000);
+    await attempt;
+
+    // The runtime retries the failed step, which delivers the interrupt once the hook exists.
+    await vi.advanceTimersByTimeAsync(10_000);
+    await interruptWorkflowToolRun(run);
+    expect(mocks.resumeHook).toHaveBeenLastCalledWith("hold-control", { kind: "interrupt" });
+    await expect(mocks.resumeHook.mock.results.at(-1)?.value).resolves.toEqual({
+      runId: "hold-run",
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+});
