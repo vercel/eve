@@ -911,6 +911,55 @@ describe("tool-hosted authorization", () => {
     ).rejects.toThrow("auth required");
   });
 
+  it.each([
+    ["the requester approves their own call", "user-1", 1, "token:user-1"],
+    ["someone else approves the call", "user-2", 2, "token:user-2"],
+  ] as const)(
+    "shares an explicit auth key between requester and approver lookups when %s",
+    async (_case, approverId, fetches, approverToken) => {
+      const fetched: string[] = [];
+      const provider: AuthorizationDefinition = {
+        principalType: "user",
+        async getToken({ principal }) {
+          const id = principal.type === "user" ? principal.id : "app";
+          fetched.push(id);
+          return { token: `token:${id}` };
+        },
+      };
+      const runtime = await createTestRuntime({ tools: [] });
+      const execute = createToolExecuteWithAuth({
+        scope: "grant-tool",
+        execute: async (_input, ctx) => ({
+          approver: (await ctx.approval!.responder.getToken(provider, { authKey: "github" })).token,
+          requester: (await ctx.getToken(provider, { authKey: "github" })).token,
+        }),
+      });
+
+      const result = await runtime.runAsSession({ sessionId: "session_shared_key" }, async () => {
+        seedUserPrincipal();
+        return await execute(
+          {},
+          {
+            messages: [],
+            toolCallId: "call_grant",
+            approval: {
+              responder: {
+                attributes: {},
+                authenticator: "test-idp",
+                issuer: "test-idp",
+                principalId: approverId,
+                principalType: "user",
+              },
+            },
+          },
+        );
+      });
+
+      expect(result).toEqual({ approver: approverToken, requester: "token:user-1" });
+      expect(fetched).toHaveLength(fetches);
+    },
+  );
+
   it("fails an approved call's approver token lookup without starting a sign-in", async () => {
     let starts = 0;
     const provider: AuthorizationDefinition = {

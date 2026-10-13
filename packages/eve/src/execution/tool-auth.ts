@@ -40,8 +40,7 @@ function approvalOf(responder: SessionAuthContext, scope: string): ApprovedCall 
   return {
     responder: {
       ...responder,
-      getToken: (provider, options) =>
-        auth.getResponderToken(provider, namespaceApprovalAuthOptions(scope, options)),
+      getToken: (provider, options) => auth.getResponderToken(provider, options),
     },
   };
 }
