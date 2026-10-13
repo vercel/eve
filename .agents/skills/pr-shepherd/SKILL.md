@@ -54,8 +54,7 @@ Triage the findings yourself. Verify each one against the code before you act.
 
 ## 3. Address PR comments
 
-Collect all feedback. Review bots such as `roboeve[bot]` and Vercel Agent
-Review often post a few minutes after the PR opens or after a push.
+Collect all feedback.
 
 Unresolved inline review threads, with the IDs you need to reply and resolve:
 
@@ -82,6 +81,14 @@ gh pr view <n> --json comments,reviews \
   --jq '.comments[], .reviews[] | select(.body != "") | {author: .author.login, body}'
 ```
 
+Expect two review bots:
+
+- `roboeve[bot]` reviews once, on the commit that opened the PR, usually within
+  2–15 minutes. It does not review later pushes.
+- Vercel Agent Review (`vercel[bot]`) runs as a check on every push and can post
+  new threads on later commits. It re-checks its own threads after a fix and
+  resolves them itself, so skip threads it already resolved.
+
 Ignore informational bot posts such as Vercel deployment and bundle analysis
 comments, unless they report a problem this PR caused.
 
@@ -95,8 +102,11 @@ needs a product or design decision only the user can make, ask the user.
 1. Combine the fixes from steps 2 and 3. Rerun the fast checks and the
    narrowest tests that cover the fixes.
 2. Commit with `git commit -s` and push. Add new commits instead of amending or
-   force-pushing, so reply SHAs stay valid. Force-push only when the user asks
-   or to repair signing or DCO.
+   force-pushing, so reply SHAs stay valid. PRs are squash-merged and `main`
+   does not require branches to be up to date, so do not rebase only to catch
+   up. If `gh pr view <n> --json mergeable` reports `CONFLICTING`, merge
+   `origin/main` into the branch with `git merge --signoff origin/main`. Rebase
+   or force-push only when the user asks or to repair signing or DCO.
 3. If the fixes changed behavior that the PR body describes, update the body
    with `gh-pr-description`.
 4. Reply in each thread after the fix is on the remote. Keep replies short and
@@ -133,14 +143,21 @@ gh pr checks <n> --watch --interval 60
 ```
 
 If your shell cannot block that long, poll `gh pr checks <n>` on an interval.
-The e2e workflows (`e2e-local`, `e2e-vercel`, `e2e-postgres`) take the longest.
+A full round takes about 10–15 minutes, and `test-scenario` and the e2e shards
+finish last. `gh pr checks <n> --required` shows only the checks that block
+merge. Advisory checks such as Bundle Analysis and the eve-code benchmark
+should still pass, but they come second to required checks.
 
-For each failure, read the log before you act:
+For each failure, find the real error before you act. Integration tests log
+many expected errors, so the first `Error:` lines in a failed log are usually
+noise. Look for the vitest summary instead:
 
 ```sh
-gh run view <run-id> --log-failed
-gh run view <run-id> --json jobs --jq '.jobs[] | select(.conclusion == "failure") | {name, databaseId}'
+gh run view <run-id> --log-failed | grep -aE 'Failed Tests|FAIL |Test Files|Unhandled'
 ```
+
+If every test passed but the job still failed, read the end of the log for a
+teardown error, hang, or timeout.
 
 Classify the failure:
 
@@ -148,26 +165,32 @@ Classify the failure:
   config from `AGENTS.md`, or fails the same way on rerun. Fix it, then go back
   to step 4.
 - Flaky: the failure does not relate to the diff, and it shows timeouts,
-  network or provider errors, or a live-model e2e variance. It also counts as
-  flaky when the same job fails on `main`
-  (`gh run list --branch main --workflow <file> --limit 10`). Rerun only the
-  failed jobs:
+  network, provider, or deploy errors. It also counts as flaky when the same
+  job fails on `main` (`gh run list --branch main --workflow <file> --limit 10`).
+  Most flakes come from `test-integration` on either OS, `test-scenario`, and
+  `e2e-vercel` or `e2e-postgres` fixture deploys. `e2e-local` uses live models,
+  so it can also vary between runs.
 
-  ```sh
-  gh run rerun <run-id> --failed
-  ```
+Rerun only the failed jobs. GitHub refuses a rerun while any job in that
+workflow run is still in progress, so wait for the run to finish:
 
-Rerun a flaky job at most twice. If it fails a third time, treat it as real or
-report it to the user with the evidence. Do not run whole integration, scenario,
-or e2e tiers locally. Scope local runs to the failing file and test name.
+```sh
+gh run rerun <run-id> --failed
+```
+
+Rerun a flaky job at most twice per head commit. If it fails a third time,
+treat it as real, or report it to the user with the failing test names. Do not
+run whole integration, scenario, or e2e tiers locally. Scope local runs to the
+failing file and test name.
 
 ## 6. Loop until done
 
-After each push, return to step 3: new commits often trigger new bot reviews.
-Stop when all of these are true for the latest head commit:
+After each push, return to step 3. Teammates may comment at any time, and
+Vercel Agent Review reviews each new commit. Stop when all of these are true for
+the latest head commit:
 
-- All checks are green, or the only failures are documented as unrelated and the
-  user knows about them.
+- All checks are green, including the Vercel Agent Review check, or the only
+  failures are documented as unrelated and the user knows about them.
 - There are no unresolved review threads, except ones that wait on a human
   decision.
 - No new comments arrived since your last pass.
