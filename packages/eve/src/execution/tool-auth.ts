@@ -8,14 +8,7 @@ import type {
   ToolExecuteOptions,
 } from "#tools/definition.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
-import {
-  handleAuthorizationError,
-  isScopedAuthorizationRequiredError,
-} from "#runtime/connections/scoped-authorization.js";
-import {
-  ConnectionAuthorizationFailedError,
-  isConnectionAuthorizationRequiredError,
-} from "#connections/errors.js";
+import { handleAuthorizationError } from "#runtime/connections/scoped-authorization.js";
 
 type ToolExecuteWithAuthInput<TInput> = {
   readonly scope: string;
@@ -43,27 +36,10 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
 
 /** What an approved call reads about the person who approved it. */
 function approvalOf(responder: SessionAuthContext, scope: string): ApprovedCall {
-  const auth = buildApprovalResponseAuth({ responder, scope });
+  const auth = createAuthorizationContext({ scope, boundResponder: responder });
   return {
-    // The approver isn't in this call, so a missing token fails the call rather than
-    // reaching the enclosing boundary, which would start a sign-in.
-    getToken: async (provider, options) => {
-      try {
-        return await auth.getToken(provider, options);
-      } catch (error) {
-        if (
-          isScopedAuthorizationRequiredError(error) ||
-          isConnectionAuthorizationRequiredError(error)
-        ) {
-          throw new ConnectionAuthorizationFailedError(scope, {
-            message: `The approver of "${scope}" has no token for this provider, and an approved call doesn't start a sign-in.`,
-            reason: "approver_authorization_required",
-            retryable: false,
-          });
-        }
-        throw error;
-      }
-    },
+    getToken: (provider, options) =>
+      auth.getResponderToken(provider, namespaceApprovalAuthOptions(scope, options)),
     responder,
   };
 }
