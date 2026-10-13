@@ -16,7 +16,7 @@ import {
   type SessionUsageLimitViolation,
 } from "#harness/session-usage-limits.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
+import { addTokenUsage, type TokenUsage, usageSince } from "#shared/token-usage.js";
 
 export type { SessionRuntimeUsageLimits, SessionUsageLimitViolation };
 
@@ -134,18 +134,8 @@ export function takeSessionUsageDelta<T extends { readonly state?: SessionStateM
   session: T,
 ): { readonly delta: TokenUsage; readonly session: T } {
   const total = sessionUsage(session);
-  const reported = reportedUsage(session.state);
   return {
-    delta: {
-      cacheReadTokens: total.cacheReadTokens - reported.cacheReadTokens,
-      cacheWriteTokens: total.cacheWriteTokens - reported.cacheWriteTokens,
-      costUsd:
-        total.costUsd === undefined && reported.costUsd === undefined
-          ? undefined
-          : (total.costUsd ?? 0) - (reported.costUsd ?? 0),
-      inputTokens: total.inputTokens - reported.inputTokens,
-      outputTokens: total.outputTokens - reported.outputTokens,
-    },
+    delta: usageSince(total, reportedUsage(session.state)),
     session: withReported(session, total),
   };
 }
@@ -159,6 +149,11 @@ export function markUsageReported<T extends { readonly state?: SessionStateMap }
   usage: TokenUsage,
 ): T {
   return withReported(session, addTokenUsage(reportedUsage(session.state), usage));
+}
+
+/** The view with `usage` as everything it records spent, all of it on model runs. */
+export function withModelUsage(view: SessionView, usage: TokenUsage): SessionView {
+  return { ...view, usage: { byKind: { model: usage }, total: usage } };
 }
 
 function reportedUsage(state: SessionStateMap | undefined): TokenUsage {

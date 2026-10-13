@@ -28,15 +28,3 @@ export function createRunUsageTally(onRecord?: () => void): RunUsageTally {
     total: () => spent,
   };
 }
-
-/** The new spend in one cumulative report: `total`, less the part of it `counted` earlier. */
-export function usageSince(total: TokenUsage, counted: TokenUsage | undefined): TokenUsage {
-  if (counted === undefined) return total;
-  return {
-    cacheReadTokens: total.cacheReadTokens - counted.cacheReadTokens,
-    cacheWriteTokens: total.cacheWriteTokens - counted.cacheWriteTokens,
-    costUsd: total.costUsd === undefined ? undefined : total.costUsd - (counted.costUsd ?? 0),
-    inputTokens: total.inputTokens - counted.inputTokens,
-    outputTokens: total.outputTokens - counted.outputTokens,
-  };
-}

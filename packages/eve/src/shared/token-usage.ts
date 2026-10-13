@@ -28,3 +28,16 @@ export function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
     outputTokens: a.outputTokens + b.outputTokens,
   };
 }
+
+/** The new spend in one cumulative report: `total`, less the part of it `counted` earlier. */
+export function usageSince(total: TokenUsage, counted: TokenUsage | undefined): TokenUsage {
+  if (counted === undefined) return total;
+  return {
+    cacheReadTokens: total.cacheReadTokens - counted.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens - counted.cacheWriteTokens,
+    // A total reports a cost once any part of it did, so `counted` has none the total lacks.
+    costUsd: total.costUsd === undefined ? undefined : total.costUsd - (counted.costUsd ?? 0),
+    inputTokens: total.inputTokens - counted.inputTokens,
+    outputTokens: total.outputTokens - counted.outputTokens,
+  };
+}

@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 import { usageOf } from "#harness/facts.js";
+import { withModelUsage } from "#harness/session-usage.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
@@ -81,12 +82,7 @@ export function importProjection(session: LegacySession): SessionProjection {
       : undefined,
   );
   const projection =
-    spent === undefined
-      ? initial
-      : {
-          ...initial,
-          view: { ...initial.view, usage: { byKind: { model: spent }, total: spent } },
-        };
+    spent === undefined ? initial : { ...initial, view: withModelUsage(initial.view, spent) };
   if (!isObject(raw) || typeof raw.sequence !== "number") return projection;
   const { view } = projection;
   const status = raw.sessionStarted === true ? ("open" as const) : ("new" as const);
