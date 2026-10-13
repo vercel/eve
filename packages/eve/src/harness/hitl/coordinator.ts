@@ -27,7 +27,7 @@ import { matchSignIns } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { signInAttemptKey } from "./sign-ins.js";
 import {
-  getAuthorizationResult,
+  getAuthorizationResults,
   isAuthorizationSignal,
   type AuthorizationChallenge,
 } from "#harness/authorization.js";
@@ -233,18 +233,21 @@ export async function coordinateApprovalDelivery(input: {
 
   // Candidates are persisted in an earlier pass. Run pending candidates and
   // resume only authorization-required candidates whose callback arrived.
-  const parkedChallengeNames = new Set(
-    readHitlState(session.state).signIns.map((challenge) => challenge.name),
-  );
+  // Several candidates can wait on the same connection, so match by attempt, not name.
+  const parkedAttempts = new Set(readHitlState(session.state).signIns.map(signInAttemptKey));
   for (const candidate of candidatesAtStart) {
     if (candidate.status === "authorization-required") {
       const candidateChallenges = candidate.authorizationChallenges ?? [];
-      const hasCallback = candidateChallenges.some(
-        (challenge) => getAuthorizationResult(challenge.name) !== undefined,
+      const hasCallback = getAuthorizationResults().some(
+        (result) =>
+          result.attemptId !== undefined &&
+          candidateChallenges.some((challenge) => challenge.attemptId === result.attemptId),
       );
       if (!hasCallback) {
         challenges.push(
-          ...candidateChallenges.filter((challenge) => !parkedChallengeNames.has(challenge.name)),
+          ...candidateChallenges.filter(
+            (challenge) => !parkedAttempts.has(signInAttemptKey(challenge)),
+          ),
         );
         continue;
       }

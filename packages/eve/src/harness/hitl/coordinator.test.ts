@@ -4,6 +4,7 @@ import { jsonSchema } from "ai";
 import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { PendingAuthorizationResultKey } from "#harness/authorization.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
@@ -314,6 +315,82 @@ describe("coordinateApprovalDelivery", () => {
     const result = await authorize(session, response);
     expect(result.kind).toBe("authorization-required");
     expect(response).not.toHaveBeenCalled();
+  });
+
+  it("resumes only the candidate whose sign-in attempt was called back", async () => {
+    const otherResponder: SessionAuthContext = { ...responder, principalId: "user-2" };
+    let session = (await ingest()).session;
+    session = (
+      await coordinateApprovalDelivery({
+        now: 100,
+        session,
+        stepInput: {
+          attributedInputResponses: [
+            {
+              auth: otherResponder,
+              response: { requestId: request.requestId, optionId: "approve" },
+            },
+          ],
+        },
+        tools: new Map(),
+      })
+    ).session;
+    const [first, second] = getApprovalAuditState(session.state).activeCandidates;
+    // Both responders wait on the same connection, each with its own sign-in attempt.
+    for (const [candidate, attemptId] of [
+      [first!, "attempt-1"],
+      [second!, "attempt-2"],
+    ] as const) {
+      session = {
+        ...session,
+        state: markApprovalCandidateAuthorizationRequired({
+          candidateId: candidate.candidateId,
+          state: session.state,
+          authorizationChallenges: [
+            {
+              attemptId,
+              candidateId: candidate.candidateId,
+              name: "github",
+              hookUrl: `https://example.com/${attemptId}`,
+              challenge: { url: "https://example.com/login" },
+            },
+          ],
+        }),
+      };
+    }
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({
+      status: "rejected",
+      reason: "not an admin",
+    }));
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: responder },
+      sessionId: session.sessionId,
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    ctx.set(PendingAuthorizationResultKey, [
+      {
+        attemptId: "attempt-1",
+        callback: { method: "GET", params: { code: "code-1" } },
+        hookUrl: "https://example.com/attempt-1",
+        name: "github",
+      },
+    ]);
+    const tool: HarnessToolDefinition = {
+      name: "gate",
+      description: "A gated tool.",
+      inputSchema: jsonSchema({ type: "object" }),
+      execute: async () => "done",
+      approval: { request: () => "user-approval", response },
+    };
+    await contextStorage.run(ctx, () =>
+      coordinateApprovalDelivery({ now: 101, session, tools: new Map([["gate", tool]]) }),
+    );
+
+    expect(response.mock.calls.map(([input]) => input.response.principal.principalId)).toEqual([
+      first!.responder.principalId,
+    ]);
   });
 
   it("recovers an allowed settlement before its synthetic response is consumed", async () => {
