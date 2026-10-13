@@ -237,7 +237,11 @@ export interface ApprovedCall {
   readonly responder: ApprovalResponder;
 }
 
-/** The person who approved a call, with access to their own credentials. */
+/**
+ * The person who approved a call, with access to their own credentials. A
+ * transient object built for each approved call: its identity fields are the
+ * stored responder record, and `getToken` is not serialized with them.
+ */
 export interface ApprovalResponder extends SessionAuthContext {
   /**
    * Resolves the responder's token for an inline provider, as
