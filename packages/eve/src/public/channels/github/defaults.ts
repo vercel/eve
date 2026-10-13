@@ -182,7 +182,7 @@ async function checkoutRepositoryForTurn(
 
 /**
  * A GitHub conversation as a sign-in shows on it: comments are public and can't reach one person,
- * so it shows only a link-free status saying who must sign in.
+ * so it shows only a link-free status saying the person who asked must sign in.
  */
 function gitHubSignIns(channel: GitHubEventContext): SignInSurface {
   const post = async (text: string) => {

@@ -16,6 +16,7 @@ import type {
 import { renderInteractionComponents } from "#public/channels/discord/hitl.js";
 import type {
   DiscordChannelEvents,
+  DiscordChannelState,
   DiscordCommandResult,
   DiscordContext,
 } from "#public/channels/discord/discordChannel.js";
@@ -67,16 +68,23 @@ type DiscordEventChannel = Parameters<
 >[1]["channel"];
 
 /**
- * A Discord conversation as a sign-in shows on it: a DM gets the challenge; a server channel, a
- * link-free status that points to a DM.
+ * Whether only the person signing in reads the conversation: a one-to-one DM (channel type 1).
+ * A group DM has no guild either, but every member reads it. A session eve started itself has no
+ * interaction, so it isn't taken as private.
+ */
+export function signsInPrivately(state: DiscordChannelState): boolean {
+  return state.channelType === 1 && state.interactionToken !== null;
+}
+
+/**
+ * A Discord conversation as a sign-in shows on it: a DM gets the challenge; a group DM or server
+ * channel, a link-free status that points to a DM.
  */
 function discordSignIns(channel: DiscordEventChannel): SignInSurface {
   const { discord } = channel;
   const post = async (content: string) => (await discord.post({ content })).id || undefined;
   return {
-    // An interaction without a guild came from a DM. A session eve started itself knows no
-    // guild either, so without an interaction it isn't taken as private.
-    private: channel.state.guildId === null && channel.state.interactionToken !== null,
+    private: signsInPrivately(channel.state),
     postChallenge: (signIn) => post(signInChallengeText(signIn)),
     post,
     async edit(messageId, content) {
