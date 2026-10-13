@@ -1,3 +1,4 @@
+import { prepareSessionState, type CreateSessionInput } from "#execution/create-session-step.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
@@ -100,9 +101,23 @@ function channelDeliveryErrorCode(error: unknown): string {
 export type { TurnStepInput };
 
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
-export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
+export function turnStep(
+  input: Omit<TurnStepInput, "sessionState"> & { readonly initialSession: CreateSessionInput },
+): Promise<TurnStepResult>;
+export function turnStep(input: TurnStepInput): Promise<TurnStepResult>;
+export async function turnStep(
+  input:
+    | TurnStepInput
+    | (Omit<TurnStepInput, "sessionState"> & { readonly initialSession: CreateSessionInput }),
+): Promise<TurnStepResult> {
   "use step";
-  return await withSessionStateDelta(input, runSessionStep);
+  return await withSessionStateDelta(input, async (input) => {
+    const sessionState =
+      "sessionState" in input
+        ? input.sessionState
+        : (await prepareSessionState(input.initialSession)).state;
+    return await runSessionStep({ ...input, sessionState });
+  });
 }
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {

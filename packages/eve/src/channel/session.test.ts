@@ -324,3 +324,18 @@ describe("buildSessionHandle", () => {
     expect(session.continuation).toBeUndefined();
   });
 });
+
+it("preserves an externally assigned followup delivery identity", async () => {
+  const runtime = createRuntime();
+  await createSession("sess_1", runtime, { channelKind: "eve", channelName: "eve" }).send("hello", {
+    auth: null,
+    deliveryId: "dlv_followup",
+  });
+  expect(runtime.dispatchSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      command: expect.objectContaining({
+        delivery: expect.objectContaining({ deliveryId: "dlv_followup" }),
+      }),
+    }),
+  );
+});

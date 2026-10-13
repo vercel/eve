@@ -1,3 +1,7 @@
+import { dispatchChannelRequest } from "#internal/nitro/routes/channel-dispatch.js";
+import { eveChannel } from "#public/channels/eve.js";
+import { none } from "#public/channels/auth.js";
+import { getRun } from "#internal/workflow/runtime.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
@@ -39,6 +43,190 @@ afterEach(() => {
 });
 
 describe("workflowEntry integration", () => {
+  it("starts its first model turn without a separate durable session-creation step", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-fast-first-turn" } });
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          sessionTimeoutMs: false,
+          input: { message: "hello" },
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const turn = await stream.nextTurn();
+        expectSingleTurn(turn, "turn_0");
+        const world = await getWorld();
+        const events = await world.events.list({
+          runId: run.runId,
+          resolveData: "all",
+          pagination: { limit: 1000 },
+        });
+        const created = events.data.filter((event) => event.eventType === "step_created");
+        expect(created.length).toBeGreaterThan(0);
+        expect(created[0]).toMatchObject({
+          eventData: { stepName: expect.stringMatching(/\/\/turnStep$/) },
+        });
+        expect(created.some((event) => JSON.stringify(event).includes("//createSessionStep"))).toBe(
+          false,
+        );
+        const firstStart = events.data.findIndex((event) => event.eventType === "step_started");
+        expect(
+          events.data.slice(0, firstStart).filter((event) => event.eventType === "hook_created"),
+        ).toHaveLength(3);
+        // Recovery uses the complete state delta in turnStep's result, not a lost local preparation.
+        const { readTurnStepStates } = await import("#internal/testing/session-test-helpers.js");
+        const { waitForParkedTurnStep } = await import("#internal/testing/session-test-helpers.js");
+        await waitForParkedTurnStep(run.runId);
+        const states = await readTurnStepStates(run.runId);
+        expect(states[0]?.sessionState.sessionId).toBe(run.runId);
+        expect(states[0]?.sessionState.snapshot.session.history.length).toBeGreaterThan(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("preclaims the first turn and deadline launcher in one SDK event batch", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-batched-start" } });
+    await runtime.run(async () => {
+      const world = await getWorld();
+      const originalBatch = world.events.createBatch;
+      const batches: Parameters<NonNullable<typeof originalBatch>>[1][] = [];
+      // This test adapter exercises the SDK's optional-batch dispatch. It is
+      // deliberately NOT a production atomic implementation of createBatch.
+      world.events.createBatch = async (runId, entries, params) => {
+        batches.push(entries);
+        const results = [];
+        for (const entry of entries) {
+          const value = await world.events.create(runId, entry.event, {
+            ...params,
+            occurredAt: entry.occurredAt,
+            computeInstanceId: entry.computeInstanceId,
+          });
+          if (!value.event) throw new Error("Test batch adapter expected a committed event");
+          results.push({ ...value, status: 200 as const, event: value.event });
+        }
+        return { results };
+      };
+      try {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            sessionTimeoutMs: 60_000,
+            input: { message: "hello" },
+            serializedContext: buildSerializedContext({ channelKind: "http" }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await stream.nextTurn();
+          const firstPairBatch = batches.find((batch) =>
+            batch.some(
+              ({ event }) =>
+                event.eventType === "step_created" &&
+                event.eventData.stepName.endsWith("//turnStep"),
+            ),
+          );
+          expect(firstPairBatch?.map(({ event }) => event.eventType)).toEqual([
+            "step_created",
+            "step_started",
+            "step_created",
+            "step_started",
+          ]);
+          expect(
+            firstPairBatch
+              ?.filter(({ event }) => event.eventType === "step_created")
+              .map(({ event }) => event.eventType === "step_created" && event.eventData.stepName),
+          ).toEqual([
+            expect.stringMatching(/\/\/turnStep$/),
+            expect.stringMatching(/\/\/startSessionTimeoutStep$/),
+          ]);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      } finally {
+        world.events.createBatch = originalBatch;
+      }
+    });
+  });
+
+  it("folds session preparation through the eve channel HTTP create route", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
+    const runtime = await createTestRuntime({
+      agent: { name: "eve-http-fast", limits: { sessionTimeoutMs: false } },
+      modules: [
+        {
+          logicalPath: "channels/eve.ts",
+          loadNamespace: async () => ({
+            default: eveChannel({ auth: [none()], turnPolicy: "queue" }),
+          }),
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+      let timestamp = Date.now();
+      let encoded = "";
+      for (let i = 0; i < 10; i++) {
+        encoded = alphabet[timestamp % 32] + encoded;
+        timestamp = Math.floor(timestamp / 32);
+      }
+      const sessionId =
+        "wrun_" +
+        encoded +
+        Array.from(crypto.getRandomValues(new Uint8Array(16)), (v) => alphabet[v % 32]).join("");
+      const request = new Request("https://example.com/eve/v1/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "hello", sessionId, deliveryId: "dlv_first" }),
+      });
+      const response = await dispatchChannelRequest(
+        { req: request, context: { params: {} }, waitUntil: () => {} } as never,
+        "POST /eve/v1/session",
+        { kind: "production", sandboxScope: "test" },
+      );
+      expect(response.status).toBe(202);
+      const run = getRun(sessionId);
+      const stream = captureTurnEvents(run);
+      try {
+        const turn = await stream.nextTurn();
+        expectSingleTurn(turn, "turn_0");
+        const events = await (
+          await getWorld()
+        ).events.list({ runId: sessionId, resolveData: "all", pagination: { limit: 1000 } });
+        const created = events.data.find((event) => event.eventType === "run_created");
+        if (created?.eventType !== "run_created") throw new Error("Missing run creation event.");
+        const [input] = await hydrateWorkflowArguments(
+          created.eventData.input,
+          sessionId,
+          undefined,
+        );
+        expect(input).toMatchObject({
+          input: { message: "hello" },
+          serializedContext: { "eve.channel": { kind: "http" } },
+        });
+        expect(input.serializedContext["eve.sessionCallback"]).toBeUndefined();
+        const firstStart = events.data.findIndex((event) => event.eventType === "step_started");
+        expect(
+          events.data.slice(0, firstStart).filter((event) => event.eventType === "hook_created"),
+        ).toHaveLength(3);
+        expect(
+          events.data.some((event) => JSON.stringify(event).includes("//createSessionStep")),
+        ).toBe(false);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
     let initializedAuth: unknown;

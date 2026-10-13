@@ -295,7 +295,10 @@ async function buildRouteArgs(
           input.continuationToken === undefined
             ? undefined
             : `${channelName}:${input.continuationToken}`,
-        delivery: createChannelDeliveryMetadata(deliverySource),
+        delivery: createChannelDeliveryMetadata({
+          ...deliverySource,
+          deliveryId: input.deliveryId,
+        }),
         requestId,
       }),
   );

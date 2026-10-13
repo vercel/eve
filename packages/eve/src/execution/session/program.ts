@@ -1,3 +1,4 @@
+import type { CreateSessionInput } from "#execution/create-session-step.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import {
@@ -54,7 +55,12 @@ export interface SessionBoot {
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
-  readonly sessionState: DurableSessionState;
+  readonly sessionState?: DurableSessionState;
+  readonly initialSession?: CreateSessionInput;
+  readonly initialTurnControllers?: {
+    readonly cancellation: AbortController;
+    readonly steering: AbortController;
+  };
   readonly sessionTimeoutDeadline?: Date;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -87,6 +93,7 @@ export async function runPreparedSession(
     sessionWritable: boot.sessionWritable,
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
+    initialSession: boot.initialSession,
   });
   const progress: SessionProgress = { caller: boot.caller, terminalEmitted: false };
   const handoff = new SessionHandoff({
@@ -124,7 +131,14 @@ export async function runPreparedSession(
     if (!progress.terminalEmitted) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
-        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
+        {
+          caller: progress.caller,
+          cursor: {
+            serializedContext: cursor.serializedContext,
+            sessionState: cursor.optionalSessionState,
+          },
+          sessionWritable: boot.sessionWritable,
+        },
       );
     }
     throw createSafeOuterWorkflowError();
@@ -195,6 +209,7 @@ async function runSessionLoop(
   const queue = new SessionInputQueue();
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
+    initialTurnControllers: boot.initialTurnControllers,
     cursor,
     inbox,
     queue,

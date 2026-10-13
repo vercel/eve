@@ -9,6 +9,40 @@ import { withSessionStateDelta } from "#execution/session/state-delta.js";
 const stableToken = "eve:session:session-1:inbox";
 
 describe("SessionStateCursor", () => {
+  it("reconstructs a fresh session solely from the first turn's recorded delta", async () => {
+    const initialSession = {
+      compiledArtifactsSource: { kind: "development" },
+      continuationToken: "",
+      sessionId: "session-1",
+    } satisfies import("#execution/create-session-step.js").CreateSessionInput;
+    const finalState = state("");
+    const recorded = await withSessionStateDelta({ serializedContext: {} }, async () => ({
+      action: "park" as const,
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      serializedContext: { title: "first" },
+      sessionState: finalState,
+    }));
+    const claimSessionHooks = vi.fn(async () => {});
+    for (let replay = 0; replay < 2; replay++) {
+      const cursor = new SessionStateCursor({
+        inbox: { claimSessionHooks },
+        initialSession,
+        serializedContext: {},
+        sessionWritable: new WritableStream<Uint8Array>(),
+      });
+      expect(cursor.optionalSessionState).toBeUndefined();
+      const existingStep = vi.fn();
+      const replayStep = vi.fn(async () => recorded);
+      await cursor.advanceTurn(existingStep, replayStep);
+      expect(existingStep).not.toHaveBeenCalled();
+      expect(cursor.sessionState).toEqual(finalState);
+      expect(cursor.serializedContext).toEqual({ title: "first" });
+      expect(replayStep).toHaveBeenCalledWith(expect.objectContaining({ initialSession }));
+    }
+    expect(claimSessionHooks).toHaveBeenCalledTimes(2);
+  });
+
   it("claims every new continuation address recorded during a step", async () => {
     const claimSessionHooks = vi.fn(async () => {});
     const inbox = {

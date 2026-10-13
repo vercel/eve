@@ -70,6 +70,10 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
 
 export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
+  readonly initialTurnControllers?: {
+    readonly cancellation: AbortController;
+    readonly steering: AbortController;
+  };
   readonly cursor: SessionStateCursor;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
@@ -83,9 +87,11 @@ export interface SessionExecutionInput {
  */
 export class SessionExecution {
   private readonly input: SessionExecutionInput;
+  private initialTurnControllers: SessionExecutionInput["initialTurnControllers"];
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
+    this.initialTurnControllers = input.initialTurnControllers;
   }
 
   get cursor(): SessionStateCursor {
@@ -102,10 +108,15 @@ export class SessionExecution {
       readonly caller?: TurnCaller;
     } = {},
   ): Promise<TurnOutcome> {
-    const turn = new ActiveTurn(this.input, {
-      caller: options.caller,
-      principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
-    });
+    const turn = new ActiveTurn(
+      this.input,
+      {
+        caller: options.caller,
+        principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
+      },
+      this.initialTurnControllers,
+    );
+    this.initialTurnControllers = undefined;
     try {
       const outcome = await this.runTurnSteps(turn, delivery);
       // Tasks run beside the turn, and a run can open a session after its call
@@ -151,13 +162,21 @@ export class SessionExecution {
 
     while (true) {
       const { cursor } = this.input;
-      const result = await cursor.advance((state) =>
-        turnStep({
-          ...state,
-          abortSignal: turn.signal,
-          input: nextStepInput,
-          steeringSignal: turn.steeringSignal,
-        }),
+      const result = await cursor.advanceTurn(
+        (state) =>
+          turnStep({
+            ...state,
+            abortSignal: turn.signal,
+            input: nextStepInput,
+            steeringSignal: turn.steeringSignal,
+          }),
+        (state) =>
+          turnStep({
+            ...state,
+            input: nextStepInput,
+            abortSignal: turn.signal,
+            steeringSignal: turn.steeringSignal,
+          }),
       );
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
@@ -469,25 +488,31 @@ class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
-  private readonly controller = new AbortController();
+  private readonly controller: AbortController;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
-  private steeringController = new AbortController();
+  private steeringController: AbortController;
   /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
 
   constructor(
     input: SessionExecutionInput,
     owner: { readonly caller: TurnCaller | undefined; readonly principal: string },
+    controllers?: SessionExecutionInput["initialTurnControllers"],
   ) {
+    this.controller = controllers?.cancellation ?? new AbortController();
+    this.steeringController = controllers?.steering ?? new AbortController();
     this.input = input;
     this.caller = owner.caller;
     this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
-    this.expectedTurnId = activeTurnId(input.cursor.sessionState.emissionState);
+    this.expectedTurnId =
+      input.cursor.optionalSessionState === undefined
+        ? "turn_0"
+        : activeTurnId(input.cursor.sessionState.emissionState);
     this.unsubscribe = input.inbox.onInterrupt((payload) => {
       if (this.cancelsThisTurn(payload)) this.abort();
     });
@@ -504,7 +529,7 @@ class ActiveTurn {
     if (
       delivery.kind === "deliver" &&
       isSteeringMessage(delivery, this.identity) &&
-      !this.input.cursor.sessionState.hasProxyInputRequests
+      !this.input.cursor.optionalSessionState?.hasProxyInputRequests
     )
       this.steeringController.abort();
   };

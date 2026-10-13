@@ -93,6 +93,61 @@ const dispatchWork = stepWork<
 const routeWork = stepWork<Parameters<typeof routeDeliverToChildren>[0], RoutedDeliverResult>;
 
 describe("SessionExecution checkpoints", () => {
+  it("uses the preclaimed signals and honors a queued cancellation before initial state exists", async () => {
+    const controllers = { cancellation: new AbortController(), steering: new AbortController() };
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: (handler) => {
+        handler({ kind: "cancel", turnId: "turn_0" });
+        return () => {};
+      },
+    };
+    const cursor = new SessionStateCursor({
+      inbox,
+      serializedContext: {},
+      sessionWritable: new WritableStream<Uint8Array>(),
+      initialSession: {
+        compiledArtifactsSource: { kind: "development" },
+        continuationToken: "",
+        sessionId: "session-1",
+      },
+    });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          expect(input.sessionState).toBeUndefined();
+          expect(input.abortSignal).toBe(controllers.cancellation.signal);
+          expect(input.steeringSignal).toBe(controllers.steering.signal);
+          expect(input.abortSignal?.aborted).toBe(true);
+          return {
+            action: "cancelled",
+            serializedContext: input.serializedContext,
+            sessionState: state(""),
+          };
+        }),
+      );
+    const execution = new SessionExecution({
+      cursor,
+      inbox,
+      queue: new SessionInputQueue(),
+      sessionId: "session-1",
+      initialTurnControllers: controllers,
+    });
+    expect(
+      await execution.runTurn({ delivery: { kind: "deliver", payloads: [{ message: "hello" }] } }),
+    ).toMatchObject({ cancelled: true });
+    expect(cursor.optionalSessionState).toBeDefined();
+  });
+
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox: SessionInbox = {
       claimedTokens: [],

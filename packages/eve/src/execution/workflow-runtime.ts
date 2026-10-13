@@ -120,6 +120,24 @@ export function createWorkflowRuntime(config: {
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
+      const existingHandle = async (): Promise<RunHandle | undefined> => {
+        if (input.sessionId === undefined) return undefined;
+        try {
+          const run = await (await getWorld()).runs.get(input.sessionId);
+          const deliveryId = run.attributes?.["eve.channel.initialDeliveryId"];
+          return {
+            sessionId: input.sessionId,
+            deliveryId: typeof deliveryId === "string" ? deliveryId : undefined,
+            existing: true,
+            get events() {
+              return readSessionEventStream(run.runId);
+            },
+          };
+        } catch (error) {
+          if (!WorkflowRunNotFoundError.is(error)) throw error;
+          return undefined;
+        }
+      };
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
@@ -173,6 +191,9 @@ export function createWorkflowRuntime(config: {
             });
       const attributes = {
         ...sessionAttributes,
+        ...(input.delivery === undefined
+          ? {}
+          : { "eve.channel.initialDeliveryId": input.delivery.deliveryId }),
         ...(input.externalInvocation === undefined
           ? {}
           : buildInvocationAttributes(input.externalInvocation)),
@@ -182,6 +203,7 @@ export function createWorkflowRuntime(config: {
       try {
         const startOptions: StartOptionsWithoutDeploymentId = {
           allowReservedAttributes: true,
+          ...(input.sessionId === undefined ? {} : { runId: input.sessionId }),
           attributes: normalizeEveAttributes(attributes),
         };
         if (retention !== undefined) startOptions.experimental_retention = retention;
@@ -192,6 +214,12 @@ export function createWorkflowRuntime(config: {
           startOptions,
         );
       } catch (error) {
+        // A different Functions instance may have won the same run creation.
+        // The world's durable run is the authority, not an in-process lock.
+        if (EntityConflictError.is(error)) {
+          const winner = await existingHandle();
+          if (winner) return winner;
+        }
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
         });
@@ -209,6 +237,7 @@ export function createWorkflowRuntime(config: {
           return getEvents();
         },
         sessionId: run.runId,
+        deliveryId: input.delivery?.deliveryId,
       };
     },
 

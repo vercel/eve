@@ -30,7 +30,7 @@ export interface CreateSessionStepResult {
  * `nodeId` targets a subagent node in the compiled graph; omitted for
  * the root agent.
  */
-export async function createSessionStep(input: {
+export type CreateSessionInput = {
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
@@ -39,9 +39,19 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
-}): Promise<CreateSessionStepResult> {
-  "use step";
+};
 
+export async function createSessionStep(
+  input: CreateSessionInput,
+): Promise<CreateSessionStepResult> {
+  "use step";
+  return await prepareSessionState(input);
+}
+
+/** Same deterministic preparation, callable inside the first turn boundary. */
+export async function prepareSessionState(
+  input: CreateSessionInput,
+): Promise<CreateSessionStepResult> {
   const bundle = await getCompiledRuntimeAgentBundle({
     compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
     nodeId: input.nodeId,

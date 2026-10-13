@@ -62,6 +62,7 @@ export interface Session {
 }
 
 interface SessionDeliveryOptions {
+  readonly deliveryId?: string;
   readonly auth: SessionAuthContext | null;
   /** Public callback destination for a delegated continuation turn. */
   readonly callback?: SessionCallback;
@@ -104,7 +105,7 @@ export function createSession(
   return {
     id,
     async send(message, options) {
-      const delivery = createDelivery(metadata);
+      const delivery = createDelivery({ ...metadata, deliveryId: options.deliveryId });
       const caller = sessionCallbackToTurnCaller(options.callback);
       const payload = attachClientContext<{
         context?: readonly string[];
@@ -133,7 +134,7 @@ export function createSession(
       }
       const validatedInputResponses = parseInputResponses(inputResponses);
       const caller = sessionCallbackToTurnCaller(options.callback);
-      const delivery = createDelivery(metadata);
+      const delivery = createDelivery({ ...metadata, deliveryId: options.deliveryId });
       const payload = attachClientContext<{
         context?: readonly string[];
         inputResponses: readonly InputResponse[];

@@ -410,6 +410,9 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /** Caller-reserved durable workflow identity. */
+  readonly sessionId?: string;
+  readonly deliveryId?: string;
   readonly adapter: ChannelAdapter<any>;
   /**
    * Registered channel name for root sessions started from an authored
@@ -542,6 +545,8 @@ export type RunResult =
  * Carries the identifiers needed for stream endpoints.
  */
 export interface RunHandle {
+  readonly deliveryId?: string;
+  readonly existing?: boolean;
   readonly events: ReadableStream<MessageStreamEvent>;
   /**
    * Runtime-owned identifier for this session. Stream and inspection APIs

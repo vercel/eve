@@ -57,6 +57,28 @@ function member(
   const fn = owner[parts.at(-1)!];
   if (typeof fn === "function") return { owner, fn: fn as (...args: unknown[]) => unknown };
 }
+/**
+ * Optional world-hub hook batching extension, advertised as
+ * `events.createHookBatch`. The SDK's events.createBatch excludes hook events.
+ *
+ * Evaluate each entry with EXACT single-create semantics (including params),
+ * in request order, in ONE durable write transaction. Results are index-aligned:
+ * value is the full events.create return (including hook_conflict events,
+ * inline deltas and force-claim victim data); error is a serialized single-create
+ * error with its name/details intact. Use a per-entry savepoint when rejecting
+ * an entry after mutation. Transaction/transport failures reject the whole RPC.
+ * Do not auto-retry; a lost response recovers through workflow replay.
+ */
+export interface WorldHubHookBatchEntry {
+  event: Parameters<World["events"]["create"]>[1];
+  params?: Parameters<World["events"]["create"]>[2];
+}
+export type WorldHubHookBatchResult = {
+  results: (
+    | { value: Awaited<ReturnType<World["events"]["create"]>> }
+    | { error: ReturnType<typeof serializeDevelopmentWorldError> }
+  )[];
+};
 export interface WorldHubServerOptions {
   world: World;
   secret: string;

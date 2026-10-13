@@ -543,3 +543,53 @@ describe("eve ID-addressed session routes", () => {
     expect(session[operation]).not.toHaveBeenCalled();
   });
 });
+
+describe("reserved session create responses", () => {
+  it.each([false, true])("returns reserved ids and status (existing %s)", async (existing) => {
+    const sessionId = "wrun_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const createSession = vi
+      .fn()
+      .mockResolvedValue({
+        events: new ReadableStream(),
+        sessionId,
+        deliveryId: "dlv_original",
+        existing,
+      });
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "hello", sessionId, deliveryId: "dlv_request" }),
+      }),
+      args,
+    );
+    expect(response.status).toBe(existing ? 200 : 202);
+    expect(await response.json()).toEqual({
+      ok: true,
+      sessionId,
+      status: "accepted",
+      deliveryId: "dlv_original",
+      ...(existing ? { existing: true } : {}),
+    });
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId, deliveryId: "dlv_request" }),
+    );
+  });
+  it("passes followup delivery identity to the session", async () => {
+    const session = createFixedSession();
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "next", deliveryId: "dlv_next" }),
+      }),
+      createArgs(session),
+    );
+    expect(response.status).toBe(202);
+    expect(session.send).toHaveBeenCalledWith(
+      "next",
+      expect.objectContaining({ deliveryId: "dlv_next" }),
+    );
+  });
+});

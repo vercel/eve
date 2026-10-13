@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { encodeDevelopmentWorldValue as encode } from "#internal/workflow/development-world-codec.js";
-import { createHubVercelWorld } from "./index.js";
+import { createHubVercelWorld, createVercelQueueWorld } from "./index.js";
 
 const queue = vi.hoisted(() => ({
   queue: vi.fn(),
@@ -38,4 +38,22 @@ it("uses Vercel queue methods and hub persistence and streams", async () => {
   } finally {
     await world.close?.();
   }
+});
+
+it("composes direct storage with Vercel delivery without changing storage options", async () => {
+  const storage = {
+    specVersion: 8,
+    capabilities: { hookRetention: { active: true } },
+    events: { create: vi.fn() },
+    streams: { write: vi.fn() },
+    queue: vi.fn(),
+    streamFlushIntervalMs: 100,
+  };
+  const world = await createVercelQueueWorld(storage as never);
+  expect(world.events).toBe(storage.events);
+  expect(world.streams).toBe(storage.streams);
+  expect(world.capabilities).toBe(storage.capabilities);
+  expect(world.queue).toBe(queue.queue);
+  expect(world.createQueueHandler).toBe(queue.createQueueHandler);
+  expect(world.streamFlushIntervalMs).toBe(100);
 });

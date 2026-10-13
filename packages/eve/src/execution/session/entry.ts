@@ -6,7 +6,7 @@ import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
-import { createSessionStep } from "#execution/create-session-step.js";
+import { createSessionStep, type CreateSessionInput } from "#execution/create-session-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
@@ -88,20 +88,30 @@ async function bootInitialOwner(
     source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
+  const initialSession: CreateSessionInput = {
+    compiledArtifactsSource: serializedBundle.source,
+    continuationToken,
+    dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
+      | DynamicSubagentAgentConfig
+      | undefined,
+    inheritedLimits: input.limits,
+    nodeId: serializedBundle.nodeId,
+    outputSchema: input.input.outputSchema,
+    rootSessionId: readRootSessionId(serializedContext),
+    sessionId,
+  };
+  // Prewarmed and delegated sessions retain their existing boot boundary: they
+  // need session state for inbox routing or caller binding before the first turn.
+  const lazyCreation =
+    input.input.message !== undefined && !hasDelegatedSessionContext(serializedContext);
+  // Signal hooks do not depend on session state. Register them in the inbox
+  // claim's suspension batch so the first turn does not pay a separate batch.
+  const initialTurnControllers = lazyCreation
+    ? { cancellation: new AbortController(), steering: new AbortController() }
+    : undefined;
   try {
     const [sessionCreation, stableClaim, aliasClaim] = await Promise.allSettled([
-      createSessionStep({
-        compiledArtifactsSource: serializedBundle.source,
-        continuationToken,
-        dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
-          | DynamicSubagentAgentConfig
-          | undefined,
-        inheritedLimits: input.limits,
-        nodeId: serializedBundle.nodeId,
-        outputSchema: input.input.outputSchema,
-        rootSessionId: readRootSessionId(serializedContext),
-        sessionId,
-      }),
+      lazyCreation ? Promise.resolve(undefined) : createSessionStep(initialSession),
       inbox.claimSessionHook(sessionCommandHookToken(sessionId)),
       continuationToken === "" ? Promise.resolve() : inbox.claimSessionHook(continuationToken),
     ]);
@@ -132,7 +142,9 @@ async function bootInitialOwner(
         retention: input.retention,
         serializedContext,
         sessionId,
-        sessionState: sessionCreation.value.state,
+        sessionState: sessionCreation.value?.state,
+        initialSession: lazyCreation ? initialSession : undefined,
+        initialTurnControllers,
         sessionTimeoutMs,
         sessionTimeoutDeadline: sessionTimeoutDeadline(
           sessionTimeoutMs,

@@ -63,7 +63,29 @@ export async function deriveOperationContinuationToken(input: {
   return `eve:op:${hex.slice(0, 32)}`;
 }
 
+function validateReservedIds(
+  input: Record<string, unknown>,
+  create: boolean,
+): Response | undefined {
+  if (
+    create &&
+    input.sessionId !== undefined &&
+    (typeof input.sessionId !== "string" ||
+      !/^wrun_[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(input.sessionId))
+  ) {
+    return Response.json({ ok: false, error: "Invalid sessionId." }, { status: 400 });
+  }
+  if (
+    input.deliveryId !== undefined &&
+    (typeof input.deliveryId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(input.deliveryId))
+  ) {
+    return Response.json({ ok: false, error: "Invalid deliveryId." }, { status: 400 });
+  }
+}
+
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
+  const reservedError = validateReservedIds(input, true);
+  if (reservedError) return reservedError;
   const legacy = splitLegacyTaskFields(input);
   const { payload } = legacy;
   if (payload.inputResponses !== undefined) {
@@ -108,6 +130,8 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   }
 
   const result: ParsedCreateBody = {
+    sessionId: input.sessionId as string | undefined,
+    deliveryId: input.deliveryId as string | undefined,
     callback,
     capabilities,
     context,
@@ -123,6 +147,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 }
 
 interface ParsedSessionMessageBody {
+  deliveryId?: string;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -134,6 +159,8 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
+  const reservedError = validateReservedIds(input, false);
+  if (reservedError) return reservedError;
   const { payload } = splitLegacyTaskFields(input);
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
@@ -175,6 +202,7 @@ export function parseSessionMessageBody(
     context,
     outputSchema,
     turnPolicy,
+    deliveryId: input.deliveryId as string | undefined,
   };
 }
 

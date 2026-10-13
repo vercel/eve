@@ -98,13 +98,21 @@ const log = createLogger("eve.channel");
  * {@link defineChannel} directly only for a custom transport.
  */
 /** A delegating caller checks that this deployment serves its remote agent protocol. */
-function createdSessionBody(sessionId: string, body: ParsedCreateBody) {
+function createdSessionBody(
+  sessionId: string,
+  body: ParsedCreateBody,
+  handle?: { deliveryId?: string; existing?: boolean },
+) {
   const created: {
     ok: true;
+    deliveryId?: string;
+    existing?: boolean;
     protocolVersion?: number;
     sessionId: string;
     status: "accepted";
   } = { ok: true, sessionId, status: "accepted" };
+  if (handle?.deliveryId !== undefined) created.deliveryId = handle.deliveryId;
+  if (handle?.existing) created.existing = true;
   if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
   return created;
 }
@@ -246,7 +254,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 auth: forwarded.auth,
                 operationId: body.operationId,
               });
-        if (operationToken !== undefined) {
+        if (operationToken !== undefined && body.sessionId === undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
             return Response.json(createdSessionBody(owner.id, body), {
@@ -324,6 +332,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
+            sessionId: body.sessionId,
+            deliveryId: body.deliveryId,
             audienceAuth: authResult,
             auth: messageResult.auth,
             capabilities: body.capabilities ?? { requestInput: true },
@@ -355,12 +365,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return Response.json(createdSessionBody(handle.sessionId, body), {
+        return Response.json(createdSessionBody(handle.sessionId, body, handle), {
           headers: {
             "cache-control": "no-store",
             [EVE_SESSION_ID_HEADER]: handle.sessionId,
           },
-          status: 202,
+          status: handle.existing ? 200 : 202,
         });
       }),
 
@@ -407,6 +417,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const options = attachClientContext(
             {
               auth: dispatchAuth,
+              deliveryId: body.deliveryId,
               callback: body.callback,
               context,
               outputSchema: body.outputSchema,
