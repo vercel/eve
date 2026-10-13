@@ -32,9 +32,17 @@ export const generateStaticParams = () => Object.keys(translations).map((lang) =
 const templateSummaries = templateManifest
   .filter(({ unlisted }) => !unlisted)
   .map(
-    ({ category, description: templateDescription, integrations, slug, title: templateTitle }) => ({
+    ({
       category,
       description: templateDescription,
+      featured,
+      integrations,
+      slug,
+      title: templateTitle,
+    }) => ({
+      category,
+      description: templateDescription,
+      featured,
       integrations,
       slug,
       title: templateTitle,
