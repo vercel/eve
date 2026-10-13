@@ -258,8 +258,6 @@ with each workflow step. eve keeps these concerns:
 - session trace seeds, turn ID reservation, and trace policy;
 - channel delivery metadata and principals;
 - tool call locators and anchors that dispatched child agents read;
-- schema-4 attribute names, such as `agent.action.kind` for the library's
-  `agent.tool.kind`, through its output mapping;
 - direct `invokeTool` spans, which have no turn;
 - SDK registration, request and MCP spans, and local trace storage.
 

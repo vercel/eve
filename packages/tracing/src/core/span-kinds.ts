@@ -214,7 +214,8 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           "gen_ai.tool.call.id": options.callId,
           "gen_ai.tool.name": options.name,
           "gen_ai.tool.type": "function",
-          "agent.tool.kind": options.kind,
+          "agent.action.kind": options.kind,
+          "agent.action.name": options.kind === undefined ? undefined : options.name,
           "agent.invocation.role": delegates ? "caller" : undefined,
           ...toolInput(options.arguments, context),
         },
@@ -222,7 +223,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
     complete(span, _data, result, context) {
       if (result.outcome !== undefined)
-        applyAttributes(span, { "agent.tool.outcome": result.outcome });
+        applyAttributes(span, { "agent.action.outcome": result.outcome });
       toolOutput(span, result, context);
     },
     redact(data, capture) {
@@ -243,7 +244,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           ...namingAttributes(SPAN_NAMES.approval, "workflow"),
           "gen_ai.operation.name": "workflow",
           "gen_ai.tool.call.id": options.callId,
-          "gen_ai.tool.name": options.toolName,
+          "agent.action.name": options.toolName,
           "agent.approval.kind": "tool-approval",
           "agent.approval.request_id": options.requestId,
           [CONTENT_FIELDS.approvalRequest]: context.capture.recordInputs

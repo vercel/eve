@@ -57,6 +57,8 @@ metadata only. Child operations cannot increase capture.
 
 When inputs or outputs are captured, a turn's span records its first model call's input as `gen_ai.input.messages` and its latest model output as `gen_ai.output.messages`.
 
+Tool and approval spans use schema 4's names: a call with a `kind` records `agent.action.kind` and `agent.action.name`, an explicit outcome records `agent.action.outcome`, and approvals record `agent.action.name`.
+
 Attempts provide `tool`, `callSubAgent`, and `callRemoteAgent`; each tool call is
 one `execute_tool` span. Tools provide `approval` and nested `tool` calls. Turns,
 attempts, and tools provide `memory`.

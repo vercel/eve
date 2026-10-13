@@ -159,8 +159,9 @@ describe("durable agent tracing", () => {
     const tool = spans.get("execute_tool lookup")!;
     expect(tool.startTime[0] * 1000 + tool.startTime[1] / 1e6).toBeCloseTo(requestedAt, -1);
     expect(tool.attributes).toMatchObject({
-      "agent.tool.kind": "subagent-call",
-      "agent.tool.outcome": "completed",
+      "agent.action.kind": "subagent-call",
+      "agent.action.name": "lookup",
+      "agent.action.outcome": "completed",
       "agent.invocation.role": "caller",
     });
     expect(spans.get("execute_tool inner")!.parentSpanContext?.spanId).toBe(
