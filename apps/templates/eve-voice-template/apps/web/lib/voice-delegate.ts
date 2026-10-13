@@ -25,7 +25,8 @@ const FILLER = new Set(["it", "ok", "okay", "please", "that", "yeah", "yes"]);
  */
 export class VoiceDelegate {
   private current: string | undefined;
-  private answer: string | undefined;
+  /** Whether the current turn's answer was already spoken. */
+  private answered = false;
   private prompts: string[] = [];
   /** Open prompts in the order eve asked them; eve answers the first one first. */
   private open: InputRequest[] = [];
@@ -48,11 +49,19 @@ export class VoiceDelegate {
 
   delegate(id: string, request: string): void {
     const prompt = this.held ? this.open[0] : undefined;
-    if (prompt?.options?.length) {
-      this.answerAloud(id, request, prompt);
+    const option = prompt && spokenOption(request, prompt);
+    if (prompt && option) {
+      this.open.shift();
+      void this.options.agent.respond([{ optionId: option.id, requestId: prompt.requestId }]);
+      this.speak(id, `The user's answer was recorded: ${option.label}.`);
       return;
     }
+
     this.queue.push({ id, request });
+    // Covers free-text questions and sign-ins too. The voice model never
+    // guesses, so without this it goes quiet until the step on screen is done.
+    if (this.held)
+      this.speak(id, "The agent will get to this once the user finishes the step on screen.");
     this.drain();
   }
 
@@ -77,8 +86,11 @@ export class VoiceDelegate {
         this.append(id, "thinking", `The agent is running ${tools.join(", ")}.`);
         return;
       }
+      // The answer is final here; waiting for turn.completed only adds delay.
       case "message.completed":
-        if (event.data.finishReason !== "tool-calls") this.answer = event.data.message;
+        if (event.data.finishReason === "tool-calls" || !event.data.message.trim()) return;
+        this.answered = true;
+        this.speak(id, event.data.message.trim());
         return;
       case "input.requested":
         this.open.push(...event.data.requests);
@@ -109,7 +121,7 @@ export class VoiceDelegate {
         this.idle = false;
         return;
       case "turn.completed":
-        this.speak(id, this.answer?.trim() || "The agent finished without a reply.");
+        if (!this.answered) this.speak(id, "The agent finished without a reply.");
         this.current = undefined;
         return;
       case "turn.failed":
@@ -137,19 +149,6 @@ export class VoiceDelegate {
     }
   }
 
-  private answerAloud(id: string, reply: string, prompt: InputRequest): void {
-    const option = spokenOption(reply, prompt);
-    if (!option) {
-      this.queue.push({ id, request: reply });
-      this.speak(id, "The agent will get to this once the user answers the open prompt.");
-      return;
-    }
-
-    this.open.shift();
-    void this.options.agent.respond([{ optionId: option.id, requestId: prompt.requestId }]);
-    this.speak(id, `The user's answer was recorded: ${option.label}.`);
-  }
-
   // Sending while the hook's previous turn is still settling would steer it,
   // so the next delegation waits for `settled()`.
   private drain(): void {
@@ -158,7 +157,7 @@ export class VoiceDelegate {
     if (!next) return;
 
     this.current = next.id;
-    this.answer = undefined;
+    this.answered = false;
     this.prompts = [];
     this.open = [];
     this.held = false;
