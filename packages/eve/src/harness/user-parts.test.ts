@@ -14,7 +14,8 @@ describe("the parts a delivery records", () => {
     for (const part of parts.slice(1)) {
       expect(part).toMatchObject({ kind: "file", unavailable: true });
       expect(part).not.toHaveProperty("url");
-      expect(typeof (part as { size?: number }).size).toBe("number");
     }
+    // "hello" is 5 bytes as a data: URL and as bare base64; the array holds 3.
+    expect(parts.slice(1).map((part) => (part as { size?: number }).size)).toEqual([5, 5, 3]);
   });
 });

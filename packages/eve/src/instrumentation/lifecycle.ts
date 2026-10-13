@@ -5,6 +5,8 @@ import type {
 } from "#protocol/session-events/families/interaction.js";
 import type { ResponseValue } from "#protocol/session-events/families/response.js";
 import type { CallOutcome } from "#protocol/session-events/families/call.js";
+import type { SessionOutcome } from "#protocol/session-events/families/session.js";
+import type { TurnOutcome } from "#protocol/session-events/families/turn.js";
 import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
 import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
@@ -306,10 +308,13 @@ export interface InstrumentationParentLineage {
   readonly turnId: string;
 }
 
+/** How a session ended, as its `session.ended` says. */
+export type InstrumentationSessionOutcome = SessionOutcome;
+
 /** The session ended: its `session.ended`. */
 export interface InstrumentationSessionEndedEvent {
   readonly type: "session.ended";
-  readonly outcome: "completed" | "failed";
+  readonly outcome: InstrumentationSessionOutcome;
   /** A failed session's error. Content: absent unless this provider records outputs. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
@@ -333,10 +338,13 @@ export interface InstrumentationTurnStartedEvent {
   readonly turnId: string;
 }
 
+/** How a turn ended, as its `turn.settled` says. */
+export type InstrumentationTurnOutcome = TurnOutcome;
+
 /** The turn ended: its `turn.settled`. A cancelled turn is no failure. */
 export interface InstrumentationTurnSettledEvent {
   readonly type: "turn.settled";
-  readonly outcome: "completed" | "cancelled" | "failed";
+  readonly outcome: InstrumentationTurnOutcome;
   /** A failed turn's error. Content: absent unless this provider records outputs. */
   readonly error?: unknown;
   readonly idempotencyKey: string;

@@ -44,6 +44,8 @@ export type {
   InstrumentationStepAttemptStartedEvent,
   InstrumentationStepAttemptTerminalEvent,
   InstrumentationCallOutcome,
+  InstrumentationSessionOutcome,
+  InstrumentationTurnOutcome,
   InstrumentationCallRequestedEvent,
   InstrumentationCallSettledEvent,
   InstrumentationToolCallKind,

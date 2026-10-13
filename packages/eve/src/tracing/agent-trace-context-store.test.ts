@@ -46,7 +46,6 @@ describe("ContextAgentTraceStateStore", () => {
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
-        terminal: { error: new Error("failed"), type: "turn.failed" },
       });
     });
 
@@ -81,11 +80,6 @@ describe("ContextAgentTraceStateStore", () => {
         type: "none",
       });
       expect(JSON.stringify(store.getTurn("session-1", "turn-1"))).not.toContain("attributes");
-      const terminal = store.getTurn("session-1", "turn-1")?.terminal;
-      expect(terminal?.type).toBe("turn.failed");
-      expect(terminal?.type === "turn.failed" ? terminal.error : undefined).toMatchObject({
-        message: "failed",
-      });
     });
   });
 
@@ -178,12 +172,12 @@ describe("ContextAgentTraceStateStore", () => {
       }));
       store.updateTurn("session-1", "turn-1", (turn) => ({
         ...turn,
-        terminal: { type: "turn.completed" },
+        subagentName: "researcher",
       }));
 
       expect(store.getTurn("session-1", "turn-1")).toMatchObject({
         modelUsage: { inputTokens: 12, outputTokens: 4 },
-        terminal: { type: "turn.completed" },
+        subagentName: "researcher",
       });
       store.deleteTurn("session-1", "turn-1");
       store.updateTurn("session-1", "turn-1", (turn) => ({

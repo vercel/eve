@@ -162,7 +162,7 @@ function instrumentationEventsOf(
               ? new Error(event.data.error?.message ?? "The session failed.")
               : undefined,
           idempotencyKey: session,
-          outcome: outcome === "failed" ? "failed" : "completed",
+          outcome,
           sessionId,
           turnId,
           type: "session.ended",
@@ -192,7 +192,7 @@ function instrumentationEventsOf(
               ? new Error(event.data.error?.message ?? "The turn failed.")
               : undefined,
           idempotencyKey: turnIdempotencyKey(sessionId, turnId),
-          outcome: outcome === "failed" || outcome === "cancelled" ? outcome : "completed",
+          outcome,
           sessionId,
           turnId,
           type: "turn.settled",

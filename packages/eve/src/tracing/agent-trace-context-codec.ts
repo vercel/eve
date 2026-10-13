@@ -7,7 +7,6 @@ import type {
 } from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
-import { boundedTraceError } from "#tracing/bounded-error.js";
 import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
 import { boundedPrincipalId } from "#tracing/telemetry-budget.js";
 import { isInstrumentationPrincipalType } from "#instrumentation/lifecycle.js";
@@ -64,12 +63,6 @@ export function serializeAgentTraceContextState(state: AgentTraceContextState): 
                       : serializeSpanContext(value.channelDelivery.requestTraceContext),
                 },
           context: serializeSpanContext(value.context),
-          terminal:
-            value.terminal === undefined
-              ? undefined
-              : value.terminal.type === "turn.failed"
-                ? { error: serializeError(value.terminal.error), type: value.terminal.type }
-                : { type: value.terminal.type },
         },
       ]),
     ),
@@ -122,7 +115,6 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     sequence: typeof value.sequence === "number" ? value.sequence : 0,
     startTimeMs: value.startTimeMs,
     subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
-    terminal: deserializeTurnTerminal(value.terminal),
   };
 }
 
@@ -246,13 +238,6 @@ function deserializeParentLineage(value: unknown): AgentSessionTraceState["paren
   };
 }
 
-function deserializeTurnTerminal(value: unknown): AgentTurnTraceState["terminal"] {
-  if (!isRecord(value) || !isTurnTerminalType(value.type)) return undefined;
-  return value.type === "turn.failed"
-    ? { error: deserializeError(value.error), type: value.type }
-    : { type: value.type };
-}
-
 function deserializeRecord<T>(
   value: unknown,
   deserialize: (entry: unknown) => T | undefined,
@@ -275,20 +260,6 @@ function serializeSpanContext(context: SpanContext): Record<string, unknown> {
   };
 }
 
-function serializeError(error: unknown): unknown {
-  if (!(error instanceof Error)) return undefined;
-  const bounded = boundedTraceError(error);
-  return { message: bounded.message, name: bounded.name, stack: bounded.stack };
-}
-
-function deserializeError(value: unknown): Error | undefined {
-  if (!isRecord(value) || typeof value.message !== "string") return undefined;
-  const error = new Error(value.message);
-  if (typeof value.name === "string") error.name = value.name;
-  if (typeof value.stack === "string") error.stack = value.stack;
-  return error;
-}
-
 function isActionKind(value: unknown): value is AgentActionTraceState["kind"] {
   return (
     value === "load-skill" ||
@@ -296,12 +267,6 @@ function isActionKind(value: unknown): value is AgentActionTraceState["kind"] {
     value === "subagent-call" ||
     value === "tool-call"
   );
-}
-
-function isTurnTerminalType(
-  value: unknown,
-): value is "turn.cancelled" | "turn.completed" | "turn.failed" {
-  return value === "turn.cancelled" || value === "turn.completed" || value === "turn.failed";
 }
 
 function isSpanContext(value: unknown): value is SpanContext {
