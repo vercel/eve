@@ -30,6 +30,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     send: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     respond: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
+    prewarm: vi.fn().mockResolvedValue({ status: "accepted" }),
     compact: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     clear: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     reset: vi.fn().mockResolvedValue({ previousSessionId: "wrun_A", status: "reset" }),
@@ -52,6 +53,36 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
 }
 
 describe("eve ID-addressed session routes", () => {
+  it("does not prepare a session when resource authentication rejects the request", async () => {
+    const session = createFixedSession();
+    const response = await route("POST", "/eve/v1/session/:sessionId/prewarm", {
+      auth: () => null,
+    })(
+      new Request("https://eve.test/eve/v1/session/wrun_A/prewarm", { method: "POST" }),
+      createArgs(session),
+    );
+    expect(response.status).toBe(401);
+    expect(session.prewarm).not.toHaveBeenCalled();
+  });
+  it.each([undefined, '{"targetDeploymentId":"dpl_injected"}', '{"message":"injected"}'])(
+    "prewarms only the authenticated fixed session, with body %s",
+    async (body) => {
+      const session = createFixedSession();
+      const onMessage = vi.fn();
+      const response = await route("POST", "/eve/v1/session/:sessionId/prewarm", {
+        auth: none(),
+        onMessage,
+      })(
+        new Request("https://eve.test/eve/v1/session/wrun_A/prewarm", { method: "POST", body }),
+        createArgs(session),
+      );
+      expect(response.status).toBe(body === undefined ? 202 : 400);
+      expect(session.prewarm).toHaveBeenCalledTimes(body === undefined ? 1 : 0);
+      expect(onMessage).not.toHaveBeenCalled();
+      expect(session.send).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     ["without a request body", undefined],
     ["with an empty JSON object", "{}"],

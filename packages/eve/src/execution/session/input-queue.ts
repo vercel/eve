@@ -55,6 +55,16 @@ export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private readonly admittedKeys: Set<string>;
   private nextSequence = 0;
+  private prewarmDeploymentId: string | undefined;
+
+  prepareOnDeployment(deploymentId: string): void {
+    this.prewarmDeploymentId = deploymentId;
+  }
+  takePrewarmDeployment(): string | undefined {
+    const target = this.prewarmDeploymentId;
+    this.prewarmDeploymentId = undefined;
+    return target;
+  }
 
   constructor(admittedDeliveryKeys: readonly string[]) {
     this.admittedKeys = new Set(admittedDeliveryKeys);
@@ -85,6 +95,8 @@ export class SessionInputQueue {
         this.admittedKeys.delete(this.admittedKeys.values().next().value!);
       }
     }
+    // A real message supersedes any speculative hint.
+    this.prewarmDeploymentId = undefined;
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
     return admission;

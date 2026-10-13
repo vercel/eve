@@ -78,7 +78,7 @@ export function Chat() {
 | `error`        | The latest session creation, stream, resume, or turn failure.                             |
 | `events`       | Raw eve stream events for this session.                                                   |
 | `session`      | Serializable fixed session cursor (`sessionId`, `streamIndex`).                           |
-| `prewarm`      | Create the durable session without starting a turn.                                       |
+| `prewarm`      | Create a session or prepare its idle owner without starting a turn.                       |
 | `send`         | Send text or a multi-part message, with per-turn options.                                 |
 | `respond`      | Answer pending HITL input requests, with per-turn options.                                |
 | `resume`       | Replay an attached session and follow its in-flight turn.                                 |
@@ -131,7 +131,7 @@ An initial `true` value or a later `false` to `true` change prepares the current
 Changing `prewarm` back to `false` does not abort creation or discard an existing session. If
 a reset and state update happen in the same event, React applies both before deciding whether
 to prepare the next session. Vue and Svelte read `prewarm` when their binding is created; call
-their returned `prewarm()` method for interaction-driven creation.
+their returned `prewarm()` method when typing starts.
 
 Prewarming defaults to `false`: the first send creates the session. Set it to `true` only after
 your application's auth, headers, and any chat-record binding are ready. Applications that
@@ -141,15 +141,35 @@ Prewarming starts the workflow and establishes its inbox, then parks before sess
 dynamic definitions, or sandbox setup run. The first message passes through the channel's
 `onMessage` hook and supplies the identity and context for initialization and `turn_0`.
 
-The explicit `prewarm()` method resolves on `202 Accepted`, as does `client.sessions.create()`.
-It does not wait for an initialization event; concurrent calls share the same create request.
+For an existing session, `prewarm()` checks the owner against the exact deployment accepting
+that request. On Vercel, an idle owner on another deployment can transfer in the background
+before Send. The session ID, history, stream, and expiry stay the same; no model call runs.
+An owner already serving that deployment needs no workflow wake-up. Active turns are never
+interrupted; an active turn can finish before preparation, and a queued real message takes priority.
+An owner with pending tasks or input requests can skip the hint.
+Older owners without preparation support and Worlds without deployment affinity are left alone.
+
+Call `agent.prewarm()` once when a new typing burst begins, with an application-level cooldown
+if you also retry during long drafts. eve shares concurrent calls; it does not listen to inputs
+or poll deployments. `prewarm: true` also prepares a restored session when the binding mounts.
+A production alias targets its current deployment; a preview alias targets that preview.
+Requests pinned to an immutable deployment (including deployment-skew routing) cannot discover
+a newer deployment. Local development retains session-creation behavior.
+
+`client.sessions.attach(sessionId).prewarm({ signal })` returns `ready`, `accepted`,
+`unsupported`, or `no_active_session`. `accepted` means the hint was persisted, not that handoff
+has finished. It never replaces an expired session. Send retains its existing retry and
+handoff behavior if preparation is unavailable, fails, or has not finished.
+
+The explicit `prewarm()` method resolves after ingress acceptance, as does `client.sessions.create()`.
+It does not wait for an initialization event; concurrent calls share the same preparation request.
 The composer stays `"ready"`, meaning it can accept input, and prewarming does not run
-`prepareSend`. A concurrent `send()` waits only for acceptance, then posts the message.
+`prepareSend`. A concurrent `send()` waits for initial creation acceptance when needed, but never waits for existing-session preparation.
 If the inbox is still starting, the client retries `409 session_not_ready` with bounded
 exponential backoff for up to 20 seconds. The caller's abort signal cancels the wait. Stream
 events are not a prerequisite for sending.
 
-A failed create sets `error` and calls `onError` when no send is waiting. A waiting send can
+An existing-session preparation failure rejects the explicit call without setting the composer's error or blocking Send. A failed create sets `error` and calls `onError` when no send is waiting. A waiting send can
 fall back to creating a session with its message. After creation succeeds, initialization
 failures arrive on the stream during the first turn. The configured session timeout starts
 at creation, so an unused prewarmed session can expire before its first message. React does not

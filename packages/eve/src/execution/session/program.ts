@@ -225,7 +225,8 @@ async function runSessionLoop(
   const sessionTimeout = boot.sessionTimeoutControl;
 
   const nextParkedActivity = async (): Promise<
-    Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
+    | Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" | "prewarm" }>
+    | { readonly kind: "transferred" }
   > => {
     while (true) {
       const next = await nextTurnDelivery({
@@ -234,6 +235,23 @@ async function runSessionLoop(
         inbox,
         queue,
       });
+      if (next.kind === "prewarm") {
+        if (
+          progress.caller === undefined &&
+          workingTasks(sessionTaskTable(cursor)).length === 0 &&
+          queue.pendingCount === 0 &&
+          !inbox.hasPending()
+        ) {
+          const deadline = sessionTimeout?.getDeadline();
+          const result = await handoff.tryPrewarmTransfer(
+            transferState(),
+            next.targetDeploymentId,
+            deadline,
+          );
+          if (result.kind === "transferred") return result;
+        }
+        continue;
+      }
       if (next.kind === "workflow") {
         await execution.handleWorkflowMessage(next.message);
         continue;
@@ -312,6 +330,8 @@ async function runSessionLoop(
           // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
+        case "transferred":
+          return next;
         case "expired":
         case "reset":
           return { kind: "terminal", outcome: { kind: "expired" } };
@@ -386,6 +406,8 @@ async function runSessionLoop(
           // Taken over outside an attempt: the new owner now writes the stream.
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
+        case "transferred":
+          return next;
         case "expired":
         case "reset":
           return { kind: "terminal", outcome: { kind: "expired" } };

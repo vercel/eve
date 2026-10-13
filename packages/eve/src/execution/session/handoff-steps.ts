@@ -39,6 +39,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   EVE_SESSION_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
+  EVE_PREWARM_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { isRetiredSandboxSessionState } from "#sandbox/state.js";
@@ -312,6 +313,7 @@ async function recordSessionOwner(sessionId: string): Promise<void> {
   await setAttributes(
     {
       [EVE_SESSION_ATTRIBUTE]: sessionId,
+      [EVE_PREWARM_ATTRIBUTE]: "1",
       [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
     },
     { allowReservedAttributes: true },

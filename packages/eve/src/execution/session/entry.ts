@@ -454,6 +454,7 @@ async function startSuccessor(
       sessionId,
       sessionState: checkpoint.sessionState,
       sessionTimeoutControl: createSessionTimeoutControl({
+        deadline: input.reason === "prewarm" ? input.sessionTimeoutDeadline : undefined,
         sessionId,
         timeoutMs: checkpoint.sessionTimeoutMs,
       }),
