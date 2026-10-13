@@ -68,6 +68,7 @@ export async function emitAgentStartedStep(
         url: session.url,
       };
       if (session.resolverId !== undefined) binding.resolverId = session.resolverId;
+      if (session.record !== undefined) binding.record = session.record;
       if (session.earlierProtocol !== undefined) binding.earlierProtocol = session.earlierProtocol;
       await recordRemoteChildBinding(parentSessionId, binding);
     }

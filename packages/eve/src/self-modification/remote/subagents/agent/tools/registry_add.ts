@@ -1,4 +1,4 @@
-import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
+import { defineDynamic, defineTool, once, type ToolContext } from "eve/tools";
 
 import { classifyCatalogEntry } from "../../../../extension/classify-registry-item.js";
 import {
@@ -176,10 +176,9 @@ export function productionRegistryAddTool(deployed: ResolvedDeployedSelfModifica
 }
 
 export default defineDynamic({
-  events: {
-    "session.started": () =>
-      isDeployedRuntime()
-        ? productionRegistryAddTool(resolveDeployedSelfModificationConfig(selfModification.config))
-        : null,
-  },
+  select: once,
+  render: () =>
+    isDeployedRuntime()
+      ? productionRegistryAddTool(resolveDeployedSelfModificationConfig(selfModification.config))
+      : null,
 });

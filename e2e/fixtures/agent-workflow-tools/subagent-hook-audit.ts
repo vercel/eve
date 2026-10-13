@@ -100,6 +100,12 @@ export async function recordSubagentHook(
     { ...observation, position, sessionId: ctx.session.id, subscriber },
   ]);
   if (subscriber === "typed") {
-    throw new Error("Fixture subagent observer failed after recording its event.");
+    // An observer that fails after recording its event catches the failure itself: a hook that
+    // throws during a turn fails the turn.
+    try {
+      throw new Error("Fixture subagent observer failed after recording its event.");
+    } catch (error) {
+      console.warn("subagent observer failed", { error: (error as Error).message });
+    }
   }
 }

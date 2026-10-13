@@ -284,9 +284,9 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Attributed [memory](../memory) records are excluded from the summary, canonicalized, and recalled again after the checkpoint. If a turn is active, eve queues the request until that turn settles. A compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the change settles `failed` and the session keeps its previous history.
+Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Recalled [memory](../memory) stays outside history, so the summary never includes it, and a memory provider can capture the history before compaction rewrites it. If a turn is active, eve queues the request until that turn settles. A compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the change settles `failed` and the session keeps its previous history.
 
-Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each settles its interaction. Requests relayed from tasks that keep running stay answerable. The clear is a context change with `kind: "clear"`.
+Clear removes model-message history in place, including static and dynamic user-role instructions, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It does not delete data from a memory provider's external store, and the next turn recalls again. It does not rerun instruction definitions or dynamic capabilities. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each settles its interaction. Requests relayed from tasks that keep running stay answerable. The clear is a context change with `kind: "clear"`.
 
 Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
 
@@ -361,10 +361,12 @@ Every commit runs in this order:
 
 1. **Write**: the line is written to the durable stream.
 2. **Channel handler**: the channel's event handler runs for each fact and can update adapter state; the framework then re-evaluates the channel's `metadata(state)` and stores the result.
-3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each fact fire.
-4. **Dynamic resolvers**: [dynamic](../guides/dynamic-capabilities) tool, skill, and instruction resolvers fire, and `ctx.channel.metadata` already holds the freshly projected metadata.
+3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each fact fire, and each hook's `select` with `run` runs if its selection changed.
+4. **Intents**: eve acts on the `cancel()` and `compact()` intents hooks returned.
 
-The order is structural, not incidental. Channels and hooks observe what was written; neither can change it. By the time a resolver or hook reads channel metadata, the channel has already updated its state and the projection is current.
+Before the next model call, eve evaluates [dynamic capabilities](../guides/dynamic-capabilities), and `ctx.channel.metadata` already holds the freshly projected metadata.
+
+The order is structural, not incidental. Channels and hooks observe what was written; neither can change it. By the time a dynamic capability or hook reads channel metadata, the channel has already updated its state and the projection is current.
 
 ## What to read next
 

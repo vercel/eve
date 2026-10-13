@@ -10,7 +10,7 @@ export default defineEval({
         (event) =>
           event.type === "turn.settled" &&
           event.data.outcome === "failed" &&
-          event.data.error?.message.includes("Dynamic model resolver returned no model"),
+          event.data.error?.message.includes("The dynamic model returned no model"),
       ),
     );
     turn.usedNoTools();

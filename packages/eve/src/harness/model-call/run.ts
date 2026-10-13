@@ -8,10 +8,16 @@ import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
 import { runRequested, runStarted } from "#harness/facts.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import { nextRunId } from "#protocol/session-projection.js";
-import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
+import {
+  failBoundaryEvent,
+  failModelSelection,
+  prepareModelCall,
+  type Step,
+} from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   buildPrompt,
+  previewPrompt,
   projectPrompt,
   type Prompt,
   withClientContext,
@@ -43,8 +49,9 @@ export interface ModelResponse {
  * One model step of the open turn: the prompt it reads, the model that serves it, and the call
  * with its retries and recoveries. `onResponse` decides what the session does with the response.
  *
- * The budget gate passes first, then the turn requests a model run, whose participants choose
- * its model and tools, and the run starts as its provider call begins.
+ * The budget gate passes first, after the session's dynamic values are evaluated with the
+ * conversation the call reads, which fixes its model, tools, and context. Then the turn requests
+ * a model run, and the run starts as its provider call begins.
  */
 export async function runModelStep(
   step: Step,
@@ -55,6 +62,8 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
+  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
+  if (failed !== undefined) return failed;
   const prompt = await buildPrompt(step, input.turn);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
@@ -62,9 +71,9 @@ export async function runModelStep(
 
   const run = await requestRun(step, prompt);
   if ("failed" in run) return run.failed;
-  const projectedMessages = projectPrompt(step, prompt);
-  // Dynamic tools and subagents resolved when the run was requested, so the step's calls resolve
-  // once, against this catalog.
+  const projectedMessages = projectPrompt(prompt);
+  // Dynamic tools and subagents were evaluated before the run was requested, so the step's calls
+  // resolve once, against this catalog.
   const endsTurn = !step.hasDelegatedCaller && step.session.outputSchema === undefined;
   const catalog = buildStepCatalog({
     agentTools: step.config.tools,
@@ -141,8 +150,8 @@ export async function runModelStep(
 }
 
 /**
- * The turn requests a model run: its participants choose the model and tools from the prompt, or
- * the agent's model serves. No model fails the session.
+ * The turn requests a model run, which the dynamic model evaluated for it serves, or the agent's
+ * model. No model fails the session.
  */
 async function requestRun(
   step: Step,
@@ -152,7 +161,7 @@ async function requestRun(
   try {
     await step.apply(
       [runRequested({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection))],
-      validateHarnessModelMessages(step.projectHistory(withClientContext(prompt))),
+      validateHarnessModelMessages(withClientContext(prompt)),
     );
   } catch (error) {
     return { failed: await failBoundaryEvent(step, error) };

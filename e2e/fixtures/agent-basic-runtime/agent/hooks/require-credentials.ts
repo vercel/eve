@@ -1,4 +1,4 @@
-import { defineHook } from "eve/hooks";
+import { cancel, defineHook } from "eve/hooks";
 import { loadWorkspaceCredentials } from "../lib/workspace";
 
 export default defineHook({
@@ -12,8 +12,9 @@ export default defineHook({
           error: error instanceof Error ? error.message : String(error),
           sessionId: ctx.session.id,
         });
-        ctx.cancel();
+        return cancel("Workspace credentials are unavailable.");
       }
+      return null;
     },
   },
 });

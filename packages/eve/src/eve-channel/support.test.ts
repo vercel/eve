@@ -34,6 +34,20 @@ describe("findRemoteAgentBinding", () => {
     });
   });
 
+  it("carries the record a dynamic remote agent's credentials render from", async () => {
+    await expect(
+      findRemoteAgentBinding({
+        ...COORDINATES,
+        parent: parentWith({ record: { tenant: "acme" }, resolverId: "node_1" }),
+      }),
+    ).resolves.toEqual({
+      name: "research",
+      record: { tenant: "acme" },
+      resolverId: "node_1",
+      url: "https://research.example.com",
+    });
+  });
+
   it("names the earlier protocol of a child whose stream the parent can't follow", async () => {
     await expect(
       findRemoteAgentBinding({ ...COORDINATES, parent: parentWith({ earlierProtocol: 1 }) }),

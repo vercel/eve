@@ -529,28 +529,27 @@ async function transcriptReadingRuntime(name: string) {
         logicalPath: "instructions/replaced-conversation.ts",
         loadNamespace: async () => ({
           default: defineDynamic({
-            events: {
-              "session.started": async (_event, ctx) => {
-                const predecessor = ctx.session.predecessor;
-                if (predecessor === undefined) return null;
-                const events = [];
-                for await (const event of sessions.attach(predecessor.sessionId).stream({
-                  follow: false,
-                  startIndex: -2000,
-                })) {
-                  events.push(event);
-                }
-                const transcript = transcriptOf(events, { maxMessages: 40 });
-                recorded.push({ ...transcript, predecessor });
-                return transcript.messages.length === 0
-                  ? null
-                  : defineInstructions({
-                      content: transcript.messages
-                        .map((message) => JSON.stringify(message))
-                        .join("\n"),
-                      role: "user",
-                    });
-              },
+            select: () => null,
+            record: async (_selection, ctx) => {
+              const predecessor = ctx.session.predecessor;
+              if (predecessor === undefined) return null;
+              const events = [];
+              for await (const event of sessions.attach(predecessor.sessionId).stream({
+                follow: false,
+                startIndex: -2000,
+              })) {
+                events.push(event);
+              }
+              const transcript = transcriptOf(events, { maxMessages: 40 });
+              recorded.push({ ...transcript, predecessor });
+              return transcript.messages.length === 0
+                ? null
+                : defineInstructions({
+                    content: transcript.messages
+                      .map((message) => JSON.stringify(message))
+                      .join("\n"),
+                    role: "user",
+                  });
             },
           }),
         }),

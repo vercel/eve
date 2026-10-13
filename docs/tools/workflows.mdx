@@ -94,7 +94,7 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
   `getSandbox` remains unavailable.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
-  not tools returned from `defineDynamic` resolvers.
+  not tools a `defineDynamic` definition renders.
 
 `ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext` and
 `WorkflowServeContext` in the workflow body.

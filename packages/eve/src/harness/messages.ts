@@ -70,6 +70,21 @@ export function createFrameworkUserMessage(
   return createUserMessage(kind, content, metadata);
 }
 
+/** The metadata key that marks the messages a turn's input brought into history. */
+const TURN_ANCHOR_KEY = "eve.turn";
+
+/** Marks a turn's input message, so what eve adds for that turn can sit just ahead of it. */
+export function anchorToTurn<T extends UserModelMessage>(message: T, turnId: string): T {
+  return { ...message, metadata: { ...message.metadata, [TURN_ANCHOR_KEY]: turnId } };
+}
+
+/** The turn whose input brought a message into history, when it's marked. */
+export function turnAnchorOf(message: HarnessModelMessage): string | undefined {
+  if (message.role !== "user") return undefined;
+  const turnId = message.metadata?.[TURN_ANCHOR_KEY];
+  return typeof turnId === "string" ? turnId : undefined;
+}
+
 /** True when a value is a recognized classification for a user-role message. */
 export function isUserMessageKind(value: unknown): value is UserMessageKind {
   return value === "user" || isFrameworkMessageKind(value);

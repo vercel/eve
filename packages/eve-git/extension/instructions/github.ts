@@ -1,11 +1,10 @@
-import { defineDynamic, defineInstructions } from "eve/instructions";
+import { defineDynamic, defineInstructions, once } from "eve/instructions";
 
 import extension from "../extension.ts";
 import { githubInstructions } from "../lib/github-guidance.ts";
 
 export default defineDynamic({
-  events: {
-    "session.started": () =>
-      defineInstructions({ content: githubInstructions(extension.config.github !== undefined) }),
-  },
+  select: once,
+  render: () =>
+    defineInstructions({ content: githubInstructions(extension.config.github !== undefined) }),
 });

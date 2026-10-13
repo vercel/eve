@@ -1,8 +1,8 @@
 import { defineAgent } from "eve";
 
-import { fixtureModel, routing } from "../../testing";
+import { fixtureModel } from "../../testing";
 
 export default defineAgent({
   description: "Complete one assigned investigation.",
-  model: fixtureModel(() => `child-result:${routing.get().model}:${routing.get().requests}`),
+  model: fixtureModel((_request, routing) => `child-result:${routing.model}:${routing.decisions}`),
 });

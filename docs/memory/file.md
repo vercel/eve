@@ -5,7 +5,7 @@ description: "Configure the built-in fileMemory() provider: a bounded, model-mai
 
 `fileMemory()` from `eve/memory/file` is the memory provider built into eve.
 It keeps one small document per resolved scope, recalls that document before
-each turn and after compaction, and gives the model two tools to maintain it.
+each turn, and gives the model two tools to maintain it.
 Use it when a short list of durable facts and preferences is enough; use
 [another provider](/docs/memory#choose-a-provider) when you need semantic
 retrieval or automatic capture.

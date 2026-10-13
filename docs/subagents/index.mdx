@@ -123,44 +123,45 @@ configuration to expose the subagent, or `null` to omit it from the parent's too
 import { defineAgent, defineDynamic } from "eve";
 
 export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.research === true
-        ? defineAgent({
-            description: "Investigate ambiguous questions before the parent responds.",
-            model: "anthropic/claude-opus-5.5",
-          })
-        : null,
-  },
+  select: (_view, ctx) => ctx.session.auth.current?.attributes.role === "researcher",
+  render: (research) =>
+    research
+      ? defineAgent({
+          description: "Investigate ambiguous questions before the parent responds.",
+          model: "anthropic/claude-opus-5.5",
+        })
+      : null,
 });
 ```
 
-Resolvers run at `session.started` or `turn.started`; `step.started` is not
-supported for subagents. A nullish result (`null` or `undefined`) removes the
-subagent's description and tool definition from the model-visible surface.
-The subagent's filesystem manifest is always compiled; a non-nullish result injects
-the returned agent configuration when the child runs.
+eve evaluates the subagent before each parent model call and renders it again
+when what `select` returns changes. A nullish result (`null` or `undefined`)
+removes the subagent's description and tool definition from the model-visible
+surface. The subagent's filesystem manifest is always compiled; a non-nullish
+result injects the returned agent configuration when the child runs.
 
-Packaging controls must be available before the resolver runs. Put them on
-`defineDynamic`, rather than the `defineAgent` returned by an event handler:
+Packaging controls must be available before the subagent renders. Put them
+beside `select` on `defineDynamic`, rather than on the `defineAgent` that
+`render` returns:
 
-```ts
+```ts title="agent/subagents/native/agent.ts"
+import { defineAgent, defineDynamic, once } from "eve";
+
 export default defineDynamic({
   build: { externalDependencies: ["native-package"] },
-  events: {
-    "session.started": () =>
-      defineAgent({
-        description: "Use a native package when handling delegated work.",
-        model: "anthropic/claude-opus-5.5",
-      }),
-  },
+  select: once,
+  render: () =>
+    defineAgent({
+      description: "Use a native package when handling delegated work.",
+      model: "anthropic/claude-opus-5.5",
+    }),
 });
 ```
 
 The compiler applies `build.externalDependencies` while bundling every authored
 module in that dynamic subagent.
 See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
-scope precedence, failure behavior, and the dispatch-time guard.
+when eve evaluates a subagent, failure behavior, and the dispatch-time guard.
 
 Minimum files:
 

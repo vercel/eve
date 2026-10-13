@@ -6,30 +6,38 @@ import metadataProvider from "../channels/metadata-provider";
 /**
  * Smoke-test fixture: resolves a tool only when the session was started
  * via the `metadata-provider` channel. Verifies that
- * `DynamicResolveContext.channel.metadata` surfaces the channel's
+ * `RecordContext.channel.metadata` surfaces the channel's
  * `metadata(state)` projection and that `isChannel` narrows it.
  */
 export default defineDynamic({
-  events: {
-    "turn.started": (_event, ctx) => {
-      if (!isChannel(ctx.channel, metadataProvider)) return null;
+  select: (view, { channel }) => {
+    if (!isChannel(channel, metadataProvider)) return null;
+    const { topic, contextMessages } = channel.metadata;
+    return topic
+      ? {
+          channelKind: channel.kind ?? null,
+          contextMessages: contextMessages ?? null,
+          topic,
+          turn: view.latest["turn.started"] ?? null,
+        }
+      : null;
+  },
+  render: (selected) => {
+    if (selected === null) return null;
+    const { channelKind, contextMessages, topic } = selected;
 
-      const { topic, contextMessages } = ctx.channel.metadata;
-      if (!topic) return null;
-
-      return defineTool({
-        description:
-          "Returns channel metadata visible to this resolver. " +
-          "Only call when the user asks to read channel context.",
-        inputSchema: z.object({}),
-        async execute() {
-          return {
-            channelKind: ctx.channel.kind ?? null,
-            topic,
-            contextMessages,
-          };
-        },
-      });
-    },
+    return defineTool({
+      description:
+        "Returns channel metadata visible to this resolver. " +
+        "Only call when the user asks to read channel context.",
+      inputSchema: z.object({}),
+      async execute() {
+        return {
+          channelKind,
+          topic,
+          contextMessages,
+        };
+      },
+    });
   },
 });

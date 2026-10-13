@@ -4,6 +4,7 @@
 
 import { getRun } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
+import type { JsonValue } from "#shared/json.js";
 
 /** What the parent's proxy route needs to reach one remote child's stream. */
 export interface RemoteChildBinding {
@@ -14,6 +15,8 @@ export interface RemoteChildBinding {
   readonly streamPath: string;
   readonly url: string;
   readonly resolverId?: string;
+  /** A dynamic remote agent's record, which the credentials the child was opened with render from. */
+  readonly record?: JsonValue;
   /** The child's remote agent protocol, when it speaks an earlier one: the proxy can't follow it. */
   readonly earlierProtocol?: number;
 }
@@ -58,7 +61,7 @@ export async function readRemoteChildBinding(
 
 function parseBinding(value: unknown, childSessionId: string): RemoteChildBinding | undefined {
   if (!isObject(value)) return undefined;
-  const { callId, earlierProtocol, name, resolverId, streamPath, url } = value;
+  const { callId, earlierProtocol, name, record, resolverId, streamPath, url } = value;
   if (
     typeof callId !== "string" ||
     typeof name !== "string" ||
@@ -74,6 +77,8 @@ function parseBinding(value: unknown, childSessionId: string): RemoteChildBindin
     url,
   };
   if (typeof resolverId === "string") binding.resolverId = resolverId;
+  // The parent wrote it, as the JSON its step returned.
+  if (record !== undefined) binding.record = record as JsonValue;
   if (typeof earlierProtocol === "number") binding.earlierProtocol = earlierProtocol;
   return binding;
 }

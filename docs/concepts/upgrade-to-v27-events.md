@@ -12,17 +12,17 @@ This page covers what to change. Work through the sections that apply to your ag
 
 ## What changes for whom
 
-| You author…                               | What changes                                                                                            |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Hooks (`agent/hooks/`)                    | Event keys and payloads. Handlers keep `(event, ctx)`; `ctx` adds `position` and `view`.                |
-| Channel `events` handlers                 | Event keys and payloads, and the handler signature: `(event, ctx)`, with your context on `ctx.channel`. |
-| Slack renderers                           | Event keys and payloads; handlers take `(event, ctx, next)`.                                            |
-| Clients, frontends, and evals             | Event types, cursors (line positions), event identity (`meta.position`), and interaction names.         |
-| Channel config, workflow tools, policies  | Names: `onAnswers`, `ToolQuestion`, `request.interactionId`. See [Renamed APIs](#renamed-apis).         |
-| MCP clients and `eve invoke` scripts      | Pending questions and sign-ins are `interactions`, keyed by `interactionId`.                            |
-| `defineDynamic` resolvers                 | Nothing in this release. The keys stay; the event argument is now the matching v27 fact.                |
-| Memory providers                          | Nothing in this release.                                                                                |
-| Instrumentation (`defineInstrumentation`) | Input events name their interaction (`interactionId`, `call`, `answer`); the event types stay.          |
+| You author…                               | What changes                                                                                                                                                          |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hooks (`agent/hooks/`)                    | Event keys and payloads; `ctx` adds `position`, `view`, and `occurrence`. Return `cancel()` instead of calling `ctx.cancel()`, and a hook that throws fails its turn. |
+| Channel `events` handlers                 | Event keys and payloads, and the handler signature: `(event, ctx)`, with your context on `ctx.channel`.                                                               |
+| Slack renderers                           | Event keys and payloads; handlers take `(event, ctx, next)`.                                                                                                          |
+| Clients, frontends, and evals             | Event types, cursors (line positions), event identity (`meta.position`), and interaction names.                                                                       |
+| Channel config, workflow tools, policies  | Names: `onAnswers`, `ToolQuestion`, `request.interactionId`. See [Renamed APIs](#renamed-apis).                                                                       |
+| MCP clients and `eve invoke` scripts      | Pending questions and sign-ins are `interactions`, keyed by `interactionId`.                                                                                          |
+| `defineDynamic` definitions               | `events` handlers become `select` with `render`, `record`, or both. See [Dynamic capabilities](#dynamic-capabilities).                                                |
+| Memory providers                          | `recall["compaction.completed"]` and the `visibility` option are removed: recall never joins history, so compaction and another scope need neither.                   |
+| Instrumentation (`defineInstrumentation`) | Input events name their interaction (`interactionId`, `call`, `answer`); the event types stay.                                                                        |
 
 A hook or channel keyed on a removed v26 event fails as eve loads it, with the key to use instead,
 rather than silently never firing. Hook, channel, and schedule extensions built for earlier
@@ -161,6 +161,61 @@ and `ctx.view`, the session's tables as of the event's commit:
 Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on
 their type; `*` no longer receives them. Key stored rows on `(session, line, index)` from
 `ctx.position` instead of `meta.id`. See [Hooks](../guides/hooks).
+
+A hook asks the session to act by returning an intent: return `cancel()` from `eve/hooks` where it
+called `ctx.cancel()`. A hook that throws during a turn now fails the turn, where it used to be
+logged; catch the errors of a hook that should not stop the agent, such as a metrics exporter. A
+hook can also take `select` with `run`, which runs each time what `select` reads changes. Key a
+side effect that must happen once on `ctx.occurrence.id`.
+
+## Dynamic capabilities
+
+`defineDynamic` takes `select`, which reads what a capability depends on, and `render`, which makes
+the capability from it, instead of `events` handlers. Move I/O into `record`, which runs once per new
+selection; eve keeps what it returns and passes it to `render`.
+
+| Before                                         | After                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------- |
+| A `"session.started"` handler                  | `select: once`                                                   |
+| A `"turn.started"` handler                     | `select: perTurn`                                                |
+| A `"step.started"` handler                     | `select: perStep`, or `select` the part of `view.messages` used  |
+| Reading `ctx.session.auth` in the handler      | `select` the attribute the capability depends on                 |
+| Awaiting I/O in the handler                    | `record`, returning JSON that `render` uses                      |
+| `defineDurableCallback`, `defineDurableSchema` | Ordinary callbacks and schemas inside the value `render` returns |
+| `ctx.model` in a subagent handler              | `view.model`, selected                                           |
+
+```diff title="agent/tools/catalog.ts"
+-import { defineDynamic, defineTool } from "eve/tools";
++import { defineDynamic, defineTool, once } from "eve/tools";
+ import { z } from "zod";
+ import { listTables, runReadOnly } from "../lib/warehouse";
+
+ export default defineDynamic({
+-  events: {
+-    "session.started": async () =>
+-      Object.fromEntries(
+-        (await listTables()).map((table) => [table.name, queryTool(table)]),
+-      ),
+-  },
++  select: once,
++  record: async () => (await listTables()).map(({ columns, name }) => ({ columns, name })),
++  render: (tables) => Object.fromEntries(tables.map((table) => [table.name, queryTool(table)])),
+ });
+
+ function queryTool(table: { readonly name: string; readonly columns: readonly string[] }) {
+   return defineTool({
+     description: `Query ${table.name}. Columns: ${table.columns.join(", ")}`,
+     inputSchema: z.object({ sql: z.string() }),
+     execute: ({ sql }) => runReadOnly(table.name, sql),
+   });
+ }
+```
+
+A failing dynamic capability now fails the turn before its model call, and the next model call
+tries it again. A dynamic tool, connection, or remote agent returns its code from `render`, which
+a fresh process runs again, so it no longer needs a build-time transform or durable wrapper.
+Extensions with dynamic capabilities or hooks must be rebuilt. See
+[Dynamic capabilities](../guides/dynamic-capabilities).
 
 ## Channels
 

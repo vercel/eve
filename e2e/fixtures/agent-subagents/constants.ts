@@ -28,3 +28,14 @@ export const SURVEY_DIRECTIVE = "SURVEY-DELEGATE";
 export const SURVEY_TOOL_DIRECTIVE = "SURVEY-TOOL";
 /** What survey-worker reports for its one model call: more than the parent's default 40M input budget. */
 export const SURVEY_WORKER_INPUT_TOKENS = 50_000_000;
+
+/** Starts Alice's request to the tenant-remote agent, and Bob's continuation of it. */
+export const TENANT_REMOTE_DIRECTIVE = "TENANT-REMOTE";
+/** What the parent sends the tenant-remote child, which reports who it runs as. */
+export const TENANT_WHOAMI_MESSAGE = "TENANT-WHOAMI Run the whoami tool and report its marker.";
+export type Tenant = "acme" | "globex";
+/** The bearer each tenant's remote calls carry; the eve channel runs each as its tenant. */
+export const TENANT_AUTHORIZATIONS: Readonly<Record<Tenant, string>> = {
+  acme: "Bearer e2e-tenant-acme",
+  globex: "Bearer e2e-tenant-globex",
+};

@@ -9,8 +9,12 @@ async function exportOrQueue(event: HookEvent, ctx: HookContext): Promise<void> 
       ...queued,
       { position: `${ctx.position.line}:${ctx.position.index}`, type: event.type },
     ]);
-    // Rethrow so eve logs the failed export. The turn keeps running.
-    throw error;
+    // An observer that mustn't fail the turn catches its own errors: a hook that throws during a
+    // turn fails it.
+    console.warn("audit export failed; queued for later", {
+      error: error instanceof Error ? error.message : String(error),
+      type: event.type,
+    });
   }
 }
 

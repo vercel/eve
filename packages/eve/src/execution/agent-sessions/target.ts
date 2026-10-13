@@ -105,8 +105,7 @@ export function resolveAgentStartTarget(input: {
 }): SubagentStartTarget {
   const { action } = input;
   const registry = input.bundle.subagentRegistry.subagentsByNodeId;
-  const isDynamicSubagent =
-    input.bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
+  const isDynamicSubagent = input.bundle.subagentRegistry.dynamicNodeIds.has(action.nodeId);
   const dynamicSubagentSelection = isDynamicSubagent
     ? (input.dynamicSelections[action.nodeId] ?? undefined)
     : undefined;

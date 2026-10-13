@@ -2,8 +2,7 @@ import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { decide } from "#ai/decide.js";
-import { parseJsonValue, type JsonObject } from "#shared/json.js";
-import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import { parseJsonValue } from "#shared/json.js";
 
 const MAX_ACTION_BYTES = 64 * 1024;
 
@@ -63,21 +62,6 @@ async function autoApproval(
   }
 }
 
-function alwaysApproval(_closure: JsonObject): "user-approval" {
-  return "user-approval";
-}
-
-function neverApproval(_closure: JsonObject): "not-applicable" {
-  return "not-applicable";
-}
-
-function onceApproval(
-  _closure: JsonObject,
-  context: ApprovalContext,
-): "not-applicable" | "user-approval" {
-  return context.approvedTools.has(context.toolName) ? "not-applicable" : "user-approval";
-}
-
 /**
  * Returns an `approval` callback that asks an AI SDK decision model whether
  * the exact tool call presents concrete security danger. Defaults to TypeSafe Jev.
@@ -85,12 +69,8 @@ function onceApproval(
  */
 export function auto<TInput = unknown>(options: AutoApprovalOptions = {}): ApprovalPolicy<TInput> {
   const decisionModel = options.model ?? "typesafe-ai/jev";
-  const callback = (_closure: JsonObject, context: ApprovalContext) =>
-    autoApproval(decisionModel, options, context);
-  return stampDurableDynamicCallback(
-    (context) => autoApproval(decisionModel, options, context as ApprovalContext),
-    { callback, closure: {} },
-  ) as ApprovalPolicy<TInput>;
+  return ((context: ApprovalContext) =>
+    autoApproval(decisionModel, options, context)) as ApprovalPolicy<TInput>;
 }
 
 /**
@@ -98,10 +78,7 @@ export function auto<TInput = unknown>(options: AutoApprovalOptions = {}): Appro
  * the tool executes.
  */
 export function always<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(() => "user-approval", {
-    callback: alwaysApproval,
-    closure: {},
-  });
+  return () => "user-approval";
 }
 
 /**
@@ -109,10 +86,7 @@ export function always<TInput = unknown>(): ApprovalPolicy<TInput> {
  * the tool executes.
  */
 export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(() => "not-applicable", {
-    callback: neverApproval,
-    closure: {},
-  });
+  return () => "not-applicable";
 }
 
 /**
@@ -123,9 +97,6 @@ export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
  * the bare tool name, so it ignores compound approval keys.
  */
 export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(
-    ({ approvedTools, toolName }) =>
-      approvedTools.has(toolName) ? "not-applicable" : "user-approval",
-    { callback: onceApproval, closure: {} },
-  );
+  return ({ approvedTools, toolName }) =>
+    approvedTools.has(toolName) ? "not-applicable" : "user-approval";
 }

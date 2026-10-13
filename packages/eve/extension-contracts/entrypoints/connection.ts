@@ -7,4 +7,7 @@ export {
   defineOpenAPIConnection,
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
+  once,
+  perStep,
+  perTurn,
 } from "../../src/public/connections/index.ts";

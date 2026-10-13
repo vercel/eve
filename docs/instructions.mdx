@@ -74,13 +74,11 @@ Static instructions never run code at runtime. When you need typed executable be
 
 ## Dynamic instructions
 
-To resolve instructions from session context (auth, tenant, channel, or external data), wrap `defineInstructions` in `defineDynamic`. Instruction resolvers support `session.started` and `turn.started`, not `step.started`, and may return `null` to contribute nothing.
+To resolve instructions from session context (auth, tenant, channel, or external data), wrap `defineInstructions` in `defineDynamic`. `select` reads what the instructions depend on, and `render` returns them, or `null` to contribute nothing. When they need I/O, `record` fetches the content once per new selection.
 
-A dynamic system result applies at its lifecycle scope. A dynamic user result is appended to durable history at that boundary: session results before turn results, and both before the current delivery. Completed workflow steps are replay-safe, so parking, resuming, or replaying one does not append the message again.
+A dynamic system instruction is part of every model call while the session selects it, and stays outside history. A dynamic user instruction joins durable history once for each new selection, and stays there: with `select: perTurn`, it joins at the start of every turn, before the message that started it, even when its text repeats. Selecting `null` later doesn't remove it. Completed workflow steps are replay-safe, so parking, resuming, or replaying one does not append the message again.
 
-The `messages` snapshot passed to a `session.started` resolver includes static user instructions. A `turn.started` resolver additionally sees user instructions produced at `session.started`. Other dynamic capability resolvers keep their existing snapshots.
-
-See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior. To give a session that replaced a [stranded session](./concepts/execution-model-and-durability#what-a-replacement-session-receives) the earlier conversation, read its stream with `sessions.attach()` and `transcriptOf()` in a `session.started` user-role instruction.
+See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior. To give a session that replaced a [stranded session](./concepts/execution-model-and-durability#what-a-replacement-session-receives) the earlier conversation, read its stream with `sessions.attach()` and `transcriptOf()` in a user-role instruction that selects `once`.
 
 ## History controls and prompt caching
 

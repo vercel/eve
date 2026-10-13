@@ -64,12 +64,7 @@ type ParsedAgentInfoSource = z.output<typeof source>;
 
 const entry = source.extend({ name: z.string() }).strict();
 
-const dynamicResolver = source
-  .extend({
-    eventNames: z.array(z.string()),
-    slug: z.string(),
-  })
-  .strict();
+const dynamicResolver = source.extend({ slug: z.string() }).strict();
 
 const modelRouting = z.discriminatedUnion("kind", [
   z
@@ -214,7 +209,6 @@ const memory = source
   .extend({
     description: z.string().optional(),
     slot: z.string(),
-    visibility: z.enum(["scope", "session"]),
   })
   .strict();
 

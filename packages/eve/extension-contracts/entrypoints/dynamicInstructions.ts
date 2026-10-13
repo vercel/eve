@@ -1,1 +1,1 @@
-export { defineDynamic } from "../../src/public/instructions/index.ts";
+export { defineDynamic, once, perStep, perTurn } from "../../src/public/instructions/index.ts";

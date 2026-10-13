@@ -37,7 +37,6 @@ import {
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
-import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import {
   applyWorkflowTransform,
   isAuthoredApplicationModule,
@@ -362,11 +361,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       source: moduleMapSource,
     }),
     createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
-    // Before callback stamping, which must see the stub and never the directive.
     createAuthoredWorkflowDirectivePlugin({ appRoot: input.appRoot, recorder: workflowSources }),
-    createDynamicCapabilityTransformPlugin({
-      workflowFunctions: (id) => workflowSources.workflowFunctions(id),
-    }),
     workflowSources.graphPlugin(),
     createExtensionMountPlugin(extensionMounts, extensionOverridePaths(input.manifest)),
     extensionScopePlugin,

@@ -10,7 +10,7 @@ const SCENARIOS = {
   direct: {
     ends: false,
     description:
-      "Delegation and later wildcard hooks continue after a typed hook writes parent state and throws.",
+      "Delegation and later wildcard hooks continue after a typed hook writes parent state and catches its own failure.",
     task: "workflow-marker",
     request: "Alice asks Bob to review a short report and return his result. SUBAGENT-HOOKS:direct",
     audit:

@@ -12,10 +12,6 @@ import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
-import {
-  collectDurableDynamicToolCallbacks,
-  stampDurableDynamicToolCallbacks,
-} from "#tools/durable-callbacks.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
@@ -435,18 +431,6 @@ export function stampToolDefinition<
     );
   }
   Object.assign(definition, { [TOOL_BRAND]: true });
-  stampDurableDynamicToolCallbacks(
-    definition,
-    collectDurableDynamicToolCallbacks({
-      inputSchema: definition.inputSchema,
-      outputSchema: definition.outputSchema,
-      label: definition.label,
-      approval: definition.approval,
-      approvalKey: definition.approvalKey,
-      execute: definition.execute,
-      toModelOutput: definition.toModelOutput,
-    }),
-  );
   stampDefinitionKey(definition, `tool:${definition.description}`);
   return definition;
 }

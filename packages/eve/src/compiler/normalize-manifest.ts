@@ -293,6 +293,9 @@ class AgentGraphCompiler {
         applyDefaultToolPolicy(phaseOne, config);
       } else {
         dynamicBuildDependencies = normalized.build?.externalDependencies;
+        if (normalized.kind === "dynamic" && normalized.defaultTools === false) {
+          applyDefaultToolPolicy(phaseOne, { defaultTools: false } as CompiledAgentDefinition);
+        }
       }
       const externalDependencies = mergeExternalDependencies(
         inheritedExternalDependencies,
@@ -333,7 +336,6 @@ class AgentGraphCompiler {
           }),
           configResolver: {
             build: normalized.kind === "dynamic" ? normalized.build : undefined,
-            eventNames: normalized.kind === "dynamic" ? normalized.eventNames : [],
             exportName: phaseOne.selectedConfig.source.exportName,
             logicalPath: phaseOne.selectedConfig.source.logicalPath,
             sourceId: phaseOne.selectedConfig.source.sourceId,

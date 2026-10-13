@@ -210,9 +210,10 @@ guide for an end-to-end walkthrough.
 
 ## Runtime behavior
 
-`auto` decides at the first `step.started` event, after the incoming prompt
-is available and before the selected language model runs. It reuses that choice
-for later tool-loop steps in the same turn. A new turn makes a new choice, and
+`auto` decides before the first model call of each turn, after the incoming
+prompt is available and before the selected language model runs. eve keeps the
+choice in the session and reuses it for the turn's later model calls, including
+in a fresh process, without deciding again. A new turn makes a new choice, and
 child sessions route from their own prompts.
 
 The decider receives up to eight recent user and assistant text messages,

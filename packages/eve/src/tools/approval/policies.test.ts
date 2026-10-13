@@ -5,7 +5,6 @@ vi.mock("#ai/decide.js", () => ({ decide }));
 
 import type { ApprovalContext } from "#approval/definition.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";
-import { readDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
 function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
   return {
@@ -30,12 +29,8 @@ describe("dynamic tool approval helpers", () => {
   it.each([
     ["always", always(), "user-approval"],
     ["never", never(), "not-applicable"],
-  ] as const)("gives %s a stable replay descriptor", async (_name, policy, expected) => {
-    const reference = readDurableDynamicCallback(policy);
-    expect(reference?.callback).toBeTypeOf("function");
-    expect(reference?.closure).toEqual({});
-
-    expect(await reference!.callback(reference!.closure, {} as never)).toBe(expected);
+  ] as const)("%s returns its fixed decision", async (_name, policy, expected) => {
+    expect(await policy({} as never)).toBe(expected);
   });
 
   it.each([
@@ -125,17 +120,17 @@ describe("dynamic tool approval helpers", () => {
     await expect(auto()(context)).rejects.toBe(reason);
   });
 
-  it("replays once against the current approval context", async () => {
-    const reference = readDurableDynamicCallback(once())!;
+  it("once decides against the current approval context", async () => {
+    const policy = once();
 
     expect(
-      await reference.callback(reference.closure, {
+      await policy({
         approvedTools: new Set(),
         toolName: "guarded",
       } as never),
     ).toBe("user-approval");
     expect(
-      await reference.callback(reference.closure, {
+      await policy({
         approvedTools: new Set(["guarded"]),
         toolName: "guarded",
       } as never),

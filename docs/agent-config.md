@@ -80,53 +80,43 @@ Gateway-routed calls do not receive the option.
 To select a model from the incoming prompt with an AI SDK decision model, use
 [`auto` from `eve/models`](./guides/decide).
 
-`model` also accepts `defineDynamic({ events })`. Each matching handler must
-return the concrete model for its scope; a dynamic model has no compiled
-default.
+`model` also accepts `defineDynamic` from `eve/models`. `select` reads what the model depends on, and `render`
+returns the model for it; a dynamic model has no compiled default.
 
 ```ts title="agent/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 
 export default defineAgent({
   model: defineDynamic({
-    events: {
-      "session.started": (_event, ctx) => {
-        if (ctx.session.auth.initiator?.attributes.plan === "enterprise") {
-          return "anthropic/claude-opus-5.5";
-        }
-
-        return "anthropic/claude-sonnet-5";
-      },
-    },
+    select: (_view, ctx) => ctx.session.auth.initiator?.attributes.plan === "enterprise",
+    render: (enterprise) =>
+      enterprise ? "anthropic/claude-opus-5.5" : "anthropic/claude-sonnet-5",
   }),
 });
 ```
 
-Handlers receive the shared [dynamic resolver
-context](./guides/dynamic-capabilities) and return a gateway model id, an AI
-SDK `LanguageModel`, or a selection object. Returning `null` or `undefined`
-fails the turn.
+`render` returns a gateway model ID, an AI SDK `LanguageModel`, or a selection object. See
+[Dynamic capabilities](./guides/dynamic-capabilities) for `select`, `record`, and `render`.
 
-- **Scopes.** `session.started` (once per session), `turn.started` (once per
-  turn), `step.started` (every model step). Precedence: step > turn >
-  session. Prefer `session.started`: prompt caches are per model, so every
-  switch re-ingests the conversation at uncached prices. If no active
-  selection exists before model-dependent work begins, the turn fails.
-- **Failures stop the turn.** A resolver that throws, returns no model, or
-  returns an invalid selection fails before the provider call. A selected
-  model without valid credentials fails at request time.
-- **Serialization.** Session/turn selections must be model id strings; return
-  live `LanguageModel` objects only from `step.started`.
+- **When it changes.** eve evaluates the model before each model call, and chooses again only when
+  what `select` returns changes. Prefer a selection that holds for the session: prompt caches are
+  per model, so every switch re-ingests the conversation at uncached prices. `select: perTurn` and
+  `select: perStep` choose per turn and per model call.
+- **Failures stop the turn.** A `select`, `record`, or `render` that throws, or returns an invalid
+  selection, fails the turn before the provider call. Returning `null` selects no model, and a
+  model call that needs one fails. A selected model without valid credentials fails at request
+  time.
+- **Serialization.** What `record` returns is kept in the session, so it must be JSON, such as a
+  model ID. Return a live `LanguageModel` from `render`.
 - **Selection object.** `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`.
-  When `modelContextWindowTokens` is omitted, eve resolves it from the AI
-  Gateway catalog and caches successful metadata in durable session state for
-  24 hours. Set it explicitly for an unlisted or custom model. Dynamic agents
-  cannot set sibling `modelContextWindowTokens` or `modelOptions` fields;
-  return per-model values from the handler.
+  When `modelContextWindowTokens` is omitted, eve resolves it from the AI Gateway catalog and caches
+  successful metadata in durable session state for 24 hours. Set it explicitly for an unlisted or
+  custom model. Dynamic agents cannot set sibling `modelContextWindowTokens` or `modelOptions`
+  fields; return per-model values from `render`.
 
-The `session.started` runtime identity does not include a model id for a
-dynamic agent. Each public `step.started` event reports the concrete `modelId`
-selected for that model call.
+The `session.started` runtime identity does not include a model ID for a dynamic agent. Each public
+`model.started` event reports the concrete model selected for that model call.
 
 ## Reasoning effort
 

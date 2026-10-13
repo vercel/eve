@@ -277,7 +277,7 @@ async function runApproved(
               tools.get(request.call.toolName)?.approvalKey?.(request.call.input),
             ),
             approvals: requests,
-            messages: step.projectHistory(step.session.history),
+            messages: step.session.history,
             position: step.position(),
             publish: step.publish,
             responderOf: (approval) => responders.get(approval.interactionId),
@@ -315,7 +315,7 @@ function stepKey(at: { readonly turnId: string; readonly stepIndex: number }): s
   return `${at.turnId}:${at.stepIndex}`;
 }
 
-/** The entries of the step that asked, restored by building its catalog; the running step's without one. */
+/** The entries of the step that asked, built once per step; the running step's without one. */
 async function restoreTools(
   step: Step,
   parked: SuspendedStep | undefined,
@@ -327,12 +327,6 @@ async function restoreTools(
   restoredTools.set(step, cache);
   const restored = cache.tools.get(key);
   if (restored !== undefined && cache.last === key) return restored;
-  await config.participants?.restoreStep({
-    at: { sequence: at.sequence, stepIndex: at.stepIndex, turnId: at.turnId },
-    messages: step.projectHistory(step.session.history),
-    modelId: step.session.agent.modelReference?.id ?? "dynamic",
-    parked: parked !== undefined,
-  });
   const tools = buildStepCatalog({
     agentTools: config.tools,
     ctx: step.ctx,
