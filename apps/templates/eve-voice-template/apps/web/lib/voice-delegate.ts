@@ -47,14 +47,15 @@ export class VoiceDelegate {
     },
   ) {}
 
-  delegate(id: string, request: string): void {
+  /** Returns whether the request goes to eve as a message, rather than answering a prompt. */
+  delegate(id: string, request: string): boolean {
     const prompt = this.held ? this.open[0] : undefined;
     const option = prompt && spokenOption(request, prompt);
     if (prompt && option) {
       this.open.shift();
       void this.options.agent.respond([{ optionId: option.id, requestId: prompt.requestId }]);
       this.speak(id, `The user's answer was recorded: ${option.label}.`);
-      return;
+      return false;
     }
 
     this.queue.push({ id, request });
@@ -63,6 +64,7 @@ export class VoiceDelegate {
     if (this.held)
       this.speak(id, "The agent will get to this once the user finishes the step on screen.");
     this.drain();
+    return true;
   }
 
   /** Call from the hook's `onFinish`, once its turn has fully settled. */

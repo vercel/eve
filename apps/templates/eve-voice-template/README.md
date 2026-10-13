@@ -25,14 +25,14 @@ Browser
  │     │ requests and spoken approvals
  │     ▼
  ├─ useEveAgent (eve/react) ── /eve/v1/session ──▶ eve agent (tools, approvals, durable session)
- │     renders the session with eve Web Chat components
+ │     tool calls and prompts render beside the live transcript
  └─ POST /api/live/client-secret ──▶ single-use Gateway client secret
 ```
 
 - **Audio goes directly from the browser to AI Gateway.** The server only mints a single-use client secret, so the Gateway API key never reaches the browser.
 - **GPT-Live-1 talks; eve works.** GPT-Live-1 delegates anything beyond small talk, and the app sends eve what the user said. One call is one durable eve session.
 - **Progress is silent; answers are spoken.** The app tells GPT-Live-1 what the agent is doing, then gives it the agent's answer to say in its own words.
-- **The screen shows the eve session** with the same components as [eve Web Chat](https://eve.dev/docs/channels/eve).
+- **The screen shows the live transcript** as both sides speak, with eve's tool calls and prompts in place. It uses the same components as [eve Web Chat](https://eve.dev/docs/channels/eve).
 - **Approvals work by voice or on screen.** The user clicks an option or says its name, such as "approve" or "cancel it, please"; anything else waits until the prompt is answered. The voice model's own words never answer a prompt.
 - **Hanging up stops the agent.** Ending the call cancels any in-flight eve turn.
 

@@ -6,15 +6,16 @@ import {
 } from "@ai-sdk/openai";
 import { experimental_useRealtime as useRealtime } from "@ai-sdk/react";
 import type { Experimental_RealtimeServerEvent as RealtimeServerEvent } from "ai";
-import { useEveAgent } from "eve/react";
+import { type EveMessage, useEveAgent } from "eve/react";
 import { LoaderCircleIcon, MicIcon, MicOffIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { AgentMessage } from "@/app/_components/agent-message";
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import {
   LIVE_INSTRUCTIONS,
@@ -50,7 +51,10 @@ export function VoiceCall() {
   const [protocols, setProtocols] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  // The spoken transcript only feeds delegations; the page renders the eve session.
+  // The transcript renders as it streams; eve contributes only tool calls and prompts.
+  const [turns, setTurns] = useState<readonly Turn[]>([]);
+  // Transcript length when each eve request was sent, so its activity renders in place.
+  const [anchors, setAnchors] = useState<readonly number[]>([]);
   const turnsRef = useRef<Turn[]>([]);
   const delegatedTurnsRef = useRef(0);
   const delegateRef = useRef<VoiceDelegate | null>(null);
@@ -100,7 +104,8 @@ export function VoiceCall() {
     setStarting(true);
     // One call is one eve session.
     agent.reset();
-    turnsRef.current = [];
+    setTurns((turnsRef.current = []));
+    setAnchors([]);
     delegatedTurnsRef.current = 0;
     delegateRef.current = new VoiceDelegate({
       agent: { cancel: agent.cancel, respond: agent.respond, send: agent.send },
@@ -135,7 +140,11 @@ export function VoiceCall() {
         return;
       case "delegation-created":
         setTimeout(() => {
-          delegateRef.current?.delegate(event.delegationId, takeUserRequest());
+          const request = takeUserRequest();
+          const at = turnsRef.current.length;
+          if (delegateRef.current?.delegate(event.delegationId, request)) {
+            setAnchors((current) => [...current, at]);
+          }
         }, TRANSCRIPT_SETTLE_MS);
         return;
       case "session-closed":
@@ -151,6 +160,7 @@ export function VoiceCall() {
       last?.speaker === speaker
         ? [...current.slice(0, -1), { speaker, text: last.text + delta }]
         : [...current, { speaker, text: delta.trimStart() }];
+    setTurns(turnsRef.current);
   }
 
   /** Everything the user said since the previous delegation. */
@@ -170,20 +180,49 @@ export function VoiceCall() {
       (input) => input.request.kind === "question" && input.request.action.callId === callId,
     );
 
+  // eve's k-th user message is the k-th request sent. Its text duplicates the
+  // transcript, and so does the spoken answer, so only tools and prompts show.
+  const activity: EveMessage[][] = [];
+  for (const message of agent.data.messages) {
+    if (message.role === "user") activity.push([]);
+    else
+      activity.at(-1)?.push({
+        ...message,
+        parts: message.parts.filter(
+          (part) => part.type === "dynamic-tool" || part.type === "authorization",
+        ),
+      });
+  }
+  const activityAt = (index: number) =>
+    activity
+      .flatMap((messages, request) => (anchors[request] === index ? messages : []))
+      .filter((message) => message.parts.length > 0)
+      .map((message) => (
+        <AgentMessage
+          canRespond={canRespond}
+          isStreaming={false}
+          key={message.id}
+          message={message}
+          onInputResponses={(responses) => agent.respond(responses)}
+          questionsFor={questionsFor}
+        />
+      ));
+
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col">
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-6 pb-10 sm:px-6">
-          {agent.data.messages.map((message, index) => (
-            <AgentMessage
-              canRespond={canRespond}
-              isStreaming={agent.status === "streaming" && index === agent.data.messages.length - 1}
-              key={message.id}
-              message={message}
-              onInputResponses={(responses) => agent.respond(responses)}
-              questionsFor={questionsFor}
-            />
+          {turns.map((turn, index) => (
+            <Fragment key={index}>
+              {activityAt(index)}
+              <Message from={turn.speaker}>
+                <MessageContent>
+                  <MessageResponse>{turn.text}</MessageResponse>
+                </MessageContent>
+              </Message>
+            </Fragment>
           ))}
+          {activityAt(turns.length)}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
