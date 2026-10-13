@@ -7,6 +7,8 @@ import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 
 export interface ParsedCreateBody {
+  sessionId?: string;
+  deliveryId?: string;
   stubs?: readonly ToolStub[];
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;

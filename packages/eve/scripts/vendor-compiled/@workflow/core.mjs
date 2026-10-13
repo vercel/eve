@@ -171,11 +171,27 @@ function stubCoreQuickJSEntrypoint() {
   };
 }
 
+function honorReservedRunId() {
+  return {
+    name: "eve:reserved-run-id",
+    transform(source, id) {
+      if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/runtime/start.js")) return null;
+      const search = "const runId = `wrun_${world.createRunId";
+      if (source.split(search).length !== 2)
+        throw new Error("Recheck the reserved Workflow run id transform.");
+      return {
+        code: source.replace(search, "const runId = opts.runId ?? `wrun_${world.createRunId"),
+        map: null,
+      };
+    },
+  };
+}
+
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
+  plugins: [honorReservedRunId(), stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
   entries: [
     { entry: "dist/util.js", outputPath: "util" },
     { entry: "dist/serialization.js", outputPath: "serialization" },
@@ -197,5 +213,19 @@ export default {
       outputPath: "private",
     },
   ],
-  copyDeclarations,
+  async copyDeclarations(context) {
+    const result = await copyDeclarations(context);
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const path = join(context.destinationRoot, "runtime/start.d.ts");
+    const source = await readFile(path, "utf8");
+    await writeFile(
+      path,
+      source.replace(
+        "export interface StartOptionsBase {",
+        "export interface StartOptionsBase {\n    /** Caller-reserved durable run identity. */\n    runId?: string;",
+      ),
+    );
+    return result;
+  },
 };

@@ -78,6 +78,8 @@ export interface Session {
 interface SessionDeliveryOptions {
   /** Stable delivery identity, deduplicated within this session's recent-key window. */
   readonly idempotencyKey?: string;
+  /** Caller-assigned delivery identity; minted when absent. */
+  readonly deliveryId?: string;
   readonly auth: SessionAuthContext | null;
   /** Public callback destination for a delegated continuation turn. */
   readonly callback?: SessionCallback;
@@ -123,7 +125,7 @@ export function createSession(
     id,
     async send(message, options) {
       validateDeliveryIdempotencyKey(options.idempotencyKey);
-      const delivery = createDelivery(metadata);
+      const delivery = createDelivery({ ...metadata, deliveryId: options.deliveryId });
       const caller = sessionCallbackToTurnCaller(options.callback);
       const history = validateSessionHistory(options.history);
       const payload = attachClientContext<{
@@ -157,7 +159,7 @@ export function createSession(
       }
       const validatedInputResponses = parseInputResponses(inputResponses);
       const caller = sessionCallbackToTurnCaller(options.callback);
-      const delivery = createDelivery(metadata);
+      const delivery = createDelivery({ ...metadata, deliveryId: options.deliveryId });
       const payload = attachClientContext<{
         context?: readonly string[];
         inputResponses: readonly InputResponse[];

@@ -1,6 +1,7 @@
 import type { ChannelDeliveryMetadata, SessionTraceContext } from "#channel/types.js";
 
 export interface ChannelDeliverySource {
+  readonly deliveryId?: string;
   readonly acceptedDeploymentId?: string;
   readonly channelKind: string;
   readonly channelName: string;
@@ -22,7 +23,7 @@ export function createChannelDeliveryMetadata(
   } = {
     channelKind: source.channelKind,
     channelName: source.channelName,
-    deliveryId: crypto.randomUUID(),
+    deliveryId: source.deliveryId ?? crypto.randomUUID(),
   };
   if (source.acceptedDeploymentId !== undefined) {
     metadata.acceptedDeploymentId = source.acceptedDeploymentId;

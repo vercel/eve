@@ -142,6 +142,25 @@ export function createWorkflowRuntime(config: {
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
 }): Runtime {
+  const existingHandle = async (input: RunInput): Promise<RunHandle | undefined> => {
+    if (input.sessionId === undefined) return undefined;
+    try {
+      const run = await (await getWorld()).runs.get(input.sessionId);
+      const deliveryId = run.attributes?.["eve.channel.initialDeliveryId"];
+      return {
+        sessionId: input.sessionId,
+        deliveryId: typeof deliveryId === "string" ? deliveryId : undefined,
+        existing: true,
+        get events() {
+          return readSessionEventStream(run.runId);
+        },
+      };
+    } catch (error) {
+      if (!WorkflowRunNotFoundError.is(error)) throw error;
+      return undefined;
+    }
+  };
+
   /** `predecessor` is set only on a successor of a retired session that has just ended. */
   const startSession = async (
     input: RunInput,
@@ -209,13 +228,17 @@ export function createWorkflowRuntime(config: {
             rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
             serializedContext,
           });
-    const attributes = {
+    const attributes: Record<string, string> = {
       ...sessionAttributes,
       [EVE_PREWARM_ATTRIBUTE]: "1",
       ...(input.externalInvocation === undefined
         ? {}
         : buildInvocationAttributes(input.externalInvocation)),
     };
+    // A retry of a caller-reserved creation reads back the delivery its run answered.
+    if (input.sessionId !== undefined && input.delivery !== undefined) {
+      attributes["eve.channel.initialDeliveryId"] = input.delivery.deliveryId;
+    }
 
     let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
     try {
@@ -223,6 +246,7 @@ export function createWorkflowRuntime(config: {
         allowReservedAttributes: true,
         attributes: normalizeEveAttributes(attributes),
       };
+      if (input.sessionId !== undefined) startOptions.runId = input.sessionId;
       if (retention !== undefined) startOptions.experimental_retention = retention;
       run = await startWorkflowOnDeployment(
         workflowEntryReference,
@@ -231,6 +255,10 @@ export function createWorkflowRuntime(config: {
         startOptions,
       );
     } catch (error) {
+      // A different Functions instance may have won the same run creation.
+      // The world's durable run is the authority, not an in-process lock.
+      const winner = await existingHandle(input);
+      if (winner) return winner;
       logError(log, "failed to start workflow run", error, {
         continuationToken: input.continuationToken,
       });
@@ -262,12 +290,13 @@ export function createWorkflowRuntime(config: {
         return getEvents();
       },
       sessionId,
+      ...(input.delivery !== undefined && { deliveryId: input.delivery.deliveryId }),
     };
   };
 
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
-      return await startSession(input);
+      return (await existingHandle(input)) ?? (await startSession(input));
     },
 
     async dispatchContinuation<TCommand extends SessionCommand>(
