@@ -143,8 +143,8 @@ export interface ControlDelivery {
 }
 
 /**
- * What a channel's `deliver` hook makes of one payload: the input a turn receives. The message
- * may be plain text or a structured AI SDK {@link UserContent} array mixing text and file parts.
+ * What a channel's `deliver` hook makes of one payload: the input a turn receives. The message is
+ * {@link MessageContent}: plain text, or text and file parts.
  */
 export interface StepInput {
   /** Answers to the session's open interactions. */

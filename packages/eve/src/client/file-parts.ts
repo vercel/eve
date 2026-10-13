@@ -1,9 +1,14 @@
-import type { MessageFilePart, MessagePart, MessageTextPart } from "#shared/message-content.js";
+import type {
+  MessageContent,
+  MessageFilePart,
+  MessagePart,
+  MessageTextPart,
+} from "#shared/message-content.js";
 
 const BASE64_CHUNK_SIZE = 0x8000;
 
 /**
- * Creates an AI SDK `MessageFilePart` whose data is an inline `data:` URL.
+ * Creates a `MessageFilePart` whose data is an inline `data:` URL.
  */
 export function createDataUrlFilePart(input: {
   readonly bytes: Uint8Array;
@@ -32,6 +37,20 @@ export function createTextWithFileContent(input: {
   const textPart: MessageTextPart = { text: input.text, type: "text" };
   const filePart = createDataUrlFilePart(input);
   return [textPart, filePart];
+}
+
+/**
+ * A message as a request body carries it: a file part's bytes become a `data:` URL, since JSON
+ * can't carry a `Uint8Array` or `ArrayBuffer`. A `URL` serializes as its string already.
+ */
+export function messageForRequest(message: MessageContent): MessageContent {
+  if (typeof message === "string") return message;
+  return message.map((part) => {
+    if (part.type !== "file") return part;
+    if (!(part.data instanceof Uint8Array || part.data instanceof ArrayBuffer)) return part;
+    const base64 = bytesToBase64(new Uint8Array(part.data));
+    return { ...part, data: `data:${part.mediaType};base64,${base64}` };
+  });
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

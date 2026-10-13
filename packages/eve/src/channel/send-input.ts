@@ -5,9 +5,12 @@ import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
 
 /** Normalizes the shorthand input forms accepted by channel and session sends. */
 export function normalizeSendInput(input: MessageContent | SendPayload): SendPayload {
-  return typeof input === "string" || Array.isArray(input)
-    ? { message: input as MessageContent }
-    : (input as SendPayload);
+  return isMessageContent(input) ? { message: input } : input;
+}
+
+// `Array.isArray` doesn't narrow a readonly array, so this guard does.
+function isMessageContent(input: MessageContent | SendPayload): input is MessageContent {
+  return typeof input === "string" || Array.isArray(input);
 }
 
 /**
