@@ -55,7 +55,7 @@ When the task is novel or ambiguous, gather evidence first, then answer with the
 key facts and the remaining uncertainty.
 ```
 
-eve reads `description`, optional `license`, string `metadata`, and `deferred`; other `SKILL.md` frontmatter is accepted as a no-op.
+eve reads `description`, optional `license`, string `metadata`, and `deferred`; other `SKILL.md` frontmatter is accepted as a no-op. `metadata` that is not a flat map of string values is ignored rather than rejected, so skills authored for other Agent Skills clients still load.
 
 When markdown can't express what you need (typed values, generated content, or inline sibling files), author the skill in TypeScript with `defineSkill` from `eve/skills`:
 

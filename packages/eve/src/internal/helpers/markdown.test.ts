@@ -111,6 +111,34 @@ When the user asks about weather, call the weather tool before answering.`),
     );
   });
 
+  it("ignores metadata that is not a flat string map", () => {
+    expect(
+      lowerSkillMarkdown(`---
+description: Use the Lark CLI before answering document questions.
+metadata:
+  requires:
+    bins: ["lark-cli"]
+  cliHelp: "lark-cli --help"
+---
+Use lark-cli to answer the question.`),
+    ).toEqual(
+      defineSkill({
+        description: "Use the Lark CLI before answering document questions.",
+        markdown: "Use lark-cli to answer the question.",
+      }),
+    );
+  });
+
+  it("still rejects a non-string license", () => {
+    expect(() =>
+      lowerSkillMarkdown(`---
+description: Use the weather tool before answering forecast questions.
+license: 42
+---
+Body.`),
+    ).toThrow('Expected "license" frontmatter to be a string.');
+  });
+
   it("derives flat skill metadata from plain markdown when no frontmatter is present", () => {
     expect(
       lowerSkillMarkdown("Use the weather tool before answering forecast questions.", {

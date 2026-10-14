@@ -174,7 +174,7 @@ function applyOptionalSkillFrontmatter(
     rawDefinition.license = license;
   }
 
-  const metadata = toOptionalStringRecord(frontmatter.metadata, "metadata");
+  const metadata = toOptionalStringRecord(frontmatter.metadata);
   if (metadata !== undefined) {
     rawDefinition.metadata = metadata;
   }
@@ -210,27 +210,22 @@ function requireStringFrontmatter(value: unknown, fieldName: string): string {
   return normalizedValue;
 }
 
-function toOptionalStringRecord(
-  value: unknown,
-  fieldName: string,
-): Record<string, string> | undefined {
-  if (value === undefined || value === null) {
+/**
+ * Returns `value` when it is a flat string map, otherwise `undefined`. eve never
+ * reads `metadata`, so a shape outside the Agent Skills spec is ignored like any
+ * other unmodeled frontmatter instead of failing discovery.
+ */
+function toOptionalStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isObject(value)) {
     return undefined;
   }
 
-  if (!isObject(value)) {
-    throw new Error(`Expected "${fieldName}" frontmatter to be an object.`);
+  const entries = Object.entries(value);
+  if (!entries.every((entry): entry is [string, string] => typeof entry[1] === "string")) {
+    return undefined;
   }
 
-  const stringEntries = Object.entries(value).map(([key, entryValue]) => {
-    if (typeof entryValue !== "string") {
-      throw new Error(`Expected "${fieldName}.${key}" frontmatter to be a string.`);
-    }
-
-    return [key, entryValue] as const;
-  });
-
-  return Object.fromEntries(stringEntries);
+  return Object.fromEntries(entries);
 }
 
 function deriveFlatSkillDescription(markdown: string, name: string): string {
