@@ -10,6 +10,7 @@
     "data:build": "node scripts/build-data.mjs",
     "typecheck": "tsc",
     "test:unit": "node --experimental-strip-types --test test/*.test.ts",
+    "test:integration": "node --experimental-strip-types --test test/*.integration.ts",
     "test:scenario": "eve build && node --experimental-strip-types --test test/*.scenario.ts"
   },
   "dependencies": {

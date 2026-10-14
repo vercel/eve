@@ -1,6 +1,6 @@
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { allowedRelations } from "./models.ts";
-import { QueryError, validateSqlAst } from "./sql-policy.ts";
+import { limitSql, QueryError, validateSqlAst } from "./sql-policy.ts";
 
 const MAX_ROWS = 200;
 const MAX_COLUMNS = 32;
@@ -56,11 +56,8 @@ export async function querySql(sql: string, signal?: AbortSignal) {
     const literal = `'${sql.replaceAll("'", "''")}'`;
     const parsed = await connection.runAndReadAll(`SELECT json_serialize_sql(${literal})`);
     validateSqlAst(JSON.parse(String(parsed.getRowsJS()[0][0])), allowedRelations);
-    const query = sql.trim().replace(/;$/u, "");
     // One extra row reveals truncation without counting the full result.
-    const reader = await connection.streamAndRead(
-      `SELECT * FROM (${query}) AS company_brain_result LIMIT ${MAX_ROWS + 1}`,
-    );
+    const reader = await connection.streamAndRead(limitSql(sql, MAX_ROWS + 1));
     if (reader.columnCount > MAX_COLUMNS) throw new QueryError("Select at most 32 columns.");
     const columns = reader
       .columnNames()

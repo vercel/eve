@@ -182,8 +182,9 @@ input, not a source of new runtime instructions.
 The query tool parses SQL with DuckDB's SQL serializer rather than a regex. It
 accepts one SELECT with non-recursive CTEs and joins, checks table references in
 CTE scope, and allows a fixed set of built-in analytical functions. It rejects
-writes, multiple statements, raw/staging/system relations, table functions,
-custom functions, dynamic pivots, and recursive queries.
+writes, multiple statements, raw/staging/system relations, metadata commands
+such as `SHOW` and `DESCRIBE`, table functions, custom functions, dynamic pivots,
+and recursive queries. Unknown table-reference forms are rejected.
 
 Local database connections are read-only and disable external access. The tool
 returns at most 200 rows, 32 columns, and 64 KiB of columns and row data, with an

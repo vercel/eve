@@ -56,7 +56,20 @@ const allowedFunctions = new Set([
   "||",
 ]);
 
+const allowedTableReferences = new Set([
+  "BASE_TABLE",
+  "JOIN",
+  "SUBQUERY",
+  "EXPRESSION_LIST",
+  "EMPTY",
+]);
+
 export class QueryError extends Error {}
+
+export function limitSql(sql: string, maxRows: number): string {
+  const query = sql.trim().replace(/;$/u, "");
+  return `SELECT * FROM (\n${query}\n) AS company_brain_result LIMIT ${maxRows}`;
+}
 
 export function validateSqlAst(ast: unknown, allowedRelations: ReadonlySet<string>): void {
   if (!ast || typeof ast !== "object") throw new QueryError("Could not parse SQL.");
@@ -67,9 +80,23 @@ export function validateSqlAst(ast: unknown, allowedRelations: ReadonlySet<strin
     );
   }
   let nodes = 0;
-  function visit(value: unknown, depth: number, ctes: ReadonlySet<string>): void {
+  function visit(
+    value: unknown,
+    depth: number,
+    ctes: ReadonlySet<string>,
+    tableReference = false,
+  ): void {
     if (++nodes > 10_000 || depth > 60)
       throw new QueryError("Simplify the query: it is too complex.");
+    if (tableReference) {
+      const type =
+        value && typeof value === "object" ? (value as { type?: unknown }).type : undefined;
+      if (typeof type !== "string" || !allowedTableReferences.has(type)) {
+        throw new QueryError(
+          "Unsupported table reference. Query documented models with SELECT; metadata commands and table functions are not allowed.",
+        );
+      }
+    }
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value)) {
       for (const item of value) visit(item, depth + 1, ctes);
@@ -99,13 +126,9 @@ export function validateSqlAst(ast: unknown, allowedRelations: ReadonlySet<strin
         );
       }
     }
-    if (
-      node.type === "TABLE_FUNCTION" ||
-      node.type === "PIVOT" ||
-      node.type === "RECURSIVE_CTE_NODE"
-    ) {
+    if (node.type === "RECURSIVE_CTE_NODE") {
       throw new QueryError(
-        "Table functions, dynamic pivots, and recursive queries are not allowed. Query the documented models directly.",
+        "Recursive queries are not allowed. Use a non-recursive CTE or query the documented models directly.",
       );
     }
     if (
@@ -120,7 +143,10 @@ export function validateSqlAst(ast: unknown, allowedRelations: ReadonlySet<strin
       );
     }
     for (const [key, child] of Object.entries(node)) {
-      if (key !== "cte_map") visit(child, depth + 1, scope);
+      if (key === "cte_map") continue;
+      const childIsTableReference =
+        key === "from_table" || (node.type === "JOIN" && (key === "left" || key === "right"));
+      visit(child, depth + 1, scope, childIsTableReference);
     }
   }
   visit(parsed.statements[0], 0, new Set());

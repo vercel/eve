@@ -6,4 +6,4 @@ The [Company Brain Template](./eve-company-brain-template/README.md) adds a Slac
 
 The root workspace intentionally excludes these projects. Do not use `workspace:` dependencies or import files from elsewhere in this repository. Keep `eve` as a normal npm dependency and update the template lockfile when its dependencies change.
 
-Run `pnpm check:templates` from the repository root to install every template in a temporary directory against a packed local `eve` package, then run its `typecheck` and `build` scripts.
+Run `pnpm check:templates` from the repository root to install every template in a temporary directory against a packed local `eve` package, then run its `typecheck`, available `test:unit` and `test:integration`, and `build` scripts. These test scripts must not require sample-data builds or external services; leave those checks in `test:scenario`.
