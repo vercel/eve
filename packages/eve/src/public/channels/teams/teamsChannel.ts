@@ -725,15 +725,11 @@ async function revealAuthorization(input: {
   } catch (error) {
     log.error("Teams sign-in press authorization failed", { error });
   }
-  const replyToActivityId = input.reveal.replyToActivityId;
-  const token =
-    replyToActivityId === undefined
-      ? stateToken(state)
-      : teamsContinuationToken({
-          conversationId: input.activity.conversation.id,
-          replyToActivityId,
-          tenantId: input.activity.tenantId,
-        });
+  const token = cardContinuationToken(
+    input.activity,
+    state,
+    input.reveal.replyToActivityId ?? null,
+  );
   return await answerTeamsAuthorizationReveal({
     adaptiveCardVersion: input.config.adaptiveCardVersion ?? "1.5",
     auth,
@@ -762,10 +758,18 @@ async function dispatchInputResponses(input: {
   }
   if (result === null) return;
   try {
-    await input.from(resolveInputContinuationToken(input.activity, state)).respond(inputResponses, {
-      auth: result.auth,
-      state: approvalResponseStatePatch(input.activity, result.auth),
-    });
+    await input
+      .from(
+        cardContinuationToken(
+          input.activity,
+          state,
+          readTeamsInputReplyToActivityId(input.activity),
+        ),
+      )
+      .respond(inputResponses, {
+        auth: result.auth,
+        state: approvalResponseStatePatch(input.activity, result.auth),
+      });
   } catch (error) {
     log.error("Teams input response delivery failed", { error });
   }
@@ -792,11 +796,12 @@ function stateFromActivity(
   };
 }
 
-function resolveInputContinuationToken(
+/** Continues the thread a card recorded when posted, or the activity's own thread. */
+function cardContinuationToken(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
   state: TeamsChannelState,
+  replyToActivityId: string | null,
 ): string {
-  const replyToActivityId = readTeamsInputReplyToActivityId(activity);
   if (replyToActivityId === null) return stateToken(state);
   return teamsContinuationToken({
     conversationId: activity.conversation.id,

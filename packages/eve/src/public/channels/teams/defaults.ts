@@ -11,6 +11,7 @@ import {
 import {
   renderTeamsAuthorizationPrompt,
   renderTeamsAuthorizationStatus,
+  teamsAuthorizationDisplayName,
 } from "#public/channels/teams/authorization.js";
 import {
   renderAnsweredInputRequestMessage,
@@ -196,9 +197,8 @@ export const defaultEvents: TeamsChannelEvents = {
 
     const activityId = channel.state.pendingAuthActivityId;
     if (!activityId) return;
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
     const text = buildAuthCompletedText({
-      displayName,
+      displayName: teamsAuthorizationDisplayName(event),
       outcome: event.outcome as ConnectionAuthorizationOutcome,
       reason: event.reason,
     });

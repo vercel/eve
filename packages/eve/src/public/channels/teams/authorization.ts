@@ -6,11 +6,15 @@
  * eve answers with the challenge only when the presser is that person.
  */
 
+import { findPendingAuthorization } from "#channel/pending-authorization.js";
 import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
 import type { TeamsChannelAccount, TeamsMessageBody } from "#public/channels/teams/api.js";
-import { TEAMS_ADAPTIVE_CARD_CONTENT_TYPE } from "#public/channels/teams/hitl.js";
+import {
+  TEAMS_ADAPTIVE_CARD_CONTENT_TYPE,
+  teamsInvokeResponse,
+} from "#public/channels/teams/hitl.js";
 import type { TeamsInvokeActivity } from "#public/channels/teams/inbound.js";
 import { createLogger } from "#internal/logging.js";
 import { displayProperName } from "#shared/display-name.js";
@@ -20,6 +24,8 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 const log = createLogger("teams.authorization");
 
 type AuthorizationRequired = AuthorizationRequiredStreamEvent["data"];
+
+const NOT_YOURS = "Only the person who needs to sign in can open this sign-in.";
 
 /** Hidden data property carried by the shared sign-in card's button. */
 const TEAMS_AUTHORIZATION_DATA_KEY = "eve_authorization";
@@ -31,8 +37,11 @@ export interface TeamsAuthorizationReveal {
   readonly replyToActivityId?: string;
 }
 
-/** A connection's display name for its sign-in card (`linear` → `Linear`). */
-export function teamsAuthorizationDisplayName(event: AuthorizationRequired): string {
+/** A connection's display name for its sign-in cards (`linear` → `Linear`). */
+export function teamsAuthorizationDisplayName(event: {
+  readonly authorization?: { readonly displayName?: string };
+  readonly name: string;
+}): string {
   return event.authorization?.displayName ?? displayProperName(event.name);
 }
 
@@ -143,17 +152,25 @@ export async function answerTeamsAuthorizationReveal(input: {
   readonly resolveSession: () => Promise<Session | undefined>;
   readonly reveal: TeamsAuthorizationReveal;
 }): Promise<JsonObject> {
+  // A press nobody can be identified for needs no lookup.
+  if (input.auth === null) return teamsInvokeResponse({ message: NOT_YOURS });
+  const { name, attemptId } = input.reveal;
   let event: AuthorizationRequired | undefined;
   try {
     const session = await input.resolveSession();
-    event = session && (await findPendingAuthorization(session, input.reveal));
+    event =
+      session &&
+      (await findPendingAuthorization(
+        session,
+        (candidate) => candidate.name === name && candidate.attemptId === attemptId,
+      ));
   } catch (error) {
     log.error("Teams sign-in lookup failed", { error });
   }
-  if (event === undefined) return invokeMessage("This sign-in is no longer active.");
-  if (input.auth === null || input.auth.principalId !== event.principalId) {
-    return invokeMessage("Only the person who needs to sign in can open this sign-in.");
-  }
+  if (event === undefined)
+    return teamsInvokeResponse({ message: "This sign-in is no longer active." });
+  if (input.auth.principalId !== event.principalId)
+    return teamsInvokeResponse({ message: NOT_YOURS });
   const prompt = renderTeamsAuthorizationPrompt(event, {
     adaptiveCardVersion: input.adaptiveCardVersion,
     requester: input.presser.name ?? input.presser.id,
@@ -163,35 +180,6 @@ export async function answerTeamsAuthorizationReveal(input: {
     type: TEAMS_ADAPTIVE_CARD_CONTENT_TYPE,
     value: prompt.attachments?.[0]?.content,
   });
-}
-
-async function findPendingAuthorization(
-  session: Session,
-  reveal: TeamsAuthorizationReveal,
-): Promise<AuthorizationRequired | undefined> {
-  const tailIndex = await session.getStreamTailIndex();
-  if (tailIndex < 0) return undefined;
-  const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
-  let pending: AuthorizationRequired | undefined;
-  try {
-    for (let index = 0; index <= tailIndex; index += 1) {
-      const next = await reader.read();
-      if (next.done) break;
-      const event = next.value;
-      if (event.type !== "authorization.required" && event.type !== "authorization.completed") {
-        continue;
-      }
-      if (event.data.name !== reveal.name || event.data.attemptId !== reveal.attemptId) continue;
-      pending = event.type === "authorization.required" ? event.data : undefined;
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  return pending;
-}
-
-function invokeMessage(message: string): JsonObject {
-  return { statusCode: 200, type: "application/vnd.microsoft.activity.message", value: message };
 }
 
 function adaptiveCard(

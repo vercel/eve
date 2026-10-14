@@ -1,7 +1,6 @@
 import type { ChannelResolveSession } from "#channel/channel-operations.js";
-import type { Session } from "#channel/session.js";
+import { findPendingAuthorization } from "#channel/pending-authorization.js";
 import { createLogger } from "#internal/logging.js";
-import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
 import {
   TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
   renderTelegramAuthorizationPrompt,
@@ -38,7 +37,10 @@ export async function dispatchTelegramAuthorizationCallback(input: {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
     }
-    const authorization = await findPendingAuthorization(session);
+    const authorization = await findPendingAuthorization(
+      session,
+      (event) => event.candidateId === undefined,
+    );
     if (authorization === undefined) {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
@@ -46,7 +48,7 @@ export async function dispatchTelegramAuthorizationCallback(input: {
 
     await input.telegram.telegram.postEphemeral(
       input.query.from.id,
-      renderTelegramAuthorizationPrompt(authorization.data),
+      renderTelegramAuthorizationPrompt(authorization),
       { callbackQueryId: input.query.id },
     );
     await input.telegram.telegram.answerCallbackQuery({
@@ -67,29 +69,4 @@ async function inactiveAuthorization(
     showAlert: true,
     text: "This authorization request is no longer active.",
   });
-}
-
-async function findPendingAuthorization(
-  session: Session,
-): Promise<AuthorizationRequiredStreamEvent | undefined> {
-  const tailIndex = await session.getStreamTailIndex();
-  if (tailIndex < 0) return undefined;
-  const events = await session.getEventStream({ startIndex: 0 });
-  const reader = events.getReader();
-  let authorization: AuthorizationRequiredStreamEvent | undefined;
-  try {
-    for (let index = 0; index <= tailIndex; index += 1) {
-      const next = await reader.read();
-      if (next.done) break;
-      if (
-        next.value.type === "authorization.required" &&
-        next.value.data.candidateId === undefined
-      ) {
-        authorization = next.value;
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  return authorization;
 }

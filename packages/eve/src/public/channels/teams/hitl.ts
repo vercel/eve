@@ -20,7 +20,7 @@ import {
   TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH,
 } from "#public/channels/teams/limits.js";
 import { isObject } from "#shared/guards.js";
-import { parseJsonObject } from "#shared/json.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 /** Adaptive Card attachment content type used by Teams. */
 export const TEAMS_ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive";
@@ -204,7 +204,7 @@ export function teamsInvokeResponse(
     readonly message?: string;
     readonly statusCode?: number;
   } = {},
-): Record<string, unknown> {
+): JsonObject {
   return {
     statusCode: input.statusCode ?? 200,
     type: "application/vnd.microsoft.activity.message",
