@@ -61,8 +61,8 @@ function PartView({
 }
 
 export function EveAgentConsole() {
-  const agent = useEveAgent();
   const [draft, setDraft] = useState("");
+  const agent = useEveAgent({ prewarm: draft.trim().length > 0 });
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isInputDisabled = isBusy || agent.status === "resuming";
 

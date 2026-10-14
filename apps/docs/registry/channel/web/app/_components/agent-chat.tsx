@@ -39,6 +39,7 @@ export function AgentChat({
   const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
     agent: WEB_CHAT_AGENT,
+    prewarm: hasInputText,
     initialSession:
       sessionId === undefined
         ? undefined

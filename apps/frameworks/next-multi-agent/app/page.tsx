@@ -48,8 +48,12 @@ function AgentPanel({
     readonly name: AgentName;
   };
 }) {
-  const eve = useEveAgent({ agent: agent.name });
   const [message, setMessage] = useState(agent.initialPrompt);
+  const [hasEditedMessage, setHasEditedMessage] = useState(false);
+  const eve = useEveAgent({
+    agent: agent.name,
+    prewarm: hasEditedMessage && message.trim().length > 0,
+  });
   const isBusy = eve.status === "submitted" || eve.status === "streaming";
 
   const submit: ComponentProps<"form">["onSubmit"] = async (event) => {
@@ -88,7 +92,10 @@ function AgentPanel({
       <form onSubmit={submit}>
         <textarea
           aria-label={`Message ${agent.name} agent`}
-          onChange={(event) => setMessage(event.currentTarget.value)}
+          onChange={(event) => {
+            setHasEditedMessage(true);
+            setMessage(event.currentTarget.value);
+          }}
           value={message}
         />
         <button disabled={isBusy || message.trim().length === 0} type="submit">
