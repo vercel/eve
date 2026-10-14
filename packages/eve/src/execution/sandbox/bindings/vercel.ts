@@ -115,9 +115,9 @@ export function createVercelSandbox(
   const loadDeleteSandboxModule =
     input.loadDeleteSandboxModule ??
     (async () => await import("#compiled/@vercel/sandbox/index.js"));
-  const createOptions: VercelCreateOptions = {
-    timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
+  const createOptions: ResolvedVercelCreateOptions = {
     ...input.createOptions,
+    timeout: input.createOptions?.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS,
   };
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
 
@@ -323,9 +323,12 @@ interface EnsureTemplateOutcome {
 
 type VercelSeedFile = { readonly content: string | Uint8Array; readonly path: string };
 
+/** Create options with the default sandbox timeout applied once, so a template waiter can bound itself by it. */
+type ResolvedVercelCreateOptions = VercelCreateOptions & { readonly timeout: number };
+
 interface EnsureTemplateInput {
   readonly prepareSandbox?: (sandbox: SandboxSession) => void | Promise<void>;
-  readonly createOptions: VercelCreateOptions;
+  readonly createOptions: ResolvedVercelCreateOptions;
   readonly createSandbox: CreateVercelSandbox;
   readonly loadSandboxModule: () => Promise<VercelModule>;
   readonly log?: (message: string) => void;
@@ -368,39 +371,21 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
     sandbox = null;
   }
 
-  if (sandbox === null) {
-    try {
-      sandbox = await input.createSandbox({
-        sandboxModule,
-        createOptions: withBaseSetupNetworkPolicy({
-          ...input.createOptions,
-          name: input.templateKey,
-          persistent: true,
-          tags: tags,
-        }),
-      });
-    } catch (error) {
-      // A concurrent build created the template first and owns its preparation.
-      if (!isVercelSandboxNameConflictError(error)) throw error;
+  /*
+   * Only the build whose create made the template prepares it. A template
+   * found by lookup is either finished (reuse it) or still being prepared
+   * by another build (wait for its snapshot). A non-empty
+   * `currentSnapshotId` normally means "finished", except that with an
+   * author-supplied `source: snapshot` the SDK pre-populates it with the
+   * author's snapshotId until we run our own snapshot, so
+   * `readFrameworkSnapshotId` ignores that exact value.
+   */
+  if (sandbox !== null) {
+    const frameworkSnapshotId = readFrameworkSnapshotId(sandbox, authorSnapshotId);
+    if (frameworkSnapshotId === null) {
       return await waitForTemplateSnapshot({ authorSnapshotId, input, sandboxModule });
     }
-  } else {
     await ensureVercelSandboxTags(sandbox, tags);
-  }
-
-  /*
-   * A non-empty `currentSnapshotId` normally means "this template was
-   * prewarmed in a previous run — reuse it." But with an author-supplied
-   * `source: snapshot`, the SDK pre-populates `currentSnapshotId` with
-   * the *author's* snapshotId both on a fresh create and on every
-   * subsequent `getNamedSandbox` reuse until we run our own snapshot.
-   * So we ignore that exact value: it's the author's base layer, not a
-   * framework snapshot, and we still owe `ensureSandboxWorkingDirectory`,
-   * preparation, seed file writes, and `sandbox.snapshot()` on top.
-   */
-  const frameworkSnapshotId = readFrameworkSnapshotId(sandbox, authorSnapshotId);
-
-  if (frameworkSnapshotId !== null) {
     return {
       template: {
         sandboxName: sandbox.name,
@@ -408,6 +393,22 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
         templateKey: input.templateKey,
       },
     };
+  }
+
+  try {
+    sandbox = await input.createSandbox({
+      sandboxModule,
+      createOptions: withBaseSetupNetworkPolicy({
+        ...input.createOptions,
+        name: input.templateKey,
+        persistent: true,
+        tags: tags,
+      }),
+    });
+  } catch (error) {
+    // A concurrent build created the template first and owns its preparation.
+    if (!isVercelSandboxNameConflictError(error)) throw error;
+    return await waitForTemplateSnapshot({ authorSnapshotId, input, sandboxModule });
   }
 
   input.log?.("preparing base runtime inside sandbox");
@@ -452,7 +453,7 @@ async function waitForTemplateSnapshot(input: {
 }): Promise<EnsureTemplateOutcome> {
   const { createOptions, log, templateKey } = input.input;
   log?.("waiting for another build to prepare the sandbox template");
-  const deadline = Date.now() + (createOptions.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS);
+  const deadline = Date.now() + createOptions.timeout;
   while (Date.now() < deadline) {
     const sandbox = await getNamedVercelSandbox({
       createOptions,

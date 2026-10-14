@@ -52,7 +52,7 @@ function createMockSandbox(input: {
 }) {
   const files = new Map<string, Buffer>();
   let tags = input.tags;
-  return {
+  const sandbox = {
     currentSnapshotId: input.snapshotId ?? "",
     delete: vi.fn().mockResolvedValue(undefined),
     fs: {
@@ -74,7 +74,11 @@ function createMockSandbox(input: {
             }
           : createMockCommandResult(),
       ),
-    snapshot: vi.fn().mockResolvedValue({ snapshotId: `${input.name}-snapshot` }),
+    // Like the SDK, a snapshot becomes the sandbox's `currentSnapshotId`.
+    snapshot: vi.fn(async () => {
+      sandbox.currentSnapshotId = `${input.name}-snapshot`;
+      return { snapshotId: sandbox.currentSnapshotId };
+    }),
     status: input.status ?? "running",
     stop: vi.fn().mockResolvedValue(undefined),
     get tags() {
@@ -93,6 +97,7 @@ function createMockSandbox(input: {
       },
     ),
   };
+  return sandbox;
 }
 
 function createVercelSandbox(input: Parameters<typeof createVercelImplementation>[0] = {}) {
@@ -721,10 +726,6 @@ describe("createVercelSandbox", () => {
             );
           }
           const template = createMockSandbox({ name: options.name });
-          template.snapshot.mockImplementation(async () => {
-            template.currentSnapshotId = `${options.name}-snapshot`;
-            return { snapshotId: template.currentSnapshotId };
-          });
           sandboxes.set(options.name, template);
           return template;
         }),
@@ -748,6 +749,57 @@ describe("createVercelSandbox", () => {
     const [template] = sandboxes.values();
     const shared = { status: "fulfilled", value: { snapshotId: `${template?.name}-snapshot` } };
     expect(await builds).toEqual([shared, shared]);
+    expect(template?.snapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for a template another build is still preparing instead of preparing it too", async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const sandboxes = new Map<string, ReturnType<typeof createMockSandbox>>();
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(async (options: { name: string }) => {
+          const template = createMockSandbox({ name: options.name });
+          sandboxes.set(options.name, template);
+          return template;
+        }),
+        get: vi.fn(async (options: { name: string }) => sandboxes.get(options.name) ?? null),
+      },
+    };
+    let preparing!: () => void;
+    const firstBuildPreparing = new Promise<void>((resolve) => {
+      preparing = resolve;
+    });
+    let finishPreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      finishPreparation = resolve;
+    });
+    const prepare = vi.fn(async () => {
+      preparing();
+      await preparation;
+    });
+    const build = async () =>
+      await createTestVercelSandbox({
+        loadSandboxModule: async () => sandboxModule as never,
+        prepare,
+      }).prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+
+    const first = build();
+    await firstBuildPreparing;
+    // The second build's lookup finds the first build's template, created but not yet snapshotted.
+    const second = build();
+    await vi.advanceTimersByTimeAsync(10_000);
+    finishPreparation();
+    const builds = Promise.allSettled([first, second]);
+    await vi.runAllTimersAsync();
+
+    const [template] = sandboxes.values();
+    const shared = { status: "fulfilled", value: { snapshotId: `${template?.name}-snapshot` } };
+    expect(await builds).toEqual([shared, shared]);
+    expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(1);
     expect(template?.snapshot).toHaveBeenCalledTimes(1);
   });
 
