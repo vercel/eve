@@ -61,20 +61,26 @@ function createProviderToolCallbacks(input: {
   readonly key: string;
   readonly tool: MemoryToolSet[string];
 }) {
-  // History stays out of the durable closure: it is already durable session
-  // state and can hold non-JSON values (dates, bytes) once a turn has run
-  // tools. Replay reuses the messages this process resolved the tools with.
-  const { messages, ...durableContext } = input.context;
-  const closure = parseJsonObject({ context: durableContext, key: input.key });
+  // History and turn input stay out of the durable closure: both are already
+  // durable session state and can hold non-JSON values (dates, bytes, staged
+  // attachment URLs). Replay reuses the values this process resolved with.
+  const {
+    messages,
+    turn: { input: turnInput, ...turn },
+    ...durableContext
+  } = input.context;
+  const closure = parseJsonObject({ context: { ...durableContext, turn }, key: input.key });
   const loadTool = async (rawClosure: JsonObject) => {
     const key = rawClosure.key;
     const context = rawClosure.context;
     if (typeof key !== "string" || typeof context !== "object" || context === null) {
       throw new Error("Memory provider tool callback has an invalid durable closure.");
     }
-    const tools = await input.definition.provider.tools?.(
-      readMemoryToolsContext({ ...context, messages }),
-    );
+    const durable = readMemoryToolsContext({ ...context, messages });
+    const tools = await input.definition.provider.tools?.({
+      ...durable,
+      turn: { ...durable.turn, input: turnInput },
+    });
     const tool = tools?.[key];
     if (tool === undefined || !isBrandedToolEntry(tool)) {
       throw new Error(`Memory provider tool "${key}" was removed or renamed.`);
