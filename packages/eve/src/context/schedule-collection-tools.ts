@@ -144,6 +144,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
             approval?: Approval,
           ) => {
             const tool = defineTool({
+              deferred: definition.tool === "deferred",
               description: `${definition.description ? `${definition.description}\n\n` : ""}${description}`,
               inputSchema,
               approval,
