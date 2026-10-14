@@ -38,11 +38,12 @@ describe("createRuntimeToolResultFromValue", () => {
       createRuntimeToolResultFromValue({
         callId: "call_failed",
         isError: true,
-        output: new Error("tool failed"),
+        output: Object.assign(new Error("tool failed"), { name: "QuotaError" }),
         toolName: "broken",
       }),
     ).toEqual({
       callId: "call_failed",
+      errorName: "QuotaError",
       isError: true,
       kind: "tool-result",
       output: "tool failed",
