@@ -12,6 +12,7 @@ import { canonicalCommand, createEveCliTelemetry } from "#cli/telemetry/index.js
 import {
   createEveTelemetryIdentity,
   isEphemeralEveTelemetryEnvironment,
+  resolveEveTelemetryInternal,
   resolveEveTelemetryProjectId,
 } from "#cli/telemetry/identity.js";
 import {
@@ -26,6 +27,7 @@ vi.mock("#cli/telemetry/identity.js", () => ({
     projectSalt: "ephemeral_project_salt_123",
   })),
   isEphemeralEveTelemetryEnvironment: vi.fn(() => false),
+  resolveEveTelemetryInternal: vi.fn(async () => undefined),
   resolveEveTelemetryProjectId: vi.fn(async () => "project_123"),
 }));
 
@@ -52,6 +54,7 @@ afterEach(() => {
     projectSalt: "ephemeral_project_salt_123",
   });
   vi.mocked(isEphemeralEveTelemetryEnvironment).mockReset().mockReturnValue(false);
+  vi.mocked(resolveEveTelemetryInternal).mockReset().mockResolvedValue(undefined);
 });
 
 describe("canonicalCommand", () => {
@@ -237,6 +240,26 @@ describe("createEveCliTelemetry", () => {
     ) as Array<{ key: string; value: string }>;
     expect(events).toContainEqual(
       expect.objectContaining({ key: "setup_failure_code", value: "target_resolution" }),
+    );
+  });
+
+  it("records only the internal flag when one is known", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const readEvents = () =>
+      JSON.parse(String(write.mock.lastCall?.[0]).replace("[eve telemetry] ", "")) as Array<{
+        key: string;
+        value: string;
+      }>;
+
+    await createEveCliTelemetry("1.0.0").flush();
+    expect(readEvents()).not.toContainEqual(expect.objectContaining({ key: "internal" }));
+
+    vi.mocked(resolveEveTelemetryInternal).mockResolvedValue(true);
+    await createEveCliTelemetry("1.0.0").flush();
+    expect(readEvents()).toContainEqual(
+      expect.objectContaining({ key: "internal", value: "true" }),
     );
   });
 
