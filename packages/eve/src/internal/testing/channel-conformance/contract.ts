@@ -905,7 +905,8 @@ const signInRules = [
       const open = (await conversation.shownOptions()).find((option) =>
         SIGN_IN_OPENERS.test(option.label),
       );
-      if (open !== undefined) await conversation.press(open, "bob");
+      expect(open, "a Sign in button for Bob to press").toBeDefined();
+      await conversation.press(open!, "bob");
       await conversation.waitForRest();
       expect(await challenges(), "Bob's press showed him the sign-in link or code").toBe(before);
     },

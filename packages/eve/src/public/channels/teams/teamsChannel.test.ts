@@ -615,6 +615,141 @@ function messageActivity(input: { readonly conversationType: string }): Record<s
   };
 }
 
+describe("teamsChannel sign-in button", () => {
+  const SIGN_IN_URL = "https://connect.example.test/a/attempt-1";
+  const required = (data: Record<string, unknown> = {}) =>
+    makeEvent("authorization.required", {
+      attemptId: "attempt-1",
+      authorization: { url: SIGN_IN_URL, userCode: "CODE-42" },
+      description: "Sign in to linear",
+      name: "linear",
+      principalId: "teams:TENANT:USER",
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn-1",
+      ...data,
+    });
+  const completed = makeEvent("authorization.completed", {
+    attemptId: "attempt-1",
+    name: "linear",
+    outcome: "declined",
+    sequence: 1,
+    stepIndex: 0,
+    turnId: "turn-1",
+  });
+
+  function sessionWith(events: readonly UnstampedMessageStreamEvent[]) {
+    return {
+      getEventStream: async () =>
+        new ReadableStream({
+          start(controller) {
+            for (const event of events) controller.enqueue(event);
+            controller.close();
+          },
+        }),
+      getStreamTailIndex: async () => events.length - 1,
+    };
+  }
+
+  function press(from: Record<string, unknown> = { id: "USER", name: "Ada" }) {
+    return {
+      ...baseActivity({ conversationType: "channel" }),
+      from,
+      name: "adaptiveCard/action",
+      type: "invoke",
+      value: {
+        action: {
+          data: {
+            eve_authorization: {
+              attemptId: "attempt-1",
+              name: "linear",
+              replyToActivityId: "THREAD_ROOT",
+            },
+          },
+          type: "Action.Execute",
+          verb: "eve.authorization.reveal",
+        },
+      },
+    };
+  }
+
+  it("answers the person signing in with a card only they see, carrying the link and code", async () => {
+    const resolveSession = vi.fn(async () => sessionWith([required()]));
+    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
+
+    const { response } = await firePost(channel, press(), { resolveSession });
+
+    const body = await response.json();
+    expect(resolveSession).toHaveBeenCalledWith("TENANT:CONV:THREAD_ROOT");
+    expect(body).toMatchObject({ type: "application/vnd.microsoft.card.adaptive" });
+    expect(JSON.stringify(body)).toContain(SIGN_IN_URL);
+    expect(JSON.stringify(body)).toContain("CODE-42");
+  });
+
+  it.each([
+    {
+      case: "someone else presses it",
+      config: {},
+      events: [required()],
+      from: { id: "USER-BOB", name: "Bob" },
+      reply: "Only the person who needs to sign in can open this sign-in.",
+    },
+    {
+      case: "the attempt has no principal",
+      config: {},
+      events: [required({ principalId: undefined })],
+      from: undefined,
+      reply: "Only the person who needs to sign in can open this sign-in.",
+    },
+    {
+      case: "onInputResponse rejects the press",
+      config: { onInputResponse: () => null },
+      events: [required()],
+      from: undefined,
+      reply: "Only the person who needs to sign in can open this sign-in.",
+    },
+    {
+      case: "onInputResponse throws",
+      config: {
+        onInputResponse: () => {
+          throw new Error("directory lookup failed");
+        },
+      },
+      events: [required()],
+      from: undefined,
+      reply: "Only the person who needs to sign in can open this sign-in.",
+    },
+    {
+      case: "the attempt already completed",
+      config: {},
+      events: [required(), completed],
+      from: undefined,
+      reply: "This sign-in is no longer active.",
+    },
+    {
+      case: "the thread has no session",
+      config: {},
+      events: undefined,
+      from: undefined,
+      reply: "This sign-in is no longer active.",
+    },
+  ])("withholds the sign-in when $case", async ({ config, events, from, reply }) => {
+    const channel = teamsChannel({ credentials: { webhookVerifier: () => true }, ...config });
+
+    const { response } = await firePost(channel, press(from), {
+      resolveSession: async () => (events === undefined ? undefined : sessionWith(events)),
+    });
+
+    const body = await response.json();
+    expect(body).toEqual({
+      statusCode: 200,
+      type: "application/vnd.microsoft.activity.message",
+      value: reply,
+    });
+    expect(JSON.stringify(body)).not.toContain(SIGN_IN_URL);
+  });
+});
+
 function baseActivity(input: { readonly conversationType: string }): Record<string, unknown> {
   return {
     channelData: {

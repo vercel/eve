@@ -30,7 +30,7 @@ function buildChannelStub(state: Partial<TeamsChannelState> = {}) {
   return { channel, post, startTyping, update };
 }
 
-function authRequiredEvent(overrides: { displayName?: string } = {}) {
+function authRequiredEvent(overrides: { displayName?: string; userCode?: string } = {}) {
   return {
     authorization: { url: "https://connect.example.com/a/sca_1", ...overrides },
     description: "Authorization required for notion",
@@ -99,6 +99,50 @@ describe("defaultEvents authorization.required", () => {
       "Authorization required for Notion Workspace: https://connect.example.com/a/sca_1",
     );
     expect(JSON.stringify(message.attachments)).toContain("Sign in with Notion Workspace");
+  });
+});
+
+describe("defaultEvents authorization.required outside personal chats", () => {
+  it.each([
+    {
+      case: "the turn's own sign-in names whoever sent the message",
+      event: { principalId: "teams:TENANT:ALICE" },
+      named: "Alice",
+    },
+    {
+      case: "an approver's sign-in names the approver",
+      event: { candidateId: "candidate-1", principalId: "teams:TENANT:BOB" },
+      named: "Bob",
+    },
+    {
+      case: "an approver's sign-in with no recorded account names nobody",
+      event: { candidateId: "candidate-1", principalId: "teams:TENANT:CAROL" },
+      named: undefined,
+    },
+  ])("$case, and shares no link or code", async ({ event, named }) => {
+    const { channel, post } = buildChannelStub({
+      approvalResponderAccounts: { "teams:TENANT:BOB": { id: "BOB", name: "Bob" } },
+      conversationType: "channel",
+      triggeringUser: { id: "ALICE", name: "Alice" },
+    });
+
+    await defaultEvents["authorization.required"]!(
+      { ...authRequiredEvent({ userCode: "CODE-42" }), ...event },
+      channel,
+      sessionCtx,
+    );
+
+    const posted = JSON.stringify(post.mock.calls[0]?.[0]);
+    expect(posted).not.toContain("https://connect.example.com/a/sca_1");
+    expect(posted).not.toContain("CODE-42");
+    expect(posted).toContain(
+      named === undefined
+        ? "Only the person who needs to sign in can open it."
+        : `${named} must sign in to continue.`,
+    );
+    for (const other of ["Alice", "Bob"].filter((name) => name !== named)) {
+      expect(posted).not.toContain(other);
+    }
   });
 });
 

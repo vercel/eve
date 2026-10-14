@@ -88,13 +88,15 @@ export function renderTeamsAuthorizationStatus(
   },
 ): TeamsMessageBody {
   const displayName = teamsAuthorizationDisplayName(event);
-  const who = options.requester ?? "The requester";
+  const notice = options.requester
+    ? `${options.requester} must sign in to continue. Only they can open the sign-in.`
+    : "Only the person who needs to sign in can open it.";
   const reveal: TeamsAuthorizationReveal = {
     attemptId: event.attemptId,
     name: event.name,
     replyToActivityId: options.replyToActivityId,
   };
-  const text = `Authorization required for ${displayName}. ${who} must sign in to continue.`;
+  const text = `Authorization required for ${displayName}. ${notice}`;
   return {
     attachments: [
       adaptiveCard(options.adaptiveCardVersion, {
@@ -106,10 +108,7 @@ export function renderTeamsAuthorizationStatus(
             verb: "eve.authorization.reveal",
           },
         ],
-        body: [
-          heading(`Authorization required for ${displayName}`),
-          textBlock(`${who} must sign in to continue. Only they can open the sign-in.`),
-        ],
+        body: [heading(`Authorization required for ${displayName}`), textBlock(notice)],
       }),
     ],
     text,
@@ -152,11 +151,7 @@ export async function answerTeamsAuthorizationReveal(input: {
     log.error("Teams sign-in lookup failed", { error });
   }
   if (event === undefined) return invokeMessage("This sign-in is no longer active.");
-  if (
-    input.auth === null ||
-    event.principalId === undefined ||
-    input.auth.principalId !== event.principalId
-  ) {
+  if (input.auth === null || input.auth.principalId !== event.principalId) {
     return invokeMessage("Only the person who needs to sign in can open this sign-in.");
   }
   const prompt = renderTeamsAuthorizationPrompt(event, {

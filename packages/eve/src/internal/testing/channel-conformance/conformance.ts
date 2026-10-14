@@ -157,7 +157,16 @@ const DISCORD_BROKEN = {
   ),
 };
 
+const SIGN_IN_PRESS_RULE = "someone else pressing a sign-in isn't shown its link or code";
+
+/** The challenge goes privately to the person signing in, so the thread has no sign-in to press. */
+const SIGN_IN_SENT_PRIVATELY = {
+  [SIGN_IN_PRESS_RULE]:
+    "the sign-in goes privately to the person signing in, so the thread shows nothing to press",
+} satisfies Partial<Record<ContractRuleName, string>>;
+
 const DISCORD_UNSUPPORTED = {
+  [SIGN_IN_PRESS_RULE]: "the channel shows no sign-in, so there's nothing to press",
   "a file sent earlier in the conversation is still there on a later message":
     "each slash command starts its own session, so no later message shares one with the file",
 } satisfies Partial<Record<ContractRuleName, string>>;
@@ -208,7 +217,10 @@ const WEB_CHAT_SINGLE_PERSON =
  *   failure (such as harness breakage) both turn it red.
  */
 const channelConformance = {
-  "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
+  "chat-sdk": [
+    { driver: chatSdkDriver, broken: CHAT_SDK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY },
+    { driver: chatSdkTextDriver },
+  ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
   "discord-dm": [
@@ -246,7 +258,7 @@ const channelConformance = {
   linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   photon: [{ driver: photonDriver }],
-  slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
+  slack: [{ driver: slackDriver, broken: SLACK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
   "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],

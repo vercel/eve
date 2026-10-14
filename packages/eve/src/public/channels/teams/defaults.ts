@@ -3,7 +3,11 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { resolvedPromptAnswer } from "#channel/resolved-prompt.js";
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
-import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
+import {
+  splitTeamsMessageText,
+  type TeamsChannelAccount,
+  type TeamsMention,
+} from "#public/channels/teams/api.js";
 import {
   renderTeamsAuthorizationPrompt,
   renderTeamsAuthorizationStatus,
@@ -15,6 +19,7 @@ import {
 import type { TeamsInvokeActivity, TeamsMessageActivity } from "#public/channels/teams/inbound.js";
 import type {
   TeamsChannelEvents,
+  TeamsChannelState,
   TeamsContext,
   TeamsInboundResult,
 } from "#public/channels/teams/teamsChannel.js";
@@ -168,7 +173,7 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 
   async "authorization.required"(event, channel, _ctx) {
-    const user = channel.state.triggeringUser;
+    const user = signInAccount(event, channel.state);
     const options = {
       adaptiveCardVersion: channel.adaptiveCardVersion,
       replyToActivityId: channel.teams.replyToActivityId,
@@ -201,6 +206,23 @@ export const defaultEvents: TeamsChannelEvents = {
     channel.state.pendingAuthActivityId = null;
   },
 };
+
+/**
+ * The Teams account that must sign in. An approver's sign-in names the
+ * approver, recorded when they pressed the approval, not whoever sent the
+ * turn's message.
+ */
+function signInAccount(
+  event: { readonly candidateId?: string; readonly principalId?: string },
+  state: TeamsChannelState,
+): TeamsChannelAccount | null {
+  const responder =
+    event.principalId === undefined
+      ? undefined
+      : state.approvalResponderAccounts?.[event.principalId];
+  if (responder !== undefined) return responder;
+  return event.candidateId === undefined ? state.triggeringUser : null;
+}
 
 /** A connection name for the Teams auth card (`linear` → `Linear`). */
 export function formatConnectionDisplayName(connectionName: string): string {
