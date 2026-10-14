@@ -68,7 +68,7 @@ export function createEveCapturePolicy(input: {
           decision.action === "drop"
             ? decision
             : {
-                action: "record",
+                ...decision,
                 recordInputs: input.recordInputs && decision.recordInputs,
                 recordOutputs: input.recordOutputs && decision.recordOutputs,
               },

@@ -4,6 +4,8 @@ export type InstrumentationDecision =
       readonly action: "record";
       readonly recordInputs: boolean;
       readonly recordOutputs: boolean;
+      /** An explicit policy opted into content beyond the audience defaults. */
+      readonly explicitContent?: true;
     };
 
 export const DROP_INSTRUMENTATION: InstrumentationDecision = { action: "drop" };
@@ -23,6 +25,7 @@ export function readInstrumentationDecision(value: unknown): InstrumentationDeci
         action: "record",
         recordInputs: decision.recordInputs,
         recordOutputs: decision.recordOutputs,
+        ...(decision.explicitContent === true ? { explicitContent: true } : undefined),
       }
     : DROP_INSTRUMENTATION;
 }
@@ -36,5 +39,6 @@ export function intersectInstrumentationDecisions(
     action: "record",
     recordInputs: left.recordInputs && right.recordInputs,
     recordOutputs: left.recordOutputs && right.recordOutputs,
+    ...(left.explicitContent || right.explicitContent ? { explicitContent: true } : undefined),
   };
 }

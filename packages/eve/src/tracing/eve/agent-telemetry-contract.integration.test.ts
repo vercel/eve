@@ -57,8 +57,10 @@ import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action
 import { taskWaitTool } from "#tools/provided/task-wait.js";
 import { taskCancelTool } from "#tools/provided/task-cancel.js";
 import { jsonSchema } from "ai";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 
-const traceContext = (agentName: string, audience: "public" | "private") => ({
+const traceContext = (agentName: string, audience: ChannelAudience) => ({
   agentName,
   audience,
   channel: { kind: "http" as const },
@@ -66,7 +68,7 @@ const traceContext = (agentName: string, audience: "public" | "private") => ({
   principalType: "anonymous",
 });
 
-function createRuntime() {
+function createRuntime(tracePolicy?: TraceCapturePolicy) {
   const exporter = new InMemorySpanExporter();
   const metadata = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -80,6 +82,7 @@ function createRuntime() {
     ],
   });
   const agent = createAgentOtelInstrumentation({
+    tracePolicy,
     frameworkVersion: "test",
     recordInputs: true,
     recordOutputs: true,
@@ -101,13 +104,18 @@ function createRuntime() {
     provider,
     idGenerator,
     ownsAgentSpans: true,
-    otelSettings: { recordInputs: true, recordOutputs: true, traceChannelRequests: false },
+    otelSettings: {
+      tracePolicy,
+      recordInputs: true,
+      recordOutputs: true,
+      traceChannelRequests: false,
+    },
     forceFlush: () => provider.forceFlush(),
     shutdown: () => provider.shutdown(),
   };
 }
 
-function contextFor(audience: "public" | "private") {
+function contextFor(audience: ChannelAudience) {
   const ctx = new ContextContainer();
   ctx.set(ChannelInstrumentationKey, { kind: "http", metadata: {} });
   ctx.set(ConversationContextKey, traceContext("parent", audience));
@@ -126,7 +134,7 @@ function contextFor(audience: "public" | "private") {
   return ctx;
 }
 
-function scopeFor(sessionId: string, audience: "public" | "private"): InstrumentationAttemptScope {
+function scopeFor(sessionId: string, audience: ChannelAudience): InstrumentationAttemptScope {
   return {
     attemptId: `${sessionId}:turn_0:0:0`,
     attemptIndex: 0,
@@ -660,10 +668,19 @@ describe("exported agent telemetry contract", () => {
     }
   });
 
-  it.each(["public", "private"] as const)(
-    "round-trips the normalized %s v4 trace forest through OTLP",
-    async (audience) => {
-      const runtime = createRuntime();
+  it.each([
+    { audience: "public", explicit: false, recordInputs: true, recordOutputs: true },
+    { audience: "private", explicit: false, recordInputs: false, recordOutputs: false },
+    { audience: "private", explicit: true, recordInputs: true, recordOutputs: true },
+    { audience: "unknown", explicit: true, recordInputs: true, recordOutputs: true },
+    { audience: "private", explicit: true, recordInputs: true, recordOutputs: false },
+    { audience: "private", explicit: true, recordInputs: false, recordOutputs: true },
+  ] as const)(
+    "round-trips the normalized $audience v4 trace forest through OTLP (explicit=$explicit, inputs=$recordInputs, outputs=$recordOutputs)",
+    async ({ audience, explicit, recordInputs, recordOutputs }) => {
+      const runtime = createRuntime(
+        explicit ? () => ({ emit: true, recordInputs, recordOutputs }) : undefined,
+      );
       let parent = contextFor(audience);
       parent.set(ConversationIdKey, "original-conversation");
       const scope = scopeFor("parent", audience);
@@ -786,6 +803,7 @@ describe("exported agent telemetry contract", () => {
         const modelKey = modelCallIdempotencyKey(childScope, 0, 0);
         await childHooks.publish({
           idempotencyKey: modelKey,
+          input: { instructions: "private instructions", messages: [] },
           model: { modelId: "test", provider: "test" },
           scope: childScope,
           type: "model.call.started",
@@ -1023,8 +1041,15 @@ describe("exported agent telemetry contract", () => {
         parsed.map((span) => [span.name, span.name]),
       );
       expect(metadata).not.toContain("private ");
-      if (audience === "private") expect(new TextDecoder().decode(bytes)).not.toContain("private ");
-      else expect(new TextDecoder().decode(bytes)).toContain("private reply");
+      const serialized = new TextDecoder().decode(bytes);
+      for (const text of ["private instructions", "private input"]) {
+        if (recordInputs) expect(serialized).toContain(text);
+        else expect(serialized).not.toContain(text);
+      }
+      for (const text of ["private output", "private reply"]) {
+        if (recordOutputs) expect(serialized).toContain(text);
+        else expect(serialized).not.toContain(text);
+      }
       await runtime.shutdown();
     },
   );

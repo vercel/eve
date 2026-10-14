@@ -212,7 +212,7 @@ describe("initializeSessionInstrumentation", () => {
       },
     );
 
-    expect(ctx.get(SessionTraceSeedKey)?.decision).toEqual({
+    expect(ctx.get(SessionTraceSeedKey)?.decision).toMatchObject({
       action: "record",
       recordInputs: true,
       recordOutputs: false,

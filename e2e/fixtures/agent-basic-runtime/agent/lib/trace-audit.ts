@@ -40,7 +40,16 @@ export const traceAuditProcessor: SpanProcessor = {
     });
     while (spans.length > 128) spans.shift();
   },
-  onEnd() {},
+  onEnd(value) {
+    const span = value as {
+      attributes: Readonly<Record<string, unknown>>;
+      spanContext: () => { spanId: string };
+    };
+    const runId = span.attributes["agent.run.id"];
+    if (typeof runId !== "string") return;
+    const recorded = runs.get(runId)?.find((entry) => entry.spanId === span.spanContext().spanId);
+    if (recorded !== undefined) recorded.attributes = { ...span.attributes };
+  },
   async forceFlush() {},
   async shutdown() {},
 };
@@ -62,6 +71,9 @@ export function inspectTrace(runId: string) {
   const model = step === undefined ? undefined : modelOf(step);
   return {
     modelStep: step !== undefined && model !== undefined,
+    content:
+      typeof model?.attributes["gen_ai.input.messages"] === "string" &&
+      typeof model?.attributes["gen_ai.output.messages"] === "string",
     identity:
       step !== undefined &&
       model !== undefined &&

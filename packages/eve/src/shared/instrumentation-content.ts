@@ -14,12 +14,16 @@ export function shouldCaptureInstrumentationContent(
   return context.audience === "public" || context.environment === "development";
 }
 
-/** Per-delivery audience is a hard ceiling over the session-level trace decision. */
+/** Audience defaults narrow implicit capture, but cannot override an explicit policy. */
 export function applyAudienceCeiling(
   decision: InstrumentationDecision,
   context: InstrumentationContentContext,
 ): InstrumentationDecision {
-  if (decision.action === "drop" || shouldCaptureInstrumentationContent(context)) {
+  if (
+    decision.action === "drop" ||
+    decision.explicitContent === true ||
+    shouldCaptureInstrumentationContent(context)
+  ) {
     return decision;
   }
   return { action: "record", recordInputs: false, recordOutputs: false };
