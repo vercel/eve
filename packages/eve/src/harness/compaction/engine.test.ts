@@ -572,6 +572,32 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
+  it("leaves an already-capped tool result unchanged on a later compaction", async () => {
+    const annotations = (message: ModelMessage | undefined) =>
+      JSON.stringify(message).split("Truncated by eve").length - 1;
+    const messages = [
+      user("investigate the bug"),
+      ...toolExchange({ callId: "call-0", payloadChars: 4_000 }),
+      user("keep going"),
+    ];
+    const { result: first } = await compact(messages, { recentWindowSize: 1 });
+    const capped = first[2];
+    expect(annotations(capped)).toBe(1);
+
+    const { result: second, summarizer } = await compact(
+      [
+        ...first,
+        ...toolExchange({ callId: "call-1", payloadChars: 4_000 }),
+        user("what did you find?"),
+      ],
+      { recentWindowSize: 1 },
+    );
+
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(annotations(second[2])).toBe(1);
+    expect(second[2]).toEqual(capped);
+  });
+
   it("does not split a UTF-16 surrogate pair when capping tool results", async () => {
     // JSON.stringify of this output places 📥's high surrogate at index 1999
     // of the 2000-unit TRANSCRIPT_PAYLOAD_LIMIT cut.
