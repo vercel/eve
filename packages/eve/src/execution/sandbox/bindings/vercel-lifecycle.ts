@@ -1,7 +1,6 @@
 import {
-  getVercelSandboxCredentials,
   getVercelSandboxFetch,
-  type VercelSandboxCredentials,
+  resolveVercelSandboxCredentials,
 } from "#execution/sandbox/bindings/vercel-credentials.js";
 import type {
   VercelCreateOptions,
@@ -53,14 +52,4 @@ export async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {
     return;
   }
   await sandbox.stop();
-}
-
-async function resolveVercelSandboxCredentials(
-  createOptions: VercelCreateOptions,
-): Promise<VercelSandboxCredentials | Record<string, never>> {
-  try {
-    return await getVercelSandboxCredentials(createOptions);
-  } catch {
-    return {};
-  }
 }
