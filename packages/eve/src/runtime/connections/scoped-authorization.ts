@@ -105,6 +105,25 @@ export function createAuthorizationExecution(
         return requireAuth(scoped, error);
       }
     },
+    /**
+     * Resolves a stored token for the bound responder, who isn't part of this
+     * execution: it never starts or completes a sign-in, so a missing token
+     * fails terminally instead of reaching the interruption boundary.
+     */
+    async getResponderToken(scoped: ScopedAuthorization): Promise<TokenResult> {
+      try {
+        return await resolveScopedToken(scoped);
+      } catch (error) {
+        if (!isConnectionAuthorizationRequiredError(error)) {
+          throw error;
+        }
+        throw new ConnectionAuthorizationFailedError(scoped.scope, {
+          message: `The approver of "${scoped.scope}" has no token for this provider, and an approved call doesn't start a sign-in.`,
+          reason: "approver_authorization_required",
+          retryable: false,
+        });
+      }
+    },
     requireAuth,
     async handleError(error: unknown, scoped?: ScopedAuthorization): Promise<AuthorizationSignal> {
       if (scoped !== undefined && isConnectionAuthorizationRequiredError(error)) {

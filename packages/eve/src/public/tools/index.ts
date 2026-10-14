@@ -7,6 +7,8 @@ export {
   defineTool,
   disableTool,
   isDisabledToolSentinel,
+  type ApprovalResponder,
+  type ApprovedCall,
   type ToolLabelDefinition,
   type ToolAuthOptions,
   type ToolAuthProvider,

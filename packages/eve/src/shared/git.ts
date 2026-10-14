@@ -18,8 +18,10 @@ export function isValidGitRef(value: string): boolean {
     value.includes("//") ||
     value.includes("@{") ||
     value.includes("\\") ||
-    value.split("/").some((part) => part.length === 0 || part.endsWith(".lock")) ||
-    /[\x00-\x20~^:?*[]/u.test(value)
+    value
+      .split("/")
+      .some((part) => part.length === 0 || part.startsWith(".") || part.endsWith(".lock")) ||
+    /[\x00-\x20\x7f~^:?*[]/u.test(value)
   );
 }
 

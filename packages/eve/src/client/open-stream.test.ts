@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { followStreamIterable, openStreamBody } from "./open-stream.js";
-import { ClientSessionStrandedError } from "#client/client-error.js";
+import { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
 import type { StreamReconnectPolicy } from "#client/types.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
@@ -67,6 +67,26 @@ describe("openStreamBody", () => {
       keepAlive: true,
     });
     await expect(stream.next()).rejects.toThrow(ClientSessionStrandedError);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("stops on the first response when the session history expired", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        { code: "session_expired", error: "Session history is no longer available.", ok: false },
+        { status: 410 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const stream = followStreamIterable({
+      host: "https://agent.example",
+      path: "/eve/v1/session/session_1/stream",
+      resolveHeaders: async () => new Headers(),
+      startIndex: 0,
+    });
+    const error = await stream.next().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ClientError);
+    expect(error).toMatchObject({ code: "session_expired", status: 410 });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

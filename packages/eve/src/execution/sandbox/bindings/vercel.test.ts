@@ -187,6 +187,40 @@ describe("createVercelSandbox", () => {
     );
   });
 
+  it("creates sandboxes with Vercel API credentials from the environment", async () => {
+    vi.stubEnv("VERCEL_TEAM_ID", "team_env");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_env");
+    vi.stubEnv("VERCEL_TOKEN", "token_env");
+    const sandboxModule = {
+      Sandbox: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(createMockSandbox({ name: "template" }))
+          .mockResolvedValueOnce(createMockSandbox({ name: "session" })),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const provider = createVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await provider.prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+    await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      prepared: { snapshotId: "prepared-snapshot" },
+      sandboxName: "session-key",
+    });
+
+    const credentials = { projectId: "prj_env", teamId: "team_env", token: "token_env" };
+    expect(sandboxModule.Sandbox.create.mock.calls.map(([options]) => options)).toEqual([
+      expect.objectContaining({ ...credentials, image: VERCEL_EVE_SANDBOX_IMAGE }),
+      expect.objectContaining({
+        ...credentials,
+        source: expect.objectContaining({ type: "snapshot" }),
+      }),
+    ]);
+  });
+
   it("reuses template identity until authored source or resources change", async () => {
     async function prepareName(input: {
       createOptions?: NonNullable<

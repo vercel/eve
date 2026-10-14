@@ -120,9 +120,9 @@ export function authorizationFrom(turn: Pick<EveEvalTurn, "events">): {
   return { attemptId: required.data.attemptId, url: new URL(required.data.authorization.url) };
 }
 
-/** Completes a fixture authorization the way a browser would: an unauthenticated GET. */
-export async function completeAuthorization(url: URL) {
-  const callback = await fetch(url);
+/** Completes a fixture authorization the way a browser would: a GET on the callback URL. */
+export async function completeAuthorization(t: EveEvalContext, url: URL) {
+  const callback = await t.target.fetch(`${url.pathname}${url.search}`);
   if (!callback.ok) throw new Error(`Fixture authorization callback failed (${callback.status}).`);
 }
 

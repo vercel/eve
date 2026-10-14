@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -25,6 +25,7 @@ import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-auth
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { formatValidationError } from "#runtime/validation.js";
+import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 
 /** Hydrates the compiled module map from the manifest’s authored bindings. */
 export async function loadCompiledModuleMapFromAuthoredSource(input: {
@@ -74,11 +75,9 @@ async function hydrateCompiledModuleMapFromManifest(
     const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
     try {
       await writeFile(temporaryPath, code, { flag: "wx" });
-      try {
-        await link(temporaryPath, outputPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
+      // Not link(): some NFS and FUSE mounts reject hard links. The name is the content hash,
+      // so replacing a concurrent writer's file swaps identical bytes.
+      await renameWithTransientBusyRetry(temporaryPath, outputPath);
     } finally {
       await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;

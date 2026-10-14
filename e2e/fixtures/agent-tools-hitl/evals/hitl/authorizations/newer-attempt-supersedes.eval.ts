@@ -41,7 +41,7 @@ export default defineEval({
       throw new Error("Expected a new authorization attempt.");
 
     const startIndex = session.state.streamIndex;
-    await completeAuthorization(newer.url);
+    await completeAuthorization(t, newer.url);
     const resumed = (await follow(t, session, startIndex)).expectOk();
     resumed.event("authorization.completed", {
       count: 1,

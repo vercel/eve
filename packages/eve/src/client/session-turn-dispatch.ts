@@ -1,3 +1,4 @@
+import { throwIfAborted } from "#client/abort-signal.js";
 import type { Client } from "#client/client.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { ClientSession } from "#client/session.js";
@@ -17,7 +18,7 @@ export async function dispatchSessionTurn<TOutput>(input: {
     if (turn.message === undefined)
       throw new Error("Cannot answer an input request before the session starts.");
     const created = await client.sessions.create({ ...turn, message: turn.message });
-    turn.signal?.throwIfAborted();
+    throwIfAborted(turn.signal);
     return { ...created, created: true };
   }
 

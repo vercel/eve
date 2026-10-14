@@ -34,7 +34,8 @@ export default defineEval({
       "Do not call any tools. Reply with exactly BOB-STATUS-OK.",
       as(BOB),
     );
-    const callback = await fetch(new URL(required.data.authorization.url));
+    const callbackUrl = new URL(required.data.authorization.url);
+    const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok) throw new Error(`Fixture sign-in callback failed (${callback.status}).`);
 
     const completed = await resumed.result();
