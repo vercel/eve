@@ -92,24 +92,29 @@ export interface PublishedSessionEvents {
  * Publishes a session step's own events, such as a workflow tool's
  * `action.partial`, exactly as a turn publishes its events. Call from a step
  * and adopt the result: hooks run in the session's context and may change it.
+ * Pass `cancelTurn` only when the events belong to a running turn, so a hook's
+ * `ctx.cancel()` can stop it.
  */
 export async function publishSessionEvents(
   target: SessionStepState,
   events: readonly UnstampedMessageStreamEvent[],
+  options?: { readonly cancelTurn?: () => void },
 ): Promise<PublishedSessionEvents> {
-  return await publishEventsFromStep(target, "own", events);
+  return await publishEventsFromStep(target, "own", events, options?.cancelTurn);
 }
 
 async function publishEventsFromStep(
   target: SessionStepState,
   origin: SessionEventOrigin,
   events: readonly UnstampedMessageStreamEvent[],
+  cancelTurn: (() => void) | undefined,
 ): Promise<PublishedSessionEvents> {
   if (events.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
   }
   const restored = await restoreSessionStep(target);
   const { published } = await publishFromSessionStep(restored, {
+    cancelTurn,
     origin,
     async publish(emit) {
       for (const event of events) await emit(event);
@@ -145,6 +150,8 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
  */
 export interface SessionStepPublication<T, R, S extends HarnessSessionBase = HarnessSessionBase> {
   readonly origin: SessionEventOrigin;
+  /** Stops the running turn the events belong to, for a hook's `ctx.cancel()`. */
+  readonly cancelTurn?: () => void;
   /** Where a relayed input batch came from; the channel adapter and its forwarding see it. */
   readonly inputSource?: string;
   /** Emits the step's events in the session's context scope. */
@@ -238,6 +245,7 @@ async function publishInSessionScope<T>(
       : undefined;
 
   const publisher = openSessionEventPublisher({
+    cancelTurn: publication.cancelTurn,
     ctx,
     inputSource: publication.inputSource,
     origin: publication.origin,
@@ -279,8 +287,8 @@ export interface SessionEventDispatcher {
   /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
   readonly adapterCtx: ChannelAdapterContext;
   /**
-   * Runs the stream-event hooks for a written event. Only a turn step passes
-   * `cancelTurn`; see `turn-event-handler.ts`.
+   * Runs the stream-event hooks for a written event. `cancelTurn` is passed
+   * only for an event of a running turn; see `turn-event-handler.ts`.
    */
   runHooks(event: MessageStreamEvent, cancelTurn?: () => void): Promise<void>;
 }
@@ -308,6 +316,7 @@ export interface SessionEventPublisher {
 }
 
 export function openSessionEventPublisher(input: {
+  readonly cancelTurn?: () => void;
   readonly ctx: ContextContainer;
   readonly origin: SessionEventOrigin;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -331,7 +340,7 @@ export function openSessionEventPublisher(input: {
     writer,
     emit,
     async publish(event) {
-      await dispatcher.runHooks(await emit(event));
+      await dispatcher.runHooks(await emit(event), input.cancelTurn);
     },
   };
 }
