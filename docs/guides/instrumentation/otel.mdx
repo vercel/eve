@@ -38,13 +38,6 @@ does not affect lifecycle instrumentation created with `defineInstrumentation()`
 See [Audience](../channels/overview#audience) for how channels classify the
 conversation passed to this policy.
 
-On `invoke_agent` spans, `agent.trace.content.input` and
-`agent.trace.content.output` report whether the destination is permitted to
-receive input and output content, respectively. These flags reflect the resolved
-trace decision and content ceilings; destination redaction can only narrow
-them. A `true` flag does not guarantee that a payload was recorded. The session
-title is input content and is omitted when input capture is disabled.
-
 ## Instrument Node.js dependencies
 
 Pass OpenTelemetry instrumentation instances to `otel({ instrumentations })`.
