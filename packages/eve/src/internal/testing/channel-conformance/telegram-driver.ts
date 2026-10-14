@@ -194,6 +194,16 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
       return inlineOptions(call);
     },
     shownMessage(call) {
+      // A callback answer is a notice only the presser sees.
+      if (call.method === "answerCallbackQuery") {
+        const { callback_query_id: id, text } = call.body as {
+          readonly callback_query_id: string;
+          readonly text?: string;
+        };
+        return text === undefined
+          ? undefined
+          : { id: `callback:${id}`, onlyPerson: true, options: [], text };
+      }
       if (!MESSAGE_WRITES.has(call.method)) return undefined;
       return {
         id: String(messageIdOf(call)),
