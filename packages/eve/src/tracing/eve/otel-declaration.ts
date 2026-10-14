@@ -60,10 +60,10 @@ export interface OtelOptions {
    * existing audience-aware behavior; explicit decisions can disable emission
    * or select input and output capture independently for any audience.
    * Defaults to emitting every audience, with content only for public
-   * conversations or development. Explicit content decisions override audience
-   * defaults, but destination settings can only narrow them. For a trusted
-   * remote trace, eve evaluates this policy against the immutable origin
-   * audience and intersects it with the parent's effective ceiling, so every
+   * conversations or development. Explicit content decisions override defaults
+   * for the evaluated audience, but destination settings can only narrow them.
+   * For a trusted remote trace, eve evaluates this policy against the immutable
+   * origin audience and intersects it with the parent's effective ceiling, so every
    * hop can only narrow capture. It never changes what lifecycle instrumentation
    * receives. A thrown error rejects trace production without silencing
    * lifecycle providers. The policy may be invoked more than once

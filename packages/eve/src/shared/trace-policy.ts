@@ -55,6 +55,8 @@ export function resolveTracePolicyDecision(
     action: "record",
     recordInputs: decision.recordInputs,
     recordOutputs: decision.recordOutputs,
-    ...(decision.recordInputs || decision.recordOutputs ? { explicitContent: true } : undefined),
+    ...(decision.recordInputs || decision.recordOutputs
+      ? { explicitContentAudience: context.audience }
+      : undefined),
   };
 }

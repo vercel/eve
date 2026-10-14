@@ -14,14 +14,14 @@ export function shouldCaptureInstrumentationContent(
   return context.audience === "public" || context.environment === "development";
 }
 
-/** Audience defaults narrow implicit capture, but cannot override an explicit policy. */
+/** An explicit policy overrides defaults only for the audience it evaluated. */
 export function applyAudienceCeiling(
   decision: InstrumentationDecision,
   context: InstrumentationContentContext,
 ): InstrumentationDecision {
   if (
     decision.action === "drop" ||
-    decision.explicitContent === true ||
+    decision.explicitContentAudience === context.audience ||
     shouldCaptureInstrumentationContent(context)
   ) {
     return decision;

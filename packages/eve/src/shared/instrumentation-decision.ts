@@ -1,11 +1,13 @@
+import { CHANNEL_AUDIENCES, type ChannelAudience } from "#shared/channel-audience.js";
+
 export type InstrumentationDecision =
   | { readonly action: "drop" }
   | {
       readonly action: "record";
       readonly recordInputs: boolean;
       readonly recordOutputs: boolean;
-      /** An explicit policy opted into content beyond the audience defaults. */
-      readonly explicitContent?: true;
+      /** The audience for which an explicit policy authorized content. */
+      readonly explicitContentAudience?: ChannelAudience;
     };
 
 export const DROP_INSTRUMENTATION: InstrumentationDecision = { action: "drop" };
@@ -25,7 +27,10 @@ export function readInstrumentationDecision(value: unknown): InstrumentationDeci
         action: "record",
         recordInputs: decision.recordInputs,
         recordOutputs: decision.recordOutputs,
-        ...(decision.explicitContent === true ? { explicitContent: true } : undefined),
+        ...(decision.explicitContentAudience !== undefined &&
+        CHANNEL_AUDIENCES.includes(decision.explicitContentAudience)
+          ? { explicitContentAudience: decision.explicitContentAudience }
+          : undefined),
       }
     : DROP_INSTRUMENTATION;
 }
@@ -35,10 +40,17 @@ export function intersectInstrumentationDecisions(
   right: InstrumentationDecision,
 ): InstrumentationDecision {
   if (left.action === "drop" || right.action === "drop") return DROP_INSTRUMENTATION;
+  const explicitContentAudience =
+    left.explicitContentAudience === undefined
+      ? right.explicitContentAudience
+      : right.explicitContentAudience === undefined ||
+          left.explicitContentAudience === right.explicitContentAudience
+        ? left.explicitContentAudience
+        : undefined;
   return {
     action: "record",
     recordInputs: left.recordInputs && right.recordInputs,
     recordOutputs: left.recordOutputs && right.recordOutputs,
-    ...(left.explicitContent || right.explicitContent ? { explicitContent: true } : undefined),
+    ...(explicitContentAudience !== undefined ? { explicitContentAudience } : undefined),
   };
 }

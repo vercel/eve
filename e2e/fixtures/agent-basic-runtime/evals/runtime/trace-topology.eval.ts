@@ -3,7 +3,7 @@ import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "The installed tracing pipeline retains eve identity, model-step parents, and explicitly enabled content for the unclassified HTTP channel.",
+    "The installed tracing pipeline retains eve identity, model-step parents, and explicitly enabled content for the private HTTP channel.",
   async test(t) {
     const turn = await t.send(
       "Alice is checking the support agent's diagnostics. Call inspect_trace once and report its result.",

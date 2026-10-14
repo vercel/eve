@@ -212,10 +212,11 @@ describe("initializeSessionInstrumentation", () => {
       },
     );
 
-    expect(ctx.get(SessionTraceSeedKey)?.decision).toMatchObject({
+    expect(ctx.get(SessionTraceSeedKey)?.decision).toEqual({
       action: "record",
       recordInputs: true,
       recordOutputs: false,
+      explicitContentAudience: "private",
     });
     await expect(
       readTelemetry(
