@@ -15,7 +15,9 @@ export default defineEval({
     approved.calledTool(TOOL_NAME, { status: "completed", count: 1 });
 
     const repeated = await session.send(
-      `Call the ${TOOL_NAME} tool exactly once with scope "repo-a".`,
+      "Alice needs a fresh check of repo-a in this new turn. " +
+        `Call the ${TOOL_NAME} tool exactly once with scope "repo-a". ` +
+        "This is a separate invocation from the earlier call.",
     );
     repeated.succeeded();
     repeated.calledTool(TOOL_NAME, { status: "completed", count: 1 });
