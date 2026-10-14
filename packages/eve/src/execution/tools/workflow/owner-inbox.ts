@@ -6,6 +6,7 @@ import type {
   WorkflowToolRequest,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
+import { rebuildSerializableError } from "#execution/workflow-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { ToolInputRequest } from "#tools/definition.js";
@@ -23,14 +24,22 @@ export function workflowToolRunOutcomeToToolResult(
       toolName: from.toolName,
     };
   }
+  if (result.status === "failed") {
+    return {
+      callId: from.callId,
+      // The output keeps what the model reads; the serialized error still carries the thrown name.
+      errorName: rebuildSerializableError(result.error).name,
+      isError: true,
+      kind: "tool-result",
+      output: workflowToolRunFailureOutput(message),
+      toolName: from.toolName,
+    };
+  }
   return {
     callId: from.callId,
     isError: true,
     kind: "tool-result",
-    output:
-      result.status === "failed"
-        ? workflowToolRunFailureOutput(message)
-        : (result.reason ?? "The workflow tool run was cancelled."),
+    output: result.reason ?? "The workflow tool run was cancelled.",
     toolName: from.toolName,
   };
 }
