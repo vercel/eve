@@ -32,6 +32,7 @@ import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { readHitlState } from "#harness/hitl/index.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
 import type { InputResponse } from "#shared/input.js";
 
@@ -158,7 +159,7 @@ async function routeProxiedDeliver(
   }
 
   let published: PublishedSessionEvents = { serializedContext, sessionState: input.sessionState };
-  let cancelled = false;
+  const hookCancellation = new AbortController();
   if (answerMessages.length > 0) {
     // Like a steering message, the answer joins the open turn, so the turn's
     // later events carry its delivery ids too. Its hooks run before the answer
@@ -172,15 +173,16 @@ async function routeProxiedDeliver(
       answerMessages,
       {
         cancelTurn: () => {
-          cancelled = true;
+          hookCancellation.abort(new TurnCancelledError());
         },
       },
     );
   }
-  if (cancelled) parentAction = { kind: "cancel-turn" };
+  // The turn owner lives outside this durable step and consumes its result.
+  if (hookCancellation.signal.aborted) parentAction = { kind: "cancel-turn" };
 
   const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
-  for (const child of cancelled ? [] : children.values()) {
+  for (const child of hookCancellation.signal.aborted ? [] : children.values()) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
       await sendWorkflowAskAnswers(
