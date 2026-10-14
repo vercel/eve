@@ -187,6 +187,31 @@ describe("createVercelSandbox", () => {
     );
   });
 
+  it("creates sandboxes with Vercel API credentials from the environment", async () => {
+    vi.stubEnv("VERCEL_TEAM_ID", "team_env");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_env");
+    vi.stubEnv("VERCEL_TOKEN", "token_env");
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockResolvedValue(createMockSandbox({ name: "session-key" })),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const provider = createVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      prepared: { snapshotId: "prepared-snapshot" },
+      sandboxName: "session-key",
+    });
+
+    expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "prj_env", teamId: "team_env", token: "token_env" }),
+    );
+  });
+
   it("reuses template identity until authored source or resources change", async () => {
     async function prepareName(input: {
       createOptions?: NonNullable<
