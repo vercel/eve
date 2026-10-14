@@ -14,7 +14,7 @@ const session: HarnessSession = {
 };
 
 // Some models fill an optional string with "" instead of omitting it (#4819).
-it.fails("starts a new task for an agent call whose taskId is empty", () => {
+it("starts a new task for an agent call whose taskId is empty", () => {
   const committed = commitCallEntry(session, {
     callId: "call-1",
     definition: subagentTool("researcher"),
