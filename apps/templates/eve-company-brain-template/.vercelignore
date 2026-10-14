@@ -1,0 +1,10 @@
+node_modules
+.eve
+.output
+.nitro
+dist
+data
+dbt
+scripts
+test
+.env.local
