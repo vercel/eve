@@ -16,6 +16,9 @@ describe("Git helpers", () => {
   it("rejects unsafe Git refs", () => {
     expect(isValidGitRef("feature/self-modification")).toBe(true);
     expect(isValidGitRef("main.lock")).toBe(false);
+    expect(isValidGitRef(".hidden")).toBe(false);
+    expect(isValidGitRef("feature/.hidden")).toBe(false);
+    expect(isValidGitRef("feature\x7fbranch")).toBe(false);
     expect(isValidGitRef("main; curl example.com")).toBe(false);
   });
 
