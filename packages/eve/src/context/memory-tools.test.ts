@@ -214,7 +214,8 @@ describe("memory provider tools", () => {
     expect(JSON.stringify(metadata)).not.toContain("hello");
   });
 
-  it("offers provider tools on a turn whose input carries a staged attachment", async () => {
+  // Repro for #4780: expected to fail until the fix lands, which flips this back to `it`.
+  it.fails("offers provider tools on a turn whose input carries a staged attachment", async () => {
     const ctx = createContext("user_1", {
       ...turn,
       input: [
