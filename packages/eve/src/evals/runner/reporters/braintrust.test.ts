@@ -208,6 +208,20 @@ describe("Braintrust", () => {
     );
   });
 
+  it("logs an empty output for an eval that produced no agent output", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+    const result = makeEvalResult();
+
+    reporter.onEvalComplete({
+      ...result,
+      result: { ...result.result, finalMessage: null, output: null },
+    });
+
+    // Braintrust rejects a null or undefined output with "output must be specified".
+    expect(braintrustMocks.log).toHaveBeenCalledWith(expect.objectContaining({ output: "" }));
+  });
+
   it("scores repeated assertions by their lowest member and keeps each score in metadata", async () => {
     const reporter = Braintrust(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
