@@ -216,6 +216,7 @@ describe("initializeSessionInstrumentation", () => {
       action: "record",
       recordInputs: true,
       recordOutputs: false,
+      explicitContentAudience: "private",
     });
     await expect(
       readTelemetry(

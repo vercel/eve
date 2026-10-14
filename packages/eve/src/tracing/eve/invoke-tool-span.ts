@@ -143,7 +143,7 @@ async function traced(
   }
   const content = applyLiveDeliveryAudienceCeiling(
     {
-      action: "record",
+      ...decision,
       recordInputs: settings.recordInputs && decision.recordInputs,
       recordOutputs: settings.recordOutputs && decision.recordOutputs,
     },

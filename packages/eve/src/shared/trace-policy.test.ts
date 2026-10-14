@@ -28,15 +28,30 @@ describe("resolveTracePolicyDecision", () => {
     ],
     [
       { emit: true, recordInputs: true, recordOutputs: false },
-      { action: "record", recordInputs: true, recordOutputs: false },
+      {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: false,
+        explicitContentAudience: "private",
+      },
     ],
     [
       { emit: true, recordInputs: false, recordOutputs: true },
-      { action: "record", recordInputs: false, recordOutputs: true },
+      {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+        explicitContentAudience: "private",
+      },
     ],
     [
       { emit: true, recordInputs: true, recordOutputs: true },
-      { action: "record", recordInputs: true, recordOutputs: true },
+      {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: true,
+        explicitContentAudience: "private",
+      },
     ],
   ] as const)("normalizes the explicit $decision.emit decision", (decision, expected) => {
     expect(resolveTracePolicyDecision(decision, contentContext("private"))).toEqual(expected);
