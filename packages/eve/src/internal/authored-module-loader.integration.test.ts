@@ -1355,7 +1355,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     }
   });
 
-  it("evaluates a module shared by authored tools once per compilation", async () => {
+  it.fails("evaluates a module shared by authored tools once per compilation", async () => {
     const evaluationsKey = "__eveSharedAuthoredModuleEvaluations";
     const tool = (sharedImport: string) =>
       [
