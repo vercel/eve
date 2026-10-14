@@ -57,7 +57,8 @@ export function uniqueName(name: string, used: Set<string>): string {
   let candidate = name;
   let suffix = 2;
   while (used.has(candidate)) {
-    candidate = `${name}_${suffix}`;
+    const ending = `_${suffix}`;
+    candidate = `${name.slice(0, 64 - ending.length)}${ending}`;
     suffix += 1;
   }
   used.add(candidate);
