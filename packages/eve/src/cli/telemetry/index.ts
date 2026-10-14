@@ -7,6 +7,7 @@ import {
   isEphemeralEveTelemetryEnvironment,
   resolveEveTelemetryProjectId,
 } from "#cli/telemetry/identity.js";
+import { resolveEveTelemetryInternal } from "#cli/telemetry/internal.js";
 import {
   markEveTelemetryNotified,
   readEveTelemetryPreference,
@@ -266,6 +267,9 @@ export function createEveCliTelemetry(version: string): EveCliTelemetry {
         return;
       }
       if (process.env.EVE_TELEMETRY_DEBUG) {
+        // Real batches get this from the flush child, which debug output never reaches.
+        const internal = await resolveEveTelemetryInternal();
+        if (internal !== undefined) events.push(event("internal", String(internal)));
         process.stderr.write(`[eve telemetry] ${JSON.stringify(events)}\n`);
         return;
       }

@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+
+import { resolveEveTelemetryInternal } from "#cli/telemetry/internal.js";
+
 const DEFAULT_ENDPOINT = "https://telemetry.vercel.com/api/eve-cli/v1/events";
 const REQUEST_TIMEOUT_MS = 1_000;
 
@@ -30,6 +34,17 @@ export async function flushEveCliTelemetry(payloadJson: string): Promise<void> {
     return;
   }
 
+  const events = [...payload.events];
+  const internal = await resolveEveTelemetryInternal();
+  if (internal !== undefined) {
+    events.push({
+      id: randomUUID(),
+      event_time: Date.now(),
+      key: "internal",
+      value: String(internal),
+    });
+  }
+
   try {
     await fetch(process.env.EVE_TELEMETRY_ENDPOINT ?? DEFAULT_ENDPOINT, {
       method: "POST",
@@ -39,7 +54,7 @@ export async function flushEveCliTelemetry(payloadJson: string): Promise<void> {
         "x-eve-cli-topic-id": "generic",
         "x-eve-cli-session-id": payload.sessionId,
       },
-      body: JSON.stringify(payload.events),
+      body: JSON.stringify(events),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {

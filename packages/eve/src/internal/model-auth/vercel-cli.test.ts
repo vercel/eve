@@ -20,7 +20,11 @@ vi.mock("node:module", () => ({
     },
   }),
 }));
-import { readVercelCliConnection, readVercelCliToken } from "./vercel-cli.js";
+import {
+  readVercelCliConnection,
+  readVercelCliFileConnection,
+  readVercelCliToken,
+} from "./vercel-cli.js";
 const base =
   process.platform === "darwin"
     ? "/test/home/Library/Application Support"
@@ -84,4 +88,16 @@ it("uses VERCEL_TOKEN without CLI configuration", async () => {
   mocks.read.mockRejectedValue(new Error("ENOENT"));
   vi.stubEnv("VERCEL_TOKEN", "env-token");
   expect(await readVercelCliToken()).toBe("env-token");
+});
+it("pairs the selected team with its file login, ignoring VERCEL_TOKEN", async () => {
+  files("file");
+  vi.stubEnv("VERCEL_TOKEN", "other-account-token");
+  expect(await readVercelCliFileConnection()).toEqual({ token: "file-token", teamId: "team_a" });
+});
+it("never opens the keyring for a file connection", async () => {
+  files("auto");
+  expect(await readVercelCliFileConnection()).toEqual({ token: "file-token", teamId: "team_a" });
+  files("keyring");
+  expect(await readVercelCliFileConnection()).toBeUndefined();
+  expect(mocks.entry).not.toHaveBeenCalled();
 });
