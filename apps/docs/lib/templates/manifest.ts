@@ -36,6 +36,7 @@ export interface TemplateGitHubSource {
 export interface TemplateManifestEntry {
   slug: string;
   title: string;
+  featured?: boolean;
   /** Hide from the gallery while keeping the detail page available. */
   unlisted?: boolean;
   description: string;
@@ -56,6 +57,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-chat-template",
     title: "Web Chat Agent",
+    featured: true,
     setupPrompt:
       "Set up the eve chat template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -84,6 +86,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-slack-agent",
     title: "Slack Assistant",
+    featured: true,
     setupPrompt:
       "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -224,6 +227,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-software-factory-template",
     title: "Software Factory",
+    featured: true,
     setupPrompt:
       "I want to build a software factory with the eve framework, using the Foreman template. Read the setup instructions at https://ask-foreman.dev/docs/getting-started and follow them. They cover deploying the template, connecting GitHub and Linear, running it locally, and how the pipeline works overall.",
     description:
