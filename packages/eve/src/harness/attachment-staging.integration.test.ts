@@ -1102,8 +1102,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     );
   });
 
-  // #4833: hydration rethrows the sandbox resume error and fails the model call.
-  it.fails("degrades tool-result refs to text when the session sandbox cannot be resumed (#4833)", async () => {
+  it("degrades tool-result refs to text when the session sandbox cannot be resumed (#4833)", async () => {
     const logs = captureLogRecords();
     const runtime = await createTestRuntime();
     const staged = await runtime.runAsSession(
@@ -1162,7 +1161,12 @@ describe("hydrateSandboxAttachments (integration)", () => {
         },
       ],
     });
-    expect(logs.records).toContainEqual(expect.objectContaining({ level: "warn" }));
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "session sandbox unavailable on hydration, degrading sandbox refs to text",
+      }),
+    );
   });
 
   it("does not inline a staged attachment that sandbox code overwrote (#4284)", async () => {

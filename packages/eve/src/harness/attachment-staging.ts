@@ -59,6 +59,8 @@ const MEDIA_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
 type ToolResultOutput = ToolResultPart["output"];
 type ToolOutputContentPart = Extract<ToolResultOutput, { type: "content" }>["value"][number];
 type ToolOutputFilePart = Extract<ToolOutputContentPart, { type: "file" }>;
+type SandboxFileReader = Pick<SandboxSession, "readBinaryFile">;
+const UNAVAILABLE_SANDBOX: SandboxFileReader = { readBinaryFile: async () => null };
 
 /**
  * Writes inbound `FilePart` bytes into the sandbox and rewrites each
@@ -195,7 +197,12 @@ export async function hydrateSandboxAttachments(
     );
   }
 
-  const sandbox = await sandboxAccess.get();
+  // The sandbox can be gone (another replica, a restart, an expired provider
+  // sandbox). Its refs then degrade like missing files so the turn survives.
+  const sandbox = await sandboxAccess.get().catch((error: unknown) => {
+    log.warn("session sandbox unavailable on hydration, degrading sandbox refs to text", { error });
+    return UNAVAILABLE_SANDBOX;
+  });
   if (sandbox === null) {
     throw new Error(
       "Cannot hydrate sandbox-ref FilePart: SandboxKey is bound but no active sandbox session is available.",
@@ -339,7 +346,10 @@ function isSandboxRefFilePart(part: unknown): part is FilePart {
   );
 }
 
-async function hydrateMessageContent(content: unknown, sandbox: SandboxSession): Promise<unknown> {
+async function hydrateMessageContent(
+  content: unknown,
+  sandbox: SandboxFileReader,
+): Promise<unknown> {
   if (!Array.isArray(content)) {
     return content;
   }
@@ -368,7 +378,7 @@ async function hydrateMessageContent(content: unknown, sandbox: SandboxSession):
 
 async function hydrateToolOutput(
   output: ToolResultOutput,
-  sandbox: SandboxSession,
+  sandbox: SandboxFileReader,
 ): Promise<ToolResultOutput> {
   if (output.type !== "content" || !output.value.some(isToolOutputRefFile)) {
     return output;
@@ -392,7 +402,7 @@ async function hydrateToolOutput(
 
 async function readSandboxRefBytes(
   ref: SandboxRef,
-  sandbox: SandboxSession,
+  sandbox: SandboxFileReader,
 ): Promise<Uint8Array | null> {
   const bytes = await sandbox.readBinaryFile({ path: ref.path });
   if (bytes === null) {
