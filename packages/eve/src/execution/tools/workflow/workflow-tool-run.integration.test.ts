@@ -324,6 +324,7 @@ describe("workflow tools", () => {
   }, 60_000);
 
   it.fails("lets a message.received hook cancel a typed answer before it resolves ctx.ask", async () => {
+    const hooksAfterCancel: string[] = [];
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-guarded-answer",
       execute: confirmDeployWorkflow,
@@ -335,6 +336,20 @@ describe("workflow tools", () => {
               events: {
                 "message.received"(event, ctx) {
                   if (event.data.message === "Deploy") ctx.cancel();
+                },
+              },
+            }),
+          }),
+        },
+        {
+          logicalPath: "hooks/observe.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "message.received"(event) {
+                  if (event.data.message !== "Deploy") return;
+                  await Promise.resolve();
+                  hooksAfterCancel.push(event.data.message);
                 },
               },
             }),
@@ -367,6 +382,7 @@ describe("workflow tools", () => {
         });
 
         const answered = await stream.nextTurn();
+        expect(hooksAfterCancel).toEqual(["Deploy"]);
         // The hook rejected the message, so it must not reach the waiting call.
         const outcomes = filterEventsByType(answered, "input.resolved").flatMap((event) =>
           event.data.resolutions.map((resolution) => resolution.outcome),

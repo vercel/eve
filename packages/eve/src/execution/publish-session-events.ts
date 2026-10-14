@@ -22,6 +22,8 @@ import {
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
+import { isHookCancellableEvent } from "#execution/session/turn-event-handler.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   publishTransition,
   saveTransition,
@@ -92,15 +94,23 @@ export interface PublishedSessionEvents {
  * Publishes a session step's own events, such as a workflow tool's
  * `action.partial`, exactly as a turn publishes its events. Call from a step
  * and adopt the result: hooks run in the session's context and may change it.
- * Pass `cancelTurn` only when the events belong to a running turn, so a hook's
- * `ctx.cancel()` can stop it.
+ * Set `canCancelTurn` only for events of a running turn. Cancellation is
+ * returned with the updated state after the hooks finish, not thrown across
+ * the durable step boundary.
  */
 export async function publishSessionEvents(
   target: SessionStepState,
   events: readonly UnstampedMessageStreamEvent[],
-  options?: { readonly cancelTurn?: () => void },
-): Promise<PublishedSessionEvents> {
-  return await publishEventsFromStep(target, "own", events, options?.cancelTurn);
+  options?: { readonly canCancelTurn?: boolean },
+): Promise<PublishedSessionEvents & { readonly cancelled: boolean }> {
+  const hookCancellation = new AbortController();
+  const published = await publishEventsFromStep(
+    target,
+    "own",
+    events,
+    options?.canCancelTurn ? () => hookCancellation.abort(new TurnCancelledError()) : undefined,
+  );
+  return { ...published, cancelled: hookCancellation.signal.aborted };
 }
 
 async function publishEventsFromStep(
@@ -340,7 +350,11 @@ export function openSessionEventPublisher(input: {
     writer,
     emit,
     async publish(event) {
-      await dispatcher.runHooks(await emit(event), input.cancelTurn);
+      const emitted = await emit(event);
+      await dispatcher.runHooks(
+        emitted,
+        isHookCancellableEvent(emitted.type) ? input.cancelTurn : undefined,
+      );
     },
   };
 }

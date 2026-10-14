@@ -32,7 +32,6 @@ import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { type InputResolution, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { readHitlState } from "#harness/hitl/index.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
 import type { InputResponse } from "#shared/input.js";
 
@@ -158,8 +157,11 @@ async function routeProxiedDeliver(
     }
   }
 
-  let published: PublishedSessionEvents = { serializedContext, sessionState: input.sessionState };
-  const hookCancellation = new AbortController();
+  let published: PublishedSessionEvents & { readonly cancelled: boolean } = {
+    serializedContext,
+    sessionState: input.sessionState,
+    cancelled: false,
+  };
   if (answerMessages.length > 0) {
     // Like a steering message, the answer joins the open turn, so the turn's
     // later events carry its delivery ids too. Its hooks run before the answer
@@ -171,18 +173,14 @@ async function routeProxiedDeliver(
         sessionWritable: input.sessionWritable,
       },
       answerMessages,
-      {
-        cancelTurn: () => {
-          hookCancellation.abort(new TurnCancelledError());
-        },
-      },
+      { canCancelTurn: true },
     );
   }
   // The turn owner lives outside this durable step and consumes its result.
-  if (hookCancellation.signal.aborted) parentAction = { kind: "cancel-turn" };
+  if (published.cancelled) parentAction = { kind: "cancel-turn" };
 
   const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
-  for (const child of hookCancellation.signal.aborted ? [] : children.values()) {
+  for (const child of published.cancelled ? [] : children.values()) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
       await sendWorkflowAskAnswers(
