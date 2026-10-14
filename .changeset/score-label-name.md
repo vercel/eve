@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-A labeled `t.score(...)` now uses its label as its name, so `t.score(x).label("grounding")` reports as `grounding` instead of `score [grounding]`, and Datadog and Braintrust log it under `grounding` instead of `score_grounding` or `score [grounding]`.
+Labeled assertions now report to Braintrust and Datadog under their label, so `t.score(x).label("grounding")` logs as `grounding` instead of `score [grounding]` or `score_grounding`. Display names in the console and run artifacts are unchanged, and labeled metrics start a new series under the bare label.

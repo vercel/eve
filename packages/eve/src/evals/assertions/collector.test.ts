@@ -32,7 +32,7 @@ describe("AssertionCollector.recordScore", () => {
 
     expect(assertions).toEqual([
       expect.objectContaining({
-        name: "fidelity",
+        name: "score [fidelity]",
         key: "fidelity",
         score: 0.82,
         severity: "soft",
@@ -158,17 +158,5 @@ describe("AssertionCollector labels", () => {
     const [assertion] = await collector.finalize(taskResult());
 
     expect(assertion?.key).toBeUndefined();
-  });
-
-  it("names a labeled score by its label alone", async () => {
-    const collector = new AssertionCollector();
-    collector.recordScore(0.82).label(" grounding ");
-    collector.recordScore(0.5);
-
-    const [labeled, unlabeled] = await collector.finalize(taskResult());
-
-    expect(labeled).toMatchObject({ name: "grounding", key: "grounding" });
-    expect(unlabeled).toMatchObject({ name: "score" });
-    expect(unlabeled?.key).toBeUndefined();
   });
 });

@@ -24,8 +24,6 @@ export interface RunAssertion {
 
 interface MutableEntry {
   readonly baseName: string;
-  /** `t.score` has no descriptive base name, so its label becomes the whole name. */
-  readonly labelReplacesName: boolean;
   name: string;
   key: string | undefined;
   severity: AssertionSeverity;
@@ -78,7 +76,6 @@ export class AssertionCollector {
   recordValue(input: {
     readonly name: string;
     readonly key?: string;
-    readonly labelReplacesName?: boolean;
     readonly severity: AssertionSeverity;
     readonly threshold?: number;
     readonly score: () => Promise<AssertionOutcome>;
@@ -92,7 +89,6 @@ export class AssertionCollector {
   recordScore(evaluation: ScoreInput): AssertionHandle {
     return this.recordValue({
       name: "score",
-      labelReplacesName: true,
       severity: "soft",
       score: async () => toOutcome(await evaluation),
     });
@@ -141,7 +137,6 @@ export class AssertionCollector {
   #add(input: {
     readonly name: string;
     readonly key?: string;
-    readonly labelReplacesName?: boolean;
     readonly severity: AssertionSeverity;
     readonly threshold?: number;
     readonly kind: MutableEntry["kind"];
@@ -150,7 +145,6 @@ export class AssertionCollector {
   }): MutableEntry {
     const entry: MutableEntry = {
       baseName: input.name,
-      labelReplacesName: input.labelReplacesName ?? false,
       name: input.name,
       key: input.key,
       severity: input.severity,
@@ -242,9 +236,8 @@ function makeHandle(entry: MutableEntry): AssertionHandle {
       return handle;
     },
     label(label) {
-      const name = formatAssertionName(entry.baseName, label);
+      entry.name = formatAssertionName(entry.baseName, label);
       entry.key = label.trim();
-      entry.name = entry.labelReplacesName ? entry.key : name;
       return handle;
     },
   };

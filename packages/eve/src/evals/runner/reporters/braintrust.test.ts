@@ -235,4 +235,34 @@ describe("Braintrust", () => {
       }),
     );
   });
+
+  it("logs labeled assertions under their label", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      makeEvalResult({
+        assertions: [
+          {
+            name: "score [grounding]",
+            key: "grounding",
+            score: 0.8,
+            severity: "soft",
+            errored: false,
+          },
+          {
+            name: "judge.boolean [citation]",
+            key: "citation",
+            score: 1,
+            severity: "gate",
+            errored: false,
+          },
+        ],
+      }),
+    );
+
+    expect(braintrustMocks.log).toHaveBeenCalledWith(
+      expect.objectContaining({ scores: { grounding: 0.8, "gate:citation": 1 } }),
+    );
+  });
 });
