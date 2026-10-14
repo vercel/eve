@@ -634,6 +634,58 @@ describe("workflow tools", () => {
     });
   }, 30_000);
 
+  it("lets an action.partial hook cancel the turn waiting on the reporting run", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-guarded-progress",
+      execute: reportingDeployWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/guard.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "action.partial"(_event, ctx) {
+                  ctx.cancel();
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "deploy_service",
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-guarded-progress",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const settled = await stream.nextTurn();
+        expect(filterEventsByType(settled, "action.partial")).toHaveLength(1);
+        // The hook stopped the turn, so the run's return must not reach the model.
+        const outputs = filterEventsByType(settled, "action.result").map(
+          (event) => event.data.result.output,
+        );
+        expect(outputs).not.toContainEqual({ plan: "plan:api" });
+        expect(
+          containsEventSequence(settled, ["turn.cancelled", "session.waiting"]),
+          JSON.stringify(settled.map((event) => event.type)),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
+
   it("keeps the conversation out of the step input of a session step that only publishes", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-step-input",
