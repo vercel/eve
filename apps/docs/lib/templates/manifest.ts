@@ -85,6 +85,30 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-agent-with-python",
+    title: "Full Stack Agent with Python Backend",
+    setupPrompt:
+      "Set up the eve agent with Python template in my current workspace using https://github.com/vercel-labs/eve-agent-python-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Python, uv, password, database, and Vercel setup steps.",
+    description:
+      "A Next.js web chat with a Python FastAPI backend, where an eve agent manages a shared task list and runs Python tools for statistics and text analysis.",
+    sourceHref: "https://github.com/vercel-labs/eve-agent-python-template/tree/main",
+    category: "Chat",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Web chat", "Postgres", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-agent-python-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/instructions.md",
+      "agent/lib/backend.ts",
+      "agent/tools/create_task.ts",
+      "agent/tools/compute_stats.ts",
+      "agent/tools/analyze_text.ts",
+      "vercel.ts",
+    ],
+  },
+  {
     slug: "eve-voice-template",
     title: "Voice Agent",
     setupPrompt:
