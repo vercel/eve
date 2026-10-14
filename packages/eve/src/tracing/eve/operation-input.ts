@@ -1,5 +1,3 @@
-import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
-
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import {
@@ -37,15 +35,6 @@ export function eveTurnIdentity(input: {
     conversationId: resolveConversationId(input.rootSessionId ?? input.sessionId),
     runId: input.sessionId,
     turnId: input.turnId,
-  };
-}
-
-/** Content flags are recorded by eve's content processor, not withheld by the library. */
-export function eveCapture(reference: SpanContext | undefined) {
-  return {
-    emit: ((reference?.traceFlags ?? 1) & 1) !== 0,
-    recordInputs: true,
-    recordOutputs: true,
   };
 }
 
