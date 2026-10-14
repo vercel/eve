@@ -10,6 +10,7 @@ import {
   ATTACHMENTS_ROOT,
   moveToolResultFilesToUserMessages,
   stageAttachmentsForAdapter,
+  stageAttachmentsToSandbox,
   stageToolResultMedia,
 } from "#harness/attachment-staging.js";
 
@@ -349,18 +350,44 @@ describe("stageAttachmentsForAdapter", () => {
   });
 });
 
+function unresumableSandboxContext(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(SandboxKey, {
+    captureState: async () => ({ session: null }),
+    get: async () => {
+      throw new Error('microsandbox session "ses_1" is no longer available to resume.');
+    },
+    stop: async () => {},
+  });
+  return ctx;
+}
+
+describe("stageAttachmentsToSandbox", () => {
+  it("replaces an inbound file with a note when the sandbox cannot be resumed", async () => {
+    const staged = await contextStorage.run(unresumableSandboxContext(), () =>
+      stageAttachmentsToSandbox([
+        { text: "see attached", type: "text" },
+        {
+          data: UTF8.encode("hello"),
+          filename: "notes.txt",
+          mediaType: "text/plain",
+          type: "file",
+        },
+      ]),
+    );
+
+    expect(staged).toEqual([
+      { text: "see attached", type: "text" },
+      { text: "Attachment notes.txt could not be stored: no sandbox is available.", type: "text" },
+    ]);
+  });
+});
+
 describe("stageToolResultMedia", () => {
   // #4839: a throw here escapes the step after its model call and tools ran,
   // so the step retries and replays them.
-  it.fails("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
-    const ctx = new ContextContainer();
-    ctx.set(SandboxKey, {
-      captureState: async () => ({ session: null }),
-      get: async () => {
-        throw new Error('microsandbox session "ses_1" is no longer available to resume.');
-      },
-      stop: async () => {},
-    });
+  it("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
+    const ctx = unresumableSandboxContext();
     const toolResult = (value: unknown) =>
       ({
         content: [

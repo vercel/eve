@@ -1164,7 +1164,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     expect(logs.records).toContainEqual(
       expect.objectContaining({
         level: "warn",
-        message: "session sandbox unavailable on hydration, degrading sandbox refs to text",
+        message: "session sandbox unavailable, degrading attachments to text",
       }),
     );
   });

@@ -30,6 +30,7 @@ import {
   type SandboxRef,
 } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#public/definitions/sandbox.js";
+import type { SandboxAccess } from "#sandbox/state.js";
 
 /**
  * Sandbox directory where eve stages message attachments and tool-result
@@ -59,8 +60,6 @@ const MEDIA_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
 type ToolResultOutput = ToolResultPart["output"];
 type ToolOutputContentPart = Extract<ToolResultOutput, { type: "content" }>["value"][number];
 type ToolOutputFilePart = Extract<ToolOutputContentPart, { type: "file" }>;
-type SandboxFileReader = Pick<SandboxSession, "readBinaryFile">;
-const UNAVAILABLE_SANDBOX: SandboxFileReader = { readBinaryFile: async () => null };
 
 /**
  * Writes inbound `FilePart` bytes into the sandbox and rewrites each
@@ -111,7 +110,7 @@ export async function stageAttachmentsToSandbox(
   }
 
   const container = loadContext();
-  const sandbox = (await container.get(SandboxKey)?.get()) ?? null;
+  const sandbox = await activeSandbox(container.get(SandboxKey));
   if (sandbox === null) {
     return message.map((part) =>
       part.type === "file" &&
@@ -153,7 +152,7 @@ export async function stageToolResultMedia<T extends ModelMessage>(
   if (!messages.some(hasInlineToolResultFile)) {
     return [...messages];
   }
-  const sandbox = (await contextStorage.getStore()?.get(SandboxKey)?.get()) ?? null;
+  const sandbox = await activeSandbox(contextStorage.getStore()?.get(SandboxKey));
   return Promise.all(
     messages.map(async (message) => {
       if (message.role !== "tool" || !hasInlineToolResultFile(message)) {
@@ -197,18 +196,7 @@ export async function hydrateSandboxAttachments(
     );
   }
 
-  // The sandbox can be gone (another replica, a restart, an expired provider
-  // sandbox). Its refs then degrade like missing files so the turn survives.
-  const sandbox = await sandboxAccess.get().catch((error: unknown) => {
-    log.warn("session sandbox unavailable on hydration, degrading sandbox refs to text", { error });
-    return UNAVAILABLE_SANDBOX;
-  });
-  if (sandbox === null) {
-    throw new Error(
-      "Cannot hydrate sandbox-ref FilePart: SandboxKey is bound but no active sandbox session is available.",
-    );
-  }
-
+  const sandbox = await activeSandbox(sandboxAccess);
   return Promise.all(
     messages.map(async (message) => {
       if (!messageContainsSandboxRef(message)) {
@@ -218,6 +206,22 @@ export async function hydrateSandboxAttachments(
       return { ...message, content } as ModelMessage;
     }),
   );
+}
+
+/**
+ * The session's sandbox for attachment staging and hydration, or `null` when
+ * there is none or it can't be resumed (another replica, a restart, an
+ * expired provider sandbox). Attachments then degrade to notes and labels so
+ * the step survives; tools still see the resume error through `get()`.
+ */
+async function activeSandbox(access: SandboxAccess | undefined): Promise<SandboxSession | null> {
+  if (access === undefined) return null;
+  try {
+    return await access.get();
+  } catch (error) {
+    log.warn("session sandbox unavailable, degrading attachments to text", { error });
+    return null;
+  }
 }
 
 /**
@@ -348,7 +352,7 @@ function isSandboxRefFilePart(part: unknown): part is FilePart {
 
 async function hydrateMessageContent(
   content: unknown,
-  sandbox: SandboxFileReader,
+  sandbox: SandboxSession | null,
 ): Promise<unknown> {
   if (!Array.isArray(content)) {
     return content;
@@ -378,7 +382,7 @@ async function hydrateMessageContent(
 
 async function hydrateToolOutput(
   output: ToolResultOutput,
-  sandbox: SandboxFileReader,
+  sandbox: SandboxSession | null,
 ): Promise<ToolResultOutput> {
   if (output.type !== "content" || !output.value.some(isToolOutputRefFile)) {
     return output;
@@ -402,8 +406,9 @@ async function hydrateToolOutput(
 
 async function readSandboxRefBytes(
   ref: SandboxRef,
-  sandbox: SandboxFileReader,
+  sandbox: SandboxSession | null,
 ): Promise<Uint8Array | null> {
+  if (sandbox === null) return null;
   const bytes = await sandbox.readBinaryFile({ path: ref.path });
   if (bytes === null) {
     // #325: sandbox snapshots can change during a session lifecycle
