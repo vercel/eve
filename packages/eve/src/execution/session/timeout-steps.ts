@@ -16,14 +16,19 @@ import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
-/** Starts the durable timer that signals one session deadline. */
+/**
+ * Starts the durable timer that signals one session deadline, and returns the
+ * deadline it armed. The caller's deadline comes from workflow start time,
+ * which can differ between invocations of one run; the recorded result does
+ * not. Results recorded before it was returned have no `deadline`.
+ */
 export async function startSessionTimeoutStep(
   input: SessionTimeoutWorkflowInput,
-): Promise<{ readonly runId: string }> {
+): Promise<{ readonly deadline?: Date; readonly runId: string }> {
   "use step";
 
   const run = await startWorkflowOnCurrentDeployment(sessionTimeoutWorkflowReference, [input]);
-  return { runId: run.runId };
+  return { deadline: input.deadline, runId: run.runId };
 }
 
 /** Resumes the owning session when its durable timer elapses. */

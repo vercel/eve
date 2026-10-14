@@ -8,6 +8,8 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 /** Workflow-body handle that targets a durable deadline at the stable command inbox. */
 export interface SessionTimeoutControl {
+  /** The deadline the timer armed once started; the requested one before that. */
+  readonly deadline: Date;
   dispose(): Promise<void>;
   start(): Promise<void>;
 }
@@ -19,8 +21,13 @@ export function createSessionTimeoutControl(input: {
 }): SessionTimeoutControl {
   let active: { readonly runId: string } | undefined;
   let startup: Promise<void> | undefined;
+  let deadline = input.deadline;
 
   return {
+    get deadline() {
+      return deadline;
+    },
+
     async dispose(): Promise<void> {
       try {
         await startup;
@@ -35,11 +42,13 @@ export function createSessionTimeoutControl(input: {
 
     async start(): Promise<void> {
       startup ??= (async () => {
-        active = await startSessionTimeoutStep({
+        const started = await startSessionTimeoutStep({
           deadline: input.deadline,
           ownerRunId: getWorkflowMetadata().workflowRunId,
           token: sessionCommandHookToken(input.sessionId),
         });
+        active = { runId: started.runId };
+        if (started.deadline !== undefined) deadline = started.deadline;
       })();
       await startup;
     },

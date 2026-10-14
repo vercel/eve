@@ -275,7 +275,8 @@ async function runSessionLoop(
     compactionHandoffDue &&
     progress.caller === undefined &&
     workingTasks(sessionTaskTable(cursor)).length === 0
-      ? { sessionTimeoutDeadline: boot.sessionTimeoutDeadline }
+      ? // The armed timer's deadline, which replays identically; see `startSessionTimeoutStep`.
+        { sessionTimeoutDeadline: sessionTimeout?.deadline ?? boot.sessionTimeoutDeadline }
       : undefined;
   /**
    * Hands a session that compacted to a fresh run on this deployment while
