@@ -225,6 +225,8 @@ export type RuntimeToolResultActionResult = z.infer<typeof runtimeToolResultActi
 const runtimeToolResultActionResultSchema = z
   .object({
     callId: z.string(),
+    /** The `name` of the error the tool threw, such as `"QuotaError"`. */
+    errorName: z.string().optional(),
     isError: z.boolean().optional(),
     kind: z.literal("tool-result"),
     output: jsonValueSchema,

@@ -7393,9 +7393,11 @@ describe("createToolLoopHarness", () => {
           error: {
             code: "ACTION_RESULT_FAILED",
             message: "Search failed",
+            name: "Error",
           },
           result: {
             callId: toolCallId,
+            errorName: "Error",
             isError: true,
             kind: "tool-result",
             output: "Search failed",

@@ -95,12 +95,15 @@ export function createRuntimeToolResultFromStepResult(
 export function createRuntimeToolResultFromToolError(
   toolError: TypedToolError<ToolSet>,
 ): RuntimeToolResultActionResult {
-  return createRuntimeToolResultFromValue({
+  const error = toError(toolError.error);
+  const result = createRuntimeToolResultFromValue({
     callId: toolError.toolCallId,
     isError: true,
-    output: toError(toolError.error),
+    output: error,
     toolName: toolError.toolName,
   });
+  // The output keeps only the message; the name lets instrumentation classify the failure.
+  return { ...result, errorName: error.name };
 }
 
 /**

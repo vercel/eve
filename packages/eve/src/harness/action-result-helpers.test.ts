@@ -63,6 +63,7 @@ describe("createRuntimeToolResultFromToolError", () => {
       }),
     ).toEqual({
       callId: "call_lookup",
+      errorName: "Error",
       isError: true,
       kind: "tool-result",
       output: 'No skill named "demo"',

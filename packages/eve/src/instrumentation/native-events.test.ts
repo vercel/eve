@@ -484,7 +484,7 @@ describe("createInstrumentationHandleEvent", () => {
   });
 
   // https://github.com/vercel/eve/issues/4820
-  it.fails("keeps the class name of the error a tool threw", async () => {
+  it("keeps the class name of the error a tool threw", async () => {
     class QuotaError extends Error {
       override name = "QuotaError";
     }
