@@ -5,6 +5,10 @@ import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
 import {
+  renderTeamsAuthorizationPrompt,
+  renderTeamsAuthorizationStatus,
+} from "#public/channels/teams/authorization.js";
+import {
   renderAnsweredInputRequestMessage,
   renderInputRequestMessage,
 } from "#public/channels/teams/hitl.js";
@@ -15,7 +19,6 @@ import type {
   TeamsInboundResult,
 } from "#public/channels/teams/teamsChannel.js";
 import { displayProperName } from "#shared/display-name.js";
-import { parseJsonObject } from "#shared/json.js";
 
 /** Default auth projection for Teams message actors. */
 export function defaultTeamsAuth(
@@ -165,62 +168,17 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 
   async "authorization.required"(event, channel, _ctx) {
-    const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const url = event.authorization?.url;
-    const instructions = event.authorization?.instructions;
-    const userCode = event.authorization?.userCode;
-    const codeHint = userCode
-      ? `If ${displayName} asks for a confirmation code, enter ${userCode}.`
-      : undefined;
-    const text = [
-      url
-        ? `Authorization required for ${displayName}: ${url}`
-        : `Authorization required for ${displayName}.`,
-      instructions,
-      codeHint,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    const posted = await channel.thread.post({
-      attachments: [
-        {
-          content: parseJsonObject({
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-            actions: url
-              ? [
-                  {
-                    title: `Sign in with ${displayName}`,
-                    type: "Action.OpenUrl",
-                    url,
-                  },
-                ]
-              : [],
-            body: [
-              {
-                text: `Authorization required for ${displayName}`,
-                type: "TextBlock",
-                weight: "Bolder",
-                wrap: true,
-              },
-              {
-                text: channel.state.triggeringUser
-                  ? `Requested by ${channel.state.triggeringUser.name ?? channel.state.triggeringUser.id}.`
-                  : "No triggering user is available for a private prompt.",
-                type: "TextBlock",
-                wrap: true,
-              },
-              ...[instructions, codeHint]
-                .filter((line): line is string => Boolean(line))
-                .map((line) => ({ text: line, type: "TextBlock", wrap: true })),
-            ],
-            type: "AdaptiveCard",
-            version: channel.adaptiveCardVersion,
-          }),
-          contentType: "application/vnd.microsoft.card.adaptive",
-        },
-      ],
-      text,
-    });
+    const user = channel.state.triggeringUser;
+    const options = {
+      adaptiveCardVersion: channel.adaptiveCardVersion,
+      replyToActivityId: channel.teams.replyToActivityId,
+      requester: user ? (user.name ?? user.id) : undefined,
+    };
+    const posted = await channel.thread.post(
+      channel.state.conversationType === "personal"
+        ? renderTeamsAuthorizationPrompt(event, options)
+        : renderTeamsAuthorizationStatus(event, options),
+    );
     if (posted.id) {
       channel.state.pendingAuthActivityId = posted.id;
     }

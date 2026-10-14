@@ -35,6 +35,11 @@ import {
   type TeamsPostedActivity,
 } from "#public/channels/teams/api.js";
 import {
+  answerTeamsAuthorizationReveal,
+  readTeamsAuthorizationReveal,
+  type TeamsAuthorizationReveal,
+} from "#public/channels/teams/authorization.js";
+import {
   defaultEvents,
   defaultOnMessage,
   defaultTeamsAuth,
@@ -381,6 +386,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
               activity,
               config,
               onInputResponse,
+              resolveSession,
               waitUntil,
               from,
             });
@@ -677,8 +683,12 @@ async function handleInvoke(input: {
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
+  readonly resolveSession: ChannelResolveSession;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
+  const reveal = readTeamsAuthorizationReveal(input.activity);
+  if (reveal !== null) return Response.json(await revealAuthorization({ ...input, reveal }));
+
   if (isTeamsInputResponseActivity(input.activity)) {
     input.waitUntil(
       dispatchInputResponses({
@@ -697,6 +707,40 @@ async function handleInvoke(input: {
   if (result instanceof Response) return result;
   if (result && typeof result === "object") return Response.json(result);
   return teamsOk();
+}
+
+/** Identifies the presser the same way a HITL card submission does. */
+async function revealAuthorization(input: {
+  readonly activity: TeamsInvokeActivity;
+  readonly config: TeamsChannelConfig;
+  readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
+  readonly resolveSession: ChannelResolveSession;
+  readonly reveal: TeamsAuthorizationReveal;
+}): Promise<JsonObject> {
+  const state = stateFromActivity(input.activity);
+  const ctx = buildTeamsBinding({ config: input.config, state });
+  let auth: SessionAuthContext | null = null;
+  try {
+    auth = (await input.onInputResponse(ctx, input.activity))?.auth ?? null;
+  } catch (error) {
+    log.error("Teams sign-in press authorization failed", { error });
+  }
+  const replyToActivityId = input.reveal.replyToActivityId;
+  const token =
+    replyToActivityId === undefined
+      ? stateToken(state)
+      : teamsContinuationToken({
+          conversationId: input.activity.conversation.id,
+          replyToActivityId,
+          tenantId: input.activity.tenantId,
+        });
+  return await answerTeamsAuthorizationReveal({
+    adaptiveCardVersion: input.config.adaptiveCardVersion ?? "1.5",
+    auth,
+    presser: input.activity.from,
+    resolveSession: () => input.resolveSession(token),
+    reveal: input.reveal,
+  });
 }
 
 async function dispatchInputResponses(input: {

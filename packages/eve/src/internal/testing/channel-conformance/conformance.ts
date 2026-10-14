@@ -178,14 +178,6 @@ const TEAMS_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
-/** The sign-in prompt, link included, goes to the whole thread. */
-const SIGN_IN_LINK_POSTED_TO_THREAD = {
-  "only the person signing in sees the sign-in link and code": {
-    reason: "the sign-in prompt, link included, is posted to the whole thread",
-    symptom: /a message everyone sees carried the sign-in (link|code)/u,
-  },
-} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
-
 const TELEGRAM_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
@@ -256,7 +248,7 @@ const channelConformance = {
   photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
-  teams: [{ driver: teamsDriver, broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINK_POSTED_TO_THREAD } }],
+  teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
   "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
   telegram: [{ driver: telegramDriver, broken: TELEGRAM_BROKEN }],
   "telegram-dm": [{ dm: true, driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
