@@ -369,15 +369,21 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
   }
 
   if (sandbox === null) {
-    sandbox = await input.createSandbox({
-      sandboxModule,
-      createOptions: withBaseSetupNetworkPolicy({
-        ...input.createOptions,
-        name: input.templateKey,
-        persistent: true,
-        tags: tags,
-      }),
-    });
+    try {
+      sandbox = await input.createSandbox({
+        sandboxModule,
+        createOptions: withBaseSetupNetworkPolicy({
+          ...input.createOptions,
+          name: input.templateKey,
+          persistent: true,
+          tags: tags,
+        }),
+      });
+    } catch (error) {
+      // A concurrent build created the template first and owns its preparation.
+      if (!isVercelSandboxNameConflictError(error)) throw error;
+      return await waitForTemplateSnapshot({ authorSnapshotId, input, sandboxModule });
+    }
   } else {
     await ensureVercelSandboxTags(sandbox, tags);
   }
@@ -392,12 +398,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
    * framework snapshot, and we still owe `ensureSandboxWorkingDirectory`,
    * preparation, seed file writes, and `sandbox.snapshot()` on top.
    */
-  const frameworkSnapshotId =
-    typeof sandbox.currentSnapshotId === "string" &&
-    sandbox.currentSnapshotId.length > 0 &&
-    sandbox.currentSnapshotId !== authorSnapshotId
-      ? sandbox.currentSnapshotId
-      : null;
+  const frameworkSnapshotId = readFrameworkSnapshotId(sandbox, authorSnapshotId);
 
   if (frameworkSnapshotId !== null) {
     return {
@@ -437,6 +438,36 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
       templateKey: input.templateKey,
     },
   };
+}
+
+/*
+ * Polls instead of preparing the same sandbox twice. The other build's
+ * sandbox stops once snapshotted, failed, or timed out, so its create
+ * timeout also bounds this wait.
+ */
+async function waitForTemplateSnapshot(input: {
+  readonly authorSnapshotId: string | undefined;
+  readonly input: EnsureTemplateInput;
+  readonly sandboxModule: VercelModule;
+}): Promise<EnsureTemplateOutcome> {
+  const { createOptions, log, templateKey } = input.input;
+  log?.("waiting for another build to prepare the sandbox template");
+  const deadline = Date.now() + (createOptions.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS);
+  while (Date.now() < deadline) {
+    const sandbox = await getNamedVercelSandbox({
+      createOptions,
+      sandboxModule: input.sandboxModule,
+      sandboxName: templateKey,
+    });
+    const snapshotId = sandbox && readFrameworkSnapshotId(sandbox, input.authorSnapshotId);
+    if (snapshotId) return { template: { sandboxName: templateKey, snapshotId, templateKey } };
+    if (sandbox === null || isUnprovisionedTerminalTemplateSandbox(sandbox, input.authorSnapshotId))
+      break;
+    await new Promise((resolve) => setTimeout(resolve, TEMPLATE_SNAPSHOT_POLL_MS));
+  }
+  throw new Error(
+    `Another build created Vercel sandbox template "${templateKey}" but did not snapshot it. Retry the build.`,
+  );
 }
 
 interface EnsureSessionInput {
@@ -680,19 +711,23 @@ async function resolveVercelWritePath(
   return resolved;
 }
 
+function readFrameworkSnapshotId(
+  sandbox: VercelSandbox,
+  authorSnapshotId: string | undefined,
+): string | null {
+  const currentSnapshotId = sandbox.currentSnapshotId;
+  return typeof currentSnapshotId === "string" &&
+    currentSnapshotId.length > 0 &&
+    currentSnapshotId !== authorSnapshotId
+    ? currentSnapshotId
+    : null;
+}
+
 function isUnprovisionedTerminalTemplateSandbox(
   sandbox: VercelSandbox,
   authorSnapshotId: string | undefined,
 ): boolean {
-  const currentSnapshotId = sandbox.currentSnapshotId;
-  if (
-    typeof currentSnapshotId === "string" &&
-    currentSnapshotId.length > 0 &&
-    currentSnapshotId !== authorSnapshotId
-  ) {
-    return false;
-  }
-
+  if (readFrameworkSnapshotId(sandbox, authorSnapshotId) !== null) return false;
   return (
     sandbox.status === "aborted" || sandbox.status === "failed" || sandbox.status === "stopped"
   );
@@ -717,3 +752,5 @@ function extractAuthorSnapshotId(createOptions: VercelCreateOptions): string | u
  * too short for multi-step workflows — the VM expires between steps.
  */
 const DEFAULT_SANDBOX_TIMEOUT_MS = 30 * 60 * 1_000;
+
+const TEMPLATE_SNAPSHOT_POLL_MS = 2_000;
