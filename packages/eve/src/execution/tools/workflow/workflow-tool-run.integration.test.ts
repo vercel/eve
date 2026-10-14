@@ -323,7 +323,7 @@ describe("workflow tools", () => {
     });
   }, 60_000);
 
-  it.fails("lets a message.received hook cancel a typed answer before it resolves ctx.ask", async () => {
+  it("lets a message.received hook cancel a typed answer before it resolves ctx.ask", async () => {
     const hooksAfterCancel: string[] = [];
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-guarded-answer",
