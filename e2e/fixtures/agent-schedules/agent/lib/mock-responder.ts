@@ -17,7 +17,22 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
   if (message.includes("This scheduled occurrence is firing now")) {
     const email = message.includes(UPDATED_EMAIL.subject) ? UPDATED_EMAIL : EMAIL;
-    return once(request, "record-email", email, () => `Sent "${email.subject}" to ${email.to}.`);
+    const reply = `Sent "${email.subject}" to ${email.to}.`;
+    const emailResult = request.toolResults.find(
+      (entry) => entry.id === `record-email-${request.userMessageCount}`,
+    );
+    if (message.includes("then disable this schedule") && emailResult !== undefined) {
+      const output =
+        typeof emailResult.output === "string"
+          ? JSON.parse(emailResult.output)
+          : emailResult.output;
+      if (Reflect.get(Object(output), "accepted") === true) {
+        const name = /Schedule management name: ([0-9A-Za-z._-]+)\./u.exec(message)?.[1];
+        if (!name) throw new Error("The scheduled prompt needs a management name.");
+        return once(request, "schedule__requests__disable", { name }, () => reply);
+      }
+    }
+    return once(request, "record-email", email, () => reply);
   }
   if (message.includes(`Create the schedule named ${SCHEDULE}`)) {
     const input = {
@@ -40,7 +55,7 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
         name,
         expression: { type: "single", at: "2030-01-02T09:00", timezone: "UTC" },
         payload: {
-          task: `Send a fixture email with subject "${UPDATED_EMAIL.subject}" and body "${UPDATED_EMAIL.body}".`,
+          task: `Send a fixture email with subject "${UPDATED_EMAIL.subject}" and body "${UPDATED_EMAIL.body}", then disable this schedule with schedule__requests__disable if record-email returns accepted: true.`,
           destination: "creator-email",
         },
       },
