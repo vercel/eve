@@ -71,6 +71,7 @@ export class EveAgentStore<TData> {
   #attached = false;
   readonly #conversationClient: ConversationClient<TData>;
   readonly #followChildStreams: boolean;
+  readonly #followIdle: boolean;
   readonly #externalSession: boolean;
   readonly #subscribers = new Set<() => void>();
   #activeTurn: ActiveTurn | undefined;
@@ -89,6 +90,7 @@ export class EveAgentStore<TData> {
   constructor(init: EveAgentStoreInit<TData>) {
     this.#autoPrewarm = init.prewarm ?? false;
     this.#followChildStreams = init.followSubagents ?? false;
+    this.#followIdle = init.followIdle ?? true;
     this.#externalSession = init.session !== undefined;
     this.#client = this.#externalSession
       ? undefined
@@ -160,7 +162,8 @@ export class EveAgentStore<TData> {
         this.#error = undefined;
         if (this.#status === "error") this.#status = "ready";
         this.#adoptSession(created.session);
-        this.#ensureStream();
+        // A prewarmed session emits nothing until its first message.
+        if (this.#followIdle) this.#ensureStream();
       } catch (error) {
         if (
           generation === this.#prewarmGeneration &&
@@ -594,6 +597,7 @@ export class EveAgentStore<TData> {
     if (!this.#isActiveTurn(turn)) return;
     turn.resolveResponse(undefined);
     this.#activeTurn = undefined;
+    this.#closeStreamWhenIdle();
     try {
       this.#callbacks.onSessionChange?.(this.#session?.state);
       this.#publish();
@@ -639,7 +643,20 @@ export class EveAgentStore<TData> {
     if (this.#activeTurn === undefined && wasStreaming && settled) {
       this.#callbacks.onFinish?.(this.#snapshot);
     }
+    if (this.#activeTurn === undefined) this.#closeStreamWhenIdle();
     return true;
+  }
+
+  #closeStreamWhenIdle(): void {
+    if (this.#followIdle) return;
+    const { conversation } = this.#conversationClient;
+    if (conversation.activeTurnId !== undefined) return;
+    // Unsettled tails include sign-ins whose callbacks resume the session from elsewhere.
+    if (this.#events.length > 0 && !isSettledSessionTail(this.#events, conversation)) return;
+    const working = Object.values(conversation.tasks).some((task) =>
+      Object.values(task.calls).some((call) => call.status === "working"),
+    );
+    if (!working) this.#conversationClient.closeStream();
   }
 
   /** Pairs a submission's echo with the server's copy once its delivery ID is known. */

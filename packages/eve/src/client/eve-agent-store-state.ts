@@ -71,6 +71,15 @@ export interface EveAgentStoreInit<TData> {
    * while the store streams its session or a framework binding has it mounted.
    */
   readonly followSubagents?: boolean;
+  /**
+   * Keep the session stream open while the session is idle, so the store sees events that arrive
+   * between turns from schedules, channels, or other clients. When false, the store closes the
+   * stream once no turn, task, or sign-in is pending, and reopens it from the session cursor on
+   * the next send, answer, or resume.
+   *
+   * @default true
+   */
+  readonly followIdle?: boolean;
   readonly reducer: EveAgentReducer<TData>;
   readonly session?: ClientSession;
 }

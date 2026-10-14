@@ -165,6 +165,15 @@ its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
 Unmounting or resetting closes the local stream without cancelling the old durable session.
 
+An open stream reconnects for as long as the chat stays mounted, even when nothing happens. If
+your UI only shows replies to its own messages, such as a help sidebar that stays mounted across
+pages, pass `followIdle: false`. The binding then closes the stream once the session is idle: no
+turn is running or parked, no task is working, and no sign-in is pending. A prewarmed session
+opens no stream until its first message. The next `send()`, `respond()`, or `resume()` reopens
+the stream from the session cursor, so events that arrived in between are applied then. Leave
+`followIdle` on when other sources, such as schedules, channels, or another tab, can start turns
+in the session while your UI is idle.
+
 `reset()` reuses the hook instance and clears the conversation. When `prewarm` is true after
 the reset, it prepares the next owned session; otherwise, the next send creates it. An explicitly
 supplied `session` remains externally owned and is never replaced by prewarming or reset. Use
@@ -399,7 +408,7 @@ then save a final snapshot in `onFinish`.
 
 `initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. When the event count matches `initialSession.streamIndex`, catch-up continues from that cursor. A partial or overlapping saved log falls back to index `0`. Every event carries a stable [`meta.id`](/docs/concepts/sessions-runs-and-streaming#the-event-envelope), and the store drops any event whose id it has already applied, so an overlapping replay renders once and `onEvent` only fires for events your UI has not seen.
 
-For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`. React reads `prewarm` on every render.
+For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `followIdle`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`. React reads `prewarm` on every render.
 
 Pass `resume: true` with `initialSession` to rebuild the projection from the durable stream after mount. While `status` is `"resuming"`, render hydrated `data` but disable message and HITL submission; do not present cancellation or active-turn progress controls. If catch-up finds an in-flight turn, `status` changes to `"streaming"` before the binding follows it to a boundary. The stream reports its initial durable tail so catch-up can finish without closing the connection or waiting for an idle timeout. A settled tail changes directly to `"ready"`; a newer turn or pending authorization remains `"streaming"`. The connection stays open to receive later events. A terminal session failure changes to `"error"`.
 
