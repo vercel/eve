@@ -18,6 +18,7 @@ import {
   createWorkflowBodyRef,
   resolveWorkflowEntryPoint,
   toFailedOutcome,
+  toWorkflowOutput,
   WorkflowToolRunCancelledError,
   type StartedWorkflowBody,
   type WorkflowBodyControl,
@@ -385,7 +386,7 @@ async function executeServeBody(
       target === undefined
         ? await resolveWorkflowEntryPoint<ServeEntryPoint>(input)(receive, ctx)
         : await serveStub(target.scope, target.tool, receive, ctx);
-    outcome = { output, status: "completed" };
+    outcome = { output: toWorkflowOutput(input, output), status: "completed" };
   } catch (error) {
     outcome = toFailedOutcome(error, calls.runSignal);
   }
@@ -423,7 +424,8 @@ function createServeContext(
     get session() {
       return calls.current.session;
     },
-    reply: (output) => calls.reply(output),
+    reply: (output) =>
+      calls.reply(toWorkflowOutput({ callId: ctx.callId, toolName: input.toolName }, output)),
   };
   return ctx;
 }

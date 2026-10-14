@@ -21,6 +21,7 @@ import {
   deployServiceWorkflow,
   failingDeployWorkflow,
   reportingDeployWorkflow,
+  returnAskAnswerWorkflow,
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
@@ -385,6 +386,58 @@ describe("workflow tools", () => {
           },
           runStartPrincipal: "alice",
         });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  // #3836: the selected option's answer has `text: undefined`, which used to
+  // fail the turn when the session projected the result for the model.
+  it("completes a workflow tool that returns the selected ctx.ask answer as-is", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-raw-answer",
+      execute: returnAskAnswerWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-raw-answer",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const requested = await stream.nextTurn();
+        const request = (
+          filterEventsByType(requested, "input.requested")[0] as InputRequestedStreamEvent
+        ).data.requests[0]!;
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
+        });
+
+        const answered = await stream.nextTurn();
+        expect(filterEventsByType(answered, "turn.failed")).toHaveLength(0);
+        const result = filterEventsByType(answered, "action.result").find(
+          (event) =>
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === "confirm_deploy",
+        );
+        expect(result?.data.result.output).toMatchObject({
+          optionId: "approve",
+          status: "answered",
+        });
+        expect(Object.hasOwn(result?.data.result.output as object, "text")).toBe(false);
+        expect(filterEventsByType(answered, "turn.completed")).toHaveLength(1);
       } finally {
         stream.dispose();
         await run.cancel();
