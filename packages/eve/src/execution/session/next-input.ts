@@ -23,7 +23,12 @@ export type NextTurnInstruction =
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn"; readonly origin?: ControlOrigin }
   /** `session.cancel()` while no turn runs, but tasks are working. */
-  | { readonly kind: "cancel-working-tasks"; readonly origin?: ControlOrigin }
+  | {
+      readonly kind: "cancel-working-tasks";
+      readonly origin?: ControlOrigin;
+      /** Only the tasks this turn's calls started; all working tasks when absent. */
+      readonly turnId?: string;
+    }
   | TurnSelection;
 
 /**
@@ -33,7 +38,7 @@ export type NextTurnInstruction =
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
-  readonly hasWorkingTasks: () => boolean;
+  readonly hasWorkingTasks: (turnId?: string | null) => boolean;
   readonly queue: SessionInputQueue;
   /** Settles a control that changes nothing; a session that hasn't started defers it. */
   readonly ignore: (settlement: ControlSettlement) => Promise<void>;
@@ -77,15 +82,17 @@ export async function nextTurnDelivery(input: {
     if (admitted.kind !== "cancel") continue;
     const projection = storedProjection(readDurableSession(cursor.sessionState).state);
     const view = projection.view;
-    const stale =
-      payload.kind === "cancel" &&
-      payload.turnId !== undefined &&
-      payload.turnId !== activeTurnIdOf(projection);
+    const stale = admitted.turnId !== undefined && admitted.turnId !== activeTurnIdOf(projection);
     if (!stale && openRequests(view).some((row) => row.request.kind === "budget")) {
       return { kind: "cancel-turn", origin: admitted.origin };
     }
-    if (!stale && input.hasWorkingTasks()) {
-      return { kind: "cancel-working-tasks", origin: admitted.origin };
+    // A cancel naming an ended turn still stops the background tasks that turn left working.
+    if (input.hasWorkingTasks(admitted.turnId)) {
+      return {
+        kind: "cancel-working-tasks",
+        origin: admitted.origin,
+        turnId: admitted.turnId ?? undefined,
+      };
     }
     if (admitted.origin !== undefined)
       await input.ignore({

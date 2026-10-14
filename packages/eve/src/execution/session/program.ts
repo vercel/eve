@@ -20,7 +20,7 @@ import { SessionInputQueue, type ControlOrigin } from "#execution/session/input-
 import { SessionExecution } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
+import { cancelWorkingTasks, sessionTaskTable, workingTaskIds } from "#execution/tasks/session.js";
 import { workingTasks } from "#execution/tasks/table.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
@@ -272,7 +272,7 @@ async function runSessionLoop(
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
-        hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
+        hasWorkingTasks: (turnId) => workingTaskIds(cursor, turnId).length > 0,
         ignore,
         inbox,
         queue,
@@ -302,7 +302,7 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "cancel-working-tasks") {
-        await cancelWorkingTasks(cursor, "turn-cancelled");
+        await cancelWorkingTasks(cursor, "turn-cancelled", { turnId: next.turnId });
         if (next.origin !== undefined) {
           const control = controlDeliveryOf(next.origin);
           await cursor.advance((state) =>

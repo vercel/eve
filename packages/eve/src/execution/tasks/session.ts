@@ -35,19 +35,27 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
 }
 
 /**
- * Cancels every working task: `session.cancel()` stops them, and a turn that
- * ends anyway, such as by failing, cancels the tasks it held on. With
- * `turnCalls`, the workflow tool runs the turn waits on stop in the same step.
+ * Cancels every working task, or with `turnId` only those with a call from that
+ * turn: `session.cancel()` stops them, and a turn that ends anyway, such as by
+ * failing, cancels the tasks it held on. With `turnCalls`, the workflow tool
+ * runs the turn waits on stop in the same step.
  */
 export async function cancelWorkingTasks(
   cursor: SessionStateCursor,
   reason: Exclude<TaskCancelReason, "task-cancel">,
-  options: { readonly turnCalls?: boolean } = {},
+  options: { readonly turnCalls?: boolean; readonly turnId?: string } = {},
 ): Promise<void> {
-  const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
+  const taskIds = workingTaskIds(cursor, options.turnId);
   const turnCalls = options.turnCalls === true && mayWaitOnWorkflowToolRuns(cursor);
   if (taskIds.length === 0 && !turnCalls) return;
   await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds, turnCalls }));
+}
+
+/** Working tasks, narrowed to those a `turnId`'s calls started. */
+export function workingTaskIds(cursor: SessionStateCursor, turnId?: string | null): string[] {
+  return workingTasks(sessionTaskTable(cursor))
+    .filter((record) => turnId === undefined || record.calls.some((call) => call.turnId === turnId))
+    .map((record) => record.id);
 }
 
 /** An unreadable run registry counts as waiting, so the step runs and logs it. */

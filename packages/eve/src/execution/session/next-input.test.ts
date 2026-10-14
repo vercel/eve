@@ -130,6 +130,51 @@ describe("nextTurnDelivery", () => {
     });
   });
 
+  it("narrows a cancel naming an ended turn to that turn's background tasks", async () => {
+    const inbox = createMockInbox([
+      {
+        result: {
+          done: false,
+          value: { kind: "cancel", deliveryId: "cancel-turn-b", turnId: "turn_B" },
+        },
+      },
+    ]);
+    const input = waitInput(inbox);
+    const asked: (string | null | undefined)[] = [];
+    input.hasWorkingTasks = (turnId) => {
+      asked.push(turnId);
+      return turnId === "turn_B";
+    };
+    expect(await nextTurnDelivery(input)).toEqual({
+      kind: "cancel-working-tasks",
+      origin: { deliveryId: "cancel-turn-b" },
+      turnId: "turn_B",
+    });
+    expect(asked).toEqual(["turn_B"]);
+  });
+
+  it("ignores a cancel naming a turn that left no task working", async () => {
+    const inbox = createMockInbox([
+      {
+        result: {
+          done: false,
+          value: { kind: "cancel", deliveryId: "cancel-turn-a", turnId: "turn_A" },
+        },
+      },
+      { result: { done: true, value: undefined } },
+    ]);
+    const input = waitInput(inbox);
+    const ignored: unknown[] = [];
+    input.ignore = async (settlement) => {
+      ignored.push(settlement);
+    };
+    input.hasWorkingTasks = (turnId) => turnId === undefined;
+    expect(await nextTurnDelivery(input)).toEqual({ kind: "closed" });
+    expect(ignored).toEqual([
+      { control: { deliveryId: "cancel-turn-a" }, outcome: "ignored", source: "cancel" },
+    ]);
+  });
+
   it("batches one principal's adjacent queued deliveries with their latest claims", async () => {
     const auth: SessionAuthContext = {
       attributes: { scopes: ["read"], team: "support" },
