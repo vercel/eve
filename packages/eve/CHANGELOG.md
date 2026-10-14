@@ -1,5 +1,34 @@
 # eve
 
+## 0.79.1
+
+### Patch Changes
+
+- 68b9d58: Approved `defineTool` calls can read who approved them: `ctx.approval.responder` is the approver and `ctx.approval.responder.getToken(provider)` resolves their token, while the call still runs as the requester.
+- 620022b: The Braintrust eval reporter no longer aborts the run when an eval produces no agent output. Those evals are now logged with an empty output.
+- 2e45423: Allow `eve/client` to use an `AbortSignal` that does not implement `throwIfAborted`, including the signal provided by React Native.
+- afa7741: Sync dynamic skill files to the sandbox about 7× faster by writing them concurrently.
+- 70f75ed: Connection sign-in callback URLs no longer include `VERCEL_AUTOMATION_BYPASS_SECRET`, so the secret stays out of the links shown to users and the `redirect_uri` sent to providers. On a deployment behind Deployment Protection, the person signing in now passes protection on their own, for example through Vercel Authentication or a Deployment Protection Exception.
+- 4c6fc60: Record `agent.input.messages.omitted` on model spans when the oldest prompt messages are dropped to fit the 32 KB content cap, so a long conversation no longer looks like it starts partway through.
+- 7f5a5e6: Reading a session stream whose history passed the World's retention now returns `410` with `code: "session_expired"` instead of a retryable `503` or `404`. The TypeScript client fails on the first response instead of retrying for about 38 seconds.
+- 624be47: Pass `followIdle: false` to `useEveAgent()` (React, Vue, and Svelte) or `EveAgentStore` to close the session stream while the session is idle instead of reconnecting it indefinitely. The stream reopens from its cursor on the next send, answer, or resume, and a prewarmed session opens no stream until its first message.
+- 4bf1efa: Propagate configured trace context at each AI Gateway model request.
+- 7921fb0: Self-modification now rejects target branch names Git rejects: path components starting with `.` (such as `.hidden` or `feature/.hidden`) and names containing the DEL character.
+- 71479ce: Let a message sent with `turnPolicy: "queue"` right after a tool approval or sign-in appears steer the held turn again. A message that arrived while the step raising the request was still finishing was treated as sent before the request, so it stayed queued behind a turn that could not end until the person acted.
+- 0fd4240: Honor explicit OpenTelemetry trace policies that enable inputs or outputs for DMs, private channels, and unknown audiences. Default capture remains audience-aware, and inherited capture limits and destination redaction still apply.
+- 3aa9a3a: Expose the live Vercel Sandbox name on `VercelSandboxSession` so tools can create Vercel git-credential-broker grants scoped to their session sandbox.
+- 9d046f8: Memory provider tools are now offered on a turn whose message carries a file attachment. Before, the agent lost its memory tools on exactly that turn.
+- 8d5b75f: `eve build` now works for apps with mounted extensions on filesystems without hard-link support, such as some NFS and FUSE mounts. It no longer fails with `Unknown system error -524` while writing the authored module map.
+- d8414ad: OpenAPI connections whose operation names collide at 64 characters now keep the suffixed tool names within the 64-character provider limit.
+- 8f336b8: Prewarm new Web Chat sessions when the user starts typing, so durable session startup overlaps with composing the first message.
+- 0dea0de: Keep a message sent with `turnPolicy: "queue"` before a tool approval or sign-in was requested in the queue, so it can no longer answer a prompt the person had not seen. Messages sent after the prompt still steer the held turn.
+- d7fef87: Import skills with structured or non-string metadata without failing, treating metadata outside eve's modeled shape like other unmodeled frontmatter.
+- f2e0f67: Vercel sandbox creation now reads `VERCEL_TOKEN`, `VERCEL_TEAM_ID`/`VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` from the environment, like sandbox lookup and deletion already do. A CI runner without a linked project can now create sandboxes.
+- a4af301: Labeled assertions now report to Braintrust and Datadog under their label, so `t.score(x).label("grounding")` logs as `grounding` instead of `score [grounding]` or `score_grounding`. Display names in the console and run artifacts are unchanged, and labeled metrics start a new series under the bare label.
+- d91d27c: Keep the answer a turn already wrote when it waits on tasks and resumes without new text, so `MessageResponse` results, `eve invoke`, and eval turns no longer report an empty message.
+- 57d4272: Connections that share a host, such as Jira and Confluence on one Atlassian domain, no longer trigger the "could not assign a unique toolResultFrom identity" warning, and `toolResultFrom` now accepts OpenAPI connections, including ones without a `baseUrl`.
+- 0e6bc96: `eve build` now reports why an extension mount failed to resolve, for example an extension that requires an unsupported tool contract or a package that isn't installed. Before, the build stopped with `Selected module binding "extensions/<name>.ts" has no compile or runtime usage.` and hid the cause.
+
 ## 0.79.0
 
 ### Minor Changes
