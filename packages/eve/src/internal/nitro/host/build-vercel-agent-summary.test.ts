@@ -4,6 +4,7 @@ import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { buildVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import {
   normalizeChannelKindForDisplay,
@@ -14,6 +15,54 @@ import {
 const GENERATOR_VERSION = "0.0.0-test";
 
 describe("buildVercelAgentSummary", () => {
+  it.each([
+    { publicRoutePrefix: undefined, urlPath: "/eve/v1/hooks/issues" },
+    { publicRoutePrefix: "/support/", urlPath: "/support/eve/v1/hooks/issues" },
+    { publicRoutePrefix: "/eve/support", urlPath: "/eve/support/v1/hooks/issues" },
+  ])("reports opted-in event receivers at $urlPath", async ({ publicRoutePrefix, urlPath }) => {
+    const auth = {
+      getToken: async () => ({ token: "credential" }),
+      vercelConnect: {
+        connector: "oauth/issues",
+        experimental_events: {
+          createAdapter: async () => {
+            throw new Error("must not create an adapter during build");
+          },
+          verify: async () => {
+            throw new Error("must not verify a delivery during build");
+          },
+        },
+      },
+    };
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      modules: ["issues", "read-only"].map((name) => ({
+        logicalPath: `connections/${name}.ts`,
+        loadNamespace: async () => ({
+          default: defineMcpClientConnection({
+            url: "https://issues.example/mcp",
+            description: "Issues",
+            auth,
+            experimental_events: name === "issues" ? { onEvent() {} } : undefined,
+          }),
+        }),
+      })),
+    });
+    const summary = buildVercelAgentSummary({ manifest, publicRoutePrefix });
+    expect(summary.connections.find((entry) => entry.name === "issues")).toEqual({
+      name: "issues",
+      description: "Issues",
+      url: "https://issues.example/mcp",
+      logicalPath: "connections/issues.ts",
+      type: "mcp",
+      vercelConnect: { connector: "oauth/issues" },
+      experimental_events: { method: "POST", urlPath },
+    });
+    expect(summary.connections.find((entry) => entry.name === "read-only")).not.toHaveProperty(
+      "experimental_events",
+    );
+  });
+
   it("projects the effective compiled graph into the public summary", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",

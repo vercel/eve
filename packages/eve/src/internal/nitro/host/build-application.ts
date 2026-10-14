@@ -391,6 +391,7 @@ async function buildApplicationInWorkspace(
       emitVercelAgentSummary({
         manifest: preparedHost.compileResult.manifest,
         outputPath: workspace.publication.summary.stagedPath,
+        publicRoutePrefix,
       }),
     );
     await measureBuildPhase(profiler, "connect-manifest.emit", () =>

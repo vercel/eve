@@ -132,6 +132,12 @@ export interface VercelEveConnectionEntry {
   readonly url: string;
   readonly logicalPath: string;
   readonly type: VercelEveConnectionType;
+  /** Build-time receiver capability; does not indicate an active subscription. */
+  readonly experimental_events?: {
+    readonly method: "POST";
+    /** Public receiver path, including any configured agent or service prefix. */
+    readonly urlPath: string;
+  };
   /**
    * When the connection's auth is built by `connect()` from
    * `@vercel/connect/eve`, the connector identifier the author passed
