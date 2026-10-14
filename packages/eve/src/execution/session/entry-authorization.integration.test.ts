@@ -18,7 +18,10 @@ import {
 } from "#execution/session-inbox/address.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import {
+  ConnectionAuthorizationFailedError,
+  ConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
@@ -258,6 +261,50 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("reports a sign-in failed when completeAuthorization rejects its callback", async () => {
+    const { completeCalls, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-denied");
+    const continuationToken = "http:workflow-entry-auth-denied";
+
+    await runtime.run(async () => {
+      const run = await startWeatherRun(continuationToken);
+      const stream = captureEvents(run);
+
+      try {
+        const firstTurn = await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil("authorization hold", (event) => event.type === "turn.waiting");
+
+        // The provider redirects back with a denial, which completeAuthorization rejects.
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId: authorizationAttemptId(firstTurn),
+                callback: { method: "GET", params: { error: "access_denied" } },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const resumed = await stream.nextUntil(
+          "resumed held turn",
+          (event) => event.type === "session.waiting",
+        );
+        expect(completeCalls()).toBe(1);
+        expect(filterEventsByType(resumed, "authorization.completed")).toMatchObject([
+          { data: { name: "weather", outcome: "failed", reason: "access_denied" } },
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("queues another person's message behind a held sign-in", async () => {
     const { completeCalls, completedPrincipals, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-queued",
@@ -464,8 +511,8 @@ interface WeatherAuthRuntime {
 /**
  * A get_weather tool behind an interactive authorization: getToken always
  * requires sign-in, and completeAuthorization mints `weather-token` from the
- * `oauth-code` callback. Shared by the callback-resume and
- * challenge-stays-open owner tests.
+ * `oauth-code` callback and rejects an `access_denied` one. Shared by the
+ * callback-resume and challenge-stays-open owner tests.
  */
 async function createWeatherAuthRuntime(
   agentName: string,
@@ -491,6 +538,12 @@ async function createWeatherAuthRuntime(
     async completeAuthorization({ callback, principal, resume }): Promise<TokenResult> {
       completeCalls += 1;
       completedPrincipals.push(principal);
+      if (callback.params.error === "access_denied") {
+        throw new ConnectionAuthorizationFailedError("weather", {
+          reason: "access_denied",
+          retryable: false,
+        });
+      }
       expect(callback.params.code).toBe("oauth-code");
       expect(resume).toEqual({ nonce: "weather-nonce" });
       return { token: "weather-token" };
