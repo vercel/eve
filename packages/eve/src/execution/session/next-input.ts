@@ -18,7 +18,7 @@ export type NextTurnInstruction =
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
   /** `session.cancel()` while no turn runs, but tasks are working. */
-  | { readonly kind: "cancel-working-tasks" }
+  | { readonly kind: "cancel-working-tasks"; readonly turnId?: string }
   | TurnSelection;
 
 /**
@@ -72,7 +72,7 @@ export async function nextTurnDelivery(input: {
     )
       return { kind: "cancel-turn" };
     if (admitted.kind === "cancel" && input.hasWorkingTasks()) {
-      return { kind: "cancel-working-tasks" };
+      return { kind: "cancel-working-tasks", turnId: admitted.turnId };
     }
   }
 }

@@ -13,7 +13,7 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
-  | { readonly kind: "cancel" }
+  | { readonly kind: "cancel"; readonly turnId?: string }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
@@ -74,6 +74,6 @@ export async function admitSessionInboxPayload(
       input.queue.enqueueControl("reset");
       return { kind: "cancel" };
     case "cancel":
-      return { kind: "cancel" };
+      return { kind: "cancel", turnId: command.turnId };
   }
 }

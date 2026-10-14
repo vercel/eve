@@ -34,14 +34,18 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
 }
 
 /**
- * Cancels every working task: `session.cancel()` stops them, and a turn that
+ * Cancels working tasks with pending calls from `turnId`, or all when omitted:
+ * `session.cancel()` stops them, and a turn that
  * ends anyway, such as by failing, cancels the tasks it held on.
  */
 export async function cancelWorkingTasks(
   cursor: SessionStateCursor,
   reason: Exclude<TaskCancelReason, "task_cancel">,
+  turnId?: string,
 ): Promise<void> {
-  const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
+  const taskIds = workingTasks(sessionTaskTable(cursor))
+    .filter((record) => turnId === undefined || record.calls.some((call) => call.turnId === turnId))
+    .map((record) => record.id);
   if (taskIds.length === 0) return;
   await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds }));
 }

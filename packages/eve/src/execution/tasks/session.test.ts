@@ -4,13 +4,16 @@ import type { DurableSession } from "#execution/durable-session-store.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
-import { answerTaskCancel } from "#execution/tasks/session.js";
+import { nextTurnDelivery } from "#execution/session/next-input.js";
+import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { answerTaskCancel, cancelWorkingTasks } from "#execution/tasks/session.js";
 import {
   createTask,
   markTaskRunStarted,
   readTaskTable,
   recordTaskRun,
   writeTaskTable,
+  workingTasks,
   type TaskTable,
 } from "#execution/tasks/table.js";
 
@@ -56,10 +59,57 @@ vi.mock("#execution/publish-session-events.js", async () => {
   };
 });
 
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
+}));
+
 const REQUEST_EVENT = { sequence: 3, stepIndex: 1, turnId: "turn_1" };
 
 beforeEach(() => {
   published.length = 0;
+});
+
+describe("between-turn cancellation", () => {
+  it.each([
+    { turnId: "turn_A", remaining: 2 },
+    { turnId: "turn_B", remaining: 0 },
+    { turnId: undefined, remaining: 0 },
+  ])("cancel $turnId leaves $remaining tasks working", async ({ turnId, remaining }) => {
+    const research = startedTask(readTaskTable(undefined), "research", "turn_B");
+    const summarize = startedTask(research.table, "summarize", "turn_B");
+    const cursor = cursorFor(
+      writeTaskTable(
+        createTestSessionState({ sessionId: "session-1" }).snapshot.session,
+        summarize.table,
+      ),
+    );
+    const next = await nextTurnDelivery({
+      cursor,
+      inbox: {
+        drain: () => [],
+        whenPending: async () => {},
+        onInterrupt: () => () => {},
+        onDelivery: () => () => {},
+        restore: () => {},
+        hasPending: () => false,
+        takeLeading: () => [],
+        next: vi
+          .fn()
+          .mockResolvedValueOnce({ kind: "cancel", turnId })
+          .mockResolvedValue(undefined),
+      },
+      queue: new SessionInputQueue(),
+      hasWorkingTasks: () =>
+        workingTasks(readTaskTable(cursor.sessionState.snapshot.session.state)).length > 0,
+    });
+    if (next.kind === "cancel-working-tasks") {
+      await cancelWorkingTasks(cursor, "turn_cancelled", next.turnId);
+    }
+    expect(workingTasks(readTaskTable(cursor.sessionState.snapshot.session.state))).toHaveLength(
+      remaining,
+    );
+    expect(next).toEqual({ kind: "cancel-working-tasks", turnId });
+  });
 });
 
 describe("answerTaskCancel", () => {
@@ -239,13 +289,14 @@ function cursorFor(session: DurableSession): SessionStateCursor {
 function startedTask(
   table: TaskTable,
   name: string,
+  turnId = "turn_1",
 ): { readonly table: TaskTable; readonly taskId: string } {
   const created = createTask(table, {
     callId: `${name}-call`,
     kind: "tool",
     name,
     resumable: false,
-    turnId: "turn_1",
+    turnId,
   });
   const runId = `${name}-run`;
   const recorded = recordTaskRun(created.table, created.taskId, {
