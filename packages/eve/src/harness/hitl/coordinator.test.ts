@@ -20,7 +20,7 @@ import { storedProjection } from "#harness/session-machine/view.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { parkedSteps, withParkedStep, withPublished } from "#internal/testing/session-machine.js";
 import { createApprovalSettledEvent } from "#protocol/message.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSession, StepInput } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
 const request: InputRequest = {
@@ -65,6 +65,7 @@ describe("coordinateApprovalDelivery", () => {
     session: HarnessSession,
     response: ApprovalResponsePolicy,
     prepareTools?: () => Promise<Map<string, HarnessToolDefinition>>,
+    stepInput?: StepInput,
   ) {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
@@ -84,6 +85,7 @@ describe("coordinateApprovalDelivery", () => {
         now: 101,
         prepareTools,
         session,
+        stepInput,
         tools: new Map([["gate", tool]]),
       }),
     );
@@ -286,11 +288,19 @@ describe("coordinateApprovalDelivery", () => {
     );
   });
 
-  it("does not complete a duplicate while its candidate is active", async () => {
+  it("authorizes the active candidate once when its duplicate arrives", async () => {
     const ingested = await ingest();
-    const duplicate = await ingest(ingested.session);
-    expect(duplicate.kind).toBe("continue");
-    expect(getApprovalAuditState(duplicate.session.state).activeCandidates).toHaveLength(1);
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    const duplicate = await authorize(ingested.session, response, undefined, {
+      attributedInputResponses: [
+        { auth: responder, response: { requestId: request.requestId, optionId: "approve" } },
+      ],
+    });
+    expect(response).toHaveBeenCalledOnce();
+    expect(duplicate.kind).toBe("responses-completed");
+    expect(duplicate.stepInput?.inputResponses).toEqual([
+      { optionId: "approve", requestId: request.requestId },
+    ]);
   });
 
   it("keeps authorization-required candidates parked instead of completing", async () => {

@@ -68,7 +68,7 @@ interface ApprovalDeliveryResult {
  * | State | Input | Transition |
  * | --- | --- | --- |
  * | pending request | Approve or Cancel | create responder-bound candidate |
- * | pending candidate | coordinator pass | run current authorizer |
+ * | pending candidate | coordinator pass or repeated answer | run current authorizer |
  * | pending candidate | allowed | settle with its decision; competitors go stale |
  * | pending candidate | rejected/error/expiry | append terminal history |
  * | pending candidate | authorization required | persist private challenge |
@@ -218,17 +218,16 @@ export async function coordinateApprovalDelivery(input: {
   }
 
   const remainingStepInput = removeConsumedResponses(stepInput, consumed);
-  if (consumed.size > 0) {
+  // Ingested answers commit before any authorizer runs. A delivery that committed nothing, such
+  // as a repeated answer, runs the pending candidates now: no later pass is scheduled for them.
+  if (didCommit) {
     return deliveryResult(
       session,
       remainingStepInput,
-      didCommit ? "continue-coordination" : "continue",
+      consumed.size > 0 ? "continue-coordination" : "continue",
       [],
       feedback,
     );
-  }
-  if (didCommit) {
-    return deliveryResult(session, remainingStepInput, "continue", [], feedback);
   }
 
   // Candidates are persisted in an earlier pass. Run pending candidates and
@@ -282,18 +281,19 @@ export async function coordinateApprovalDelivery(input: {
     (didCommit || expiredCandidates.length > 0) &&
     getApprovalAuditState(session.state).activeCandidates.length === 0
   ) {
-    return deliveryResult(session, resumedStepInput, "responses-completed");
+    return deliveryResult(session, resumedStepInput, "responses-completed", [], feedback);
   }
   if (pendingSettlements.length > 0) {
-    return deliveryResult(session, resumedStepInput, "continue");
+    return deliveryResult(session, resumedStepInput, "continue", [], feedback);
   }
   return didCommit
-    ? deliveryResult(session, resumedStepInput, "continue-coordination")
+    ? deliveryResult(session, resumedStepInput, "continue-coordination", [], feedback)
     : deliveryResult(
         session,
         resumedStepInput,
         challenges.length > 0 ? "authorization-required" : "continue",
         challenges,
+        feedback,
       );
 }
 

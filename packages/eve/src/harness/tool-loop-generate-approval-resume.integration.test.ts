@@ -526,7 +526,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
   });
 
   // #4817: a second press of the same Approve reaches the pass that should authorize the first.
-  it.fails("authorizes a pending approval when a duplicate answer joins its pass", async () => {
+  it("authorizes a pending approval when a duplicate answer joins its pass", async () => {
     const execute = vi.fn(async () => "/workspace");
     const response = vi.fn(() => ({ status: "allowed" as const }));
     const runStep = createToolLoopHarness(
