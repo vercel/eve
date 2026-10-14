@@ -27,7 +27,8 @@ interface Capped<T> {
  * Exactly what the listing says, which is what gets recorded. It names no
  * deferred entry, so deferring keeps entries out of context and the listing
  * doesn't grow with the catalog. It counts nothing, so a dynamic resolver
- * adding or dropping an entry doesn't append a message.
+ * adding or dropping an entry doesn't change it; `dynamicToolAnnouncements`
+ * names the dynamic entries a resolver adds.
  */
 interface CatalogListing {
   readonly connections: Capped<ListedConnection>;

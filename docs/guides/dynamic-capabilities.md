@@ -278,6 +278,8 @@ export default defineDynamic({
 
 An entry with `deferred: true` stays out of the model's tool list, like a static [deferred tool](../tools#keep-a-tool-out-of-the-tool-list). The model finds it with `eve__search` and calls it with `eve__tool`. If the session doesn't have those two tools yet, eve adds them on the first step where a resolver returns a deferred entry, and keeps them for the rest of the session. A resolver whose entries are all listed adds neither, so the model doesn't spend steps searching for tools it already has.
 
+When a resolver adds a deferred entry mid-session, eve appends a short context message with its name, so the model knows it was added. The message carries no description or signature, so it stays small; the model searches the exact name with `eve__search` to learn what the entry does and how to call it. It names up to 20 entries per message, then a count. The message goes after the existing conversation, so the cached prompt prefix holds. Entries present on the session's first step, or on the first step after compaction, stay unnamed like static deferred entries. Each name is announced at most once: removing an entry appends nothing, and one that returns isn't announced again.
+
 ### Author replayable callbacks
 
 Write callback properties as inline function expressions, arrows, method shorthand, or module-level function references. eve transforms authored modules that import `defineTool`, including helper modules outside `agent/tools/`, and stores each callback's referenced closure values independently.

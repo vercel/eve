@@ -41,6 +41,17 @@ describe("createCurrentMessages", () => {
     expect(current.history).toEqual(current.nonSystemMessages);
   });
 
+  it("records an announcement that renders nothing without appending a message", () => {
+    const current = createCurrentMessages([], {
+      historyState: { announcements: { other: "kept" } },
+    });
+
+    current.addAnnouncements({ silent: { value: "baseline", render: () => undefined } });
+
+    expect(current.nonSystemMessages).toEqual([]);
+    expect(current.historyState.announcements).toEqual({ other: "kept", silent: "baseline" });
+  });
+
   it("inserts later context before the current turn input", () => {
     const currentTurnMessages = [
       { role: "user" as const, content: "channel context", kind: "user" as const },

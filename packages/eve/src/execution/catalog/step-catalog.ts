@@ -105,6 +105,8 @@ export interface StepCatalog extends HarnessToolLookup {
   readonly connections: readonly ResolvedConnectionDefinition[];
   /** Entries reached only through `eve__tool`, connection tools aside. */
   readonly deferred: HarnessToolMap;
+  /** The names of the entries a dynamic resolver supplied this step, direct or deferred. */
+  readonly dynamic: ReadonlySet<string>;
   /** Every direct and deferred entry the session sees, connection tools aside. */
   readonly entries: HarnessToolMap;
   /** Every skill the session can load, deferred or not. */
@@ -147,7 +149,7 @@ export function buildStepCatalog(input: {
     [...input.agentTools.values()].some(
       (definition) => visible(definition) && startsTasks(definition),
     );
-  const ownEntries = stepEntries(input, visible);
+  const { dynamic, entries: ownEntries } = stepEntries(input, visible);
   const entries = offersTasks ? withTaskTools(ownEntries) : ownEntries;
   const direct = new Map<string, HarnessToolDefinition>();
   const deferred = new Map<string, HarnessToolDefinition>();
@@ -182,6 +184,7 @@ export function buildStepCatalog(input: {
     connections,
     deferred,
     describe,
+    dynamic,
     entries,
     get: (name) => (name === SKILL_ENTRY_NAME ? skillLoader : toolEntry(name)),
     offered,
@@ -261,12 +264,17 @@ function describeEntry(definition: HarnessToolDefinition, endsTurn: boolean): st
 function stepEntries(
   input: Parameters<typeof buildStepCatalog>[0],
   visible: (definition: HarnessToolDefinition) => boolean,
-): Map<string, HarnessToolDefinition> {
+): {
+  readonly dynamic: ReadonlySet<string>;
+  readonly entries: Map<string, HarnessToolDefinition>;
+} {
   const entries = new Map([...input.agentTools].filter(([, definition]) => visible(definition)));
-  if (input.ctx === undefined) return entries;
+  const dynamic = new Set<string>();
+  if (input.ctx === undefined) return { dynamic, entries };
 
   for (const subagent of buildDynamicSubagentTools(input.ctx).filter(visible)) {
     entries.set(subagent.name, subagent);
+    dynamic.add(subagent.name);
   }
   // Dynamic tools override a same-named authored tool. The first definition of
   // a name wins: step, then turn, then session.
@@ -274,9 +282,10 @@ function stepEntries(
   for (const tool of buildDynamicTools(input.ctx).filter(visible)) {
     if (dynamicNames.has(tool.name)) continue;
     dynamicNames.add(tool.name);
+    dynamic.add(tool.name);
     entries.set(tool.name, tool);
   }
-  return entries;
+  return { dynamic, entries };
 }
 
 /** Root-only tools and tools unavailable in subagents are hidden from delegated sessions. */

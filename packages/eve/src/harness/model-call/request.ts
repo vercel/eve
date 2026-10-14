@@ -2,6 +2,7 @@ import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
 import { DynamicSkillManifestKey, HistoryStateKey } from "#context/keys.js";
+import { dynamicToolAnnouncements } from "#execution/catalog/dynamic-tools.js";
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
@@ -48,6 +49,7 @@ export function requestMessages(
   const announced = ctx?.get(HistoryStateKey)?.announcements;
   messages.addAnnouncements({
     ...catalogAnnouncements(input.catalog, announced),
+    ...dynamicToolAnnouncements(input.catalog, announced),
     ...dynamicSkillAnnouncements(ctx?.get(DynamicSkillManifestKey), announced),
   });
   if (input.pendingApprovalsNote !== undefined) {

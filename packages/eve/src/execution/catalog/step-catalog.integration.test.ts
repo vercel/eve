@@ -155,6 +155,16 @@ function catalogMessages(request: LanguageModelV4CallOptions): string[] {
     .filter((entry) => entry.includes(LISTING_MARKER) || entry.startsWith("The catalog changed"));
 }
 
+const DYNAMIC_TOOLS_MARKER = "New in your catalog: ";
+
+/** The hints naming deferred entries a dynamic resolver added, in order. */
+function dynamicToolMessages(request: LanguageModelV4CallOptions): string[] {
+  return request.prompt
+    .filter((message) => message.role === "user")
+    .map(messageText)
+    .filter((entry) => entry.startsWith(DYNAMIC_TOOLS_MARKER));
+}
+
 /** What the model read back for `callId`: a JSON value or error text. */
 function toolResult(request: LanguageModelV4CallOptions, callId: string): unknown {
   for (const message of request.prompt) {
@@ -533,12 +543,22 @@ describe("step catalog in the harness (real AI SDK)", () => {
 
     // 4. No system-message fallback, including on the step that runs approved
     // calls: the approved call's result, then the listing, which gained the
-    // `tenant` namespace, as an appended message.
+    // `tenant` namespace, then the hint naming the dynamic tool, as appended
+    // messages.
     const approvedStep = requests[approvalStep]!;
     expect(toolResult(approvedStep, "credit")).toEqual({ input: {}, ran: "issue_credit" });
-    expect(approvedStep.prompt.at(-2)?.role).toBe("tool");
-    expect(approvedStep.prompt.at(-1)).toEqual({
+    expect(approvedStep.prompt.at(-3)?.role).toBe("tool");
+    expect(approvedStep.prompt.at(-2)).toEqual({
       content: [{ text: expect.stringMatching(NAMESPACES_OPS_TENANT), type: "text" }],
+      role: "user",
+    });
+    expect(approvedStep.prompt.at(-1)).toEqual({
+      content: [
+        {
+          text: "New in your catalog: tenant__sync. Search an exact name with eve__search for its description and signature.",
+          type: "text",
+        },
+      ],
       role: "user",
     });
     expect(listingFor(approvalStep).at(-1)).toMatch(/^The catalog changed\./u);
@@ -563,6 +583,18 @@ describe("step catalog in the harness (real AI SDK)", () => {
       index > 0 && listingFor(index).length > listingFor(index - 1).length ? [index] : [],
     );
     expect(announcedAt).toEqual([approvalStep, connectionStep, changedStep]);
+
+    // Each dynamic deferred entry is named once, without its description, when
+    // it first appears; static deferred entries never are.
+    const hintsFor = (index: number) => dynamicToolMessages(requests[index]!);
+    const hintedAt = requests.flatMap((_request, index) =>
+      index > 0 && hintsFor(index).length > hintsFor(index - 1).length ? [index] : [],
+    );
+    expect(hintedAt).toEqual([approvalStep, changedStep]);
+    expect(hintsFor(changedStep).at(-1)).toBe(
+      "New in your catalog: plan_advisor. Search an exact name with eve__search for its description and signature.",
+    );
+    for (const hint of hintsFor(compactionStep - 1)) expect(hint).not.toContain("refund_invoice");
 
     // The stand-in result for calls the harness dispatches after the step never
     // reaches the model or the protocol: until compaction, each prompt carries
