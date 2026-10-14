@@ -2,13 +2,15 @@ import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapterContext } from "#channel/adapter.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SandboxKey } from "#context/keys.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import {
   ATTACHMENTS_ROOT,
   moveToolResultFilesToUserMessages,
   stageAttachmentsForAdapter,
+  stageToolResultMedia,
 } from "#harness/attachment-staging.js";
 
 const UTF8 = new TextEncoder();
@@ -344,6 +346,52 @@ describe("stageAttachmentsForAdapter", () => {
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename).toMatch(ATTACHMENTS_PATH_PATTERN);
+  });
+});
+
+describe("stageToolResultMedia", () => {
+  // #4839: a throw here escapes the step after its model call and tools ran,
+  // so the step retries and replays them.
+  it.fails("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, {
+      captureState: async () => ({ session: null }),
+      get: async () => {
+        throw new Error('microsandbox session "ses_1" is no longer available to resume.');
+      },
+      stop: async () => {},
+    });
+    const toolResult = (value: unknown) =>
+      ({
+        content: [
+          {
+            output: { type: "content", value },
+            toolCallId: "call-1",
+            toolName: "inspect",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      }) as ModelMessage;
+
+    const staged = await contextStorage.run(ctx, () =>
+      stageToolResultMedia([
+        toolResult([
+          {
+            data: { data: "iVBORw0KGgo=", type: "data" },
+            filename: "chart.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ]),
+      ]),
+    );
+
+    expect(staged).toEqual([
+      toolResult([
+        { text: "Returned file chart.png (image/png) could not be stored.", type: "text" },
+      ]),
+    ]);
   });
 });
 
