@@ -237,7 +237,10 @@ export interface AssertionHandle {
   gate(threshold?: number): this;
   soft(threshold?: number): this;
   atLeast(threshold: number): this;
-  /** Sets this entry's stable `key` and appends the label to its display name. */
+  /**
+   * Sets this entry's stable `key` and appends the label to its display name.
+   * A `t.score` entry takes the label as its whole name.
+   */
   label(label: string): this;
 }
 
