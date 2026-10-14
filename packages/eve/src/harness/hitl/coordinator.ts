@@ -218,16 +218,11 @@ export async function coordinateApprovalDelivery(input: {
   }
 
   const remainingStepInput = removeConsumedResponses(stepInput, consumed);
-  // Ingested answers commit before any authorizer runs. A delivery that committed nothing, such
-  // as a repeated answer, runs the pending candidates now: no later pass is scheduled for them.
-  if (didCommit) {
-    return deliveryResult(
-      session,
-      remainingStepInput,
-      consumed.size > 0 ? "continue-coordination" : "continue",
-      [],
-      feedback,
-    );
+  // A new candidate commits before any authorizer runs, and the next pass authorizes it. Every
+  // other delivery, such as a repeated answer or a direct settlement, runs the pending candidates
+  // now: no later pass is scheduled for them.
+  if (didCommit && consumed.size > 0) {
+    return deliveryResult(session, remainingStepInput, "continue-coordination", [], feedback);
   }
 
   // Candidates are persisted in an earlier pass. Run pending candidates and

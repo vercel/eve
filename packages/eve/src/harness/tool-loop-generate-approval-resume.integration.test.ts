@@ -554,6 +554,53 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     expect(parkedSteps(result.session)).toEqual([]);
   });
 
+  it("authorizes a pending approval when a sibling's direct answer joins its pass", async () => {
+    const execute = vi.fn(async () => "/workspace");
+    const response = vi.fn(() => ({ status: "allowed" as const }));
+    const runStep = createToolLoopHarness(
+      createConfig(createModel(), execute, { request: () => "user-approval", response }),
+    );
+    const parked = withParkedStep(createBaseSession(), {
+      event: { sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      messages: [
+        {
+          content: [toolCall, approvalRequest, secondToolCall, secondApprovalRequest],
+          role: "assistant",
+        },
+      ],
+      requests: [
+        pendingApprovalInputRequest,
+        {
+          ...pendingApprovalInputRequest,
+          action: {
+            ...pendingApprovalInputRequest.action,
+            callId: secondToolCall.toolCallId,
+            input: secondToolCall.input,
+          },
+          requestId: secondApprovalRequest.approvalId,
+        },
+      ],
+      responseAuthRequiredRequestIds: [approvalRequest.approvalId],
+    });
+    const session = withOpenTurn(parked, { sequence: 1, stepIndex: 1, turnId: "turn-1" });
+
+    const result = await contextStorage.run(createApprovalContext(), async () => {
+      const first = await runStep(session, {
+        inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+      });
+      if (typeof first.next !== "function") {
+        throw new TypeError("Expected the answer to schedule an authorization pass.");
+      }
+      return await first.next(first.session, {
+        inputResponses: [{ optionId: "approve", requestId: secondApprovalRequest.approvalId }],
+      });
+    });
+
+    expect(response).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(parkedSteps(result.session)).toEqual([]);
+  });
+
   it("executes approved siblings concurrently and exactly once each", async () => {
     const bothStarted = Promise.withResolvers<void>();
     let started = 0;

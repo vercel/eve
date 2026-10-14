@@ -303,6 +303,46 @@ describe("coordinateApprovalDelivery", () => {
     ]);
   });
 
+  it("authorizes the active candidate when a sibling's direct answer arrives", async () => {
+    const direct: InputRequest = {
+      ...request,
+      action: { ...request.action, callId: "call-2" },
+      requestId: "approval-2",
+    };
+    const parked = withParkedStep(
+      {
+        agent: { modelReference: { id: "test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 0.8 },
+        continuationToken: "test",
+        history: [],
+        sessionId: "session-1",
+      },
+      {
+        requester: responder,
+        requests: [request, direct],
+        responseAuthRequiredRequestIds: [request.requestId],
+      },
+    );
+    const ingested = await ingest(parked);
+    expect(ingested.kind).toBe("continue-coordination");
+
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    const result = await authorize(ingested.session, response, undefined, {
+      attributedInputResponses: [
+        { auth: responder, response: { requestId: direct.requestId, optionId: "approve" } },
+      ],
+    });
+    expect(response).toHaveBeenCalledOnce();
+    expect(result.kind).toBe("responses-completed");
+    expect(getApprovalAuditState(result.session.state).activeCandidates).toEqual([]);
+    expect(result.stepInput?.inputResponses).toEqual(
+      expect.arrayContaining([
+        { optionId: "approve", requestId: request.requestId },
+        { optionId: "approve", requestId: direct.requestId },
+      ]),
+    );
+  });
+
   it("keeps authorization-required candidates parked instead of completing", async () => {
     const ingested = await ingest();
     const candidate = getApprovalAuditState(ingested.session.state).activeCandidates[0]!;
