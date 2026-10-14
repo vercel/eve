@@ -85,7 +85,7 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## Scores with `t.score`
 
-`t.score(evaluation)` records a score from 0 to 1. The evaluation is the number or `{ score, message?, metadata? }`, or a promise of either. Chain `.label(key)` to name it; the label becomes the score's name, and reporters and artifacts also expose it as `key`. Without a label the score reports as `score`, and several unlabeled scores share that name.
+`t.score(evaluation)` records a score from 0 to 1. The evaluation is the number or `{ score, message?, metadata? }`, or a promise of either. Chain `.label(key)` to name it; reporters and artifacts expose the label as `key`. Without a label the score reports as `score`, and several unlabeled scores share that name.
 
 ```ts
 const reply = turn.message ?? "";
