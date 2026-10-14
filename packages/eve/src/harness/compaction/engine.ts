@@ -278,6 +278,12 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       if (part.type !== "tool-result") {
         return part;
       }
+      // A capped output still serializes past the limit, so without this
+      // guard every later compaction would nest another annotation and keep
+      // a shorter, further-escaped prefix of the same content.
+      if (part.output.type === "text" && part.output.value.startsWith(CAPPED_RESULT_ANNOTATION)) {
+        return part;
+      }
       // File parts of a content output reduce to their text stubs before the
       // size check: serializing raw payloads into a prefix cap would keep
       // bytes the model cannot read while cutting the text it can.
