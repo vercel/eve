@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
@@ -696,6 +696,59 @@ describe("createVercelSandbox", () => {
       expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
       expect(gone.delete).not.toHaveBeenCalled();
     });
+  });
+
+  it("shares the template a concurrent build creates under the same name", async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const sandboxes = new Map<string, ReturnType<typeof createMockSandbox>>();
+    let lookups = 0;
+    let releaseLookups!: () => void;
+    const bothLookedUp = new Promise<void>((resolve) => {
+      releaseLookups = resolve;
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(async (options: { name: string }) => {
+          if (sandboxes.has(options.name)) {
+            throw Object.assign(
+              new Error(
+                `A sandbox with the name '${options.name}' already exists for this project.`,
+              ),
+              { response: { status: 400 } },
+            );
+          }
+          const template = createMockSandbox({ name: options.name });
+          template.snapshot.mockImplementation(async () => {
+            template.currentSnapshotId = `${options.name}-snapshot`;
+            return { snapshotId: template.currentSnapshotId };
+          });
+          sandboxes.set(options.name, template);
+          return template;
+        }),
+        // Both builds look the template up before either one creates it.
+        get: vi.fn(async (options: { name: string }) => {
+          const found = sandboxes.get(options.name) ?? null;
+          if (++lookups === 2) releaseLookups();
+          await bothLookedUp;
+          return found;
+        }),
+      },
+    };
+    const build = async () =>
+      await createTestVercelSandbox({
+        loadSandboxModule: async () => sandboxModule as never,
+      }).prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+
+    const builds = Promise.allSettled([build(), build()]);
+    await vi.runAllTimersAsync();
+
+    const [template] = sandboxes.values();
+    const shared = { status: "fulfilled", value: { snapshotId: `${template?.name}-snapshot` } };
+    expect(await builds).toEqual([shared, shared]);
+    expect(template?.snapshot).toHaveBeenCalledTimes(1);
   });
 
   it("forwards author source to template create as the base layer", async () => {
