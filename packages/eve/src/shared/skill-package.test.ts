@@ -94,6 +94,37 @@ describe("writeSkillPackageToSandbox", () => {
     );
   });
 
+  it("overlaps file writes without starting every write at once", async () => {
+    const sandbox = mockSandbox();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const session = {
+      ...sandbox.session,
+      async writeBinaryFile(options: Parameters<typeof sandbox.session.writeBinaryFile>[0]) {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        inFlight -= 1;
+        await sandbox.session.writeBinaryFile(options);
+      },
+    };
+    const files = Object.fromEntries(
+      Array.from({ length: 40 }, (_, index) => [`references/${index}.md`, `Reference ${index}`]),
+    );
+    const skill = normalizeSkillPackage({
+      name: "tenant",
+      description: "Tenant-specific procedures.",
+      markdown: "Follow tenant policy.",
+      files,
+    });
+
+    await writeSkillPackageToSandbox({ sandbox: session, skill });
+
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThan(skill.files.length);
+    expect(sandbox.files.get("/workspace/skills/tenant/references/39.md")).toBe("Reference 39");
+  });
+
   it("falls back to the legacy workspace skill directory when HOME is unavailable", async () => {
     const sandbox = mockSandbox();
     const skill = normalizeSkillPackage({
