@@ -79,6 +79,10 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
   let messageId = 0;
   /** The bot's latest message, which a person in a group replies to so the bot hears them. */
   let lastBotMessage: number | undefined;
+  /** Each bot message's text as last written, by message id. */
+  const texts = new Map<number, string>();
+  /** The text a keyboard-only edit leaves in place, which its body doesn't carry. */
+  const keptText = new WeakMap<PlatformCall, string>();
 
   /**
    * A group's default policy hears only mentions and replies to the bot, and a
@@ -151,11 +155,16 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
     }
     messageId += 1;
     if (method === "sendMessage") lastBotMessage = messageId;
-    return {
+    const call: PlatformCall = {
       body: text === "" ? {} : JSON.parse(text),
       method,
       response: { ok: true, result: { chat: CHAT, date: 0, message_id: messageId } },
     };
+    // Editing only the keyboard leaves the message's text as it was.
+    const id = messageIdOf(call);
+    if (method === "editMessageReplyMarkup") keptText.set(call, texts.get(id) ?? "");
+    else if (MESSAGE_WRITES.has(method)) texts.set(id, (call.body as MessageBody).text ?? "");
+    return call;
   }
 
   return {
@@ -211,7 +220,7 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
         onlyPerson: (call.body as MessageBody).ephemeral_message_parameters !== undefined,
         // Telegram drops a message's inline keyboard when an edit omits `reply_markup`.
         options: inlineOptions(call),
-        text: (call.body as MessageBody).text ?? "",
+        text: keptText.get(call) ?? (call.body as MessageBody).text ?? "",
       };
     },
     personShownAs: [PERSON.first_name],
