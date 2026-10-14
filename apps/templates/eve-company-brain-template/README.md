@@ -29,13 +29,32 @@ pnpm data:build
 ```
 
 Set `AI_GATEWAY_API_KEY` in `.env.local`, or run `pnpm exec eve link` to link a
-Vercel project and pull its local environment. Then start the agent:
+Vercel project and pull its local environment. To use the local terminal UI,
+generate an HTTP operator password in `.env.local`:
 
 ```bash
+node --input-type=module - <<'JS'
+import { randomBytes } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
+appendFileSync('.env.local', `\nCOMPANY_BRAIN_HTTP_PASSWORD=${randomBytes(32).toString('hex')}\n`);
+JS
 pnpm dev
 ```
 
-Try these questions in the local terminal UI:
+`pnpm dev` starts the server without a terminal UI. In a second terminal in the
+same directory, connect with the operator credentials:
+
+```bash
+AUTH=$(node --env-file=.env.local -e 'process.stdout.write(Buffer.from("company-brain:" + process.env.COMPANY_BRAIN_HTTP_PASSWORD).toString("base64"))')
+pnpm exec eve remote connect --url http://127.0.0.1:2000 --header "Authorization: Basic $AUTH"
+unset AUTH
+```
+
+The username is `company-brain`. Anyone with this password can query all exposed
+models in development. Keep it private and do not deploy it. For Slack-only
+development, skip generating the password; HTTP session routes remain disabled.
+
+Try these questions in the authenticated terminal UI:
 
 - “What is included in our payment totals?”
 - “How many orders do we have, and what dates do they cover?”
@@ -73,9 +92,11 @@ wildcards. Include DM conversation IDs if you want DMs to work. Mentions, DMs,
 interactive continuations, and the model tools check this policy. Other messages
 are ignored; channel conversations require a mention to start another turn.
 
-For a local webhook, Slack needs a publicly reachable development URL. Deploy
-when you want Slack to reach a stable endpoint; the local terminal UI does not
-need Slack configured.
+For a local webhook, Slack needs a publicly reachable development URL. Forward
+only `/eve/v1/slack` when your tunnel supports path restrictions, and use HTTPS.
+HTTP session routes still require operator credentials if the whole server is
+forwarded. Deploy when you want Slack to reach a stable endpoint; the local
+terminal UI does not need Slack configured.
 
 **Every permitted conversation must be appropriate for the entire dataset.**
 Replies appear in that conversation, where other members may read them. Choose
@@ -83,8 +104,11 @@ internal, non-shared conversations deliberately; the template does not check
 Slack Connect membership, move sensitive results to DMs, or implement per-user
 warehouse permissions. Everyone admitted uses the same warehouse identity.
 
-The HTTP channel accepts local development auth only. It does not expose an
-anonymous production chat endpoint.
+The HTTP channel requires HTTP Basic operator credentials in development. An
+unset or empty `COMPANY_BRAIN_HTTP_PASSWORD` disables HTTP access. Synthetic
+`local-dev` identities cannot read models. Production HTTP access stays disabled,
+even if the password is accidentally configured; Slack uses its own admission
+policy.
 
 ## Use MotherDuck and deploy
 

@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "eve build",
-    "dev": "eve dev",
+    "dev": "eve dev --no-ui",
     "start": "eve start",
     "data:build": "node scripts/build-data.mjs",
     "typecheck": "tsc",
     "test:unit": "node --experimental-strip-types --test test/*.test.ts",
-    "test:scenario": "node --experimental-strip-types --test test/*.scenario.ts"
+    "test:scenario": "eve build && node --experimental-strip-types --test test/*.scenario.ts"
   },
   "dependencies": {
     "@duckdb/node-api": "1.4.4-r.3",
