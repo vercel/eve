@@ -101,12 +101,6 @@ if (isScheduleAuth(ctx.session.auth.current)) {
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Markdown-form sessions park too, but no channel is attached, so they cannot receive follow-up messages.
 
-## Manage schedules from scheduled work
-
-Scheduled sessions and their locally delegated tasks can use the generated tools from `defineDynamicSchedules` (`eve/experimental/schedules`) and the `schedules()` client to manage dynamic schedules. For example, a task can disable a recurring schedule after confirming that its work is complete, or update its timing based on a tool result.
-
-Each operation still uses the collection's scope authorization and the current caller's principal. Generated tools retain their approval policies; scheduled execution does not bypass approval. For unattended manipulation, configure a policy that permits the intended operation without asking for human input. The app principal cannot create or replace schedule payloads; those writes require an authenticated user or service principal.
-
 ## Session continuity
 
 Markdown schedules start a new session on every fire. Handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.

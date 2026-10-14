@@ -33,7 +33,7 @@ async function bindCaller() {
 }
 
 describe("schedule creation and invocation", () => {
-  it.each([false, true])("manages schedules with prepared approvals (%s)", async (scheduled) => {
+  it.each([false, true])("prepared approvals (scheduled: %s)", async (scheduled) => {
     let destination = "C123";
     const provider = inMemoryScheduleProvider();
     const write = vi.spyOn(provider, "create");

@@ -97,7 +97,7 @@ describe("schedule subscription client", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("checks caller isolation and scope (%s)", async (scheduled) => {
+  it.each([false, true])("caller isolation and scope (scheduled: %s)", async (scheduled) => {
     const { definition, provider } = setup();
     const context = {
       ...callContext,

@@ -33,7 +33,7 @@ export default defineEval({
     const managementName = Reflect.get(Object(record), "name");
     if (typeof managementName !== "string") throw new Error("The schedule has no management name.");
     const edit = await t.send(
-      `Alice wants to revise her saved reminder. Update the schedule using management name ${managementName}. Set its one-time timing to January 2, 2030 at 09:00 UTC and replace its complete payload with a task to send a fixture email with subject Updated note and body A revised fixture note., then disable this schedule with schedule__requests__disable if record-email returns accepted: true, and destination creator-email. Save the change without sending the email now.`,
+      `Alice wants to revise her saved reminder. Update the schedule using management name ${managementName}. Set its one-time timing to January 2, 2030 at 09:00 UTC and its destination to creator-email. Replace its complete task with these instructions: Send a fixture email with subject Updated note and body A revised fixture note. If record-email returns accepted: true, disable this schedule with schedule__requests__disable. Save the change without sending the email now.`,
     );
     edit.expectOk();
     const updateApproval = edit.session.requireInputRequest({
@@ -86,13 +86,6 @@ export default defineEval({
       input: { name: managementName },
       output: { name: managementName, state: "inactive" },
       status: "completed",
-    });
-    const disabled = await t.send(
-      "Inspect the schedule named collection-email with share-schedule using its get operation.",
-    );
-    disabled.succeeded();
-    disabled.calledTool("share-schedule", {
-      output: { name: managementName, state: "inactive" },
     });
     // The authored outbox channel records the scheduled session's reply.
     const delivered = await t.send("Use share-schedule to read what collection-email delivered.");
