@@ -30,6 +30,7 @@ const world = createWorld({
 
 await world.start?.();
 await world.clear();
+const pendingDeliveries = new Set<Promise<Response>>();
 world.registerHandler(
   deriveEveWorkflowQueuePrefix(WORKFLOW_TEST_AGENT_NAME),
   createLazyHandler(join(outDir, "workflows.mjs")),
@@ -37,19 +38,36 @@ world.registerHandler(
 setWorld(world);
 
 afterAll(async () => {
-  setWorld(undefined);
-  await world.close?.();
+  try {
+    await world.close?.();
+    // The local queue stops delayed deliveries on close, but does not join its
+    // in-process handlers. They still need the installed world to hydrate streams.
+    while (pendingDeliveries.size > 0) {
+      await Promise.allSettled(pendingDeliveries);
+    }
+  } finally {
+    setWorld(undefined);
+  }
 });
 
 function createLazyHandler(bundlePath: string): (request: Request) => Promise<Response> {
   let handler: ((request: Request) => Promise<Response>) | undefined;
   let loading: Promise<(request: Request) => Promise<Response>> | undefined;
 
-  return async (request: Request) => {
+  const deliver = async (request: Request) => {
     loading ??= import(/* @vite-ignore */ pathToFileURL(bundlePath).href).then(
       (mod: { POST: (request: Request) => Promise<Response> }) => mod.POST,
     );
     handler ??= await loading;
     return await handler(request);
+  };
+  return async (request: Request) => {
+    const delivery = deliver(request);
+    pendingDeliveries.add(delivery);
+    try {
+      return await delivery;
+    } finally {
+      pendingDeliveries.delete(delivery);
+    }
   };
 }

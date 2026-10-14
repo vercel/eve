@@ -94,7 +94,10 @@ function createInbox() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(createSessionStep).mockResolvedValue({ history: [], state: {} } as never);
-  vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timeout-run-1" });
+  vi.mocked(startSessionTimeoutStep).mockImplementation(async (input) => ({
+    runId: "timeout-run-1",
+    deadline: input.deadline,
+  }));
   vi.mocked(cancelSessionTimeoutStep).mockResolvedValue(undefined);
   vi.mocked(createTurnControl).mockImplementation(() => ({
     cancellation: new AbortController(),
@@ -109,7 +112,7 @@ beforeEach(() => {
 describe("bootInitialOwner timeout startup", () => {
   it("prepares controls and starts the timeout while session creation is pending", async () => {
     const sessionCreation = deferred<never>();
-    const timeoutStartup = deferred<{ runId: string }>();
+    const timeoutStartup = deferred<{ runId: string; deadline: Date }>();
     const inbox = createInbox();
     vi.mocked(createSessionStep).mockReturnValue(sessionCreation.promise);
     vi.mocked(startSessionTimeoutStep).mockReturnValue(timeoutStartup.promise);
@@ -127,7 +130,7 @@ describe("bootInitialOwner timeout startup", () => {
     expect(boot?.session.sessionTimeoutControl).toBeDefined();
     const loopStart = boot!.session.sessionTimeoutControl!.start();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
-    timeoutStartup.resolve({ runId: "timeout-run-1" });
+    timeoutStartup.resolve({ runId: "timeout-run-1", deadline: new Date("2026-03-01") });
     await loopStart;
   });
 
@@ -249,7 +252,6 @@ describe("bootInitialOwner timeout startup", () => {
     const boot = await bootInitialOwner(initialInput({ sessionTimeoutMs: false }), "session-1");
 
     expect(boot?.session.initialTurnControl).toBeDefined();
-    expect(boot?.session.sessionTimeoutDeadline).toBeUndefined();
     expect(boot?.session.sessionTimeoutControl).toBeUndefined();
     expect(createTurnControl).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();

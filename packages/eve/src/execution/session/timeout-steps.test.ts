@@ -67,7 +67,10 @@ describe("session timeout steps", () => {
       token: "session-1:session-timeout",
     };
 
-    await expect(startSessionTimeoutStep(input)).resolves.toEqual({ runId: "timer-run" });
+    await expect(startSessionTimeoutStep(input)).resolves.toEqual({
+      runId: "timer-run",
+      deadline: input.deadline,
+    });
     expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [input], {
       allowReservedAttributes: true,
       attributes: { "$eve.version": resolveInstalledPackageInfo().version },

@@ -660,13 +660,17 @@ describe("workflowEntry integration", () => {
           events.push(event);
         }
         const ids = events.map((event) => event.meta.id);
-        expect(ids.slice(0, firstTurn.length)).toEqual(firstTurn.map((event) => event.meta.id));
+        // Separate steps' writes can interleave differently in a live read and
+        // a persisted snapshot. Preserve every id and its count, not that order.
+        expect(ids.slice(0, firstTurn.length).toSorted()).toEqual(
+          firstTurn.map((event) => event.meta.id).toSorted(),
+        );
 
         // A hook's bounded read ends at the durable tail. The step's own writes
         // may still be buffered, so it can see only an earlier prefix.
         expect(hookReads.length).toBeGreaterThan(0);
         for (const hookRead of hookReads) {
-          expect(hookRead).toEqual(ids.slice(0, hookRead.length));
+          expect(hookRead.toSorted()).toEqual(ids.slice(0, hookRead.length).toSorted());
         }
       } finally {
         await run.cancel();

@@ -80,7 +80,6 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
           ? undefined
           : createSessionTimeoutControl({ deadline: timeoutDeadline, sessionId }),
       sessionTimeoutMs: prepared.sessionTimeoutMs,
-      sessionTimeoutDeadline: timeoutDeadline,
       sessionWritable,
     },
     inbox,

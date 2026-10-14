@@ -227,7 +227,6 @@ export async function bootInitialOwner(
         sessionState: created.state,
         sessionTimeoutControl: prepared.timeoutControl,
         sessionTimeoutMs,
-        sessionTimeoutDeadline: deadline,
         sessionWritable,
       },
     };
@@ -307,8 +306,6 @@ async function bootHandoffOwner(
       sessionState: checkpoint.sessionState,
       sessionTimeoutControl: timeoutControl,
       sessionTimeoutMs: checkpoint.sessionTimeoutMs,
-      // A deployment handoff renews the configured lifetime; compaction keeps the deadline.
-      sessionTimeoutDeadline: deadline,
       sessionWritable: input.sessionWritable,
     },
   };

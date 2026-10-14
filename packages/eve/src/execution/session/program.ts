@@ -71,7 +71,6 @@ export interface SessionBoot {
   readonly sessionId: string;
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutControl?: SessionTimeoutControl;
-  readonly sessionTimeoutDeadline?: Date;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
@@ -227,6 +226,7 @@ async function runSessionLoop(
     sessionId: boot.sessionId,
   });
   const sessionTimeout = boot.sessionTimeoutControl;
+  let sessionTimeoutDeadline: Date | undefined;
 
   const nextParkedActivity = async (): Promise<
     Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
@@ -275,7 +275,7 @@ async function runSessionLoop(
     compactionHandoffDue &&
     progress.caller === undefined &&
     workingTasks(sessionTaskTable(cursor)).length === 0
-      ? { sessionTimeoutDeadline: boot.sessionTimeoutDeadline }
+      ? { sessionTimeoutDeadline }
       : undefined;
   /**
    * Hands a session that compacted to a fresh run on this deployment while
@@ -343,6 +343,9 @@ async function runSessionLoop(
       sessionTimeout?.start(),
     ]);
     if (timerResult.status === "rejected") throw timerResult.reason;
+    // Workflow's optimistic start timestamp can change on replay. Transfer the
+    // deadline recorded by the timer-start step, not a recomputed timestamp.
+    sessionTimeoutDeadline = timerResult.value;
     if (actionResult.status === "rejected") throw actionResult.reason;
     const initial = actionResult.value;
     if (initial.kind !== "action") return initial;

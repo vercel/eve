@@ -22,14 +22,18 @@ afterEach(() => {
 describe("createSessionTimeoutControl", () => {
   it("starts one absolute deadline against the stable command inbox", async () => {
     const deadline = new Date("2026-02-01T00:00:00.000Z");
-    vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
+    const recordedDeadline = new Date("2026-02-01T00:00:00.005Z");
+    vi.mocked(startSessionTimeoutStep).mockResolvedValue({
+      runId: "timer-run",
+      deadline: recordedDeadline,
+    });
 
     const control = createSessionTimeoutControl({
       deadline,
       sessionId: "wrun_1",
     });
-    await control.start();
-    await control.start();
+    await expect(control.start()).resolves.toEqual(recordedDeadline);
+    await expect(control.start()).resolves.toEqual(recordedDeadline);
 
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).toHaveBeenCalledWith({
@@ -40,7 +44,7 @@ describe("createSessionTimeoutControl", () => {
   });
 
   it("shares in-progress startup across concurrent start calls", async () => {
-    let resolveStartup!: (value: { runId: string }) => void;
+    let resolveStartup!: (value: { runId: string; deadline: Date }) => void;
     vi.mocked(startSessionTimeoutStep).mockReturnValue(
       new Promise((resolve) => {
         resolveStartup = resolve;
@@ -54,14 +58,14 @@ describe("createSessionTimeoutControl", () => {
     const first = control.start();
     const second = control.start();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
-    resolveStartup({ runId: "timer-run" });
+    resolveStartup({ runId: "timer-run", deadline: new Date("2026-02-01") });
     await Promise.all([first, second]);
 
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
   });
 
   it("waits for in-progress startup before cancelling", async () => {
-    let resolveStartup!: (value: { runId: string }) => void;
+    let resolveStartup!: (value: { runId: string; deadline: Date }) => void;
     vi.mocked(startSessionTimeoutStep).mockReturnValue(
       new Promise((resolve) => {
         resolveStartup = resolve;
@@ -75,14 +79,17 @@ describe("createSessionTimeoutControl", () => {
     const startup = control.start();
     const disposal = control.dispose();
     expect(cancelSessionTimeoutStep).not.toHaveBeenCalled();
-    resolveStartup({ runId: "timer-run" });
+    resolveStartup({ runId: "timer-run", deadline: new Date("2026-02-01") });
     await Promise.all([startup, disposal]);
 
     expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timer-run" });
   });
 
   it("cancels the active timer when the session settles", async () => {
-    vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
+    vi.mocked(startSessionTimeoutStep).mockResolvedValue({
+      runId: "timer-run",
+      deadline: new Date("2026-02-01"),
+    });
     const control = createSessionTimeoutControl({
       deadline: new Date("2026-02-01T00:00:00.000Z"),
       sessionId: "wrun_1",
