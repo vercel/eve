@@ -63,6 +63,7 @@ try {
     process.stdout.write(`\nChecking ${template} against ${tarballs[0]}\n`);
     run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
     run("pnpm", ["typecheck"], { cwd: destination });
+    if (manifest.scripts?.test) run("pnpm", ["test"], { cwd: destination });
 
     // Preparing a Vercel Sandbox snapshot needs Vercel credentials, which this
     // check does not have. Such templates build with `eve build` alone.

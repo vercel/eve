@@ -5,4 +5,9 @@ import { slackChannel } from "eve/channels/slack";
 // connector UID here, so keep it a string literal.
 export default slackChannel({
   credentials: connectSlackCredentials("slack/coding-agent"),
+  // Slack identities cannot establish GitHub team membership in this prototype.
+  onAppMention: () => null,
+  onDirectMessage: () => null,
+  onMessage: () => null,
+  onInputResponse: () => null,
 });

@@ -12,6 +12,7 @@
     "dev": "eve dev",
     "eval": "eve eval",
     "start": "eve start",
+    "test": "node --experimental-strip-types --test test/*.test.mjs",
     "typecheck": "tsc"
   },
   "dependencies": {
