@@ -179,6 +179,7 @@ describe("multi-agent callback routing", () => {
           servicePrefix: `/_eve_internal/eve/${agent.name}`,
         })),
         nextRoot,
+        writeOutput: true,
       });
     } finally {
       vi.unstubAllEnvs();

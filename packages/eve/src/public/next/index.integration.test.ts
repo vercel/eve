@@ -29,8 +29,11 @@ async function readJsonFile(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8")) as unknown;
 }
 
-async function resolveConfig(config: ReturnType<typeof withEve<TestConfig>>): Promise<TestConfig> {
-  return await config("phase-test", {
+async function resolveConfig(
+  config: ReturnType<typeof withEve<TestConfig>>,
+  phase = "phase-production-build",
+): Promise<TestConfig> {
+  return await config(phase, {
     defaultConfig: {},
   });
 }
@@ -49,7 +52,7 @@ describe("withEve Vercel config", () => {
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
 
-    const config = await resolveConfig(withEve<TestConfig>({}));
+    const config = await resolveConfig(withEve<TestConfig>({}), "phase-production-server");
     await expect(config.rewrites?.()).rejects.toThrow(
       /Run eve build from .+ before starting Next\.js\./u,
     );
@@ -220,7 +223,7 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
-  it("preserves an already configured Build Output eve service and inserts its route", async () => {
+  it("keeps a configured Build Output eve service and drops routes eve does not own", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
@@ -235,6 +238,7 @@ describe("withEve Vercel config", () => {
           version: 3,
           routes: [
             { handle: "filesystem" },
+            { dest: "/about.rsc", has: [{ key: "rsc", type: "header" }], src: "^/about$" },
             {
               destination: {
                 service: "agent",
@@ -269,7 +273,6 @@ describe("withEve Vercel config", () => {
           },
           src: "^/eve/v1/(.*)$",
         },
-        { handle: "filesystem" },
       ],
       services: {
         agent: {
@@ -293,6 +296,49 @@ describe("withEve Vercel config", () => {
       version: 3,
     });
     expect(rewrites).toBeUndefined();
+  });
+
+  describe("over a finished Build Output config", () => {
+    const eveRoute = { destination: { service: "eve", type: "service" }, src: "^/eve/v1/(.*)$" };
+    // Shaped like `vercel build` output: Next.js routes plus a services array.
+    const finishedConfig = `${JSON.stringify(
+      {
+        routes: [
+          { dest: "/about.rsc", has: [{ key: "rsc", type: "header" }], src: "^/about$" },
+          eveRoute,
+          { handle: "filesystem" },
+          { dest: "/404", src: "^/(.*)$", status: 404 },
+        ],
+        services: [{ framework: "eve", name: "eve", root: ".eve/vercel-services/eve" }],
+        version: 3,
+      },
+      null,
+      2,
+    )}\n`;
+
+    async function loadOverFinishedOutput(phase: string): Promise<string> {
+      const appRoot = await createTempAppRoot();
+      process.chdir(appRoot);
+      vi.stubEnv("NODE_ENV", "production");
+      await mkdir(join(appRoot, ".vercel", "output"), { recursive: true });
+      await writeFile(join(appRoot, ".vercel", "project.json"), "{}\n");
+      const configPath = join(appRoot, ".vercel", "output", "config.json");
+      await writeFile(configPath, finishedConfig);
+
+      await withEve<TestConfig>({})(phase, { defaultConfig: {} });
+      return await readFile(configPath, "utf8");
+    }
+
+    it("leaves it untouched outside the build, e.g. before a prebuilt deploy", async () => {
+      expect(await loadOverFinishedOutput("phase-production-server")).toBe(finishedConfig);
+    });
+
+    it("drops routes eve does not own while Next.js builds", async () => {
+      const outputConfig = JSON.parse(await loadOverFinishedOutput("phase-production-build")) as {
+        routes?: unknown;
+      };
+      expect(outputConfig.routes).toEqual([eveRoute]);
+    });
   });
 
   it("discovers workspace agents when the Next.js app owns the workspace", async () => {
@@ -587,7 +633,6 @@ describe("withEve Vercel config", () => {
           },
           src: "^/eve/support/v1/(.*)$",
         },
-        { handle: "filesystem" },
       ],
       services: {
         "eve-billing": {

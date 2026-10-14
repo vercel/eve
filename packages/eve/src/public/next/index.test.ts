@@ -393,6 +393,7 @@ describe("withEve", () => {
         },
       ],
       nextRoot: process.cwd(),
+      writeOutput: false,
     });
   });
 

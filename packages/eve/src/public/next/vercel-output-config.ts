@@ -118,6 +118,12 @@ function assertRootServicesIncludeEve(input: {
 export async function ensureEveVercelOutputConfig(input: {
   readonly agents: readonly EnsureVercelOutputConfigAgentInput[];
   readonly nextRoot: string;
+  /**
+   * Whether to write config.json. Only true while Next.js builds: other loads
+   * (`next start`, `next dev`, `next lint`) may run over a finished output
+   * that `vercel deploy --prebuilt` will upload as-is.
+   */
+  readonly writeOutput: boolean;
 }): Promise<EnsureVercelOutputConfigResult> {
   const { canWriteGeneratedOutput, outputConfigPath, projectRoot } =
     await resolveVercelOutputConfigLocation(input.nextRoot);
@@ -149,12 +155,14 @@ export async function ensureEveVercelOutputConfig(input: {
     }),
   }));
 
-  if (!canWriteGeneratedOutput) {
+  if (!canWriteGeneratedOutput || !input.writeOutput) {
     return {
       agents: agentResults,
     };
   }
 
+  // `vercel build` appends these routes to the routes Next.js emits, so
+  // carrying forward routes eve does not own would duplicate them.
   const assembled = assembleEveVercelServices({
     agents: input.agents.map((agent) => ({
       agent,
@@ -163,7 +171,6 @@ export async function ensureEveVercelOutputConfig(input: {
         projectRoot: input.nextRoot,
       },
     })),
-    routes: existingConfig.routes,
     services: existingServices,
   });
   await Promise.all(assembled.rootDirectories.map((root) => mkdir(root, { recursive: true })));

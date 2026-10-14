@@ -466,6 +466,7 @@ export function withEve<TConfig extends EveNextConfig>(
         return outputAgent;
       }),
       nextRoot,
+      writeOutput: phase === NEXT_PHASE_PRODUCTION_BUILD,
     });
 
     if (process.env.VERCEL) {
