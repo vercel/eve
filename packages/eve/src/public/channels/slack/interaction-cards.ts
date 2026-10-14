@@ -135,18 +135,21 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 export async function updateAnsweredHitlCard(
   interaction: ParsedBlockActionsPayload,
   deps: InteractionHandlerDeps,
+  /** Shown in place of the pressed choice, without attribution, such as when no session took it. */
+  outcome?: string,
 ): Promise<void> {
   const hitlAction = interaction.actions.find((action) => isHitlAction(action.actionId));
   if (!hitlAction?.messageTs) return;
 
-  const answerLabel = hitlAction.label ?? hitlAction.selectedOptionValue ?? hitlAction.value;
+  const answerLabel =
+    outcome ?? hitlAction.label ?? hitlAction.selectedOptionValue ?? hitlAction.value;
   if (!answerLabel) return;
 
   const blocks = buildAnsweredHitlMessageBlocks({
     actionId: hitlAction.actionId,
     answerLabel,
     messageBlocks: interaction.messageBlocks,
-    userId: hitlAction.user.id,
+    userId: outcome === undefined ? hitlAction.user.id : "",
   });
   await updateAnsweredCard({
     answerLabel,

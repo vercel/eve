@@ -1,6 +1,10 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  isUnanswerableResponseError,
+} from "#channel/session-not-active-error.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -622,25 +626,33 @@ async function dispatchCallbackQuery(input: {
   }
 
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
+    // Answered after delivery, so the presser learns when no session took it.
+    let answer = "Answer received.";
+    const message = input.query.message;
+    if (message && state.chatId) {
+      try {
+        const source = input.from(telegramContinuationTokenFromState(state));
+        // The presser acts as themselves, so a press that starts a turn lets
+        // their next message steer it.
+        await source.respond([telegramCallbackInputResponse(input.query.data)], {
+          auth: defaultTelegramAuth({ ...message, from: input.query.from }),
+        });
+      } catch (error) {
+        if (isUnanswerableResponseError(error)) {
+          answer = INACTIVE_REQUEST_NOTICE;
+          await retireInactivePrompt(telegram, message.messageId, error);
+        } else {
+          log.error("callback query delivery failed", { error });
+        }
+      }
+    }
     try {
       await telegram.telegram.answerCallbackQuery({
         callbackQueryId: input.query.id,
-        text: "Answer received.",
+        text: answer,
       });
     } catch (error) {
       log.warn("Telegram callback-query acknowledgement failed", { error });
-    }
-
-    if (!input.query.message || !state.chatId) return;
-    try {
-      const source = input.from(telegramContinuationTokenFromState(state));
-      // The presser acts as themselves, so a press that starts a turn lets
-      // their next message steer it.
-      await source.respond([telegramCallbackInputResponse(input.query.data)], {
-        auth: defaultTelegramAuth({ ...input.query.message, from: input.query.from }),
-      });
-    } catch (error) {
-      log.error("callback query delivery failed", { error });
     }
     return;
   }
@@ -661,6 +673,26 @@ async function dispatchCallbackQuery(input: {
     });
   } catch (error) {
     log.warn("Telegram unsupported callback-query acknowledgement failed", { error });
+  }
+}
+
+/**
+ * A press that reached no session can never be taken, and eve will never
+ * withdraw the prompt, so its keyboard is removed here.
+ */
+async function retireInactivePrompt(
+  telegram: TelegramContext,
+  messageId: string,
+  error: unknown,
+): Promise<void> {
+  log.warn("Telegram HITL answer reached no active session", { error });
+  try {
+    await telegram.telegram.editMessageReplyMarkup({
+      messageId,
+      replyMarkup: { inline_keyboard: [] },
+    });
+  } catch (editError) {
+    log.warn("Telegram inactive prompt edit failed", { error: editError });
   }
 }
 

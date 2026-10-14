@@ -107,18 +107,42 @@ export function renderAnsweredInputRequestMessage(input: {
   readonly prompt: string;
 }): TeamsMessageBody {
   const text = input.label ? `Answered: ${input.label}` : "Answered";
-  const result: TeamsMessageBody = {
+  const result = renderSettledInputRequestMessage(input.prompt, { color: "good", text });
+  if (input.includeText !== false) return { ...result, text };
+  return result;
+}
+
+/**
+ * Renders the card that replaces a prompt no session can answer anymore. A
+ * press carries only an approval's prompt, so other cards show just `notice`.
+ */
+export function renderInactiveInputRequestMessage(
+  prompt: string | undefined,
+  notice: string,
+): TeamsMessageBody {
+  return renderSettledInputRequestMessage(prompt, { text: notice });
+}
+
+function renderSettledInputRequestMessage(
+  prompt: string | undefined,
+  status: { readonly color?: string; readonly text: string },
+): TeamsMessageBody {
+  return {
     attachments: [
       {
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
           body: [
-            {
-              text: truncate(input.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-              type: "TextBlock",
-              wrap: true,
-            },
-            { color: "good", text, type: "TextBlock", wrap: true },
+            ...(prompt === undefined
+              ? []
+              : [
+                  {
+                    text: truncate(prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+                    type: "TextBlock",
+                    wrap: true,
+                  },
+                ]),
+            { ...status, type: "TextBlock", wrap: true },
           ],
           type: "AdaptiveCard",
           version: "1.5",
@@ -127,8 +151,6 @@ export function renderAnsweredInputRequestMessage(input: {
       },
     ],
   };
-  if (input.includeText !== false) return { ...result, text };
-  return result;
 }
 
 /** Returns true when a Teams activity carries an eve HITL submit payload. */

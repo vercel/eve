@@ -53,6 +53,10 @@ import type {
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import {
+  INACTIVE_REQUEST_NOTICE,
+  isUnanswerableResponseError,
+} from "#channel/session-not-active-error.js";
+import {
   bindSlackSessionOperations,
   withSlackResponder,
 } from "#public/channels/slack/session-operations.js";
@@ -504,6 +508,20 @@ async function dispatchBlockInputResponses(input: {
         state: withSlackResponder(undefined, input.submission.user.id),
       });
   } catch (error) {
+    if (isUnanswerableResponseError(error)) {
+      await retireInactiveRequest({
+        channelId: input.interaction.channelId,
+        deps: input.deps,
+        error,
+        installationTeamId: input.interaction.installationTeamId,
+        retireCard: () =>
+          updateAnsweredHitlCard(input.interaction, input.deps, INACTIVE_REQUEST_LABEL),
+        teamId: input.interaction.teamId,
+        threadTs: input.interaction.threadTs,
+        userId: input.submission.user.id,
+      });
+      return;
+    }
     log.error("HITL interaction delivery failed", { error });
     return;
   }
@@ -518,6 +536,44 @@ async function dispatchBlockInputResponses(input: {
     await updateAnsweredHitlCard(input.interaction, input.deps);
   } catch (error) {
     log.error("HITL answered-card update failed", { error });
+  }
+}
+
+const INACTIVE_REQUEST_LABEL = "No longer active";
+
+/**
+ * An answer that reached no session can never be taken, and eve will never
+ * withdraw the request, so its card stops offering choices here and the
+ * person who answered is told privately.
+ */
+async function retireInactiveRequest(input: {
+  readonly channelId: string;
+  readonly deps: InteractionHandlerDeps;
+  readonly error: unknown;
+  readonly installationTeamId: string | undefined;
+  readonly retireCard: () => Promise<void>;
+  readonly teamId: string | undefined;
+  readonly threadTs: string;
+  readonly userId: string;
+}): Promise<void> {
+  log.warn("HITL answer reached no active session", { error: input.error });
+  try {
+    await input.retireCard();
+  } catch (error) {
+    log.error("HITL inactive-card update failed", { error });
+  }
+  const { thread } = buildSlackBinding({
+    api: input.deps.api,
+    botToken: input.deps.config.credentials?.botToken,
+    channelId: input.channelId,
+    installationTeamId: input.installationTeamId,
+    teamId: input.teamId,
+    threadTs: input.threadTs,
+  });
+  try {
+    await thread.postEphemeral(input.userId, INACTIVE_REQUEST_NOTICE);
+  } catch (error) {
+    log.error("HITL inactive-request notice failed", { error });
   }
 }
 
@@ -681,6 +737,28 @@ async function dispatchViewInputResponse(input: {
         state: withSlackResponder(undefined, input.submission.user.id),
       });
   } catch (error) {
+    if (isUnanswerableResponseError(error)) {
+      const cardChannelId = input.metadata.messageChannelId ?? input.metadata.channelId;
+      await retireInactiveRequest({
+        channelId: cardChannelId,
+        deps: input.deps,
+        error,
+        installationTeamId: input.installationTeamId,
+        retireCard: () =>
+          updateAnsweredFreeformCard({
+            answerLabel: INACTIVE_REQUEST_LABEL,
+            channelId: cardChannelId,
+            deps: input.deps,
+            installationTeamId: input.installationTeamId,
+            messageTs: input.metadata.messageTs,
+          }),
+        teamId: input.teamId ?? undefined,
+        // A card routed to another conversation only records the thread it answers.
+        threadTs: cardChannelId === input.metadata.channelId ? input.metadata.threadTs : "",
+        userId: input.submission.user.id,
+      });
+      return;
+    }
     log.error("freeform answer delivery failed", { error });
     return;
   }

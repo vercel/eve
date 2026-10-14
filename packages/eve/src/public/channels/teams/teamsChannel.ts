@@ -1,6 +1,10 @@
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  isUnanswerableResponseError,
+} from "#channel/session-not-active-error.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -51,6 +55,7 @@ import {
   isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
   readTeamsToolApprovalPrompt,
+  renderInactiveInputRequestMessage,
   teamsInvokeResponse,
 } from "#public/channels/teams/hitl.js";
 import {
@@ -771,7 +776,26 @@ async function dispatchInputResponses(input: {
         state: approvalResponseStatePatch(input.activity, result.auth),
       });
   } catch (error) {
-    log.error("Teams input response delivery failed", { error });
+    if (!isUnanswerableResponseError(error)) {
+      log.error("Teams input response delivery failed", { error });
+      return;
+    }
+    // No session can take the answer, and eve will never withdraw the
+    // request, so its card stops offering choices here.
+    log.warn("Teams input response reached no active session", { error });
+    const activityId = input.activity.replyToId;
+    if (activityId === undefined) return;
+    try {
+      await ctx.thread.update(
+        activityId,
+        renderInactiveInputRequestMessage(
+          readTeamsToolApprovalPrompt(input.activity),
+          INACTIVE_REQUEST_NOTICE,
+        ),
+      );
+    } catch (updateError) {
+      log.error("Teams inactive card update failed", { error: updateError });
+    }
   }
 }
 

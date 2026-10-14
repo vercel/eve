@@ -12,7 +12,7 @@ import { telegramDriver } from "#internal/testing/channel-conformance/telegram-d
 // #4835: an operator cancels a session's run through the workflow world, so
 // eve never withdraws its pending approval. A later press reaches no session.
 for (const driver of [slackDriver(), teamsDriver(), telegramDriver()]) {
-  it.fails(
+  it(
     `${driver.name}: pressing Approve after the session's run was cancelled outside eve clears the approval's buttons and says it is no longer active`,
     () =>
       withChannelConversation(driver, async (conversation) => {

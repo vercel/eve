@@ -10,6 +10,7 @@ import {
   type CompiledChannel,
 } from "#channel/compiled-channel.js";
 import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -5037,6 +5038,26 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(logs.records).toContainEqual(
       expect.objectContaining({ level: "error", message: "HITL interaction delivery failed" }),
     );
+  });
+
+  it("retires a HITL card and tells the presser when its session is stranded", async () => {
+    const send = vi.fn().mockRejectedValue(new SessionStrandedError({}));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    await firePost(channel, buildHitlButtonRequest(), { send });
+
+    expect(slackOperations(fetchMock)).toEqual(["chat.update", "chat.postEphemeral"]);
+    expect(parseSlackRequestBody(slackCalls(fetchMock, "chat.update")[0]?.[1])).toMatchObject({
+      text: "Answered: No longer active",
+      ts: "1700000000.000010",
+    });
+    expect(
+      parseSlackRequestBody(slackCalls(fetchMock, "chat.postEphemeral")[0]?.[1]),
+    ).toMatchObject({
+      markdown_text: "This request is no longer active. Send a new message to start again.",
+      thread_ts: "1700000000.000001",
+      user: "U_APPROVER",
+    });
   });
 
   it("waits for approval settlement before updating a tool-approval card", async () => {
