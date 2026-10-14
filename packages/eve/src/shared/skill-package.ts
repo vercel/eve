@@ -13,7 +13,7 @@ import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/s
  * path with a command first), so writing a package's files one at a time makes
  * a dynamic skill's first sync cost seconds.
  */
-const SANDBOX_WRITE_CONCURRENCY = 8;
+const SANDBOX_WRITE_CONCURRENCY = 16;
 
 export interface NormalizedSkillPackageFile {
   readonly content: Buffer;

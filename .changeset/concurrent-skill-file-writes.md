@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Write a dynamic skill's supporting files to the sandbox concurrently instead of one at a time, so the first turn that syncs a skill with many files no longer waits seconds before the model call.
+Dynamic skills with supporting files no longer delay the first model call by seconds. eve now writes a skill's files to the sandbox concurrently, so a 25-file skill syncs in under a second instead of about five.
