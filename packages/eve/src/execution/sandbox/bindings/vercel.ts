@@ -413,13 +413,10 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
   await ensureVercelSandboxBaseRuntime(sandbox);
   await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
 
-  const templateSession = {
-    ...buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox, input.createOptions.env),
-      createVercelNetworkPolicySetter(sandbox),
-    ),
-    name: sandbox.name,
-  };
+  const templateSession = buildSandboxSession(
+    createVercelInternalSandboxSession(sandbox, input.createOptions.env),
+    createVercelNetworkPolicySetter(sandbox),
+  );
 
   await writeVercelSandboxSeedFiles({
     sandbox,
