@@ -192,6 +192,97 @@ describe("createOrderedStreamEmitter", () => {
     ]);
   });
 
+  it("batches trailing deltas when the sink acknowledges writes immediately", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: UnstampedMessageStreamEvent[] = [];
+      const emitter = createOrderedStreamEmitter(async (event) => {
+        events.push(event);
+      });
+
+      await emitter.emit(input("call_1", "{"));
+      for (const delta of ['"title"', ":", '"Hello"', "}"]) {
+        await vi.advanceTimersByTimeAsync(8);
+        await emitter.emit(input("call_1", delta));
+      }
+      expect(events).toEqual([input("call_1", "{")]);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(events).toEqual([input("call_1", "{"), input("call_1", '"title":"Hello"}')]);
+
+      await vi.advanceTimersByTimeAsync(100);
+      await emitter.emit(input("call_1", " "));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(events.at(-1)).toEqual(input("call_1", " "));
+      await emitter.closeAndDrain();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes a waiting delta at a barrier or close without waiting for the interval", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: UnstampedMessageStreamEvent[] = [];
+      const emitter = createOrderedStreamEmitter(async (event) => {
+        events.push(event);
+      });
+      const completed = createMessageCompletedEvent({
+        message: "ABC",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      });
+
+      await emitter.emit(message("A"));
+      await vi.advanceTimersByTimeAsync(8);
+      await emitter.emit(message("B"));
+      await vi.advanceTimersByTimeAsync(8);
+      await emitter.emit(message("C"));
+      await emitter.emit(completed);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(events).toEqual([message("A"), message("BC"), completed]);
+
+      await emitter.emit(reasoning("R"));
+      await vi.advanceTimersByTimeAsync(8);
+      await emitter.emit(reasoning("S"));
+      await vi.advanceTimersByTimeAsync(8);
+      await emitter.emit(reasoning("T"));
+      await emitter.closeAndDrain();
+      expect(events).toEqual([
+        message("A"),
+        message("BC"),
+        completed,
+        reasoning("R"),
+        reasoning("ST"),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces a failed delayed delta write to later emissions and close", async () => {
+    vi.useFakeTimers();
+    try {
+      const writeError = new Error("durable write failed");
+      const events: UnstampedMessageStreamEvent[] = [];
+      const emitter = createOrderedStreamEmitter(async (event) => {
+        events.push(event);
+        if (events.length === 2) throw writeError;
+      });
+
+      await emitter.emit(message("A"));
+      await emitter.emit(message("B"));
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(events).toEqual([message("A"), message("B")]);
+      await expect(emitter.emit(message("C"))).rejects.toBe(writeError);
+      await expect(emitter.closeAndDrain()).rejects.toBe(writeError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("surfaces sink failures from close and later emissions", async () => {
     const writeError = new Error("durable write failed");
     const emitter = createOrderedStreamEmitter(async () => {
