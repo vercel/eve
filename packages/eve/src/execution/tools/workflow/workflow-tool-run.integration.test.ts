@@ -25,6 +25,7 @@ import {
   workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import type { InputRequestedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import { defineHook } from "#public/definitions/hook.js";
 import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
@@ -315,6 +316,70 @@ describe("workflow tools", () => {
         expect(answered.find((event) => event.type === "turn.completed")?.meta).toMatchObject({
           deliveryIds: ["delivery-answer"],
         });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("lets a message.received hook cancel a typed answer before it resolves ctx.ask", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-guarded-answer",
+      execute: confirmDeployWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/guard.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "message.received"(event, ctx) {
+                  if (event.data.message === "Deploy") ctx.cancel();
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-guarded-answer",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const asked = await stream.nextTurn();
+        expect(filterEventsByType(asked, "input.requested")).toHaveLength(1);
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
+          kind: "send",
+          payload: { message: "Deploy" },
+        });
+
+        const answered = await stream.nextTurn();
+        // The hook rejected the message, so it must not reach the waiting call.
+        const outcomes = filterEventsByType(answered, "input.resolved").flatMap((event) =>
+          event.data.resolutions.map((resolution) => resolution.outcome),
+        );
+        expect(outcomes).not.toContain("answered");
+        const outputs = filterEventsByType(answered, "action.result").map(
+          (event) => event.data.result.output,
+        );
+        expect(outputs).not.toContainEqual({ approved: true, service: "api" });
+        expect(
+          containsEventSequence(answered, ["turn.cancelled", "session.waiting"]),
+          JSON.stringify(answered.map((event) => event.type)),
+        ).toBe(true);
       } finally {
         stream.dispose();
         await run.cancel();
