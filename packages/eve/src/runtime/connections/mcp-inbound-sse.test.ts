@@ -1,80 +1,79 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMCPClient } from "#compiled/@ai-sdk/mcp/index.js";
+import {
+  createStatefulMcpServer,
+  type StatefulMcpServer,
+} from "#internal/testing/stateful-mcp-server.js";
 
-const SESSION_ID = "session-1";
+const SERVER_URL = "http://127.0.0.1:8000/mcp";
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json", "mcp-session-id": SESSION_ID },
-  });
+function inboundGets(server: StatefulMcpServer) {
+  return server.requests.filter((request) => request.method === "GET");
 }
 
-describe("compiled HttpMCPTransport inbound SSE", () => {
-  // #4379: a second GET while the first is in flight gets 409 from servers
-  // that allow one standalone stream per session.
-  it.fails("opens at most one inbound GET per session while one is in flight", async () => {
-    const sessionGets: Promise<unknown>[] = [];
-    let inFlight = 0;
-    let maxInFlight = 0;
-    let releaseGets!: () => void;
-    const getGate = new Promise<void>((resolve) => {
-      releaseGets = resolve;
+// A 2025-era session allows one standalone GET stream. The MCP SDK server
+// answers a second with 409, and stateful gateways drop the session (#4379).
+describe("compiled HttpMCPTransport inbound SSE stream", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("opens one stream per connect, after the session exists", async () => {
+    const server = createStatefulMcpServer();
+    const client = await createMCPClient({
+      onUncaughtError: vi.fn(),
+      transport: { fetch: server.fetch, type: "http", url: SERVER_URL },
     });
+    const [sessionId] = server.liveSessions;
+    try {
+      await server.waitForRequest((request) => request.method === "GET" && request.status === 200);
+    } finally {
+      await client.close();
+    }
 
-    const fakeFetch: typeof fetch = async (input, init) => {
+    expect(inboundGets(server)).toEqual([{ method: "GET", sessionId, status: 200 }]);
+  });
+
+  it("does not reopen the stream from a reconnect timer once a stream is attached", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const server = createStatefulMcpServer();
+    // The first session GET fails at the network layer, which schedules a
+    // reconnect. The `notifications/initialized` 202 then opens a stream
+    // before that reconnect fires.
+    let markDropped!: () => void;
+    const dropped = new Promise<void>((resolve) => {
+      markDropped = resolve;
+    });
+    let droppedGets = 0;
+    const fetch: typeof globalThis.fetch = async (input, init) => {
       const request = new Request(input, init);
-      if (request.method === "GET") {
-        if (request.headers.get("mcp-session-id") !== SESSION_ID) {
-          return new Response(null, { status: 400 });
-        }
-        inFlight += 1;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        const gated = getGate.then(() => {
-          inFlight -= 1;
-          return new Response(":\n\n", {
-            status: 200,
-            headers: { "content-type": "text/event-stream" },
-          });
-        });
-        sessionGets.push(gated);
-        return await gated;
+      if (request.method === "GET" && request.headers.has("mcp-session-id") && droppedGets === 0) {
+        droppedGets += 1;
+        markDropped();
+        throw new TypeError("fetch failed");
       }
-      if (request.method === "DELETE") return new Response(null, { status: 200 });
-
-      const message = (await request.json()) as { id?: number; method?: string };
-      if (message.method === "server/discover") return new Response(null, { status: 405 });
-      if (message.method === "initialize") {
-        return jsonResponse({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: {
-            protocolVersion: "2025-11-25",
-            capabilities: { tools: {} },
-            serverInfo: { name: "fake-mcp", version: "1.0.0" },
-          },
-        });
+      if (request.method === "POST") {
+        const message = (await request.clone().json()) as { method?: string };
+        if (message.method === "notifications/initialized") await dropped;
       }
-      if (message.method === "notifications/initialized") {
-        return new Response(null, { status: 202, headers: { "mcp-session-id": SESSION_ID } });
-      }
-      throw new Error(`Unexpected MCP request: ${request.method} ${message.method}`);
+      return await server.fetch(request);
     };
 
     const client = await createMCPClient({
       onUncaughtError: vi.fn(),
-      transport: { fetch: fakeFetch, type: "http", url: "http://127.0.0.1:8000/mcp" },
+      transport: { fetch, type: "http", url: SERVER_URL },
     });
+    const [sessionId] = server.liveSessions;
     try {
-      // Let every start the connect handshake triggered reach the server.
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(sessionGets.length).toBeGreaterThan(0);
-      expect(maxInFlight).toBe(1);
+      await server.waitForRequest((request) => request.method === "GET" && request.status === 200);
+      // Past every reconnect delay the transport could have scheduled.
+      await vi.advanceTimersByTimeAsync(60_000);
     } finally {
-      releaseGets();
-      await Promise.allSettled(sessionGets);
       await client.close();
     }
+
+    expect(droppedGets).toBe(1);
+    expect(inboundGets(server)).toEqual([{ method: "GET", sessionId, status: 200 }]);
   });
 });

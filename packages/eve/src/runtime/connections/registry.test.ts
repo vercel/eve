@@ -77,13 +77,17 @@ describe("ConnectionRegistryImpl", () => {
     );
   });
 
-  it("dispose clears the client cache", async () => {
+  it("a disposed registry hands out no clients", async () => {
     const registry = new ConnectionRegistryImpl([makeConnection("linear")]);
 
-    const before = registry.getClient("linear");
+    registry.getClient("linear");
     await registry.dispose();
-    const after = registry.getClient("linear");
 
-    expect(before).not.toBe(after);
+    expect(() => registry.getClient("linear")).toThrow(
+      'Connection "linear" was used after its step ended.',
+    );
+    await expect(registry.replaceDynamicConnections("turn", new Map())).rejects.toThrow(
+      "Dynamic connections were replaced after their step ended.",
+    );
   });
 });
