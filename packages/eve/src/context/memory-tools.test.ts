@@ -21,7 +21,12 @@ import { createMemoryToolDynamicDefinition } from "#context/memory-tools.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { defineTool } from "#tools/definition.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
-import { defineMemory, type MemoryToolsContext } from "#public/memory/index.js";
+import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
+import {
+  defineMemory,
+  type MemoryToolsContext,
+  type MemoryTurnContext,
+} from "#public/memory/index.js";
 import { always } from "#public/tools/approval/index.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createMemoryLock } from "#shared/memory-state.js";
@@ -29,7 +34,7 @@ import { createMemoryLock } from "#shared/memory-state.js";
 const turn = Object.freeze({ id: "turn_0", input: [], sequence: 0 });
 const event = { data: { sequence: 0, turnId: "turn_0" }, type: "turn.started" as const };
 
-function createContext(scope: string) {
+function createContext(scope: string, lockedTurn: MemoryTurnContext = turn) {
   const auth = {
     attributes: {},
     authenticator: "test",
@@ -50,7 +55,7 @@ function createContext(scope: string) {
       namespace: "app",
       scope,
       slot: "profile",
-      turn,
+      turn: lockedTurn,
       visibility: "scope",
     }),
   });
@@ -207,6 +212,38 @@ describe("memory provider tools", () => {
     expect(seen).toEqual([history]);
     const [metadata] = ctx.require(TurnDynamicToolMetadataKey);
     expect(JSON.stringify(metadata)).not.toContain("hello");
+  });
+
+  it("offers provider tools on a turn whose input carries a staged attachment", async () => {
+    const ctx = createContext("user_1", {
+      ...turn,
+      input: [
+        {
+          content: [
+            { text: "remember this screenshot", type: "text" },
+            {
+              data: encodeSandboxRef({ mediaType: "image/png", path: "/tmp/pixel.png", size: 68 }),
+              mediaType: "image/png",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+    });
+
+    await contextStorage.run(
+      ctx,
+      async () =>
+        await dispatchDynamicToolEvent({
+          ctx,
+          event,
+          messages: [{ content: "remember this screenshot", role: "user" }],
+          resolvers: [resolver(() => 1)],
+        }),
+    );
+
+    expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["profile__save"]);
   });
 
   it("omits tools when the provider has no tool factory", async () => {
