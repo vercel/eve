@@ -14,6 +14,7 @@ import {
   slackLogo,
   typefullyLogo,
   vercelLogo,
+  voiceLogo,
   webLogo,
 } from "@/lib/integrations/logos";
 import type { TemplateIntegration } from "@/lib/templates/data";
@@ -35,5 +36,6 @@ export const integrationIcons: Record<TemplateIntegration, IconComponent> = {
   "Stripe Link": linkLogo,
   Typefully: typefullyLogo,
   Vercel: vercelLogo,
+  Voice: voiceLogo,
   "Web chat": webLogo,
 };

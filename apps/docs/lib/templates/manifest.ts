@@ -18,6 +18,7 @@ export type TemplateIntegration =
   | "Stripe Link"
   | "Typefully"
   | "Vercel"
+  | "Voice"
   | "Web chat";
 
 export type TemplateSource = "GitHub" | "Vercel Templates";
@@ -89,7 +90,7 @@ export const templateManifest: TemplateManifestEntry[] = [
     sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-voice-template",
     category: "Chat",
     model: "anthropic/claude-haiku-5.5",
-    integrations: ["Web chat"],
+    integrations: ["Voice", "Web chat"],
     source: "Vercel Templates",
     github: {
       owner: "vercel",
