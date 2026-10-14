@@ -1083,6 +1083,56 @@ describe("workflowEntry integration", () => {
     );
   }, 60_000);
 
+  it("lets a queued message sent after the approval appeared steer before the step returns", async () => {
+    const executions: string[] = [];
+    const approvalShown = Promise.withResolvers<void>();
+    const releaseStep = Promise.withResolvers<void>();
+    const holdStepOpen = {
+      logicalPath: "hooks/hold-step-open.ts",
+      loadNamespace: async () => ({
+        default: defineHook({
+          events: {
+            // Keeps the step that raised the approval running after it was
+            // published, the window a client that reacts at once lands in.
+            async "input.requested"() {
+              approvalShown.resolve();
+              await releaseStep.promise;
+            },
+          },
+        }),
+      }),
+    };
+    await withHeldApprovalRun(
+      {
+        agent: { name: "workflow-entry-steer-held-before-boundary" },
+        auth: ALICE,
+        modules: [gatedTool("approve_change", executions), holdStepOpen],
+      },
+      async ({ sessionInbox, stream }) => {
+        await withTimeout(approvalShown.promise, "approval shown");
+        await resumeHook(sessionInbox, {
+          auth: ALICE,
+          kind: "send",
+          payload: { message: "Never mind, just say hello." },
+          turnPolicy: "queue",
+        });
+        // Let the session accept the message before the step returns.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        releaseStep.resolve();
+
+        const held = await withTimeout(stream.nextTurn(), "approval hold");
+        const request = filterEventsByType(held, "input.requested")[0]?.data.requests[0];
+        expect(held.at(-1)?.type).toBe("turn.waiting");
+        const steered = await withTimeout(stream.nextTurn(), "steered turn");
+        expect(filterEventsByType(steered, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "ignored", requestId: request!.requestId }] } },
+        ]);
+        expect(steered.at(-1)?.type).toBe("session.waiting");
+        expect(executions).toEqual([]);
+      },
+    );
+  }, 60_000);
+
   // https://github.com/vercel/eve/issues/786
   it("keeps a queued message sent before an approval queued instead of answering it", async () => {
     const executions: string[] = [];

@@ -192,6 +192,10 @@ export class SessionExecution {
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;
 
+      // Deliveries the boundary admits next arrived while the step ran. A step
+      // that raises a request publishes it before it returns, so they may
+      // reply to it.
+      const stepAdmission = this.input.queue.nextAdmission;
       await turn.admitBoundary();
       await this.handleBoundaryMessages(turn.takeBoundaryMessages(), result.action === "done");
 
@@ -218,7 +222,7 @@ export class SessionExecution {
         ) {
           throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
         }
-        const woke = await this.waitForHeldRequest(turn, result);
+        const woke = await this.waitForHeldRequest(turn, result, stepAdmission);
         if (woke === "cancelled") return await this.finishCancelledTurn(turn);
         nextStepInput = { delivery: woke };
         continue;
@@ -353,8 +357,9 @@ export class SessionExecution {
    * delivery its next step reads: the sign-in callback, an approval answer
    * from any responder, or a message from the turn's own person, which steers
    * the turn and cancels the request. Anyone else's message queues behind it,
-   * as does a queued message admitted before the hold: it was sent before the
-   * request existed, so it must not answer it.
+   * as does a queued message admitted before the step that raised the request
+   * (`heldSince`): it was sent before the request existed, so it must not
+   * answer it.
    */
   private async waitForHeldRequest(
     turn: ActiveTurn,
@@ -362,10 +367,10 @@ export class SessionExecution {
       readonly authorizationAttemptIds: readonly string[];
       readonly inputRequestIds: readonly string[];
     },
+    heldSince: number,
   ): Promise<DeliverHookPayload | "cancelled"> {
     const attemptIds = new Set(held.authorizationAttemptIds);
     const requestIds = new Set(held.inputRequestIds);
-    const heldSince = this.input.queue.nextAdmission;
     while (true) {
       const callbacks = this.input.queue.takeAuthorizations(attemptIds);
       if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
