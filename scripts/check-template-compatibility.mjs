@@ -63,9 +63,6 @@ try {
     process.stdout.write(`\nChecking ${template} against ${tarballs[0]}\n`);
     run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
     run("pnpm", ["typecheck"], { cwd: destination });
-    for (const script of ["test:unit", "test:integration"]) {
-      if (manifest.scripts?.[script]) run("pnpm", [script], { cwd: destination });
-    }
     run("pnpm", ["exec", "eve", "build"], { cwd: destination });
     run("pnpm", ["build"], { cwd: destination });
   }

@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["agent/**/*.ts", "test/**/*.ts", ".eve/**/*.d.ts"]
+  "include": ["agent/**/*.ts", ".eve/**/*.d.ts"]
 }

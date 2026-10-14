@@ -144,8 +144,8 @@ its native dependency instead of bundling the binary as JavaScript. The Python
 project, CSVs, and local database are not uploaded by the supplied `.vercelignore`;
 Vercel builds the agent from the already-generated catalog.
 
-MotherDuck/Slack live connectivity is not covered by the local tests. Verify a
-mention and a query against your deployment before using real company data.
+Verify a Slack mention and a query against your deployment before using real
+company data.
 
 ## How the data and catalog stay together
 

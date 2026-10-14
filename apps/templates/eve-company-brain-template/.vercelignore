@@ -6,5 +6,4 @@ dist
 data
 dbt
 scripts
-test
 .env.local

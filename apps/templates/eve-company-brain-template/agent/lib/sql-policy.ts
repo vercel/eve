@@ -66,11 +66,6 @@ const allowedTableReferences = new Set([
 
 export class QueryError extends Error {}
 
-export function limitSql(sql: string, maxRows: number): string {
-  const query = sql.trim().replace(/;$/u, "");
-  return `SELECT * FROM (\n${query}\n) AS company_brain_result LIMIT ${maxRows}`;
-}
-
 export function validateSqlAst(ast: unknown, allowedRelations: ReadonlySet<string>): void {
   if (!ast || typeof ast !== "object") throw new QueryError("Could not parse SQL.");
   const parsed = ast as { error?: boolean; statements?: unknown[] };
