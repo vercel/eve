@@ -350,9 +350,7 @@ describe("stageAttachmentsForAdapter", () => {
 });
 
 describe("stageToolResultMedia", () => {
-  // #4839: a throw here escapes the step after its model call and tools ran,
-  // so the step retries and replays them.
-  it.fails("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
+  it("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, {
       captureState: async () => ({ session: null }),

@@ -142,8 +142,8 @@ export async function stageAttachmentsToSandbox(
  * Moves inline file payloads in `content` tool outputs into the sandbox and
  * leaves `eve-sandbox:` refs in their place, so durable history never
  * carries tool-result bytes. {@link hydrateSandboxAttachments} restores the
- * bytes on every model call. Without an active sandbox, each file becomes a
- * note instead.
+ * bytes on every model call. When no sandbox is available, or it fails to
+ * open, each file becomes a note instead.
  */
 export async function stageToolResultMedia<T extends ModelMessage>(
   messages: readonly T[],
@@ -151,7 +151,7 @@ export async function stageToolResultMedia<T extends ModelMessage>(
   if (!messages.some(hasInlineToolResultFile)) {
     return [...messages];
   }
-  const sandbox = (await contextStorage.getStore()?.get(SandboxKey)?.get()) ?? null;
+  const sandbox = await openToolResultSandbox();
   return Promise.all(
     messages.map(async (message) => {
       if (message.role !== "tool" || !hasInlineToolResultFile(message)) {
@@ -167,6 +167,19 @@ export async function stageToolResultMedia<T extends ModelMessage>(
       return { ...message, content };
     }),
   );
+}
+
+// The step's model call and tools already ran, so a throw here would retry
+// the step and replay them.
+async function openToolResultSandbox(): Promise<SandboxSession | null> {
+  try {
+    return (await contextStorage.getStore()?.get(SandboxKey)?.get()) ?? null;
+  } catch (error) {
+    log.warn("sandbox failed to open for tool-result files, degrading them to text parts", {
+      error,
+    });
+    return null;
+  }
 }
 
 /**
