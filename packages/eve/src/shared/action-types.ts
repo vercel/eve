@@ -23,6 +23,8 @@ export const runtimeToolCallActionRequestSchema = z
      * the call id of the tool call that made it.
      */
     parentCallId: z.string().optional(),
+    /** True when the tool dispatches to an agent. */
+    subagent: z.literal(true).optional(),
     toolName: z.string(),
   })
   .strict();

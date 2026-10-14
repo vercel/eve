@@ -3306,6 +3306,73 @@ describe("createToolLoopHarness", () => {
     expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {
+      name: "named",
+      target: { kind: "subagent-call", nodeId: "agents/researcher", subagentName: "researcher" },
+    },
+    {
+      name: "self",
+      target: { kind: "self-agent-call", nodeId: "agents/root", subagentName: "root" },
+    },
+    {
+      name: "dynamic",
+      target: {
+        kind: "subagent-call",
+        nodeId: "dynamic/researcher",
+        subagentName: "dynamic-researcher",
+      },
+    },
+    { name: "plain", target: undefined },
+  ] as const)(
+    "preserves $name agent classification in the tool-loop request",
+    async ({ target }) => {
+      const call = {
+        input: {},
+        toolCallId: "call-delegate",
+        toolName: "delegate",
+        type: "tool-call" as const,
+      };
+      setupMockAgent({
+        finishReason: "tool-calls",
+        response: { messages: [{ role: "assistant", content: [call] }] },
+        text: "",
+        toolCalls: [call],
+        toolResults: [],
+      });
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(
+        createTestConfig(emit, {
+          tools: new Map([
+            [
+              "delegate",
+              {
+                description: "Run a tool.",
+                inputSchema: jsonSchema({ type: "object" }),
+                name: "delegate",
+                ...(target === undefined
+                  ? {}
+                  : {
+                      behavior: { availability: [], handling: { kind: "dispatch", target } },
+                    }),
+              },
+            ],
+          ]),
+        }),
+      );
+      await runStep(createTestSession(), { message: "Delegate work" });
+      expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
+        {
+          callId: "call-delegate",
+          input: {},
+          kind: "tool-call",
+          toolName: "delegate",
+          ...(target === undefined ? {} : { subagent: true }),
+        },
+      ]);
+    },
+  );
+
   it("emits actions.requested and action.result on tool call step", async () => {
     setupMockAgent({
       finishReason: "tool-calls",

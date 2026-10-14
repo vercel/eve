@@ -19,7 +19,7 @@ import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { pendingTaskToolCalls } from "#execution/tasks/calls.js";
-import { startsTasks } from "#execution/tasks/tool-entry-point.js";
+import { isAgentTool, startsTasks } from "#execution/tasks/tool-entry-point.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -362,6 +362,7 @@ export function createRuntimeActionRequestFromToolCall(input: {
     callId: input.toolCall.toolCallId,
     input: toolInput,
     kind: "tool-call",
+    ...(isAgentTool(definition) ? { subagent: true as const } : {}),
     toolName: input.toolCall.toolName,
   };
   return definition?.workflowId === undefined ? action : markRuntimeWorkflowToolAction(action);

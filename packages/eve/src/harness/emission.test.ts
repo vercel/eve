@@ -49,6 +49,67 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
   };
 }
 
+describe("subagent request metadata", () => {
+  it.each([
+    {
+      name: "named",
+      target: { kind: "subagent-call", nodeId: "agents/researcher", subagentName: "researcher" },
+    },
+    {
+      name: "self",
+      target: { kind: "self-agent-call", nodeId: "agents/root", subagentName: "root" },
+    },
+    {
+      name: "dynamic",
+      target: {
+        kind: "subagent-call",
+        nodeId: "dynamic/researcher",
+        subagentName: "dynamic-researcher",
+      },
+    },
+    { name: "plain", target: undefined },
+  ] as const)("emits the $name tool classification at request time", async ({ target }) => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "delegate",
+        {
+          description: "Run a tool.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "delegate",
+          ...(target === undefined
+            ? {}
+            : {
+                behavior: { availability: [], handling: { kind: "dispatch", target } },
+              }),
+        },
+      ],
+    ]);
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { input: {}, toolCallId: "call-delegate", toolName: "delegate", type: "tool-call" },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools },
+    );
+    const event = vi
+      .mocked(emit)
+      .mock.calls.map(([event]) => event)
+      .find((event) => event.type === "actions.requested");
+    expect(event?.data.actions).toEqual([
+      {
+        callId: "call-delegate",
+        input: {},
+        kind: "tool-call",
+        toolName: "delegate",
+        ...(target === undefined ? {} : { subagent: true }),
+      },
+    ]);
+  });
+});
+
 describe("emitTurnEpilogue", () => {
   it("passes settled history with turn.completed", async () => {
     const emit = createEmitStub();

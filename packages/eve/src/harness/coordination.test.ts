@@ -15,9 +15,69 @@ import {
 import { toolOutput } from "#tools/model-output.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import {
+  isRuntimeWorkflowToolAction,
+  runtimeToolCallActionRequestSchema,
+} from "#shared/action-types.js";
 
 describe("createRuntimeActionRequestFromToolCall", () => {
+  it.each([
+    {
+      name: "named",
+      target: { kind: "subagent-call", nodeId: "agents/researcher", subagentName: "researcher" },
+    },
+    {
+      name: "self",
+      target: { kind: "self-agent-call", nodeId: "agents/root", subagentName: "root" },
+    },
+    {
+      name: "dynamic",
+      target: {
+        kind: "subagent-call",
+        nodeId: "dynamic/researcher",
+        subagentName: "dynamic-researcher",
+      },
+    },
+    { name: "plain", target: undefined },
+  ] as const)("marks $name agent tool requests from their dispatch definition", ({ target }) => {
+    const action = createRuntimeActionRequestFromToolCall({
+      toolCall: { input: {}, toolCallId: "call-delegate", toolName: "delegate" },
+      tools: new Map([
+        [
+          "delegate",
+          {
+            description: "Run a tool.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "delegate",
+            ...(target === undefined
+              ? {}
+              : {
+                  behavior: { availability: [], handling: { kind: "dispatch", target } },
+                }),
+          },
+        ],
+      ]),
+    });
+    expect(action).toEqual({
+      callId: "call-delegate",
+      input: {},
+      kind: "tool-call",
+      toolName: "delegate",
+      ...(target === undefined ? {} : { subagent: true }),
+    });
+  });
+
+  it("preserves the subagent flag when parsing the serialized request", () => {
+    const action = {
+      callId: "call-1",
+      input: {},
+      kind: "tool-call",
+      subagent: true,
+      toolName: "delegate",
+    };
+    expect(runtimeToolCallActionRequestSchema.parse(action)).toEqual(action);
+  });
+
   const loadSkillCall = {
     input: { skill: "research" },
     toolCallId: "call-skill",
