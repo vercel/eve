@@ -9,8 +9,7 @@ import { startProductionServer } from "./start-production-server.js";
 describe("production server output", () => {
   const createApp = useTemporaryAppRoots();
 
-  // Reproduces https://github.com/vercel/eve/issues/3282. Remove `.fails` once fixed.
-  it.fails.each(["stdout", "stderr"] as const)(
+  it.each(["stdout", "stderr"] as const)(
     "releases startup %s and stops retaining output after readiness",
     async (stream) => {
       const { appRoot } = await createApp("eve-production-output-", {
