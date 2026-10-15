@@ -31,7 +31,8 @@ import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import { hasRunnableQueue, parkOnApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
+import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
+import { hasQueuedTurnInput, park } from "#harness/step/park.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -150,33 +151,18 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       tasks: dispatched.workflowRequests,
     };
     if (approvalRequests.length > 0) {
-      const parkedResult = await parkOnApprovals(step, {
-        ...parked,
-        requests: approvalRequests,
-        tools: input.catalog,
-        waitsOn: authorizationInterrupt
-          ? "sign-in"
-          : workflowToolCalls.length > 0
-            ? "runtime"
-            : undefined,
-      });
-      // Approval only precedes sign-in for the same call, not an executing sibling.
-      if (authorizationInterrupt) {
-        return stopForToolSignIn(step, {
-          ...authorizationInterrupt,
-          history: step.session.history,
-        });
-      }
-      return parkedResult;
+      await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
+    } else {
+      await step.apply(suspendStep(step.view(), parked));
     }
-    await step.apply(suspendStep(step.view(), parked));
+    // Approval only precedes sign-in for the same call, not an executing sibling.
     if (authorizationInterrupt) {
       return stopForToolSignIn(step, {
         ...authorizationInterrupt,
         history: step.session.history,
       });
     }
-    return { next: null, session: step.session };
+    return park(step);
   }
 
   // --- Park on authorization request ------------------------------------------
@@ -215,7 +201,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
-      hasRunnableQueue(step.view()));
+      hasQueuedTurnInput(step.view()));
   if (continueLoop) return { next: step.runStep, session: step.session };
   // The turn rule: no turn ends while its tasks work. The session waits for
   // one to settle, then calls the model again in the same turn.

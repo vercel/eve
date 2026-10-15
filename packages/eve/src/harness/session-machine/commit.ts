@@ -6,7 +6,12 @@ import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
-import { readHitlState, writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
+import {
+  readHitlState,
+  writeHitlState,
+  type RelayChange,
+  type ResponderChange,
+} from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import type { SessionView } from "./view.js";
 
@@ -28,6 +33,8 @@ export interface Transition {
   readonly signIns?: readonly AuthorizationChallenge[];
   /** Relay routes the transition records or retires. */
   readonly relays?: RelayChange;
+  /** Responder records the transition writes or retires. */
+  readonly responders?: ResponderChange;
 }
 
 /**
@@ -47,6 +54,7 @@ export function sessionView(
   return {
     projection,
     relayedRequestIds: new Set(hitl.relays.keys()),
+    responders: hitl.responders,
     signIns: hitl.signIns,
     turn: readTurnState(state),
     usage: getSessionUsage({ state }),
@@ -114,9 +122,15 @@ export function dropClosedRecords<T extends HarnessSessionBase>(
   session: T,
   projection: SessionProjection,
 ): T {
-  const closed = [...readHitlState(session.state).relays.keys()].filter((requestId) => {
+  const hitl = readHitlState(session.state);
+  const closed = [...hitl.relays.keys()].filter((requestId) => {
     const row = projection.view?.interactions[requestId];
     return row === undefined || row.status === "settled";
   });
-  return writeHitlState(session, { relays: { retire: closed } });
+  // A responder's record lives while their answer stands: a policy weighs it, or it waits to
+  // decide its approval, whose call reads who approved it.
+  const weighed = Object.keys(hitl.responders).filter(
+    (responseId) => (projection.view?.responses[responseId]?.status ?? "settled") === "settled",
+  );
+  return writeHitlState(session, { relays: { retire: closed }, responders: { retire: weighed } });
 }

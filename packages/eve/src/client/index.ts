@@ -115,5 +115,4 @@ export type { Interaction, AskedCall } from "#protocol/session-reader.js";
 export { signInEnding } from "#protocol/session-reader.js";
 export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";
 
-export { answerFromText, answerFromTexts } from "#channel/resolve-text.js";
 export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";

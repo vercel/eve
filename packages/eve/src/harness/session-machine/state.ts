@@ -35,13 +35,11 @@ export interface SuspendedStep {
   readonly event: StepCoordinates;
   /** The withheld response. Results join it as they arrive. */
   readonly messages: readonly ModelMessage[];
-  /** Approvals the step still waits on. */
-  readonly requests: readonly ApprovalAsk[];
   /**
-   * Calls a person approved that haven't run. They run when the turn next calls the model, after
-   * its step starts and its budget allows it, as calls the model makes do.
+   * The approvals the response's calls asked for. How each was answered is the session's
+   * interaction and response tables'; this only remembers what was asked.
    */
-  readonly approved?: readonly ApprovalAsk[];
+  readonly requests: readonly ApprovalAsk[];
   /** Workflow and agent calls the runtime runs for the step. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
@@ -50,7 +48,10 @@ export interface SuspendedStep {
 }
 
 export interface TurnState {
-  /** Input that arrived before it could run: a partial answer, or input behind a policy pass. */
+  /**
+   * Turn input that arrived before the turn could take it: behind a question a message can't
+   * steer past, such as the budget prompt, or behind approved calls the model reads first.
+   */
   readonly queued?: HarnessStepInput;
   readonly suspended: readonly SuspendedStep[];
   /** Approval keys a `once()` approval granted for the rest of the session. */

@@ -67,26 +67,6 @@ export function answerFromText(text: string, interaction: TextResolvable): Answe
   return undefined;
 }
 
-/**
- * Resolves text against all pending interactions, returning one
- * {@link Answer} for each it could match.
- */
-export function answerFromTexts(
-  text: string,
-  requests: readonly TextResolvable[],
-): readonly Answer[] {
-  const responses: Answer[] = [];
-
-  for (const request of requests) {
-    const response = answerFromText(text, request);
-    if (response !== undefined) {
-      responses.push(response);
-    }
-  }
-
-  return responses;
-}
-
 function matchOption(
   normalized: string,
   options: readonly InteractionOption[],

@@ -1,6 +1,6 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DeliverPayload } from "#channel/types.js";
-import { firstOpenInteraction } from "#harness/first-open-interaction.js";
+import { promptQueueHead } from "#protocol/session-reader.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
@@ -139,7 +139,7 @@ function resolveMessageAgainstFirstRequest(input: {
   if (text === undefined) return none;
   // A request an earlier payload answered is no longer open to this one. The first open request
   // is the one the person sees: a reply answers it only when a child asked it.
-  const first = firstOpenInteraction(input.projection, input.taken);
+  const first = promptQueueHead(input.projection.view, input.taken);
   if (first === undefined || input.routeOf(first.interactionId) === undefined) return none;
   const answer = answerFromText(text, first);
   return answer === undefined ? none : { answers: [answer], consumed: true };

@@ -20,7 +20,6 @@ import type {
   TaskCancelReason,
 } from "#protocol/message.js";
 import {
-  approvalOpened,
   interactionSettled,
   responseSettled,
   responseAdmitted,
@@ -58,14 +57,8 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Transition } from "./commit.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
-import type { ApprovalAsk, SuspendedStep, TurnState } from "./state.js";
-import {
-  activeTurnId,
-  answeredCallIds,
-  runningTasks,
-  turnPosition,
-  type SessionView,
-} from "./view.js";
+import type { SuspendedStep, TurnState } from "./state.js";
+import { activeTurnId, answeredCallIds, turnPosition, type SessionView } from "./view.js";
 
 // The session's lifecycle. Every transition reads a `SessionView` and returns the facts that
 // report what changed with the execution state that follows; `applyTransition` publishes them as
@@ -375,8 +368,6 @@ export function fail(
     readonly terminal?: { readonly sessionId: string };
   },
 ): Transition {
-  // The calls the turn approved but hadn't run never run: the model reads that they stopped.
-  const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
   const error = errorInfoOf(failure);
   const turnId = activeTurnIdOf(view.projection);
   // A terminal failure ends the session, which ends the turn with it, in one commit.
@@ -388,14 +379,7 @@ export function fail(
           error,
           outcome: "failed",
         });
-  return {
-    commit: stopped.flatMap(cancelledTranscript),
-    events,
-    turn: {
-      ...view.turn,
-      suspended: view.turn.suspended.filter((step) => !stopped.includes(step)),
-    },
-  };
+  return unchanged(view, events);
 }
 
 /** The session waits for its next delivery. Nothing is written: readers ask `idle`. */
@@ -500,10 +484,7 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
     const index = steps.findIndex((step) => stepCallIds(step).has(part.toolCallId));
     const step = steps[index];
     if (step === undefined) continue;
-    steps[index] = withoutApproved(
-      { ...step, messages: withResult(step.messages, part) },
-      new Set([part.toolCallId]),
-    );
+    steps[index] = { ...step, messages: withResult(step.messages, part) };
     const recorded = result === undefined ? undefined : view.projection.view.calls[result.callId];
     if (result !== undefined && recorded?.taskId === undefined && recorded?.status !== "settled") {
       // A task's start receipt is model history only. Its public call stays open until the
@@ -513,15 +494,6 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       // A child's usage counts once, in the commit that settles its call.
       if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage, scope));
     }
-  }
-  // A step that parked approvals beside its tasks asks for them once the tasks finish.
-  for (const step of steps) {
-    if (step.tasks.length === 0 || step.requests.length === 0) continue;
-    if (runningTasks(step).length > 0) continue;
-    const tables = view.projection.view;
-    if (step.requests.some((request) => tables.interactions[request.interactionId] !== undefined))
-      continue;
-    events.push(...step.requests.map((ask) => approvalOpened(ask, step.event.turnId)));
   }
   const complete = steps.filter(isComplete);
   return {
@@ -574,20 +546,6 @@ export function suspendStep(
   return { events: [], turn: suspend(view.turn, { ...step, requests: [] }) };
 }
 
-/** The step without the approved calls in `callIds`, which have run or joined the runtime. */
-export function withoutApproved(step: SuspendedStep, callIds: ReadonlySet<string>): SuspendedStep {
-  if (step.approved === undefined) return step;
-  const approved = step.approved.filter((request) => !callIds.has(request.call.callId));
-  if (approved.length === step.approved.length) return step;
-  const { approved: _approved, ...rest } = step;
-  return approved.length === 0 ? rest : { ...rest, approved };
-}
-
-/** Approved calls of suspended steps that haven't run. */
-export function approvedCalls(turn: TurnState): readonly ApprovalAsk[] {
-  return turn.suspended.flatMap((step) => step.approved ?? []);
-}
-
 export function suspend(turn: TurnState, step: SuspendedStep): TurnState {
   return { ...turn, suspended: [...turn.suspended, step] };
 }
@@ -604,8 +562,8 @@ export function stepCallIds(step: Pick<SuspendedStep, "messages">): ReadonlySet<
   return ids;
 }
 
+/** Every call the step made has a result: a pending approval's call has none yet. */
 function isComplete(step: SuspendedStep): boolean {
-  if (step.requests.length > 0) return false;
   const answered = answeredCallIds(step.messages);
   return [...stepCallIds(step)].every((callId) => answered.has(callId));
 }
@@ -1199,8 +1157,7 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
   const stopped = view.turn.suspended.filter(
     (step) =>
       (turnId !== undefined && step.event.turnId === turnId) ||
-      step.tasks.some((task) => !answeredCallIds(step.messages).has(task.callId)) ||
-      (step.approved?.length ?? 0) > 0,
+      step.tasks.some((task) => !answeredCallIds(step.messages).has(task.callId)),
   );
   const stoppedRequestIds = new Set(
     stopped.flatMap((step) => step.requests.map((request) => request.interactionId)),

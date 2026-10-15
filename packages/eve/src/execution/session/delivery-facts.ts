@@ -1,26 +1,23 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
-import type { HarnessStepInput } from "#harness/types.js";
+import type { HarnessStepInput, StepInput } from "#harness/types.js";
 import { userPartsOf } from "#harness/user-parts.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { JsonValue, Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
-import type {
-  ResponseSubmittedData,
-  ResponseValue,
-} from "#protocol/session-events/families/response.js";
 
 // A delivery's facts at the step that admits it: every payload is admitted, a payload the
 // channel's `deliver` hook ignored settles `ignored` at once, and the rest go on to the turn,
 // which consumes them. Deliveries are admitted at step boundaries, since only steps write.
 
-/** What one step admits: the facts it writes first, and the deliveries its turn consumes. */
+/**
+ * What one step admits: the facts it writes first, and each consumed payload's input, carrying
+ * its delivery and each answer bound to the response it submits.
+ */
 export interface DeliveryAdmission {
   readonly facts: readonly SessionEvent[];
-  readonly consumed: readonly ConsumedDelivery[];
-  /** The identities of answers, before coalescing or asynchronous policy checks. */
-  readonly responseBindings: readonly ResponseSubmittedData[];
+  readonly inputs: readonly HarnessStepInput[];
 }
 
 export function admitDeliveries(input: {
@@ -29,7 +26,7 @@ export function admitDeliveries(input: {
   /** The payloads left once sign-in callbacks were matched out, with what `deliver` made of each. */
   readonly payloads: readonly {
     readonly payload: DeliverPayload;
-    readonly input: HarnessStepInput | undefined;
+    readonly input: StepInput | undefined;
   }[];
   /** Whether the session already admitted a delivery, as when it forwarded part of it. */
   readonly admitted?: (deliveryId: string) => boolean;
@@ -37,8 +34,7 @@ export function admitDeliveries(input: {
 }): DeliveryAdmission {
   const { delivery } = input;
   const facts: SessionEvent[] = [];
-  const consumed: ConsumedDelivery[] = [];
-  const responseBindings: ResponseSubmittedData[] = [];
+  const inputs: HarnessStepInput[] = [];
   const principal = principalOf(delivery.auth);
   for (const { input: stepInput, payload } of input.payloads) {
     const index = delivery.payloads.indexOf(payload);
@@ -76,23 +72,26 @@ export function admitDeliveries(input: {
       facts.push({ data: { deliveryId, outcome: "ignored" }, type: "delivery.settled" });
       continue;
     }
-    consumed.push({
+    const consumed: ConsumedDelivery = {
       deliveryId,
       parts: stepInput.message === undefined ? [] : userPartsOf(stepInput.message),
-    });
-    for (const [answerIndex, answer] of (stepInput.answers ?? []).entries()) {
-      const value: { -readonly [K in keyof ResponseValue]: ResponseValue[K] } = {};
-      if (answer.optionId !== undefined) value.optionId = answer.optionId;
-      if (answer.text !== undefined) value.text = answer.text;
-      responseBindings.push({
-        responseId: `response_${deliveryId}_${answerIndex}`,
-        interactionId: answer.interactionId,
-        deliveryId,
-        value,
-      });
-    }
+    };
+    const { answers, ...rest } = stepInput;
+    inputs.push(
+      answers === undefined || answers.length === 0
+        ? { ...rest, deliveries: [consumed] }
+        : {
+            ...rest,
+            answers: answers.map((answer, index) => ({
+              ...answer,
+              deliveryId,
+              responseId: `response_${deliveryId}_${String(index)}`,
+            })),
+            deliveries: [consumed],
+          },
+    );
   }
-  return { consumed, facts, responseBindings };
+  return { facts, inputs };
 }
 
 /** Who sent a delivery, as the wire names them. */

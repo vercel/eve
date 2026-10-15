@@ -1,19 +1,17 @@
-import { openRequests } from "#protocol/session-reader.js";
-import { withTypedBindings } from "#harness/response-bindings.js";
+import { openRequests, promptQueueHead } from "#protocol/session-reader.js";
 import type { UserContent } from "ai";
 
-import { answerFromText, answerFromTexts } from "#channel/resolve-text.js";
+import { answerFromText } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/hitl/stale-responses.js";
-import { firstOpenInteraction } from "#harness/first-open-interaction.js";
-import type { HarnessStepInput } from "#harness/types.js";
+import type { HarnessStepInput, SubmittedAnswer } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { readAnswerText } from "#internal/input-text.js";
 import type { Answer } from "#shared/input.js";
-import type { InteractionRow } from "#protocol/session-projection/tables.js";
+import type { SessionView as SessionTables } from "#protocol/session-projection/tables.js";
 import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 
@@ -40,7 +38,7 @@ export function deliver(
   // Match the new typed answer before queued messages join it.
   const incoming =
     queued !== undefined && limit !== undefined
-      ? resolveTextInput({ requests: [limit] }, input)
+      ? resolveTextInput(view.projection.view, input)
       : input;
   const merged =
     queued === undefined
@@ -50,11 +48,16 @@ export function deliver(
         : coalesceTurnInputs(queued, incoming);
   // An approval settles on its own answer, before its batch resolves: the answer still counts
   // while its batch waits for the rest.
+  const tables = view.projection.view;
+  // An approval not asked yet, behind its step's tasks, still takes its answer.
   const pendingRequestIds = new Set([
     ...ownOpenRequestIds(view),
-    ...view.turn.suspended.flatMap((step) => step.requests.map((ask) => ask.interactionId)),
+    ...view.turn.suspended.flatMap((step) =>
+      step.requests
+        .filter((ask) => tables.interactions[ask.interactionId] === undefined)
+        .map((ask) => ask.interactionId),
+    ),
   ]);
-  const tables = view.projection.view;
   const converted = convertStaleResponsesToUserMessage({
     pendingRequestIds,
     view: tables,
@@ -78,24 +81,25 @@ export type ResolvedStepInput = HarnessStepInput & { readonly messageConsumed?: 
  * neither.
  */
 export function resolveTextInput(
-  batch: { readonly requests: readonly InteractionRow[] },
+  view: SessionTables,
   stepInput: HarnessStepInput | undefined,
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
   if (stepInput === undefined || text === undefined) return stepInput;
-  const batchRequestIds = new Set(batch.requests.map((row) => row.interactionId));
+  const batchRequestIds = new Set(openRequests(view).map((row) => row.interactionId));
   if (stepInput.answers?.some((answer) => batchRequestIds.has(answer.interactionId))) {
     return stepInput;
   }
-  const responses = answerFromTexts(text, batch.requests);
-  if (responses.length === 0) return stepInput;
+  const first = promptQueueHead(view);
+  const response = first === undefined ? undefined : answerFromText(text, first);
+  const answers = typedAnswers(stepInput, response === undefined ? [] : [response]);
+  if (answers === undefined) return stepInput;
   return compactInput({
     ...stepInput,
     context: undefined,
-    answers: [...(stepInput.answers ?? []), ...responses],
+    answers: [...(stepInput.answers ?? []), ...answers],
     message: undefined,
     messageConsumed: true,
-    responseBindings: withTypedBindings(stepInput, responses),
   });
 }
 
@@ -111,13 +115,8 @@ export function resolveTypedApproval(
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
   if (stepInput === undefined || text === undefined) return stepInput;
-  const answered = new Set(
-    [
-      ...(stepInput.answers ?? []),
-      ...(stepInput.attributedAnswers ?? []).map(({ response }) => response),
-    ].map(({ interactionId }) => interactionId),
-  );
-  const first = firstOpenInteraction(view.projection, (interactionId) =>
+  const answered = new Set((stepInput.answers ?? []).map(({ interactionId }) => interactionId));
+  const first = promptQueueHead(view.projection.view, (interactionId) =>
     answered.has(interactionId),
   );
   const parked = view.turn.suspended.some((step) =>
@@ -125,21 +124,33 @@ export function resolveTypedApproval(
   );
   if (first === undefined || !parked || first.request.kind !== "approval") return stepInput;
   const response = answerFromText(text, first);
-  if (response === undefined) return stepInput;
+  const answers = typedAnswers(stepInput, response === undefined ? [] : [response]);
+  if (answers === undefined) return stepInput;
   return {
     ...stepInput,
     context: undefined,
-    answers: [...(stepInput.answers ?? []), response],
+    answers: [...(stepInput.answers ?? []), ...answers],
     message: undefined,
     messageConsumed: true,
-    responseBindings: withTypedBindings(stepInput, [response]),
   };
 }
 
-export function canonicalize(answers: readonly Answer[]): readonly Answer[] {
-  const byInteraction = new Map<string, Answer>();
-  for (const answer of answers) byInteraction.set(answer.interactionId, answer);
-  return [...byInteraction.values()];
+/**
+ * The answers a typed message stands for, submitted from the delivery that carried it, so they
+ * keep one identity through coalescing and policy passes as a press does. Text that arrived in
+ * no delivery answers nothing.
+ */
+function typedAnswers(
+  input: HarnessStepInput,
+  answers: readonly Answer[],
+): readonly SubmittedAnswer[] | undefined {
+  const deliveryId = input.deliveries?.at(-1)?.deliveryId;
+  if (deliveryId === undefined || answers.length === 0) return undefined;
+  return answers.map((answer, index) => ({
+    ...answer,
+    deliveryId,
+    responseId: `response_${deliveryId}_typed_${String(index)}`,
+  }));
 }
 
 export function isEmptyInput(input: HarnessStepInput): boolean {
@@ -150,13 +161,7 @@ export function withoutResponses(
   input: ResolvedStepInput | undefined,
 ): HarnessStepInput | undefined {
   if (input === undefined) return undefined;
-  const {
-    attributedAnswers: _attributed,
-    answers: _responses,
-    responseBindings: _bindings,
-    messageConsumed: _consumed,
-    ...rest
-  } = input;
+  const { answers: _answers, messageConsumed: _consumed, ...rest } = input;
   return rest;
 }
 
@@ -176,14 +181,9 @@ export function withoutTurnInput(input: ResolvedStepInput | undefined): Resolved
   const result: {
     answers?: HarnessStepInput["answers"];
     outputSchema?: HarnessStepInput["outputSchema"];
-    attributedAnswers?: HarnessStepInput["attributedAnswers"];
-    responseBindings?: HarnessStepInput["responseBindings"];
     deliveries?: HarnessStepInput["deliveries"];
   } = {};
   if ((input?.answers?.length ?? 0) > 0) result.answers = input!.answers;
-  if ((input?.attributedAnswers?.length ?? 0) > 0)
-    result.attributedAnswers = input!.attributedAnswers;
-  if ((input?.responseBindings?.length ?? 0) > 0) result.responseBindings = input!.responseBindings;
   if ((input?.deliveries?.length ?? 0) > 0) result.deliveries = input!.deliveries;
   if (input?.outputSchema !== undefined) result.outputSchema = input.outputSchema;
   return result;
@@ -197,16 +197,9 @@ export function compactInput(input: ResolvedStepInput | undefined): ResolvedStep
     message?: HarnessStepInput["message"];
     messageConsumed?: boolean;
     outputSchema?: HarnessStepInput["outputSchema"];
-    attributedAnswers?: HarnessStepInput["attributedAnswers"];
-    responseBindings?: HarnessStepInput["responseBindings"];
     deliveries?: HarnessStepInput["deliveries"];
-    messageAuth?: HarnessStepInput["messageAuth"];
   } = {};
-  if ((input.attributedAnswers?.length ?? 0) > 0)
-    result.attributedAnswers = input.attributedAnswers;
-  if ((input.responseBindings?.length ?? 0) > 0) result.responseBindings = input.responseBindings;
   if ((input.deliveries?.length ?? 0) > 0) result.deliveries = input.deliveries;
-  if (input.messageAuth !== undefined) result.messageAuth = input.messageAuth;
   if ((input.context?.length ?? 0) > 0) result.context = input.context;
   if ((input.answers?.length ?? 0) > 0) result.answers = input.answers;
   if (input.message !== undefined) result.message = input.message;

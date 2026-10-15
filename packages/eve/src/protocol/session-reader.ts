@@ -10,6 +10,7 @@ import type {
 import type { Answer } from "#protocol/session-events/families/response.js";
 import type { JsonValue } from "#shared/json.js";
 import {
+  answeredInteractionIds,
   callOutputSource,
   callRun,
   callTurn,
@@ -309,4 +310,16 @@ export function signInEnding(
     default:
       return "cancelled";
   }
+}
+
+/** The prompt a text-only channel displays: budget first, then the oldest unanswered request. */
+export function promptQueueHead(
+  view: SessionView,
+  answered: (interactionId: string) => boolean = () => false,
+): InteractionRow | undefined {
+  const admitted = answeredInteractionIds(view);
+  const open = openRequests(view).filter(
+    (row) => !answered(row.interactionId) && !admitted.has(row.interactionId),
+  );
+  return open.find((row) => row.request.kind === "budget") ?? open[0];
 }

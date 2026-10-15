@@ -279,7 +279,7 @@ export default defineTool({
 });
 ```
 
-For approval requests, a follow-up message that doesn't match an option steers the turn instead of answering it. eve withdraws the turn's pending approval: its interaction settles `withdrawn`, its call settles `rejected` without running, and the model reads the message next. This happens even when the message is sent with `turnPolicy: "queue"`, because a turn held on a person can't end until they act. Calls the person already approved in the same batch still run. A message from someone other than the person the turn serves waits until the turn ends. Cancelling the turn interrupts its approval: the call doesn't run, the interaction settles `interrupted`, and a later answer to it approves nothing.
+For approval requests, a follow-up message that doesn't match an option steers the turn instead of answering it. eve withdraws every approval nobody has answered: each interaction settles `withdrawn`, its call settles `rejected` without running, and the model reads the message next. This happens even when the message is sent with `turnPolicy: "queue"`, because a turn held on a person can't end until they act. Approvals that already have an answer settle on it, so calls the person already approved still run. A message from someone other than the person the turn serves waits until the turn ends. Cancelling the turn interrupts its approval: the call doesn't run, the interaction settles `interrupted`, and a later answer to it approves nothing.
 
 ### Several requests at once
 

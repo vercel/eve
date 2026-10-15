@@ -11,7 +11,6 @@ import type { Answer } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
@@ -136,35 +135,20 @@ export interface SessionLimits {
   readonly maxTokenCostUsdPerSession?: number;
 }
 
-/**
- * Input payload for a harness turn.
- *
- * Carries an optional message and/or structured input responses from the
- * channel emitter's `onDeliver`. The message may be a plain text string or
- * a structured AI SDK {@link UserContent} array (mixing `text`, `image`,
- * and `file` parts) to support multimodal attachments delivered by
- * channels. The harness resolves any pending input batch at the start of
- * `runStep` before the model call.
- */
-export interface AttributedAnswer {
-  readonly auth: SessionAuthContext | null;
-  readonly response: Answer;
-}
-
 /** The delivery a control arrived as: its id, and who sent it, as the wire names them. */
 export interface ControlDelivery {
   readonly deliveryId: string;
   readonly principal?: Principal;
 }
 
-/** What a channel's `deliver` hook makes of one payload: the input a turn receives. */
+/**
+ * What a channel's `deliver` hook makes of one payload: the input a turn receives. The message
+ * may be plain text or a structured AI SDK {@link UserContent} array mixing text and file parts.
+ */
 export interface StepInput {
-  /** Internal responder-bound input produced at the delivery boundary. */
-  readonly attributedAnswers?: readonly AttributedAnswer[];
+  /** Answers to the session's open interactions. */
   readonly answers?: readonly Answer[];
   readonly message?: string | UserContent;
-  /** Internal actor attribution for `message`. */
-  readonly messageAuth?: SessionAuthContext | null;
   /**
    * Context strings from the channel delivery. Each entry is appended as a
    * synthetic user-role message to `session.history` before the
@@ -176,25 +160,30 @@ export interface StepInput {
    * present. Omitted continuations keep the existing schema.
    */
   readonly outputSchema?: JsonObject;
-  /**
-   * Runtime-owned action results being resumed into the current turn.
-   *
-   * This field is internal to the execution/harness boundary and is never
-   * produced by channels.
-   */
-  readonly runtimeActionResults?: readonly RuntimeActionResult[];
 }
 
 /**
- * A turn step's input inside the session: what `deliver` made, plus the identities eve attaches
- * at the delivery boundary. Never produced by channels.
+ * An answer as the session received it: the response it submits, the delivery it arrived in,
+ * and who gave it when that isn't the turn's caller.
  */
-export interface HarnessStepInput extends StepInput {
+export interface SubmittedAnswer extends Answer {
+  readonly responseId: string;
+  readonly deliveryId: string;
   /**
-   * Stable public response and delivery identities carried across policy and sign-in passes.
-   * Routing and auth stay private; lifecycle status belongs only to the public fold.
+   * Who answered an approval when a delivery only answered requests: the turn keeps its caller.
+   * `null` answers as no one; absent, the answer is the caller's.
    */
-  readonly responseBindings?: readonly ResponseSubmittedData[];
+  readonly responder?: SessionAuthContext | null;
+}
+
+/**
+ * A turn step's input inside the session: what `deliver` made, with each answer bound to the
+ * response it submits, and what the runtime resumes. Never produced by channels.
+ */
+export interface HarnessStepInput extends Omit<StepInput, "answers"> {
+  readonly answers?: readonly SubmittedAnswer[];
+  /** Runtime-owned action results being resumed into the current turn. */
+  readonly runtimeActionResults?: readonly RuntimeActionResult[];
   /**
    * What the agents behind some of {@link runtimeActionResults} spent, by call id. Each call's
    * settlement records it, so the session counts a child's usage once.

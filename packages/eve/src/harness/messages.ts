@@ -120,30 +120,27 @@ type FrameworkStepInput = HarnessStepInput & {
 };
 
 /** Marks an execution-owned delivery so its model message retains provenance. */
-export function markFrameworkStepInput(
-  input: HarnessStepInput,
-  kind: FrameworkMessageKind,
-): HarnessStepInput {
-  return { ...input, frameworkMessageKind: kind } as FrameworkStepInput;
+export function markFrameworkStepInput<T extends object>(input: T, kind: FrameworkMessageKind): T {
+  return { ...input, frameworkMessageKind: kind };
 }
 
 /** Returns the framework reason for an execution-owned user message, when present. */
 export function frameworkMessageKindForStepInput(
-  input: HarnessStepInput | undefined,
+  input: object | undefined,
 ): FrameworkMessageKind | undefined {
   if (input === undefined) return undefined;
   const { frameworkMessageKind } = input as FrameworkStepInput;
   return isFrameworkMessageKind(frameworkMessageKind) ? frameworkMessageKind : undefined;
 }
 
+/** A turn's input as a channel payload or the harness carries it. */
+type TurnInput = Omit<HarnessStepInput, "answers"> & { readonly answers?: readonly Answer[] };
+
 /**
- * Merges two {@link HarnessStepInput} values into one.
- *
- * Used by the harness to coalesce deferred step input with the current
- * turn's input, and by the execution layer after calling `onDeliver`
- * for each queued delivery payload.
+ * Merges two turn inputs into one: deferred step input with the current turn's, or the inputs
+ * `deliver` made of a delivery's payloads.
  */
-export function coalesceTurnInputs(a: HarnessStepInput, b: HarnessStepInput): HarnessStepInput {
+export function coalesceTurnInputs<T extends TurnInput>(a: T, b: T): T {
   const answers = coalesceAnswers({
     a: a.answers,
     b: b.answers,
@@ -163,12 +160,8 @@ export function coalesceTurnInputs(a: HarnessStepInput, b: HarnessStepInput): Ha
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
-  const attributedAnswers = [...(a.attributedAnswers ?? []), ...(b.attributedAnswers ?? [])];
-
   const result: {
-    attributedAnswers?: HarnessStepInput["attributedAnswers"];
     deliveries?: HarnessStepInput["deliveries"];
-    responseBindings?: HarnessStepInput["responseBindings"];
     answers?: readonly Answer[];
     message?: string | UserContent;
     context?: readonly string[];
@@ -176,15 +169,8 @@ export function coalesceTurnInputs(a: HarnessStepInput, b: HarnessStepInput): Ha
   } = {};
   const deliveries = [...(a.deliveries ?? []), ...(b.deliveries ?? [])];
   if (deliveries.length > 0) result.deliveries = deliveries;
-  const bindings = [...(a.responseBindings ?? []), ...(b.responseBindings ?? [])];
-  if (bindings.length > 0) result.responseBindings = bindings;
-
   if (answers !== undefined) {
     result.answers = answers;
-  }
-
-  if (attributedAnswers.length > 0) {
-    result.attributedAnswers = attributedAnswers;
   }
 
   if (message !== undefined) {
@@ -212,7 +198,7 @@ export function coalesceTurnInputs(a: HarnessStepInput, b: HarnessStepInput): Ha
         ? result
         : markFrameworkStepInput(result, frameworkMessageKind),
       inputText,
-    ),
+    ) as T,
     ephemeralContext,
   );
 }
@@ -368,8 +354,8 @@ function coalesceContext(input: {
 }
 
 function coalesceFrameworkMessageKind(input: {
-  readonly a: HarnessStepInput;
-  readonly b: HarnessStepInput;
+  readonly a: TurnInput;
+  readonly b: TurnInput;
 }): FrameworkMessageKind | undefined {
   const a = frameworkMessageKindForStepInput(input.a);
   const b = frameworkMessageKindForStepInput(input.b);

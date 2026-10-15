@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
-import { answerFromText, answerFromTexts } from "#channel/resolve-text.js";
+import { answerFromText } from "#channel/resolve-text.js";
 
 const asked = (interactionId: string, request: InteractionRequest) => ({ interactionId, request });
 
@@ -128,24 +128,5 @@ describe("answerFromText", () => {
       interactionId: "req-1",
       optionId: "approve",
     });
-  });
-});
-
-describe("answerFromTexts", () => {
-  it("resolves text against multiple requests", () => {
-    const responses = answerFromTexts("approve", [APPROVAL_REQUEST, FREEFORM_REQUEST]);
-    expect(responses).toEqual([
-      { interactionId: "req-1", optionId: "approve" },
-      { interactionId: "req-3", text: "approve" },
-    ]);
-  });
-
-  it("returns empty array when nothing matches", () => {
-    const responses = answerFromTexts("gibberish", [APPROVAL_REQUEST, SELECT_REQUEST]);
-    expect(responses).toEqual([]);
-  });
-
-  it("resolves against empty requests", () => {
-    expect(answerFromTexts("hello", [])).toEqual([]);
   });
 });
