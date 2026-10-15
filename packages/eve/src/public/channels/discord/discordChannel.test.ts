@@ -14,7 +14,12 @@ import {
   DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
   renderInputRequestComponents,
 } from "#public/channels/discord/hitl.js";
-import { defaultDiscordAuth, discordChannel } from "#public/channels/discord/index.js";
+import {
+  defaultDiscordAuth,
+  defaultDiscordMessageAuth,
+  discordChannel,
+  type DiscordGatewayConfig,
+} from "#public/channels/discord/index.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
@@ -234,7 +239,7 @@ describe("discordChannel() inbound route", () => {
     expect(continuationToken).toBe("C01:I01");
     expect(input).toMatchObject({
       auth: {
-        authenticator: "discord-interaction",
+        authenticator: "discord",
         principalId: "discord:G01:U01",
       },
       state: {
@@ -633,7 +638,252 @@ describe("discordChannel() default event handlers", () => {
   });
 });
 
+const RELAY_AUTH = {
+  attributes: {},
+  authenticator: "test-relay",
+  principalId: "relay",
+  principalType: "service",
+} as const;
+
+function messageCreate(message: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    d: {
+      attachments: [],
+      author: { id: "U01", username: "ada" },
+      channel_id: "C01",
+      content: "<@APP1> hello",
+      guild_id: "G01",
+      id: "M01",
+      mentions: [{ id: "APP1" }],
+      type: 0,
+      ...message,
+    },
+    op: 0,
+    s: 7,
+    t: "MESSAGE_CREATE",
+  };
+}
+
+/** A Gateway-enabled channel whose Discord channel lookups report `channelType`. */
+function gatewayChannel(
+  options: {
+    readonly channelType?: number;
+    readonly gateway?: DiscordGatewayConfig;
+  } = {},
+) {
+  const discordFetch = vi.fn<typeof fetch>(async () =>
+    Response.json({ id: "C01", type: options.channelType ?? 0 }),
+  );
+  const channel = discordChannel({
+    api: { fetch: discordFetch },
+    credentials: { applicationId: "APP1", botToken: "bot-token" },
+    gateway: { auth: () => RELAY_AUTH, ...options.gateway },
+  });
+  return { channel, discordFetch };
+}
+
+async function fireGateway(
+  channel: unknown,
+  body: unknown,
+  options: { readonly activeTokens?: readonly string[] } = {},
+): Promise<{ response: Response; send: ReturnType<typeof vi.fn> }> {
+  const route = asCompiled(channel).routes.find(
+    (candidate) => isHttpRouteDefinition(candidate) && candidate.path === "/eve/v1/discord/gateway",
+  );
+  if (!route || !isHttpRouteDefinition(route)) throw new Error("Expected a Gateway route.");
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
+  const response = await route.handler(
+    new Request("https://example.com/eve/v1/discord/gateway", {
+      body: JSON.stringify(body),
+      method: "POST",
+    }),
+    {
+      ...mockAgentRouteArgs(),
+      attachSession: vi.fn() as any,
+      ...mockChannelContext(send),
+      resolveSession: async (token: string) =>
+        options.activeTokens?.includes(token) ? ({ id: "existing" } as any) : undefined,
+      to: vi.fn() as any,
+      params: {},
+      requestIp: null,
+      waitUntil: vi.fn(),
+    },
+  );
+  return { response, send };
+}
+
+describe("discordChannel() Gateway route", () => {
+  it("mounts only when gateway is configured", () => {
+    expect(discordChannel({ gateway: {} }).routes.map((route) => route.path)).toEqual([
+      "/eve/v1/discord",
+      "/eve/v1/discord/gateway",
+    ]);
+  });
+
+  it("dispatches a direct message to one session per DM channel", async () => {
+    const { channel, discordFetch } = gatewayChannel();
+
+    const { response, send } = await fireGateway(
+      channel,
+      messageCreate({ channel_id: "D01", content: "hi there", guild_id: undefined, mentions: [] }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(discordFetch).not.toHaveBeenCalled();
+    const [token, input] = send.mock.calls[0]!;
+    expect(token).toBe("D01:channel");
+    expect(input).toMatchObject({
+      auth: { authenticator: "discord", principalId: "discord:U01" },
+      message: "hi there",
+      state: {
+        audience: "private",
+        channelId: "D01",
+        conversationId: "channel",
+        guildId: null,
+        hasMessageAnchor: true,
+        interactionToken: null,
+      },
+    });
+    expect((input as { context: string[] }).context[0]).toContain("message_id: M01");
+  });
+
+  it.each([
+    {
+      name: "a mention in a channel starts a per-user session",
+      message: {},
+      channelType: 0,
+      token: "C01:user:U01",
+    },
+    {
+      name: "a reply to the bot in a channel starts a per-user session",
+      message: {
+        content: "and then?",
+        mentions: [],
+        referenced_message: { author: { id: "APP1" } },
+        type: 19,
+      },
+      channelType: 0,
+      token: "C01:user:U01",
+    },
+    {
+      name: "a mention in a thread starts a session for the whole thread",
+      message: {},
+      channelType: 11,
+      token: "C01:channel",
+    },
+  ])("$name", async ({ message, channelType, token }) => {
+    const { channel } = gatewayChannel({ channelType });
+
+    const { send } = await fireGateway(channel, messageCreate(message));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![0]).toBe(token);
+    expect(send.mock.calls[0]![1]).toMatchObject({
+      auth: { principalId: "discord:G01:U01" },
+      message: expect.stringMatching(/^(hello|and then\?)$/),
+    });
+  });
+
+  it("continues a thread conversation without a mention", async () => {
+    const { channel, discordFetch } = gatewayChannel();
+
+    const { send } = await fireGateway(
+      channel,
+      messageCreate({ content: "one more thing", mentions: [] }),
+      { activeTokens: ["C01:channel"] },
+    );
+
+    expect(discordFetch).not.toHaveBeenCalled();
+    expect(send.mock.calls[0]![0]).toBe("C01:channel");
+  });
+
+  it("ignores channel messages that are not for the bot", async () => {
+    const { channel } = gatewayChannel();
+
+    const { response, send } = await fireGateway(
+      channel,
+      messageCreate({ content: "just chatting", mentions: [] }),
+    );
+
+    await expect(response.json()).resolves.toEqual({ accepted: false, reason: "not_accepted" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("never dispatches messages from bots, including its own replies", async () => {
+    const onMessage = vi.fn(() => ({ auth: null }));
+    const { channel } = gatewayChannel({ gateway: { onMessage } });
+
+    const { send } = await fireGateway(
+      channel,
+      messageCreate({ author: { bot: true, id: "APP1", username: "eve" } }),
+    );
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("lets onMessage accept messages the default would ignore", async () => {
+    const { channel } = gatewayChannel({
+      gateway: {
+        onMessage: (_ctx, message) => ({
+          auth: defaultDiscordMessageAuth(message),
+          context: [`addressed: ${message.addressed}`],
+        }),
+      },
+    });
+
+    const { send } = await fireGateway(
+      channel,
+      messageCreate({ content: "anyone around?", mentions: [] }),
+    );
+
+    expect(send.mock.calls[0]![1]).toMatchObject({
+      context: [expect.stringContaining("<discord_context>"), "addressed: false"],
+      message: "anyone around?",
+    });
+  });
+
+  it("rejects relay requests without credentials by default", async () => {
+    const channel = discordChannel({
+      credentials: { applicationId: "APP1", botToken: "bot-token" },
+      gateway: {},
+    });
+
+    const { response, send } = await fireGateway(channel, messageCreate());
+
+    expect(response.status).toBe(401);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe("defaultDiscordAuth", () => {
+  it("gives a person the same principal for messages and interactions", () => {
+    const user = { id: "U01", isBot: false, username: "ada" };
+    const fromInteraction = defaultDiscordAuth({
+      applicationId: "APP1",
+      channelId: "C01",
+      guildId: "G01",
+      id: "I01",
+      raw: {},
+      token: "tok",
+      user,
+    });
+    const fromMessage = defaultDiscordMessageAuth({
+      addressed: true,
+      attachments: [],
+      author: user,
+      channelId: "C02",
+      content: "hi",
+      guildId: "G01",
+      id: "M01",
+      raw: {},
+    });
+
+    for (const field of ["authenticator", "issuer", "principalId", "principalType"] as const) {
+      expect(fromMessage[field]).toBe(fromInteraction[field]);
+    }
+  });
+
   it("derives guild-scoped user auth", () => {
     const auth = defaultDiscordAuth({
       applicationId: "APP1",
@@ -652,7 +902,7 @@ describe("defaultDiscordAuth", () => {
         interaction_id: "I01",
         user_id: "U01",
       },
-      authenticator: "discord-interaction",
+      authenticator: "discord",
       principalId: "discord:G01:U01",
       principalType: "user",
     });

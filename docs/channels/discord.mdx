@@ -1,10 +1,10 @@
 ---
 title: "Discord"
-description: "Reach your agent from Discord HTTP Interactions, including slash commands, components, and modals."
+description: "Reach your agent from Discord slash commands, components, and modals, and from DMs and mentions through the Discord Gateway."
 type: integration
 ---
 
-The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve. See [Channels](./overview) for the contract this builds on.
+The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel acknowledges the command right away and runs the eve work in the background. Credentials and inbound request verification run through [Vercel Connect](../guides/auth-and-route-protection), so Discord's bot token stays out of your environment and Connect verifies Discord's signature before forwarding an interaction to eve. To also answer DMs and mentions, add a [Discord Gateway relay](#reply-to-dms-and-mentions). See [Channels](./overview) for the contract this builds on.
 
 ## Set up Discord
 
@@ -123,6 +123,134 @@ Start a session without an inbound interaction through `to(discord, target).send
 ### Attachments
 
 Files attached through a command's attachment options (type `11`) reach the agent as file parts. eve downloads each one from Discord's signed CDN URL (`cdn.discordapp.com` or `media.discordapp.net`) without credentials. A file over 25 MB, or one whose download fails, reaches the agent as a short note instead. Each command starts its own session, so a file is available in the conversation that command starts.
+
+## Reply to DMs and mentions
+
+Discord sends ordinary messages, such as DMs, mentions, and thread replies, only over its Gateway WebSocket, not as HTTP Interactions. To receive them, run `runDiscordGatewayRelay` from `eve/channels/discord/gateway` in a process that stays connected, and enable the matching route on the channel. The relay forwards each `MESSAGE_CREATE` dispatch to the agent unchanged, and the channel replies through the same handlers it uses for commands, including HITL buttons and error messages.
+
+```text
+Discord Gateway ── WebSocket ──▶ relay (Vercel Daemon) ── POST /eve/v1/discord/gateway ──▶ agent ── REST ──▶ Discord
+```
+
+### Enable the Gateway route
+
+Add `gateway` to the channel. It mounts `POST /eve/v1/discord/gateway`, which by default accepts `localDev()` and Vercel OIDC tokens minted for the same project to a service rather than a person:
+
+```ts title="agent/channels/discord.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+  gateway: {},
+});
+```
+
+Pass `gateway.auth` to accept a relay that runs outside your Vercel project, and `gateway.route` to change the path.
+
+### Run the relay as a Vercel Daemon
+
+A Vercel Daemon keeps the relay connected. Daemons are in beta. Put the relay in its own directory with the same credentials as the agent:
+
+```ts title="daemon/main.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { runDiscordGatewayRelay } from "eve/channels/discord/gateway";
+
+await runDiscordGatewayRelay({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+  url: process.env.EVE_URL,
+});
+```
+
+```json title="daemon/package.json"
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/connect": "<same version as your agent>",
+    "eve": "<same version as your agent>"
+  }
+}
+```
+
+Run `npm install` in `daemon/` to create the `package-lock.json` the image installs from:
+
+```dockerfile title="daemon/Dockerfile"
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY main.ts ./
+USER node
+CMD ["node", "main.ts"]
+```
+
+Register the daemon in `vercel.json` with exactly one instance:
+
+```json title="vercel.json"
+{
+  "framework": "eve",
+  "daemons": {
+    "discord-gateway": {
+      "root": "daemon",
+      "entrypoint": "Dockerfile",
+      "instances": { "iad1": 1 }
+    }
+  }
+}
+```
+
+On Vercel, the relay sends messages to `https://$VERCEL_PROJECT_PRODUCTION_URL` and signs each request with the project's Vercel OIDC token, so the agent and relay need no shared secret. Set `url` to send them elsewhere.
+
+The bot needs the **Send Messages in Threads** permission to reply in threads, in addition to **View Channels** and **Send Messages**. This install URL grants all three plus **Read Message History**; replace `<APPLICATION_ID>`:
+
+```text
+https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=274877975552
+```
+
+### Who the bot answers
+
+By default the channel answers a message when it is a DM, mentions the bot, replies to one of the bot's messages, or arrives in a thread where the bot already has a conversation. It strips the bot's mention from the text, and it never answers messages from bots, including its own. Messages group into sessions this way:
+
+| Where the message arrives | Session                        |
+| ------------------------- | ------------------------------ |
+| DM                        | One per DM channel             |
+| Thread                    | One per thread                 |
+| Text channel              | One per person in that channel |
+
+Discord sends the text of messages that neither mention the bot nor arrive as a DM only to bots with the privileged **Message Content** intent. Without it, thread follow-ups that skip the mention arrive empty and are ignored. To request the intent, enable **Message Content Intent** under **Bot** in the Discord Developer Portal, then pass `messageContent: true` to `runDiscordGatewayRelay`. Discord refuses the relay's connection if you request the intent before enabling it, and the relay stops with an error naming the close code.
+
+To choose which messages run the agent, or under what `auth`, set `gateway.onMessage(ctx, message)`. It runs for every message from a person and returns `{ auth }` to dispatch or `null` to ignore. `message.addressed` reports whether the default would answer. `defaultDiscordMessageAuth(message)` gives the author the same principal `defaultDiscordAuth` gives them for commands and button presses, so requester-only approvals work across both:
+
+```ts
+import { defaultDiscordMessageAuth, discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  gateway: {
+    onMessage: (_ctx, message) =>
+      message.addressed && message.guildId === "123456789012345678"
+        ? { auth: defaultDiscordMessageAuth(message) }
+        : null,
+  },
+});
+```
+
+### Run the relay locally
+
+Pull a development OIDC token with `vercel env pull .env.local`, start `eve dev`, then run the relay against it from another terminal:
+
+```bash
+EVE_URL=http://localhost:2000 node --env-file=.env.local daemon/main.ts
+```
+
+Scale the production daemon to zero while you do this. Every connection receives every message, so two relays make the agent answer twice.
+
+### Limitations
+
+- Run one relay per bot. Each connection receives every message.
+- Messages sent while the relay restarts, such as during a deploy, are not delivered.
+- A message can occasionally be answered twice, for example while a deploy briefly runs the old and new daemon together.
 
 ## What to read next
 
