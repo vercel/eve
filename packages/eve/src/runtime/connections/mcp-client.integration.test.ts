@@ -12,7 +12,7 @@ import {
 } from "#runtime/resolve-connection.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey } from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 
 describe.each(["static", "dynamic"] as const)(
@@ -223,6 +223,13 @@ describe("MCP bearer refresh with the bundled client", () => {
       principalId: "alice",
       principalType: "user",
     });
+    ctx.set(InitiatorAuthKey, {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "bob",
+      principalType: "user",
+    });
     token = "first-token";
     acceptedToken = token;
     status = 200;
@@ -235,6 +242,7 @@ describe("MCP bearer refresh with the bundled client", () => {
       authorization: { getToken, evict, principalType: "user" },
       connectionName: "test",
       description: "Read the current user",
+      forwardPrincipal: true,
       logicalPath: "connections/test.ts",
       protocol: "mcp",
       protocolVersionDiscovery: false,
@@ -246,6 +254,13 @@ describe("MCP bearer refresh with the bundled client", () => {
       const request = new Request(input, init);
       const message = (await request.json()) as { id?: number; method: string };
       const bearer = request.headers.get("authorization");
+      const forwarded = request.headers.get("eve-forwarded-principal");
+      expect(forwarded).not.toBeNull();
+      expect(JSON.parse(Buffer.from(forwarded!, "base64url").toString())).toEqual({
+        current: ctx.get(AuthKey),
+        initiator: ctx.get(InitiatorAuthKey),
+      });
+      expect(request.redirect).toBe("error");
       requests.push({ method: message.method, bearer });
       if (status !== 200 || bearer !== `Bearer ${acceptedToken}`) {
         return new Response("Access denied", { status: status === 200 ? 401 : status });
