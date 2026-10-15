@@ -4,7 +4,6 @@ import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operat
 import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
-  type PromptResponseOutcome,
 } from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
@@ -309,7 +308,6 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
               query: update.callbackQuery,
               from,
               resolveSession,
-              waitUntil,
             }),
           );
           return new Response("ok");
@@ -612,7 +610,6 @@ async function dispatchCallbackQuery(input: {
   readonly query: TelegramCallbackQuery;
   readonly from: ChannelFrom<TelegramChannelState>;
   readonly resolveSession: ChannelResolveSession;
-  readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<void> {
   const state = stateFromTelegramCallbackQuery(input.query, input.config.botUsername);
   const telegram: TelegramContext = {
@@ -633,33 +630,33 @@ async function dispatchCallbackQuery(input: {
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
     // Telegram takes one answer per callback, so it waits for delivery: a press
     // no session can take is answered with the inactive notice instead.
+    // The prompt's edit starts before the answer and finishes after it.
     const message = input.query.message;
-    let outcome: PromptResponseOutcome = "failed";
-    if (message && state.chatId) {
-      const source = input.from(telegramContinuationTokenFromState(state));
-      const data = input.query.data;
-      outcome = await respondOrRetireInactivePrompt(
-        // The presser acts as themselves, so a press that starts a turn lets
-        // their next message steer it.
-        () =>
-          source.respond([telegramCallbackInputResponse(data)], {
-            auth: defaultTelegramAuth({ ...message, from: input.query.from }),
-          }),
-        {
-          retirePrompt: (label) => retireInactivePrompt(telegram, message, label),
-          waitUntil: input.waitUntil,
-        },
-        log,
-      );
-    }
+    const data = input.query.data;
+    const answer =
+      message && state.chatId
+        ? await respondOrRetireInactivePrompt(
+            // The presser acts as themselves, so a press that starts a turn lets
+            // their next message steer it.
+            () =>
+              input
+                .from(telegramContinuationTokenFromState(state))
+                .respond([telegramCallbackInputResponse(data)], {
+                  auth: defaultTelegramAuth({ ...message, from: input.query.from }),
+                }),
+            { retirePrompt: (label) => retireInactivePrompt(telegram, message, label) },
+            log,
+          )
+        : undefined;
     try {
       await telegram.telegram.answerCallbackQuery({
         callbackQueryId: input.query.id,
-        text: outcome === "inactive" ? INACTIVE_REQUEST_NOTICE : "Answer received.",
+        text: answer?.outcome === "inactive" ? INACTIVE_REQUEST_NOTICE : "Answer received.",
       });
     } catch (error) {
       log.warn("Telegram callback-query acknowledgement failed", { error });
     }
+    if (answer?.outcome === "inactive") await answer.retirement;
     return;
   }
 

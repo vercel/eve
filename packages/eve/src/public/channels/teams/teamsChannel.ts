@@ -4,7 +4,7 @@ import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operat
 import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
-  type PromptResponseOutcome,
+  type PromptResponse,
 } from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
@@ -375,7 +375,10 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           if (activity.type === "message") {
             waitUntil(
               isTeamsInputResponseActivity(activity)
-                ? dispatchInputResponses({ activity, config, from, onInputResponse, waitUntil })
+                ? // The retired card is the notice here: a message has no private reply.
+                  dispatchInputResponses({ activity, config, from, onInputResponse }).then(
+                    (answer) => (answer?.outcome === "inactive" ? answer.retirement : undefined),
+                  )
                 : dispatchMessage({
                     activity,
                     config,
@@ -698,16 +701,16 @@ async function handleInvoke(input: {
 
   if (isTeamsInputResponseActivity(input.activity)) {
     // Answered after delivery, so the presser learns when no session took it.
-    const outcome = await dispatchInputResponses({
+    const answer = await dispatchInputResponses({
       activity: input.activity,
       config: input.config,
       onInputResponse: input.onInputResponse,
       from: input.from,
-      waitUntil: input.waitUntil,
     });
-    return Response.json(
-      teamsInvokeResponse(outcome === "inactive" ? { message: INACTIVE_REQUEST_NOTICE } : {}),
-    );
+    if (answer?.outcome !== "inactive") return Response.json(teamsInvokeResponse());
+    // The reply doesn't wait for the card's edit, which the request still keeps.
+    input.waitUntil(answer.retirement);
+    return Response.json(teamsInvokeResponse({ message: INACTIVE_REQUEST_NOTICE }));
   }
 
   if (input.config.onInvoke === undefined) return teamsOk();
@@ -749,18 +752,16 @@ async function revealAuthorization(input: {
 }
 
 /**
- * Delivers a card submission and reports what became of it. Its card is
- * retired without holding the request. A button submission arrives as a
- * message, which has no reply only the presser sees, so the retired card is
- * its notice; an invoke's response also carries one, which the caller owns.
+ * Delivers a card submission and reports what became of it. When no session
+ * can take it, the card's retirement has started and the caller keeps the
+ * request alive until it settles.
  */
 async function dispatchInputResponses(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-  readonly waitUntil: (task: Promise<unknown>) => void;
-}): Promise<PromptResponseOutcome | undefined> {
+}): Promise<PromptResponse | undefined> {
   const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
   if (inputResponses.length === 0) return undefined;
   const state = stateFromActivity(input.activity);
@@ -792,7 +793,6 @@ async function dispatchInputResponses(input: {
           renderInactiveInputRequestMessage(prompt, label),
         );
       },
-      waitUntil: input.waitUntil,
     },
     log,
   );

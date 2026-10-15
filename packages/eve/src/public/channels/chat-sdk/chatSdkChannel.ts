@@ -70,7 +70,6 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
 
 interface ActiveWebhookContext {
   readonly from: ChannelFrom<ChatSdkChannelState>;
-  readonly waitUntil: (task: Promise<unknown>) => void;
 }
 
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
@@ -308,7 +307,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
-    const outcome = await respondOrRetireInactivePrompt(
+    const answer = await respondOrRetireInactivePrompt(
       async () =>
         bridgeRespond(bot, [response], {
           auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
@@ -316,20 +315,16 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         }),
       {
         retirePrompt: (label) => retireInputCard(thread, event.messageId, label),
-        waitUntil: activeWebhook("respond").waitUntil,
       },
       log,
     );
-    if (outcome !== "inactive") return;
-    try {
-      await thread.postEphemeral(
-        event.user,
-        { markdown: INACTIVE_REQUEST_NOTICE },
-        { fallbackToDM: true },
-      );
-    } catch (error) {
-      log.error("inactive prompt notice failed", { error });
-    }
+    if (answer.outcome !== "inactive") return;
+    await Promise.all([
+      answer.retirement,
+      thread
+        .postEphemeral(event.user, { markdown: INACTIVE_REQUEST_NOTICE }, { fallbackToDM: true })
+        .catch((error: unknown) => log.error("inactive prompt notice failed", { error })),
+    ]);
   });
 
   const channel = defineChannel<
@@ -363,7 +358,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       ): Promise<Response> => {
         const webhook = bot.webhooks[adapterName];
         const ctx = new ContextContainer();
-        ctx.setVirtualContext(ActiveWebhookKey, { from: args.from, waitUntil: args.waitUntil });
+        ctx.setVirtualContext(ActiveWebhookKey, { from: args.from });
         return contextStorage.run(ctx, () =>
           webhook(request, {
             ...config.webhook,
@@ -680,7 +675,7 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   message: string | UserContent,
   options: ChatSdkSendOptions,
 ): Promise<Session> {
-  const from = activeWebhook("send").from;
+  const from = activeFrom("send");
   const { adapterName, auth, thread: threadInput, ...sendOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
   return from(thread.id).send(message, {
@@ -695,7 +690,7 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   inputResponses: readonly InputResponse[],
   options: ChatSdkRespondOptions,
 ): Promise<Session> {
-  const from = activeWebhook("respond").from;
+  const from = activeFrom("respond");
   const { adapterName, auth, thread: threadInput, ...respondOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
   return from(thread.id).respond(parseInputResponses(inputResponses), {
@@ -726,14 +721,14 @@ function recordPrincipalUser(
   };
 }
 
-function activeWebhook(operation: "respond" | "send"): ActiveWebhookContext {
+function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {
   const active = contextStorage.getStore()?.get(ActiveWebhookKey);
   if (!active) {
     throw new Error(
       `chatSdkChannel().${operation} can only run during a Chat SDK webhook handler for this bridge.`,
     );
   }
-  return active;
+  return active.from;
 }
 
 function initialState(): ChatSdkChannelState {

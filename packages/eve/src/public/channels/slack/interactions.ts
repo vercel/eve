@@ -483,7 +483,6 @@ function dispatchInteractionHook(
 async function dispatchBlockInputResponses(input: {
   readonly ctx: {
     from: ChannelFrom<SlackChannelState>;
-    waitUntil: (task: Promise<unknown>) => void;
   };
   readonly deps: InteractionHandlerDeps;
   readonly interaction: ParsedBlockActionsPayload;
@@ -502,7 +501,7 @@ async function dispatchBlockInputResponses(input: {
   });
   if (result === null) return;
 
-  const outcome = await respondOrRetireInactivePrompt(
+  const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx
         .from(slackContinuationToken(channelId, threadTs))
@@ -513,21 +512,23 @@ async function dispatchBlockInputResponses(input: {
     {
       retirePrompt: (label) =>
         settleHitlCard(input.interaction, input.deps, { label, text: label }),
-      waitUntil: input.ctx.waitUntil,
     },
     log,
   );
-  if (outcome === "inactive") {
-    await postEphemeralNotice({
-      channelId: input.interaction.channelId,
-      deps: input.deps,
-      installationTeamId: input.interaction.installationTeamId,
-      teamId: input.interaction.teamId,
-      threadTs: input.interaction.threadTs,
-      userId: input.submission.user.id,
-    });
+  if (response.outcome === "inactive") {
+    await Promise.all([
+      response.retirement,
+      postEphemeralNotice({
+        channelId: input.interaction.channelId,
+        deps: input.deps,
+        installationTeamId: input.interaction.installationTeamId,
+        teamId: input.interaction.teamId,
+        threadTs: input.interaction.threadTs,
+        userId: input.submission.user.id,
+      }),
+    ]);
   }
-  if (outcome !== "delivered") return;
+  if (response.outcome !== "delivered") return;
 
   if (
     input.submission.actions.some((action) => decodeHitlResponse(action)?.kind === "tool-approval")
@@ -702,7 +703,6 @@ async function handleViewSubmission(
 async function dispatchViewInputResponse(input: {
   readonly ctx: {
     from: ChannelFrom<SlackChannelState>;
-    waitUntil: (task: Promise<unknown>) => void;
   };
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
@@ -722,7 +722,7 @@ async function dispatchViewInputResponse(input: {
   if (result === null) return;
 
   const cardChannelId = input.metadata.messageChannelId ?? input.metadata.channelId;
-  const outcome = await respondOrRetireInactivePrompt(
+  const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx.from(input.metadata.continuationToken).respond(input.submission.inputResponses, {
         auth: result.auth,
@@ -737,22 +737,24 @@ async function dispatchViewInputResponse(input: {
           installationTeamId: input.installationTeamId,
           messageTs: input.metadata.messageTs,
         }),
-      waitUntil: input.ctx.waitUntil,
     },
     log,
   );
-  if (outcome === "inactive") {
-    await postEphemeralNotice({
-      channelId: cardChannelId,
-      deps: input.deps,
-      installationTeamId: input.installationTeamId,
-      teamId: input.teamId ?? undefined,
-      // A card routed to another conversation only records the thread it answers.
-      threadTs: cardChannelId === input.metadata.channelId ? input.metadata.threadTs : "",
-      userId: input.submission.user.id,
-    });
+  if (response.outcome === "inactive") {
+    await Promise.all([
+      response.retirement,
+      postEphemeralNotice({
+        channelId: cardChannelId,
+        deps: input.deps,
+        installationTeamId: input.installationTeamId,
+        teamId: input.teamId ?? undefined,
+        // A card routed to another conversation only records the thread it answers.
+        threadTs: cardChannelId === input.metadata.channelId ? input.metadata.threadTs : "",
+        userId: input.submission.user.id,
+      }),
+    ]);
   }
-  if (outcome !== "delivered") return;
+  if (response.outcome !== "delivered") return;
 
   try {
     await settleFreeformCard({

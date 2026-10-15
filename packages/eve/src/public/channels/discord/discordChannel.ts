@@ -636,7 +636,6 @@ function handleComponentInteraction(input: {
         inputResponses,
         interaction: input.interaction,
         from: input.from,
-        waitUntil: input.waitUntil,
       }),
     );
   }
@@ -660,7 +659,6 @@ function handleModalSubmitInteraction(input: {
         inputResponses,
         interaction: input.interaction,
         from: input.from,
-        waitUntil: input.waitUntil,
       }),
     );
   }
@@ -709,7 +707,6 @@ async function dispatchInputResponses(input: {
   readonly inputResponses: readonly ValidatedInputResponse[];
   readonly interaction: DiscordInputResponseInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
-  readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<void> {
   const state = stateFromInteraction(input.interaction, {
     conversationId: input.conversationId,
@@ -736,7 +733,7 @@ async function dispatchInputResponses(input: {
   const source = input.from(
     discordContinuationToken(input.interaction.channelId, input.conversationId),
   );
-  const outcome = await respondOrRetireInactivePrompt(
+  const response = await respondOrRetireInactivePrompt(
     () => source.respond(input.inputResponses, { auth }),
     {
       // The session's record of the prompt is gone, so its text comes from the
@@ -748,11 +745,15 @@ async function dispatchInputResponses(input: {
         if (messageId === undefined || content === undefined) return;
         await editDiscordResolvedPrompt(discord, { content, messageId }, label);
       },
-      waitUntil: input.waitUntil,
     },
     log,
   );
-  if (outcome !== "inactive") return;
+  if (response.outcome !== "inactive") return;
+  await Promise.all([response.retirement, sendInactiveNotice(discord)]);
+}
+
+/** Tells only the presser that the prompt they answered is no longer active. */
+async function sendInactiveNotice(discord: DiscordHandle): Promise<void> {
   try {
     await discord.followup({
       content: INACTIVE_REQUEST_NOTICE,

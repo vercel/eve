@@ -15,48 +15,49 @@ export interface InactivePromptRetirement {
    * prompt kept, its choices replaced by `label`.
    */
   readonly retirePrompt: (label: string) => Promise<void>;
-  /** Keeps the request alive until the edit settles, without waiting on it. */
-  readonly waitUntil: (task: Promise<unknown>) => void;
 }
 
 /** What became of a person's answer to a prompt. */
-export type PromptResponseOutcome =
+export type PromptResponse =
   /** A session took the answer. */
-  | "delivered"
-  /** No session can ever take it; the prompt is being retired. */
-  | "inactive"
+  | { readonly outcome: "delivered" }
   /** Delivery failed in a way a retry may fix; the prompt is left as it was. */
-  | "failed";
+  | { readonly outcome: "failed" }
+  /**
+   * No session can ever take it. `retirement` is the prompt's edit, already
+   * started; it logs its own failure and never rejects.
+   */
+  | { readonly outcome: "inactive"; readonly retirement: Promise<void> };
 
 /**
  * Delivers a person's answer to a prompt and reports what became of it.
  *
  * When no session can ever take the answer, such as after the session's run
  * was cancelled outside eve, nothing will withdraw the prompt either, so its
- * retirement starts here, labeled `No longer active`, and is left to
- * `waitUntil`. The caller tells the presser on `inactive` in whatever way its
- * platform allows, which never waits on the edit. Any other failure is only
- * logged and leaves the prompt as it was, since a retry may succeed.
+ * retirement starts here, labeled `No longer active`. The caller tells the
+ * presser in whatever way its platform allows, without waiting on the edit,
+ * and keeps its request alive until `retirement` settles. Any other failure
+ * is only logged and leaves the prompt as it was, since a retry may succeed.
  */
 export async function respondOrRetireInactivePrompt(
   respond: () => Promise<unknown>,
   retirement: InactivePromptRetirement,
   log: Logger,
-): Promise<PromptResponseOutcome> {
+): Promise<PromptResponse> {
   try {
     await respond();
-    return "delivered";
+    return { outcome: "delivered" };
   } catch (error) {
     if (!isUnanswerableResponseError(error)) {
       log.error("input response delivery failed", { error });
-      return "failed";
+      return { outcome: "failed" };
     }
     log.warn("input response reached no active session", { error });
   }
-  retirement.waitUntil(
-    retirement
+  return {
+    outcome: "inactive",
+    retirement: retirement
       .retirePrompt(INACTIVE_PROMPT_LABEL)
       .catch((error: unknown) => log.error("inactive prompt edit failed", { error })),
-  );
-  return "inactive";
+  };
 }
