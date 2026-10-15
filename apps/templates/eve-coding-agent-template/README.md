@@ -25,6 +25,7 @@ agent/
 - **Delegation.** `code__worker` is a read-only subagent for independent slices of a task. The root `agent` tool is disabled so all writes stay in one session.
 - **Credentials.** Each `gh` command gets a token scoped to one repository, minted by [Vercel Connect](https://vercel.com/docs/connect). The sandbox only sees a placeholder. `lib/github.ts` swaps it in at the sandbox firewall for that command and removes it afterward. The GitHub channel's checkout attaches a broader token to `github.com`, so `hooks/reset-github-egress.ts` removes it before the model runs.
 - **GitHub.** The triggering repository is checked out at `/workspace` before each GitHub turn, and pull request turns include the diff. Only comments from owners, members, and collaborators start a turn, so strangers on a public repository cannot drive the agent.
+- **Access.** Anyone who can invoke the agent can use every repository the GitHub App is installed on. Choose those repositories when installing the app through Connect. To also limit who can invoke it, set `SLACK_ALLOWED_USERS` to Slack user IDs and `GITHUB_ALLOWED_USERS` to GitHub logins, comma-separated. Empty lists admit everyone the channel accepts.
 
 ## Getting started
 
@@ -60,6 +61,7 @@ Then set these in `.env.local` and your Vercel project:
 - `GITHUB_ORG`: the organization or user whose repositories the agent may access
 - `GITHUB_CONNECTOR`: the connector UID, if it is not `github/coding-agent`
 - `GITHUB_BOT_NAME`: your GitHub App's slug, shown on the connector in the Connect dashboard
+- `SLACK_ALLOWED_USERS` and `GITHUB_ALLOWED_USERS`: optional caller allowlists (see [Access](#how-it-works))
 
 Deploy with `eve deploy`, then install the GitHub App on your repositories from the Connect dashboard. Mention the app in Slack, or comment `@<bot name> <request>` on an issue or pull request. Delete `agent/channels/github.ts` if you only want Slack; the agent still needs the GitHub connector and `GITHUB_ORG` to open pull requests.
 
