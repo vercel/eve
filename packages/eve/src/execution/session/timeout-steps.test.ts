@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  resolveSessionTimeoutDeadlineStep,
   cancelSessionTimeoutStep,
   signalSessionTimeoutStep,
   startSessionTimeoutStep,
@@ -9,6 +10,10 @@ import { sessionTimeoutWorkflowReference } from "#execution/workflow-runtime.js"
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getWorkflowMetadata: () => ({ workflowRunId: "session-1", workflowStartedAt: new Date(1000) }),
+}));
 
 const cancelRunMock = vi.fn();
 const getHookByTokenMock = vi.fn();
@@ -58,6 +63,23 @@ afterEach(() => {
 });
 
 describe("session timeout steps", () => {
+  it("records the deadline without reading the not-yet-started owner", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1001);
+    try {
+      await expect(resolveSessionTimeoutDeadlineStep({ timeoutMs: 60_000 })).resolves.toEqual(
+        new Date(61_001),
+      );
+      expect(getWorldMock).not.toHaveBeenCalled();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("does not read the owner when timeouts are disabled", async () => {
+    await expect(resolveSessionTimeoutDeadlineStep({ timeoutMs: false })).resolves.toBeUndefined();
+    expect(getWorldMock).not.toHaveBeenCalled();
+  });
+
   it("starts the durable timer workflow", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     startMock.mockResolvedValue({ runId: "timer-run" });

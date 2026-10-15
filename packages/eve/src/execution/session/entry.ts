@@ -11,6 +11,7 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
+import { resolveSessionTimeoutDeadlineStep } from "#execution/session/timeout-steps.js";
 import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import {
   createSessionTimeoutControl,
@@ -157,9 +158,11 @@ export async function bootInitialOwner(
   const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
   const sessionWritable = getWritable<Uint8Array>();
   const inbox = createSessionInbox(sessionId);
-  const { workflowStartedAt } = getWorkflowMetadata();
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
-  const deadline = sessionTimeoutDeadline(sessionTimeoutMs, workflowStartedAt.getTime());
+  const deadlinePromise =
+    sessionTimeoutMs === false
+      ? Promise.resolve(undefined)
+      : resolveSessionTimeoutDeadlineStep({ timeoutMs: sessionTimeoutMs });
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
     source: DurableCompiledArtifactsSource;
@@ -179,11 +182,13 @@ export async function bootInitialOwner(
       rootSessionId: readRootSessionId(serializedContext),
       sessionId,
     });
-    const ownerPreparationPromise = prepareInitialOwner(inbox, {
-      continuationToken,
-      deadline,
-      sessionId,
-    });
+    const ownerPreparationPromise = deadlinePromise.then((deadline) =>
+      prepareInitialOwner(inbox, {
+        continuationToken,
+        deadline,
+        sessionId,
+      }),
+    );
     const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
       ? resolveInitialTurnCallerStep({ serializedContext })
       : Promise.resolve(undefined);
@@ -208,6 +213,7 @@ export async function bootInitialOwner(
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);
+    const deadline = await deadlinePromise;
     return {
       inbox,
       session: {

@@ -1,3 +1,4 @@
+import { sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import {
   EntityConflictError,
   HookNotFoundError,
@@ -15,6 +16,16 @@ import { endStrandedSession } from "#execution/session-inbox/end-stranded-sessio
 import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
+
+/** Records the initial deadline once so replay and handoff preserve it. */
+export async function resolveSessionTimeoutDeadlineStep(input: {
+  readonly timeoutMs: number | false;
+}): Promise<Date | undefined> {
+  "use step";
+
+  if (input.timeoutMs === false) return undefined;
+  return sessionTimeoutDeadline(input.timeoutMs, Date.now());
+}
 
 /** Starts the durable timer that signals one session deadline. */
 export async function startSessionTimeoutStep(
