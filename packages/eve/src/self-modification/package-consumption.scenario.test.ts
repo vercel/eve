@@ -17,10 +17,12 @@ async function run(
   command: string,
   args: string[],
   cwd: string,
+  env?: Record<string, string>,
 ): Promise<{ stderr: string; stdout: string }> {
   try {
     return await runFile(command, args, {
       cwd,
+      env: env === undefined ? process.env : { ...process.env, ...env },
       maxBuffer: 10 * 1024 * 1024,
       shell: process.platform === "win32",
     });
@@ -217,8 +219,16 @@ const slugs = compiled.subagents[0].agent.dynamicTools.map((tool) => tool.slug);
 assert.ok(slugs.includes("publish") && slugs.includes("registry_add"));
 `,
     );
-    await run("node", ["verify-remote-extension.mjs"], appRoot);
-    const build = await run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], appRoot);
+    // The deployed child selects its sandbox from the host. Pin the Vercel backend this
+    // app configures so the check does not depend on the runner's `/dev/kvm` access.
+    const deployedOnVercel = { VERCEL: "1" };
+    await run("node", ["verify-remote-extension.mjs"], appRoot, deployedOnVercel);
+    const build = await run(
+      "pnpm",
+      ["exec", "eve", "build", "--skip-sandbox-prewarm"],
+      appRoot,
+      deployedOnVercel,
+    );
     const output = `${build.stdout}\n${build.stderr}`;
     if (output.includes("Could not resolve '#shared/")) {
       throw new Error(

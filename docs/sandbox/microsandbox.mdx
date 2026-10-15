@@ -16,7 +16,7 @@ export const environment = MicrosandboxSandbox.dockerfile({
 export default defineSandbox(() => environment.open({ networkPolicy: "deny-all" }));
 ```
 
-Supported hosts are macOS on Apple Silicon and Linux with glibc and KVM.
+Supported hosts are macOS on Apple Silicon and Linux with glibc where the current user can read and write `/dev/kvm`; exposing the device inside a nested guest is not enough without those permissions. Set `MSB_PATH` to use an explicit custom runtime executable instead of this local KVM probe.
 
 ## Environment options
 
