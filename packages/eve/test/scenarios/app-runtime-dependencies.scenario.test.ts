@@ -1,7 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -79,6 +79,8 @@ async function writeWorkspaceExternalFixture(input: {
   readonly dynamicImport?: boolean;
   /** The workspace package imports `fixture-workspace-external/extra`, which only v2 exports. */
   readonly subpathImport?: boolean;
+  /** Every installation's `.` export selects by this condition first; see `writeExternalInstallation`. */
+  readonly exportCondition?: ExportCondition;
 }): Promise<{ readonly appRoot: string }> {
   const version = input.subpathImport === true ? "2.0.0" : "1.0.0";
   const workspaceRoot = await createScratchDirectory("eve-workspace-external-dep-build-");
@@ -94,6 +96,7 @@ async function writeWorkspaceExternalFixture(input: {
     await writeExternalInstallation(
       join(appRoot, "node_modules", "fixture-workspace-external"),
       version,
+      input.exportCondition,
     );
   }
   await writeFile(
@@ -162,24 +165,34 @@ async function writeWorkspaceExternalFixture(input: {
   await writeExternalInstallation(
     join(packageRoot, "node_modules", "fixture-workspace-external"),
     version,
+    input.exportCondition,
   );
   await symlink(packageRoot, join(appRoot, "node_modules", "@fixture", "backend"), "dir");
 
   return { appRoot };
 }
 
-/** v1 exports only `.`; v2 also exports `./extra`. */
+type ExportCondition = "node" | "node-addons";
+
+/**
+ * v1 exports only `.`; v2 also exports `./extra`. With `exportCondition`, `.`
+ * selects `./<condition>.js` under that condition before `import`.
+ */
 async function writeExternalInstallation(
   externalRoot: string,
   version: "1.0.0" | "2.0.0" = "1.0.0",
+  exportCondition?: ExportCondition,
 ): Promise<void> {
   await mkdir(externalRoot, { recursive: true });
+  const rootExport =
+    exportCondition === undefined
+      ? "./index.js"
+      : { [exportCondition]: `./${exportCondition}.js`, import: "./index.js" };
   await writeFile(
     join(externalRoot, "package.json"),
     `${JSON.stringify(
       {
-        exports:
-          version === "1.0.0" ? "./index.js" : { ".": "./index.js", "./extra": "./extra.js" },
+        exports: version === "1.0.0" ? rootExport : { ".": rootExport, "./extra": "./extra.js" },
         name: "fixture-workspace-external",
         type: "module",
         version,
@@ -191,6 +204,12 @@ async function writeExternalInstallation(
   await writeFile(join(externalRoot, "index.js"), 'export const value = "workspace external";\n');
   if (version === "2.0.0") {
     await writeFile(join(externalRoot, "extra.js"), 'export const value = "workspace extra";\n');
+  }
+  if (exportCondition !== undefined) {
+    await writeFile(
+      join(externalRoot, `${exportCondition}.js`),
+      `export const value = "workspace external (${exportCondition})";\n`,
+    );
   }
 }
 
@@ -252,8 +271,8 @@ async function writeMountedExtensionDeclaringExternal(
 
 /**
  * Copies the build output away from the workspace, so no source installation
- * is reachable, then resolves and imports the external exactly as the
- * bundled authored module does.
+ * is reachable, then imports the external in Node by its bare specifier from
+ * beside the chunk that imports it, exactly as the bundled module does.
  */
 async function importRelocatedWorkspaceExternal(
   outputDir: string,
@@ -275,10 +294,16 @@ async function importRelocatedWorkspaceExternal(
     )
   ).filter((path) => path !== null);
   expect(importers).not.toHaveLength(0);
-  const resolved = createRequire(importers[0]!).resolve(specifier);
-  expect(resolved.startsWith(serverDirectory)).toBe(true);
-  const module = (await import(pathToFileURL(resolved).href)) as { value: unknown };
-  return module.value;
+  const probePath = join(dirname(importers[0]!), "relocated-external-probe.mjs");
+  await writeFile(
+    probePath,
+    `import { value } from ${JSON.stringify(specifier)};\nprocess.stdout.write(JSON.stringify(value));\n`,
+  );
+  const probe = spawnSync(process.execPath, [probePath], { cwd: relocatedRoot, encoding: "utf8" });
+  if (probe.status !== 0) {
+    throw new Error(probe.stderr);
+  }
+  return JSON.parse(probe.stdout) as unknown;
 }
 
 describe("app runtime dependency tracing", () => {
@@ -1048,6 +1073,33 @@ describe("app runtime dependency tracing", () => {
     await expect(
       importRelocatedWorkspaceExternal(outputDir, "fixture-workspace-external/extra"),
     ).resolves.toBe("workspace extra");
+  }, 60_000);
+
+  it("fails the build when Node selects a conditional export the output lacks", async () => {
+    // Node's ESM loader selects `node-addons` by default; Nitro's tracer
+    // copies only the `import` target. This used to build and then fail at
+    // boot with ERR_MODULE_NOT_FOUND.
+    const { appRoot } = await writeWorkspaceExternalFixture({
+      appDeclaresExternal: true,
+      exportCondition: "node-addons",
+    });
+
+    await expect(buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS)).rejects.toThrow(
+      /"fixture-workspace-external" is listed in build\.externalDependencies and imported by the hosted bundle \(.+\), but the build output cannot resolve it\./,
+    );
+  }, 60_000);
+
+  it("ships the conditional export Node selects when the output contains it", async () => {
+    const { appRoot } = await writeWorkspaceExternalFixture({
+      appDeclaresExternal: true,
+      exportCondition: "node",
+    });
+
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+
+    await expect(importRelocatedWorkspaceExternal(outputDir)).resolves.toBe(
+      "workspace external (node)",
+    );
   }, 60_000);
 
   it("rewrites framework tool executors into hosted Vercel output", async () => {

@@ -6,7 +6,7 @@ import {
   resolveConfiguredExternalDependency,
 } from "#internal/authored-package-boundary.js";
 import {
-  loadNitroRolldownNodeImportResolver,
+  createNitroRolldownNodeImportResolver,
   type RolldownOutputAsset,
   type RolldownOutputChunk,
 } from "#internal/bundler/nitro-rolldown.js";
@@ -39,7 +39,7 @@ export function createExternalDependencyOutputCheckPlugin(input: {
   return {
     name: "eve-external-dependency-output-check",
     async writeBundle(outputOptions, bundle) {
-      const resolver = await loadNitroRolldownNodeImportResolver();
+      const resolver = await createNitroRolldownNodeImportResolver();
       const outputDir = realpathSync(outputOptions.dir);
       for (const output of Object.values(bundle)) {
         if (output.type !== "chunk") {

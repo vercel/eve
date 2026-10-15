@@ -83,33 +83,32 @@ type RolldownExperimentalModule = {
   readonly ResolverFactory: new (options: Record<string, unknown>) => RolldownResolver;
 };
 
-let rolldownNodeImportResolverPromise: Promise<RolldownResolver> | undefined;
+let rolldownExperimentalPromise: Promise<RolldownExperimentalModule> | undefined;
 
 /**
- * Returns Rolldown's resolver (oxc-resolver), loaded from Nitro's dependency
- * tree and configured like Node's ESM loader resolving an `import`: `node` and
- * `import` export conditions, fully specified subpaths, no `NODE_PATH`.
- * Results are realpaths.
+ * Creates a Rolldown resolver (oxc-resolver), loaded from Nitro's dependency
+ * tree and configured like Node's ESM loader resolving an `import`: Node's
+ * default export conditions (`node`, `import`, `module-sync`, `node-addons`;
+ * `default` always matches), fully specified subpaths, no `NODE_PATH`.
+ * Results are realpaths. The resolver caches the filesystem, so create one
+ * per check of a finished tree.
  */
-export function loadNitroRolldownNodeImportResolver(): Promise<RolldownResolver> {
-  rolldownNodeImportResolverPromise ??= (async () => {
+export async function createNitroRolldownNodeImportResolver(): Promise<RolldownResolver> {
+  rolldownExperimentalPromise ??= (async () => {
     const require = createRequire(import.meta.url);
     const nitroRequire = createRequire(require.resolve("nitro/package.json"));
     const experimentalPath = nitroRequire.resolve("rolldown/experimental");
-    const { ResolverFactory } = (await import(
-      pathToFileURL(experimentalPath).href
-    )) as RolldownExperimentalModule;
-    return new ResolverFactory({
-      conditionNames: ["node", "import"],
-      extensions: [".js", ".mjs", ".cjs", ".json", ".node"],
-      fullySpecified: true,
-      mainFields: ["main"],
-      nodePath: false,
-      symlinks: true,
-    });
+    return (await import(pathToFileURL(experimentalPath).href)) as RolldownExperimentalModule;
   })();
-
-  return rolldownNodeImportResolverPromise;
+  const { ResolverFactory } = await rolldownExperimentalPromise;
+  return new ResolverFactory({
+    conditionNames: ["node", "import", "module-sync", "node-addons"],
+    extensions: [".js", ".mjs", ".cjs", ".json", ".node"],
+    fullySpecified: true,
+    mainFields: ["main"],
+    nodePath: false,
+    symlinks: true,
+  });
 }
 
 function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
