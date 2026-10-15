@@ -181,21 +181,17 @@ beforeEach(async () => {
     close: vi.fn(),
     listTools: async () => ({ tools: [] }),
     toolsFromDefinitions: () => ({}),
-    experimental_events:
-      config.experimental_events === undefined
-        ? undefined
-        : {
-            ...config.experimental_events.adapter.createAdapter({ transport: config.transport }),
-            list: async () => ({
-              events: [
-                {
-                  name: `${config.transport.headers.account}.issue.created`,
-                  delivery: ["webhook"],
-                  inputSchema: eventSchema,
-                },
-              ],
-            }),
+    experimental_events: {
+      list: async () => ({
+        events: [
+          {
+            name: `${config.transport.headers.account}.issue.created`,
+            delivery: ["webhook"],
+            inputSchema: eventSchema,
           },
+        ],
+      }),
+    },
   }));
   ctx = new ContextContainer();
   ctx.set(BundleKey, bundle);
@@ -215,74 +211,82 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it("discovers through the released AI SDK and subscribes through the backend without an event store", async () => {
-  const tracing = eventTracing();
-  tracing.enable();
-  onTestFinished(() => tracing.close());
-  const traceparents: string[] = [];
-  const { createMCPClient } = await vi.importActual<
-    typeof import("#compiled/@ai-sdk/mcp/index.js")
-  >("#compiled/@ai-sdk/mcp/index.js");
-  createClient.mockImplementation(createMCPClient);
-  const methods: string[] = [];
-  const transportFetch: typeof fetch = async (_url, init) => {
-    if (init?.method !== "POST") return new Response(null, { status: 405 });
-    const request = JSON.parse(String(init.body));
-    methods.push(request.method);
-    if (request.id === undefined) return new Response(null, { status: 202 });
-    let result;
-    if (request.method === "initialize") {
-      result = {
-        protocolVersion: "2025-11-25",
-        serverInfo: { name: "test-events", version: "1" },
-        capabilities: { events: {} },
-      };
-    } else if (request.method === "events/list") {
-      traceparents.push(request.params?._meta?.traceparent);
-      result = {
-        events: [
-          {
-            name: "issue.created",
-            delivery: ["webhook"],
-            inputSchema: eventSchema,
-            payloadSchema: { type: "object" },
-          },
-        ],
-      };
-    } else {
-      throw new Error(`Unexpected upstream request: ${request.method}`);
-    }
-    return Response.json({ jsonrpc: "2.0", id: request.id, result });
-  };
-  actions = new ConnectionEventActions(
-    connection,
-    async () => ({ Authorization: "Bearer test" }),
-    transportFetch,
-  );
-  await watch();
-  expect(methods.filter((method) => method === "events/list")).toHaveLength(2);
-  expect(methods).not.toContain("events/subscribe");
-  const catalogSpans = tracing.exporter
-    .getFinishedSpans()
-    .filter((span) => span.name === "events/list");
-  expect(catalogSpans).toHaveLength(2);
-  expect(traceparents).toEqual(
-    catalogSpans.map((span) => `00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`),
-  );
-  expect(catalogSpans.map((span) => span.attributes["mcp.method.name"])).toEqual([
-    "events/list",
-    "events/list",
-  ]);
-  expect(
-    tracing.exporter
+it.each([3_600_000, null])(
+  "discovers through the released AI SDK and subscribes through the backend with ttlMs=%s",
+  async (ttlMs) => {
+    const tracing = eventTracing();
+    tracing.enable();
+    onTestFinished(() => tracing.close());
+    const traceparents: string[] = [];
+    const { createMCPClient } = await vi.importActual<
+      typeof import("#compiled/@ai-sdk/mcp/index.js")
+    >("#compiled/@ai-sdk/mcp/index.js");
+    createClient.mockImplementation(createMCPClient);
+    const methods: string[] = [];
+    const transportFetch: typeof fetch = async (_url, init) => {
+      if (init?.method !== "POST") return new Response(null, { status: 405 });
+      const request = JSON.parse(String(init.body));
+      methods.push(request.method);
+      if (request.id === undefined) return new Response(null, { status: 202 });
+      let result;
+      if (request.method === "initialize") {
+        result = {
+          protocolVersion: "2025-11-25",
+          serverInfo: { name: "test-events", version: "1" },
+          capabilities: { events: {} },
+        };
+      } else if (request.method === "events/list") {
+        traceparents.push(request.params?._meta?.traceparent);
+        result = {
+          events: [
+            {
+              name: "issue.created",
+              delivery: ["webhook"],
+              inputSchema: eventSchema,
+              payloadSchema: { type: "object" },
+            },
+          ],
+        };
+      } else {
+        throw new Error(`Unexpected upstream request: ${request.method}`);
+      }
+      return Response.json({ jsonrpc: "2.0", id: request.id, result });
+    };
+    actions = new ConnectionEventActions(
+      connection,
+      async () => ({ Authorization: "Bearer test" }),
+      transportFetch,
+    );
+    await watch("watch-1", ttlMs);
+    expect(methods.filter((method) => method === "events/list")).toHaveLength(2);
+    expect(methods).not.toContain("events/subscribe");
+    const catalogSpans = tracing.exporter
       .getFinishedSpans()
-      .find((span) => span.name === "agent.connection.event.subscribe")?.attributes,
-  ).toMatchObject({ "connect.subscription.id": "sub_0", "connect.subscription.status": "active" });
-  expect(subscriber).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({ name: "issue.created", arguments: { project: "ABC" } }),
-  );
-  expect(initial.state!.subscription.id).toBe("sub_0");
-});
+      .filter((span) => span.name === "events/list");
+    expect(catalogSpans).toHaveLength(2);
+    expect(traceparents).toEqual(
+      catalogSpans.map(
+        (span) => `00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`,
+      ),
+    );
+    expect(catalogSpans.map((span) => span.attributes["mcp.method.name"])).toEqual([
+      "events/list",
+      "events/list",
+    ]);
+    expect(
+      tracing.exporter
+        .getFinishedSpans()
+        .find((span) => span.name === "agent.connection.event.subscribe")?.attributes,
+    ).toMatchObject({
+      "connect.subscription.id": "sub_0",
+      "connect.subscription.status": "active",
+    });
+    expect(subscriber).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ name: "issue.created", arguments: { project: "ABC" }, ttlMs }),
+    );
+    expect(initial.state!.subscription.id).toBe("sub_0");
+  },
+);
 
 it.each([120_000, 31_536_000_000, null])(
   "subscribes with the requested ttlMs=%s and preserves it in the handler's input",

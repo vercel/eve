@@ -272,6 +272,8 @@ replacement session.
 
 `eve__search` exposes subscribe actions from the event catalog, plus get and
 stop actions. `eve__tool` applies the connection's approval and auth gates.
+eve uses AI SDK for authenticated catalog discovery and calls the Connect events
+bridge directly for subscription operations.
 Supply event arguments and an explicit `ttlMs`: an integer from 120,000
 (2 minutes) to 31,536,000,000 (365 days), or `null` to watch until stopped.
 Creation does not accept `expiresAt`. Connect returns the calculated deadline in
