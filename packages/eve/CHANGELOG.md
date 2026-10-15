@@ -1,5 +1,23 @@
 # eve
 
+## 0.79.2
+
+### Patch Changes
+
+- 910705c: An agent or `serve` tool call with an empty `taskId` now starts a new task instead of failing with `UNKNOWN_TASK`. Some models send `""` for the optional `taskId` rather than omitting it.
+- 3ac1bd0: `eve start` no longer keeps the server's stdout and stderr in memory after startup. Output is still forwarded, and an unexpected exit no longer repeats the full log history in its error.
+- 4c8ffa6: Keep successful tool calls completed when their output includes `code` and `message` fields.
+- ee0c6c0: `ctx.cancel()` in a `message.received` hook now cancels the turn when the message is a plain-text answer to a pending `ask_question` or `ctx.ask()` question. The question resolves as `cancelled` and the tool call never receives the text. Before, eve logged a warning and delivered the answer. `ctx.cancel()` in an `action.partial` hook for a workflow tool's report now cancels the turn waiting on that tool too.
+- bc4edd9: Attachments no longer fail a step when the session's sandbox cannot be resumed, for example when a follow-up lands on another replica. Earlier attachments and tool-result files in history reach the model as a "FileNotFound" note, and new inbound attachments and tool-returned files become a "could not be stored" note. Tools that use the sandbox still report the resume error.
+- 2de4011: Fail fast with an actionable error when the project has an unsupported `microsandbox` version (such as 0.7), instead of every sandbox operation throwing `isInstalled is not a function`.
+- 394ed22: Start built, managed eve agents when a local production Next.js server loads its configuration, so `next start` can serve eve routes.
+- f6bf73e: Keep every property name in `eve__search` tool signatures that run past the length cap. A long signature now drops its property descriptions before any property name, so the model no longer misses fields a large MCP tool such as Linear's `save_issue` supports.
+- b382594: Compaction no longer re-caps a tool result it already capped. A capped result now fits the size limit it was measured against, so later compactions leave it as it is instead of nesting another truncation notice and keeping less of the original content. A summary written after a cap also sees the whole content the capped result kept.
+- a1c18f5: Teams group chats and channels no longer show connection sign-in links or confirmation codes in the shared thread. The card now has a **Sign in** button, and Teams shows the link only to the person who has to sign in, so another member can't connect their own account under the requester's identity.
+- 9f3a634: Snapshot retained tracing arguments and errors so later mutations cannot introduce private content into telemetry or checkpoints. Apply accepted delegation capture ceilings when re-entering durable turns, including through `resume()`.
+- ec2862e: When a tool throws, the error on its `tool.call.failed` instrumentation event now keeps the thrown error's `name`, such as `QuotaError`, instead of always reading `Error`. The `action.result` stream event reports the same name as `error.name`.
+- c1880f4: Parse a workflow tool's result as JSON when its run completes, the way a local tool's result already is. A tool that returns `ctx.ask()`'s answer directly, after the person picked an option, no longer fails the turn with `Cannot convert undefined or null to object`: undefined properties are omitted, a tool that returns nothing reports `null`, and the same applies to `ctx.reply()` in `serve` tools. A result JSON can't carry, such as a `Date` or `Map`, now fails the call with a serialization error instead of reaching the model as `{}`.
+
 ## 0.79.1
 
 ### Patch Changes
