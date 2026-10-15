@@ -16,7 +16,7 @@ import {
 } from "#public/channels/slack/hitl.js";
 import {
   answeredBlocksFromActionBlock,
-  settledCardText,
+  type SettledCard,
 } from "#public/channels/slack/interaction-cards.js";
 import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
@@ -138,7 +138,7 @@ function recordApprovalCards(
 async function settleApprovalCard(
   channel: SlackEventContext,
   requestId: string,
-  answer: { readonly announcement: string; readonly label: string; readonly userId?: string },
+  answer: SettledCard & { readonly announcement: string },
 ): Promise<void> {
   const cards = channel.state.pendingApprovalCards ?? {};
   const card = cards[requestId];
@@ -169,7 +169,7 @@ async function settleApprovalCard(
   await settleRequest(channel, "chat.update", requestId, {
     blocks,
     channel: messageChannelId,
-    text: settledCardText(answer),
+    text: answer.text,
     ts: card.messageTs,
   });
 
@@ -292,9 +292,11 @@ export const approvalEvents: Pick<
     const approved = event.outcome === "approved";
     const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
     const by = userId === undefined ? "" : ` by <@${userId}>`;
+    const label = approved ? "Approve" : "Cancel";
     await settleApprovalCard(channel, event.requestId, {
       announcement: `${approved ? "Approved" : "Cancelled"}${by}.`,
-      label: approved ? "Approve" : "Cancel",
+      label,
+      text: `Answered: ${label}`,
       userId,
     });
   },
@@ -311,12 +313,13 @@ export const approvalEvents: Pick<
           : resolution.outcome === "denied"
             ? "Cancel"
             : "No longer needed";
+      const withdrawn = label === "No longer needed";
       await settleApprovalCard(channel, resolution.requestId, {
-        announcement:
-          label === "No longer needed"
-            ? "This approval is no longer needed."
-            : `${label === "Approve" ? "Approved" : "Cancelled"}.`,
+        announcement: withdrawn
+          ? "This approval is no longer needed."
+          : `${label === "Approve" ? "Approved" : "Cancelled"}.`,
         label,
+        text: withdrawn ? label : `Answered: ${label}`,
       });
     }
   },

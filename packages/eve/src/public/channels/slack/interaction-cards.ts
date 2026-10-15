@@ -11,18 +11,13 @@ import type {
 
 /**
  * What a settled card shows in place of its controls: the line that replaces
- * them, and who answered when someone's answer was taken. A card nobody
- * answered, such as one withdrawn or one whose session is gone, has no
- * `userId`, so it credits nobody and is not announced as answered.
+ * them, the notification text of the update, such as `Answered: Saturday` or
+ * `No longer active`, and who answered when the card credits someone.
  */
 export interface SettledCard {
   readonly label: string;
+  readonly text: string;
   readonly userId?: string;
-}
-
-/** The notification text of a settled card, such as `Answered: Saturday` or `No longer active`. */
-export function settledCardText(card: SettledCard): string {
-  return card.userId === undefined ? card.label : `Answered: ${card.label}`;
 }
 
 function buildSettledHitlMessageBlocks(input: {
@@ -155,7 +150,11 @@ export async function updateAnsweredHitlCard(
   const hitlAction = interaction.actions.find((action) => isHitlAction(action.actionId));
   const label = hitlAction?.label ?? hitlAction?.selectedOptionValue ?? hitlAction?.value;
   if (!hitlAction || !label) return;
-  await settleHitlCard(interaction, deps, { label, userId: hitlAction.user.id });
+  await settleHitlCard(interaction, deps, {
+    label,
+    text: `Answered: ${label}`,
+    userId: hitlAction.user.id,
+  });
 }
 
 /** Replaces a pressed HITL card's controls with `card`. */
@@ -216,7 +215,7 @@ async function updateSettledCard(input: {
       channel: input.channelId,
       ts: input.messageTs,
       blocks: input.blocks,
-      text: settledCardText(input.card),
+      text: input.card.text,
     },
   });
 }

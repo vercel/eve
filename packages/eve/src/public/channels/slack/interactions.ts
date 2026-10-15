@@ -511,7 +511,8 @@ async function dispatchBlockInputResponses(input: {
           state: withSlackResponder(undefined, input.submission.user.id),
         }),
     {
-      retirePrompt: (label) => settleHitlCard(input.interaction, input.deps, { label }),
+      retirePrompt: (label) =>
+        settleHitlCard(input.interaction, input.deps, { label, text: label }),
       waitUntil: input.ctx.waitUntil,
     },
     log,
@@ -730,7 +731,7 @@ async function dispatchViewInputResponse(input: {
     {
       retirePrompt: (label) =>
         settleFreeformCard({
-          card: { label },
+          card: { label, text: label },
           channelId: cardChannelId,
           deps: input.deps,
           installationTeamId: input.installationTeamId,
@@ -755,7 +756,11 @@ async function dispatchViewInputResponse(input: {
 
   try {
     await settleFreeformCard({
-      card: { label: input.text, userId: input.submission.user.id },
+      card: {
+        label: input.text,
+        text: `Answered: ${input.text}`,
+        userId: input.submission.user.id,
+      },
       channelId: cardChannelId,
       deps: input.deps,
       installationTeamId: input.installationTeamId,
