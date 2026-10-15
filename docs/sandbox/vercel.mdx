@@ -104,6 +104,52 @@ const sandbox = await ctx.getSandbox(environment);
 const sandboxName = sandbox.name;
 ```
 
+## Mount a Drive
+
+A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+
+const REGION = "iad1";
+
+export const environment = VercelSandbox.environment({ region: REGION });
+
+export default defineSandbox(async () => {
+  const drive = await Drive.getOrCreate({
+    name: "agent-workspace",
+    region: REGION,
+  });
+
+  return environment.open({
+    mounts: {
+      "/data": drive,
+    },
+  });
+});
+```
+
+This example mounts the Drive read-write at `/data`. Files written there remain on the Drive after the sandbox stops. Keep Drive mounts separate from eve's managed `/workspace` directory.
+
+Set the same region on the environment and the Drive. The environment region places the prepared snapshot and each session sandbox together with the Drive.
+
+A Drive supports one active read-write mount. Because each eve session gets its own sandbox, the fixed `agent-workspace` name works only when one eve session uses the Drive at a time. If sessions can overlap, derive an opaque, stable Drive name per owner or tenant. The [Vercel guide to using Drives with eve](https://vercel.com/kb/guide/vercel-drives-eve-agent) shows how to derive a Drive name from the session initiator.
+
+To share a point-in-time view across concurrent sandboxes, mount a read-only snapshot instead:
+
+```ts
+return environment.open({
+  mounts: {
+    "/data": drive.snapshot(),
+  },
+});
+```
+
+Before mounting `drive.snapshot()`, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
+
+Vercel allows up to four non-overlapping, absolute Drive mount paths per sandbox. See the Vercel documentation for [Drive lifecycle, limits, and pricing](https://vercel.com/docs/sandbox/concepts/drives).
+
 ## Live sandbox options
 
 `open()` also accepts Vercel compute resources, timeout, and Drive mounts. Configure project credentials and custom fetch behavior on the environment, not in `open()`, because resume does not reconstruct start-only options.

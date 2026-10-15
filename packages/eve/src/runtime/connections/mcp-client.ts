@@ -1,3 +1,4 @@
+import { ConnectionEventActions, isEventAction } from "#runtime/connections/events/actions.js";
 import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
@@ -60,9 +61,36 @@ export class McpConnectionClient implements ConnectionClient {
   #connection: ResolvedConnectionDefinition;
   /** Whether the current transport connected without a bearer because none was available yet. */
   #anonymous = false;
+  readonly eventActions: ConnectionClient["eventActions"];
 
   constructor(connection: ResolvedConnectionDefinition) {
     this.#connection = connection;
+    if (connection.experimental_events !== undefined) {
+      const events = new ConnectionEventActions(
+        connection,
+        connection.experimental_events,
+        () => resolveHeaders(connection),
+        this.#forwardingFetch(),
+      );
+      this.eventActions = {
+        ownsName: isEventAction,
+        recoveryMetadata: () => events.recoveryMetadata(),
+        metadata: async () => {
+          try {
+            return await events.metadata();
+          } catch (error) {
+            return await this.#rethrowClassified(error);
+          }
+        },
+        execute: async (name, args, options) => {
+          try {
+            return await events.execute(name, args, options);
+          } catch (error) {
+            return await this.#rethrowClassified(error);
+          }
+        },
+      };
+    }
   }
 
   /**
@@ -143,8 +171,8 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   /**
-   * Returns cached tool metadata for all tools this connection exposes,
-   * after applying any configured tool filter.
+   * Returns cached tool metadata for all tools this connection exposes. The
+   * catalog applies the connection's tool filter to the listing.
    *
    * The first call fetches tools from the server via `listTools()` and
    * creates the AI SDK tool set in parallel. Subsequent calls return
@@ -152,8 +180,7 @@ export class McpConnectionClient implements ConnectionClient {
    * promise.
    */
   async getToolMetadata(): Promise<readonly ConnectionToolMetadata[]> {
-    const cache = await this.#ensureTools();
-    return cache.metadata;
+    return (await this.#ensureTools()).metadata;
   }
 
   /**
@@ -242,18 +269,12 @@ export class McpConnectionClient implements ConnectionClient {
       protocolVersion: client.initializeResult?.protocolVersion,
     });
 
-    const filter = this.#connection.tools;
-    const filteredTools =
-      filter !== undefined
-        ? listResult.tools.filter((t) => passesToolFilter(t.name, filter))
-        : listResult.tools;
-
     // `toolsFromDefinitions` returns `McpToolSet<"automatic">`, whose
     // elements are `Tool<unknown, CallToolResult>`. The AI SDK's
     // `ToolSet` constraint only admits `Tool<any | never, any | never>`,
     // so a single-hop cast is required — the runtime shape is identical.
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
-    const projectedTools = filteredTools.map((tool) => ({
+    const projectedTools = listResult.tools.map((tool) => ({
       ...tool,
       inputSchema: omitProvidedArgumentsFromSchema(tool.inputSchema, providedArgumentNames),
     }));
@@ -386,7 +407,7 @@ function isMcpHttpFallbackRetryableError(error: unknown): boolean {
   return status === 400 || status === 404 || status === 405;
 }
 
-function readHttpStatus(error: unknown): number | undefined {
+export function readHttpStatus(error: unknown): number | undefined {
   for (const candidate of walkErrorChain(error)) {
     if (!isObject(candidate)) {
       continue;

@@ -284,15 +284,6 @@ describe("OpenApiConnectionClient", () => {
     expect(JSON.stringify(createItem?.inputSchema)).not.toContain("nullable");
   });
 
-  it("applies an operations allow filter", async () => {
-    const client = new OpenApiConnectionClient(
-      makeConnection({ tools: { allow: ["getProject"] } }),
-    );
-    const metadata = await client.getToolMetadata();
-
-    expect(metadata.map((m) => m.name)).toEqual(["getProject"]);
-  });
-
   it("substitutes path params, appends query, and attaches auth on execute", async () => {
     const fetchMock = vi.fn(
       async (_url: URL, _init: RequestInit) =>

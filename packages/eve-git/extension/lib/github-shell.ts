@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import { getToken, type ConnectTokenParams } from "@vercel/connect";
+import type { SessionAuthContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
 
 import { validateRepositoryRoot } from "./repository-root.ts";
@@ -27,6 +28,7 @@ export interface GitHubShellOutput {
 }
 
 export interface GitHubConfig {
+  readonly authorize?: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
@@ -34,6 +36,19 @@ export interface GitHubConfig {
   readonly connector: string;
   readonly org: string;
 }
+
+/** What an `authorize` callback sees before a `gh` command runs. */
+export interface GitHubAuthorizeRequest {
+  /** The session's current caller, or `null` when the session has none. */
+  readonly auth: SessionAuthContext | null;
+  /** The `owner/name` repository the command declared. */
+  readonly repository: string;
+  /** The repository-scoped GitHub App token minted for this command, for API lookups. */
+  readonly token: string;
+}
+
+/** Decides whether the session's caller may run a `gh` command against one repository. */
+export type GitHubAuthorize = (request: GitHubAuthorizeRequest) => boolean | Promise<boolean>;
 
 export interface GitHubLeaseRule {
   readonly match?: {
@@ -46,6 +61,7 @@ export interface GitHubLeaseRule {
 }
 
 interface GitHubShellDependencies {
+  readonly auth?: SessionAuthContext | null;
   readonly getConnectToken?: typeof getToken;
   readonly getSandbox: () => Promise<SandboxSession>;
   /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
@@ -96,6 +112,13 @@ export async function executeGitHubShell(
   const token = await (dependencies.getConnectToken ?? getToken)(config.connector, tokenParams);
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
+  const repository = declaredRepositories[0]!;
+  if (
+    config.authorize &&
+    !(await config.authorize({ auth: dependencies.auth ?? null, repository, token }))
+  ) {
+    throw new Error(`The current caller is not authorized to access ${repository}.`);
+  }
 
   const executable = executablePath(argv[0]!);
   const executionArguments = remoteRepository

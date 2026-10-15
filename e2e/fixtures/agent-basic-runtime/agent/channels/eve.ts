@@ -24,7 +24,17 @@ const authenticateB: AuthFn<Request> = (request) =>
 const authenticateMember: AuthFn<Request> = (request) =>
   authenticateWorkspaceMember(request.headers.get("authorization"));
 const authenticateEvalDriver: AuthFn<Request> = () => principal("eval-driver");
+const authenticateRetentionCheck: AuthFn<Request> = (request) =>
+  request.headers.get("authorization") === "Bearer e2e-metadata-retention"
+    ? { ...principal("retention-check"), principalType: "metadata-only" }
+    : null;
 
 export default eveChannel({
-  auth: [authenticateA, authenticateB, authenticateMember, authenticateEvalDriver],
+  auth: [
+    authenticateA,
+    authenticateB,
+    authenticateMember,
+    authenticateRetentionCheck,
+    authenticateEvalDriver,
+  ],
 });

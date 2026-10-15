@@ -422,6 +422,8 @@ export default noReply();
 
 `no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes. Remove the file to remove the tool.
 
+A root session also accepts a successful model call that returns no text with `finishReason: "stop"`, without retrying or reporting a model-call failure. A turn that settles with no text completes without a final message. Use `no_reply` when the agent should record an explicit choice to stay quiet, including an optional reason. Delegated sessions still retry an empty reply once and report a failure if it remains empty, so the caller can act on the failure.
+
 ### `sleep`
 
 `sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message, the default for a new message, ends the wait early: `sleep` returns `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, followed by the message. Add it:

@@ -24,6 +24,7 @@ import {
 import {
   intersectInstrumentationDecisions,
   readInstrumentationDecision,
+  type InstrumentationDecision,
 } from "#shared/instrumentation-decision.js";
 import {
   isSampledTrace,
@@ -39,7 +40,7 @@ const log = createLogger("instrumentation.session-init");
 export function initializeSessionInstrumentation(input: {
   readonly agentName: string;
   readonly ctx: ContextContainer;
-}): void {
+}): InstrumentationDecision {
   const runtime = getInstrumentationRuntime();
   const parentTraceContext = input.ctx.get(ParentTraceContextKey);
   const forwardedTracePolicy = readForwardedTraceAssertion(
@@ -87,6 +88,13 @@ export function initializeSessionInstrumentation(input: {
     }
   }
   input.ctx.set(OtelTraceEnabledKey, runtime?.prepareSessionTrace !== undefined);
+  return (
+    traceSeed?.decision ??
+    resolveTracePolicy(runtime?.otelSettings?.tracePolicy, {
+      agentName: input.agentName,
+      ...conversation,
+    })
+  );
 }
 
 function allocateSessionTraceSeed(input: {

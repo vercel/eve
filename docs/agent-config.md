@@ -263,7 +263,8 @@ duration. Process restarts, ordinary messages, compaction handoffs, and failed
 or skipped handoffs keep the existing deadline. At the deadline, eve lets an active turn settle,
 then emits `session.completed` and releases every continuation address; the next
 qualifying channel message starts fresh. Set it to `false` to disable the
-timeout. Expiration does not delete stored session data.
+timeout. Session expiration follows [run-data retention](#run-data-retention);
+a zero-retention session loses its stored payloads when it ends.
 
 Input tokens, output tokens, and model token cost are checked independently.
 The model call that crosses a limit is allowed to finish because exact usage
@@ -409,11 +410,24 @@ for the retry behavior.
 
 ## Run data retention
 
-The runtime keeps each run's data after the run finishes: model and tool
-payloads, streamed output, and the event log eve replays from. How long it keeps
-them is the World's decision, and on Vercel that follows your team's plan. Set
-`experimental.workflow.retention` to `0` to have it deleted as soon as the run
-finishes instead:
+By default, eve derives run-data retention from the session's resolved
+[OpenTelemetry trace policy](./observability/otel#configure-opentelemetry):
+
+- When the policy allows both inputs and outputs, eve uses the World's default
+  retention period.
+- When the policy drops the trace or excludes either content direction, eve
+  requests deletion as soon as the run ends with Workflow's
+  `experimental_retention: 0`. Workflow cannot delete inputs and outputs separately.
+
+Without a custom policy, public conversations and development sessions use the
+World's default. Private and unknown-audience sessions outside development request
+`0`, even when no OpenTelemetry destination is installed. This decision is made
+when the session starts; destination export filters and lifecycle-provider
+policies do not change it.
+
+Set `experimental.workflow.retention` explicitly to override this behavior.
+Use `0` to request deletion regardless of the tracing policy, or `"default"` to
+keep run data for the World's default period regardless of the tracing policy:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -428,18 +442,29 @@ export default defineAgent({
 });
 ```
 
-This applies to every run that owns the session, including successor owners
+The resolved value applies to every run that owns the session, including successor owners
 started after a deployment handoff, and to the run that collects session
 activity. Runs eve starts for other purposes keep the world's default: session
 timeouts and [workflow tools](./tools/workflows).
 
 The value applies per agent. A [subagent](./subagents) that runs its own session
-uses its own value, unlike `experimental.workflow.world`, which is root-only.
+uses its own explicit value or derives retention from its resolved trace decision,
+including any inherited content ceiling. `experimental.workflow.world` is root-only.
 
-Custom Worlds used with eve might not support this feature, in which case
-it falls back to the World's default retention period.
+At `0`, supporting Worlds delete run and step inputs, outputs, and errors;
+event payloads; and stream contents when the run reaches a terminal state. The
+data remains available while the session is active. Run, step, and event records
+remain for the World's default period, including IDs, timestamps, statuses,
+step names, and attributes. Attributes can contain content, including eve's
+session title. This option does not delete local traces, exported telemetry, or
+data stored by tools, channels, or model providers.
 
-> ⚠️ **At `0`, a finished session's output is usually gone before you can read it.** Since data is deleted immediately before it can be read back, results and transcripts become unreadable and a client polling for a finished session's output can see it disappear.
+The Workflow World enforces deletion, not eve or the SDK. A World older than
+spec version 4 rejects `0`; a spec version 4 World without retention support
+keeps the data. Confirm support with your World provider. See
+[Workflow data retention](https://workflow-sdk.dev/docs/observability/retention).
+
+> ⚠️ **At `0`, completed session transcripts become unreadable.** Deletion races reads of finished runs. Depending on the World, reading deleted session history returns either an empty stream or `410` with `code: "session_expired"`. Persist anything you need to keep from inside a tool, or set `retention: "default"` to preserve completed-session reads independently of tracing.
 
 ## Other defineAgent fields
 

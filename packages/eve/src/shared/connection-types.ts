@@ -1,3 +1,4 @@
+import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 /**
  * Protocol-agnostic interfaces for the connection system.
  *
@@ -255,6 +256,7 @@ interface AuthorizationDefinitionBase {
    * Connect side.
    */
   readonly vercelConnect?: {
+    readonly experimental_events?: ConnectionEventsBackend;
     readonly connector: string;
   };
 
@@ -458,6 +460,8 @@ export interface ConnectionToolExecuteOptions {
 
 /** A live client for a single connection. */
 export interface ConnectionClient {
+  /** eve-owned event actions, separate from remote protocol tools and their filters. */
+  readonly eventActions?: ConnectionEventActionHandler;
   close(): Promise<void>;
   connect(): Promise<unknown>;
   executeTool(
@@ -466,4 +470,11 @@ export interface ConnectionClient {
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
+}
+
+export interface ConnectionEventActionHandler {
+  ownsName(name: string): boolean;
+  metadata(): Promise<readonly ConnectionToolMetadata[]>;
+  recoveryMetadata(): readonly ConnectionToolMetadata[];
+  execute(name: string, args: unknown, options: ConnectionToolExecuteOptions): Promise<unknown>;
 }

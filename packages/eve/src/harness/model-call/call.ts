@@ -450,11 +450,11 @@ export class ModelCaller {
       ...(await Promise.all([stepResultPromise, streamResult.responseMessages])),
       catalog.resolve,
     );
-    assertUsableResponse(
-      stepResult,
-      accumulatedResponseMessages,
-      inlineAuthorizationResults.length > 0 || trailingInlineToolResultParts.length > 0,
-    );
+    assertUsableResponse(stepResult, accumulatedResponseMessages, {
+      allowEmptyStop: !step.hasDelegatedCaller,
+      hasInlineResults:
+        inlineAuthorizationResults.length > 0 || trailingInlineToolResultParts.length > 0,
+    });
     const skipped = answerSkippedToolCalls(stepResult, catalog);
     await emitStepActions(
       step.publish,
@@ -498,23 +498,24 @@ export class ModelCaller {
 }
 
 /**
- * A filtered response fails the step, and an empty one, without output or any tool result, is
- * retried by the empty-response recovery.
+ * A filtered response fails the step. A successful empty `stop` is usable only
+ * when no delegated caller needs a reply.
  */
 function assertUsableResponse(
   stepResult: HarnessStepResult,
   responseMessages: Parameters<typeof extractToolResultCallIds>[0],
-  hasInlineResults: boolean,
+  options: { readonly allowEmptyStop: boolean; readonly hasInlineResults: boolean },
 ): void {
   if (stepResult.finishReason === "content-filter") {
     throw new ContentFilteredModelResponseError(
       readGatewayGenerationId(stepResult.providerMetadata),
     );
   }
+  if (options.allowEmptyStop && stepResult.finishReason === "stop") return;
   if (
     isEmptyModelResponse(stepResult) &&
     extractToolResultCallIds(responseMessages).size === 0 &&
-    !hasInlineResults
+    !options.hasInlineResults
   ) {
     throw new EmptyModelResponseError();
   }

@@ -59,7 +59,8 @@ export function createMcpTraceFetch(input: {
     );
     const annotateRequest =
       message.method === "tools/call" ||
-      (message.method === "tools/list" && activeTraceOperation(activeContext)?.type === "mcp");
+      ((message.method === "tools/list" || message.method === "events/list") &&
+        activeTraceOperation(activeContext)?.type === "mcp");
     if (annotateRequest) {
       activeTraceOperation(activeContext)?.mcp?.update(
         mcpRequestMetadata({
@@ -128,7 +129,7 @@ export const MCP_SERIALIZER: ContentSerializer = {
 export function createMcpTracing() {
   const telemetry = otelTelemetry({ tracerName: "eve.mcp", mapping: eveOutputMapping() });
   function start(input: {
-    method: "tools/list" | "tools/call";
+    method: "tools/list" | "tools/call" | "events/list";
     connectionName: string;
     toolName?: string;
     protocolVersion?: string;
@@ -180,13 +181,14 @@ export function createMcpTracing() {
   }
   return {
     async list<T>(input: {
+      readonly method?: "tools/list" | "events/list";
       readonly connectionName: string;
       readonly execute: () => Promise<T>;
       readonly protocolVersion?: string;
     }): Promise<T> {
       const parent = otelContext.active();
       const span = start({
-        method: "tools/list",
+        method: input.method ?? "tools/list",
         connectionName: input.connectionName,
         protocolVersion: input.protocolVersion,
         executionContext: parent,

@@ -94,8 +94,10 @@ export async function executeWebFetchTool(
   const buffer = await response.arrayBuffer();
 
   const contentType = response.headers.get("content-type") ?? "";
-  const isHtml = contentType.includes("text/html");
   const body = new TextDecoder().decode(buffer);
+  const isHtml =
+    contentType.includes("text/html") ||
+    (contentType.trim() === "" && /^\s*<(?:!doctype\s+html|html)[\s>]/i.test(body));
 
   let rawContent: string;
 

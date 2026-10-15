@@ -67,6 +67,7 @@ export class WorkflowBundleBuilder {
     const dirs = [
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),
     ];
