@@ -16,13 +16,13 @@ const waiting = (turnId: string): BlockingWorkflowToolRun => ({
 });
 
 describe("workflow tool run registry", () => {
-  it("stores waiting runs under eve.workflowTool", () => {
+  it("stores waiting runs in the session's record of running work", () => {
     const first = waiting("turn-a");
     const second = waiting("turn-b");
     const initial: { state?: SessionStateMap } = {};
     const session = registerWorkflowToolRun(registerWorkflowToolRun(initial, first), second);
     expect(session.state).toEqual({
-      "eve.workflowTool": { version: 4, runs: [first, second] },
+      "eve.work": { version: 1, calls: [first, second] },
     });
   });
 
@@ -41,9 +41,9 @@ describe("workflow tool run registry", () => {
   it("rejects duplicate originating call identities", () => {
     expect(() =>
       getBlockingWorkflowToolRuns({
-        "eve.workflowTool": {
-          version: 4,
-          runs: [waiting("turn-a"), waiting("turn-a")],
+        "eve.work": {
+          version: 1,
+          calls: [waiting("turn-a"), waiting("turn-a")],
         },
       }),
     ).toThrow("Run identities must be unique");
@@ -59,7 +59,9 @@ describe("workflow tool run registry", () => {
   it.each([
     ["the task-only index", { "eve.tasks": { version: 2, tasks: [] } }],
     ["the separate blocking-run store", { "eve.runtime.workflowToolRuns": [] }],
+    ["the v26 blocking-run registry", { "eve.workflowTool": { version: 4, runs: [] } }],
+    ["the v26 task table", { "eve.taskTable": { version: 1, tasks: [] } }],
   ])("rejects %s", (_, state) => {
-    expect(() => getBlockingWorkflowToolRuns(state)).toThrow("Unsupported workflow tool run state");
+    expect(() => getBlockingWorkflowToolRuns(state)).toThrow("Unsupported running-work state");
   });
 });
