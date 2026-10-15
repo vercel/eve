@@ -2,7 +2,11 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
-import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import {
+  isWorkflowMessage,
+  type SandboxRequestPayload,
+  type SessionInboxPayload,
+} from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
@@ -12,6 +16,7 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
+  | { readonly kind: "sandbox-request"; readonly message: SandboxRequestPayload }
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly kind: "cancel" }
   | { readonly kind: "consumed" }
@@ -32,6 +37,7 @@ export async function admitSessionInboxPayload(
   if (value.kind === "session-failure") throw new Error(value.error);
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
+  if (value.kind === "sandbox-request") return { kind: "sandbox-request", message: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
   if (value.kind === "authorization-callback") {
     input.queue.enqueueAuthorization(value.payloads);

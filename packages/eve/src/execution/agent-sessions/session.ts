@@ -9,12 +9,19 @@ import {
   cancelAgentSessionTurnStep,
   endAgentSessionsStep,
   openAgentSessionStep,
+  resolveAgentSandboxOwnerStep,
   sendAgentSessionMessageStep,
   type AgentSessionMessage,
   type OpenedAgentSession,
 } from "#execution/agent-sessions/steps.js";
 import type { RunUsageTally } from "#execution/agent-sessions/usage.js";
-import { disposeHook } from "#execution/hook-ownership.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type { SandboxState } from "#sandbox/state.js";
+import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -223,8 +230,25 @@ class RunAgentSession implements AgentSession {
    * the run serves another call by then; each message carries its own auth.
    */
   async #open(message: AgentSessionMessage): Promise<OpenedAgentSession> {
-    const { agentContext: context, from } = this.#run;
+    const { agentContext, from } = this.#run;
+    let context = agentContext;
     try {
+      const ownerSessionId = await resolveAgentSandboxOwnerStep({ context, name: this.#name });
+      if (ownerSessionId !== undefined) {
+        const hook = createHook<{ readonly state: SandboxState } | { readonly error: string }>();
+        try {
+          await claimHookOwnership(hook);
+          await resumeHookStep(sessionInboxHookToken(sessionCommandHookToken(ownerSessionId)), {
+            kind: "sandbox-request",
+            replyTo: hook.token,
+          });
+          const response = await hook;
+          if ("error" in response) throw new Error(response.error);
+          context = { ...context, sandbox: { sessionId: ownerSessionId, state: response.state } };
+        } finally {
+          await disposeHook(hook);
+        }
+      }
       const address = await openAgentSessionStep({
         ...message,
         context,

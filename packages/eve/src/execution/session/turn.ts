@@ -1,3 +1,5 @@
+import { handleSandboxRequest } from "#execution/session-sandbox-request.js";
+import type { SessionBoundaryMessage } from "#execution/session/active-turn.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -143,12 +145,16 @@ export class SessionExecution {
    * stream is closed, and finalizing the session terminates the children.
    */
   private async handleBoundaryMessages(
-    messages: readonly WorkflowToolRunMessage[],
+    messages: readonly SessionBoundaryMessage[],
     ending = false,
   ): Promise<void> {
     let applied: AppliedRunMessage[] = [];
     for (const message of messages) {
-      if (!isAppliedRunMessage(message)) {
+      if (message.kind === "sandbox-request") {
+        await this.applyRunMessages(applied);
+        applied = [];
+        await handleSandboxRequest({ cursor: this.input.cursor, message });
+      } else if (!isAppliedRunMessage(message)) {
         await this.applyRunMessages(applied);
         applied = [];
         await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
@@ -341,6 +347,9 @@ export class SessionExecution {
         case "steering":
           interrupted = true;
           continue;
+        case "sandbox-request":
+          await handleSandboxRequest({ cursor: this.input.cursor, message: next.message });
+          continue;
         case "workflow":
           await this.handleWorkflowMessage(next.message, turn);
           continue;
@@ -380,6 +389,9 @@ export class SessionExecution {
       if (steering !== undefined) return steering;
       const next = await turn.nextRuntimeEvent([]);
       if (next === "cancelled") return next;
+      if (next.kind === "sandbox-request") {
+        await handleSandboxRequest({ cursor: this.input.cursor, message: next.message });
+      }
       if (next.kind === "workflow") await this.handleWorkflowMessage(next.message, turn);
     }
   }
@@ -457,6 +469,10 @@ export class SessionExecution {
           continue;
         }
 
+        if (next.kind === "sandbox-request") {
+          await handleSandboxRequest({ cursor: this.input.cursor, message: next.message });
+          continue;
+        }
         const result = await this.handleWorkflowMessage(next.message, input.turn);
         if (result === undefined) continue;
         accept(result);

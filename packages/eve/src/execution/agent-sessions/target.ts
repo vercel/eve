@@ -152,7 +152,9 @@ export function resolveAgentStartTarget(input: {
     dynamicAgentConfig?.description ??
     (registered?.definition.kind === "subagent" ? registered.definition.description : undefined);
   const source: SubagentInputSource =
-    description === undefined ? { type: "runtime" } : { description, type: "local" };
+    registered === undefined && !isDynamicSubagent
+      ? { type: "runtime" }
+      : { description: description ?? "", type: "local" };
   return { action, dynamicSubagentAgentConfig: dynamicAgentConfig, kind: "local", source };
 }
 

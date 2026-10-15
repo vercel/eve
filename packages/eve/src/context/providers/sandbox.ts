@@ -28,6 +28,7 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
       compiledArtifactsSource: bundle.compiledArtifactsSource,
       nodeId: node.nodeId,
       ownsSandbox: !reusesOwnerSandbox,
+      inherited: reusesOwnerSandbox,
       registry,
       sessionId: sandboxSessionId,
       state: session.sandboxState ?? (reusesOwnerSandbox ? parentSandboxState : undefined) ?? null,

@@ -21,6 +21,7 @@ vi.mock("#execution/workflow-registry.js", async () => {
   return { readRegisteredWorkflow: () => agentToolServeWorkflow };
 });
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  resolveAgentSandboxOwnerStep: async () => undefined,
   cancelAgentSessionTurnStep: async () => {},
   endAgentSessionsStep: async () => {},
   openAgentSessionStep: async ({ message }: { readonly message: string }) => {

@@ -78,6 +78,7 @@ async function open(
   id = "session-1",
   state: Parameters<typeof ensureSandboxAccess>[0]["state"] = null,
   nodeId = "__root__",
+  inherited?: boolean,
 ) {
   const context = new ContextContainer();
   context.set(SessionKey, {
@@ -89,6 +90,7 @@ async function open(
     const access = await ensureSandboxAccess({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId,
+      inherited,
       registry,
       sessionId: id,
       state,
@@ -192,13 +194,18 @@ describe("ensureSandboxAccess", () => {
     expect(value.start).toHaveBeenCalledOnce();
   });
 
-  it("passes empty live options when a child inherits its parent sandbox", async () => {
-    const value = fixture();
-
-    await open(inheritingChildRegistry(value.registry));
-
-    expect(value.create).toHaveBeenCalledOnce();
-  });
+  it.each(["declared", "builtin"])(
+    "rejects %s inherited first creation without an initialized owner snapshot",
+    async (kind) => {
+      const value = fixture();
+      const registry =
+        kind === "declared" ? inheritingChildRegistry(value.registry) : value.registry;
+      await expect(open(registry, "owner", null, "child", true)).rejects.toThrow(
+        "has no initialized owner snapshot",
+      );
+      expect(value.start).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects a fabricated sandbox", async () => {
     const value = fixture(undefined, true);

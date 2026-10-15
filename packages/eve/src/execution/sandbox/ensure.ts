@@ -42,6 +42,8 @@ interface EnsureSandboxAccessInput {
   readonly nodeId: string;
   /** `false` when the sandbox outlives this access: it may not delete it, even after a failed start. */
   readonly ownsSandbox?: boolean;
+  /** Includes built-in copies whose registry retains the owner definition. */
+  readonly inherited?: boolean;
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
   readonly state: SandboxState | null;
@@ -283,12 +285,9 @@ export async function ensureSandboxAccess(
     session: SandboxProviderSessionContext["session"],
   ): Promise<SandboxProviderHandle> {
     const inherited = registered.inheritance;
-    if (inherited !== undefined) {
-      await open(
-        getSandboxEnvironmentRuntime(definition.environment),
-        undefined,
-        definition.environment,
-        session,
+    if (inherited !== undefined || input.inherited === true) {
+      throw new Error(
+        `Inherited sandbox "${definition.logicalPath}" has no initialized owner snapshot. Initialize the owning session before starting a child.`,
       );
     } else {
       try {

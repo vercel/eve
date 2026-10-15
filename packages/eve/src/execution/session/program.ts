@@ -1,3 +1,4 @@
+import { handleSandboxRequest } from "#execution/session-sandbox-request.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { withStubPlayback } from "#execution/tool-stubs/playback.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -229,7 +230,7 @@ async function runSessionLoop(
   const sessionTimeout = boot.sessionTimeoutControl;
 
   const nextParkedActivity = async (): Promise<
-    Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
+    Exclude<NextTurnInstruction, { kind: "workflow" | "sandbox-request" | "cancel-working-tasks" }>
   > => {
     while (true) {
       const next = await nextTurnDelivery({
@@ -238,6 +239,10 @@ async function runSessionLoop(
         inbox,
         queue,
       });
+      if (next.kind === "sandbox-request") {
+        await handleSandboxRequest({ cursor, message: next.message });
+        continue;
+      }
       if (next.kind === "workflow") {
         await execution.handleWorkflowMessage(next.message);
         continue;

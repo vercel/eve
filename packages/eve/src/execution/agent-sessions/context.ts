@@ -65,6 +65,7 @@ export interface AgentSessionBundle {
 
 /** The caller's sandbox, which agents declared with a parent sandbox share. */
 export interface AgentSessionSandbox {
+  /** Nearest sandbox-owning ancestor; an independent caller resets this to its own id. */
   readonly sessionId: string;
   readonly state?: SandboxState;
 }

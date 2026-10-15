@@ -6,12 +6,13 @@ import type {
   SessionInputQueue,
   TurnSelection,
 } from "#execution/session/input-queue.js";
-import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import type { SessionInboxReader, SandboxRequestPayload } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 export type NextTurnInstruction =
+  | { readonly kind: "sandbox-request"; readonly message: SandboxRequestPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
@@ -57,6 +58,7 @@ export async function nextTurnDelivery(input: {
     const admitted = await admitSessionInboxPayload(payload, input);
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
+    if (admitted.kind === "sandbox-request") return admitted;
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
     if (
       admitted.kind === "cancel" &&

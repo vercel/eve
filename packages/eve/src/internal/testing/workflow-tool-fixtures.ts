@@ -268,3 +268,16 @@ export async function failingServeWorkflow(): Promise<never> {
   "use workflow";
   throw new Error("Live serve workflow must not execute.");
 }
+
+/** Holds the calling session on its child until real hook delivery finishes the child's turn. */
+export async function sandboxDelegateWorkflow(
+  input: { readonly target: string; readonly message: string },
+  ctx: WorkflowToolContext,
+) {
+  "use workflow";
+  const child = ctx.agent(input.target);
+  const response = await child.send(input.message);
+  const result = await response.result();
+  if (result.status !== "completed") throw new Error(`Child ended with ${result.status}`);
+  return { completed: true };
+}

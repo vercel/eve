@@ -344,3 +344,10 @@ function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
   }));
   return { ...input, queue: queueOf(...bufferedDeliveries) };
 }
+
+it("dispatches sandbox initialization separately from workflow-run messages and deliveries", async () => {
+  const request = { kind: "sandbox-request", replyTo: "sandbox-reply" } as const;
+  const input = waitInput(createMockInbox([{ result: { done: false, value: request } }]));
+  expect(await nextTurnDelivery(input)).toEqual({ kind: "sandbox-request", message: request });
+  expect(input.queue.pendingCount).toBe(0);
+});

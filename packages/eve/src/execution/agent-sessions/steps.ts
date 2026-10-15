@@ -397,3 +397,30 @@ async function loadAgentSessionBundle(context: AgentSessionContext): Promise<Com
     nodeId: context.bundle.nodeId,
   });
 }
+
+/** Resolve sharing at the common local child-start boundary, not by tool name. */
+export async function resolveAgentSandboxOwnerStep(input: {
+  readonly context: AgentSessionContext;
+  readonly name: string;
+}): Promise<string | undefined> {
+  "use step";
+  const { context } = input;
+  const bundle = await loadAgentSessionBundle(context);
+  const action = resolveAgentAction({
+    bundle,
+    callId: context.parent.callId,
+    dynamicSelections: context.dynamicSelections,
+    input: { message: "", target: input.name },
+  });
+  const target = resolveAgentStartTarget({
+    action,
+    bundle,
+    dynamicSelections: context.dynamicSelections,
+    isRootSession: context.parent.rootSessionId === context.parent.sessionId,
+  });
+  if (target.kind !== "local") return undefined;
+  const sandbox = bundle.graph.nodesByNodeId.get(target.action.nodeId)?.sandboxRegistry.sandbox;
+  return target.source.type === "runtime" || sandbox?.definition.kind === "parent"
+    ? context.sandbox.sessionId
+    : undefined;
+}

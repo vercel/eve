@@ -38,6 +38,7 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.deliver,
 }));
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  resolveAgentSandboxOwnerStep: async () => undefined,
   openAgentSessionStep: mocks.openAgent,
   sendAgentSessionMessageStep: mocks.sendAgent,
 }));
