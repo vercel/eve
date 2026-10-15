@@ -1,8 +1,8 @@
-// What channels render about interactions, read from the facts and the line's tables: the batch of
-// requests a commit opened, a sign-in prompt, how a request or sign-in settled, and a responder an
-// approval refused. Built-in channels render these; authored handlers can read the facts directly.
+// What channels render about requests, read from the facts and the line's tables: the batch of
+// requests a commit opened, how a request settled, and a responder an approval refused. Sign-ins
+// are `sign-in.ts`'s. Built-in channels render these; authored handlers can read the facts directly.
 
-import type { Principal, Scope } from "#protocol/session-events/envelope.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 import type {
   InteractionOpenedData,
   InteractionOutcome,
@@ -33,39 +33,6 @@ export interface RequestBatch {
   readonly taskId?: string;
   /** The call a relayed request serves. */
   readonly callId?: string;
-}
-
-/** What a sign-in asks of a person, and where to complete it. */
-export interface SignInPrompt {
-  readonly attemptId: string;
-  readonly name: string;
-  readonly description: string;
-  readonly authorization?: {
-    readonly url?: string;
-    readonly userCode?: string;
-    readonly expiresAt?: string;
-    readonly instructions?: string;
-    readonly displayName?: string;
-  };
-  readonly webhookUrl?: string;
-  /** Who the sign-in is for: the principal that started it. */
-  readonly principalId?: string;
-  /** The approval response whose responder signs in. */
-  readonly responseId?: string;
-  readonly taskId?: string;
-  readonly turnId?: string;
-}
-
-/** How a sign-in ended. */
-export interface SignInSettlement {
-  readonly attemptId: string;
-  readonly name: string;
-  readonly outcome: InteractionOutcome;
-  readonly reason?: string;
-  readonly principalId?: string;
-  readonly responseId?: string;
-  readonly authorization?: SignInPrompt["authorization"];
-  readonly taskId?: string;
 }
 
 /** How a request ended, with the answer that decided it and who gave it. */
@@ -119,58 +86,6 @@ export function firstOpenRequest(view: SessionView): Interaction | undefined {
   return first === undefined ? undefined : interaction(view, first.interactionId);
 }
 
-/** A sign-in's prompt, from its `interaction.opened`. */
-export function signInPromptOf(
-  data: InteractionOpenedData,
-  scope?: Scope,
-): SignInPrompt | undefined {
-  const { request, subject } = data;
-  if (request.kind !== "sign-in") return undefined;
-  const signIn = request.signIn;
-  const prompt: Mutable<SignInPrompt> = {
-    attemptId: data.interactionId,
-    description: request.prompt,
-    name: signIn?.name ?? data.interactionId,
-  };
-  const authorization = challengeOf(signIn);
-  if (authorization !== undefined && signIn?.callbackUrl !== undefined) {
-    prompt.authorization = authorization;
-    prompt.webhookUrl = signIn.callbackUrl;
-  }
-  const principalId = data.audience?.principalIds[0];
-  if (principalId !== undefined) prompt.principalId = principalId;
-  if ("responseId" in subject) prompt.responseId = subject.responseId;
-  const taskId = scope?.taskId ?? ("taskId" in subject ? subject.taskId : undefined);
-  if (taskId !== undefined) prompt.taskId = taskId;
-  const turnId = scope?.turnId ?? ("turnId" in subject ? subject.turnId : undefined);
-  if (turnId !== undefined) prompt.turnId = turnId;
-  return prompt;
-}
-
-/** How a sign-in ended, from its `interaction.settled`. */
-export function signInSettlementOf(
-  view: SessionView,
-  data: InteractionSettledData,
-): SignInSettlement | undefined {
-  const row = view.interactions[data.interactionId];
-  if (row === undefined || row.request.kind !== "sign-in") return undefined;
-  const signIn = row.request.signIn;
-  const settled: Mutable<SignInSettlement> = {
-    attemptId: row.interactionId,
-    name: signIn?.name ?? row.interactionId,
-    outcome: data.outcome,
-  };
-  if (data.reason !== undefined) settled.reason = data.reason;
-  const principalId = row.audience?.principalIds[0];
-  if (principalId !== undefined) settled.principalId = principalId;
-  if ("responseId" in row.subject) settled.responseId = row.subject.responseId;
-  const authorization = challengeOf(signIn);
-  if (authorization !== undefined) settled.authorization = authorization;
-  const taskId = interactionOwner(view, row).taskId;
-  if (taskId !== undefined) settled.taskId = taskId;
-  return settled;
-}
-
 /** How a request ended, from its `interaction.settled`. */
 export function requestSettlementOf(
   view: SessionView,
@@ -216,19 +131,6 @@ export function refusedAnswerOf(
 export function responderOf(view: SessionView, responseId: string): Principal | undefined {
   const response = view.responses[responseId];
   return response === undefined ? undefined : view.deliveries[response.deliveryId]?.principal;
-}
-
-function challengeOf(
-  signIn: InteractionOpenedData["request"]["signIn"],
-): SignInPrompt["authorization"] | undefined {
-  if (signIn === undefined) return undefined;
-  const challenge: Mutable<NonNullable<SignInPrompt["authorization"]>> = {};
-  if (signIn.url !== undefined) challenge.url = signIn.url;
-  if (signIn.userCode !== undefined) challenge.userCode = signIn.userCode;
-  if (signIn.expiresAt !== undefined) challenge.expiresAt = signIn.expiresAt;
-  if (signIn.instructions !== undefined) challenge.instructions = signIn.instructions;
-  if (signIn.displayName !== undefined) challenge.displayName = signIn.displayName;
-  return Object.keys(challenge).length === 0 ? undefined : challenge;
 }
 
 /** An option's style a channel can render: a style a newer eve added reads as none. */

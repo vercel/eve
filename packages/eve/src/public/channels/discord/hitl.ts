@@ -13,6 +13,7 @@ import {
 import { parseAnswer, type ValidatedAnswer } from "#shared/input.js";
 import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
+import { chunk, truncate } from "#public/channels/text.js";
 
 /** Maps Discord component kinds (ACTION_ROW, BUTTON, STRING_SELECT, TEXT_INPUT) to their wire `type` integers used in component payloads. */
 export const DISCORD_COMPONENT_TYPE = {
@@ -237,18 +238,4 @@ function toDiscordButtonStyle(style: InteractionOption["style"]): number {
   if (style === "primary") return 1;
   if (style === "danger") return 4;
   return 2;
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
-}
-
-function chunk<T>(values: readonly T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let index = 0; index < values.length; index += size) {
-    result.push(values.slice(index, index + size));
-  }
-  return result;
 }

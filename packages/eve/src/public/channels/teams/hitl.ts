@@ -18,6 +18,7 @@ import {
 } from "#public/channels/teams/limits.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { truncate } from "#public/channels/text.js";
 
 /** Adaptive Card attachment content type used by Teams. */
 export const TEAMS_ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive";
@@ -316,10 +317,4 @@ function formatApprovalInput(request: Interaction): string | null {
   }
   const json = JSON.stringify(request.call?.input ?? {}, null, 2);
   return json === "{}" ? null : json;
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
 }

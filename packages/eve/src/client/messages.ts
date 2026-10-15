@@ -1,4 +1,5 @@
 import type { ConversationInteraction } from "#client/conversation-state.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
 import type { EveMessage, EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { UserPart } from "#protocol/session-events/envelope.js";
 import { callOutputSource } from "#protocol/session-projection/selectors.js";
@@ -10,7 +11,7 @@ import type {
   SessionView,
 } from "#protocol/session-projection/tables.js";
 import { callPlace, runPlace } from "#protocol/session-reader.js";
-import { displayTitle } from "#shared/display-name.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -115,6 +116,7 @@ export function assistantMessages(
       part: {
         callId: preview.callId,
         inputText: preview.input,
+        kind: preview.kind,
         label: displayTitle(preview.name),
         name: preview.name,
         status: "streaming",
@@ -162,12 +164,12 @@ function toolPart(
   preview: CallPreview | undefined,
   interaction: ConversationInteraction | undefined,
 ): EveToolPart {
-  const { kind, name, label } = row.capability;
+  const { kind, name } = row.capability;
   const running = row.status !== "settled";
   const part: Mutable<EveToolPart> = {
     callId: row.callId,
     kind,
-    label: row.label ?? (running ? preview?.label : undefined) ?? label ?? displayTitle(name),
+    label: callLabel(row, preview),
     name,
     status: row.status,
     type: "tool",

@@ -31,7 +31,7 @@ import {
 } from "#runtime/connections/tool-result.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionToolMetadata } from "#shared/connection-types.js";
-import { displayProperName, displayTitle } from "#shared/display-name.js";
+import { displayProperName, displayTitle } from "#protocol/session-projection/display-name.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";

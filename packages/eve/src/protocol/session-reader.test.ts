@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
 import { activeTurn } from "#protocol/session-projection/selectors.js";
+import { callLabel, callState, waiting } from "#protocol/session-projection/selectors.js";
 import {
   callPlace,
   interaction,
   readerTasks,
   readerTurns,
-  waitingOn,
   runPlace,
 } from "#protocol/session-reader.js";
 
@@ -94,18 +94,80 @@ describe("turns and steps", () => {
   });
 });
 
-describe("waitingOn", () => {
+describe("where a call stands", () => {
   const asked = [turn("turn_0"), run("run_0", "turn_0"), call("c_0", "run_0", { a: 1 })];
 
-  it("names the open approval a call waits on, until it settles", () => {
+  it("waits on its own approval until it settles, then starts and ends", () => {
     const open = viewOf(started, [...asked, runSettled("run_0", "turn_0"), approval("i_0", "c_0")]);
-    expect(waitingOn(open, "c_0")).toBe("i_0");
+    expect(callState(open, "c_0")).toBe("approval");
+    expect(waiting(open, { callId: "c_0" })).toMatchObject({
+      interactions: [{ interactionId: "i_0" }],
+      on: "person",
+    });
     const declined = viewOf(
       started,
       [...asked, runSettled("run_0", "turn_0"), approval("i_0", "c_0")],
       [{ data: { interactionId: "i_0", outcome: "declined" }, type: "interaction.settled" }],
     );
-    expect(waitingOn(declined, "c_0")).toBeUndefined();
+    expect(callState(declined, "c_0")).toBe("requested");
+    expect(waiting(declined, { callId: "c_0" })).toBeUndefined();
+    const ended = (outcome: string) =>
+      callState(
+        viewOf(started, [
+          ...asked,
+          { data: { callId: "c_0" }, type: "call.started" },
+          { data: { callId: "c_0", outcome }, type: "call.settled" },
+        ]),
+        "c_0",
+      );
+    expect(ended("completed")).toBe("completed");
+    expect(ended("rejected")).toBe("rejected");
+    expect(ended("interrupted")).toBe("cancelled");
+    expect(ended("abandoned")).toBe("cancelled");
+    expect(ended("an-outcome-a-newer-eve-adds")).toBe("failed");
+  });
+
+  it("is blocked while its task's question waits, and running once it's answered", () => {
+    const task = [
+      ...asked,
+      {
+        data: { kind: "agent", name: "helper", startedBy: { callId: "c_0" }, taskId: "t_0" },
+        type: "task.started",
+      },
+      { data: { callId: "c_0", taskId: "t_0" }, type: "call.started" },
+    ];
+    expect(callState(viewOf(started, task), "c_0")).toBe("running");
+    const question = {
+      data: {
+        interactionId: "i_1",
+        request: { kind: "question", prompt: "Which repo?" },
+        subject: { taskId: "t_0" },
+      },
+      type: "interaction.opened",
+    };
+    const blocked = viewOf(started, [...task, question]);
+    expect(callState(blocked, "c_0")).toBe("blocked");
+    expect(waiting(blocked, { taskId: "t_0" })).toEqual(waiting(blocked, { callId: "c_0" }));
+    expect(waiting(blocked, { taskId: "t_0" })?.on).toBe("person");
+    const answered = viewOf(started, [
+      ...task,
+      question,
+      { data: { interactionId: "i_1", outcome: "accepted" }, type: "interaction.settled" },
+    ]);
+    expect(callState(answered, "c_0")).toBe("running");
+  });
+
+  it("labels a call by its tool's label, its progress while running, then its name", () => {
+    const view = viewOf(started, asked);
+    const row = view.calls.c_0!;
+    expect(callLabel(row)).toBe("Tool c 0");
+    expect(callLabel(row, { label: "Fetching" })).toBe("Fetching");
+    expect(callLabel({ ...row, capability: { ...row.capability, label: "Deploy" } })).toBe(
+      "Deploy",
+    );
+    expect(callLabel({ ...row, status: "settled", label: "Deployed" }, { label: "Fetching" })).toBe(
+      "Deployed",
+    );
   });
 });
 

@@ -99,11 +99,15 @@ describe("the conversation", () => {
     const conversation = observe([
       ...started,
       { data: { delta: "Check", kind: "text", partId: "p_0" }, scope, type: "content.delta" },
-      { data: { callId: "call_0", delta: '{"env"', name: "deploy" }, scope, type: "call.input" },
+      {
+        data: { callId: "call_0", delta: '{"env"', kind: "tool", name: "deploy" },
+        scope,
+        type: "call.input",
+      },
     ]);
     expect(assistantParts(conversation)).toMatchObject([
       { state: "streaming", text: "Check", type: "text" },
-      { inputText: '{"env"', name: "deploy", status: "streaming", type: "tool" },
+      { inputText: '{"env"', kind: "tool", name: "deploy", status: "streaming", type: "tool" },
     ]);
 
     observe([text("p_0", "Checking."), requested], conversation);

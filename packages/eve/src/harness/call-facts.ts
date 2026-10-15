@@ -1,23 +1,47 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, ErrorInfo, JsonValue, Scope } from "#protocol/session-events/envelope.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
-import type { Capability, CallOwner, ClearedBy } from "#protocol/session-events/families/call.js";
+import type {
+  Capability,
+  CapabilityKind,
+  CallOwner,
+  ClearedBy,
+} from "#protocol/session-events/families/call.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import { callOutcomeOf } from "#harness/call-outcome.js";
 
 // The facts for one call, built where the call streams and runs: what the model asked for, that
 // it started, and how it settled. Calls never reach the wire any other way.
 
-/** What a call invokes: a tool, an agent, or the skill it loads, with its label. */
+/** What a call invokes: a tool, an agent, the skill it loads, or a task control, with its label. */
 export function capabilityOf(action: RuntimeActionRequest, label?: string): Capability {
   const capability: { -readonly [K in keyof Capability]: Capability[K] } =
     action.kind === "load-skill"
       ? { kind: "skill", name: action.name }
       : action.kind === "subagent-call" || action.kind === "remote-agent-call"
         ? { kind: "agent", name: action.name }
-        : { kind: "tool", name: action.toolName };
+        : { kind: toolKind(action.toolName), name: action.toolName };
   if (label !== undefined) capability.label = label;
   return capability;
+}
+
+/** What a call to an entry invokes, as its input starts streaming. */
+export function announcedKind(
+  name: string,
+  definition: Pick<HarnessToolDefinition, "behavior"> | undefined,
+): CapabilityKind {
+  if (name === SKILL_ENTRY_NAME) return "skill";
+  const handling = definition?.behavior?.handling;
+  if (handling?.kind === "dispatch" && handling.target.kind !== "workflow-tool-call")
+    return "agent";
+  return toolKind(name);
+}
+
+function toolKind(name: string): CapabilityKind {
+  return isTaskControlTool(name) ? "control" : "tool";
 }
 
 /** The model asked for a call. */

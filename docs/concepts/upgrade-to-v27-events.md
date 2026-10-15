@@ -197,6 +197,15 @@ Slack renderers take `(event, ctx, next)`, with Slack's handles on `ctx.channel.
 `interaction.opened` receives only the private delivery surface as `ctx.channel`. See
 [Slack: Customize rendering](../channels/slack#customize-rendering).
 
+A Slack renderer's `taskCard(card, next)` receives a `TaskCard` instead of a `TaskCardView`:
+the card's calls as table rows, with `view` to read them by, in place of `tasks` and `actions`.
+Read a row's `taskId` for a task, `callState(card.view, callId)` for its status,
+`callLabel(row)` for its title, and `waiting(card.view, { callId })` for what it's blocked on.
+`TaskCardTask`, `TaskCardAction`, `TaskCardBlocker` and `TaskCardStatus` are gone.
+
+A channel that keeps something in step with the session can handle `committed`, once per
+committed line with the line's facts and `ctx.view`, instead of several facts.
+
 ## Clients and frontends
 
 - **Read v27 lines.** The client accepts stream version 27 only. Each stored line is a commit
@@ -231,7 +240,9 @@ Slack renderers take `(event, ctx, next)`, with Slack's handles on `ctx.channel.
   conversation. `transcriptReducer(options)` is `transcriptOf(events, options)`.
 - **Use the shared fold.** `eve/events` exports the catalog, the fold that turns facts into tables,
   and selectors such as `activeTurn`, `reply`, `openInteractions`, `waiting`, and `idle`, so a
-  client doesn't need its own reducer for session state.
+  client doesn't need its own reducer for session state. `callState(view, callId)` says where a
+  call stands for a display, `callLabel(row)` how to name it, and `waiting(view, { taskId })` or
+  `waiting(view, { callId })` who a task's or call's work waits on.
 - **Follow children with `child.opened`.** `session.agent(opened)` takes a `child.opened` event.
 
 ## Evals

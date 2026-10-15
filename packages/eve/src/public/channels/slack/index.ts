@@ -92,13 +92,7 @@ export {
   type SlackTaskCard,
 } from "#public/channels/slack/renderers.js";
 
-export type {
-  TaskCardAction,
-  TaskCardBlocker,
-  TaskCardStatus,
-  TaskCardTask,
-  TaskCardView,
-} from "#channel/task-card.js";
+export type { TaskCard } from "#channel/task-card.js";
 
 export {
   loadThreadContextMessages,

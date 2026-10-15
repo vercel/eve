@@ -3,6 +3,7 @@
 // clients, and through the session handle on the server.
 
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 import {
   type Family,
   isOpen,
@@ -195,6 +196,9 @@ export type Waiting =
 
 /**
  * What an open turn waits on, read from the tables; `undefined` while the session works on it.
+ * For a task or a call, the person its work waits on: a task's relayed questions and sign-ins,
+ * or a call's own approval, else its task's; `undefined` while it works, or once it has ended.
+ *
  * The session works on a turn while it has a model run open, a context change running, an
  * answer it hasn't weighed, or a delivery the turn consumed after it last requested a run or
  * asked someone. Otherwise the
@@ -207,7 +211,17 @@ export type Waiting =
  * interaction; the line that makes a model call necessary requests the run; and every call
  * another run serves names its task when it starts.
  */
-export function waiting(view: SessionView, turnId: string): Waiting | undefined {
+export function waiting(view: SessionView, turnId: string): Waiting | undefined;
+export function waiting(
+  view: SessionView,
+  of: { readonly taskId: string } | { readonly callId: string },
+): Extract<Waiting, { readonly on: "person" }> | undefined;
+export function waiting(
+  view: SessionView,
+  of: string | { readonly taskId: string } | { readonly callId: string },
+): Waiting | undefined {
+  if (typeof of !== "string") return heldBy(view, of);
+  const turnId = of;
   const row = view.turns[turnId];
   if (row === undefined || row.status === "settled") return undefined;
   const open = openWork(view, { turnId });
@@ -293,6 +307,108 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   return calls.length > 0 ? { calls, on: "work" } : undefined;
 }
 
+/** The unanswered interactions a task's or call's work waits on. */
+function heldBy(
+  view: SessionView,
+  of: { readonly taskId: string } | { readonly callId: string },
+): Extract<Waiting, { readonly on: "person" }> | undefined {
+  let taskId: string;
+  if ("callId" in of) {
+    const call = view.calls[of.callId];
+    if (call === undefined || call.status === "settled") return undefined;
+    const approval = ownApproval(view, of.callId);
+    if (approval?.status === "open" && call.taskId === undefined)
+      return { interactions: [approval], on: "person" };
+    if (call.taskId === undefined) {
+      // A blocking call's run asks through the call: its questions name it as their origin.
+      const relayed = unanswered(view).filter((row) => row.origin?.call?.callId === of.callId);
+      return relayed.length === 0 ? undefined : { interactions: relayed, on: "person" };
+    }
+    taskId = call.taskId;
+  } else taskId = of.taskId;
+  if (view.tasks[taskId]?.status === "ended") return undefined;
+  const asked = unanswered(view).filter((row) => interactionOwner(view, row).taskId === taskId);
+  return asked.length === 0 ? undefined : { interactions: asked, on: "person" };
+}
+
+function unanswered(view: SessionView): readonly InteractionRow[] {
+  const answered = answeredInteractionIds(view);
+  return openInteractions(view).filter((row) => !answered.has(row.interactionId));
+}
+
+/** The approval this session asked about a call itself, not one relayed from elsewhere. */
+export function ownApproval(view: SessionView, callId: string): InteractionRow | undefined {
+  let found: InteractionRow | undefined;
+  for (const row of Object.values(view.interactions)) {
+    if (
+      row.request.kind === "approval" &&
+      row.origin === undefined &&
+      "callId" in row.subject &&
+      row.subject.callId === callId
+    )
+      found = row;
+  }
+  return found;
+}
+
+/**
+ * Where a call stands, for a display: `requested` until the session starts it, `approval` while
+ * its own approval is open, `running`, `blocked` while its work waits on a person, then how it
+ * ended. A call interrupted or abandoned reads as `cancelled`; an outcome a newer writer adds
+ * reads as `failed`.
+ */
+export type CallState =
+  | "requested"
+  | "approval"
+  | "running"
+  | "blocked"
+  | "completed"
+  | "failed"
+  | "rejected"
+  | "cancelled";
+
+/** Where a call stands; `undefined` for a call the tables don't hold. */
+export function callState(view: SessionView, callId: string): CallState | undefined {
+  const row = view.calls[callId];
+  if (row === undefined) return undefined;
+  if (row.status === "settled") {
+    switch (row.outcome) {
+      case "completed":
+      case "failed":
+      case "rejected":
+        return row.outcome;
+      case "interrupted":
+      case "abandoned":
+        return "cancelled";
+      default:
+        return "failed";
+    }
+  }
+  const waits = heldBy(view, { callId });
+  if (waits !== undefined) {
+    const own = ownApproval(view, callId);
+    return waits.interactions.some((entry) => entry === own) ? "approval" : "blocked";
+  }
+  return row.status === "requested" ? "requested" : "running";
+}
+
+/**
+ * A call's label: the one its tool gave its result or, while it runs, its latest progress; else
+ * its capability's label, else its name as a title (`linear__list_issues` → `List issues`). A
+ * `call.requested`'s data reads as its call's row did then.
+ */
+export function callLabel(
+  row: Pick<CallRow, "capability"> & Partial<Pick<CallRow, "status" | "label">>,
+  preview?: { readonly label?: string },
+): string {
+  return (
+    row.label ??
+    (row.status === "settled" ? undefined : preview?.label) ??
+    row.capability.label ??
+    displayTitle(row.capability.name)
+  );
+}
+
 /** What the session is doing right now, for status lines. */
 export type Activity =
   | { readonly kind: "idle" }
@@ -325,7 +441,7 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
     if (working.length > 0) return { kind: "waiting-on-tasks", tasks: working };
     return {
       kind: "calling",
-      names: waits.calls.map((entry) => entry.capability.label ?? entry.capability.name),
+      names: waits.calls.map((entry) => callLabel(entry)),
     };
   }
   return { kind: "thinking" };

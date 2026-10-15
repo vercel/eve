@@ -1,7 +1,6 @@
 import { errorHintOf } from "#public/channels/reply.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
-import { displayTitle } from "#shared/display-name.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { waiting } from "#protocol/session-projection/selectors.js";
 import { workingTaskNames } from "#channel/task-card.js";
@@ -19,7 +18,6 @@ import {
   buildAuthEphemeralBlocks,
   buildAuthEphemeralText,
   buildAuthRequiredPublicText,
-  formatConnectionDisplayName,
 } from "#public/channels/slack/connections.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import {
@@ -31,11 +29,9 @@ import {
   refusedAnswerOf,
   requestBatchOf,
   requestSettlementOf,
-  signInPromptOf,
-  signInSettlementOf,
-  type SignInPrompt,
-  type SignInSettlement,
 } from "#channel/interaction-prompts.js";
+import { signInOf, type SignIn } from "#channel/sign-in.js";
+import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
@@ -211,13 +207,10 @@ function firstNonEmptyLine(text: string): string | undefined {
  * A sign-in: a public, link-free status for the thread, and the challenge, which is a credential,
  * privately to the person who must sign in.
  */
-export async function showSlackSignIn(
-  event: SignInPrompt,
-  channel: SlackEventContext,
-): Promise<void> {
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
+export async function showSlackSignIn(event: SignIn, channel: SlackEventContext): Promise<void> {
+  const { displayName } = event;
   const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
-  const challengeUrl = event.authorization?.url;
+  const challengeUrl = event.url;
 
   // Post a public, link-free status so everyone in the thread can see
   // the session is blocked and later see it complete. The challenge
@@ -244,7 +237,7 @@ export async function showSlackSignIn(
   // The challenge is user-specific: the sign-in link (and device code)
   // must only ever be visible to the person who started the sign-in, never posted into
   // the shared thread.
-  const instructions = event.authorization?.instructions;
+  const { instructions } = event;
   if (recipientUserId && (challengeUrl || instructions)) {
     const { channelId, threadTs } = channel.state;
     // The turn's own sign-in holds it, so the prompt can cancel that turn.
@@ -257,7 +250,7 @@ export async function showSlackSignIn(
       displayName,
       instructions,
       url: challengeUrl,
-      userCode: event.authorization?.userCode,
+      userCode: event.userCode,
     };
     try {
       await channel.thread.postEphemeral(recipientUserId, {
@@ -274,11 +267,12 @@ export async function showSlackSignIn(
 }
 
 async function settleSlackSignIn(
-  event: SignInSettlement,
+  event: SignIn,
+  settled: InteractionSettledData,
   channel: SlackEventContext,
 ): Promise<void> {
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-  if (event.outcome === "accepted" && event.responseId === undefined) {
+  const { displayName } = event;
+  if (settled.outcome === "accepted" && event.responseId === undefined) {
     await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
   }
 
@@ -288,8 +282,8 @@ async function settleSlackSignIn(
 
   const text = buildAuthCompletedText({
     displayName,
-    outcome: event.outcome,
-    reason: event.reason,
+    outcome: settled.outcome,
+    reason: settled.reason,
   });
 
   try {
@@ -318,13 +312,13 @@ export function defaultInteractionOpenedHandler(
   approvalChannel?: SlackApprovalChannelResolver,
 ): NonNullable<SlackChannelInternalEvents["interaction.opened"]> {
   const showRequests = defaultInteractionsHandler(approvalChannel);
-  return async ({ data, scope }, ctx) => {
+  return async ({ data }, ctx) => {
     const batch = requestBatchOf(ctx.view, data);
     if (batch !== undefined) {
       await showRequests(batch, ctx);
       return;
     }
-    const signIn = signInPromptOf(data, scope);
+    const signIn = signInOf(ctx.view, data.interactionId);
     if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
   };
 }
@@ -339,9 +333,9 @@ export function defaultInteractionOpenedHandler(
 export const defaultEvents: SlackChannelInternalEvents = {
   async "interaction.settled"({ data }, ctx) {
     const { channel } = ctx;
-    const signIn = signInSettlementOf(ctx.view, data);
+    const signIn = signInOf(ctx.view, data.interactionId);
     if (signIn !== undefined) {
-      await settleSlackSignIn(signIn, channel);
+      await settleSlackSignIn(signIn, data, channel);
       return;
     }
     const resolution = requestSettlementOf(ctx.view, data);
@@ -364,7 +358,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "model.settled"(event, ctx) {
     const turnId = event.scope?.turnId;
     if (turnId === undefined || waiting(ctx.view, turnId)?.on !== "work") return;
-    const working = workingTaskNames(ctx.channel.state.taskCards?.[turnId]?.turn);
+    const working = workingTaskNames(ctx.view, turnId);
     if (working.length > 0) await showStatus(ctx.channel, waitingOnTasks(working));
   },
 
@@ -422,11 +416,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     const { capability, owner } = data;
-    const counts = !("callId" in owner) && !isTaskControlTool(capability.name);
+    const counts = !("callId" in owner) && capability.kind !== "control";
     if (!narration && !counts) return;
     if (!("runId" in owner)) return;
     const stream = stepStream(channel.state, owner.runId);
-    const label = capability.label ?? displayTitle(capability.name);
+    const label = callLabel(data);
     const calls =
       !narration && stream.calls
         ? { ...stream.calls, count: stream.calls.count + 1 }
