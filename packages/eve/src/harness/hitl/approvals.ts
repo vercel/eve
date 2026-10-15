@@ -27,7 +27,6 @@ import {
   signInOpened,
 } from "#harness/interaction-facts.js";
 import { responseBindingFor } from "#harness/response-bindings.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import type { RefusedResponse } from "#harness/hitl/coordinator.js";
 import { turnCoordinates, turnCoordinatesOf } from "#protocol/session-projection.js";
@@ -249,7 +248,7 @@ export function answer(
 ): Answered {
   const { policy } = input;
   const { projection } = view;
-  const tables = publicViewOf(projection);
+  const tables = projection.view;
   const responses = responseLedger(tables, input.submitted ?? []);
   // What a responder may not do refuses their delivery, with why: a notice, not the model's.
   const refusal = policy.feedback.join("\n");
@@ -626,9 +625,7 @@ export function hasRunnableQueue(view: SessionView): boolean {
   ];
   const answered = new Set(responses.map((response) => response.interactionId));
   // A message waits for the budget answer too: the turn holds until the prompt is answered.
-  const limit = openRequests(publicViewOf(view.projection)).find(
-    (open) => open.request.kind === "budget",
-  );
+  const limit = openRequests(view.projection.view).find((open) => open.request.kind === "budget");
   if (limit !== undefined) return answered.has(limit.interactionId);
   if (
     queued.message !== undefined ||
@@ -692,7 +689,7 @@ export function stepForRequest(
  * responder's for one of its approvals.
  */
 export function withdrawSignIns(view: SessionView, reason: string): Transition {
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   return {
     events: view.signIns.flatMap((challenge) => {
       const interactionId = signInInteractionId(challenge);
@@ -732,7 +729,7 @@ export function openLimit(
   view: SessionView,
 ): { readonly row: InteractionRow; readonly turnId?: string } | undefined {
   const own = ownOpenRequestIds(view);
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const row = openRequests(tables).find(
     (open) => open.request.kind === "budget" && own.has(open.interactionId),
   );
@@ -771,7 +768,7 @@ export function requireSignIn(
   },
 ): Transition {
   const { turnId } = turnPosition(view.projection);
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const opening = input.challenges.filter(
     (challenge) => tables.interactions[signInInteractionId(challenge)] === undefined,
   );

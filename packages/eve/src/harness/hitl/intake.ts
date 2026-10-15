@@ -1,3 +1,4 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
@@ -147,7 +148,7 @@ export async function acceptHumanInput(
   switch (decision.next) {
     case "park":
       // A held turn's request is still open: a partial answer, or one a policy refused.
-      if (step.view().projection.activeTurnId === undefined) {
+      if (activeTurnIdOf(step.view().projection) === undefined) {
         return stop({ next: null, session: step.session });
       }
       return stop(holdForInput(step));

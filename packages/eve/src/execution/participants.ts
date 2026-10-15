@@ -41,7 +41,11 @@ import {
   turnStartedForResolvers,
 } from "#harness/session-machine/change-points.js";
 import { currentProjection, currentView } from "#harness/session-machine/current.js";
-import { turnCoordinates } from "#protocol/session-projection.js";
+import {
+  activeTurnIdOf,
+  turnCoordinates,
+  turnCoordinatesOf,
+} from "#protocol/session-projection.js";
 import type { StepCoordinates, StepParticipants } from "#harness/types.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
@@ -133,15 +137,23 @@ export function bindSessionParticipants(input: {
   const coordinates = (runId?: string) => {
     const projection = currentProjection(ctx);
     const turn = turnCoordinates(projection);
-    const run = runId === undefined ? undefined : projection.runs?.[runId];
-    return { ...turn, stepIndex: run?.stepIndex ?? turn.stepIndex };
+    const run = runId === undefined ? undefined : projection.view.runs[runId];
+    return { ...turn, stepIndex: run?.step ?? turn.stepIndex };
   };
   const previewModelId = () => input.effectiveAgent.turnAgent.model?.id ?? "dynamic";
   // A restored step's handlers get the facts its turn published, rebuilt from the tables.
   const restoredTurn = (turn: TurnRef) =>
     turnStartedForResolvers(turn, turnStartedFact(currentView(ctx), turn.turnId));
   const restoredRun = (at: StepCoordinates) => {
-    const runId = currentProjection(ctx).turns[at.turnId]?.runId;
+    // The turn's latest run: the one its step requested.
+    const runs = Object.values(currentView(ctx).runs).filter(
+      (run) => "turnId" in run.owner && run.owner.turnId === at.turnId,
+    );
+    const runId = runs.reduce<(typeof runs)[number] | undefined>(
+      (latest, run) =>
+        latest === undefined || (run.step ?? 0) >= (latest.step ?? 0) ? run : latest,
+      undefined,
+    )?.runId;
     if (runId === undefined) {
       throw new Error(`Turn "${at.turnId}" has no model run to restore step ${at.stepIndex} from.`);
     }
@@ -209,7 +221,7 @@ export function bindSessionParticipants(input: {
               ...coordinates(),
               modelId: previewModelId(),
               sessionId: ctx.get(SessionIdKey) ?? "",
-              turnId: currentProjection(ctx).activeTurnId ?? "",
+              turnId: activeTurnIdOf(currentProjection(ctx)) ?? "",
             }),
             messages: messages ?? [],
           });
@@ -221,7 +233,7 @@ export function bindSessionParticipants(input: {
             await dispatchMemoryTurnCompleted({
               ...memory,
               event: turnCompletedPoint({
-                sequence: currentProjection(ctx).turns[event.data.turnId]?.sequence ?? 0,
+                sequence: turnCoordinatesOf(currentProjection(ctx), event.data.turnId).sequence,
                 turnId: event.data.turnId,
               }),
               messages,

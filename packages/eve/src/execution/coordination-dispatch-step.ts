@@ -29,7 +29,6 @@ import {
 } from "#execution/agent-sessions/context.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { startTask, type TaskCallStart } from "#harness/session-machine/transitions.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
@@ -70,7 +69,7 @@ async function dispatchCoordination(
   // Prospective facts for this admission batch use the same fold as committed facts. This
   // shadow is never saved: limits count work actually started earlier in the batch without
   // introducing a private lifecycle counter or treating undispatched intents as queued work.
-  const admissionView = copyView(publicViewOf(storedProjection(session.state)));
+  const admissionView = copyView(storedProjection(session.state).view);
 
   const starts = withPrestartedRuns(
     prepared.plan.map((task) => ({
@@ -121,7 +120,7 @@ async function dispatchCoordination(
   const view = sessionView(storedProjection(nextSession.state), nextSession.state);
   // One introduction per task in this commit, based on the public table and this batch's
   // pending facts, not the private runtime address (which can exist before publication).
-  const introducedTasks = new Set(Object.keys(publicViewOf(view.projection).tasks));
+  const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
   const published = await publishSessionEvents(
     {
       serializedContext: input.serializedContext,

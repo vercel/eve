@@ -1,3 +1,4 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
 import { openRequests, openSignIns } from "#protocol/session-reader.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
@@ -51,7 +52,7 @@ export function isSessionStateIdleForHandoff(input: {
   const projection = storedProjection(state);
   return (
     workflowToolRuns.length === 0 &&
-    projection.activeTurnId === undefined &&
+    activeTurnIdOf(projection) === undefined &&
     openRequests(projection.view).length === 0 &&
     openSignIns(projection.view).length === 0 &&
     queuedInput(state) === undefined

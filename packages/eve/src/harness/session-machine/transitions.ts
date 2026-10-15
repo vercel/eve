@@ -45,11 +45,12 @@ import type {
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import {
+  activeTurnIdOf,
   nextChangeId,
   nextRunId,
-  publicViewOf,
   type SessionProjection,
 } from "#protocol/session-projection.js";
+import type { SessionView as PublicView } from "#protocol/session-projection/tables.js";
 import { openRequests } from "#protocol/session-reader.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
@@ -103,9 +104,9 @@ export interface ConsumedDelivery {
 
 /** The turn the next turn follows: the newest, unless a context change chose another or none. */
 function followedTurn(projection: SessionProjection): string | null {
-  const selection = projection.view?.selection;
+  const selection = projection.view.selection;
   if (selection === null) return null;
-  return selection?.turnId ?? projection.latestTurn?.turnId ?? null;
+  return selection?.turnId ?? projection.view.session.latestTurnId ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +194,7 @@ export function join(
 ): Transition {
   const { projection } = view;
   const open = waitingDeliveries(projection, input.deliveries);
-  const turnId = projection.activeTurnId;
+  const turnId = activeTurnIdOf(projection);
   if (turnId === undefined) {
     return unchanged(
       view,
@@ -231,7 +232,7 @@ export function startModel(
   view: SessionView,
   input: { readonly runId: string; readonly modelId: string; readonly attempt: number },
 ): Transition {
-  const owner = view.projection.runs?.[input.runId];
+  const owner = view.projection.view.runs[input.runId]?.owner;
   return unchanged(view, [
     {
       data: { attempt: input.attempt, modelId: input.modelId, runId: input.runId },
@@ -246,7 +247,7 @@ export function retryModel(
   view: SessionView,
   input: { readonly runId: string; readonly attempt: number; readonly error: ErrorInfo },
 ): Transition {
-  const owner = view.projection.runs?.[input.runId];
+  const owner = view.projection.view.runs[input.runId]?.owner;
   return unchanged(view, [
     {
       data: { attempt: input.attempt, error: input.error, runId: input.runId },
@@ -272,7 +273,7 @@ export function settleModel(view: SessionView, input: RunSettlement): Transition
 }
 
 function runSettledFacts(projection: SessionProjection, input: RunSettlement): SessionEvent[] {
-  const owner = projection.runs?.[input.runId];
+  const owner = projection.view.runs[input.runId]?.owner;
   const scope = runScope(owner, input.runId);
   const data: {
     -readonly [K in keyof FactOf<"model.settled">["data"]]: FactOf<"model.settled">["data"][K];
@@ -316,7 +317,7 @@ interface TurnEnding {
  * the deliveries it answered after it (`cascade`).
  */
 function closeTurn(projection: SessionProjection, ending: TurnEnding): SessionEvent[] {
-  const turnId = activeTurn(publicViewOf(projection))?.turnId ?? projection.activeTurnId;
+  const turnId = activeTurn(projection.view)?.turnId;
   return turnId === undefined ? [] : turnClosure(projection, turnId, ending).facts;
 }
 
@@ -325,7 +326,7 @@ function turnClosure(
   turnId: string,
   ending: TurnEnding,
 ): { readonly facts: SessionEvent[]; readonly closed: OpenWork } {
-  const tables = publicViewOf(projection);
+  const tables = projection.view;
   const open = openWork(tables, { turnId });
   const turn = tables.turns[turnId];
   const data: {
@@ -377,7 +378,7 @@ export function fail(
   // The calls the turn approved but hadn't run never run: the model reads that they stopped.
   const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
   const error = errorInfoOf(failure);
-  const turnId = view.projection.activeTurnId;
+  const turnId = activeTurnIdOf(view.projection);
   // A terminal failure ends the session, which ends the turn with it, in one commit.
   const events =
     failure.terminal === undefined
@@ -424,7 +425,7 @@ export function sessionEndedFacts(
   const facts: SessionEvent[] = [];
   // A session that ends before it started, as one that fails admitting its first message or a
   // prewarmed one that expires, starts in the same commit: only a started session ends.
-  if (projection !== undefined && projection.started !== true) {
+  if (projection !== undefined && projection.view.session.status === "new") {
     facts.push({ data: {}, type: "session.started" });
   }
   const { control } = ending;
@@ -433,7 +434,7 @@ export function sessionEndedFacts(
   // also works for degraded terminal publication from a checkpoint without live turn state. The
   // writer closes what each turn, and then the session, leaves open (`cascade`).
   if (projection !== undefined) {
-    for (const row of Object.values(publicViewOf(projection).turns)) {
+    for (const row of Object.values(projection.view.turns)) {
       if (row.status === "settled") continue;
       const turn = turnClosure(projection, row.turnId, {
         error: ending.error,
@@ -503,8 +504,7 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       { ...step, messages: withResult(step.messages, part) },
       new Set([part.toolCallId]),
     );
-    const recorded =
-      result === undefined ? undefined : publicViewOf(view.projection).calls[result.callId];
+    const recorded = result === undefined ? undefined : view.projection.view.calls[result.callId];
     if (result !== undefined && recorded?.taskId === undefined && recorded?.status !== "settled") {
       // A task's start receipt is model history only. Its public call stays open until the
       // task replies; the reply path publishes its actual settlement and delegated spend.
@@ -518,7 +518,7 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
   for (const step of steps) {
     if (step.tasks.length === 0 || step.requests.length === 0) continue;
     if (runningTasks(step).length > 0) continue;
-    const tables = publicViewOf(view.projection);
+    const tables = view.projection.view;
     if (step.requests.some((request) => tables.interactions[request.interactionId] !== undefined))
       continue;
     events.push(...step.requests.map((ask) => approvalOpened(ask, step.event.turnId)));
@@ -545,7 +545,7 @@ export function discardAttempt(
     readonly usage?: FactOf<"usage.recorded">["data"]["usage"];
   },
 ): Transition {
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const ref = { family: "run" as const, id: input.runId };
   // A retry abandons the run, and the writer abandons what it announced with it; steering
   // completes what it streamed, so its calls close here.
@@ -672,8 +672,7 @@ export function startTask(
   const scope = { taskId: task.taskId, turnId: task.turnId };
   const events: SessionEvent[] = [];
   const introduced =
-    introducedTasks?.has(task.taskId) ??
-    publicViewOf(view.projection).tasks[task.taskId] !== undefined;
+    introducedTasks?.has(task.taskId) ?? view.projection.view.tasks[task.taskId] !== undefined;
   if (!introduced) {
     introducedTasks?.add(task.taskId);
     events.push({
@@ -742,7 +741,7 @@ export function endTask(
     readonly outcome: TaskCallOutcome;
   },
 ): Transition {
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const row = tables.tasks[input.taskId];
   if (row === undefined || row.status === "ended") return unchanged(view, []);
   const { outcome } = input;
@@ -767,7 +766,7 @@ export function finishRun(
   run: { readonly taskId?: string; readonly requestIds?: Iterable<string> },
 ): Transition {
   const ids = new Set(run.requestIds);
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const withdrawn = Object.values(tables.interactions).filter(
     (row) =>
       row.status === "open" &&
@@ -782,7 +781,7 @@ export function finishRun(
 
 /** An interaction nobody needs anymore, with the answers still open on it. */
 function withdrawInteraction(
-  tables: ReturnType<typeof publicViewOf>,
+  tables: PublicView,
   interactionId: string,
   reason: string,
   outcome: "withdrawn" | "interrupted" = "withdrawn",
@@ -824,7 +823,7 @@ export function relay(
   },
 ): Transition {
   const { payload } = input;
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const serving = tables.calls[payload.callId];
   const scope: { turnId?: string; taskId?: string } = {};
   const turnId = serving === undefined ? undefined : callTurn(tables, serving);
@@ -897,7 +896,7 @@ export function relay(
 
 /** The asker settled what this session mirrors: the mirror settles the same way. */
 function mirrorSettled(
-  tables: ReturnType<typeof publicViewOf>,
+  tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
   scope: { readonly turnId?: string; readonly taskId?: string },
 ): SessionEvent[] {
@@ -920,7 +919,7 @@ function mirrorSettled(
 
 /** The answer this session forwarded that an asker's settlement is about. */
 function forwardedAnswer(
-  tables: ReturnType<typeof publicViewOf>,
+  tables: PublicView,
   settled: { readonly interactionId: string; readonly deliveryId?: string },
 ): string | undefined {
   const open = Object.values(tables.responses)
@@ -964,7 +963,7 @@ export function routeAnswer(
     }[];
   },
 ): Transition {
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   const events: SessionEvent[] = [];
   const admitted = new Set<string>();
   for (const delivery of input.deliveries) {
@@ -1097,7 +1096,7 @@ export function completeSignIn(
   view: SessionView,
   input: { readonly completions: readonly AuthorizationChallenge[] },
 ): Transition {
-  const tables = publicViewOf(view.projection);
+  const tables = view.projection.view;
   return unchanged(
     view,
     input.completions.flatMap((challenge): SessionEvent[] => {
@@ -1129,11 +1128,11 @@ export function completeSignIn(
 /** Requests this session asked itself and still awaits; relayed requests answer elsewhere. */
 export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<string> {
   return new Set(
-    openRequests(publicViewOf(view.projection))
+    openRequests(view.projection.view)
       .filter(
         (row) =>
           row.origin === undefined &&
-          interactionOwner(publicViewOf(view.projection), row).taskId === undefined &&
+          interactionOwner(view.projection.view, row).taskId === undefined &&
           !view.relayedRequestIds.has(row.interactionId),
       )
       .map((row) => row.interactionId),
@@ -1145,7 +1144,7 @@ export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<
  * control ids, is named by the position it applies at.
  */
 export function controlDeliveryFor(view: SessionView, given?: ControlDelivery): ControlDelivery {
-  return given ?? { deliveryId: `control_${String(view.projection.position ?? 0)}` };
+  return given ?? { deliveryId: `control_${String(view.projection.view.position)}` };
 }
 
 /** A control's admission: the delivery it arrived as, its kind, and who sent it. */
@@ -1196,7 +1195,7 @@ export const CANCELLED_CALL_RESULT = "The turn was cancelled before this call fi
  */
 export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}): Transition {
   const { projection } = view;
-  const turnId = projection.activeTurnId;
+  const turnId = activeTurnIdOf(projection);
   const stopped = view.turn.suspended.filter(
     (step) =>
       (turnId !== undefined && step.event.turnId === turnId) ||
@@ -1206,7 +1205,7 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
   const stoppedRequestIds = new Set(
     stopped.flatMap((step) => step.requests.map((request) => request.interactionId)),
   );
-  const tables = publicViewOf(projection);
+  const tables = projection.view;
   const closingTurn = activeTurn(tables)?.turnId ?? turnId;
   const turn =
     closingTurn === undefined
@@ -1291,8 +1290,8 @@ export function clear(
  * outside it. Requests relayed from live tasks stay.
  */
 function clearedInteractions(view: SessionView): SessionEvent[] {
-  const tables = publicViewOf(view.projection);
-  const turnId = activeTurn(tables)?.turnId ?? view.projection.activeTurnId;
+  const tables = view.projection.view;
+  const turnId = activeTurn(tables)?.turnId;
   const closed = new Set(
     turnId === undefined
       ? []

@@ -70,23 +70,29 @@ export function importProjection(session: LegacySession): SessionProjection {
   const raw = session.state?.[LEGACY_EMISSION_KEY];
   const projection = initialSessionProjection();
   if (!isObject(raw) || typeof raw.sequence !== "number") return projection;
-  const started = raw.sessionStarted === true ? { started: true as const } : {};
+  const { view } = projection;
+  const status = raw.sessionStarted === true ? ("open" as const) : ("new" as const);
   const turnId = typeof raw.turnId === "string" ? raw.turnId : "";
-  if (turnId === "") return { ...projection, ...started, nextSequence: raw.sequence };
-  // A legacy driver kept the index its next step takes; the projection keeps the last started.
-  const next = typeof raw.stepIndex === "number" ? raw.stepIndex : 0;
+  if (turnId === "") {
+    return { ...projection, view: { ...view, session: { status, turnCount: raw.sequence } } };
+  }
+  // A legacy driver kept the index its next step takes: the steps its turn already ran.
+  const runs = typeof raw.stepIndex === "number" ? raw.stepIndex : 0;
+  const turn = {
+    cause: { hook: "legacy" },
+    follows: null,
+    introducedAt: 0,
+    startedAt: new Date(0).toISOString(),
+    status: "running" as const,
+    turnId,
+    ...(runs > 0 && { runs }),
+  };
   return {
     ...projection,
-    ...started,
-    activeTurnId: turnId,
-    nextSequence: raw.sequence + 1,
-    turns: {
-      [turnId]: {
-        turnId,
-        sequence: raw.sequence,
-        status: "active",
-        ...(next > 0 && { stepIndex: next - 1 }),
-      },
+    view: {
+      ...view,
+      session: { latestTurnId: turnId, status, turnCount: raw.sequence + 1 },
+      turns: { [turnId]: turn },
     },
   };
 }
