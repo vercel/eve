@@ -97,11 +97,17 @@ Configure `github` to broker GitHub access through Connect instead. The extensio
 | `github.connector` | With `github` | Connector that mints a GitHub token                                                        |
 | `github.org`       | With `github` | Organization whose repositories the `gh` tool can access                                   |
 | `github.broker`    | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
-| `github.authorize` | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` command  |
+| `github.authorize` | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
 
 The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
 
-Anyone who can invoke the agent can use every repository the GitHub App is installed on. Choose those repositories when installing the app. To also decide per caller, set `github.authorize`. It runs before each command with the session's current caller (`auth`, or `null`), the declared `owner/name` repository, and the repository-scoped token, and the command fails when it returns `false`. The token lets you check access through the GitHub API:
+Anyone who can invoke the agent can use every repository the GitHub App is installed on. Choose those repositories when installing the app. To also decide per caller, set `github.authorize`.
+
+The callback runs once per `gh` tool invocation, after minting the repository-scoped token and before starting the sandbox command. It receives the session's current caller (`auth`, or `null`), the declared `owner/name` repository, and that token. Returning `false` prevents the command from running.
+
+This is a caller/repository gate, not per-request or per-operation authorization. One command can make multiple GitHub API requests; the callback does not inspect or approve those requests individually. Once allowed, the command uses the app token's permissions, not the caller's GitHub permissions. A collaborator check alone does not prevent a read-only collaborator from invoking writes allowed by the app token. Only allow callers you trust with the token's permissions for that repository.
+
+The callback can use the token for its own GitHub API lookups. This example checks collaborator status, but does not restrict commands to the collaborator's permission level:
 
 ```ts title="agent/extensions/git.ts"
 import git from "eve/extensions/git";
