@@ -251,6 +251,23 @@ on when one exists. Do not create an issue solely to accompany a pull request.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 
+### First publication of a package
+
+The [release workflow](./.github/workflows/release.yml) publishes through npm
+trusted publishing, without an npm token. Before enabling a new package in a
+release, an npm maintainer must:
+
+1. Publish an initial version using an account with write access to the package's
+   scope. Choose a version below the first planned Changesets release.
+2. Configure a GitHub Actions trusted publisher for owner `vercel`, repository
+   `eve`, and workflow file `release.yml` in the package's npm settings.
+3. Confirm the trusted publisher configuration before merging the release change.
+
+[npm requires the package to exist before trusted publishing can be configured](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites).
+Adding an unpublished package directly to the automated release can fail after
+other packages have already published. For `@vercel/agent-runs`, bootstrap
+`0.0.0` before the planned `0.0.1` release.
+
 ## Developer Certificate of Origin (DCO)
 
 We do not require a CLA. Instead, all contributions are made under the

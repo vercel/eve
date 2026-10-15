@@ -4,15 +4,6 @@
 span topology, capture, completion, and durable checkpoints. Its only required
 peer dependency is `@opentelemetry/api`.
 
-eve vendors it: `pnpm --filter eve build:compiled` bundles the four
-entrypoints into `#compiled/@vercel/agent-runs/` in the same chunk group as eve's
-vendored `@opentelemetry/api`, so both share one copy. eve imports only those
-entrypoints, never this workspace package. After changing the library, rerun
-`build:compiled` before running eve's tests.
-
-Run the library's own tests with `pnpm --filter @vercel/agent-runs test:unit` and
-`test:integration`.
-
 ## Setup
 
 Requires Node.js 24 or newer.
@@ -248,3 +239,14 @@ operation at 64 KiB, and unfinished children at 10,000. `onError(error, context)
 tracing error channel. Trace output retains schema version 4.
 
 Local tests cover output and recovery. They do not prove live Agent Runs ingestion.
+
+## Development
+
+eve vendors this package: `pnpm --filter eve build:compiled` bundles the four
+entrypoints into `#compiled/@vercel/agent-runs/` in the same chunk group as eve's
+vendored `@opentelemetry/api`, so both share one copy. eve imports only those
+entrypoints, never this workspace package. After changing the library, rerun
+`build:compiled` before running eve's tests.
+
+Run the library's own tests with `pnpm --filter @vercel/agent-runs test:unit` and
+`pnpm --filter @vercel/agent-runs test:integration`.
