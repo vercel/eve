@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
+import { resolveNodeExecutable } from "#shared/node-executable.js";
 
 import { normalizeOrigin } from "./routing.js";
 
@@ -239,7 +240,7 @@ function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
 function startEveDevServer(appRoot: string): Promise<EveProcessHandle> {
   return startServerProcess({
     args: [createEveBinaryPath(), "dev", "--no-ui", "--port", "0"],
-    command: process.execPath,
+    command: resolveNodeExecutable(),
     cwd: appRoot,
   }).then((handle) => {
     process.env[EVE_BASE_URL_ENV] = handle.origin;

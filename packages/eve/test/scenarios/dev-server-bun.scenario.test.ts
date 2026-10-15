@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
@@ -24,6 +28,16 @@ const BUN_LAYOUT_DESCRIPTOR: ScenarioAppDescriptor = {
 };
 
 const bunAvailable = isBunAvailable();
+
+// Stands in for `bun --bun next dev`: Next.js loads `withEve` and asks for
+// rewrites in the development phase, which spawns the eve dev sidecar.
+const WITH_EVE_DEV_PROBE = `import { withEve } from "eve/next";
+
+const config = await withEve({})("phase-development-server", { defaultConfig: {} });
+const rewrites = await config.rewrites();
+console.log("eve-rewrites:" + JSON.stringify(rewrites));
+process.exit(0);
+`;
 
 describe("eve dev server with bun", () => {
   it("keeps bun available in CI so the suite cannot silently skip", () => {
@@ -78,6 +92,36 @@ describe("eve dev server with bun", () => {
 
       expect(result.code).not.toBe(0);
       expect(result.output).toContain("failed before readiness");
+    },
+    BUN_DEV_SERVER_TIMEOUT_MS,
+  );
+
+  it.skipIf(!bunAvailable)(
+    "starts the withEve dev server under Node when the framework runs under bun --bun",
+    async () => {
+      const app = await scenarioApp({
+        ...BUN_LAYOUT_DESCRIPTOR,
+        files: { ...BUN_LAYOUT_DESCRIPTOR.files, "with-eve-probe.mjs": WITH_EVE_DEV_PROBE },
+      });
+      const packageJsonPath = join(app.appRoot, "package.json");
+      const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      // A package script, unlike `bun --bun <file>`, gets Bun's `node` PATH shim.
+      packageJson.scripts = { probe: "node with-eve-probe.mjs" };
+      await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+      const result = spawnSync("bun", ["--bun", "run", "probe"], {
+        cwd: app.appRoot,
+        encoding: "utf8",
+        env: { ...process.env, EVE_BASE_URL: "", NODE_ENV: "development" },
+        timeout: 180_000,
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
+
+      expect(result.status, output).toBe(0);
+      expect(output).toMatch(/eve-rewrites:.*http:\/\/127\.0\.0\.1:\d+/);
     },
     BUN_DEV_SERVER_TIMEOUT_MS,
   );
