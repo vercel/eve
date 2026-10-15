@@ -1,19 +1,10 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
 import { deserializeContext } from "#context/serialize.js";
-import {
-  connectionEventWorkflowReference,
-  startWorkflowOnCurrentDeployment,
-} from "#execution/workflow-runtime.js";
 import { readHttpStatus } from "#runtime/connections/mcp-client.js";
 import { resolveBinding } from "#runtime/connections/events/dispatch-step.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
-import {
-  connectionEventDestination,
-  connectionEventHandoverToken,
-} from "#runtime/connections/events/path.js";
+import { connectionEventDestination } from "#runtime/connections/events/path.js";
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
-  type ConnectionEventHandover,
   type ConnectionEventSubscribeOutcome,
   type ConnectionEventSubscribeResult,
   type EventBinding,
@@ -21,8 +12,8 @@ import {
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 
 /**
- * Subscribes from inside the handler run, after its hook is registered, so a
- * delivery that beats the subscribe response waits on the hook.
+ * Subscribes from inside the watch run, after its hook is registered, so a
+ * delivery that beats the subscribe response finds the binding it runs under.
  */
 export async function openConnectionEventStep(input: {
   readonly serializedContext: Record<string, unknown>;
@@ -81,8 +72,7 @@ function isRefusal(status: number): boolean {
 }
 
 /**
- * Publishes what this run holds for readers outside it: a successor's
- * inherited subscription, or the run a duplicate's caller should read.
+ * Publishes, for a duplicate run's caller, the run that owns the watch.
  */
 export async function publishConnectionEventOutcomeStep(
   outcome: ConnectionEventSubscribeOutcome,
@@ -100,33 +90,4 @@ async function publishOutcome(outcome: ConnectionEventSubscribeOutcome): Promise
   } finally {
     writer.releaseLock();
   }
-}
-
-/** Starts the run that takes over this watch's hook, so no run's log grows without bound. */
-export async function startConnectionEventSuccessorStep(input: {
-  readonly serializedContext: Record<string, unknown>;
-  readonly binding: EventBinding;
-  readonly generation: number;
-}): Promise<void> {
-  "use step";
-  await startWorkflowOnCurrentDeployment(connectionEventWorkflowReference, [
-    {
-      binding: input.binding,
-      serializedContext: input.serializedContext,
-      generation: input.generation,
-    },
-  ]);
-}
-
-/**
- * Sends the successor this run's final state. The successor registers this
- * hook before it takes the watch hook, so it exists by the time a takeover is seen.
- */
-export async function passConnectionEventHandoverStep(input: {
-  readonly bindingId: string;
-  readonly generation: number;
-  readonly handover: ConnectionEventHandover;
-}): Promise<void> {
-  "use step";
-  await resumeHook(connectionEventHandoverToken(input.bindingId, input.generation), input.handover);
 }

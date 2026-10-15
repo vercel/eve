@@ -15,12 +15,7 @@ export function connectionEventDestination(connectionName: string): string {
   );
 }
 
-/** The handler run's hook: the receiver resumes it by the binding id Connect echoes in context. */
+/** The watch run's hook: the receiver finds it by the binding id Connect echoes in context. */
 export function connectionEventHookToken(bindingId: string): string {
   return `eve:connection-event:${bindingId}`;
-}
-
-/** Where a handler run's predecessor sends its final state; one per generation of a watch. */
-export function connectionEventHandoverToken(bindingId: string, generation: number): string {
-  return `${connectionEventHookToken(bindingId)}:handover:${generation}`;
 }

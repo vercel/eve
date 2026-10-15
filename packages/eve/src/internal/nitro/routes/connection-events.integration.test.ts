@@ -1,14 +1,15 @@
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { handleConnectionEventRequest } from "#internal/nitro/routes/connection-events.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 
-const { verify, resume, load } = vi.hoisted(() => ({
+const { verify, start, load } = vi.hoisted(() => ({
   verify: vi.fn(),
-  resume: vi.fn(),
+  start: vi.fn(),
   load: vi.fn(),
 }));
-vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: resume }));
+vi.mock("#runtime/connections/events/owner.js", () => ({
+  startConnectionEventDelivery: start,
+}));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: load,
 }));
@@ -32,7 +33,7 @@ function request() {
 }
 beforeEach(() => {
   verify.mockResolvedValue(envelope);
-  resume.mockResolvedValue({});
+  start.mockResolvedValue(true);
   load.mockResolvedValue({
     resolvedAgent: {
       connections: [
@@ -56,10 +57,10 @@ it("verifies the untouched request and acknowledges only durable handler accepta
   const started = new Promise<void>((resolve) => {
     accepting = resolve;
   });
-  resume.mockImplementation(() => {
+  start.mockImplementation(() => {
     accepting();
-    return new Promise<void>((resolve) => {
-      accepted = resolve;
+    return new Promise<boolean>((resolve) => {
+      accepted = () => resolve(true);
     });
   });
   const req = request();
@@ -71,14 +72,14 @@ it("verifies the untouched request and acknowledges only durable handler accepta
   await started;
   expect(settled).toBe(false);
   expect(verify).toHaveBeenCalledWith(req, { path: "/eve/support/v1/hooks/issues" });
-  expect(resume).toHaveBeenCalledWith(
-    `eve:connection-event:${"a".repeat(64)}`,
+  expect(start).toHaveBeenCalledWith(
     expect.objectContaining({
       kind: "connection-event",
       bindingId: "a".repeat(64),
       connectionName: "issues",
       delivery: envelope,
     }),
+    expect.anything(),
   );
   accepted();
   expect((await response).status).toBe(202);
@@ -91,13 +92,13 @@ it.each([
 ])("does not enqueue unverified deliveries: %j", async (error, status) => {
   verify.mockRejectedValue(error);
   expect((await handleConnectionEventRequest(input, request())).status).toBe(status);
-  expect(resume).not.toHaveBeenCalled();
+  expect(start).not.toHaveBeenCalled();
 });
 
-it("does not replace a retired session and leaves failed inbox writes retryable", async () => {
-  resume.mockRejectedValueOnce(new HookNotFoundError("gone"));
+it("tells Connect an ended watch is gone and leaves failed starts retryable", async () => {
+  start.mockResolvedValueOnce(false);
   expect((await handleConnectionEventRequest(input, request())).status).toBe(410);
-  resume.mockRejectedValueOnce(new Error("temporarily unavailable"));
+  start.mockRejectedValueOnce(new Error("temporarily unavailable"));
   expect((await handleConnectionEventRequest(input, request())).status).toBe(503);
 });
 
@@ -125,7 +126,7 @@ it("traces verified acceptance and propagates a serializable request parent to t
       "agent.run.id": "session-1",
       "connect.delivery.id": "del_1",
     });
-    expect(JSON.parse(JSON.stringify(resume.mock.calls[0]![1])).requestTraceContext).toEqual({
+    expect(JSON.parse(JSON.stringify(start.mock.calls[0]![0])).requestTraceContext).toEqual({
       traceId: span.spanContext().traceId,
       spanId: span.spanContext().spanId,
       traceFlags: 1,

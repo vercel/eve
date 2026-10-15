@@ -89,6 +89,7 @@ import {
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
   CONNECTION_EVENT_WORKFLOW_NAME,
+  CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
 } from "#execution/stable-workflow-names.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 
@@ -126,6 +127,10 @@ export const workflowToolRunWorkflowReference = {
 
 export const connectionEventWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${CONNECTION_EVENT_WORKFLOW_NAME}`,
+};
+
+export const connectionEventDeliveryWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME}`,
 };
 
 /**

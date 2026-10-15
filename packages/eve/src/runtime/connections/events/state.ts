@@ -37,32 +37,11 @@ export type ConnectionEventSubscribeOutcome =
   /** Another run already owns this binding: read the outcome from that run. */
   | { readonly ownerRunId: string };
 
-/** The latest completed delivery ids, oldest first. */
-export type ConnectionEventReceipts = readonly string[];
-
-export interface ConnectionEventHandlerState {
+/** The watch hook's metadata: what each delivery runs under, and whether the watch has ended. */
+export type ConnectionEventWatch = {
   readonly binding: EventBinding;
-  readonly subscription: ManagedEventSubscription;
-  readonly receipts: ConnectionEventReceipts;
-}
-
-/** What a handler run passes to the successor that took its hook, once it has processed every delivery it received. */
-export interface ConnectionEventHandover {
-  readonly serializedContext: Record<string, unknown>;
-  readonly state: ConnectionEventHandlerState;
-  /** The watch was stopped or terminated before the takeover: the successor ends too. */
   readonly ended: boolean;
-}
-
-export function eventOwner(binding: EventOwner): EventOwner {
-  return {
-    connectionName: binding.connectionName,
-    instanceId: binding.instanceId,
-    connector: binding.connector,
-    principalKey: binding.principalKey,
-    executionPrincipal: binding.executionPrincipal,
-  };
-}
+};
 
 export function sameEventOwner(left: EventOwner, right: EventOwner): boolean {
   return (

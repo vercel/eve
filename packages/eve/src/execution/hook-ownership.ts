@@ -40,21 +40,6 @@ export function isHookConflictError(error: unknown): error is {
   );
 }
 
-/**
- * A later run took this hook's token with `experimental_force`. Matched by name
- * because `@workflow/errors` can't load inside the workflow bundle.
- */
-export function isHookForceClaimedError(error: unknown): error is {
-  readonly name: "HookForceClaimedError";
-} {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "name" in error &&
-    error.name === "HookForceClaimedError"
-  );
-}
-
 function createHookConflictError(
   token: string,
   conflictingRunId: string,

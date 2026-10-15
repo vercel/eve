@@ -241,7 +241,7 @@ export default defineMcpClientConnection({
       );
     },
     async onGap({ origin, cursor }) {
-      // Reconcile the source before assuming a contiguous event stream.
+      // Events were missed: reconcile the source.
     },
     async onTerminated({ origin, error }) {
       // Decide whether to notify the session or request another subscription.
@@ -263,7 +263,7 @@ supported by this first version because the receiver must be mounted at build
 time. The provider still resolves the current authorized user or app for each
 subscription operation.
 
-`origin` and `auth` come from eve's subscription binding, saved in its handler. Provider event
+`origin` and `auth` come from eve's subscription binding, saved with its watch. Provider event
 payloads never select the execution principal. Callback code chooses whether
 to send input to an existing session. A session attachment never creates a
 replacement session.
@@ -281,36 +281,38 @@ Creation does not accept `expiresAt`. Connect returns the calculated deadline in
 and idempotency key, so they do not extend the original deadline.
 Registration mounts the receiver; it does not create a subscription.
 
-Each subscription is owned by one durable handler workflow. Subscribing starts it:
-the handler registers its hook, then calls Connect, so a delivery that arrives
-before the subscribe response waits for it. If Connect rejects the subscription,
-the action fails and the handler ends. A timeout or server error is retried with
-the same idempotency key, so a subscription Connect already created is reused. The handler's input holds the binding (the
-creator, their auth and the request); eve keeps no other copy. Connect owns the
-subscription's status and lifetime.
+Each subscription is owned by one durable watch workflow. Subscribing starts it:
+the watch registers its hook, which carries the binding (the creator, their auth
+and the request), then calls Connect, so a delivery that arrives before the
+subscribe response already finds the binding. If Connect rejects the subscription,
+the action fails and the watch ends. A timeout or server error is retried with
+the same idempotency key, so a subscription Connect already created is reused.
+eve keeps no other copy of the binding. Connect owns the subscription's status
+and lifetime; the watch ends at its expiry.
 
 Subscriptions belong to their creator and connection, not a conversation session.
 Get and stop take the `id` the subscribe action returned, and accept it from any
 of the creator's sessions. There is no list action yet. Ending the originating
 session does not stop the watch. Stop, expiry, or upstream termination ends it.
-Stop cancels the subscription in Connect first, then ends its handler.
+Stop cancels the subscription in Connect first, then ends its watch.
 `cleanupStatus: "pending"` means Connect is still finishing upstream cancellation.
 An ended watch stays reachable by its `id` for seven days, so get and stop still
 report Connect's status while that cleanup finishes.
 
-The receiver verifies Connect's delivery, then queues it to a durable event-handler
-workflow. It responds with `202` after durable acceptance. The handler checks the
-saved binding before running your callback. Raw events never enter the session inbox.
+The receiver verifies Connect's delivery, then starts a durable workflow for that
+one delivery under the watch's binding. It responds with `202` once that run is
+accepted, and `410` once the watch has ended. The delivery run checks the binding
+against the deployed connection before running your callback. Raw events never
+enter the session inbox.
 Only an explicit `attachSession(...).send(...)` enters a conversation session.
 Connect owns upstream verification, renewal, and cancellation.
 
-Callbacks run as their creator. `defineState()` persists within that subscription's
-handler, not the conversation.
-Use `deliveryId` to deduplicate external effects: callback steps can retry after a crash.
-Each handler retains its latest 1,000 completed receipts. Older redeliveries can run again.
-Every few hundred deliveries a handler hands its binding, state and receipts to a fresh
-workflow run, so a long-lived watch never replays an ever-growing history.
-Exhausted callback retries fail the handler workflow, not the conversation session.
+Callbacks run as their creator, each delivery in its own run, so callbacks can
+run concurrently and out of order. `defineState()` lasts for one delivery.
+Use `deliveryId` to deduplicate external effects: a callback can run again after a
+crash or a redelivery. `onTerminated` ends the watch once it returns.
+Exhausted callback retries fail that delivery's run, not the watch or the
+conversation session.
 
 ### Runtime requirements
 

@@ -1,13 +1,11 @@
-import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { deserializeContext } from "#context/serialize.js";
 import { AuthKey } from "#context/keys.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createAttachSessionFn } from "#channel/session.js";
-import type {
-  ConnectionEventHandlerState,
-  EventBinding,
-} from "#runtime/connections/events/state.js";
+import type { EventBinding } from "#runtime/connections/events/state.js";
+import { retireConnectionEventOwner } from "#runtime/connections/events/owner.js";
 import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
 import {
   principalKey,
@@ -39,39 +37,32 @@ export function resolveBinding(ctx: AlsContext, binding: EventBinding) {
   return { binding, connection, events, principal };
 }
 
-/** The hook token already routed this delivery to its binding; the subscription decides acceptance. */
-function accepts(state: ConnectionEventHandlerState, payload: ConnectionEventPayload): boolean {
+/** The hook token already routed this delivery to its binding; its content must still match. */
+function accepts(binding: EventBinding, payload: ConnectionEventPayload): boolean {
   const { delivery } = payload;
   return (
-    payload.connectionName === state.binding.connectionName &&
-    delivery.subscriptionId === state.subscription.id &&
-    !("event" in delivery && delivery.event.name !== state.binding.request.name)
+    payload.connectionName === binding.connectionName &&
+    !("event" in delivery && delivery.event.name !== binding.request.name)
   );
 }
 
-/** Bounds the run's checkpoint; durable external effects still key on deliveryId past this window. */
-const RECEIPT_WINDOW = 1000;
-
 /**
- * Runs one delivery's callback as the watch's creator, unless the run already
- * completed it. A crash before the receipt is recorded re-runs the callback,
- * so callbacks are idempotent on deliveryId.
+ * Runs one delivery's callback as the watch's creator. A crash before the
+ * step completes re-runs the callback, so callbacks are idempotent on
+ * deliveryId. A `terminated` delivery then ends the watch's run.
  */
 export async function dispatchConnectionEventStep(input: {
-  serializedContext: Record<string, unknown>;
-  state: ConnectionEventHandlerState;
-  payload: ConnectionEventPayload;
-}) {
+  readonly serializedContext: Record<string, unknown>;
+  readonly binding: EventBinding;
+  readonly payload: ConnectionEventPayload;
+}): Promise<void> {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
-  const { state } = input;
   const { delivery } = input.payload;
-  const resolved =
-    accepts(state, input.payload) && !state.receipts.includes(delivery.deliveryId)
-      ? resolveBinding(ctx, state.binding)
-      : undefined;
-  if (resolved === undefined)
-    return { accepted: false, serializedContext: input.serializedContext, state };
+  const resolved = accepts(input.binding, input.payload)
+    ? resolveBinding(ctx, input.binding)
+    : undefined;
+  if (resolved === undefined) return;
   const { binding, connection } = resolved;
   const bundle = ctx.require(BundleKey);
   const { callbacks } = resolved.events;
@@ -119,9 +110,6 @@ export async function dispatchConnectionEventStep(input: {
       else await callbacks.onTerminated?.({ ...common, error: delivery.control.error });
     },
   );
-  const next: ConnectionEventHandlerState = {
-    ...state,
-    receipts: [...state.receipts, delivery.deliveryId].slice(-RECEIPT_WINDOW),
-  };
-  return { accepted: true, serializedContext: serializeContext(ctx), state: next };
+  if ("control" in delivery && delivery.control.type === "terminated")
+    await retireConnectionEventOwner(binding.id);
 }
