@@ -23,21 +23,16 @@ const DiagnosticSchema = z.object({
 
 export default defineTool({
   description: [
-    "Apply targeted changes to files in the sandbox workspace. No git checkout is required.",
-    "Use this instead of rewriting complete files or writing through bash.",
-    "Write small hunks against current file contents. If a hunk misses, re-read that file and rewrite only the failed hunk. Do not retry the same patch text.",
-    "The patch is fully parsed and every source file is verified before any write.",
-    "After writing, the tool runs bounded whitespace, syntax, and TypeScript checks and",
-    "returns only diagnostics the patch introduced.",
-    "Patch format:",
+    "Edit files in the sandbox with a patch. Prefer it over rewriting whole files or writing through bash.",
+    "Keep hunks small and based on current file contents. Nothing is written unless every hunk applies; if one misses, re-read the file and resend the whole corrected patch.",
+    "Returns the files changed and any problems the patch introduced (whitespace, syntax, TypeScript).",
+    "Paths are relative to root and cannot escape it. Generated files such as lockfiles and dist/ are rejected; regenerate them with their command.",
+    "Format:",
     "*** Begin Patch",
     "*** Add File: path (every content line starts with +)",
     "*** Update File: path (optional *** Move to: new-path, followed by @@ chunks)",
     "*** Delete File: path",
     "*** End Patch",
-    "Paths are relative to root and may not escape it.",
-    "Generated files (lockfiles, dist/, vendor-compiled/) are rejected: change them",
-    "through the command that generates them, never through a patch.",
   ].join("\n"),
   approval: never(),
   label: {

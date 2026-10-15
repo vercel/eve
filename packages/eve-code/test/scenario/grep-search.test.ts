@@ -386,12 +386,3 @@ test("tool description is truthful about fallback gitignore behavior", async () 
   const source = await readFile(new URL("../../extension/tools/grep.ts", import.meta.url), "utf8");
   assert.match(source, /POSIX fallback does not read \.gitignore/u);
 });
-
-test("worker remounts the extension grep instead of eve's provided tool", async () => {
-  const source = await readFile(
-    new URL("../../extension/subagents/worker/tools/grep.ts", import.meta.url),
-    "utf8",
-  );
-  assert.match(source, /from "\.\.\/\.\.\/\.\.\/tools\/grep\.ts"/u);
-  assert.doesNotMatch(source, /eve\/tools\/grep/u);
-});

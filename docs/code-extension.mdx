@@ -3,7 +3,7 @@ title: "Code Extension"
 description: "Mount eve's coding extension, eve-code, and see its latest benchmark results against other coding agent harnesses."
 ---
 
-`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension contributes file-editing and search tools, coding skills, a read-only worker subagent, and sandbox bootstrap helpers. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
+`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension contributes file-editing and search tools, coding instructions and skills, and sandbox bootstrap helpers. To split work, the agent uses eve's built-in [`agent`](/docs/concepts/built-in-tools#agent) tool, which runs a copy of itself with the same tools and sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
 
 ## Benchmark results
 
@@ -42,7 +42,7 @@ The workflow does not publish incomplete runs, single-task runs, or pull request
 
 ## Mount the extension
 
-Create an extension file in your agent. The file name sets the mount name, which prefixes every contributed tool and subagent ID (for example, `code__grep`):
+Create an extension file in your agent. The file name sets the mount name, which prefixes every contributed tool and skill ID (for example, `code__grep`):
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
@@ -54,21 +54,17 @@ export default code({});
 
 ## Configure the extension
 
-| Option                         | Required      | Effect                                                                                         |
-| ------------------------------ | ------------- | ---------------------------------------------------------------------------------------------- |
-| `vercel.connector`             | With `vercel` | Connector that requests an app-subject Vercel token                                            |
-| `vercel.delivery`              | No            | `"firewall"` (default) or `"command"`                                                          |
-| `broker`                       | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
-| `worker.model`                 | With `worker` | Model for the `worker` subagent. Defaults to `openai/gpt-5.6-terra-fast`                       |
-| `worker.reasoning`             | With `worker` | Reasoning level for the `worker` subagent. Defaults to `xhigh`                                 |
-| `worker.openaiReasoningEffort` | No            | Passed to OpenAI models as `reasoningEffort`                                                   |
+| Option             | Required      | Effect                                                                                         |
+| ------------------ | ------------- | ---------------------------------------------------------------------------------------------- |
+| `vercel.connector` | With `vercel` | Connector that requests an app-subject Vercel token                                            |
+| `vercel.delivery`  | No            | `"firewall"` (default) or `"command"`                                                          |
+| `broker`           | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
 
 export default code({
   vercel: { connector: "vercel/acme-bot" },
-  worker: { model: "openai/gpt-5.6-terra-fast", reasoning: "high" },
 });
 ```
 
@@ -130,5 +126,5 @@ eve derives the prepared environment generation from the sandbox file and enviro
 
 - [Extensions](/docs/extensions): mount, configure, and override extension packages
 - [Sandbox](/docs/sandbox): environments, preparation, and network policy
-- [Subagents](/docs/subagents): how declared subagents run and inherit configuration
+- [Built-in tools](/docs/concepts/built-in-tools#agent): how the `agent` tool delegates to a copy of the agent
 - [Skills](/docs/skills): how the model loads skills on demand

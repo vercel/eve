@@ -1,21 +1,18 @@
 ---
 name: review
-description: Comprehensive security and correctness audit. Use for review, deep review, thermo nuclear, or thermonuclear requests and branch or PR diff audits.
+description: Security and correctness audit of a branch, diff, or pull request. Use for review, deep review, or thermonuclear review requests.
 ---
 
-# Deep review
+# Review
 
-Give the worker subagent a self-contained audit instruction naming the repository and target ref or worktree. The worker inspects the shared checkout directly. The root agent evaluates findings and owns the final verdict.
+Audit the changed code, and the code it depends on, for bugs, broken behavior, security vulnerabilities, and developer-experience regressions. Report only issues the change introduces or exposes, each with repository evidence.
 
-Audit changed code and its necessary surrounding context for bugs, broken functionality, security vulnerabilities, developer-experience regressions, and feature-gate leaks. Cite repository evidence for every finding. Report only issues introduced or exposed by code added or modified in the reviewed change.
+## Check
 
-## Required checks
+- Side effects across packages and runtimes, traced end to end.
+- Authorization, untrusted input, credential disclosure, destructive behavior, and unbounded work.
+- Build, run, and setup changes: environment variables, ports, networking.
+- Internal or gated features that stop being gated.
+- Intended, contained breakage versus accidental consequences.
 
-- Trace cross-package and runtime side effects end to end.
-- Check authorization, untrusted input, credential disclosure, destructive behavior, and bounded work.
-- Check local build and run workflows, changed environment variables, ports, networking, and required setup.
-- Verify internal or gated features remain gated.
-- Distinguish intended, well-contained breakage from accidental consequences.
-- Calibrate priority carefully; do not inflate speculative or low-impact concerns.
-
-Never present a finding with unfinished evidence. Name the exact missing file or ref instead. Run the independent audit before reading PR discussion so existing comments do not anchor it. Afterward, the root agent may compare findings with discussion, verify each against the workspace, and report only actionable defects.
+Rank findings by real impact and don't inflate speculative ones. When evidence is missing, name the file or ref instead of guessing. Form your own view before reading existing PR discussion, then reconcile with it. A review changes nothing in the workspace.

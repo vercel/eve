@@ -235,43 +235,25 @@ describe("mounted extension via authored-source loader", () => {
     ).toHaveLength(2);
   });
 
-  it("isolates configured built-in extension mounts", async () => {
+  it("isolates built-in extension mounts", async () => {
     const app = await createAppRoot("eve-built-in-mounts-", {
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs":
-          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "high" } });',
+          'import code from "eve/extensions/code"; export default code({});',
         "agent/extensions/two.mjs":
-          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "low" } });',
+          'import code from "eve/extensions/code"; export default code({});',
       },
     });
-    const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
-    const workers = ["one", "two"].map((name) =>
-      manifest.subagents.find((subagent) => subagent.name === `${name}__worker`)!,
+    const { manifest } = await compileRuntimeGraph(app.appRoot);
+    const patches = ["one", "two"].map((name) =>
+      manifest.tools.find((tool) => tool.name === `${name}__apply_patch`),
     );
-    expect(workers[0]?.owner).toMatchObject({ mountId: "extensions/one" });
-    const reasoning = workers.map((worker) => {
-      if ("configResolver" in worker) throw new Error("Expected static worker config.");
-      const configSourceId = worker.agent.config.source.sourceId;
-      const definition = moduleMap.nodes[worker.nodeId]!.modules[configSourceId]!.default as {
-        model: { events: { "session.started": () => { reasoning: string } } };
-      };
-      return definition.model.events["session.started"]().reasoning;
-    });
-    expect(reasoning).toEqual(["high", "low"]);
-    const second = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
-    });
-    const secondReasoning = workers.map((worker) => {
-      if ("configResolver" in worker) throw new Error("Expected static worker config.");
-      const definition = second.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
-        .default as {
-        model: { events: { "session.started": () => { reasoning: string } } };
-      };
-      return definition.model.events["session.started"]().reasoning;
-    });
-    expect(secondReasoning).toEqual(["high", "low"]);
+    expect(patches.map((tool) => tool?.sourceId)).toEqual([
+      "ext:one:tools/apply_patch.js",
+      "ext:two:tools/apply_patch.js",
+    ]);
   });
 
   it("keeps state independent across mounts and context restoration", async () => {

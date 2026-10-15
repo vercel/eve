@@ -42,11 +42,10 @@ const InputSchema = z.object({
 
 export default defineTool({
   description: [
-    "Fast sandbox content search powered by ripgrep.",
-    "Start with outputMode files_with_matches and a narrow path or glob. That stops at the first hit per file.",
-    "Use content only after you know which files matter. Use count to size a pattern before reading hits.",
-    "Function names and error strings are matched as fixed strings unless you set literal false or the pattern uses regex syntax.",
-    "With ripgrep, respects .gitignore. The POSIX fallback does not read .gitignore; both include hidden files and exclude .git.",
+    "Search file contents in the sandbox with ripgrep.",
+    "Start with files_with_matches and a narrow path or glob, then read matching lines with content or size a pattern with count.",
+    "Patterns without regex syntax match literally unless literal is false.",
+    "Hidden files are included and .git is excluded. Ripgrep respects .gitignore; the POSIX fallback does not read .gitignore.",
   ].join(" "),
   inputSchema: InputSchema,
   outputSchema: z.object({

@@ -211,8 +211,8 @@ describe("presentTool", () => {
       "Delegate subagent(stock price) …",
     );
     // An extension's subagents go by their own name, and its `agent` by the extension's.
-    expect(presentTool("code__worker", {}, { isSubagent: true }).title).toBe(
-      "Delegate subagent(worker)",
+    expect(presentTool("code__reviewer", {}, { isSubagent: true }).title).toBe(
+      "Delegate subagent(reviewer)",
     );
     expect(presentTool("code_review__agent", {}, { isSubagent: true }).title).toBe(
       "Delegate subagent(code review)",
