@@ -51,8 +51,8 @@ export default defineChannel({
   ],
 
   events: {
-    "message.completed"(event, _channel, ctx) {
-      console.log(ctx.session.id, event.message);
+    "content.completed"(event, ctx) {
+      if (event.data.phase === "reply") console.log(ctx.session.id, event.data.value);
     },
   },
 });
@@ -75,29 +75,24 @@ Each route receives these operation surfaces:
 - `listSkillFiles(skill)` resolves to the skill's regular files, each with its `path` under the skill root and its `size` in bytes, sorted by path. It rejects a skill the agent does not have.
 - `readSkill(skill, path?)` resolves to one skill file's raw bytes as a `Uint8Array`; decode text yourself, for example with `new TextDecoder().decode(bytes)`. `path` is relative to the skill root, such as `references/api.md`, and defaults to the skill's `SKILL.md`. It rejects absolute paths, paths with `.`, `..`, or empty segments, files the skill does not list, and files over 512 KiB.
 
-Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
-the exact session, while `channel.continuation` exposes the current address and
-`alias()` when this channel needs to add another address. `session.failed`
-receives only `(eventData, channel)` because it runs outside session context;
-its event data contains `sessionId` directly.
+Event handlers receive `(event, ctx)`: the whole fact, with its `type`, `data`, and
+`scope`, and a context. `ctx.session.id` identifies the exact session, `ctx.position`
+and `ctx.view` locate the fact on the stream and the session's state as of its commit,
+and `ctx.channel` is the channel's own context. `ctx.channel.continuation` exposes the
+current address and `alias()` when this channel needs to add another address. Handlers
+run after the line is written, so they observe facts and never shape them.
 
-A failed turn emits `turn.failed`, then either `session.waiting` or
-`session.failed`. `turn.failed` carries `terminal: true` when the failure ends
-the session and `session.failed` follows. The built-in channels skip terminal
-`turn.failed` events, so a person sees one notice: the `session.failed` handler
-tells them to start over instead of to try again. Check `eventData.terminal` the
-same way in a custom channel that posts on both events.
-
-A channel that renders questions and approvals from `input.requested` can handle
-`input.resolved` to learn when each request ends, however it ended: answered from
-the channel, answered by a plain-text reply, or withdrawn. A request that a
+A channel that renders questions and approvals from `interaction.opened` can handle
+`interaction.settled` to learn when each request ends, however it ended: answered
+from the channel, answered by a plain-text reply, or withdrawn. A request that a
 workflow tool run relays, from its own `ctx.ask()` or from a session it opened
-with `ctx.agent`, also resolves as `cancelled` when that run ends before anyone
-answers. Every request relayed from a task, workflow tool call, or subagent does
-the same when the turn is cancelled. Each resolution carries the `requestId` and
-an `outcome` such as `answered`, `approved`, or `cancelled`.
+with `ctx.agent`, also settles `withdrawn` when that run ends before anyone
+answers. Every request relayed from a task, workflow tool call, or subagent
+settles `interrupted` when the turn is cancelled. Each settlement carries the
+`interactionId` and an `outcome` such as `accepted`, `declined`, `withdrawn`, or
+`interrupted`.
 
-`channel.continuation.token` is always the channel-local address accepted by
+`ctx.channel.continuation.token` is always the channel-local address accepted by
 `from()`, `resolveSession()`, and `alias()`. Framework namespace prefixes are not
 part of the authored channel API.
 
@@ -114,7 +109,7 @@ handle to the canonical owner.
 const source = from(threadId);
 
 const session = await source.send("Hello", { auth });
-await source.respond(inputResponses, { auth });
+await source.respond(answers, { auth });
 await source.cancel({ turnId });
 await source.compact();
 await source.clear();
@@ -139,7 +134,7 @@ follows, or resolves a replacement.
 const session = attachSession(sessionId);
 
 await session.send("Follow up", { auth });
-await session.respond(inputResponses, { auth });
+await session.respond(answers, { auth });
 await session.cancel({ turnId });
 await session.compact();
 await session.clear();
@@ -165,15 +160,15 @@ try {
 ```
 
 `respond()` accepts exact response literals directly. If responses have already
-been widened to `InputResponse[]`—for example, after decoding a platform
+been widened to `Answer[]`—for example, after decoding a platform
 payload—validate them with eve's strict schema before delivery. The validated
 type preserves that proof across channel wrappers:
 
 ```ts
-import { parseInputResponses } from "eve/client";
+import { parseAnswers } from "eve/client";
 
-const inputResponses = parseInputResponses(decodedResponses);
-await source.respond(inputResponses, { auth });
+const answers = parseAnswers(decodedResponses);
+await source.respond(answers, { auth });
 ```
 
 Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output, and interrupted provider-managed search may run again. The turn ID stays the same.
@@ -260,10 +255,11 @@ Keep each route's `method` and `path` unless you mean to move the endpoint.
 
 ## Operation semantics
 
-- `cancel` cooperatively stops the active turn. Confirm it with `turn.cancelled`
-  followed by `session.waiting`; the session accepts another message afterward.
-- `compact` summarizes model context without adding a synthetic user message. A
-  success emits `compaction.requested`, `compaction.completed`, then `session.waiting`.
+- `cancel` cooperatively stops the active turn. Confirm it with `turn.settled` and
+  `outcome: "cancelled"`; the session accepts another message afterward.
+- `compact` summarizes model context without adding a synthetic user message. It
+  is a context change: `context.started`, then `context.settled` with
+  `kind: "compaction"`.
 - `clear` removes model-message history in place. It preserves the system prompt,
   skills, tools, durable state, limits, address ownership, and session sandbox.
 - `reset` terminally retires the current session. A later address `send()` creates
@@ -417,8 +413,8 @@ export default defineChannel({
     }),
   ],
   events: {
-    "turn.started"(eventData, channel) {
-      channel.state.internalCounter += 1;
+    "turn.started"(_event, ctx) {
+      ctx.channel.state.internalCounter += 1;
     },
   },
 });
@@ -497,8 +493,8 @@ defineChannel<{ ref: string | null }>({
     };
   },
   events: {
-    "message.completed"(eventData, channel) {
-      if (!channel.state.ref) channel.registerAnchor(mintRef());
+    "content.completed"(_event, ctx) {
+      if (!ctx.channel.state.ref) ctx.channel.registerAnchor(mintRef());
     },
   },
   routes: [/* ... */],

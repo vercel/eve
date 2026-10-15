@@ -327,7 +327,7 @@ The tools eve adds itself all live in the `eve` namespace: `eve__search`, `eve__
 
 eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks): any agent tool, including the built-in `agent` tool, declared subagents, and remote agents, or a tool such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)`. There is no add command, and the tools are not workflow tools. Like every `eve__` name, both are reserved.
 
-- `eve__task_wait({ timeoutSeconds? })` parks the turn until any task has a result, a new message arrives, or `timeoutSeconds` pass, and returns at once when a result is already waiting. While it waits, the stream reports `turn.waiting` for the open turn. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
+- `eve__task_wait({ timeoutSeconds? })` parks the turn until any task has a result, a new message arrives, or `timeoutSeconds` pass, and returns at once when a result is already waiting. While it waits, the stream reports `turn.paused` for the open turn, awaiting the working calls. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `eve__task_cancel({ taskId })` stops a task's current work and says so, or says the task had no work to stop when it already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve). An id that names no task fails with `UNKNOWN_TASK`. A resumable task stays available after a cancel.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
