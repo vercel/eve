@@ -41,7 +41,7 @@ import {
   prepareTurnTraceContext,
   type PrepareTurnTraceContextInput,
 } from "#instrumentation/prepare-trace-context.js";
-import type { RuntimeTraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/message.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
@@ -108,7 +108,7 @@ export interface InstrumentationStepScope<TSession> {
   }) => PreparedInstrumentationAttempt;
   readonly preparePreamble: (
     input: Omit<PrepareTurnTraceContextInput, "instrumentation" | "principals" | "session">,
-  ) => Promise<RuntimeTraceContext | undefined>;
+  ) => Promise<TraceContext | undefined>;
   readonly publishInputResolutions: (input: {
     readonly batch: ResolvedInputBatch;
     readonly sessionId: string;

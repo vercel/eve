@@ -141,7 +141,7 @@ export type {
   ReasoningAppendedStreamEvent,
   ReasoningCompletedStreamEvent,
   ResultCompletedStreamEvent,
-  RuntimeTraceContext,
+  TraceContext,
   SessionCompletedStreamEvent,
   SessionFailedStreamEvent,
   SessionPredecessor,

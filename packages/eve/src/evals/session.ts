@@ -13,7 +13,7 @@ import type {
 } from "#client/types.js";
 import type {
   MessageStreamEvent,
-  RuntimeTraceContext,
+  TraceContext,
   AgentStartedStreamEvent,
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
@@ -71,7 +71,7 @@ export interface EvalSessionStartedEvent {
   readonly primary: boolean;
   readonly sessionId: string;
   readonly startedAt: string;
-  readonly traceContext: RuntimeTraceContext;
+  readonly traceContext: TraceContext;
 }
 
 export class EvalSessionDriver implements EveEvalSession {
@@ -83,7 +83,7 @@ export class EvalSessionDriver implements EveEvalSession {
   readonly #events: MessageStreamEvent[] = [];
   readonly #primary: boolean;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
-  readonly #traceContexts: RuntimeTraceContext[] = [];
+  readonly #traceContexts: TraceContext[] = [];
   readonly #traceKeys = new Set<string>();
   #lastTurn: EvalTurn | undefined;
   #sessionStartReported = false;

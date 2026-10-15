@@ -11,7 +11,7 @@ export { mockModel } from "#evals/mock-model.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
+export type { RuntimeIdentity, TraceContext } from "#protocol/message.js";
 export type { InputRequest } from "#shared/input.js";
 export type { CancelSessionResult } from "#client/types.js";
 

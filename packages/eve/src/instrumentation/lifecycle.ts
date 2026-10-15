@@ -1,7 +1,7 @@
 import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
 import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
-import type { RuntimeTraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
@@ -277,7 +277,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly traceSeed?: InstrumentationTraceSeed;
 }
 
-export type InstrumentationTraceContext = RuntimeTraceContext;
+export type InstrumentationTraceContext = TraceContext;
 export interface InstrumentationTraceSeed extends InstrumentationTraceContext {
   readonly decision?: InstrumentationDecision;
 }

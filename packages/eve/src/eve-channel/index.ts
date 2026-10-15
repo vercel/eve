@@ -4,7 +4,7 @@ import { getRun } from "#internal/workflow/runtime.js";
 import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
+import type { SessionAuthContext, SessionParent, SessionTraceSeed } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
@@ -282,7 +282,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             : forwardedTraceAssertion === "malformed"
               ? FAIL_CLOSED_FORWARDED_TRACE_ASSERTION
               : undefined;
-        let parentTraceContext: SessionTraceContext | undefined = parsedParentTraceContext;
+        let parentTraceContext: SessionTraceSeed | undefined = parsedParentTraceContext;
         if (acceptedForwardedTracePolicy !== undefined && parsedParentTraceContext !== undefined) {
           parentTraceContext = {
             ...parsedParentTraceContext,

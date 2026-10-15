@@ -1,3 +1,4 @@
+import type { RuntimeIdentity, TraceContext } from "#protocol/session-events/families/session.js";
 import type { FileUIPart, ProviderMetadata, TextUIPart, UserContent } from "ai";
 
 import {
@@ -132,34 +133,7 @@ export interface SessionPredecessor {
   readonly sessionId: string;
 }
 
-/**
- * Runtime identity metadata attached to the `session.started` event.
- *
- * The server populates this at run time so remote eval processes and
- * reporters receive authoritative metadata about the eve instance
- * serving the run.
- */
-export interface RuntimeIdentity {
-  readonly agentId: string;
-  readonly agentName?: string;
-  readonly eveVersion: string;
-  readonly build?: {
-    readonly deployedAt?: string;
-    readonly gitBranch?: string;
-    readonly gitSha?: string;
-  };
-}
-
-/**
- * Portable trace coordinates for correlating an eve run with an external
- * observability backend. The fields follow the W3C trace-context model while
- * remaining owned by eve rather than exposing an OpenTelemetry type.
- */
-export interface RuntimeTraceContext {
-  readonly traceId: string;
-  readonly spanId: string;
-  readonly traceFlags: number;
-}
+export type { RuntimeIdentity, TraceContext } from "#protocol/session-events/families/session.js";
 
 /**
  * JSON request accepted by the canonical message route.
@@ -194,7 +168,7 @@ export interface SessionStartedStreamEvent {
     /** Present when this session replaced one that could no longer run. */
     predecessor?: SessionPredecessor;
     runtime?: RuntimeIdentity;
-    trace?: RuntimeTraceContext;
+    trace?: TraceContext;
   };
   type: "session.started";
 }
@@ -205,7 +179,7 @@ export interface SessionStartedStreamEvent {
 export interface TurnStartedStreamEvent {
   data: {
     sequence: number;
-    trace?: RuntimeTraceContext;
+    trace?: TraceContext;
     turnId: string;
   };
   type: "turn.started";
@@ -963,7 +937,7 @@ export function createSessionStartedEvent(input?: {
   readonly invocation?: SubagentSessionInvocationMetadata;
   readonly predecessor?: SessionPredecessor;
   readonly runtime?: RuntimeIdentity;
-  readonly trace?: RuntimeTraceContext;
+  readonly trace?: TraceContext;
 }): SessionStartedStreamEvent {
   const data: SessionStartedStreamEvent["data"] = {};
 
@@ -994,7 +968,7 @@ export function createSessionStartedEvent(input?: {
  */
 export function createTurnStartedEvent(input: {
   readonly sequence: number;
-  readonly trace?: RuntimeTraceContext;
+  readonly trace?: TraceContext;
   readonly turnId: string;
 }): TurnStartedStreamEvent {
   const data: TurnStartedStreamEvent["data"] = {

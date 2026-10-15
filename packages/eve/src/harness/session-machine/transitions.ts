@@ -31,7 +31,7 @@ import {
   createTurnWaitingEvent,
   type InputResolution,
   type RuntimeIdentity,
-  type RuntimeTraceContext,
+  type TraceContext,
   type SessionPredecessor,
   type TaskCancelReason,
   type TaskStartedStreamEvent,
@@ -103,7 +103,7 @@ export function receive(
     /** The session this one replaced, when eve started it in place of a stranded one. */
     readonly predecessor?: SessionPredecessor;
     readonly runtime?: RuntimeIdentity;
-    readonly trace?: RuntimeTraceContext;
+    readonly trace?: TraceContext;
   },
 ): Transition {
   const position = turnPosition(view.projection);

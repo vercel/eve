@@ -13,7 +13,7 @@ import type {
   SessionCallback,
   SessionCapabilities,
   SessionParent,
-  SessionTraceContext,
+  SessionTraceSeed,
   SessionTraceRoot,
   SessionTurn,
 } from "#channel/types.js";
@@ -162,9 +162,9 @@ export const SessionPredecessorKey = new ContextKey<SessionPredecessor>("eve.ses
 /** Set only when the trace root differs from `ParentSessionKey`'s root; see {@link SessionTraceRoot}. */
 export const TraceRootKey = new ContextKey<SessionTraceRoot>("eve.traceRoot");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
-export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
+export const ParentTraceContextKey = new ContextKey<SessionTraceSeed>("eve.parentTraceContext");
 
-export type SessionTraceSeed = SessionTraceContext;
+export type { SessionTraceSeed } from "#channel/types.js";
 export const SessionTraceSeedKey = new ContextKey<SessionTraceSeed>("eve.sessionTraceSeed");
 export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled");
 
