@@ -571,6 +571,51 @@ export default defineDynamic({
     expect(execute({ value: "present" })).toBe("present");
   });
 
+  // https://github.com/vercel/eve/issues/4860
+  it.fails("captures locals bound by an array rest element", async () => {
+    const { callHandler } = await transformAndEval(
+      "tools/array-rest.ts",
+      `
+      import { defineDynamic, defineTool } from "eve/tools";
+      import { z } from "zod";
+      export default defineDynamic({ events: { "turn.started": () => {
+        const [first, ...rest] = ["a", "b"];
+        return { pick: defineTool({
+          description: "Pick",
+          inputSchema: z.object({ pick: z.enum([first, ...rest]) }),
+          execute: ({ pick }) => pick,
+        }) };
+      } } });
+    `,
+    );
+    const { inputSchema } = durableCallbacks((await callHandler()).pick);
+    expect(inputSchema!.closure).toEqual({ first: "a", rest: ["b"] });
+    const schema = inputSchema!.callback(JSON.parse(JSON.stringify(inputSchema!.closure)));
+    if (!isToolSchema(schema)) throw new Error("Expected schema");
+    expect(await schema["~standard"].validate({ pick: "b" })).toEqual({ value: { pick: "b" } });
+  });
+
+  // https://github.com/vercel/eve/issues/4860
+  it.fails("captures a rest parameter of the resolver", async () => {
+    const { callHandler } = await transformAndEval(
+      "tools/rest-param.ts",
+      `
+      import { defineDynamic, defineTool } from "eve/tools";
+      export default defineDynamic({ events: { "turn.started": (...args) => ({
+        count: defineTool({
+          description: "Count",
+          inputSchema: { type: "object" },
+          execute: () => args.length,
+        }),
+      }) } });
+    `,
+    );
+    const tool = (await callHandler()).count as Record<string, unknown>;
+    const { execute } = durableCallbacks(tool);
+    expect(execute!.closure.args).toHaveLength(2);
+    expect(execute!.callback(JSON.parse(JSON.stringify(execute!.closure)), {})).toBe(2);
+  });
+
   it("captures a direct identifier in an arrow expression body", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";
