@@ -14,6 +14,7 @@ import {
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
 import {
+  assertDynamicResolverEvents,
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
@@ -94,10 +95,9 @@ export async function compileSkillSource(
   });
 
   if (isDynamicSentinel(exportValue)) {
-    assertResolverOnlyDynamicSentinel(
-      exportValue,
-      `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-    );
+    const message = `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
+    assertResolverOnlyDynamicSentinel(exportValue, message);
+    assertDynamicResolverEvents("skill", Object.keys(exportValue.events), message);
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, "");
     return {
       kind: "dynamic-skill",

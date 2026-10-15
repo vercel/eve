@@ -1,10 +1,11 @@
+import type { DynamicScopeEvent } from "#dynamic/definition.js";
 import { describe, expect, it, vi } from "vitest";
 import { z as z3 } from "zod/v3";
 import { z } from "#compiled/zod/index.js";
 import { ContextContainer } from "#context/container.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import {
-  dispatchDynamicToolEvent,
+  resolveDynamicTools,
   refreshDynamicSessionToolsForRuntimeRevision,
   rebindMissingCompiledDynamicToolCallbacks,
   validateDurableDynamicToolCallbacks,
@@ -23,7 +24,7 @@ import {
 import { defineDurableSchema } from "#tools/durable-schema.js";
 import { clearDurableDynamicCallbacks, defineDurableCallback } from "#tools/durable-callbacks.js";
 import { isToolSchema, serializeInputSchema, type ToolSchema } from "#tools/schema.js";
-import { createStepStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createStepStartedEvent } from "#protocol/message.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 
@@ -39,10 +40,10 @@ const owner = {
   name: "tool",
 };
 
-function event(scope: "session" | "turn" | "step"): UnstampedMessageStreamEvent {
+function event(scope: "session" | "turn" | "step"): DynamicScopeEvent {
   return scope === "step"
     ? createStepStartedEvent({ modelId: "test", sequence: 0, stepIndex: 0, turnId: "turn" })
-    : ({ type: `${scope}.started`, data: {} } as UnstampedMessageStreamEvent);
+    : ({ type: `${scope}.started`, data: {} } as DynamicScopeEvent);
 }
 
 function tool(inputSchema: PublicToolInputSchema, outputSchema?: PublicToolOutputSchema) {
@@ -68,7 +69,7 @@ async function resolve(createTool: () => unknown, scope: "session" | "turn" | "s
     sourceKind: "module",
     logicalPath: "agent/tools/schema.ts",
   };
-  await dispatchDynamicToolEvent({ ctx, resolvers: [resolver], event: event(scope), messages: [] });
+  await resolveDynamicTools({ ctx, resolvers: [resolver], event: event(scope), messages: [] });
   ctx.set(SessionDynamicToolRuntimeRevisionKey, "stable");
   return { ctx, resolver };
 }
@@ -197,7 +198,7 @@ describe("durable dynamic tool schemas", () => {
           ),
       },
     };
-    await dispatchDynamicToolEvent({
+    await resolveDynamicTools({
       ctx: other,
       resolvers: [otherResolver],
       event: event("turn"),

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
-  dispatchDynamicToolEvent,
+  resolveDynamicTools,
   rebindMissingCompiledDynamicToolCallbacks,
 } from "#context/dynamic-tool-lifecycle.js";
 import {
@@ -107,7 +107,7 @@ describe("memory provider tools", () => {
     await contextStorage.run(
       ctx,
       async () =>
-        await dispatchDynamicToolEvent({
+        await resolveDynamicTools({
           ctx,
           event,
           messages: [{ content: "hello", role: "user" }],
@@ -170,7 +170,7 @@ describe("memory provider tools", () => {
     await contextStorage.run(
       ctx,
       async () =>
-        await dispatchDynamicToolEvent({
+        await resolveDynamicTools({
           ctx,
           event,
           messages: [{ content: "hello", role: "user" }],
@@ -238,7 +238,7 @@ describe("memory provider tools", () => {
     await contextStorage.run(
       ctx,
       async () =>
-        await dispatchDynamicToolEvent({
+        await resolveDynamicTools({
           ctx,
           event,
           messages: [{ content: "remember this screenshot", role: "user" }],
