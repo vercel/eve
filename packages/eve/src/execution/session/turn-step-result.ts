@@ -1,11 +1,16 @@
 import { storedProjection } from "#harness/session-machine/view.js";
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
-import { derivePendingState } from "#execution/session/pending-turn-state.js";
-import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import { sessionView } from "#harness/session-machine/commit.js";
-import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
+import {
+  pausedOnCalls,
+  pausedOnPerson,
+  pausedOnTasks,
+} from "#execution/session/pending-turn-state.js";
+import type {
+  DurableStepResult,
+  DurableStepResultFields,
+} from "#execution/session/turn-step-types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import type { StepResult } from "#harness/types.js";
+import type { HarnessSession, SettledTurn, StepResult } from "#harness/types.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
@@ -15,7 +20,8 @@ export function resolveSessionStepResult(
     serializedContext: nextSerializedContext,
     ...createDurableSessionValues(stepResult.session),
   };
-  if (stepResult.steered) return { action: "steered", ...values };
+  // Steering cut the model call short; the next step reads it.
+  if (stepResult.steered) return { action: "continue", ...values };
 
   if (
     stepResult.next !== null &&
@@ -34,44 +40,47 @@ export function resolveSessionStepResult(
   }
 
   if (stepResult.held?.kind === "tasks") {
-    return { action: "held", hold: "tasks", ...values, taskIds: stepResult.held.taskIds };
+    return { action: "paused", ...pausedOnTasks(stepResult.held.taskIds), ...values };
   }
   if (stepResult.held?.kind === "request") {
     const projection = storedProjection(stepResult.session.state);
-    const pending = derivePendingState(stepResult.session, projection);
-    return {
-      action: "held",
-      authorizationAttemptIds: pending.authorizationAttemptIds ?? [],
-      hasPendingInputBatch: pending.hasPendingInputBatch,
-      hold: "request",
-      inputRequestIds: [...ownOpenRequestIds(sessionView(projection, stepResult.session.state))],
-      ...values,
-    };
+    return { action: "paused", ...pausedOnPerson(stepResult.session, projection), ...values };
   }
+  if (stepResult.next !== null) return { action: "continue", ...values };
 
-  if (stepResult.next === null) {
-    const { hasRunsToDispatch, pendingCoordinationCallIds, pendingTaskToolCalls } =
-      derivePendingState(stepResult.session, storedProjection(stepResult.session.state));
-    const pending = { hasRunsToDispatch, pendingCoordinationCallIds, pendingTaskToolCalls };
-
-    // Usage stays unreported until the turn settles, so the caller's result includes all of it.
-    if (stepResult.settledTurn !== undefined) {
-      const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
-      return {
-        action: "park",
-        ...pending,
-        serializedContext: nextSerializedContext,
-        ...createDurableSessionValues(reportedSession),
-        settled: {
+  // Usage stays unreported until the turn settles, so the caller's result includes all of it.
+  const reported =
+    stepResult.settledTurn === undefined ? undefined : takeSessionUsageDelta(stepResult.session);
+  const fields =
+    reported === undefined
+      ? values
+      : {
+          serializedContext: nextSerializedContext,
+          ...createDurableSessionValues(reported.session),
+        };
+  return pausedOrParked(
+    stepResult.session,
+    fields,
+    stepResult.settledTurn === undefined
+      ? undefined
+      : {
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,
-          usage: delta,
+          usage: reported?.delta,
         },
-      };
-    }
+  );
+}
 
-    return { action: "park", ...pending, ...values };
-  }
-
-  return { action: "continue", ...values };
+/**
+ * The turn pauses on the calls the runtime runs for it, or, with none, parks the session.
+ * `settled` is a settled turn's answer to its delegated caller.
+ */
+export function pausedOrParked(
+  session: HarnessSession,
+  fields: DurableStepResultFields,
+  settled?: SettledTurn,
+): DurableStepResult {
+  const calls = pausedOnCalls(session);
+  if (calls !== undefined) return { action: "paused", ...calls, ...fields };
+  return { action: "parked", ...(settled !== undefined && { settled }), ...fields };
 }
