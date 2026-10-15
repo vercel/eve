@@ -24,7 +24,7 @@ describe("loadMicrosandboxModule", () => {
   // Regression for #3420: a project that already has microsandbox@^0.7
   // loads a module that exports `isRuntimeInstalled` but not `isInstalled`
   // or `setup`.
-  it.fails("rejects an incompatible microsandbox API with the installed version and fix", async () => {
+  it("rejects an incompatible microsandbox API with the installed version and fix", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-microsandbox-07-"));
     appRoots.push(appRoot);
     const packageRoot = join(appRoot, "node_modules", "microsandbox");
