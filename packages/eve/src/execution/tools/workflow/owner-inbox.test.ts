@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { toFailedOutcome } from "#execution/tools/workflow/body.js";
 import {
   workflowToolRunFailureOutput,
+  workflowToolRunOutcomeToToolResult,
   workflowToolRunRequestToInputRequestPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
+import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
+import { createInstrumentationHandleEvent } from "#instrumentation/native-events.js";
+import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
 
 const from = {
   callId: "call-1",
@@ -126,5 +132,60 @@ describe("workflow-tool task outcomes", () => {
         },
       }),
     ).toEqual("export failed");
+  });
+});
+
+// https://github.com/vercel/eve/issues/4820
+describe("a workflow body's failure", () => {
+  async function toolCallFailed(error: Error): Promise<InstrumentationEvent | undefined> {
+    const result = workflowToolRunOutcomeToToolResult({
+      from,
+      result: toFailedOutcome(error, new AbortController().signal),
+    });
+    const events: InstrumentationEvent[] = [];
+    const handleEvent = createInstrumentationHandleEvent({
+      getAttemptScope: () => ({
+        attemptId: "session-1:turn-1:0:0",
+        attemptIndex: 0,
+        sessionId: "session-1",
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      handleEvent: async () => {},
+      hooks: { capturesContent: true, publish: async (event) => void events.push(event) },
+      sessionId: "session-1",
+    })!;
+    await contextStorage.run(new ContextContainer(), async () => {
+      await handleEvent(
+        createActionsRequestedEvent({
+          actions: [{ callId: from.callId, input: {}, kind: "tool-call", toolName: from.toolName }],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+      );
+      await handleEvent(
+        createActionResultEvent({ result, sequence: 0, stepIndex: 0, turnId: "turn-1" }),
+      );
+    });
+    return events.find((event) => event.type === "tool.call.failed");
+  }
+
+  it("keeps the name of the error the body threw on tool.call.failed", async () => {
+    const failed = await toolCallFailed(
+      Object.assign(new Error("quota exceeded"), { name: "QuotaError" }),
+    );
+
+    expect(failed).toHaveProperty("error.name", "QuotaError");
+    expect(failed).toHaveProperty("error.message", "quota exceeded");
+  });
+
+  it("keeps the name of a coded error the body threw on tool.call.failed", async () => {
+    const failed = await toolCallFailed(
+      Object.assign(new Error("quota exceeded"), { code: "QUOTA", name: "QuotaError" }),
+    );
+
+    expect(failed).toHaveProperty("error.name", "QuotaError");
+    expect(failed).toHaveProperty("errorCode", "QUOTA");
   });
 });

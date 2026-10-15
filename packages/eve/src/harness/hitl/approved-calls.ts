@@ -77,9 +77,9 @@ export async function runApprovedCalls(input: {
   const settleFailure = async (
     callId: string,
     toolName: string,
-    message: string,
+    failure: Error | string,
   ): Promise<ApprovedCallResult> => {
-    const failed = failedCall({ callId, message, toolName });
+    const failed = failedCall({ callId, failure, toolName });
     await input.publish(createActionResultEvent({ ...at, result: failed.result }));
     return { part: failed.part };
   };
@@ -136,7 +136,8 @@ export async function runApprovedCalls(input: {
           return { settled, toolResults };
         }
         let output: unknown;
-        let failed = false;
+        /** The error the tool threw, kept whole so the result records its name. */
+        let failure: Error | undefined;
         const telemetry = toolTelemetry(input.telemetry, {
           messages: [...input.messages],
           toolCall: { input: args, toolCallId: callId, toolName, type: "tool-call" },
@@ -189,10 +190,10 @@ export async function runApprovedCalls(input: {
           );
           throwIfTurnAborted(input.abortSignal);
           logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
-          failed = true;
-          output = toError(error).message;
+          failure = toError(error);
+          output = failure.message;
         }
-        if (!failed) {
+        if (failure === undefined) {
           await telemetry.ended(
             { input: args, output, toolCallId: callId, toolName, type: "tool-result" },
             executionMs,
@@ -209,9 +210,10 @@ export async function runApprovedCalls(input: {
         if (isInlineAuthorizationToolResult(result)) return { settled, toolResults };
         completed = {
           part: {
-            output: failed
-              ? { type: "error-text", value: String(output) }
-              : await toolCallModelOutput(definition, output, callId),
+            output:
+              failure !== undefined
+                ? { type: "error-text", value: failure.message }
+                : await toolCallModelOutput(definition, output, callId),
             toolCallId: callId,
             toolName,
             type: "tool-result",
@@ -221,10 +223,16 @@ export async function runApprovedCalls(input: {
         await input.publish(
           createActionResultEvent({
             ...at,
-            presentation: failed
-              ? undefined
-              : projectResultPresentation(definition, callId, parseJsonObject(args), output),
-            result: createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
+            presentation:
+              failure !== undefined
+                ? undefined
+                : projectResultPresentation(definition, callId, parseJsonObject(args), output),
+            result: createRuntimeToolResultFromValue({
+              callId,
+              isError: failure !== undefined,
+              output: failure ?? output,
+              toolName,
+            }),
           }),
         );
         return { settled, toolResults };
@@ -236,7 +244,7 @@ export async function runApprovedCalls(input: {
         }
         logError(log, "approved tool failed", error, { toolName, toolCallId: callId });
         return {
-          settled: [await settleFailure(callId, toolName, toError(error).message)],
+          settled: [await settleFailure(callId, toolName, toError(error))],
           toolResults,
         };
       }

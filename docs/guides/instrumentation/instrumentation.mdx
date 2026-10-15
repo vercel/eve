@@ -170,6 +170,8 @@ Each call emits one `tool.call.*` lifecycle to authored providers. SDK execution
 
 For local and remote subagents, `tool.call.completed` and `tool.call.failed` include the child turn's `usage` directly. Token counts are always present when the child reports usage; `usage.costUsd` is present only when the model provider reports a price.
 
+When a tool throws and outputs are recorded, `tool.call.failed` carries an `Error` with the thrown error's `name` and `message`, so a provider can classify the failure by `error.name`. It is rebuilt from the durable session record rather than being the object the tool threw, so `instanceof` checks against your own error classes do not match.
+
 When upgrading, replace `action.started`, `action.completed`, and `action.failed` handlers with their `tool.call.*` equivalents. Read `event.toolName` instead of `event.name` on start events. The OpenTelemetry trace schema remains version 4.
 
 Handlers from different files run concurrently and are failure-isolated. Do
