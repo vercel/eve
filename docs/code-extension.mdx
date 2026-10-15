@@ -97,8 +97,34 @@ Configure `github` to broker GitHub access through Connect instead. The extensio
 | `github.connector` | With `github` | Connector that mints a GitHub token                                                        |
 | `github.org`       | With `github` | Organization whose repositories the `gh` tool can access                                   |
 | `github.broker`    | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
+| `github.authorize` | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` command  |
 
 The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.
+
+Anyone who can invoke the agent can use every repository the GitHub App is installed on. Choose those repositories when installing the app. To also decide per caller, set `github.authorize`. It runs before each command with the session's current caller (`auth`, or `null`), the declared `owner/name` repository, and the repository-scoped token, and the command fails when it returns `false`. The token lets you check access through the GitHub API:
+
+```ts title="agent/extensions/git.ts"
+import git from "eve/extensions/git";
+
+import { brokerGitHubLease } from "../lib/github";
+
+export default git({
+  github: {
+    connector: "github/my-agent",
+    org: "acme",
+    broker: brokerGitHubLease,
+    // GitHub channel sessions carry the commenter's login as `auth.subject`.
+    async authorize({ auth, repository, token }) {
+      if (auth?.authenticator !== "github-webhook" || !auth.subject) return false;
+      const response = await fetch(
+        `https://api.github.com/repos/${repository}/collaborators/${auth.subject}`,
+        { headers: { authorization: `Bearer ${token}` } },
+      );
+      return response.status === 204;
+    },
+  },
+});
+```
 
 ### Migrate from `code({ github })`
 
