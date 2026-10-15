@@ -526,6 +526,7 @@ describe("message stream protocol", () => {
     const event = createActionResultEvent({
       result: {
         callId: "call_weather",
+        isError: true,
         kind: "tool-result",
         output: '{"code":"TOOL_EXECUTION_FAILED","message":"Nope"}',
         toolName: "get_weather",
@@ -542,6 +543,7 @@ describe("message stream protocol", () => {
       },
       result: {
         callId: "call_weather",
+        isError: true,
         kind: "tool-result",
         output: '{"code":"TOOL_EXECUTION_FAILED","message":"Nope"}',
         toolName: "get_weather",
@@ -570,6 +572,27 @@ describe("message stream protocol", () => {
       error: { code: "TOOL_EXECUTION_DENIED" },
       status: "failed",
     });
+  });
+
+  it("keeps successful action results completed when their output has code and message fields", () => {
+    const event = createActionResultEvent({
+      result: {
+        callId: "call_purchase_request",
+        kind: "tool-result",
+        output: {
+          code: "PR-2025-001",
+          message: "Purchase request created successfully.",
+          ok: true,
+        },
+        toolName: "create_purchase_request",
+      },
+      sequence: 0,
+      stepIndex: 1,
+      turnId: "turn_0",
+    });
+
+    expect(event.data.status).toBe("completed");
+    expect(event.data.error).toBeUndefined();
   });
 
   it("marks denied action results as rejected", () => {

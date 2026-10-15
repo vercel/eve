@@ -180,11 +180,16 @@ export class ConversationClient<TData = ConversationState> {
     return this.#stream;
   }
 
+  /** Closes the root stream; the next `stream()` call reopens it from the session cursor. */
+  closeStream(): void {
+    this.#stream?.close();
+    this.#stream = undefined;
+  }
+
   stop(): void {
     this.#follower?.abortAll();
     this.#follower = undefined;
-    this.#stream?.close();
-    this.#stream = undefined;
+    this.closeStream();
   }
 
   reset(): void {

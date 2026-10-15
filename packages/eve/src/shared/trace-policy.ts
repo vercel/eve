@@ -29,14 +29,7 @@ export function resolveTracePolicy(
 ): InstrumentationDecision {
   try {
     const decision = policy?.(trace);
-    return resolveTracePolicyDecision(
-      decision ?? {
-        emit: true,
-        recordInputs: trace.audience === "public" || trace.environment === "development",
-        recordOutputs: trace.audience === "public" || trace.environment === "development",
-      },
-      trace,
-    );
+    return resolveTracePolicyDecision(decision ?? true, trace);
   } catch (error) {
     try {
       onError?.(error);
@@ -62,5 +55,8 @@ export function resolveTracePolicyDecision(
     action: "record",
     recordInputs: decision.recordInputs,
     recordOutputs: decision.recordOutputs,
+    ...(decision.recordInputs || decision.recordOutputs
+      ? { explicitContentAudience: context.audience }
+      : undefined),
   };
 }

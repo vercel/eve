@@ -11,7 +11,10 @@ import type { Session } from "#channel/session.js";
 import { strandedSessionResponse } from "#eve-channel/support.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
-import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
+import {
+  isExpiredWorkflowRunError,
+  isMissingWorkflowRunError,
+} from "#internal/workflow/is-inactive-workflow-run-error.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -344,6 +347,12 @@ export async function createSessionStreamResponse(
   } catch (error) {
     const stranded = strandedSessionResponse(error);
     if (stranded !== undefined) return stranded;
+    if (isExpiredWorkflowRunError(error)) {
+      return Response.json(
+        { code: "session_expired", error: "Session history is no longer available.", ok: false },
+        { headers: { "cache-control": "no-store" }, status: 410 },
+      );
+    }
     const notFound = isMissingWorkflowRunError(error);
     return Response.json(
       { error: notFound ? "Session not found." : "Session stream unavailable.", ok: false },

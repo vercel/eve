@@ -1,12 +1,7 @@
 import { defineMcpClientConnection } from "#public/connections/index.js";
 
-// Epoch 48 Connect providers carry connector metadata without an events bridge.
+// Epoch 48 `action.result` errors had no `name`; epoch 49 adds it as optional.
 export default defineMcpClientConnection({
-  description: "Read issues from the tracker.",
+  description: "Manage issues in the tracker.",
   url: "https://tracker.example.com/mcp",
-  auth: {
-    principalType: "app",
-    getToken: async () => ({ token: "service-credential" }),
-    vercelConnect: { connector: "oauth/issues" },
-  },
 });

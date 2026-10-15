@@ -74,7 +74,8 @@ export interface ServeCallInput {
 
 export function splitTaskIdInput(modelInput: JsonObject): ServeCallInput {
   const { [TASK_ID_INPUT]: taskId, ...input } = modelInput;
-  if (typeof taskId !== "string") return { input };
+  // Some models fill an optional string with "" instead of omitting it.
+  if (typeof taskId !== "string" || taskId === "") return { input };
   return { input, taskId };
 }
 

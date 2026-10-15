@@ -53,16 +53,14 @@ export function createRuntimeToolResultFromValue(input: {
   readonly output: unknown;
   readonly isError?: boolean;
 }): RuntimeToolResultActionResult {
+  const thrown = input.isError === true && input.output instanceof Error ? input.output : undefined;
   const result: RuntimeToolResultActionResult = {
     callId: input.callId,
     kind: "tool-result",
     output: toolResultOutputToJsonValue({
       output: {
         type: input.isError === true ? "error-json" : "json",
-        value:
-          input.isError === true && input.output instanceof Error
-            ? input.output.message
-            : input.output,
+        value: thrown === undefined ? input.output : thrown.message,
       },
       toolCallId: input.callId,
       toolName: input.toolName,
@@ -70,7 +68,11 @@ export function createRuntimeToolResultFromValue(input: {
     toolName: input.toolName,
   };
 
-  return input.isError === true ? { ...result, isError: true } : result;
+  if (input.isError !== true) return result;
+  // The output keeps only a thrown error's message; its name lets instrumentation classify the failure.
+  return thrown === undefined
+    ? { ...result, isError: true }
+    : { ...result, errorName: thrown.name, isError: true };
 }
 
 /**

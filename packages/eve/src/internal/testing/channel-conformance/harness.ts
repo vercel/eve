@@ -163,6 +163,11 @@ export interface ChannelDriver {
    * {@link postedText}.
    */
   shownMessage?(call: PlatformCall): ShownMessage | undefined;
+  /**
+   * The message a webhook's JSON answer shows the person who sent it, such as
+   * the card Teams shows only whoever pressed an `Action.Execute` button.
+   */
+  shownReply?(body: unknown): ShownMessage | undefined;
   /** How the person driving the conversation appears in the platform's text, in any form. */
   readonly personShownAs?: readonly string[];
   /**
@@ -226,6 +231,8 @@ export interface ChannelConversation {
   waitForShown(pattern: string | RegExp): Promise<string>;
   /** Everything the bot has shown that everyone in the conversation sees, joined. */
   sharedText(): Promise<string>;
+  /** Every message the bot has shown anyone, privately or not. */
+  shownTexts(): Promise<readonly string[]>;
   /** Every choice the bot's messages let a person press now, newest message first. */
   shownOptions(): Promise<readonly RenderedOption[]>;
   /** Waits for the turn to hold for a sign-in, however the channel shows it. */
@@ -507,12 +514,25 @@ function webhookView(
   dispatch: Dispatch,
   wait: Wait,
 ): ClientView {
+  /** What webhook answers showed the person who sent each request. */
+  const answered: ShownMessage[] = [];
+  const describe = () =>
+    `Platform calls:\n${JSON.stringify(calls, null, 2)}\nWebhook answers:\n${JSON.stringify(answered, null, 2)}`;
   async function post(request: Request): Promise<void> {
     const { response, settled } = await dispatch(request);
     await settled;
     if (!response.ok) throw new Error(`${driver.name} webhook answered ${response.status}.`);
+    if (driver.shownReply === undefined) return;
+    const text = await response.text();
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return;
+    }
+    const shown = driver.shownReply(body);
+    if (shown !== undefined) answered.push(shown);
   }
-  const describe = () => `Platform calls:\n${JSON.stringify(calls, null, 2)}`;
   /** Where each prompt may next appear: after the call it was last found in. */
   const promptsFrom = new Map<string, number>();
 
@@ -558,19 +578,23 @@ function webhookView(
     personShownAs: driver.personShownAs ?? [],
     personId: driver.personId,
     nextAddress: driver.nextAddress?.bind(driver),
-    shown: () =>
-      calls.flatMap((call) => {
+    shown: () => [
+      ...calls.flatMap((call) => {
         const shown = driver.shownMessage?.(call);
-        if (shown !== undefined) {
-          const text = [shown.text, ...(shown.links ?? [])].join("\n");
-          return [{ onlyPerson: shown.onlyPerson === true, options: shown.options, text }];
-        }
+        if (shown !== undefined) return [shownText(shown)];
         const text = driver.postedText(call);
         return text === undefined ? [] : [{ onlyPerson: false, options: [], text }];
       }),
+      ...answered.map(shownText),
+    ],
     describe,
     close: async () => {},
   };
+}
+
+function shownText(shown: ShownMessage): ShownText {
+  const text = [shown.text, ...(shown.links ?? [])].join("\n");
+  return { onlyPerson: shown.onlyPerson === true, options: shown.options, text };
 }
 
 /** Starts `driver`'s client with the client host's `fetch` routed to the channel until it closes. */
@@ -911,6 +935,7 @@ async function converse(
           view.describe,
         ),
       shownOptions: async () => (await view.shown()).toReversed().flatMap(({ options }) => options),
+      shownTexts: async () => (await view.shown()).map(({ text }) => text),
       sharedText: async () =>
         (await view.shown())
           .filter((shown) => !shown.onlyPerson)

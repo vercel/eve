@@ -26,16 +26,32 @@ export interface EventBinding extends EventOwner {
 /** The run publishes its subscription once, so callers outside it can read what it owns. */
 export const CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE = "eve.connection-event.subscription";
 
-export type ConnectionEventSubscribeOutcome =
+/** What a run's own subscribe produced. */
+export type ConnectionEventSubscribeResult =
   | { readonly subscription: ManagedEventSubscription }
-  | { readonly error: string };
+  /** Connect refused the subscription; `status` keeps its HTTP status, such as a 401 that asks for sign-in. */
+  | { readonly error: string; readonly status?: number };
 
-export type ConnectionEventReceipts = Readonly<Record<string, "pending" | "complete">>;
+export type ConnectionEventSubscribeOutcome =
+  | ConnectionEventSubscribeResult
+  /** Another run already owns this binding: read the outcome from that run. */
+  | { readonly ownerRunId: string };
+
+/** The latest completed delivery ids, oldest first. */
+export type ConnectionEventReceipts = readonly string[];
 
 export interface ConnectionEventHandlerState {
   readonly binding: EventBinding;
   readonly subscription: ManagedEventSubscription;
   readonly receipts: ConnectionEventReceipts;
+}
+
+/** What a handler run passes to the successor that took its hook, once it has processed every delivery it received. */
+export interface ConnectionEventHandover {
+  readonly serializedContext: Record<string, unknown>;
+  readonly state: ConnectionEventHandlerState;
+  /** The watch was stopped or terminated before the takeover: the successor ends too. */
+  readonly ended: boolean;
 }
 
 export function eventOwner(binding: EventOwner): EventOwner {

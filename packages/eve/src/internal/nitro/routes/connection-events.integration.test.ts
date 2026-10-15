@@ -38,8 +38,7 @@ beforeEach(() => {
       connections: [
         {
           connectionName: "issues",
-          experimental_events: { onEvent() {} },
-          authorization: { vercelConnect: { experimental_events: { verify } } },
+          experimental_events: { backend: { verify } },
         },
       ],
     },

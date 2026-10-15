@@ -176,14 +176,27 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     shownMessage(call) {
       const body = call.body as ActivityBody;
       if (body.type !== "message") return undefined;
-      const texts = (adaptiveCard(body)?.body ?? []).flatMap((element) =>
-        element.type === "TextBlock" && element.text !== undefined ? [element.text] : [],
-      );
       return {
         id: activityIdOf(call),
         links: linkTargets(adaptiveCard(body)?.actions),
         options: cardOptions(call),
-        text: [body.text ?? "", ...texts].join("\n"),
+        text: [body.text ?? "", cardText(adaptiveCard(body))].join("\n"),
+      };
+    },
+    shownReply(body) {
+      // Teams shows an `Action.Execute` invoke's answer card to the presser alone.
+      const reply = body as { readonly type?: string; readonly value?: unknown };
+      if (reply.type === "application/vnd.microsoft.activity.message") {
+        return { id: "", onlyPerson: true, options: [], text: String(reply.value ?? "") };
+      }
+      if (reply.type !== "application/vnd.microsoft.card.adaptive") return undefined;
+      const card = reply.value as AdaptiveCard;
+      return {
+        id: "",
+        links: linkTargets(card.actions),
+        onlyPerson: true,
+        options: [],
+        text: cardText(card),
       };
     },
     personShownAs: [PERSON.name],
@@ -216,12 +229,22 @@ function adaptiveCard(body: ActivityBody): AdaptiveCard | undefined {
   )?.content;
 }
 
+function cardText(card: AdaptiveCard | undefined): string {
+  return (card?.body ?? [])
+    .flatMap((element) =>
+      element.type === "TextBlock" && element.text !== undefined ? [element.text] : [],
+    )
+    .join("\n");
+}
+
 function cardOptions(call: PlatformCall): RenderedOption[] {
   const card = adaptiveCard(call.body as ActivityBody);
   const activityId = activityIdOf(call);
   const choiceSet = card?.body?.find((element) => element.type === "Input.ChoiceSet");
   const submits = (card?.actions ?? []).filter(
-    (action) => action.type === "Action.Submit" && action.data !== undefined,
+    (action) =>
+      (action.type === "Action.Submit" || action.type === "Action.Execute") &&
+      action.data !== undefined,
   );
   // A select renders one ChoiceSet and a single Submit; other choices are one Submit each.
   if (choiceSet?.choices !== undefined) {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { context } from "@opentelemetry/api";
+import { createAgentDelegationTransport } from "@eve/tracing/delegation";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
   BasicTracerProvider,
@@ -258,7 +259,7 @@ describe("content capture after a narrower decision", () => {
         .map((span) => ({ attributes: span.attributes, events: span.events }));
       return JSON.stringify(spans) + JSON.stringify([...entries.values()]);
     };
-    return { tracing, turn, attempt, exported };
+    return { tracing, turn, attempt, exported, checkpointer, entries, exporter };
   }
 
   it("keeps an existing tool's failure out when its parent's run declines outputs", async () => {
@@ -302,6 +303,102 @@ describe("content capture after a narrower decision", () => {
     await attempt.complete();
     await turn.complete();
     expect(await exported()).not.toContain("private note");
+  });
+
+  it("snapshots arguments accepted from a second tool report", async () => {
+    const { turn, attempt, exported } = await setup();
+    const tool = await attempt.tool({ callId: "lookup", name: "lookup" });
+    const arguments_ = { note: { text: "Alice's approved note" } };
+    await attempt.tool({ callId: "lookup", name: "lookup", arguments: arguments_ });
+    attempt.run(() => {
+      arguments_.note.text = "Alice's private note";
+    }, NO_INPUTS);
+    await attempt.tool({ callId: "lookup", name: "lookup" });
+    const approval = await tool.approval({ requestId: "approval" });
+    expect(await exported()).toContain("approved note");
+    expect(await exported()).not.toContain("private note");
+    await approval.complete();
+    await tool.complete();
+    await attempt.complete();
+    await turn.complete();
+    expect(await exported()).toContain("approved note");
+    expect(await exported()).not.toContain("private note");
+  });
+
+  it.each(["Error", "object"] as const)(
+    "snapshots a retained %s before later mutation",
+    async (kind) => {
+      const { turn, attempt, exported } = await setup();
+      const tool = await attempt.tool({ callId: "lookup", name: "lookup" });
+      const error =
+        kind === "Error"
+          ? new Error("Alice's approved note")
+          : { message: "Alice's approved note" };
+      tool.recordError(error);
+      tool.run(() => {
+        error.message = "Alice's private note";
+        if (error instanceof Error) error.stack = "Alice's private stack";
+      }, NO_OUTPUTS);
+      const approval = await tool.approval({ requestId: "approval" });
+      expect(await exported()).toContain("approved note");
+      expect(await exported()).not.toContain("private");
+      await approval.complete();
+      await tool.complete();
+      await attempt.complete();
+      await turn.complete();
+      expect(await exported()).toContain("approved note");
+      expect(await exported()).not.toContain("private");
+    },
+  );
+
+  it.each([
+    ["cached", "turn"],
+    ["restored", "turn"],
+    ["cached", "resume"],
+    ["restored", "resume"],
+  ] as const)("honors a remote capture decline on a %s %s", async (state, entrypoint) => {
+    const { tracing, turn, attempt, checkpointer, entries, exporter, exported } = await setup();
+    const tool = await attempt.tool({ callId: "lookup", name: "lookup" });
+    const receiver = state === "cached" ? tracing : worker(checkpointer, exporter);
+    const transport = createAgentDelegationTransport();
+    const headers = new Headers({
+      "x-agent-tracing": JSON.stringify({
+        caller: { traceId: "a".repeat(32), spanId: "b".repeat(16), traceFlags: 1 },
+        conversationId: identity.conversationId,
+        parentRunId: "caller-run",
+        parentCallId: "caller-call",
+        agentName: "support",
+        capture: METADATA,
+      }),
+    });
+    const reentered = await transport.receive(
+      headers,
+      () => true,
+      () =>
+        entrypoint === "turn"
+          ? receiver.turn({ agentName: "support", identity, sequence: 0, capture: ALL })
+          : receiver.resume({ identity }),
+    );
+    expect(reentered!.reference).toEqual(turn.reference);
+    const resumedAttempt = reentered!.findAttempt({ stepIndex: 0, attempt: 0 })!;
+    const resumedTool = await resumedAttempt.tool({
+      callId: "lookup",
+      name: "lookup",
+      arguments: { note: "Bob's private address" },
+    });
+    expect(resumedTool.reference).toEqual(tool.reference);
+    const approval = await resumedTool.approval({ requestId: "approval" });
+    expect(JSON.stringify([...entries.values()])).not.toContain("private address");
+    await approval.complete({ response: "Alice's private response" });
+    await resumedTool.complete({ output: "Alice's private result" });
+    await resumedAttempt.complete();
+    await reentered!.complete();
+    await receiver.forceFlush();
+    const output = await exported();
+    expect(output).not.toContain("private");
+    expect(exporter.getFinishedSpans().some((span) => span.name === "execute_tool lookup")).toBe(
+      true,
+    );
   });
 
   it("narrows a cached turn re-entered with less capture", async () => {

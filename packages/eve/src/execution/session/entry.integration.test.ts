@@ -1083,6 +1083,136 @@ describe("workflowEntry integration", () => {
     );
   }, 60_000);
 
+  it("lets a queued message sent after the approval appeared steer before the step returns", async () => {
+    const executions: string[] = [];
+    const approvalShown = Promise.withResolvers<void>();
+    const releaseStep = Promise.withResolvers<void>();
+    const holdStepOpen = {
+      logicalPath: "hooks/hold-step-open.ts",
+      loadNamespace: async () => ({
+        default: defineHook({
+          events: {
+            // Keeps the step that raised the approval running after it was
+            // published, the window a client that reacts at once lands in.
+            async "input.requested"() {
+              approvalShown.resolve();
+              await releaseStep.promise;
+            },
+          },
+        }),
+      }),
+    };
+    await withHeldApprovalRun(
+      {
+        agent: { name: "workflow-entry-steer-held-before-boundary" },
+        auth: ALICE,
+        modules: [gatedTool("approve_change", executions), holdStepOpen],
+      },
+      async ({ sessionInbox, stream }) => {
+        await withTimeout(approvalShown.promise, "approval shown");
+        await resumeHook(sessionInbox, {
+          auth: ALICE,
+          kind: "send",
+          payload: { message: "Never mind, just say hello." },
+          turnPolicy: "queue",
+        });
+        // Let the session accept the message before the step returns.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        releaseStep.resolve();
+
+        const held = await withTimeout(stream.nextTurn(), "approval hold");
+        const request = filterEventsByType(held, "input.requested")[0]?.data.requests[0];
+        expect(held.at(-1)?.type).toBe("turn.waiting");
+        const steered = await withTimeout(stream.nextTurn(), "steered turn");
+        expect(filterEventsByType(steered, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "ignored", requestId: request!.requestId }] } },
+        ]);
+        expect(steered.at(-1)?.type).toBe("session.waiting");
+        expect(executions).toEqual([]);
+      },
+    );
+  }, 60_000);
+
+  // https://github.com/vercel/eve/issues/786
+  it("keeps a queued message sent before an approval queued instead of answering it", async () => {
+    const executions: string[] = [];
+    const lookupStarted = Promise.withResolvers<void>();
+    const releaseLookup = Promise.withResolvers<void>();
+    const lookup = {
+      loadNamespace: async () => ({
+        default: defineTool({
+          description: "Look up the change to apply.",
+          execute: async () => {
+            lookupStarted.resolve();
+            await releaseLookup.promise;
+            return { stepKey: "change-1" };
+          },
+          inputSchema: {},
+        }),
+      }),
+      logicalPath: "tools/lookup_change.ts",
+    };
+    await withHeldApprovalRun(
+      {
+        agent: { name: "workflow-entry-stale-queued-approval" },
+        auth: ALICE,
+        message: "Use lookup_change, then approve_change.",
+        modules: [
+          lookup,
+          gatedTool("approve_change", executions, {
+            request: always(),
+            response: async () => ({ status: "allowed" as const }),
+          }),
+        ],
+      },
+      async ({ commandInbox, sessionInbox, stream }) => {
+        await withTimeout(lookupStarted.promise, "lookup started");
+        // Alice types while the turn runs, before any approval exists.
+        await resumeHook(sessionInbox, {
+          auth: ALICE,
+          kind: "send",
+          payload: { message: "approve" },
+          turnPolicy: "queue",
+        });
+        // Let the session admit the message before the step ends.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        releaseLookup.resolve();
+
+        const held = await withTimeout(stream.nextTurn(), "approval hold");
+        const request = filterEventsByType(held, "input.requested")[0]?.data.requests[0];
+        expect(request?.action.toolName).toBe("approve_change");
+        expect(held.at(-1)).toMatchObject({ data: { on: "input" }, type: "turn.waiting" });
+        expect(filterEventsByType(held, "approval.settled")).toHaveLength(0);
+        expect(executions).toEqual([]);
+
+        // Bob approves, so the settlement shows who answered.
+        await resumeHook(commandInbox, {
+          auth: BOB,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+        });
+        // The approval settles first; the queued message then runs as an ordinary message.
+        const answered = await withTimeout(
+          stream.nextUntil((event) => event.type === "message.received"),
+          "queued message",
+        );
+        expect(filterEventsByType(answered, "approval.settled")).toMatchObject([
+          {
+            data: {
+              outcome: "approved",
+              requestId: request!.requestId,
+              responderPrincipalId: expect.stringContaining("bob"),
+            },
+          },
+        ]);
+        expect(filterEventsByType(answered, "message.received").at(-1)?.data.message).toBe(
+          "approve",
+        );
+        expect(executions).toEqual(["approve_change"]);
+      },
+    );
+  }, 60_000);
+
   it("runs a steering message after the budget prompt that followed its cancelled approval", async () => {
     await withHeldApprovalRun(
       {

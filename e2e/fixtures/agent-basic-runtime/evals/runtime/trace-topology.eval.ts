@@ -3,7 +3,7 @@ import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "The installed tracing pipeline retains eve identity and model-step parent relationships.",
+    "The installed tracing pipeline retains eve identity, model-step parents, and explicitly enabled content for the private HTTP channel.",
   async test(t) {
     const turn = await t.send(
       "Alice is checking the support agent's diagnostics. Call inspect_trace once and report its result.",
@@ -18,8 +18,9 @@ export default defineEval({
           typeof value === "object" &&
           value !== null &&
           Reflect.get(value, "modelStep") === true &&
-          Reflect.get(value, "identity") === true,
-        "the model has its step parent and eve schema identity is preserved",
+          Reflect.get(value, "identity") === true &&
+          Reflect.get(value, "content") === true,
+        "the model has its step parent, eve schema identity, and captured input and output content",
       ),
     );
   },

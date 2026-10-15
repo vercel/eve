@@ -5,6 +5,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
   type ConnectionEventSubscribeOutcome,
+  type ConnectionEventSubscribeResult,
   type EventBinding,
   type EventOwner,
 } from "#runtime/connections/events/state.js";
@@ -35,8 +36,14 @@ export async function startConnectionEventOwner(
   const run = await startWorkflowOnCurrentDeployment(connectionEventWorkflowReference, [
     { binding, serializedContext: serializeContext(ctx) },
   ]);
-  const outcome = await readSubscribeOutcome(run.runId, signal);
-  if ("error" in outcome) throw new Error(outcome.error);
+  return subscriptionFromOutcome(await readSubscribeOutcome(run.runId, signal));
+}
+
+/** Connect's refusal reaches the caller with its status, so a 401 is classified as a sign-in request. */
+export function subscriptionFromOutcome(
+  outcome: ConnectionEventSubscribeResult,
+): ManagedEventSubscription {
+  if ("error" in outcome) throw Object.assign(new Error(outcome.error), { status: outcome.status });
   return outcome.subscription;
 }
 
@@ -64,7 +71,19 @@ export async function retireConnectionEventOwner(bindingId: string): Promise<voi
   }
 }
 
+/** What the run that owns this binding subscribed to, following a duplicate run to that owner. */
 async function readSubscribeOutcome(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<ConnectionEventSubscribeResult> {
+  const outcome = await readPublishedOutcome(runId, signal);
+  if (!("ownerRunId" in outcome)) return outcome;
+  const owned = await readPublishedOutcome(outcome.ownerRunId, signal);
+  if ("ownerRunId" in owned) throw new Error("Event handler ownership did not resolve.");
+  return owned;
+}
+
+async function readPublishedOutcome(
   runId: string,
   signal?: AbortSignal,
 ): Promise<ConnectionEventSubscribeOutcome> {

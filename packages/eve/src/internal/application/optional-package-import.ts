@@ -30,6 +30,18 @@ export async function resolveInstalledEnginePackageEntrypointHref(input: {
   return pathToFileURL(join(packageRoot, entry)).href;
 }
 
+/** Reads the version of an optional package installed in the application. */
+export async function readInstalledPackageVersion(input: {
+  readonly appRoot: string;
+  readonly packageName: string;
+}): Promise<string | undefined> {
+  const packageJsonPath = join(findInstalledPackageRoot(input), "package.json");
+  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+    readonly version?: unknown;
+  };
+  return typeof packageJson.version === "string" ? packageJson.version : undefined;
+}
+
 function findInstalledPackageRoot(input: {
   readonly appRoot: string;
   readonly packageName: string;

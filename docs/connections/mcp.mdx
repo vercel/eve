@@ -284,7 +284,8 @@ Registration mounts the receiver; it does not create a subscription.
 Each subscription is owned by one durable handler workflow. Subscribing starts it:
 the handler registers its hook, then calls Connect, so a delivery that arrives
 before the subscribe response waits for it. If Connect rejects the subscription,
-the action fails and the handler ends. The handler's input holds the binding (the
+the action fails and the handler ends. A timeout or server error is retried with
+the same idempotency key, so a subscription Connect already created is reused. The handler's input holds the binding (the
 creator, their auth and the request); eve keeps no other copy. Connect owns the
 subscription's status and lifetime.
 
@@ -294,6 +295,8 @@ of the creator's sessions. There is no list action yet. Ending the originating
 session does not stop the watch. Stop, expiry, or upstream termination ends it.
 Stop cancels the subscription in Connect first, then ends its handler.
 `cleanupStatus: "pending"` means Connect is still finishing upstream cancellation.
+An ended watch stays reachable by its `id` for seven days, so get and stop still
+report Connect's status while that cleanup finishes.
 
 The receiver verifies Connect's delivery, then queues it to a durable event-handler
 workflow. It responds with `202` after durable acceptance. The handler checks the
@@ -317,7 +320,7 @@ tools: `tools.allow`, `tools.block`, and `toolCall.providedArguments` do not app
 them. Event discovery failures leave ordinary MCP tools available. Remote tools must
 not use the generated `events_` action names.
 
-It requires the matching Connect events bridge. The receiver mounts at
+It requires `@vercel/connect@2.5.2` or later for the Connect events bridge. The receiver mounts at
 `POST /eve/v1/hooks/:connectionName`, including any configured agent or public prefix.
 It authenticates Connect's delivery-purpose OIDC token over HTTPS; the body is not
 separately signed. Saved bindings determine execution identity, not delivery context.

@@ -41,30 +41,40 @@ interface RenderContext {
   /** Shared across one schema's render; counts down to zero. */
   readonly budget: { remaining: number };
   readonly depth: number;
+  readonly descriptions: boolean;
   readonly refs: ReadonlySet<string>;
   readonly root: Schema;
 }
 
-export function renderToolSignature(input: {
+interface SignatureInput {
   readonly name: string;
   readonly inputSchema?: Record<string, unknown>;
   readonly outputSchema?: Record<string, unknown>;
-}): string {
-  const inputType = input.inputSchema === undefined ? "{}" : renderRoot(input.inputSchema);
-  const outputType = input.outputSchema === undefined ? "unknown" : renderRoot(input.outputSchema);
-  const signature = `${input.name}(input: ${inputType}): Promise<${outputType}>`;
-  return signature.length > MAX_SIGNATURE_LENGTH
-    ? `${signature.slice(0, MAX_SIGNATURE_LENGTH - 3)}...`
-    : signature;
 }
 
-function renderRoot(schema: Schema): string {
-  return renderType(schema, {
-    budget: { remaining: MAX_NODES },
-    depth: 0,
-    refs: new Set(),
-    root: schema,
-  });
+export function renderToolSignature(input: SignatureInput): string {
+  const signature = renderSignature(input, true);
+  if (signature.length <= MAX_SIGNATURE_LENGTH) return signature;
+  // A field missing from the signature reads as a field the tool doesn't have,
+  // so property names outrank their descriptions.
+  const compact = renderSignature(input, false);
+  return compact.length > MAX_SIGNATURE_LENGTH
+    ? `${compact.slice(0, MAX_SIGNATURE_LENGTH - 3)}...`
+    : compact;
+}
+
+function renderSignature(input: SignatureInput, descriptions: boolean): string {
+  const render = (schema: Schema) =>
+    renderType(schema, {
+      budget: { remaining: MAX_NODES },
+      depth: 0,
+      descriptions,
+      refs: new Set(),
+      root: schema,
+    });
+  const inputType = input.inputSchema === undefined ? "{}" : render(input.inputSchema);
+  const outputType = input.outputSchema === undefined ? "unknown" : render(input.outputSchema);
+  return `${input.name}(input: ${inputType}): Promise<${outputType}>`;
 }
 
 function renderType(schema: unknown, context: RenderContext): string {
@@ -136,7 +146,7 @@ function renderObject(schema: Schema, context: RenderContext): string {
   const fields = Object.entries(properties).map(([key, value]) => {
     const name = IDENTIFIER.test(key) ? key : JSON.stringify(key);
     const optional = required.has(key) ? "" : "?";
-    const comment = isObject(value) ? propertyComment(value) : "";
+    const comment = isObject(value) ? propertyComment(value, context.descriptions) : "";
     return `${name}${optional}: ${renderType(value, next(context))}${comment}`;
   });
   const extra = schema.additionalProperties;
@@ -147,10 +157,10 @@ function renderObject(schema: Schema, context: RenderContext): string {
   return `{ ${fields.join("; ")} }`;
 }
 
-function propertyComment(schema: Schema): string {
+function propertyComment(schema: Schema, descriptions: boolean): string {
   const parts: string[] = [];
   const description =
-    typeof schema.description === "string"
+    descriptions && typeof schema.description === "string"
       ? schema.description
           .replaceAll(/\s+/gu, " ")
           .replace(/[\s.;,:]+$/u, "")

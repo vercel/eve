@@ -28,19 +28,12 @@ export async function handleConnectionEventRequest(
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: resolveNitroCompiledArtifactsSource(input.artifactsConfig),
       });
-      const connection = bundle.resolvedAgent.connections.find(
+      const events = bundle.resolvedAgent.connections.find(
         (connection) => connection.connectionName === input.connectionName,
-      );
-      const auth = connection?.authorization;
-      if (
-        connection?.experimental_events === undefined ||
-        auth === undefined ||
-        typeof auth === "function" ||
-        auth.vercelConnect?.experimental_events === undefined
-      )
-        return new Response(null, { status: 404 });
+      )?.experimental_events;
+      if (events === undefined) return new Response(null, { status: 404 });
       stage = "verify";
-      const delivery = await auth.vercelConnect.experimental_events.verify(request, {
+      const delivery = await events.backend.verify(request, {
         path: connectionEventDestination(input.connectionName),
       });
       const origin = delivery.context.eve;

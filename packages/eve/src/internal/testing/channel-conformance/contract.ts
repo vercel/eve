@@ -887,6 +887,31 @@ const signInRules = [
     },
   },
   {
+    rule: "someone else pressing a sign-in isn't shown its link or code",
+    source:
+      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+    requires: ["another-person", "buttons"],
+    variesByConversation: true,
+    surfaces: ["shared"],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.waitForRest();
+      const challenges = async () =>
+        (await conversation.shownTexts()).filter(
+          (text) => text.includes(CALENDAR.url) || text.includes(CALENDAR.userCode),
+        ).length;
+      const before = await challenges();
+      const open = (await conversation.shownOptions()).find((option) =>
+        SIGN_IN_OPENERS.test(option.label),
+      );
+      expect(open, "a Sign in button for Bob to press").toBeDefined();
+      await conversation.press(open!, "bob");
+      await conversation.waitForRest();
+      expect(await challenges(), "Bob's press showed him the sign-in link or code").toBe(before);
+    },
+  },
+  {
     rule: "a sign-in without a link shows its instructions",
     source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
     requires: [],

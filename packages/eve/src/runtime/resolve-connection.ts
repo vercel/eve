@@ -135,10 +135,26 @@ export async function resolveConnectionDefinition(
     }
 
     if (definition.experimental_events === true) {
-      result.experimental_events = normalizeMcpClientConnectionDefinition(
+      const callbacks = normalizeMcpClientConnectionDefinition(
         resolvedRecord,
         `Connection "${definition.connectionName}":`,
       ).experimental_events;
+      const authorization =
+        typeof result.authorization === "object" ? result.authorization : undefined;
+      if (
+        callbacks === undefined ||
+        authorization?.vercelConnect?.experimental_events === undefined
+      )
+        throw new ResolveAgentError(
+          `Connection "${definition.connectionName}": experimental_events requires a static Connect auth provider with the events bridge.`,
+          { logicalPath: definition.logicalPath, sourceId: definition.sourceId },
+        );
+      result.experimental_events = {
+        callbacks,
+        authorization,
+        connector: authorization.vercelConnect.connector,
+        backend: authorization.vercelConnect.experimental_events,
+      };
     }
 
     if (hasHeaders) {

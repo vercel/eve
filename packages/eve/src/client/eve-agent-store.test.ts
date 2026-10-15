@@ -1037,6 +1037,139 @@ describe("EveAgentStore prewarming", () => {
   });
 });
 
+describe("EveAgentStore with followIdle disabled", () => {
+  function streamRequests(fetchMock: { mock: { calls: unknown[][] } }) {
+    return fetchMock.mock.calls
+      .map(([request, init]) => ({ url: String(request), init: init as RequestInit | undefined }))
+      .filter(({ init }) => init?.method !== "POST");
+  }
+
+  it("opens the stream for each turn and reopens it from the session cursor", async () => {
+    const first = controlledStreamResponse();
+    const second = controlledStreamResponse();
+    let delivery = 0;
+    let streams = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method === "POST") return startedResponse(`delivery_${(delivery += 1)}`);
+      streams += 1;
+      return streams === 1 ? first.response : second.response;
+    });
+    const store = createStore({ followIdle: false, reducer: defaultMessageReducer() });
+    const emitTurn = (live: typeof first, deliveryId: string, idPrefix: string) => {
+      for (const event of turnEvents()) {
+        live.emit({
+          ...event,
+          meta: { ...event.meta, deliveryIds: [deliveryId], id: `${idPrefix}-${event.meta.id}` },
+        });
+      }
+    };
+
+    await store.prewarm();
+    expect(streamRequests(fetchMock)).toHaveLength(0);
+
+    const firstSend = store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(streamRequests(fetchMock)).toHaveLength(1));
+    emitTurn(first, "delivery_2", "first");
+    await firstSend;
+    expect(store.snapshot.status).toBe("ready");
+    expect(streamRequests(fetchMock)[0]!.init?.signal?.aborted).toBe(true);
+
+    const secondSend = store.send({ message: "Hello again" });
+    await vi.waitFor(() => expect(streamRequests(fetchMock)).toHaveLength(2));
+    expect(streamRequests(fetchMock)[1]!.url).toContain("startIndex=3");
+    emitTurn(second, "delivery_3", "second");
+    await secondSend;
+
+    expect(store.snapshot.events).toHaveLength(6);
+    expect(store.snapshot.session?.streamIndex).toBe(6);
+    expect(streamRequests(fetchMock)[1]!.init?.signal?.aborted).toBe(true);
+  });
+
+  it("keeps the stream open until a task that outlives its turn settles", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_request, init) =>
+        init?.method === "POST" ? startedResponse() : live.response,
+      );
+    const store = createStore({
+      followIdle: false,
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const withDelivery = (events: MessageStreamEvent[]) =>
+      events.map((event) => ({ ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } }));
+
+    const send = store.send({ message: "Research Alice's region" });
+    await vi.waitFor(() => expect(streamRequests(fetchMock)).toHaveLength(1));
+    for (const event of withDelivery(
+      stampTestEvents([
+        createMessageReceivedEvent({
+          message: "Research Alice's region",
+          sequence: 0,
+          turnId: "turn_1",
+        }),
+        createTaskStartedEvent({
+          callId: "call_1",
+          kind: "agent",
+          name: "researcher",
+          taskId: "task_1",
+          turnId: "turn_1",
+        }),
+        createTurnCompletedEvent({ sequence: 1, turnId: "turn_1" }),
+        createSessionWaitingEvent(TEST_USAGE),
+      ]),
+    ))
+      live.emit(event);
+    await send;
+    const stream = streamRequests(fetchMock)[0]!;
+    expect(stream.init?.signal?.aborted).toBe(false);
+
+    for (const event of stampTestEvents([
+      createTaskSettledEvent({
+        callId: "call_1",
+        output: "Alice works in the west region.",
+        status: "completed",
+        taskId: "task_1",
+        turnId: "turn_1",
+      }),
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_2" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Alice works in the west region.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+      createTurnCompletedEvent({ sequence: 2, turnId: "turn_2" }),
+      createSessionWaitingEvent(TEST_USAGE),
+    ]).map((event) => ({ ...event, meta: { ...event.meta, id: `task-${event.meta.id}` } })))
+      live.emit(event);
+
+    await vi.waitFor(() => expect(stream.init?.signal?.aborted).toBe(true));
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toHaveLength(9);
+  });
+
+  it("closes the stream after resuming a settled session", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => boundedStreamResponse(turnEvents()));
+    const store = createStore({
+      followIdle: false,
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+
+    await store.resume();
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.events).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(streamRequests(fetchMock)[0]!.init?.signal?.aborted).toBe(true);
+  });
+});
+
 describe("EveAgentStore stream overlap", () => {
   it("reconstructs a split message across an in-memory stream reconnect", async () => {
     const events = streamingTurnEvents();

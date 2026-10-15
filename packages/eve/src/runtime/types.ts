@@ -1,4 +1,5 @@
 import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
+import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -100,8 +101,17 @@ export type ResolvedScheduleDefinition = Readonly<
  * Both `authorization` and `headers` are optional — a connection to a
  * server that requires no authentication (e.g. localhost) may omit both.
  */
+/** A connection's event watching, checked once when the connection resolves. */
+export interface ResolvedConnectionEvents {
+  readonly callbacks: Experimental_ConnectionEvents;
+  /** The static Connect authorization every watch subscribes and runs under. */
+  readonly authorization: Readonly<AuthorizationDefinition>;
+  readonly connector: string;
+  readonly backend: ConnectionEventsBackend;
+}
+
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
-  readonly experimental_events?: Experimental_ConnectionEvents;
+  readonly experimental_events?: ResolvedConnectionEvents;
   readonly protocolVersionDiscovery?: boolean;
   /** MCP only: send the turn's principals in `eve-forwarded-principal`. */
   readonly forwardPrincipal?: boolean;

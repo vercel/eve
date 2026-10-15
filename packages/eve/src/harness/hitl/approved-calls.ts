@@ -8,6 +8,7 @@ import {
 } from "ai";
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
@@ -61,6 +62,8 @@ export async function runApprovedCalls(input: {
   readonly abortSignal: AbortSignal | undefined;
   /** The step attempt's telemetry, which hears each execution as the AI SDK reports it. */
   readonly telemetry?: TelemetryOptions;
+  /** Who approved each request, which the call reads as `ctx.approval`; it still runs as the requester. */
+  readonly responderOf: (request: InputRequest) => SessionAuthContext | undefined;
 }): Promise<{
   readonly settled: readonly ApprovedCallResult[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
@@ -74,9 +77,9 @@ export async function runApprovedCalls(input: {
   const settleFailure = async (
     callId: string,
     toolName: string,
-    message: string,
+    failure: Error | string,
   ): Promise<ApprovedCallResult> => {
-    const failed = failedCall({ callId, message, toolName });
+    const failed = failedCall({ callId, failure, toolName });
     await input.publish(createActionResultEvent({ ...at, result: failed.result }));
     return { part: failed.part };
   };
@@ -133,7 +136,8 @@ export async function runApprovedCalls(input: {
           return { settled, toolResults };
         }
         let output: unknown;
-        let failed = false;
+        /** The error the tool threw, kept whole so the result records its name. */
+        let failure: Error | undefined;
         const telemetry = toolTelemetry(input.telemetry, {
           messages: [...input.messages],
           toolCall: { input: args, toolCallId: callId, toolName, type: "tool-call" },
@@ -145,7 +149,9 @@ export async function runApprovedCalls(input: {
             const startedAt = performance.now();
             try {
               started = true;
+              const responder = input.responderOf(request);
               const executed = execute(args, {
+                ...(responder !== undefined && { approval: { responder } }),
                 abortSignal: input.abortSignal,
                 messages: [...input.messages],
                 toolCallId: callId,
@@ -184,10 +190,10 @@ export async function runApprovedCalls(input: {
           );
           throwIfTurnAborted(input.abortSignal);
           logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
-          failed = true;
-          output = toError(error).message;
+          failure = toError(error);
+          output = failure.message;
         }
-        if (!failed) {
+        if (failure === undefined) {
           await telemetry.ended(
             { input: args, output, toolCallId: callId, toolName, type: "tool-result" },
             executionMs,
@@ -204,9 +210,10 @@ export async function runApprovedCalls(input: {
         if (isInlineAuthorizationToolResult(result)) return { settled, toolResults };
         completed = {
           part: {
-            output: failed
-              ? { type: "error-text", value: String(output) }
-              : await toolCallModelOutput(definition, output, callId),
+            output:
+              failure !== undefined
+                ? { type: "error-text", value: failure.message }
+                : await toolCallModelOutput(definition, output, callId),
             toolCallId: callId,
             toolName,
             type: "tool-result",
@@ -216,10 +223,16 @@ export async function runApprovedCalls(input: {
         await input.publish(
           createActionResultEvent({
             ...at,
-            presentation: failed
-              ? undefined
-              : projectResultPresentation(definition, callId, parseJsonObject(args), output),
-            result: createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
+            presentation:
+              failure !== undefined
+                ? undefined
+                : projectResultPresentation(definition, callId, parseJsonObject(args), output),
+            result: createRuntimeToolResultFromValue({
+              callId,
+              isError: failure !== undefined,
+              output: failure ?? output,
+              toolName,
+            }),
           }),
         );
         return { settled, toolResults };
@@ -231,7 +244,7 @@ export async function runApprovedCalls(input: {
         }
         logError(log, "approved tool failed", error, { toolName, toolCallId: callId });
         return {
-          settled: [await settleFailure(callId, toolName, toError(error).message)],
+          settled: [await settleFailure(callId, toolName, toError(error))],
           toolResults,
         };
       }

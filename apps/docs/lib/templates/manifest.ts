@@ -4,6 +4,7 @@
 export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing";
 
 export type TemplateIntegration =
+  | "Contentful"
   | "Datadog"
   | "GitHub"
   | "HTTP API"
@@ -11,6 +12,7 @@ export type TemplateIntegration =
   | "Linq"
   | "Mux"
   | "Notion"
+  | "Postgres"
   | "Resend"
   | "Sanity"
   | "Sentry"
@@ -18,6 +20,7 @@ export type TemplateIntegration =
   | "Stripe Link"
   | "Typefully"
   | "Vercel"
+  | "Voice"
   | "Web chat";
 
 export type TemplateSource = "GitHub" | "Vercel Templates";
@@ -34,6 +37,7 @@ export interface TemplateGitHubSource {
 export interface TemplateManifestEntry {
   slug: string;
   title: string;
+  featured?: boolean;
   /** Hide from the gallery while keeping the detail page available. */
   unlisted?: boolean;
   description: string;
@@ -54,6 +58,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-chat-template",
     title: "Web Chat Agent",
+    featured: true,
     setupPrompt:
       "Set up the eve chat template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -80,8 +85,61 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-agent-with-python",
+    title: "Full Stack Agent with Python Backend",
+    setupPrompt:
+      "Set up the eve agent with Python template in my current workspace using https://github.com/vercel-labs/eve-agent-python-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Python, uv, password, database, and Vercel setup steps.",
+    description:
+      "A Next.js web chat with a Python FastAPI backend, where an eve agent manages a shared task list and runs Python tools for statistics and text analysis.",
+    sourceHref: "https://github.com/vercel-labs/eve-agent-python-template/tree/main",
+    category: "Chat",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Web chat", "Postgres", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-agent-python-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/instructions.md",
+      "agent/lib/backend.ts",
+      "agent/tools/create_task.ts",
+      "agent/tools/compute_stats.ts",
+      "agent/tools/analyze_text.ts",
+      "vercel.ts",
+    ],
+  },
+  {
+    slug: "eve-voice-template",
+    title: "Voice Agent",
+    setupPrompt:
+      "Set up the eve voice template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-voice-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
+    description:
+      "A Next.js voice app where GPT-Live-1 on AI Gateway handles listening and speaking while your eve agent runs tools, asks for approvals, and keeps durable state.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-voice-template",
+    category: "Chat",
+    model: "anthropic/claude-haiku-5.5",
+    integrations: ["Voice", "Web chat"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-voice-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/instructions.md",
+      "agent/tools/create_reminder.ts",
+      "agent/tools/get_weather.ts",
+      "apps/web/app/api/live/client-secret/route.ts",
+      "apps/web/components/voice-call.tsx",
+    ],
+  },
+  {
     slug: "eve-slack-agent",
     title: "Slack Assistant",
+    featured: true,
     setupPrompt:
       "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -106,8 +164,123 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-data-analyst-template",
+    title: "Data Analyst",
+    setupPrompt:
+      "Set up the eve data analyst template in my current workspace using https://github.com/vercel-labs/eve-data-analyst-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required database, Slack, and Vercel setup steps.",
+    description:
+      "A Slack-based data analyst that answers business questions from Postgres, with charts and tables for useful results.",
+    sourceHref: "https://github.com/vercel-labs/eve-data-analyst-template/tree/main",
+    category: "Collaboration",
+    model: "anthropic/claude-opus-5.5",
+    integrations: ["Slack", "Postgres", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-data-analyst-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/instructions.md",
+      "agent/skills/metric-definitions.md",
+      "agent/tools/describe_schema.ts",
+      "agent/tools/run_sql.ts",
+      "agent/tools/post_slack_chart.ts",
+    ],
+  },
+  {
+    slug: "eve-contentful-agent-template",
+    title: "Contentful Assistant",
+    setupPrompt:
+      "Set up the eve Contentful agent template in my current workspace using https://github.com/vercel-labs/eve-contentful-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required Contentful, Slack, and Vercel setup steps.",
+    description:
+      "A Slack-based Contentful assistant that searches, drafts, and edits entries, with approval before publishing content.",
+    sourceHref: "https://github.com/vercel-labs/eve-contentful-agent-template/tree/main",
+    category: "Collaboration",
+    model: "openai/gpt-6.1-sol-fast",
+    integrations: ["Slack", "Contentful", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-contentful-agent-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/instructions.md",
+      "agent/schedules/contentful-mirror-nightly.ts",
+      "agent/skills/contentful-query.ts",
+      "agent/tools/search_contentful_entries.ts",
+      "agent/tools/update_contentful_fields.ts",
+      "agent/tools/publish_contentful_entry.ts",
+    ],
+  },
+  {
+    slug: "eve-vercel-drives-starter",
+    title: "Team Knowledge Assistant",
+    setupPrompt:
+      "Set up the eve Vercel Drives starter in my current workspace using https://github.com/vercel-labs/eve-vercel-drives-starter as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the Slack and Vercel setup steps.",
+    description:
+      "An eve agent that searches files on a Vercel Drive and saves new notes or documents, through Slack or the terminal.",
+    sourceHref: "https://github.com/vercel-labs/eve-vercel-drives-starter/tree/main",
+    category: "Collaboration",
+    model: "openai/gpt-6.1-sol-fast",
+    integrations: ["Slack", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-vercel-drives-starter", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/instructions.md",
+      "agent/lib/drive.ts",
+      "agent/sandbox.ts",
+      "agent/tools/save_to_drive.ts",
+    ],
+  },
+  {
+    slug: "eve-memory-agent-template",
+    title: "Memory Agent",
+    setupPrompt:
+      "Set up the eve memory agent template in my current workspace using https://github.com/vercel-labs/eve-memory-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required Slack and Vercel setup steps.",
+    description:
+      "A Slack assistant that remembers each user's preferences and shared channel conventions in separate long-term memories.",
+    sourceHref: "https://github.com/vercel-labs/eve-memory-agent-template/tree/main",
+    category: "Collaboration",
+    model: "openai/gpt-6.1-sol-fast",
+    integrations: ["Slack", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-memory-agent-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/instructions.md",
+      "agent/memory/channel-preferences.ts",
+      "agent/memory/user-preferences.ts",
+      "agent/tools/agent.ts",
+    ],
+  },
+  {
+    slug: "eve-tanstack-start-template",
+    title: "TanStack Start Chat",
+    setupPrompt:
+      "Set up the eve TanStack Start template in my current workspace using https://github.com/vercel-labs/eve-tanstack-start-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required password and deployment setup steps.",
+    description:
+      "A password-protected web chat built with eve and TanStack Start, with generative UI for search results, forms, and data tables.",
+    sourceHref: "https://github.com/vercel-labs/eve-tanstack-start-template/tree/main",
+    category: "Chat",
+    model: "openai/gpt-6.1-sol-fast",
+    integrations: ["Web chat", "Vercel"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-tanstack-start-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/instructions.md",
+      "agent/sandbox.ts",
+      "agent/tools/ask_question.ts",
+      "agent/tools/render_ui.ts",
+      "apps/web/app/routes/index.tsx",
+      "apps/web/app/_components/agent-chat.tsx",
+    ],
+  },
+  {
     slug: "eve-software-factory-template",
     title: "Software Factory",
+    featured: true,
     setupPrompt:
       "I want to build a software factory with the eve framework, using the Foreman template. Read the setup instructions at https://ask-foreman.dev/docs/getting-started and follow them. They cover deploying the template, connecting GitHub and Linear, running it locally, and how the pipeline works overall.",
     description:

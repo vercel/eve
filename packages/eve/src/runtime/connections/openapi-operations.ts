@@ -44,12 +44,14 @@ export function operationName(
   return sanitizeToolName(`${method}_${sanitizedPath}`);
 }
 
+const MAX_TOOL_NAME_LENGTH = 64;
+
 /** Coerces an arbitrary string into a provider-legal tool name (`[a-zA-Z0-9_-]`, ≤64). */
 function sanitizeToolName(name: string): string {
   return name
     .replace(/[^a-zA-Z0-9_-]+/g, "_")
     .replace(/^[_-]+|[_-]+$/g, "")
-    .slice(0, 64);
+    .slice(0, MAX_TOOL_NAME_LENGTH);
 }
 
 /** Disambiguates a tool name against names already used in the same connection. */
@@ -57,7 +59,8 @@ export function uniqueName(name: string, used: Set<string>): string {
   let candidate = name;
   let suffix = 2;
   while (used.has(candidate)) {
-    candidate = `${name}_${suffix}`;
+    const ending = `_${suffix}`;
+    candidate = `${name.slice(0, MAX_TOOL_NAME_LENGTH - ending.length)}${ending}`;
     suffix += 1;
   }
   used.add(candidate);

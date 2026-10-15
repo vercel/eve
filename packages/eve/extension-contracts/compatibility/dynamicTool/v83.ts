@@ -1,20 +1,18 @@
 import { defineDynamic, defineTool } from "#public/tools/index.js";
 
-// Epoch 83 dynamic tools can use Connect auth without opting into event handling.
+// Epoch 83 tool contexts had no `approval`; epoch 84 adds it as optional.
+// Dynamic tools that read the session auth keep observing the requester.
 export default defineDynamic({
   events: {
-    "session.started": () => ({
-      authorization: defineTool({
-        description: "Check that the issue service is authorized.",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false },
-        async execute(_input, ctx) {
-          const { token } = await ctx.getToken({
-            principalType: "app",
-            getToken: async () => ({ token: "service-credential" }),
-            vercelConnect: { connector: "oauth/issues" },
-          });
-          return { authorized: token.length > 0 };
-        },
+    "turn.started": (_event, ctx) => ({
+      requester: defineTool({
+        deferred: true,
+        description: "Return the active session's requester.",
+        inputSchema: { type: "object", properties: {} },
+        execute: (_input, toolContext) => ({
+          sessionId: ctx.session.id,
+          requester: toolContext.session.auth.current?.principalId ?? null,
+        }),
       }),
     }),
   },

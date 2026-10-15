@@ -58,6 +58,11 @@ export class SessionInputQueue {
     return this.entries.length;
   }
 
+  /** The sequence the next admission receives; every earlier admission is below it. */
+  get nextAdmission(): number {
+    return this.nextSequence;
+  }
+
   enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission {
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
@@ -136,7 +141,9 @@ export class SessionInputQueue {
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn, options),
+        isSteeringDelivery(entry.delivery, turn, {
+          heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
+        }),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -219,22 +226,25 @@ export interface SteeringTurn {
 
 export interface SteeringOptions {
   /**
-   * The turn waits on its own person for a sign-in or approval. Their message
-   * steers even with `turnPolicy: "queue"`: queued, it would wait for a turn
-   * that cannot end until they act.
+   * The turn waits on its own person for a sign-in or approval, held since
+   * this admission sequence. Their later messages steer even with
+   * `turnPolicy: "queue"`: queued, they would wait for a turn that cannot end
+   * until they act. Earlier ones were sent before the request existed, so
+   * they stay queued and never answer it.
    */
-  readonly heldOnPerson?: boolean;
+  readonly heldSince?: number;
 }
 
 /**
  * Only the turn's own principal steers it; another principal's message waits
  * for the turn to end. A delivery without auth acts as the session's current
- * identity, which is the turn's.
+ * identity, which is the turn's. `heldOnPerson` lets a queued message steer a
+ * turn that waits on its person.
  */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
-  options?: SteeringOptions,
+  options?: { readonly heldOnPerson?: boolean },
 ): boolean {
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&

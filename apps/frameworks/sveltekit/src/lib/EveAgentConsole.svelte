@@ -44,6 +44,17 @@
   });
 
   let messageText = $state("");
+  let prewarmRequested = false;
+
+  $effect(() => {
+    if (messageText.trim().length === 0) {
+      prewarmRequested = false;
+      return;
+    }
+    if (prewarmRequested) return;
+    prewarmRequested = true;
+    void agent.prewarm().catch(() => {});
+  });
 
   function submitMessage() {
     const text = messageText.trim();

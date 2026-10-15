@@ -208,6 +208,20 @@ describe("Braintrust", () => {
     );
   });
 
+  it("logs an empty output for an eval that produced no agent output", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+    const result = makeEvalResult();
+
+    reporter.onEvalComplete({
+      ...result,
+      result: { ...result.result, finalMessage: null, output: null },
+    });
+
+    // Braintrust rejects a null or undefined output with "output must be specified".
+    expect(braintrustMocks.log).toHaveBeenCalledWith(expect.objectContaining({ output: "" }));
+  });
+
   it("scores repeated assertions by their lowest member and keeps each score in metadata", async () => {
     const reporter = Braintrust(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
@@ -233,6 +247,36 @@ describe("Braintrust", () => {
           ],
         }),
       }),
+    );
+  });
+
+  it("logs labeled assertions under their label", async () => {
+    const reporter = Braintrust(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      makeEvalResult({
+        assertions: [
+          {
+            name: "score [grounding]",
+            key: "grounding",
+            score: 0.8,
+            severity: "soft",
+            errored: false,
+          },
+          {
+            name: "judge.boolean [citation]",
+            key: "citation",
+            score: 1,
+            severity: "gate",
+            errored: false,
+          },
+        ],
+      }),
+    );
+
+    expect(braintrustMocks.log).toHaveBeenCalledWith(
+      expect.objectContaining({ scores: { grounding: 0.8, "gate:citation": 1 } }),
     );
   });
 });

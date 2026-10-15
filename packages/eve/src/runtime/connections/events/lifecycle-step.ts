@@ -4,55 +4,52 @@ import {
   connectionEventWorkflowReference,
   startWorkflowOnCurrentDeployment,
 } from "#execution/workflow-runtime.js";
+import { readHttpStatus } from "#runtime/connections/mcp-client.js";
 import { resolveBinding } from "#runtime/connections/events/dispatch-step.js";
-import { retireConnectionEventOwner } from "#runtime/connections/events/owner.js";
-import { connectionEventDestination } from "#runtime/connections/events/path.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
+import {
+  connectionEventDestination,
+  connectionEventHandoverToken,
+} from "#runtime/connections/events/path.js";
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
-  type ConnectionEventReceipts,
+  type ConnectionEventHandover,
   type ConnectionEventSubscribeOutcome,
+  type ConnectionEventSubscribeResult,
   type EventBinding,
 } from "#runtime/connections/events/state.js";
-import type { ManagedEventSubscription } from "#shared/connection-events.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 
 /**
  * Subscribes from inside the handler run, after its hook is registered, so a
- * delivery that beats the subscribe response waits on the hook. A successor
- * run republishes the subscription it inherited instead of subscribing again.
+ * delivery that beats the subscribe response waits on the hook.
  */
 export async function openConnectionEventStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly binding: EventBinding;
-  readonly subscription: ManagedEventSubscription | undefined;
-}): Promise<ConnectionEventSubscribeOutcome> {
+}): Promise<ConnectionEventSubscribeResult> {
   "use step";
-  const outcome: ConnectionEventSubscribeOutcome =
-    input.subscription === undefined
-      ? await subscribeConnectionEvent(input.serializedContext, input.binding)
-      : { subscription: input.subscription };
-  const writer = getWritable<ConnectionEventSubscribeOutcome>({
-    namespace: CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
-  }).getWriter();
-  try {
-    await writer.write(outcome);
-  } finally {
-    writer.releaseLock();
-  }
+  const outcome = await subscribeConnectionEvent(input.serializedContext, input.binding);
+  await publishOutcome(outcome);
   return outcome;
 }
 
-/** The model sees any failure, and the run then ends without a watch. */
+/**
+ * Connect's definitive refusals reach the model, and the run then ends
+ * without a watch. Anything else, such as a timeout after Connect may have
+ * created the subscription, throws so the step retries with the same
+ * idempotency key.
+ */
 export async function subscribeConnectionEvent(
   serializedContext: Record<string, unknown>,
   binding: EventBinding,
-): Promise<ConnectionEventSubscribeOutcome> {
+): Promise<ConnectionEventSubscribeResult> {
+  const ctx = await deserializeContext(serializedContext);
+  const resolved = resolveBinding(ctx, binding);
+  if (resolved === undefined)
+    return { error: "This connection no longer accepts the subscription's binding." };
+  const { connection, principal, events } = resolved;
   try {
-    const ctx = await deserializeContext(serializedContext);
-    const resolved = resolveBinding(ctx, binding);
-    if (resolved === undefined)
-      return { error: "This connection no longer accepts the subscription's binding." };
-    const { connection, principal, backend } = resolved;
     const subscription = await withConnectionEventSpan(
       {
         ctx,
@@ -61,7 +58,7 @@ export async function subscribeConnectionEvent(
         operation: "subscribe",
       },
       async () => {
-        const adapter = await backend.createAdapter({
+        const adapter = await events.backend.createAdapter({
           principal,
           connection: { url: connection.url },
           destination: { path: connectionEventDestination(connection.connectionName) },
@@ -72,29 +69,64 @@ export async function subscribeConnectionEvent(
     // Snapshot the SDK's readonly JSON into the run's owned state.
     return { subscription: structuredClone(subscription) };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) };
+    const status = readHttpStatus(error);
+    if (status === undefined || !isRefusal(status)) throw error;
+    return { error: error instanceof Error ? error.message : String(error), status };
+  }
+}
+
+/** A 4xx other than a timeout or rate limit: retrying the same request can't succeed. */
+function isRefusal(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
+ * Publishes what this run holds for readers outside it: a successor's
+ * inherited subscription, or the run a duplicate's caller should read.
+ */
+export async function publishConnectionEventOutcomeStep(
+  outcome: ConnectionEventSubscribeOutcome,
+): Promise<void> {
+  "use step";
+  await publishOutcome(outcome);
+}
+
+async function publishOutcome(outcome: ConnectionEventSubscribeOutcome): Promise<void> {
+  const writer = getWritable<ConnectionEventSubscribeOutcome>({
+    namespace: CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
+  }).getWriter();
+  try {
+    await writer.write(outcome);
+  } finally {
+    writer.releaseLock();
   }
 }
 
 /** Starts the run that takes over this watch's hook, so no run's log grows without bound. */
-export async function handOverConnectionEventStep(input: {
+export async function startConnectionEventSuccessorStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly binding: EventBinding;
-  readonly subscription: ManagedEventSubscription;
-  readonly receipts: ConnectionEventReceipts;
+  readonly generation: number;
 }): Promise<void> {
   "use step";
   await startWorkflowOnCurrentDeployment(connectionEventWorkflowReference, [
     {
       binding: input.binding,
       serializedContext: input.serializedContext,
-      handover: { subscription: input.subscription, receipts: input.receipts },
+      generation: input.generation,
     },
   ]);
 }
 
-/** Forwards a stop that reached a run after its successor took the hook. */
-export async function retireConnectionEventStep(bindingId: string): Promise<void> {
+/**
+ * Sends the successor this run's final state. The successor registers this
+ * hook before it takes the watch hook, so it exists by the time a takeover is seen.
+ */
+export async function passConnectionEventHandoverStep(input: {
+  readonly bindingId: string;
+  readonly generation: number;
+  readonly handover: ConnectionEventHandover;
+}): Promise<void> {
   "use step";
-  await retireConnectionEventOwner(bindingId);
+  await resumeHook(connectionEventHandoverToken(input.bindingId, input.generation), input.handover);
 }

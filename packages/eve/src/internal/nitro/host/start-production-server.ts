@@ -214,7 +214,10 @@ export async function startProductionServer(
     host,
     port,
   });
+  // Startup output is kept only for URL detection and startup diagnostics.
+  // After readiness it is dropped so a long-running server does not grow it.
   let output = "";
+  let ready = false;
   let closing = false;
   let startError: unknown;
 
@@ -231,11 +234,11 @@ export async function startProductionServer(
   });
 
   child.stdout?.on("data", (chunk: Buffer) => {
-    output += chunk.toString("utf8");
+    if (!ready) output += chunk.toString("utf8");
     process.stdout.write(chunk);
   });
   child.stderr?.on("data", (chunk: Buffer) => {
-    output += chunk.toString("utf8");
+    if (!ready) output += chunk.toString("utf8");
     process.stderr.write(chunk);
   });
 
@@ -269,6 +272,8 @@ export async function startProductionServer(
       getOutput: () => output,
       knownUrl,
     });
+    ready = true;
+    output = "";
 
     return {
       async close() {

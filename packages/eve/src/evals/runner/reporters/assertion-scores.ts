@@ -1,13 +1,16 @@
 import type { AssertionResult } from "#evals/types.js";
 
 /**
- * The name an assertion is exported under. Gates carry a `gate:` prefix so
- * they do not share a column with a soft assertion of the same name, and so
- * experiments diff gate regressions the same way they diff soft scores.
- * Sinks with stricter label rules normalize this name themselves.
+ * The name an assertion is exported under: its label when it has one, so a
+ * labeled assertion keeps a stable column however its display name is built.
+ * Gates carry a `gate:` prefix so they do not share a column with a soft
+ * assertion of the same name, and so experiments diff gate regressions the
+ * same way they diff soft scores. Sinks with stricter label rules normalize
+ * this name themselves.
  */
 export function exportedAssertionName(assertion: AssertionResult): string {
-  return assertion.severity === "gate" ? `gate:${assertion.name}` : assertion.name;
+  const name = assertion.key ?? assertion.name;
+  return assertion.severity === "gate" ? `gate:${name}` : name;
 }
 
 /** Assertions reported under one name, scored together. */

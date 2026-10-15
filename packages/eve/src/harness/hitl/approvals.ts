@@ -318,7 +318,7 @@ export function answer(
       if (unavailable.has(request.requestId)) {
         const failed = failedCall({
           callId,
-          message: unavailableToolMessage(toolName, input.searchable(request)),
+          failure: unavailableToolMessage(toolName, input.searchable(request)),
           toolName,
         });
         messages = withResult(messages, failed.part);

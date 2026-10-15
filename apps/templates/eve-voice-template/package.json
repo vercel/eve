@@ -1,0 +1,60 @@
+{
+  "name": "eve-voice-template",
+  "version": "0.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*"
+  },
+  "scripts": {
+    "build": "pnpm build:eve && pnpm build:web",
+    "build:eve": "eve build",
+    "build:web": "next build --turbopack apps/web",
+    "db:generate": "drizzle-kit generate --config apps/web/drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config apps/web/drizzle.config.ts",
+    "dev": "next dev apps/web",
+    "dev:all": "vercel dev --local",
+    "dev:eve": "eve dev",
+    "typecheck": "next typegen apps/web && tsgo --noEmit -p apps/web/tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.93",
+    "@ai-sdk/react": "4.0.142",
+    "@neondatabase/serverless": "1.1.0",
+    "@radix-ui/react-use-controllable-state": "1.2.2",
+    "@shadcn/react": "0.3.1",
+    "@streamdown/cjk": "1.0.3",
+    "@streamdown/code": "1.1.1",
+    "@streamdown/math": "1.0.2",
+    "@streamdown/mermaid": "1.0.2",
+    "@tailwindcss/postcss": "4.3.3",
+    "@upstash/redis": "1.38.2",
+    "ai": "7.0.139",
+    "better-auth": "1.7.1",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "drizzle-orm": "0.45.2",
+    "eve": "^0.78.0",
+    "lucide-react": "1.33.0",
+    "motion": "12.40.0",
+    "next": "16.3.4",
+    "radix-ui": "1.4.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "shiki": "3.23.0",
+    "streamdown": "2.5.0",
+    "tailwind-merge": "3.6.0",
+    "tailwindcss": "4.3.3",
+    "use-stick-to-bottom": "1.1.4",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "drizzle-kit": "0.31.10",
+    "microsandbox": "^0.5.10",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

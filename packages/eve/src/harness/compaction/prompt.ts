@@ -214,13 +214,29 @@ function renderTranscriptToolResult(
 function renderToolResultOutput(value: unknown, limit: number): string {
   const parts = contentToolOutputParts(value);
   if (parts === undefined) {
-    return renderPayload(value, limit);
+    return capText(serializeToolResultOutput(value), limit);
   }
   const rendered = parts
     .map((part) => renderContentToolOutputPart(part, limit))
     .filter((entry) => entry.length > 0)
     .join(" ");
   return capText(rendered, limit);
+}
+
+/**
+ * The text a tool-result output is measured and clipped by, in history
+ * capping and in the summarizer transcript alike: a text output is its
+ * value, any other output its JSON. Sharing it keeps a capped history
+ * result whole when the summarizer renders it.
+ */
+export function serializeToolResultOutput(output: unknown): string {
+  if (output !== null && typeof output === "object") {
+    const candidate = output as { readonly type?: unknown; readonly value?: unknown };
+    if (candidate.type === "text" && typeof candidate.value === "string") {
+      return candidate.value;
+    }
+  }
+  return JSON.stringify(output) ?? "";
 }
 
 function contentToolOutputParts(value: unknown): readonly unknown[] | undefined {

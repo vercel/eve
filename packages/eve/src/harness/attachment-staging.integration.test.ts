@@ -1102,6 +1102,73 @@ describe("hydrateSandboxAttachments (integration)", () => {
     );
   });
 
+  it("degrades tool-result refs to text when the session sandbox cannot be resumed (#4833)", async () => {
+    const logs = captureLogRecords();
+    const runtime = await createTestRuntime();
+    const staged = await runtime.runAsSession(
+      { sandbox: mockSandbox({ id: "sbx_lost_stage" }) },
+      async () =>
+        stageToolResultMedia([
+          {
+            content: [
+              {
+                output: {
+                  type: "content",
+                  value: [
+                    {
+                      data: { data: smallImageBytes.toString("base64"), type: "data" },
+                      filename: "shot.png",
+                      mediaType: "image/png",
+                      type: "file",
+                    },
+                  ],
+                },
+                toolCallId: "shot-1",
+                toolName: "screenshot",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ] satisfies ModelMessage[]),
+    );
+    const [stagedResult] = staged[0]!.content as ToolResultPart[];
+    const stagedFile = (stagedResult!.output as { value: { data: { url: URL } }[] }).value[0]!;
+    const stagedPath = decodeSandboxRef(stagedFile.data.url).path;
+
+    // A follow-up turn on another replica: the just-bash session root lives
+    // on the replica that staged the file, so resuming the sandbox throws.
+    const lost = mockSandbox({ id: "sbx_lost" });
+    const hydrated = await runtime.runAsSession(
+      {
+        sandboxAccess: {
+          ...lost.access,
+          async get() {
+            throw new Error('just-bash session root "/tmp/sessions/lost" no longer exists.');
+          },
+        },
+      },
+      async () => hydrateSandboxAttachments(staged),
+    );
+
+    const [result] = hydrated[0]!.content as ToolResultPart[];
+    expect(result!.output).toEqual({
+      type: "content",
+      value: [
+        {
+          text: `FileNotFound: Current snapshot may be newer and does not contain ${stagedPath}.`,
+          type: "text",
+        },
+      ],
+    });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "session sandbox unavailable, degrading attachments to text",
+      }),
+    );
+  });
+
   it("does not inline a staged attachment that sandbox code overwrote (#4284)", async () => {
     const sandbox = mockSandbox({ id: "sbx_overwritten" });
     const runtime = await createTestRuntime();

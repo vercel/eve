@@ -7,6 +7,7 @@ import {
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 export const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
+export const NEXT_PHASE_PRODUCTION_SERVER = "phase-production-server";
 export const EVE_NEXT_HOST: EveFrameworkHost = { label: "Next.js", slug: "next" };
 
 interface EveNextGlobalState {
@@ -37,47 +38,42 @@ function readEveBaseUrlEnvironment(): string | undefined {
   return new URL(configuredUrl).origin;
 }
 
+/**
+ * Start the built eve server for `appRoot` on `origin` once per process. Named
+ * agents may share a root, each on its own port, so both identify the server.
+ * `next start` calls this while loading config, because Next serves the
+ * rewrites saved by `next build` and never calls `rewrites()` again.
+ */
+export async function ensureEveProductionServer(input: {
+  readonly appRoot: string;
+  readonly origin: string;
+}): Promise<void> {
+  const state = getGlobalState();
+  const key = `production:${input.appRoot}:${input.origin}`;
+  let server = state.servers.get(key);
+  if (server === undefined) {
+    server = startEveProductionServer({
+      appRoot: input.appRoot,
+      host: EVE_NEXT_HOST,
+      origin: input.origin,
+    }).catch((error: unknown) => {
+      state.servers.delete(key);
+      throw error;
+    });
+    state.servers.set(key, server);
+  }
+  await server;
+}
+
 export async function resolveEveDestinationPrefix(input: {
   readonly appRoot: string;
   readonly devServerTimeoutMs?: number;
   readonly logLabel?: string;
-  readonly phase: string;
   readonly productionDestinationPrefix: string;
-  readonly productionServerOrigin?: string;
   /** Workspace member selected when spawning the local eve dev server. */
   readonly workspaceAgentName?: string;
 }): Promise<string> {
-  const state = getGlobalState();
-
   if (process.env.NODE_ENV === "production") {
-    if (input.phase === NEXT_PHASE_PRODUCTION_BUILD) {
-      return input.productionDestinationPrefix;
-    }
-
-    const key = `production:${input.appRoot}`;
-    let productionServer = state.servers.get(key);
-    if (productionServer === undefined) {
-      productionServer =
-        process.env.VERCEL || input.productionServerOrigin === undefined
-          ? undefined
-          : startEveProductionServer({
-              appRoot: input.appRoot,
-              host: EVE_NEXT_HOST,
-              origin: input.productionServerOrigin,
-            });
-      if (productionServer !== undefined) {
-        productionServer = productionServer.catch((error) => {
-          state.servers.delete(key);
-          throw error;
-        });
-        state.servers.set(key, productionServer);
-      }
-    }
-
-    if (productionServer !== undefined) {
-      return (await productionServer).origin;
-    }
-
     return input.productionDestinationPrefix;
   }
 
@@ -90,6 +86,7 @@ export async function resolveEveDestinationPrefix(input: {
     return input.productionDestinationPrefix;
   }
 
+  const state = getGlobalState();
   const key = `dev:${input.appRoot}`;
   let server = state.servers.get(key);
 

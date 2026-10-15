@@ -87,6 +87,12 @@ By default, submissions use the Teams identity of the user who clicked the card.
 
 When a tool approval settles, eve replaces its Adaptive Card with the outcome and responder name. A response rejected by an approval policy leaves the shared card unchanged.
 
+### Connection sign-ins
+
+When a connection needs the person to sign in, eve's `authorization.required` handler posts an Adaptive Card. In a personal chat, the card includes the sign-in link and any confirmation code. In group chats and channels, the shared card only says who has to sign in and has a **Sign in** button (`Action.Execute`). When someone presses it, eve resolves who they are the same way it does for HITL submissions (`onInputResponse`). If that's the person who needs to sign in, eve sends back a card with the link and code, and Teams shows that card only to them. Anyone else is told they can't open it. That way another member can't finish the sign-in with their own account and have it saved under the requester's identity.
+
+If you customize `onMessage` without also setting `onInputResponse`, nobody can open a sign-in from a group chat or channel, because eve rejects every press.
+
 For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
 
 ### Proactive sessions

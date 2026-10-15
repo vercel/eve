@@ -1,6 +1,5 @@
-import { principalOf } from "#execution/session/principal.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { AuthKey } from "#context/keys.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -23,69 +22,41 @@ export function resolveBinding(ctx: AlsContext, binding: EventBinding) {
     .resolvedAgent.connections.find(
       (connection) => connection.connectionName === binding.connectionName,
     );
+  const events = connection?.experimental_events;
   if (
-    connection?.experimental_events === undefined ||
-    binding.sessionId !== ctx.require(SessionIdKey) ||
+    connection === undefined ||
+    events === undefined ||
     binding.instanceId !== connection.instanceId ||
-    binding.executionPrincipal !== principalOf(binding.auth)
-  )
-    return undefined;
-  const authorization = connection.authorization;
-  if (
-    authorization === undefined ||
-    typeof authorization === "function" ||
-    authorization.vercelConnect?.connector !== binding.connector ||
-    authorization.vercelConnect.experimental_events === undefined
+    events.connector !== binding.connector
   )
     return undefined;
   const principal = resolveConnectionPrincipalFromAuth(
-    connection.connectionName,
-    authorization,
+    binding.connectionName,
+    events.authorization,
     binding.auth,
   );
   if (principalKey(principal) !== binding.principalKey) return undefined;
-  return {
-    binding,
-    connection,
-    principal,
-    backend: authorization.vercelConnect.experimental_events,
-  };
+  return { binding, connection, events, principal };
 }
 
-/** Context only locates the handler: the run's own binding and subscription decide acceptance. */
+/** The hook token already routed this delivery to its binding; the subscription decides acceptance. */
 function accepts(state: ConnectionEventHandlerState, payload: ConnectionEventPayload): boolean {
   const { delivery } = payload;
   return (
-    payload.bindingId === state.binding.id &&
     payload.connectionName === state.binding.connectionName &&
     delivery.subscriptionId === state.subscription.id &&
     !("event" in delivery && delivery.event.name !== state.binding.request.name)
   );
 }
 
-export async function prepareConnectionEventStep(input: {
-  serializedContext: Record<string, unknown>;
-  state: ConnectionEventHandlerState;
-  payload: ConnectionEventPayload;
-}) {
-  "use step";
-  const ctx = await deserializeContext(input.serializedContext);
-  const { state, payload } = input;
-  const result = (accepted: boolean, next = state) => ({
-    accepted,
-    state: next,
-    serializedContext: serializeContext(ctx),
-  });
-  const { deliveryId } = payload.delivery;
-  if (
-    !accepts(state, payload) ||
-    resolveBinding(ctx, state.binding) === undefined ||
-    state.receipts[deliveryId] === "complete"
-  )
-    return result(false);
-  return result(true, { ...state, receipts: { ...state.receipts, [deliveryId]: "pending" } });
-}
+/** Bounds the run's checkpoint; durable external effects still key on deliveryId past this window. */
+const RECEIPT_WINDOW = 1000;
 
+/**
+ * Runs one delivery's callback as the watch's creator, unless the run already
+ * completed it. A crash before the receipt is recorded re-runs the callback,
+ * so callbacks are idempotent on deliveryId.
+ */
 export async function dispatchConnectionEventStep(input: {
   serializedContext: Record<string, unknown>;
   state: ConnectionEventHandlerState;
@@ -93,18 +64,17 @@ export async function dispatchConnectionEventStep(input: {
 }) {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
-  const resolved = accepts(input.state, input.payload)
-    ? resolveBinding(ctx, input.state.binding)
-    : undefined;
-  if (resolved === undefined)
-    return { serializedContext: input.serializedContext, state: input.state };
-  const { binding, connection } = resolved;
-  const state = input.state;
+  const { state } = input;
   const { delivery } = input.payload;
-  if (state.receipts[delivery.deliveryId] !== "pending")
-    return { serializedContext: input.serializedContext, state };
+  const resolved =
+    accepts(state, input.payload) && !state.receipts.includes(delivery.deliveryId)
+      ? resolveBinding(ctx, state.binding)
+      : undefined;
+  if (resolved === undefined)
+    return { accepted: false, serializedContext: input.serializedContext, state };
+  const { binding, connection } = resolved;
   const bundle = ctx.require(BundleKey);
-  const callbacks = connection.experimental_events!;
+  const { callbacks } = resolved.events;
   // The callback runs as its creator without replacing the last conversational caller.
   ctx.setVirtualContext(AuthKey, binding.auth);
   const operation =
@@ -149,20 +119,9 @@ export async function dispatchConnectionEventStep(input: {
       else await callbacks.onTerminated?.({ ...common, error: delivery.control.error });
     },
   );
-  // Bound checkpoint size; durable external effects still use deliveryId as
-  // their idempotency key when Connect redelivers beyond this recent window.
-  const completed = Object.entries(state.receipts)
-    .filter(([id, status]) => status === "complete" && id !== delivery.deliveryId)
-    .slice(-999);
-  const pending = Object.entries(state.receipts).filter(
-    ([id, status]) => status === "pending" && id !== delivery.deliveryId,
-  );
   const next: ConnectionEventHandlerState = {
     ...state,
-    receipts: {
-      ...Object.fromEntries([...completed, ...pending]),
-      [delivery.deliveryId]: "complete",
-    },
+    receipts: [...state.receipts, delivery.deliveryId].slice(-RECEIPT_WINDOW),
   };
-  return { serializedContext: serializeContext(ctx), state: next };
+  return { accepted: true, serializedContext: serializeContext(ctx), state: next };
 }

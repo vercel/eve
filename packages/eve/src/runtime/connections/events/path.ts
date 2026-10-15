@@ -19,3 +19,8 @@ export function connectionEventDestination(connectionName: string): string {
 export function connectionEventHookToken(bindingId: string): string {
   return `eve:connection-event:${bindingId}`;
 }
+
+/** Where a handler run's predecessor sends its final state; one per generation of a watch. */
+export function connectionEventHandoverToken(bindingId: string, generation: number): string {
+  return `${connectionEventHookToken(bindingId)}:handover:${generation}`;
+}

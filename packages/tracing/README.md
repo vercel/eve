@@ -86,7 +86,9 @@ Handles expose execution, attributes, completion, and identity.
 `run(execute, ceiling)` limits captured content for work inside the run without
 changing what the operation already recorded. Content any operation receives
 while the run is active, such as an existing tool's arguments, result, or error,
-is held to that ceiling. Re-entering a durable turn with a narrower `capture`
+is held to that ceiling. Retained tool arguments and errors are snapshotted when
+accepted; later mutations of the original objects do not change captured content.
+Re-entering a durable turn with a narrower `capture`
 narrows the turn and its open operations and drops retained content the new
 decision declines. `recordError(error)` records a
 failure without ending the operation, for example when a tool's work fails in a
@@ -170,6 +172,8 @@ Bind the sender only to approved destinations. It rejects redirects. The receive
 validates the bounded `x-agent-tracing` header before calling your trust callback.
 Metadata is not authorization: verify authenticated provenance and the expected
 caller, parent run, and call. Rejected metadata does not change application work.
+An accepted handoff's capture ceiling also applies when `turn()` or `resume()`
+re-enters an existing durable turn.
 
 ## Durable turns
 

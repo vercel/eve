@@ -95,6 +95,15 @@ await sandbox.setNetworkPolicy("deny-all");
 return sandbox;
 ```
 
+## Live sandbox name
+
+Sessions returned by `environment.open()` and `ctx.getSandbox(environment)` expose a read-only `name` property. The name identifies the live Vercel Sandbox and stays stable across stop/resume for the session. Use it as `sandboxName` when creating Vercel git-credential-broker grants scoped to that sandbox:
+
+```ts
+const sandbox = await ctx.getSandbox(environment);
+const sandboxName = sandbox.name;
+```
+
 ## Live sandbox options
 
 `open()` also accepts Vercel compute resources, timeout, and Drive mounts. Configure project credentials and custom fetch behavior on the environment, not in `open()`, because resume does not reconstruct start-only options.

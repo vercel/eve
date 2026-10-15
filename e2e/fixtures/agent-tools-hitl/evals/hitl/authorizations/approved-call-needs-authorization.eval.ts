@@ -36,7 +36,7 @@ export default defineEval({
     const authorization = authorizationFrom(signing);
 
     const startIndex = session.state.streamIndex;
-    await completeAuthorization(authorization.url);
+    await completeAuthorization(t, authorization.url);
     const resumed = (await follow(t, session, startIndex)).expectOk();
     resumed.event("authorization.completed", {
       count: 1,

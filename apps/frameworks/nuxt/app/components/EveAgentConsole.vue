@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
 
-const { cancel, data, status, error, respond, send } = useEveAgent();
+const { cancel, data, status, error, prewarm, respond, send } = useEveAgent();
 
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
@@ -36,6 +36,13 @@ watch(
 );
 
 const messageText = ref("");
+
+watch(
+  () => messageText.value.trim().length > 0,
+  (shouldPrewarm) => {
+    if (shouldPrewarm) void prewarm().catch(() => {});
+  },
+);
 
 function submitMessage() {
   const text = messageText.value.trim();

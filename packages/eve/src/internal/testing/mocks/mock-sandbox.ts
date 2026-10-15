@@ -14,6 +14,7 @@ import type {
 } from "#public/definitions/sandbox.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 type NetworkPolicySandboxSession = SandboxSession & {
+  readonly name: string;
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
 import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
@@ -36,6 +37,8 @@ interface MockSandboxInput {
    * Stable sandbox identifier. Defaults to `"sbx_mock"`.
    */
   readonly id?: string;
+  /** Sandbox name exposed by Vercel sessions. Defaults to `"sbx_mock"`. */
+  readonly name?: string;
   /**
    * Initial file contents visible to the sandbox.
    *
@@ -181,6 +184,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   }
 
   const baseSession: NetworkPolicySandboxSession = {
+    name: input.name ?? "sbx_mock",
     resolvePath(path: string): string {
       return resolveWorkspacePath(path);
     },

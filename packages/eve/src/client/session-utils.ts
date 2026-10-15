@@ -45,8 +45,6 @@ export function summarizeTurnEvents(
     if (segment.observe(event)) boundary = event;
     if (isTurnFailureEvent(event)) failure = event;
     if (isFinalMessageCompleted(event)) message = event.data.message ?? undefined;
-    // Text completed before the turn parked was interim; the reply comes after it resumes.
-    if (event.type === "turn.waiting") message = undefined;
   }
 
   return {

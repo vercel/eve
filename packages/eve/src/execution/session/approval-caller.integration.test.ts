@@ -79,12 +79,16 @@ const BOB = testUser("bob");
 // need Bob to approve Alice's calls.
 const anyoneResponds: ApprovalResponsePolicy = () => ({ status: "allowed" });
 
-/** Records `ctx.session.auth.current` for every tool that runs. */
+/**
+ * Records `ctx.session.auth.current` for every tool that runs, and in `approvedBy` who
+ * approved each call that ran after an approval.
+ */
 function recordingTool(
   name: string,
   seen: Array<{ tool: string; caller: string | null }>,
   log: string[],
   approval?: Approval,
+  approvedBy?: Array<{ tool: string; responder: string }>,
 ) {
   return {
     loadNamespace: async () => ({
@@ -96,6 +100,9 @@ function recordingTool(
           // Yield so calls running in parallel interleave before reading the caller.
           await new Promise((resolve) => setTimeout(resolve, 20));
           seen.push({ tool: name, caller: ctx.session.auth.current?.principalId ?? null });
+          if (ctx.approval !== undefined) {
+            approvedBy?.push({ tool: name, responder: ctx.approval.responder.principalId });
+          }
           log.push(`end ${name}`);
           return { ran: name };
         },
@@ -136,6 +143,7 @@ async function withChainRun(
   } = {},
 ) {
   const seen: Array<{ tool: string; caller: string | null }> = [];
+  const approvedBy: Array<{ tool: string; responder: string }> = [];
   const log: string[] = [];
   const secondRequesters: Array<string | null> = [];
   const secondApproval: Approval = {
@@ -165,9 +173,10 @@ async function withChainRun(
         seen,
         log,
         options.firstApproval ?? { request: always(), response: anyoneResponds },
+        approvedBy,
       ),
-      recordingTool("read_notes", seen, log),
-      recordingTool("publish_change", seen, log, secondApproval),
+      recordingTool("read_notes", seen, log, undefined, approvedBy),
+      recordingTool("publish_change", seen, log, secondApproval, approvedBy),
       ...(options.modules ?? []),
     ],
   });
@@ -235,7 +244,7 @@ async function withChainRun(
       await run.cancel().catch(() => {});
     }
   });
-  return { log, secondRequesters, seen, stages };
+  return { approvedBy, log, secondRequesters, seen, stages };
 }
 
 function turnBoundaries(stage: Stage) {
@@ -248,7 +257,7 @@ describe("approval caller", () => {
   it.each([false, true])(
     "runs a call another person approves as its requester (unmatched stub: %s)",
     async (withStub) => {
-      const { secondRequesters, seen, stages } = await withChainRun(
+      const { approvedBy, secondRequesters, seen, stages } = await withChainRun(
         `approval-caller-${withStub}`,
         async (run) => {
           await run.approve(BOB);
@@ -280,6 +289,11 @@ describe("approval caller", () => {
         { tool: "publish_change", caller: "alice" },
       ]);
       expect(secondRequesters).toEqual(["alice"]);
+      // Each approved call reads who approved it; the call that needed no approval reads nobody.
+      expect(approvedBy).toEqual([
+        { tool: "deploy_change", responder: "bob" },
+        { tool: "publish_change", responder: "alice" },
+      ]);
     },
     60_000,
   );

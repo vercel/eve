@@ -272,6 +272,11 @@ describe("ensureChannel", () => {
     expect(agentChatSource).toMatch(/<PromptInputTextarea\s+disabled=\{isResuming\}/);
     expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
+    expect(agentChatSource).toContain("prewarm: hasInputText");
+    expect(agentChatSource).toContain("hasSubmittedMessage.current && session !== undefined");
+    expect(agentChatSource).toContain(
+      "if (agent.session !== undefined) replaceSessionRoute(agent.session.sessionId)",
+    );
     expect(agentChatSource).toContain(
       '!isResuming && agent.data.inputs[requestId]?.status === "open"',
     );

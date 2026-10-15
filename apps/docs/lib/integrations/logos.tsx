@@ -6,6 +6,7 @@ import {
   SiClickhouse,
   SiCloudinary,
   SiCoda,
+  SiContentful,
   SiDatadog,
   SiEgnyte,
   SiGooglechat,
@@ -22,6 +23,7 @@ import {
   SiPlanetscale,
   SiPosthog,
   SiPostman,
+  SiPostgresql,
   SiRazorpay,
   SiSanity,
   SiSentry,
@@ -56,6 +58,18 @@ export const webLogo = (props: LogoProps) => (
       d="M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18"
       stroke="currentColor"
       strokeWidth="1.5"
+    />
+  </svg>
+);
+
+// Geist `microphone` icon.
+export const voiceLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      clipRule="evenodd"
+      d="M8.5 1.5h-1C6.67 1.5 6 2.17 6 3v4c0 .83.67 1.5 1.5 1.5h1c.83 0 1.5-.67 1.5-1.5V3c0-.83-.67-1.5-1.5-1.5M7.5 0a3 3 0 0 0-3 3v4a3 3 0 0 0 3 3h1a3 3 0 0 0 3-3V3a3 3 0 0 0-3-3zm-.25 13.2V16h1.5v-2.79a6.8 6.8 0 0 0 5.79-5.02l.19-.73-1.46-.37-.18.72a5.25 5.25 0 0 1-10.17 0l-.2-.72-1.44.37.18.73a6.8 6.8 0 0 0 5.8 5.02"
+      fill="currentColor"
+      fillRule="evenodd"
     />
   </svg>
 );
@@ -294,6 +308,10 @@ const posthogLogo = (props: LogoProps) => <SiPosthog {...props} />;
 const postmanLogo = (props: LogoProps) => <SiPostman color="default" {...props} />;
 
 const razorpayLogo = (props: LogoProps) => <SiRazorpay {...props} />;
+
+export const contentfulLogo = (props: LogoProps) => <SiContentful {...props} />;
+
+export const postgresLogo = (props: LogoProps) => <SiPostgresql {...props} />;
 
 export const sanityLogo = (props: LogoProps) => <SiSanity {...props} />;
 

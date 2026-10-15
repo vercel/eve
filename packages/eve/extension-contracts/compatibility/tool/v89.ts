@@ -1,15 +1,16 @@
+import { z } from "zod";
 import { defineTool } from "#public/tools/index.js";
+import { always } from "#public/tools/approval/index.js";
 
-// Existing Connect auth providers still work without event support.
+// Epoch 89 tool contexts had no `approval`; epoch 90 adds it as optional, set
+// only when a call runs after a person approved it. Approved tools that read
+// only `ctx.session.auth` keep running as the requester.
 export default defineTool({
-  description: "Check that the issue service is authorized.",
-  inputSchema: { type: "object", properties: {}, additionalProperties: false },
-  async execute(_input, ctx) {
-    const { token } = await ctx.getToken({
-      principalType: "app",
-      getToken: async () => ({ token: "service-credential" }),
-      vercelConnect: { connector: "oauth/issues" },
-    });
-    return { authorized: token.length > 0 };
-  },
+  description: "Report who requested the release check.",
+  inputSchema: z.object({ release: z.string() }),
+  approval: always(),
+  execute: ({ release }, ctx) => ({
+    release,
+    requester: ctx.session.auth.current?.principalId ?? null,
+  }),
 });

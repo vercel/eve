@@ -180,6 +180,8 @@ export function createAgentTracing(input: AgentTracingOptions): AgentTracing {
     context: ExecutionContext | undefined,
     capture?: CaptureDecision,
   ): Promise<LiveTurn | undefined> {
+    const ceiling = currentAgentHandoff()?.capture;
+    capture = capture === undefined ? ceiling : intersectCapture(capture, ceiling);
     const saved = checkpointer === undefined ? undefined : await loadCheckpoint(key);
     if (
       cached !== undefined &&

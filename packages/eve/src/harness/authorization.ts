@@ -38,7 +38,7 @@ import {
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SessionIdKey, type SessionAuthContext } from "#context/keys.js";
-import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
+import { createBrowserCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
 import type { JsonValue } from "#shared/json.js";
@@ -190,6 +190,9 @@ export function consumeAuthorizationResult(
  * It is independent of the continuation token, so channel aliasing mid-turn
  * does not invalidate the callback URL.
  *
+ * The URL reaches the user's browser and the IdP, so it never carries the
+ * deployment's protection bypass secret.
+ *
  * Returns `undefined` if no callback address is available.
  */
 export function getHookUrl(name: string, attemptId: string): string | undefined {
@@ -198,7 +201,7 @@ export function getHookUrl(name: string, attemptId: string): string | undefined 
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   const token = ctx.get(AuthorizationHookKey) ?? (sessionId ? authHookToken(sessionId) : undefined);
   if (!token || !baseUrl) return undefined;
-  return createWorkflowCallbackUrl(
+  return createBrowserCallbackUrl(
     baseUrl,
     createEveConnectionCallbackRoutePath(name, attemptId, token),
   );

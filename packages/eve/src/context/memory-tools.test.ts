@@ -21,7 +21,12 @@ import { createMemoryToolDynamicDefinition } from "#context/memory-tools.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import { defineTool } from "#tools/definition.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
-import { defineMemory, type MemoryToolsContext } from "#public/memory/index.js";
+import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
+import {
+  defineMemory,
+  type MemoryToolsContext,
+  type MemoryTurnContext,
+} from "#public/memory/index.js";
 import { always } from "#public/tools/approval/index.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createMemoryLock } from "#shared/memory-state.js";
@@ -29,7 +34,7 @@ import { createMemoryLock } from "#shared/memory-state.js";
 const turn = Object.freeze({ id: "turn_0", input: [], sequence: 0 });
 const event = { data: { sequence: 0, turnId: "turn_0" }, type: "turn.started" as const };
 
-function createContext(scope: string) {
+function createContext(scope: string, lockedTurn: MemoryTurnContext = turn) {
   const auth = {
     attributes: {},
     authenticator: "test",
@@ -50,7 +55,7 @@ function createContext(scope: string) {
       namespace: "app",
       scope,
       slot: "profile",
-      turn,
+      turn: lockedTurn,
       visibility: "scope",
     }),
   });
@@ -207,6 +212,59 @@ describe("memory provider tools", () => {
     expect(seen).toEqual([history]);
     const [metadata] = ctx.require(TurnDynamicToolMetadataKey);
     expect(JSON.stringify(metadata)).not.toContain("hello");
+  });
+
+  it("offers provider tools on a turn whose input carries a staged attachment", async () => {
+    const input: ModelMessage[] = [
+      {
+        content: [
+          { text: "remember this screenshot", type: "text" },
+          {
+            data: encodeSandboxRef({ mediaType: "image/png", path: "/tmp/pixel.png", size: 68 }),
+            mediaType: "image/png",
+            type: "file",
+          },
+        ],
+        role: "user",
+      },
+    ];
+    const ctx = createContext("user_1", { ...turn, input });
+    const seen: (readonly ModelMessage[])[] = [];
+    const compiledResolver = resolver(
+      () => 1,
+      (context) => seen.push(context.turn.input),
+    );
+
+    await contextStorage.run(
+      ctx,
+      async () =>
+        await dispatchDynamicToolEvent({
+          ctx,
+          event,
+          messages: [{ content: "remember this screenshot", role: "user" }],
+          resolvers: [compiledResolver],
+        }),
+    );
+
+    expect(buildDynamicTools(ctx).map((tool) => tool.name)).toEqual(["profile__save"]);
+
+    clearDurableDynamicCallbacks(ctx.require(SessionIdKey));
+    await rebindMissingCompiledDynamicToolCallbacks({
+      ctx,
+      event,
+      messages: [{ content: "remember this screenshot", role: "user" }],
+      resolvers: [compiledResolver],
+    });
+    seen.length = 0;
+    const [replayed] = buildDynamicTools(ctx);
+    const output = await contextStorage.run(
+      ctx,
+      async () => await replayed?.execute?.({}, { messages: [], toolCallId: "call_1" }),
+    );
+    expect(output).toBe("1:user_1");
+    expect(seen).toEqual([input]);
+    const [metadata] = ctx.require(TurnDynamicToolMetadataKey);
+    expect(JSON.stringify(metadata)).not.toContain("eve-sandbox:");
   });
 
   it("omits tools when the provider has no tool factory", async () => {

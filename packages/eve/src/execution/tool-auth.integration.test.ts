@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildApprovalResponseAuth,
+  createToolExecuteWithAuth,
   handleApprovalResponsePolicyError,
 } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
@@ -908,5 +909,183 @@ describe("tool-hosted authorization", () => {
         return runtime.executeTool(tool, {});
       }),
     ).rejects.toThrow("auth required");
+  });
+
+  it.each([
+    ["the requester approves their own call", "user-1", 1, "token:user-1"],
+    ["someone else approves the call", "user-2", 2, "token:user-2"],
+  ] as const)(
+    "shares an explicit auth key between requester and approver lookups when %s",
+    async (_case, approverId, fetches, approverToken) => {
+      const fetched: string[] = [];
+      const provider: AuthorizationDefinition = {
+        principalType: "user",
+        async getToken({ principal }) {
+          const id = principal.type === "user" ? principal.id : "app";
+          fetched.push(id);
+          return { token: `token:${id}` };
+        },
+      };
+      const runtime = await createTestRuntime({ tools: [] });
+      const execute = createToolExecuteWithAuth({
+        scope: "grant-tool",
+        execute: async (_input, ctx) => ({
+          approver: (await ctx.approval!.responder.getToken(provider, { authKey: "github" })).token,
+          requester: (await ctx.getToken(provider, { authKey: "github" })).token,
+        }),
+      });
+
+      const result = await runtime.runAsSession({ sessionId: "session_shared_key" }, async () => {
+        seedUserPrincipal();
+        return await execute(
+          {},
+          {
+            messages: [],
+            toolCallId: "call_grant",
+            approval: {
+              responder: {
+                attributes: {},
+                authenticator: "test-idp",
+                issuer: "test-idp",
+                principalId: approverId,
+                principalType: "user",
+              },
+            },
+          },
+        );
+      });
+
+      expect(result).toEqual({ approver: approverToken, requester: "token:user-1" });
+      expect(fetched).toHaveLength(fetches);
+    },
+  );
+
+  describe("when the requester approves their own call", () => {
+    const selfApproval = {
+      responder: {
+        attributes: {},
+        authenticator: "test-idp",
+        issuer: "test-idp",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    } as const;
+    const tokenProvider = (token: string, fetched: string[]): AuthorizationDefinition => ({
+      principalType: "user",
+      async getToken() {
+        fetched.push(token);
+        return { token };
+      },
+    });
+    const run = async (
+      read: (
+        ctx: ToolContext,
+        github: AuthorizationDefinition,
+        linear: AuthorizationDefinition,
+      ) => Promise<unknown>,
+    ) => {
+      const fetched: string[] = [];
+      const github = tokenProvider("github-secret", fetched);
+      const linear = tokenProvider("linear-secret", fetched);
+      const runtime = await createTestRuntime({ tools: [] });
+      const execute = createToolExecuteWithAuth({
+        scope: "grant-tool",
+        execute: async (_input, ctx) => await read(ctx, github, linear),
+      });
+      const outcome = runtime.runAsSession({ sessionId: "session_mixed_providers" }, async () => {
+        seedUserPrincipal();
+        return await execute(
+          {},
+          { messages: [], toolCallId: "call_grant", approval: selfApproval },
+        );
+      });
+      return { fetched, outcome };
+    };
+
+    it.each([
+      [
+        "requester first",
+        async (ctx: ToolContext, a: AuthorizationDefinition, b: AuthorizationDefinition) => {
+          await ctx.getToken(a);
+          await ctx.approval!.responder.getToken(b);
+        },
+      ],
+      [
+        "approver first",
+        async (ctx: ToolContext, a: AuthorizationDefinition, b: AuthorizationDefinition) => {
+          await ctx.approval!.responder.getToken(a);
+          await ctx.getToken(b);
+        },
+      ],
+    ] as const)(
+      "rejects two anonymous providers across both getters (%s)",
+      async (_order, read) => {
+        const { fetched, outcome } = await run(read);
+        await expect(outcome).rejects.toThrow(/explicit auth keys/);
+        expect(fetched).toEqual(["github-secret"]);
+      },
+    );
+
+    it("returns each provider's own token under distinct explicit keys", async () => {
+      const { fetched, outcome } = await run(async (ctx, github, linear) => ({
+        requester: (await ctx.getToken(github, { authKey: "github" })).token,
+        approver: (await ctx.approval!.responder.getToken(linear, { authKey: "linear" })).token,
+      }));
+      await expect(outcome).resolves.toEqual({
+        requester: "github-secret",
+        approver: "linear-secret",
+      });
+      expect(fetched).toEqual(["github-secret", "linear-secret"]);
+    });
+  });
+
+  it("fails an approved call's approver token lookup without starting a sign-in", async () => {
+    let starts = 0;
+    const provider: AuthorizationDefinition = {
+      principalType: "user",
+      async getToken() {
+        throw requiredError();
+      },
+      async startAuthorization() {
+        starts += 1;
+        return { challenge: { url: "https://idp.example/auth" } };
+      },
+      async completeAuthorization() {
+        return { token: "after-signin" };
+      },
+    };
+    const runtime = await createTestRuntime({ tools: [] });
+    const execute = createToolExecuteWithAuth({
+      scope: "grant-tool",
+      execute: async (_input, ctx) => await ctx.approval!.responder.getToken(provider),
+    });
+
+    const outcome = runtime.runAsSession({ sessionId: "session_approver_token" }, async () => {
+      seedUserPrincipal();
+      // An interactive sign-in is possible here; the approver's lookup must still not start one.
+      loadContext().set(CallbackBaseUrlKey, "https://app.example");
+      return await execute(
+        {},
+        {
+          messages: [],
+          toolCallId: "call_grant",
+          approval: {
+            responder: {
+              attributes: {},
+              authenticator: "test-idp",
+              principalId: "bob",
+              principalType: "user",
+            },
+          },
+        },
+      );
+    });
+
+    await expect(outcome).rejects.toSatisfy(isConnectionAuthorizationFailedError);
+    await expect(outcome).rejects.toMatchObject({
+      reason: "approver_authorization_required",
+      retryable: false,
+    });
+    expect(starts).toBe(0);
   });
 });

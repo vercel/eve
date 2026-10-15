@@ -94,6 +94,30 @@ describe("writeSkillPackageToSandbox", () => {
     );
   });
 
+  it("writes several files at once, but not all of them", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const session = {
+      ...mockSandbox().session,
+      async writeBinaryFile() {
+        maxInFlight = Math.max(maxInFlight, ++inFlight);
+        await Promise.resolve();
+        inFlight -= 1;
+      },
+    };
+    const skill = normalizeSkillPackage({
+      name: "tenant",
+      description: "Tenant-specific procedures.",
+      markdown: "Follow tenant policy.",
+      files: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`references/${i}.md`, ""])),
+    });
+
+    await writeSkillPackageToSandbox({ sandbox: session, skill });
+
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThan(skill.files.length);
+  });
+
   it("falls back to the legacy workspace skill directory when HOME is unavailable", async () => {
     const sandbox = mockSandbox();
     const skill = normalizeSkillPackage({

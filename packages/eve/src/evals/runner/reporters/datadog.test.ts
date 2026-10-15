@@ -484,6 +484,41 @@ describe("Datadog", () => {
     ]);
   });
 
+  it("names labeled assertion metrics by their label", async () => {
+    const { config, experiment } = makeConfig({ recordInputs: false });
+    const reporter = Datadog(config);
+    const result = makeEvalResult({
+      assertions: [
+        {
+          name: "score [grounding]",
+          key: "grounding",
+          score: 0.8,
+          severity: "soft",
+          errored: false,
+        },
+        {
+          name: "judge.boolean [citation]",
+          key: "citation",
+          score: 1,
+          severity: "gate",
+          threshold: 1,
+          passed: true,
+          errored: false,
+        },
+      ],
+    });
+
+    await reporter.onRunStart([makeEval()], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitEvaluationMetrics.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "grounding", value: 0.8 }),
+        expect.objectContaining({ label: "gate_citation", value: 1 }),
+      ]),
+    );
+  });
+
   it("omits assertion_passed when no member of a group has a verdict", async () => {
     const { config, experiment } = makeConfig({ recordInputs: false });
     const reporter = Datadog(config);

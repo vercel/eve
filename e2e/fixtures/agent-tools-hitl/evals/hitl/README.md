@@ -38,6 +38,7 @@ and [`agent-workflow-tools/evals/hitl`](../../../agent-workflow-tools/evals/hitl
 | A `once()` grant is reused                                                         | [once-grant-is-reused](./approvals/once-grant-is-reused.eval.ts)                                                        |
 | An approved call runs with the asking step's tools                                 | [approved-call-uses-asking-step-tools](./approvals/approved-call-uses-asking-step-tools.eval.ts)                        |
 | Approval keeps the requester's identity and permissions                            | [approved-call-keeps-requester](./approvals/approved-call-keeps-requester.eval.ts)                                      |
+| An approved call reads who approved it and their credentials                       | [approved-call-reads-responder](./approvals/approved-call-reads-responder.eval.ts)                                      |
 | A recheck denies a change frozen for the requester                                 | [recheck-denies-at-run-time](./approvals/recheck-denies-at-run-time.eval.ts)                                            |
 | A rejected responder leaves the approval open                                      | [rejected-responder-leaves-approval-open](./response-policies/rejected-responder-leaves-approval-open.eval.ts)          |
 | An allowed responder settles the approval                                          | [allowed-responder-settles](./response-policies/allowed-responder-settles.eval.ts)                                      |

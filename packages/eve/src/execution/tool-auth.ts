@@ -1,7 +1,12 @@
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ApprovalResponseAuth } from "#approval/definition.js";
-import type { ToolAuthOptions, ToolContext, ToolExecuteOptions } from "#tools/definition.js";
+import type {
+  ApprovedCall,
+  ToolAuthOptions,
+  ToolContext,
+  ToolExecuteOptions,
+} from "#tools/definition.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
 import { handleAuthorizationError } from "#runtime/connections/scoped-authorization.js";
 
@@ -19,10 +24,26 @@ export function createToolExecuteWithAuth<TInput>(input: ToolExecuteWithAuthInpu
       messages: options.messages,
       getToken: auth.getToken,
       requireAuth: auth.requireAuth,
+      ...(options.approval !== undefined && {
+        approval: approvalOf(options.approval.responder, auth),
+      }),
     };
     return auth.run(() => {
       return input.execute(toolInput, ctx);
     });
+  };
+}
+
+/** What an approved call reads about the person who approved it. */
+function approvalOf(
+  responder: SessionAuthContext,
+  auth: ReturnType<typeof createAuthorizationContext>,
+): ApprovedCall {
+  return {
+    responder: {
+      ...responder,
+      getToken: (provider, options) => auth.getResponderToken(responder, provider, options),
+    },
   };
 }
 

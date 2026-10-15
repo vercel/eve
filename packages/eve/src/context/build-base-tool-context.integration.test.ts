@@ -36,7 +36,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
 
   it("forwards the configured environment", async () => {
     const environment = VercelSandbox.environment();
-    const sandbox = mockSandbox();
+    const sandbox = mockSandbox({ name: "eve-sbx-vercel-test" });
     const runtime = await createTestRuntime();
 
     await runtime.runAsSession({ sandboxAccess: { ...sandbox.access, environment } }, async () => {
@@ -44,7 +44,8 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
         options: { toolCallId: "call_1" },
         toolName: "shell",
       });
-      await expect(ctx.getSandbox(environment)).resolves.toBeDefined();
+      const live = await ctx.getSandbox(environment);
+      expect(live.name).toBe("eve-sbx-vercel-test");
     });
   });
 

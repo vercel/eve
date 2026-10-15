@@ -145,23 +145,31 @@ export class SessionExecution {
   private async handleBoundaryMessages(
     messages: readonly WorkflowToolRunMessage[],
     ending = false,
+    turn?: ActiveTurn,
   ): Promise<void> {
     let applied: AppliedRunMessage[] = [];
     for (const message of messages) {
       if (!isAppliedRunMessage(message)) {
-        await this.applyRunMessages(applied);
+        await this.applyRunMessages(applied, turn);
         applied = [];
         await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
       } else if (!ending || message.kind !== "agent-started") {
         applied.push(message);
       }
     }
-    await this.applyRunMessages(applied);
+    await this.applyRunMessages(applied, turn);
   }
 
-  private async applyRunMessages(messages: readonly AppliedRunMessage[]): Promise<void> {
+  /** Hooks on the messages' events may cancel `turn`, the turn that is running. */
+  private async applyRunMessages(
+    messages: readonly AppliedRunMessage[],
+    turn?: ActiveTurn,
+  ): Promise<void> {
     if (messages.length === 0) return;
-    await this.input.cursor.advance((state) => applyRunMessagesStep({ ...state, messages }));
+    const { cancelled } = await this.input.cursor.advance((state) =>
+      applyRunMessagesStep({ ...state, canCancelTurn: turn !== undefined, messages }),
+    );
+    if (cancelled) turn?.abort();
   }
 
   private async runTurnSteps(
@@ -192,8 +200,17 @@ export class SessionExecution {
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;
 
+      // Deliveries the boundary admits next arrived while the step ran. A step
+      // that raises a request publishes it before it returns, so they may
+      // reply to it.
+      const stepAdmission = this.input.queue.nextAdmission;
       await turn.admitBoundary();
-      await this.handleBoundaryMessages(turn.takeBoundaryMessages(), result.action === "done");
+      const ending = result.action === "done";
+      await this.handleBoundaryMessages(
+        turn.takeBoundaryMessages(),
+        ending,
+        ending ? undefined : turn,
+      );
 
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
       if (!turnCompleted && turn.signal.aborted && pendingCallIds === undefined) {
@@ -218,7 +235,7 @@ export class SessionExecution {
         ) {
           throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
         }
-        const woke = await this.waitForHeldRequest(turn, result);
+        const woke = await this.waitForHeldRequest(turn, result, stepAdmission);
         if (woke === "cancelled") return await this.finishCancelledTurn(turn);
         nextStepInput = { delivery: woke };
         continue;
@@ -287,7 +304,7 @@ export class SessionExecution {
     if (isAppliedRunMessage(message)) {
       const following =
         turn?.takeAppliedRunMessages() ?? takeLeadingAppliedRunMessages(this.input.inbox);
-      await this.applyRunMessages([message, ...following]);
+      await this.applyRunMessages([message, ...following], turn);
       return undefined;
     }
     return await handleWorkflowToolRunMessage({
@@ -352,7 +369,10 @@ export class SessionExecution {
    * The turn waits on a sign-in or tool approval it raised. It wakes with the
    * delivery its next step reads: the sign-in callback, an approval answer
    * from any responder, or a message from the turn's own person, which steers
-   * the turn and cancels the request. Anyone else's message queues behind it.
+   * the turn and cancels the request. Anyone else's message queues behind it,
+   * as does a queued message admitted before the step that raised the request
+   * (`heldSince`): it was sent before the request existed, so it must not
+   * answer it.
    */
   private async waitForHeldRequest(
     turn: ActiveTurn,
@@ -360,6 +380,7 @@ export class SessionExecution {
       readonly authorizationAttemptIds: readonly string[];
       readonly inputRequestIds: readonly string[];
     },
+    heldSince: number,
   ): Promise<DeliverHookPayload | "cancelled"> {
     const attemptIds = new Set(held.authorizationAttemptIds);
     const requestIds = new Set(held.inputRequestIds);
@@ -368,7 +389,7 @@ export class SessionExecution {
       if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
       const answer = await turn.takeInputResponses(requestIds);
       if (answer !== undefined) return answer;
-      const steering = await turn.takeSteering({ heldOnPerson: true });
+      const steering = await turn.takeSteering({ heldSince });
       if (steering !== undefined) return steering;
       const next = await turn.nextRuntimeEvent([]);
       if (next === "cancelled") return next;
