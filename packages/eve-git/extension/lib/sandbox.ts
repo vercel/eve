@@ -2,6 +2,7 @@
 export {
   executeGitHubShell,
   githubShellApproval,
+  type GitHubCoAuthor,
   type GitHubConfig,
   type GitHubLeaseRule,
   type GitHubShellInput,
