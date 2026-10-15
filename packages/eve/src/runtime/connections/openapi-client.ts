@@ -423,9 +423,9 @@ export class OpenApiConnectionClient implements ConnectionClient {
       if (param.location === "path") {
         const pathValue = String(value);
         // URL parsing normalizes dot segments even after encodeURIComponent.
-        if (pathValue.split("/").some((segment) => segment === "." || segment === "..")) {
+        if (pathValue === "." || pathValue === "..") {
           throw new Error(
-            `Path parameter "${param.name}" for tool "${operation.toolName}" in connection "${this.#connection.connectionName}" must not contain "." or ".." segments.`,
+            `Path parameter "${param.name}" for tool "${operation.toolName}" in connection "${this.#connection.connectionName}" must not be "." or "..".`,
           );
         }
         path = path.replace(`{${param.name}}`, encodeURIComponent(pathValue));
