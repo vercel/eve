@@ -127,7 +127,7 @@ export class McpConnectionClient implements ConnectionClient {
     const url = this.#connection.url;
     const fetch = createMcpTraceFetch({
       connectionName: this.#connection.connectionName,
-      fetcher: this.#forwardingFetch(),
+      fetcher: this.#authorizedFetch(Object.keys(headers)),
       getProtocolVersion: () => this.#client?.initializeResult?.protocolVersion,
     });
 
@@ -145,6 +145,43 @@ export class McpConnectionClient implements ConnectionClient {
         transport: { fetch, headers, type: "sse", url },
       });
     }
+  }
+
+  /** Keep eve's token provider on the request path instead of capturing one bearer forever. */
+  #authorizedFetch(connectionHeaderNames: readonly string[]): typeof fetch {
+    const fetcher = this.#forwardingFetch() ?? globalThis.fetch;
+    return async (request, init) => {
+      const resolve = () =>
+        resolveConnectionHeaders(this.#connection, { anonymousWhenAuthorizationRequired: true });
+      const send = async (resolved: ResolvedConnectionHeaders) => {
+        this.#anonymous = resolved.anonymous;
+        const headers = new Headers(init?.headers);
+        for (const name of connectionHeaderNames) headers.delete(name);
+        for (const [name, value] of Object.entries(resolved.headers)) headers.set(name, value);
+        return await fetcher(request, { ...init, headers });
+      };
+
+      const resolved = await resolve();
+      const response = await send(resolved);
+      if (
+        response.status !== 401 ||
+        resolved.anonymous ||
+        this.#connection.authorization === undefined ||
+        init?.signal?.aborted
+      ) {
+        return response;
+      }
+
+      // A rejected access token need not mean the refresh grant needs consent.
+      await this.#evictCachedToken();
+      const refreshed = await resolve();
+      if (refreshed.anonymous) {
+        this.#anonymous = true;
+        return response;
+      }
+      await response.body?.cancel();
+      return await send(refreshed);
+    };
   }
 
   /**

@@ -53,6 +53,8 @@ eve asks the user to sign in only when the MCP server asks for it. When a connec
 
 After the user signs in, the turn resumes and the model makes the call again. eve reconnects with the token and reloads the tool list, which may now include tools the server hides from anonymous callers. A connection that already has a token sends it on every request, as before.
 
+eve resolves credentials before each MCP HTTP request, including requests on an existing client. When the cached token's `expiresAt` has passed, eve calls the token provider again. If the server rejects a bearer with HTTP `401`, eve evicts the cached token, asks the provider for another token, and retries the request once before asking for sign-in. Eviction preserves the provider's refresh grant. Missing grants and rejected replacement tokens still use the normal authorization flow; HTTP `403` permission failures do not trigger token refresh or retries.
+
 A server that leaves protected tools out of its anonymous `tools/list` never triggers sign-in, because the model cannot find those tools. Servers that support anonymous use should list every tool and refuse the protected calls.
 
 ## Static tokens and headers

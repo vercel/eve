@@ -11,6 +11,9 @@ import {
   resolveDynamicConnectionValue,
 } from "#runtime/resolve-connection.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { AuthKey } from "#context/keys.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 
 describe.each(["static", "dynamic"] as const)(
   "%s MCP protocol configuration with the bundled client",
@@ -198,3 +201,135 @@ describe.each(["static", "dynamic"] as const)(
     });
   },
 );
+
+describe("MCP bearer refresh with the bundled client", () => {
+  let client: McpConnectionClient;
+  let token: string;
+  let acceptedToken: string;
+  let status: number;
+  const requests: { method: string; bearer: string | null }[] = [];
+  const getToken = vi.fn();
+  const evict = vi.fn();
+  const ctx = new ContextContainer();
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
+    ctx.clearVirtualContext();
+    ctx.set(AuthKey, {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "alice",
+      principalType: "user",
+    });
+    token = "first-token";
+    acceptedToken = token;
+    status = 200;
+    requests.length = 0;
+    getToken
+      .mockReset()
+      .mockImplementation(async () => ({ token, expiresAt: Date.now() + 60_000 }));
+    evict.mockReset();
+    client = new McpConnectionClient({
+      authorization: { getToken, evict, principalType: "user" },
+      connectionName: "test",
+      description: "Read the current user",
+      logicalPath: "connections/test.ts",
+      protocol: "mcp",
+      protocolVersionDiscovery: false,
+      sourceId: "connections/test",
+      sourceKind: "module",
+      url: "https://mcp.example.com/mcp",
+    });
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const message = (await request.json()) as { id?: number; method: string };
+      const bearer = request.headers.get("authorization");
+      requests.push({ method: message.method, bearer });
+      if (status !== 200 || bearer !== `Bearer ${acceptedToken}`) {
+        return new Response("Access denied", { status: status === 200 ? 401 : status });
+      }
+      let result: Record<string, unknown>;
+      switch (message.method) {
+        case "initialize":
+          result = {
+            capabilities: { tools: {} },
+            protocolVersion: "2025-11-25",
+            serverInfo: { name: "refresh-fixture", version: "1.0.0" },
+          };
+          break;
+        case "notifications/initialized":
+          return new Response(null, { status: 202 });
+        case "tools/list":
+          result = { tools: [{ name: "whoami", inputSchema: { type: "object", properties: {} } }] };
+          break;
+        case "tools/call":
+          result = { content: [{ type: "text", text: "alice" }] };
+          break;
+        default:
+          throw new Error(`Unexpected MCP method: ${message.method}`);
+      }
+      return Response.json({ jsonrpc: "2.0", id: message.id, result });
+    });
+  });
+
+  afterEach(async () => {
+    await client.close();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const call = () =>
+    contextStorage.run(ctx, () => client.executeTool("whoami", {}, { callId: "read" }));
+
+  it("refreshes an expired bearer on a live MCP client without consent or another handshake", async () => {
+    await call();
+    token = acceptedToken = "refreshed-token";
+    vi.setSystemTime(Date.now() + 60_001);
+    await expect(call()).resolves.toMatchObject({ content: [{ text: "alice" }] });
+    expect(
+      requests
+        .filter((request) => request.method === "tools/call")
+        .map((request) => request.bearer),
+    ).toEqual(["Bearer first-token", "Bearer refreshed-token"]);
+    expect(requests.filter((request) => request.method === "initialize")).toHaveLength(1);
+    expect(evict).not.toHaveBeenCalled();
+  });
+
+  it("silently reacquires a rejected bearer and retries the request once", async () => {
+    await call();
+    token = acceptedToken = "replacement-token";
+    await expect(call()).resolves.toMatchObject({ content: [{ text: "alice" }] });
+    expect(
+      requests
+        .filter((request) => request.method === "tools/call")
+        .map((request) => request.bearer),
+    ).toEqual(["Bearer first-token", "Bearer first-token", "Bearer replacement-token"]);
+    expect(evict).toHaveBeenCalledOnce();
+  });
+
+  it("requires consent when the refreshed bearer is also rejected, without looping", async () => {
+    await call();
+    token = "replacement-token";
+    acceptedToken = "unavailable-token";
+    await expect(call()).rejects.toMatchObject({ name: "ConnectionAuthorizationRequiredError" });
+    expect(requests.filter((request) => request.method === "tools/call")).toHaveLength(3);
+  });
+
+  it("keeps missing grants in the existing consent flow", async () => {
+    await call();
+    getToken.mockRejectedValue(new ConnectionAuthorizationRequiredError("test"));
+    vi.setSystemTime(Date.now() + 60_001);
+    await expect(call()).rejects.toMatchObject({ name: "ConnectionAuthorizationRequiredError" });
+    expect(requests.filter((request) => request.method === "tools/call").at(-1)?.bearer).toBeNull();
+  });
+
+  it("does not refresh or retry a team permission failure", async () => {
+    await call();
+    status = 403;
+    await expect(call()).rejects.toThrow();
+    expect(requests.filter((request) => request.method === "tools/call")).toHaveLength(2);
+    expect(evict).not.toHaveBeenCalled();
+  });
+});
