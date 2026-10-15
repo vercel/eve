@@ -38,6 +38,16 @@ does not affect lifecycle instrumentation created with `defineInstrumentation()`
 See [Audience](../channels/overview#audience) for how channels classify the
 conversation passed to this policy.
 
+The session's resolved capture decision also selects its default
+[Workflow run-data retention](/docs/agent-config#run-data-retention). Allowing
+both inputs and outputs uses the World's default; dropping the trace or excluding
+either direction requests deletion of durable payloads and streams when the run
+ends. This makes completed private and unknown-audience transcripts unreadable
+under the default policy outside development. Set
+`experimental.workflow.retention: "default"` on the agent to retain completed
+sessions independently of tracing. Destination `exportPolicy` filters do not
+change Workflow retention, and Workflow deletion does not delete exported traces.
+
 ## Instrument Node.js dependencies
 
 Pass OpenTelemetry instrumentation instances to `otel({ instrumentations })`.

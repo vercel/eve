@@ -302,20 +302,28 @@ export interface AgentWorkflowDefinition {
    * Applied to every run that owns the session, including successors created
    * by deployment handoff.
    *
-   * - `"default"`: same as omission. The Workflow SDK World decides.
+   * When omitted, eve uses the session's resolved OTel trace decision: full
+   * input and output capture keeps the World's default; dropped traces or
+   * either excluded content direction request `0`. Destination export filters
+   * and lifecycle-provider policies do not affect this choice.
+   *
+   * An explicit value overrides this automatic choice:
+   * - `"default"`: the Workflow SDK World decides, regardless of tracing.
    *   On Vercel this follows your team's plan.
    * - `0`: the world deletes run payloads and stream chunks as soon as the run
    *   completes or fails. Metadata such as run IDs, status, and timestamps may
    *   persist up to the default period.
    *
-   * The World you are using with the Workflow SDK might not support every
-   * option. A World that does not recognize the value keeps the data.
+   * The World enforces deletion. Worlds older than spec version 4 reject `0`;
+   * spec version 4 Worlds without retention support keep the data. Run, step,
+   * and event metadata and attributes remain for the default period. Exported
+   * traces are not deleted.
    *
    * Note that with retention set to `0`, data deletion can race reads of a finished
    * run, so results and transcripts of completed sessions generally become
    * unreadable. Persist anything you need to keep from inside a tool.
    *
-   * @default "default"
+   * @default Derived from the session's resolved trace policy.
    */
   readonly retention?: AgentWorkflowRetentionDefinition;
   /**

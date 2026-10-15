@@ -151,14 +151,19 @@ export function createWorkflowRuntime(config: {
     });
     if (predecessor !== undefined) ctx.set(SessionPredecessorKey, predecessor);
     const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-    initializeSessionInstrumentation({
+    const traceDecision = initializeSessionInstrumentation({
       agentName: effectiveAgent.turnAgent.id,
       ctx,
     });
     const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
-    // Retention is always the authored value: `experimental` cannot be
-    // selected by a dynamic subagent config, so there is nothing to resolve.
-    const retention = bundle.resolvedAgent.config?.experimental?.workflow?.retention;
+    // Workflow cannot purge inputs and outputs independently.
+    const retention =
+      bundle.resolvedAgent.config?.experimental?.workflow?.retention ??
+      (traceDecision.action === "record" &&
+      traceDecision.recordInputs &&
+      traceDecision.recordOutputs
+        ? undefined
+        : 0);
     const serializedContext = serializeContext(ctx);
     const parentLineage = readParentLineage(serializedContext);
     const workflowInput: {
