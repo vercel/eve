@@ -1578,6 +1578,7 @@ const PUBLISHED = "test.published";
 /** Mocks the run-message publishing steps to record what they publish in the session context. */
 function publishIntoContext(): void {
   const append = (context: Record<string, unknown>, entry: string) => ({
+    cancelled: false,
     serializedContext: {
       ...context,
       [PUBLISHED]: [...((context[PUBLISHED] as string[] | undefined) ?? []), entry],

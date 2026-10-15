@@ -145,23 +145,31 @@ export class SessionExecution {
   private async handleBoundaryMessages(
     messages: readonly WorkflowToolRunMessage[],
     ending = false,
+    turn?: ActiveTurn,
   ): Promise<void> {
     let applied: AppliedRunMessage[] = [];
     for (const message of messages) {
       if (!isAppliedRunMessage(message)) {
-        await this.applyRunMessages(applied);
+        await this.applyRunMessages(applied, turn);
         applied = [];
         await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
       } else if (!ending || message.kind !== "agent-started") {
         applied.push(message);
       }
     }
-    await this.applyRunMessages(applied);
+    await this.applyRunMessages(applied, turn);
   }
 
-  private async applyRunMessages(messages: readonly AppliedRunMessage[]): Promise<void> {
+  /** Hooks on the messages' events may cancel `turn`, the turn that is running. */
+  private async applyRunMessages(
+    messages: readonly AppliedRunMessage[],
+    turn?: ActiveTurn,
+  ): Promise<void> {
     if (messages.length === 0) return;
-    await this.input.cursor.advance((state) => applyRunMessagesStep({ ...state, messages }));
+    const { cancelled } = await this.input.cursor.advance((state) =>
+      applyRunMessagesStep({ ...state, canCancelTurn: turn !== undefined, messages }),
+    );
+    if (cancelled) turn?.abort();
   }
 
   private async runTurnSteps(
@@ -197,7 +205,12 @@ export class SessionExecution {
       // reply to it.
       const stepAdmission = this.input.queue.nextAdmission;
       await turn.admitBoundary();
-      await this.handleBoundaryMessages(turn.takeBoundaryMessages(), result.action === "done");
+      const ending = result.action === "done";
+      await this.handleBoundaryMessages(
+        turn.takeBoundaryMessages(),
+        ending,
+        ending ? undefined : turn,
+      );
 
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
       if (!turnCompleted && turn.signal.aborted && pendingCallIds === undefined) {
@@ -291,7 +304,7 @@ export class SessionExecution {
     if (isAppliedRunMessage(message)) {
       const following =
         turn?.takeAppliedRunMessages() ?? takeLeadingAppliedRunMessages(this.input.inbox);
-      await this.applyRunMessages([message, ...following]);
+      await this.applyRunMessages([message, ...following], turn);
       return undefined;
     }
     return await handleWorkflowToolRunMessage({

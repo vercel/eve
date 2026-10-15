@@ -157,8 +157,30 @@ async function routeProxiedDeliver(
     }
   }
 
+  let published: PublishedSessionEvents & { readonly cancelled: boolean } = {
+    serializedContext,
+    sessionState: input.sessionState,
+    cancelled: false,
+  };
+  if (answerMessages.length > 0) {
+    // Like a steering message, the answer joins the open turn, so the turn's
+    // later events carry its delivery ids too. Its hooks run before the answer
+    // goes down, so `ctx.cancel()` stops the turn instead of answering.
+    published = await publishSessionEvents(
+      {
+        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
+        sessionState: published.sessionState,
+        sessionWritable: input.sessionWritable,
+      },
+      answerMessages,
+      { canCancelTurn: true },
+    );
+  }
+  // The turn owner lives outside this durable step and consumes its result.
+  if (published.cancelled) parentAction = { kind: "cancel-turn" };
+
   const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
-  for (const child of children.values()) {
+  for (const child of published.cancelled ? [] : children.values()) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
       await sendWorkflowAskAnswers(
@@ -211,19 +233,6 @@ async function routeProxiedDeliver(
     parentAction === undefined &&
     [...requests.keys()].some((id) => !retired.has(id) && !forwarded.has(id));
 
-  let published: PublishedSessionEvents = { serializedContext, sessionState: input.sessionState };
-  if (answerMessages.length > 0) {
-    // Like a steering message, the answer joins the open turn, so the turn's
-    // later events carry its delivery ids too.
-    published = await publishSessionEvents(
-      {
-        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
-        sessionState: published.sessionState,
-        sessionWritable: input.sessionWritable,
-      },
-      answerMessages,
-    );
-  }
   const context = await commitSessionStep(
     { ...published, sessionWritable: input.sessionWritable },
     (view) => [routeAnswer(view, { children: answered, holds })],

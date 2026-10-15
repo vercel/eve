@@ -325,7 +325,8 @@ export class ActiveTurn {
     return steered;
   }
 
-  private abort(): void {
+  /** Stops the turn, as `session.cancel()` does; a hook's `ctx.cancel()` uses it too. */
+  abort(): void {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
   }
