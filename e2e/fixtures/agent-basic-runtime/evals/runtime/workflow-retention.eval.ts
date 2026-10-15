@@ -1,4 +1,3 @@
-import { Client, ClientError } from "eve/client";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -6,60 +5,52 @@ export default defineEval({
   description:
     "Metadata-only sessions lose their durable transcript after reset, while full-capture sessions retain it.",
   async test(t) {
-    const host = `https://${crypto.randomUUID()}.invalid`;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (input, init) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      return url.origin === host
-        ? t.target.fetch(`${url.pathname}${url.search}`, init)
-        : originalFetch(input, init);
-    };
-    try {
-      for (const metadataOnly of [false, true]) {
-        const client = new Client({
-          host,
-          headers: metadataOnly ? { authorization: "Bearer e2e-metadata-retention" } : {},
-        });
-        const { session, response } = await client.sessions.create({
-          message:
-            "Alice has finished reviewing her notes. Greet her briefly without calling tools.",
+    const message =
+      "Alice has finished reviewing her notes. Greet her briefly without calling tools.";
+    for (const metadataOnly of [false, true]) {
+      const headers: Record<string, string> = metadataOnly
+        ? { authorization: "Bearer e2e-metadata-retention" }
+        : {};
+      const turn = await t.send(message, { headers });
+      turn.expectOk();
+      turn.event("message.completed", { count: 1 });
+      const sessionPath = `/eve/v1/session/${encodeURIComponent(turn.sessionId)}`;
+      const readHistory = () =>
+        t.target.fetch(`${sessionPath}/stream?follow=false&startIndex=0`, {
+          headers,
           signal: t.signal,
         });
-        const result = await response.result();
-        await t.require(result.status, equals("completed"));
-        const live = await session.snapshot({ signal: t.signal });
-        await t.require(
-          live.events.some((event) => event.type === "message.completed"),
-          equals(true),
-        );
+      const live = await readHistory();
+      await t.require(live.status, equals(200));
+      await t.require((await live.text()).includes(message), equals(true));
 
-        const reset = await session.reset({ signal: t.signal });
-        await t.require(reset.status, equals("reset"));
-        if (!metadataOnly) {
-          const retained = await session.snapshot({ signal: t.signal });
-          await t.require(
-            retained.events.some((event) => event.type === "message.completed"),
-            equals(true),
-          );
-          continue;
-        }
-
-        let expired = false;
-        for (const delayMs of [0, 50, 100, 200, 400, 800, 1_600, 3_200]) {
-          await t.sleep(delayMs);
-          try {
-            await session.snapshot({ signal: t.signal });
-          } catch (error) {
-            if (!(error instanceof ClientError) || error.code !== "session_expired") throw error;
-            await t.require(error.status, equals(410));
-            expired = true;
-            break;
-          }
-        }
-        await t.require(expired, equals(true));
+      const reset = await t.target.fetch(`${sessionPath}/reset`, {
+        headers,
+        method: "POST",
+        signal: t.signal,
+      });
+      await t.require(reset.status, equals(200));
+      await reset.body?.cancel();
+      if (!metadataOnly) {
+        const retained = await readHistory();
+        await t.require(retained.status, equals(200));
+        await t.require((await retained.text()).includes(message), equals(true));
+        continue;
       }
-    } finally {
-      globalThis.fetch = originalFetch;
+
+      let expired = false;
+      for (const delayMs of [0, 50, 100, 200, 400, 800, 1_600, 3_200]) {
+        await t.sleep(delayMs);
+        const history = await readHistory();
+        if (history.status === 410) {
+          await t.require((await history.json()).code, equals("session_expired"));
+          expired = true;
+          break;
+        }
+        await t.require(history.status, equals(200));
+        await history.body?.cancel();
+      }
+      await t.require(expired, equals(true));
     }
   },
 });
