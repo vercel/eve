@@ -21,11 +21,14 @@ import {
   recallBotConfig,
   recallSupportsDirectMessages,
   sendRecallChatMessage,
+  startRecallOutputMedia,
+  stopRecallOutputMedia,
   type RecallApiOptions,
 } from "#public/channels/recall/api.js";
 import {
   defaultEvents,
   defaultOnMeetingEvent,
+  defaultShouldRespond,
   isAddressedTo,
 } from "#public/channels/recall/defaults.js";
 import { parseRecallEvent, type RecallMeetingEvent } from "#public/channels/recall/inbound.js";
@@ -39,6 +42,9 @@ const log = createLogger("recall.channel");
 /** Real-time payloads are one utterance or chat message; anything near this is not Recall. */
 const MAX_WEBHOOK_BYTES = 256 * 1024;
 
+/** How many lines the agent didn't answer stay in state for the next turn it takes. */
+const MAX_TRANSCRIPT_LINES = 60;
+
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
@@ -47,6 +53,23 @@ export interface RecallChannelState extends PromptQueueState {
   botId: string | null;
   /** Meeting platform, such as `zoom`, learned from the first participant event. */
   platform: string | null;
+  /** Lines the agent heard but didn't answer since its last turn, oldest first. */
+  transcript?: string[];
+}
+
+/** Per-delivery state: the event a line came from, which `deliver` reads and doesn't keep. */
+interface RecallDeliveryState extends RecallChannelState {
+  event?: RecallMeetingEvent;
+}
+
+/** Input to {@link RecallChannelConfig.shouldRespond}. */
+export interface RecallRespondInput {
+  readonly event: RecallMeetingEvent;
+  /** The line the model will see for this event, such as `Alice: can you file that?`. */
+  readonly line: string;
+  /** Lines the agent heard but didn't answer since its last turn, oldest first. */
+  readonly transcript: readonly string[];
+  readonly botName: string;
 }
 
 /** Credentials for the Recall API and webhook verification. */
@@ -72,6 +95,9 @@ export interface RecallHandle {
   sendChatMessage(message: string, options?: { readonly to?: string }): Promise<boolean>;
   /** Plays an MP3 clip through the bot. The bot must be created with `automatic_audio_output`. */
   outputAudio(mp3: Uint8Array): Promise<void>;
+  /** Streams a web page into the meeting as the bot's camera and microphone (Recall Output Media). */
+  startOutputMedia(url: string): Promise<void>;
+  stopOutputMedia(): Promise<void>;
   /** Removes the bot from the meeting. */
   leaveCall(): Promise<void>;
   /** Raw Recall REST escape hatch. `path` is relative to `/api/v1`. */
@@ -173,11 +199,22 @@ export interface RecallChannelConfig {
   readonly turnPolicy?: TurnPolicy;
   readonly api?: Pick<RecallApiOptions, "apiBaseUrl" | "fetch">;
   /**
-   * Decides which meeting events reach the agent and as whom. Defaults to
-   * every chat message and speech that names the bot, each as its
-   * participant. See `recallParticipantAuth` and `recallMeetingAuth`.
+   * Decides which meeting events reach the session and as whom. Runs in the
+   * webhook route, before the session. Defaults to speech, chat, joins, and
+   * leaves, each as its participant. See `recallParticipantAuth` and
+   * `recallMeetingAuth`. Use `shouldRespond` to decide which of them get an
+   * answer.
    */
   onMeetingEvent?(ctx: RecallContext, event: RecallMeetingEvent): RecallInboundResultOrPromise;
+  /**
+   * Decides whether a line the session heard starts a turn. Lines it declines
+   * cost no model call: they're kept and given to the next turn as recent
+   * transcript, and they don't withdraw a pending approval or question.
+   * Runs inside the session, so it sees the recent transcript; call a fast
+   * decision model such as `decide` from `eve/ai` here. Defaults to every chat
+   * message and speech that names the bot. A throw falls back to the default.
+   */
+  shouldRespond?(input: RecallRespondInput): boolean | Promise<boolean>;
   readonly events?: RecallChannelEvents;
 }
 
@@ -193,6 +230,15 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
   const route = config.route ?? "/eve/v1/recall";
   const botName = config.botName ?? "eve";
   const onMeetingEvent = config.onMeetingEvent ?? defaultOnMeetingEvent;
+  const shouldRespond = async (input: RecallRespondInput): Promise<boolean> => {
+    if (config.shouldRespond === undefined) return defaultShouldRespond(input);
+    try {
+      return await config.shouldRespond(input);
+    } catch (error) {
+      log.warn("shouldRespond failed; falling back to name matching", { error });
+      return defaultShouldRespond(input);
+    }
+  };
   const api: RecallApiOptions = {
     ...config.api,
     apiKey: config.credentials?.apiKey,
@@ -210,10 +256,28 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       return { recall: buildRecallHandle(api, state), state };
     },
 
-    deliver(payload, channel) {
-      const platform = (payload.state as Partial<RecallChannelState> | undefined)?.platform;
-      if (platform) channel.state.platform = platform;
-      return defaultDeliverResult(payload);
+    async deliver(payload, channel) {
+      const delivered = payload.state as Partial<RecallDeliveryState> | undefined;
+      if (delivered?.platform) channel.state.platform = delivered.platform;
+      // A session's first send seeds state with the whole delivery.
+      delete (channel.state as RecallDeliveryState).event;
+      const event = delivered?.event;
+      if (event === undefined || typeof payload.message !== "string") {
+        return defaultDeliverResult(payload);
+      }
+
+      const transcript = channel.state.transcript ?? [];
+      const line = payload.message;
+      if (!(await shouldRespond({ botName, event, line, transcript }))) {
+        // Between turns the session parks without a model call; during a held
+        // turn eve ignores the delivery, so a pending prompt stays open.
+        channel.state.transcript = [...transcript, line].slice(-MAX_TRANSCRIPT_LINES);
+        return undefined;
+      }
+      channel.state.transcript = [];
+      const input = defaultDeliverResult(payload);
+      if (input === undefined || transcript.length === 0) return input;
+      return { ...input, context: [...(input.context ?? []), formatTranscript(transcript)] };
     },
 
     routes: [
@@ -283,7 +347,7 @@ async function dispatch(input: {
   readonly api: RecallApiOptions;
   readonly botName: string;
   readonly event: RecallMeetingEvent;
-  readonly from: ChannelFrom<RecallChannelState>;
+  readonly from: ChannelFrom<RecallDeliveryState>;
   readonly onMeetingEvent: NonNullable<RecallChannelConfig["onMeetingEvent"]>;
 }): Promise<void> {
   const { event } = input;
@@ -309,7 +373,7 @@ async function dispatch(input: {
         {
           auth: result.auth,
           context: [formatRecallContextBlock(event, platform)],
-          state: { botId: event.botId, platform },
+          state: { botId: event.botId, event, platform },
           title: result.title,
         },
         // The speaker prefix stays model-visible; a pending prompt matches what they said.
@@ -353,6 +417,15 @@ function answerTextOf(event: RecallMeetingEvent, botName: string): string | unde
     text = text.replace(new RegExp(`^\\W*${escapeRegExp(botName)}\\W*`, "iu"), "");
   }
   return text.replace(/[.!?,;:]+$/u, "").trim();
+}
+
+function formatTranscript(lines: readonly string[]): string {
+  return [
+    "<meeting_transcript>",
+    "What was said since your last turn, which you heard but didn't answer:",
+    ...lines,
+    "</meeting_transcript>",
+  ].join("\n");
 }
 
 function formatRecallContextBlock(event: RecallMeetingEvent, platform: string | null): string {
@@ -413,6 +486,8 @@ function buildRecallHandle(
       }
     },
     outputAudio: (mp3) => outputRecallAudio({ ...api, botId: botId(), mp3 }),
+    startOutputMedia: (url) => startRecallOutputMedia({ ...api, botId: botId(), url }),
+    stopOutputMedia: () => stopRecallOutputMedia({ ...api, botId: botId() }),
     leaveCall: () => leaveRecallCall({ ...api, botId: botId() }),
     request: (path, init) => callRecallApi({ ...api, ...init, path }),
   };
