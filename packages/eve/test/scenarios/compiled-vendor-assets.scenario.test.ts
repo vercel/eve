@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
+import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const EVE_CATALOG_ROOT = join(EVE_PACKAGE_ROOT, "..", "eve-catalog");
@@ -19,6 +20,7 @@ const EVE_CATALOG_FINGERPRINT_FILES = [
 ] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const execFileAsync = promisify(execFile);
+const createTemporaryDirectory = useTemporaryDirectories();
 const require = createRequire(import.meta.url);
 const VERCEL_BLOB_DIST_ROOT = dirname(require.resolve("@vercel/blob"));
 const VERCEL_SANDBOX_DIST_ROOT = join(
@@ -46,6 +48,53 @@ function rewriteDeclarationImports(
 }
 
 describe("compiled vendor assets", () => {
+  it("vendors a symlinked workspace package before its compiled export exists", async () => {
+    const root = await createTemporaryDirectory("eve-vendor-workspace-");
+    const packageRoot = join(root, "packages", "consumer");
+    const libraryRoot = join(root, "packages", "library");
+    const compiledRoot = join(packageRoot, "compiled");
+    await mkdir(join(packageRoot, "node_modules", "@example"), { recursive: true });
+    await mkdir(join(libraryRoot, "src"), { recursive: true });
+    await writeFile(join(root, "package.json"), JSON.stringify({ type: "module" }));
+    await writeFile(join(root, "tsconfig.json"), "{}");
+    await writeFile(
+      join(libraryRoot, "package.json"),
+      JSON.stringify({
+        name: "@example/library",
+        version: "0.0.0",
+        type: "module",
+        exports: { ".": "./dist/index.js" },
+      }),
+    );
+    await writeFile(join(libraryRoot, "src", "index.ts"), "export const answer = 42;");
+    await symlink(
+      libraryRoot,
+      join(packageRoot, "node_modules", "@example", "library"),
+      "junction",
+    );
+
+    const { runVendor } = await import(
+      pathToFileURL(join(EVE_PACKAGE_ROOT, "scripts", "vendor-compiled", "_shared.mjs")).href
+    );
+    await runVendor({
+      packageRoot,
+      compiledRoot,
+      scriptFiles: [],
+      modules: [
+        {
+          packageName: "@example/library",
+          compiledPath: "library",
+          entry: "src/index.ts",
+          bundling: "standalone",
+          fingerprintFiles: ["../../tsconfig.json", "src/index.ts"],
+        },
+      ],
+    });
+
+    const { answer } = await import(pathToFileURL(join(compiledRoot, "library", "index.js")).href);
+    expect(answer).toBe(42);
+  });
+
   it("leaves Zod's process-global configuration to the app", async () => {
     // Every Zod copy in a process shares `globalThis.__zod_globalConfig`, so a
     // vendored side effect there would rewrite the app's own schemas too.
