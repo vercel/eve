@@ -317,6 +317,51 @@ describe("OpenApiConnectionClient", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
   });
 
+  it.each([".", "..", "folder/../item", "folder/./item"])(
+    "rejects dot segments in path parameter %j before sending a request",
+    async (id) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new OpenApiConnectionClient(makeConnection());
+
+      await expect(client.executeTool("getProject", { id }, EXECUTE_OPTIONS)).rejects.toThrow(
+        'Path parameter "id" for tool "getProject" in connection "test" must not contain "." or ".." segments.',
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("validates resolved application-provided path parameters", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OpenApiConnectionClient(
+      makeConnection({ toolCall: { providedArguments: { id: Promise.resolve("..") } } }),
+    );
+
+    await expect(
+      client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS),
+    ).rejects.toThrow('Path parameter "id"');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves application-provided path values and ordinary URL encoding", async () => {
+    const fetchMock = vi.fn(async (_url: URL) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        toolCall: { providedArguments: { id: "release.v1/café 100%" } },
+      }),
+    );
+
+    await client.executeTool("getProject", { id: "..", teamId: ".." }, EXECUTE_OPTIONS);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [calledUrl] = fetchMock.mock.calls[0]!;
+    expect(calledUrl.toString()).toBe(
+      "https://api.example.com/v1/projects/release.v1%2Fcaf%C3%A9%20100%25?teamId=..",
+    );
+  });
+
   it("resolves auth and headers from the active caller", async () => {
     const fetchMock = vi.fn(
       async (_url: URL, _init: RequestInit) => new Response(null, { status: 200 }),
