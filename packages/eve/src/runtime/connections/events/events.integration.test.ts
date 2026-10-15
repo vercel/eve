@@ -311,7 +311,8 @@ it.each([
   { ttlMs: 120_000.5 },
   { ttlMs: 31_536_000_001 },
   { ttlMs: "120000" },
-])("rejects an unsupported lifetime %j before starting a watch", async (lifetime) => {
+  { ttlMs: 120_000, expiresAt: null },
+])("rejects invalid subscription input %j before starting a watch", async (lifetime) => {
   const [tool] = await contextStorage.run(ctx, () => actions.metadata());
   const input = { arguments: { project: "ABC" }, ...lifetime };
   const { toInputSchema } = await import("#tools/schema.js");
@@ -320,10 +321,29 @@ it.each([
   );
   await expect(
     contextStorage.run(ctx, () => actions.execute(tool!.name, input, { callId: "invalid" })),
-  ).rejects.toThrow("ttlMs");
+  ).rejects.toThrow("Invalid subscription input");
   expect(subscriber).not.toHaveBeenCalled();
   expect(handlers.size).toBe(0);
 });
+
+it.each([{ ttlMs: 1 }, { ttlMs: 120_000, expiresAt: null }])(
+  "rejects invalid subscription input %j even when the provider schema cannot be validated",
+  async (lifetime) => {
+    eventSchema = { type: "object", properties: { project: { type: "provider-specific" } } };
+    const [tool] = await contextStorage.run(ctx, () => actions.metadata());
+    await expect(
+      contextStorage.run(ctx, () =>
+        actions.execute(
+          tool!.name,
+          { arguments: { project: "ABC" }, ...lifetime },
+          { callId: "invalid" },
+        ),
+      ),
+    ).rejects.toThrow("Invalid subscription input");
+    expect(subscriber).not.toHaveBeenCalled();
+    expect(handlers.size).toBe(0);
+  },
+);
 
 it.each(["available", "filtered", "catalog unavailable", "connection unavailable"])(
   "returns subscription results through eve's connection tool entry with MCP %s",
@@ -400,9 +420,13 @@ it("runs callbacks in the creator's eve context and persists authored state with
 it("uses eve tool schema defaults and treats format as an annotation for event arguments", async () => {
   eventSchema = {
     type: "object",
-    properties: {
+    $defs: {
       project: { type: "string", format: "email" },
       includeArchived: { type: "boolean", default: false },
+    },
+    properties: {
+      project: { $ref: "#/$defs/project" },
+      includeArchived: { $ref: "#/$defs/includeArchived" },
     },
   };
   await watch();

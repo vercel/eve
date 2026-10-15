@@ -7,7 +7,7 @@ import {
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { principalOf } from "#execution/session/principal.js";
-import { toInputSchema } from "#tools/schema.js";
+import { defineJsonSchema, toInputSchema } from "#tools/schema.js";
 import { createHash } from "node:crypto";
 import {
   createMCPClient,
@@ -39,6 +39,9 @@ const PREFIX = "events_subscribe_";
 const MIN_TTL_MS = 120_000;
 const MAX_TTL_MS = 31_536_000_000;
 type EventCatalog = Pick<MCPEvents, "list">;
+const SUBSCRIBE_INPUT_SCHEMA = defineJsonSchema<
+  Pick<ManagedEventSubscribeInput, "arguments" | "ttlMs">
+>(parseJsonObject(subscribeInputSchema()));
 
 export function isEventAction(name: string): boolean {
   return name === GET || name === STOP || name.startsWith(PREFIX);
@@ -163,21 +166,7 @@ export class ConnectionEventActions {
         ...catalog.map((event) => ({
           name: actionName(event.name),
           description: `Watch ${event.name}. ${event.description ?? ""} Events reach this connection's authored callback for ttlMs milliseconds or until stopped. Set ttlMs to null to watch indefinitely.`,
-          inputSchema: {
-            type: "object",
-            additionalProperties: false,
-            required: ["arguments", "ttlMs"],
-            properties: {
-              arguments: event.inputSchema,
-              ttlMs: {
-                type: ["integer", "null"],
-                minimum: MIN_TTL_MS,
-                maximum: MAX_TTL_MS,
-                description:
-                  "How long to watch, in milliseconds (2 minutes to 365 days), or null until stopped",
-              },
-            },
-          },
+          inputSchema: subscribeInputSchema(event.inputSchema),
         })),
         ...managementMetadata(),
       ];
@@ -235,27 +224,24 @@ export class ConnectionEventActions {
       );
       if (definition === undefined)
         throw new Error("Unknown event subscription action for this account.");
+      // Unsupported provider schemas can pass through validation. Keep eve's input checks
+      // independent, and validate provider arguments with their original local $ref root.
+      const inputResult = await SUBSCRIBE_INPUT_SCHEMA["~standard"].validate(args);
+      if (inputResult.issues !== undefined)
+        throw new Error(
+          `Invalid subscription input: ${inputResult.issues.map(({ message }) => message).join("; ")}`,
+        );
+      const { arguments: inputArguments, ttlMs } = inputResult.value;
       const schema =
         typeof definition.inputSchema === "boolean"
           ? { allOf: [definition.inputSchema] }
           : definition.inputSchema;
       const valid = await toInputSchema(schema)["~standard"].validate(
-        parseJsonObject(args.arguments),
+        parseJsonObject(inputArguments),
       );
       if (valid.issues !== undefined)
         throw new Error("Event arguments do not match the authorized catalog schema.");
       const eventArguments = parseJsonObject(valid.value);
-      const ttlMs = args.ttlMs;
-      if (
-        ttlMs !== null &&
-        (typeof ttlMs !== "number" ||
-          !Number.isSafeInteger(ttlMs) ||
-          ttlMs < MIN_TTL_MS ||
-          ttlMs > MAX_TTL_MS)
-      )
-        throw new Error(
-          `ttlMs must be an integer from ${MIN_TTL_MS} to ${MAX_TTL_MS}, or null to watch until stopped.`,
-        );
       const id = createHash("sha256")
         .update(
           JSON.stringify([
@@ -293,6 +279,25 @@ export class ConnectionEventActions {
       return subscriptionResult(id, subscription);
     });
   }
+}
+
+function subscribeInputSchema(
+  argumentsSchema: EventDefinition["inputSchema"] = { type: "object" },
+) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["arguments", "ttlMs"],
+    properties: {
+      arguments: argumentsSchema,
+      ttlMs: {
+        type: ["integer", "null"],
+        minimum: MIN_TTL_MS,
+        maximum: MAX_TTL_MS,
+        description: `How long to watch, in milliseconds (${MIN_TTL_MS} to ${MAX_TTL_MS}), or null until stopped`,
+      },
+    },
+  };
 }
 
 /** Model-facing ids are eve's binding ids: they locate the handler that owns the watch. */
