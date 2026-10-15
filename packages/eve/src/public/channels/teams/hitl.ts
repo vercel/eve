@@ -274,11 +274,11 @@ function renderActions(
   replyToActivityId: string | undefined,
 ): readonly Record<string, unknown>[] {
   const payload = (optionId?: string): Record<string, unknown> => {
-    // The prompt rides along so a card can be retired without the session
-    // that posted it, such as when that session is gone.
+    // The prompt the card shows rides along so a card can be retired without
+    // the session that posted it, such as when that session is gone.
     const value: Record<string, unknown> = {
       requestId: request.requestId,
-      [TEAMS_HITL_PROMPT_KEY]: request.prompt,
+      [TEAMS_HITL_PROMPT_KEY]: truncate(request.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
     };
     if (request.kind === "tool-approval") value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
     if (replyToActivityId !== undefined) value.replyToActivityId = replyToActivityId;
