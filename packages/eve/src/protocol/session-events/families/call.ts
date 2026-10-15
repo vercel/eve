@@ -15,8 +15,12 @@ import type { Cause, Envelope, ErrorInfo, JsonValue, ValueReference } from "../e
 /** What a call belongs to: the model run that made it, or the call it runs inside. */
 export type CallOwner = { readonly runId: string } | { readonly callId: string };
 
-/** What a call can invoke. A newer eve can add one: a reader's switch keeps a default branch. */
-export type CapabilityKind = "tool" | "agent" | "skill";
+/**
+ * What a call can invoke: a tool, an agent, a skill to load, or `control`, the model managing its
+ * own tasks (waiting on or cancelling them), which readers showing activity usually leave out. A
+ * newer eve can add one: a reader's switch keeps a default branch.
+ */
+export type CapabilityKind = "tool" | "agent" | "skill" | "control";
 
 /** What a call invokes. */
 export interface Capability {
@@ -28,8 +32,9 @@ export interface Capability {
 /** A preview of a call's input as the model writes it. The first record announces the call. */
 export interface CallInputData {
   readonly callId: string;
-  /** On the announcing record only. */
+  /** On the announcing record only: the entry the model calls, and what it invokes. */
   readonly name?: string;
+  readonly kind?: CapabilityKind;
   readonly delta: string;
 }
 
@@ -146,7 +151,12 @@ export const callProgressSchemas = {
   "call.input": envelopeOf(
     "call.input",
     conforming<CallInputData>()(
-      z.object({ callId: id, delta: z.string(), name: z.string().optional() }),
+      z.object({
+        callId: id,
+        delta: z.string(),
+        kind: known<CapabilityKind>().optional(),
+        name: z.string().optional(),
+      }),
     ),
   ),
   "call.progress": envelopeOf(

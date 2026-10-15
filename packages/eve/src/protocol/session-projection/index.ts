@@ -5,7 +5,9 @@ export * from "./fold.js";
 export {
   activeTurn,
   activity,
+  callLabel,
   callOutputSource,
+  callState,
   conversation,
   failure,
   idle,
@@ -15,6 +17,7 @@ export {
   tasks,
   waiting,
   type Activity,
+  type CallState,
   type Waiting,
 } from "./selectors.js";
 export type * from "./tables.js";

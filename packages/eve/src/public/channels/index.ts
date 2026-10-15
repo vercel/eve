@@ -58,7 +58,9 @@ export {
   type WebSocketRouteHooks,
   type WebSocketUpgradeRequest,
   type WebSocketUpgradeResult,
+  type ChannelCommitHandler,
   type ChannelEventContext,
+  type CommittedLine,
   isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
 export { attachmentError } from "#public/channels/attachment-error.js";

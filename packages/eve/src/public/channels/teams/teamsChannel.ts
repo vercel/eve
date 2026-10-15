@@ -110,8 +110,8 @@ export interface TeamsChannelState {
   tenantId: string | null;
   /** User account that triggered the latest turn/session. */
   triggeringUser: TeamsChannelAccount | null;
-  /** Activity id for the default connection-auth card, when posted. */
-  pendingAuthActivityId?: string | null;
+  /** What the default sign-in flow posted for each open sign-in, by connection name. */
+  pendingAuthActivityIds?: Record<string, string>;
   pendingPromptCards?: Record<string, TeamsPendingPromptCard>;
   approvalResponderAccounts?: Record<string, TeamsChannelAccount>;
 }
@@ -722,7 +722,7 @@ function stateFromActivity(
     channelId: activity.teamsChannelId ?? null,
     conversationId: activity.conversation.id,
     conversationType: activity.conversationType ?? activity.scope,
-    pendingAuthActivityId: null,
+    pendingAuthActivityIds: {},
     replyToActivityId: address.replyToActivityId,
     serviceUrl: activity.serviceUrl,
     teamId: activity.teamId ?? null,
@@ -786,7 +786,7 @@ function initialTeamsState(): TeamsChannelState {
     conversationType: null,
     approvalResponderAccounts: {},
     pendingPromptCards: {},
-    pendingAuthActivityId: null,
+    pendingAuthActivityIds: {},
     replyToActivityId: null,
     serviceUrl: null,
     teamId: null,

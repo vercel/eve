@@ -89,32 +89,6 @@ export function callPlace(view: SessionView, callId: string): RunPlace | undefin
 // Calls
 // ---------------------------------------------------------------------------
 
-/** The approval this session asked about its own call, which the call waits on while open. */
-function ownApproval(view: SessionView, callId: string): InteractionRow | undefined {
-  let found: InteractionRow | undefined;
-  for (const row of Object.values(view.interactions)) {
-    if (
-      row.request.kind === "approval" &&
-      row.origin === undefined &&
-      "callId" in row.subject &&
-      row.subject.callId === callId
-    )
-      found = row;
-  }
-  return found;
-}
-
-/**
- * What an open call waits on: the approval this session asked about it, while that's open. Any
- * other open call is running, or waits on the runtime, as its row says.
- */
-export function waitingOn(view: SessionView, callId: string): string | undefined {
-  const row = view.calls[callId];
-  if (row === undefined || row.status === "settled" || row.taskId !== undefined) return undefined;
-  const approval = ownApproval(view, callId);
-  return approval?.status === "open" ? approval.interactionId : undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------

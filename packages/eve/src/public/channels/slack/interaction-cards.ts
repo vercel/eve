@@ -8,6 +8,7 @@ import type {
   InteractionHandlerDeps,
   ParsedBlockActionsPayload,
 } from "#public/channels/slack/interactions.js";
+import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
 
 function buildAnsweredHitlMessageBlocks(input: {
   readonly actionId: string;
@@ -108,13 +109,6 @@ function formatAnsweredCardSubtext(input: {
   return truncateCardSubtext(
     `${ANSWERED_CARD_SUBTEXT_PREFIX}${label}${ANSWERED_CARD_SUBTEXT_SUFFIX}${attribution}`,
   );
-}
-
-function truncateWithEllipsis(value: string, maxLength: number): string {
-  if (maxLength <= 0) return "";
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
 }
 
 function promptBlocksFromActionBlock(block: unknown): unknown[] {

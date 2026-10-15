@@ -16,14 +16,14 @@
  * surface the outcome (`authorized` / `declined` / `failed` /
  * `timed-out`).
  */
-import { signInEnding } from "#channel/interaction-prompts.js";
+import { signInEnding } from "#protocol/session-reader.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import { truncatePlainText } from "#public/channels/slack/limits.js";
 import {
   SIGN_IN_CANCEL_ACTION_ID,
   type SignInCancelTarget,
 } from "#public/channels/slack/sign-in-cancel.js";
-import { displayProperName } from "#shared/display-name.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
 
 export type { InteractionOutcome };
 

@@ -232,6 +232,9 @@ export {
 export {
   activeTurn,
   activity,
+  callLabel,
+  callState,
+  type CallState,
   callOutputSource,
   conversation,
   failure,

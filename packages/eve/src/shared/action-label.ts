@@ -2,7 +2,7 @@ import type { ActionPresentationByCallId } from "#protocol/message.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
-import { displayTitle } from "#shared/display-name.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 /**
  * How a call reads to people on every surface: the label its entry's definition

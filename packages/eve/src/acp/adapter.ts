@@ -21,14 +21,12 @@ import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
 import { isFactType } from "#protocol/session-events/catalog.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-import { interaction, waitingOn, type Interaction } from "#protocol/session-reader.js";
-import { callOutputSource } from "#protocol/session-projection/selectors.js";
+import { interaction, type Interaction } from "#protocol/session-reader.js";
+import { callLabel, callOutputSource, callState } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { actionLabel } from "#shared/action-label.js";
 import { failureOf } from "#client/session-utils.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
-import { displayTitle } from "#shared/display-name.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
 
@@ -72,15 +70,25 @@ interface AcpSession {
 }
 
 /**
- * A call's ACP status, from its row: pending while it waits on its approval, in progress while
- * otherwise open. ACP v1 has no statuses for denied or stopped calls, so they report `failed`.
+ * A call's ACP status, from the tables: pending until it starts or while its approval is open, in
+ * progress while it runs. ACP v1 has no statuses for denied or stopped calls, so they report
+ * `failed`.
  */
 function acpStatus(view: SessionView, callId: string): ToolCallStatus | undefined {
-  const row = view.calls[callId];
-  if (row === undefined) return undefined;
-  if (row.status !== "settled")
-    return waitingOn(view, callId) === undefined ? "in_progress" : "pending";
-  return row.outcome === "completed" ? "completed" : "failed";
+  switch (callState(view, callId)) {
+    case undefined:
+      return undefined;
+    case "requested":
+    case "approval":
+      return "pending";
+    case "running":
+    case "blocked":
+      return "in_progress";
+    case "completed":
+      return "completed";
+    default:
+      return "failed";
+  }
 }
 
 /** Configuration for translating one ACP client connection to an eve server. */
@@ -365,49 +373,34 @@ export class EveAcpAdapter {
     event: SessionStreamEvent,
     client: AgentContext,
   ): Promise<void> {
-    const fact = isFactType(event.type);
-    const before = new Map<string, ToolCallStatus | undefined>();
-    if (fact) {
-      for (const callId of session.tools.keys())
-        before.set(callId, acpStatus(session.view, callId));
-      foldReceivedEvent(session.view, event);
+    if (!isFactType(event.type)) {
+      await this.#projectContent(sessionId, session, event, client);
+      return;
     }
+    foldReceivedEvent(session.view, event);
     await this.#projectContent(sessionId, session, event, client);
-    // A call's status is the tables': a task call runs until its task settles, and a
-    // stopped or denied call ends when the stream says so.
-    // `tool_call` already announced the request. Only an announced call gets updates:
-    // an approval reaches the client through its permission request.
+    // `tool_call` announced the request. Only an announced call gets updates: an approval
+    // reaches the client through its permission request.
     if (event.type === "call.requested") return;
-    const updated = new Set<string>();
-    if (fact) {
-      for (const callId of session.tools.keys()) {
-        const status = acpStatus(session.view, callId);
-        if (status === undefined || status === before.get(callId)) continue;
-        updated.add(callId);
-        await notifyUpdate(client, sessionId, {
-          sessionUpdate: "tool_call_update",
-          toolCallId: callId,
-          status,
-          ...callOutput(event, callId, session.view),
-          ...resultTitle(event, callId),
-        });
-      }
-    }
-    // A result reports its content even when its call had already settled, such as the reason
-    // for a denial that `interaction.settled` decided first.
+    // Each announced call reports when the tables' status differs from the one it last
+    // reported: a task call runs until its task settles, and a stopped or denied call ends when
+    // the stream says so. A result reports its content even when its call had already settled,
+    // such as the reason for a denial that `interaction.settled` decided first.
     const resultCallId = event.type === "call.settled" ? event.data.callId : undefined;
-    if (resultCallId === undefined || updated.has(resultCallId)) return;
-    if (!session.tools.has(resultCallId)) return;
-    const output = callOutput(event, resultCallId, session.view);
-    const status = acpStatus(session.view, resultCallId);
-    if (!("content" in output) || status === undefined) return;
-    await notifyUpdate(client, sessionId, {
-      sessionUpdate: "tool_call_update",
-      toolCallId: resultCallId,
-      status,
-      ...output,
-      ...resultTitle(event, resultCallId),
-    });
+    for (const [callId, call] of session.tools) {
+      const status = acpStatus(session.view, callId);
+      if (status === undefined) continue;
+      const output = callOutput(event, callId, session.view);
+      if (status === call.status && !(callId === resultCallId && "content" in output)) continue;
+      session.tools.set(callId, { ...call, status });
+      await notifyUpdate(client, sessionId, {
+        sessionUpdate: "tool_call_update",
+        toolCallId: callId,
+        status,
+        ...output,
+        ...resultTitle(event, callId),
+      });
+    }
   }
 
   /**
@@ -463,10 +456,11 @@ export class EveAcpAdapter {
       }
       case "call.requested": {
         const { callId, capability, input } = event.data;
-        if (capability.kind === "tool" && isTaskControlTool(capability.name)) return;
+        const row = session.view.calls[callId];
+        if (capability.kind === "control" || row === undefined) return;
         const toolCall: ToolCall = {
           toolCallId: callId,
-          title: capability.label ?? displayTitle(capability.name),
+          title: callLabel(row),
           kind: "other",
           status: "pending",
           rawInput: input,
