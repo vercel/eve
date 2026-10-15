@@ -498,8 +498,8 @@ export class ModelCaller {
 }
 
 /**
- * A filtered response fails the step, and an empty one, without output or any tool result, is
- * retried by the empty-response recovery.
+ * A filtered response fails the step. An empty non-`stop` response without any
+ * tool result is retried by the empty-response recovery.
  */
 function assertUsableResponse(
   stepResult: HarnessStepResult,

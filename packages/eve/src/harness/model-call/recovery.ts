@@ -100,12 +100,12 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
 }
 
 /**
- * True when a step produced no assistant text and no tool calls. A blank
- * response is ambiguous and must be retried instead of silently dropping a
- * HITL reply.
+ * A successful `stop` may intentionally produce no reply. Only other finish
+ * reasons with no assistant text or tool work need empty-response recovery.
  */
 export function isEmptyModelResponse(step: HarnessStepResult): boolean {
   return (
+    step.finishReason !== "stop" &&
     step.toolCalls.length === 0 &&
     step.toolResults.length === 0 &&
     resolveAssistantStepText(step.response.messages, step.text) === null

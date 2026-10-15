@@ -214,7 +214,7 @@ function readErrorMessage(error: unknown): string {
 /**
  * A model call that produced no content. Raised by the model caller from
  * either of its two triggers: `isEmptyModelResponse` (a completed step
- * with finishReason 'other' and no output — AI Gateway HTTP 200 whose
+ * with a non-'stop' finish reason and no output — e.g. AI Gateway HTTP 200 whose
  * stream carries no content, no usage, and no error) or
  * {@link isNoOutputGeneratedError} (the AI SDK rejecting a stream that
  * closed after metadata without output, normalized via the model call's
