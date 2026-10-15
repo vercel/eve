@@ -289,7 +289,11 @@ async function importRelocatedWorkspaceExternal(
         .filter((entry) => !join(entry.parentPath, entry.name).includes("/node_modules/"))
         .map(async (entry) => {
           const path = join(entry.parentPath, entry.name);
-          return (await readFile(path, "utf8")).includes(`"${specifier}"`) ? path : null;
+          // An import statement or a literal dynamic import, not a mention in the embedded manifest.
+          const code = await readFile(path, "utf8");
+          return code.includes(`from "${specifier}"`) || code.includes(`import("${specifier}")`)
+            ? path
+            : null;
         }),
     )
   ).filter((path) => path !== null);

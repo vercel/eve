@@ -1,4 +1,4 @@
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -68,6 +68,34 @@ async function checkOutput(input: {
   );
 }
 
+// Installs `pg` in the output from `files` (path -> contents, `package.json`
+// included) and checks a chunk that imports bare `pg`. Returns the output's
+// remaining file list, so tests can assert the probes are cleaned up.
+async function checkInstalledPackage(files: Readonly<Record<string, string>>) {
+  const serverDir = join(await createDirectory("eve-external-output-check-"), "server");
+  const packageDir = join(serverDir, "node_modules", "pg");
+  await mkdir(packageDir, { recursive: true });
+  for (const [path, contents] of Object.entries(files)) {
+    await writeFile(join(packageDir, path), contents);
+  }
+  await createExternalDependencyOutputCheckPlugin({
+    appRoot: APP_ROOT,
+    externalDependencies: ["pg"],
+  })?.writeBundle(
+    { dir: serverDir },
+    {
+      "index.mjs": {
+        code: "",
+        dynamicImports: [],
+        fileName: "index.mjs",
+        imports: ["pg"],
+        type: "chunk",
+      },
+    },
+  );
+  return readdir(serverDir, { recursive: true });
+}
+
 const missing = (specifier: string, chunk: string) =>
   `"${specifier}" is listed in build.externalDependencies and imported by the hosted bundle (${chunk}), but the build output cannot resolve it. Add "pg" to the dependencies in ${join(APP_ROOT, "package.json")}.`;
 
@@ -98,6 +126,32 @@ describe("external dependency output check", () => {
     await expect(checkOutput({ installAt: "server", withClient: false })).rejects.toThrow(
       missing("pg/lib/client", "_chunks/db.mjs"),
     );
+  });
+
+  it("rejects a legacy main that only resolves by adding an extension Node does not try", async () => {
+    await expect(
+      checkInstalledPackage({
+        "index.mjs": "export default {};\n",
+        "package.json": JSON.stringify({ main: "./index", name: "pg" }),
+      }),
+    ).rejects.toThrow(missing("pg", "index.mjs"));
+  });
+
+  it("accepts a legacy main that names its file", async () => {
+    await expect(
+      checkInstalledPackage({
+        "index.mjs": "export default {};\n",
+        "package.json": JSON.stringify({ main: "./index.mjs", name: "pg" }),
+      }),
+    ).resolves.not.toContainEqual(expect.stringContaining(".eve-resolve-"));
+  });
+
+  it("rejects an exports target the output does not contain", async () => {
+    await expect(
+      checkInstalledPackage({
+        "package.json": JSON.stringify({ exports: "./index.js", name: "pg" }),
+      }),
+    ).rejects.toThrow(missing("pg", "index.mjs"));
   });
 
   it("does nothing when no externals are configured", () => {

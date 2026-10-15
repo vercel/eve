@@ -73,44 +73,6 @@ function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
   return rolldownParseAstPromise;
 }
 
-type RolldownResolveResult = { readonly path?: string; readonly error?: string };
-
-type RolldownResolver = {
-  sync(directory: string, specifier: string): RolldownResolveResult;
-};
-
-type RolldownExperimentalModule = {
-  readonly ResolverFactory: new (options: Record<string, unknown>) => RolldownResolver;
-};
-
-let rolldownExperimentalPromise: Promise<RolldownExperimentalModule> | undefined;
-
-/**
- * Creates a Rolldown resolver (oxc-resolver), loaded from Nitro's dependency
- * tree and configured like Node's ESM loader resolving an `import`: Node's
- * default export conditions (`node`, `import`, `module-sync`, `node-addons`;
- * `default` always matches), fully specified subpaths, no `NODE_PATH`.
- * Results are realpaths. The resolver caches the filesystem, so create one
- * per check of a finished tree.
- */
-export async function createNitroRolldownNodeImportResolver(): Promise<RolldownResolver> {
-  rolldownExperimentalPromise ??= (async () => {
-    const require = createRequire(import.meta.url);
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const experimentalPath = nitroRequire.resolve("rolldown/experimental");
-    return (await import(pathToFileURL(experimentalPath).href)) as RolldownExperimentalModule;
-  })();
-  const { ResolverFactory } = await rolldownExperimentalPromise;
-  return new ResolverFactory({
-    conditionNames: ["node", "import", "module-sync", "node-addons"],
-    extensions: [".js", ".mjs", ".cjs", ".json", ".node"],
-    fullySpecified: true,
-    mainFields: ["main"],
-    nodePath: false,
-    symlinks: true,
-  });
-}
-
 function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
   if (filename.endsWith(".tsx")) return "tsx";
   if (filename.endsWith(".jsx")) return "jsx";
