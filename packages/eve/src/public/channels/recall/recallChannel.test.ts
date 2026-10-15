@@ -69,8 +69,13 @@ describe("recallChannel webhook", () => {
     expect(delivery.auth.principalId).toBe("recall:bot_1:7");
   });
 
-  it("by default ignores speech that doesn't name the bot", async () => {
-    const { response, send } = await post(signed(speech("let's move on to the roadmap")));
+  it("leaves bot status webhooks out of the session by default", async () => {
+    const payload = JSON.stringify({
+      data: { bot: { id: "bot_1", metadata: {} }, data: { code: "call_ended" } },
+      event: "bot.call_ended",
+    });
+
+    const { response, send } = await post(signed(payload));
 
     expect(response.status).toBe(204);
     expect(send).not.toHaveBeenCalled();
@@ -124,6 +129,59 @@ describe("recallChannel webhook", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("recallChannel deliver", () => {
+  async function deliver(
+    channel: ReturnType<typeof recallChannel>,
+    state: Record<string, unknown>,
+    text: string,
+  ) {
+    const { send } = await post(signed(speech(text)));
+    const [, delivery] = send.mock.calls[0]!;
+    if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
+    return await channel.adapter.deliver!(
+      { context: delivery.context, message: delivery.message, state: delivery.state },
+      { state } as never,
+    );
+  }
+
+  it("keeps lines it doesn't answer and hands them to the next turn it takes", async () => {
+    const channel = recallChannel({ credentials: { verificationSecret: SECRET } });
+    const state: Record<string, unknown> = { botId: "bot_1", platform: "zoom" };
+
+    expect(await deliver(channel, state, "the login page times out")).toBeUndefined();
+    const input = await deliver(channel, state, "Eve, file that");
+
+    expect(input?.message).toBe("Alice: Eve, file that");
+    expect(input?.context?.at(-1)).toContain("Alice: the login page times out");
+    expect(state.transcript).toEqual([]);
+  });
+
+  it("asks shouldRespond with the recent transcript, and falls back to name matching if it throws", async () => {
+    const seen: (readonly string[])[] = [];
+    const answering = recallChannel({
+      credentials: { verificationSecret: SECRET },
+      shouldRespond: ({ transcript }) => {
+        seen.push(transcript);
+        return transcript.length > 0;
+      },
+    });
+    const state: Record<string, unknown> = { botId: "bot_1", platform: "zoom" };
+
+    expect(await deliver(answering, state, "who owns the login bug")).toBeUndefined();
+    expect(await deliver(answering, state, "can you file it")).toBeDefined();
+    expect(seen).toEqual([[], ["Alice: who owns the login bug"]]);
+
+    const failing = recallChannel({
+      credentials: { verificationSecret: SECRET },
+      shouldRespond: () => {
+        throw new Error("decision model unavailable");
+      },
+    });
+    expect(await deliver(failing, {}, "Eve, file it")).toBeDefined();
+    expect(await deliver(failing, {}, "moving on")).toBeUndefined();
   });
 });
 

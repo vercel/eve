@@ -12,6 +12,7 @@ export {
   type RecallInboundResult,
   type RecallInboundResultOrPromise,
   type RecallReceiveTarget,
+  type RecallRespondInput,
 } from "#public/channels/recall/recallChannel.js";
 
 export {
@@ -29,6 +30,8 @@ export {
   RecallApiError,
   recallSupportsDirectMessages,
   sendRecallChatMessage,
+  startRecallOutputMedia,
+  stopRecallOutputMedia,
   type RecallApiOptions,
   type RecallBotConfigInput,
   type RecallFetch,

@@ -124,6 +124,34 @@ export async function outputRecallAudio(
   });
 }
 
+/**
+ * Streams a web page into the meeting as the bot's camera and microphone
+ * (Recall Output Media). The page can play audio and read the meeting's audio
+ * and live transcript. Not available in Slack huddles, and can't be combined
+ * with `outputRecallAudio`.
+ */
+export async function startRecallOutputMedia(
+  input: RecallApiOptions & { readonly botId: string; readonly url: string },
+): Promise<void> {
+  await callRecallApi({
+    ...input,
+    body: { camera: { config: { url: input.url }, kind: "webpage" } },
+    path: `/bot/${encodeURIComponent(input.botId)}/output_media/`,
+  });
+}
+
+/** Stops the page {@link startRecallOutputMedia} started. */
+export async function stopRecallOutputMedia(
+  input: RecallApiOptions & { readonly botId: string },
+): Promise<void> {
+  await callRecallApi({
+    ...input,
+    body: { camera: true },
+    method: "DELETE",
+    path: `/bot/${encodeURIComponent(input.botId)}/output_media/`,
+  });
+}
+
 /** Removes the bot from its meeting. */
 export async function leaveRecallCall(
   input: RecallApiOptions & { readonly botId: string },
@@ -146,6 +174,8 @@ export interface RecallBotConfigInput {
   readonly metadata?: Readonly<Record<string, string>>;
   /** Chat message the bot posts when it joins. */
   readonly greeting?: string;
+  /** Web page the bot streams as its camera and microphone from the start. See {@link startRecallOutputMedia}. */
+  readonly outputMediaUrl?: string;
 }
 
 /**
@@ -173,6 +203,9 @@ export function recallBotConfig(input: RecallBotConfigInput): Record<string, unk
     },
   };
   if (input.metadata !== undefined) config.metadata = input.metadata;
+  if (input.outputMediaUrl !== undefined) {
+    config.output_media = { camera: { config: { url: input.outputMediaUrl }, kind: "webpage" } };
+  }
   if (input.greeting !== undefined) {
     config.chat = { on_bot_join: { message: input.greeting, send_to: "everyone" } };
   }

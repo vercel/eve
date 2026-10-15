@@ -11,6 +11,7 @@ import type {
   RecallContext,
   RecallEventContext,
   RecallInboundResult,
+  RecallRespondInput,
 } from "#public/channels/recall/recallChannel.js";
 import type { RecallMeetingEvent } from "#public/channels/recall/inbound.js";
 
@@ -84,20 +85,19 @@ export function isAddressedTo(text: string, botName: string): boolean {
   );
 }
 
-/**
- * Default inbound hook: every chat message, and speech that names the bot,
- * from the participant who sent it. Joins, leaves, status changes, and other
- * speech are dropped.
- */
+/** Default inbound hook: speech, chat, joins, and leaves, each as its participant. */
 export function defaultOnMeetingEvent(
-  ctx: RecallContext,
+  _ctx: RecallContext,
   event: RecallMeetingEvent,
 ): RecallInboundResult {
-  if (event.type === "chat") return { auth: recallParticipantAuth(event) };
-  if (event.type === "speech" && isAddressedTo(event.text, ctx.botName)) {
-    return { auth: recallParticipantAuth(event) };
-  }
-  return null;
+  return event.type === "status" ? null : { auth: recallParticipantAuth(event) };
+}
+
+/** Default respond check: every chat message, and speech that names the bot. */
+export function defaultShouldRespond(input: RecallRespondInput): boolean {
+  const { event } = input;
+  if (event.type === "chat") return true;
+  return event.type === "speech" && isAddressedTo(event.text, input.botName);
 }
 
 /** Built-in Recall event handlers: chat replies, typed prompts, private sign-ins, and errors. */

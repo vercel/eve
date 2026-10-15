@@ -27,10 +27,15 @@ interface ChatBody {
  * Drives a Recall bot in a meeting through signed real-time webhooks. People
  * type in the meeting chat, or with `"speech"` say each message to the bot
  * by name. `platform` decides what the chat can do: only Zoom reaches one
- * participant privately.
+ * participant privately. Messages `overheard` picks are spoken without naming
+ * the bot, as people talking to each other do.
  */
 export function recallDriver(
-  options: { readonly input?: "chat" | "speech"; readonly platform?: string } = {},
+  options: {
+    readonly input?: "chat" | "speech";
+    readonly platform?: string;
+    readonly overheard?: (text: string, person: Person) => boolean;
+  } = {},
 ): ChannelDriver {
   const input = options.input ?? "chat";
   const platform = options.platform ?? "zoom";
@@ -69,10 +74,11 @@ export function recallDriver(
   }
 
   function message(text: string, person: Person): Request {
-    if (input === "speech") {
+    const overheard = options.overheard?.(text, person) === true;
+    if (input === "speech" || overheard) {
       return webhook("transcript.data", {
         participant: participant(person),
-        words: `Eve, ${text}`
+        words: (overheard ? text : `Eve, ${text}`)
           .split(/\s+/u)
           .map((word) => ({ end_timestamp: null, start_timestamp: { relative: 0 }, text: word })),
       });

@@ -34,32 +34,61 @@ recallChannel({
   botName?: string,             // default "eve": addressing + own-message filter
   webhookUrl?: string,          // for bots `receive` creates
   turnPolicy?: TurnPolicy,      // default "queue"
-  onMeetingEvent?(ctx, event),  // -> { auth, message?, title? } | null
+  onMeetingEvent?(ctx, event),  // route: -> { auth, message?, title? } | null
+  shouldRespond?(input),        // session: does this line start a turn?
   events?: RecallChannelEvents, // merged over the defaults
 });
 ```
 
 `event` is a `RecallMeetingEvent`: `speech`, `chat`, `join`, `leave`, or
-`status` (`call_ended`, `done`, `fatal`, …). The default hook dispatches
-every chat message and only the speech that names the bot, each as its
-participant. The meeting-agent template, which listens to everything as one
-principal, becomes:
+`status` (`call_ended`, `done`, `fatal`, …). Two hooks split the work:
 
-```ts
-import { recallChannel, recallMeetingAuth } from "eve/channels/recall";
+- `onMeetingEvent` runs in the webhook route and decides which events enter
+  the session and as whom. By default that's speech, chat, joins, and leaves,
+  each as its participant.
+- `shouldRespond({ event, line, transcript, botName })` runs in the session's
+  `deliver` hook and decides whether a line starts a turn. A declined line
+  costs no model call. It's kept in channel state (the last 60 lines) and
+  given to the next turn as a `<meeting_transcript>` context block, and it
+  doesn't withdraw a pending approval or question. The default answers every
+  chat message and speech that names the bot. A throw falls back to that
+  default.
+
+`shouldRespond` is where a cheap decision model goes. It sees the recent
+transcript, so it can tell that "can you file that?" right after a bug
+discussion is meant for the bot:
+
+```ts title="agent/channels/recall.ts"
+import { decide } from "eve/ai";
+import { recallChannel } from "eve/channels/recall";
 
 export default recallChannel({
-  onMeetingEvent: (_ctx, event) =>
-    event.type === "speech" || event.type === "chat" || event.type === "join"
-      ? { auth: recallMeetingAuth(event) }
-      : null,
+  async shouldRespond({ event, line, transcript, botName }) {
+    if (event.type === "chat") return true;
+    if (event.type !== "speech") return false;
+    const { answers } = await decide({
+      state: { assistant: botName, recentTranscript: transcript.slice(-10), latest: line },
+      questions: {
+        addressed: {
+          type: "boolean",
+          instructions: `Is the latest line asking ${botName} to do or answer something?`,
+        },
+      },
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+    return answers.addressed.probability >= 0.5;
+  },
 });
 ```
+
+This replaces the template's `no_reply` tool, along with the full model call
+it made for every utterance.
 
 Building blocks are exported for code outside the channel, such as a
 `join_meeting` tool or Recall calendar auto-join: `recallBotConfig` (the
 `POST /bot/` body the channel needs), `createRecallBot`,
-`sendRecallChatMessage`, `outputRecallAudio`, `leaveRecallCall`,
+`sendRecallChatMessage`, `outputRecallAudio`, `startRecallOutputMedia`,
+`stopRecallOutputMedia`, `leaveRecallCall`,
 `callRecallApi`, `parseRecallEvent`, and `verifyRecallWebhook`. The
 `receive` target `{ meetingUrl, metadata? }` sends a new bot and starts its
 session, so another channel can hand a request into a meeting.
@@ -72,7 +101,8 @@ session, so another channel can hand a request into a meeting.
   Names, host flags, and emails come from the meeting platform and are not
   verified (Recall's emails are fuzzy calendar matches).
 - **Model input:** `Alice: …` for speech, `Alice (in chat):\n…` for chat, plus
-  a `<recall_context>` block. Pending prompts resolve against the raw words:
+  a `<recall_context>` block and any `<meeting_transcript>` the agent heard
+  but didn't answer. Pending prompts resolve against the raw words:
   "Eve, approve." answers an approval as `approve`.
 - **Replies:** `message.completed` posts to the chat, including text before a
   tool call. Messages are split at the platform limit (Meet 500, Zoom and
@@ -85,42 +115,60 @@ session, so another channel can hand a request into a meeting.
   route verifies, caps the body at 256 KiB, and acknowledges before dispatch.
   It also acknowledges a signed body it can't parse.
 
-## Decisions to make
+## Decided
 
-1. **Ambient listening.** A meeting agent wants to hear everything but speak
-   rarely. Today every dispatched utterance is a model call, and each one
-   withdraws pending prompts. The default avoids both by dispatching only
-   addressed speech, at the cost of context. The real fix is core: a
-   context-only delivery that records a line in history without starting a
-   turn or counting as a reply. That would also replace the template's
-   `no_reply` tool.
-2. **Principal default.** Per-participant principals pass the caller and
-   requester-only approval rules. They also make `queue` start a separate
-   turn per speaker, where one meeting principal batches a burst into one
-   turn. The spike defaults to per-participant and exports `recallMeetingAuth`.
-3. **`queue` with an open question.** A message that doesn't answer the
-   question waits for the turn to end, but the turn is waiting on the
-   question. Approvals are cancelled by the same message, so this looks like a
-   core inconsistency. It's recorded as broken in the matrix.
-4. **Voice replies.** Recall offers two paths:
-   - `output_audio` plays an MP3 clip. It requires `automatic_audio_output` at
-     bot creation and can't be combined with output media. That makes it fine
-     for short TTS replies, at the cost of a TTS step and seconds of latency.
-   - Output Media renders an eve-hosted web page as the bot's camera and
-     microphone. The page hears meeting audio and plays a realtime voice
-     model's audio. That's the low-latency voice-agent path, but it's a
-     separate realtime runtime beside the session, not a channel reply.
+- **Per-participant principals** are the default. `recallMeetingAuth` stays
+  exported for agents that want one principal per meeting.
+- **No voice replies.** Recall has no TTS; `output_audio` only plays a clip
+  you supply.
 
-   The spike exposes only `RecallHandle.outputAudio`. A `reply: "chat" |
-"voice"` option would need a TTS provider abstraction.
+## Limits of `shouldRespond`
 
-5. **Own-message detection.** Recall documents no bot participant id or
+- A declined line during a turn held on a prompt is dropped from the
+  transcript, because eve restores channel state when it ignores a delivery
+  mid-turn.
+- Under `queue`, lines spoken during a running turn are delivered when it
+  ends, and each runs `shouldRespond` then.
+- Each declined line still costs a workflow step and one decision call.
+- `queue` with an open question can stall: a message that doesn't answer the
+  question waits for the turn to end, but the turn is waiting on the question.
+  This is recorded as broken in the matrix and is being investigated
+  separately.
+
+## Output Media
+
+Output Media streams a web page into the meeting as the bot's camera and
+microphone. The page can play audio and read meeting audio and the live
+transcript. The spike exposes only primitives:
+
+- `recallBotConfig({ outputMediaUrl })`, set at creation;
+- `RecallHandle.startOutputMedia(url)` and `stopOutputMedia()`;
+- `startRecallOutputMedia` and `stopRecallOutputMedia`.
+
+A real surface could be a _meeting screen_. The channel would serve a page
+for each bot, and the page would follow the session stream through
+`eve/client`. The agent could then show things to the meeting: the issues it
+filed, an agenda, or a diagram. That's beyond chat, which is capped at 500
+characters on Meet. Open questions:
+
+- **Page authorization.** Recall's headless browser loads a bare URL, so
+  access would rely on a short-lived signed token in that URL.
+- **Who renders the page.** eve could ship a default page, or authors could
+  point at their own app.
+- **How the agent puts things on screen.** Options are a provided tool such as
+  `show_on_screen`, or the page rendering the stream itself.
+- **Recall constraints.** Output Media is not available in Slack huddles, and
+  it can't be combined with `output_audio`.
+
+## Open questions
+
+1. **Own-message detection.** Recall documents no bot participant id or
    `is_bot` flag, nor whether the bot's chat echoes back. The spike matches the
    display name, which drops a human with the same name.
-6. **Webhook deduplication.** Retries carry the same `webhook-id`. Ack-first
+2. **Webhook deduplication.** Retries carry the same `webhook-id`. Ack-first
    handling makes retries rare, but deduplication would need a store the route
    doesn't have.
-7. **Session end.** Status webhooks arrive at the same route, but they're
+3. **Session end.** Status webhooks arrive at the same route, but they're
    configured in the Recall dashboard and the default hook drops them. A
    `call_ended` could reset the session or prompt a post-meeting summary;
    `transcript.done` enables a full-transcript recap.
