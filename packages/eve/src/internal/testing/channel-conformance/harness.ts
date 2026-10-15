@@ -847,7 +847,7 @@ async function converse(
         },
       );
       const response = await route.handler(request, args);
-      const settled = Promise.all(pending);
+      const settled = settleAll(pending);
       background.push(settled);
       return { response, settled };
     };
@@ -1156,6 +1156,18 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
 const asks = (prompt: string) => (event: MessageStreamEvent) =>
   event.type === "input.requested" &&
   event.data.requests.some((request) => request.prompt === prompt);
+
+/**
+ * Waits for a request's `waitUntil` work, including work that work registers
+ * later, as the platform keeps a request open for it.
+ */
+async function settleAll(pending: readonly Promise<unknown>[]): Promise<void> {
+  let count: number;
+  do {
+    count = pending.length;
+    await Promise.all(pending);
+  } while (pending.length > count);
+}
 
 /** Whether `session` settled the request that asked `prompt`, answered or withdrawn. */
 async function settles(session: Session, prompt: string): Promise<boolean> {

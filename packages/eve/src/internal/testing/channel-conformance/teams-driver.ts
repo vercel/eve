@@ -202,13 +202,13 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     personShownAs: [PERSON.name],
     press: (option: RenderedOption, person: Person) => {
       const { activityId: cardActivityId, data, value } = option.handle as PressHandle;
+      // An Action.Submit button in a conversation posts a message activity whose value is the
+      // action's data merged with the card's inputs; only Action.Execute sends an invoke.
       return activity({
         from: PEOPLE[person],
-        id: `INVOKE-${activityId + 1}`,
-        name: "adaptiveCard/action",
         replyToId: cardActivityId,
-        type: "invoke",
-        value: { action: { data: value === undefined ? data : { ...data, eve_option: value } } },
+        type: "message",
+        value: value === undefined ? data : { ...data, eve_option: value },
       });
     },
     postedText(call) {

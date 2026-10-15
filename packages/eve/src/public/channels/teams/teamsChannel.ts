@@ -749,9 +749,10 @@ async function revealAuthorization(input: {
 }
 
 /**
- * Delivers a card submission and reports what became of it. A submission no
- * session can take is told through an invoke's response, which the caller
- * owns; its card is retired without holding that response.
+ * Delivers a card submission and reports what became of it. Its card is
+ * retired without holding the request. A button submission arrives as a
+ * message, which has no reply only the presser sees, so the retired card is
+ * its notice; an invoke's response also carries one, which the caller owns.
  */
 async function dispatchInputResponses(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
