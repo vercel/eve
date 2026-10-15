@@ -1,9 +1,9 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { expect } from "vitest";
 import { getWorld } from "#internal/workflow/runtime.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 
 export function buildSerializedContext(overrides: {
@@ -58,7 +58,7 @@ export function buildSerializedContext(overrides: {
   return context;
 }
 
-export function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string): void {
+export function expectSingleTurn(events: readonly SessionStreamEvent[], turnId: string): void {
   expect(filterEventsByType(events, "turn.started")).toHaveLength(1);
   const eventTurnIds = events.flatMap((event) => {
     if (!("data" in event) || typeof event.data !== "object" || event.data === null) return [];
@@ -105,8 +105,8 @@ export interface CapturedEventStream {
   dispose(): void;
   nextUntil(
     label: string,
-    predicate: (event: MessageStreamEvent) => boolean,
-  ): Promise<MessageStreamEvent[]>;
+    predicate: (event: SessionStreamEvent) => boolean,
+  ): Promise<SessionStreamEvent[]>;
 }
 
 export function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
@@ -137,9 +137,9 @@ async function readUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   decoder: InstanceType<typeof TextDecoder>,
   initialBuffer: string,
-  predicate: (event: MessageStreamEvent) => boolean,
-): Promise<{ buffer: string; events: MessageStreamEvent[] }> {
-  const events: MessageStreamEvent[] = [];
+  predicate: (event: SessionStreamEvent) => boolean,
+): Promise<{ buffer: string; events: SessionStreamEvent[] }> {
+  const events: SessionStreamEvent[] = [];
   let buffer = initialBuffer;
 
   while (true) {
@@ -163,7 +163,7 @@ async function readUntil(
         continue;
       }
 
-      const event = JSON.parse(line) as MessageStreamEvent;
+      const event = JSON.parse(line) as SessionStreamEvent;
       events.push(event);
 
       if (predicate(event)) {

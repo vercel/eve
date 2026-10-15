@@ -1,6 +1,5 @@
 import { z } from "#compiled/zod/index.js";
-import { inputOptionSchema, inputRequestSchema, type InputRequest } from "#shared/input.js";
-import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
+import { interactionJsonSchema } from "#protocol/interaction-json.js";
 
 const sessionCursorSchema = z
   .object({
@@ -12,26 +11,6 @@ const targetSchema = z.object({ kind: z.literal("remote"), serverUrl: z.url() })
 const invokeResumeSchema = z
   .object({ session: sessionCursorSchema, target: targetSchema })
   .strict();
-const invocationInputRequestSchema = inputRequestSchema
-  .omit({ action: true, display: true, options: true })
-  .extend({ options: z.array(inputOptionSchema.omit({ style: true })).optional() });
-const authorizationChallengeSchema: z.ZodType<ConnectionAuthorizationChallenge> = z
-  .object({
-    displayName: z.string().optional(),
-    expiresAt: z.string().optional(),
-    instructions: z.string().optional(),
-    url: z.string().optional(),
-    userCode: z.string().optional(),
-  })
-  .strict();
-const authorizationInterruptSchema = z
-  .object({
-    authorization: authorizationChallengeSchema.optional(),
-    description: z.string(),
-    name: z.string(),
-    webhookUrl: z.string().optional(),
-  })
-  .strict();
 const turnOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ message: z.string().optional(), status: z.literal("completed") }).strict(),
   z.object({ message: z.string(), status: z.literal("failed") }).strict(),
@@ -41,16 +20,9 @@ const invokeResultSchema = z.discriminatedUnion("status", [
   z.object({ resume: invokeResumeSchema, status: z.literal("running") }).strict(),
   z
     .object({
-      requests: z.array(invocationInputRequestSchema).readonly(),
+      interactions: z.array(interactionJsonSchema).min(1).readonly(),
       resume: invokeResumeSchema,
       status: z.literal("input-required"),
-    })
-    .strict(),
-  z
-    .object({
-      authorizations: z.array(authorizationInterruptSchema).min(1).readonly(),
-      resume: invokeResumeSchema,
-      status: z.literal("authorization-required"),
     })
     .strict(),
   z
@@ -69,7 +41,6 @@ const invokeResultSchema = z.discriminatedUnion("status", [
 
 /** Durable session coordinates emitted by `eve remote invoke`. Credentials are deliberately excluded. */
 export type InvokeResume = z.infer<typeof invokeResumeSchema>;
-type InvocationInputRequest = z.infer<typeof invocationInputRequestSchema>;
 /** Result emitted by one non-interactive agent invocation. */
 export type InvokeResult = z.infer<typeof invokeResultSchema>;
 export type InvokeAuthenticationFailure = Extract<
@@ -77,17 +48,7 @@ export type InvokeAuthenticationFailure = Extract<
   { status: "authentication-required" }
 >;
 
-/** Projects a runtime input request to the stable invocation-facing contract. */
-export function projectInvocationInputRequest(request: InputRequest): InvocationInputRequest {
-  const { allowFreeform, kind, options, prompt, requestId } = request;
-  return {
-    allowFreeform,
-    kind,
-    options: options?.map(({ description, id, label }) => ({ description, id, label })),
-    prompt,
-    requestId,
-  };
-}
+export { interactionJson as projectInvocationInteraction } from "#protocol/interaction-json.js";
 
 /** Parses a complete, resumable result from a previous `eve remote invoke` command. */
 export function parseInvokeResumeInput(value: unknown): InvokeResult & { resume: InvokeResume } {

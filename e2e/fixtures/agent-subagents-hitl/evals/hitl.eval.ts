@@ -7,7 +7,7 @@ const GOOG_PRICE = "178.92";
 
 type SessionCursor = Pick<
   EveEvalSession,
-  "pendingInputRequests" | "requireInputRequest" | "respondAll" | "sessionId" | "state"
+  "pendingInteractions" | "requireInteraction" | "respondAll" | "sessionId" | "state"
 >;
 
 /**
@@ -27,7 +27,7 @@ export default defineEval({
     );
     const blocked = await waitForInput(t, started.session, "get_stock_price");
     const resumed = await blocked.respondAll("approve");
-    t.check(resumed.inputRequests, equals([]));
+    t.check(resumed.interactions, equals([]));
     resumed.noFailedActions();
     const completed = resumed.message?.includes(GOOG_PRICE)
       ? resumed
@@ -44,19 +44,19 @@ export default defineEval({
       "parent input hooks record the published approval once per subscriber",
       (events) => {
         if (!Array.isArray(observations) || observations.length !== 2) return false;
-        const approvals = events.filter((event) => event.type === "input.requested");
+        const approvals = events.filter(
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "approval",
+        );
         const approval = approvals[0];
-        if (approvals.length !== 1 || approval?.type !== "input.requested") return false;
+        if (approvals.length !== 1 || approval?.type !== "interaction.opened") return false;
+        const position = `${approval.meta.position.line}:${approval.meta.position.index}`;
         const records = observations as InputHookObservation[];
         return (
           records.every(
             (record) =>
               record.sessionId === started.sessionId &&
-              record.eventId === approval.meta.id &&
-              record.requestIds.length === approval.data.requests.length &&
-              record.requestIds.every(
-                (id, index) => id === approval.data.requests[index]?.requestId,
-              ),
+              record.position === position &&
+              record.interactionId === approval.data.interactionId,
           ) &&
           (["typed", "wildcard"] as const).every(
             (subscriber) =>
@@ -79,8 +79,8 @@ async function waitForInput(
 ): Promise<SessionCursor> {
   let session = initialSession;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.pendingInputRequests.some((request) => request.action.toolName === toolName)) {
-      session.requireInputRequest({ toolName });
+    if (session.pendingInteractions.some((request) => request.call?.name === toolName)) {
+      session.requireInteraction({ toolName });
       return session;
     }
     const live = watchNextTurn(t, session, "subagent input wait");

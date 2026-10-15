@@ -9,7 +9,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { ClientSessionState, MessageStreamEvent } from "eve/client";
+import type { ClientSessionState, SessionStreamEvent } from "eve/client";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -90,7 +90,7 @@ export const chatEvent = pgTable(
       .references(() => chat.id, { onDelete: "cascade" }),
     eventIndex: integer("event_index").notNull(),
     event: jsonb("event")
-      .$type<MessageStreamEvent>()
+      .$type<SessionStreamEvent>()
       .notNull()
       .default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at").notNull().defaultNow(),

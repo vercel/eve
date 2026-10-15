@@ -19,24 +19,22 @@ export default defineEval({
     );
     const blocked = await waitForInputs(t, started.session, ["deploy_release", "publish_notes"]);
 
-    const deployRequestId = blocked.pendingInputRequests[0]?.requestId;
-    // The reply answers only the first approval. The subagent decides it, and the parent relays
-    // its settlement before showing the next prompt; Alice replies once she sees that one.
+    const deployRequestId = blocked.pendingInteractions[0]?.interactionId;
+    // The reply answers only the first approval. The subagent admits it: the answer stands while
+    // the rest of its batch waits, and the parent relays that admission before Alice replies
+    // to the next prompt, so her next reply can't revise it.
     const approved = await blocked.send("approve");
     approved.noFailedActions();
-    const settledInTurn = approved.events.some(
-      (event) => event.type === "approval.settled" && event.data.requestId === deployRequestId,
-    );
-    if (!settledInTurn) {
-      await watchNextTurn(t, approved.session, "deploy approval settlement").waitForEvent(
-        "approval.settled",
-        { data: { outcome: "approved", requestId: deployRequestId } },
+    const admittedInTurn = approved.events.some((event) => event.type === "response.admitted");
+    if (!admittedInTurn) {
+      await watchNextTurn(t, approved.session, "deploy approval admission").waitForEvent(
+        "response.admitted",
       );
     }
     const resolved = approved.events.flatMap((event) =>
-      event.type === "input.resolved" ? event.data.resolutions : [],
+      event.type === "interaction.settled" ? [event.data.interactionId] : [],
     );
-    if (resolved.some((resolution) => resolution.requestId !== deployRequestId)) {
+    if (resolved.some((interactionId) => interactionId !== deployRequestId)) {
       throw new Error(`The first reply resolved ${JSON.stringify(resolved)}.`);
     }
 
@@ -61,7 +59,7 @@ async function waitForInputs(
   toolNames: readonly string[],
 ): Promise<EveEvalSession> {
   let session = initialSession;
-  const pending = () => session.pendingInputRequests.map((request) => request.action.toolName);
+  const pending = () => session.pendingInteractions.map((request) => request.call?.name);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (JSON.stringify(pending()) === JSON.stringify(toolNames)) return session;
     const live = watchNextTurn(t, session, "subagent input wait");

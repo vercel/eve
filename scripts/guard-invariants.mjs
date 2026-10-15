@@ -122,10 +122,7 @@
  *             after the turn loop returns, and `execution/session/finalization.ts`
  *             when the session ends. A held turn is still open, so nothing
  *             inside the turn loop or the harness may reply.
- *   rule 48 — Remote agent protocol 1 stays in
- *             `execution/legacy-remote-agent/`. Only the ingress files that
- *             route protocol-1 callers into it may import it, so deleting the
- *             directory removes protocol 1 without a search.
+ *   rule 48 — Retired: remote agent protocol 1 and its directory were removed.
  *   rule 49 — Provided tool definitions carry a framework tool flag,
  *             so telemetry ownership survives renamed and namespaced tools.
  *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
@@ -146,6 +143,14 @@
  *             itself and external packages. eve reaches it only through the
  *             vendored root, delegation, otel, and ai-sdk entrypoints under
  *             `#compiled/@eve/tracing/`, never the workspace package itself.
+ *   rule 53 — The session event contract (`protocol/session-events/`) and
+ *             the shared fold (`protocol/session-projection/`) stand alone:
+ *             they import only each other, plus the vendored Zod in the
+ *             schema files, so a runtime refactor can't change the wire.
+ *   rule 54 — Zod stays out of readers. The modules readers load (the
+ *             contract's catalog, envelope, guards, and index; the fold;
+ *             `eve/events`; the client) never import a schema module by
+ *             value: schemas serve tests and development only.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -264,10 +269,10 @@ function isTsLike(relPath) {
  *   rule45: { allowlist: Set<string>; violations: Violation[] };
  *   rule46: Violation[];
  *   rule47: Violation[];
- *   rule48: Violation[];
  *   rule50: Violation[];
  *   rule51: Violation[];
  *   rule52: Violation[];
+ *   rule53: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -300,7 +305,6 @@ async function scanRepo(state) {
     checkRule45(posix, lines, state.rule45);
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
-    checkRule48(posix, lines, state.rule48);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
     if (posix.startsWith("packages/tracing/src/")) {
@@ -347,6 +351,7 @@ async function scanRepo(state) {
           });
       });
     }
+    checkRule53(posix, lines, state.rule53);
   }
 }
 
@@ -610,6 +615,59 @@ function checkRule50(posix, lines, violations) {
   });
 }
 
+// ---------- Rules 53 and 54: the session event contract stands alone ----------
+
+const CONTRACT_DIR = "packages/eve/src/protocol/session-events/";
+const FOLD_DIR = "packages/eve/src/protocol/session-projection/";
+const CONTRACT_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/;
+const CONTRACT_SPECIFIER_RE = /^(?:#protocol\/session-(?:events|projection)\/|\.\.?\/)/;
+const SCHEMA_FILE_RE =
+  /^packages\/eve\/src\/protocol\/session-events\/(?:common|schemas|families\/[^/]+)\.ts$/;
+const SCHEMA_SPECIFIER_RE =
+  /session-events\/(?:common|schemas|families\/[^"'/]+)\.js$|^\.\.?\/(?:common|schemas)\.js$|^\.\/families\//;
+const READER_FILE_RE =
+  /^packages\/eve\/src\/(?:protocol\/session-events\/(?:catalog|envelope|facts|guards|index)\.ts$|protocol\/session-projection\/|public\/events\/|client\/)/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule53(posix, lines, violations) {
+  if (/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
+  const inContract = posix.startsWith(CONTRACT_DIR) || posix.startsWith(FOLD_DIR);
+  const isReader = READER_FILE_RE.test(posix);
+  if (!inContract && !isReader) return;
+  // A multi-line `import type { … } from` names its specifier lines after the `type`.
+  let statementTypeOnly = false;
+  lines.forEach((line, idx) => {
+    if (/^\s*(?:import|export)\b/.test(line)) {
+      statementTypeOnly = /^\s*(?:import|export)\s+type\b/.test(line);
+    }
+    const specifier = CONTRACT_IMPORT_RE.exec(line)?.[1];
+    if (specifier === undefined) return;
+    const typeOnly = statementTypeOnly;
+    if (inContract) {
+      const allowed =
+        CONTRACT_SPECIFIER_RE.test(specifier) ||
+        (specifier === "#compiled/zod/index.js" && SCHEMA_FILE_RE.test(posix));
+      if (!allowed) {
+        violations.push({
+          rule: 53,
+          file: posix,
+          line: idx + 1,
+          message: `imports "${specifier}". The session event contract and its fold stand alone, so runtime refactors can't change the wire.`,
+        });
+        return;
+      }
+    }
+    if (isReader && !typeOnly && SCHEMA_SPECIFIER_RE.test(specifier)) {
+      violations.push({
+        rule: 54,
+        file: posix,
+        line: idx + 1,
+        message: `imports the schema module "${specifier}" by value, which loads Zod. Readers import its types with \`import type\`, and validate nothing.`,
+      });
+    }
+  });
+}
+
 // ---------- Rule 51: the session machine owns lifecycle ----------
 
 const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
@@ -660,42 +718,6 @@ function checkRule51(posix, lines, violations) {
           "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
       });
     }
-  });
-}
-
-// ---------- Rule 48: remote agent protocol 1 stays compartmentalized ----------
-
-const LEGACY_REMOTE_AGENT_DIR = "packages/eve/src/execution/legacy-remote-agent/";
-const LEGACY_REMOTE_AGENT_INGRESS_FILES = new Set([
-  "packages/eve/src/channel/types.ts",
-  "packages/eve/src/context/keys.ts",
-  "packages/eve/src/eve-channel/create-request.ts",
-  "packages/eve/src/eve-channel/index.ts",
-  "packages/eve/src/eve-channel/request.ts",
-  "packages/eve/src/execution/forward-session-input.ts",
-  "packages/eve/src/subagents/callback-route.ts",
-]);
-// `from "…"` covers imports and re-exports; `import "…"` and `import("…")` cover side effects and dynamic imports.
-const LEGACY_REMOTE_AGENT_IMPORT_RE = /\b(?:from|import)\s*\(?\s*["'][^"']*legacy-remote-agent\//;
-
-/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
-function checkRule48(posix, lines, violations) {
-  if (
-    !posix.startsWith("packages/eve/src/") ||
-    posix.startsWith(LEGACY_REMOTE_AGENT_DIR) ||
-    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
-    LEGACY_REMOTE_AGENT_INGRESS_FILES.has(posix)
-  )
-    return;
-  lines.forEach((line, idx) => {
-    if (!LEGACY_REMOTE_AGENT_IMPORT_RE.test(line)) return;
-    violations.push({
-      rule: 48,
-      file: posix,
-      line: idx + 1,
-      message:
-        "imports remote agent protocol 1 outside its ingress files. Route protocol-1 behavior through execution/legacy-remote-agent/ from an existing ingress so the legacy path stays removable in one place.",
-    });
   });
 }
 
@@ -1781,10 +1803,10 @@ async function main() {
     },
     rule46: /** @type {Violation[]} */ ([]),
     rule47: /** @type {Violation[]} */ ([]),
-    rule48: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
     rule52: /** @type {Violation[]} */ ([]),
+    rule53: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1898,11 +1920,11 @@ async function main() {
 
   // Rule 47
   violations.push(...state.rule47);
-  violations.push(...state.rule48);
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
   violations.push(...state.rule51);
   violations.push(...state.rule52);
+  violations.push(...state.rule53);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

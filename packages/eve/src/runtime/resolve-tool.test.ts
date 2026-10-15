@@ -6,7 +6,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 import { toolResultFrom } from "#public/tools/result.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { SettledCallRow } from "#public/tools/result.js";
 import { defineTool } from "#tools/definition.js";
 import { sleep } from "#tools/provided/sleep.js";
 import { noReply } from "#tools/provided/no-reply.js";
@@ -147,6 +147,11 @@ describe("toolResultFrom identity for resolved tools", () => {
   });
 });
 
-function toolResult(toolName: string): RuntimeActionResult {
-  return { callId: "call_1", kind: "tool-result", output: null, toolName };
+function toolResult(toolName: string): SettledCallRow {
+  return {
+    callId: "call_1",
+    capability: { kind: "tool", name: toolName },
+    outcome: "completed",
+    output: null,
+  };
 }

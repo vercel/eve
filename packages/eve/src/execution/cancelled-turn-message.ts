@@ -5,11 +5,11 @@ import {
   frameworkMessageKindForStepInput,
   normalizeUserContent,
 } from "#harness/messages.js";
-import type { HarnessSession, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 
 export async function preserveCancelledTurnMessage(
   session: HarnessSession,
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
 ): Promise<HarnessSession> {
   const message = normalizeUserContent(input?.message);
   if (message === undefined) return session;

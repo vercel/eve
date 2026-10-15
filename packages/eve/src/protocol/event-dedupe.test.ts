@@ -1,8 +1,8 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it } from "vitest";
 
-import { stampTestEvent } from "#internal/testing/events.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import { stampMessageStreamEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { stampTestEvent } from "#internal/testing/events.js";
 
 function sessionStarted(index: number) {
   return stampTestEvent({ type: "session.started", data: {} }, index);
@@ -17,12 +17,8 @@ describe("createEventDeduper", () => {
     // byte-identical payload are not.
     expect(deduper.admit(replayed)).toBe(true);
     expect(deduper.admit(replayed)).toBe(false);
-    expect(deduper.admit(stampMessageStreamEvent({ type: "session.started", data: {} }))).toBe(
-      true,
-    );
-    expect(deduper.admit(stampMessageStreamEvent({ type: "session.started", data: {} }))).toBe(
-      true,
-    );
+    expect(deduper.admit(sessionStarted(1))).toBe(true);
+    expect(deduper.admit(sessionStarted(2))).toBe(true);
     expect(deduper.size).toBe(3);
   });
 
@@ -45,7 +41,7 @@ describe("createEventDeduper", () => {
       type: "session.started",
       data: {},
       meta: { at: "2026-07-27T18:04:11.912Z" },
-    } as MessageStreamEvent;
+    } as SessionStreamEvent;
 
     expect(deduper.admit(preV20)).toBe(true);
     expect(deduper.admit(preV20)).toBe(true);
@@ -54,7 +50,7 @@ describe("createEventDeduper", () => {
 
   it("admits events with no envelope at all", () => {
     const deduper = createEventDeduper();
-    const bare = { type: "session.started", data: {} } as MessageStreamEvent;
+    const bare = { type: "session.started", data: {} } as SessionStreamEvent;
 
     expect(deduper.admit(bare)).toBe(true);
     expect(deduper.size).toBe(0);

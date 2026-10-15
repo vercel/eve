@@ -103,16 +103,17 @@ function selectionLogIdentity(selection: AutoModelSelection): string {
   return typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
 }
 
+/**
+ * What a `step.started` handler chooses for, from the `model.requested` fact's scope: the turn, or
+ * the context change whose summary run a compaction asks for, between turns or within one.
+ */
 function turnId(event: unknown): string {
-  if (
-    !isRecord(event) ||
-    !isRecord(event.data) ||
-    typeof event.data.turnId !== "string" ||
-    !event.data.turnId
-  ) {
-    throw new Error("auto requires a step.started event with a turn ID.");
+  const scope = isRecord(event) && isRecord(event.scope) ? event.scope : undefined;
+  const owner = scope?.changeId ?? scope?.turnId;
+  if (typeof owner !== "string" || !owner) {
+    throw new Error("auto requires a step.started event with a turn or context change ID.");
   }
-  return event.data.turnId;
+  return owner;
 }
 
 function routingState(ctx: DynamicResolveContext): Parameters<typeof decide>[0]["state"] {

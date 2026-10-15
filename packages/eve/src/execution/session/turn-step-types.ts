@@ -1,3 +1,4 @@
+import type { ControlDelivery } from "#harness/types.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
@@ -10,8 +11,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 /** Trusted runtime-action results collected by the session owner. */
 export interface RuntimeActionResultStepInput {
   readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
-  /** What the `ctx.agent` sessions of the `execute` runs behind these results spent. */
-  readonly delegatedUsage?: readonly TokenUsage[];
+  /** What the `ctx.agent` sessions of the `execute` runs behind these results spent, by call. */
+  readonly delegatedUsage?: Readonly<Record<string, TokenUsage>>;
   readonly results: readonly RuntimeActionResult[];
 }
 
@@ -22,6 +23,8 @@ export interface RuntimeActionResultStepInput {
  */
 export interface TurnStepPayload {
   readonly control?: "clear" | "compact";
+  /** The delivery the control arrived as. */
+  readonly controlDelivery?: ControlDelivery;
   readonly delivery?: DeliverHookPayload;
   readonly runtimeResults?: RuntimeActionResultStepInput;
 }
@@ -92,6 +95,8 @@ export type TurnOutcome = {
     }
   | {
       readonly cancelled?: true;
+      /** The cancel control that stopped the turn, when it named its delivery. */
+      readonly cancelledBy?: ControlDelivery;
       readonly kind: "park";
       readonly settled?: SettledTurn;
     }

@@ -23,19 +23,20 @@ export default defineEval({
   async test(t) {
     const { session } = await t.send(DELEGATE_PROMPT);
     const continueSession = await waitForInput(t, session);
-    const continueRequest = continueSession.requireInputRequest({
+    const continueRequest = continueSession.requireInteraction({
       display: "confirmation",
       optionIds: ["continue", "stop"],
-      toolName: "session_limit_continuation",
+      kind: "budget",
     });
     const rootSessionId = session.sessionId;
     if (rootSessionId === undefined) {
       throw new Error("The root session did not expose its session id.");
     }
     await t.require(
-      continueRequest.requestId,
+      continueRequest.interactionId,
       satisfies(
-        (requestId: string) => !new RegExp(`^${rootSessionId}:\\d+:limit:`, "u").test(requestId),
+        (interactionId: string) =>
+          !new RegExp(`^${rootSessionId}:\\d+:limit:`, "u").test(interactionId),
         "continuation request belongs to a descendant session",
       ),
     );
@@ -43,7 +44,7 @@ export default defineEval({
     const resumed = await continueSession.respond([
       {
         optionId: "continue",
-        requestId: continueRequest.requestId,
+        interactionId: continueRequest.interactionId,
       },
     ]);
     resumed.expectOk();
@@ -57,23 +58,23 @@ export default defineEval({
     const stopSession = await t.session();
     await stopSession.send(DELEGATE_PROMPT);
     const blockedStopSession = await waitForInput(t, stopSession);
-    const stopRequest = blockedStopSession.requireInputRequest({
+    const stopRequest = blockedStopSession.requireInteraction({
       display: "confirmation",
       optionIds: ["continue", "stop"],
-      toolName: "session_limit_continuation",
+      kind: "budget",
     });
 
     const stopped = await blockedStopSession.respond([
       {
         optionId: "stop",
-        requestId: stopRequest.requestId,
+        interactionId: stopRequest.interactionId,
       },
     ]);
     stopped.expectOk();
-    stopped.notEvent("turn.failed");
-    stopped.notEvent("session.failed");
-    stopped.notEvent("session.completed");
-    stopped.event("turn.cancelled");
+    stopped.notEvent("turn.settled", { data: { outcome: "failed" } });
+    stopped.notEvent("session.ended", { data: { outcome: "failed" } });
+    stopped.notEvent("session.ended", { data: { outcome: "completed" } });
+    stopped.event("turn.settled", { data: { outcome: "cancelled" } });
     t.check(stopped.status, equals("waiting"));
 
     const recovered = await blockedStopSession.send(
@@ -87,13 +88,13 @@ export default defineEval({
 
 type SessionCursor = Pick<
   EveEvalSession,
-  "pendingInputRequests" | "requireInputRequest" | "respond" | "send" | "sessionId" | "state"
+  "pendingInteractions" | "requireInteraction" | "respond" | "send" | "sessionId" | "state"
 >;
 
 async function waitForInput(t: EveEvalContext, initial: SessionCursor): Promise<SessionCursor> {
   let session = initial;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.pendingInputRequests.length > 0) return session;
+    if (session.pendingInteractions.length > 0) return session;
     const live = watchNextTurn(t, session, "descendant input wait");
     const turn = await live.result();
     turn.noFailedActions();

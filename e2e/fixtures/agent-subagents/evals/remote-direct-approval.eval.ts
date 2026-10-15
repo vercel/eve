@@ -10,10 +10,11 @@ export default defineEval({
     );
     started.expectOk();
     const pending = await waitForDirectApproval(t, started.session);
-    const request = pending.requireInputRequest({ toolName: "direct_approval_gate" });
-    if (request.kind !== "tool-approval")
-      throw new Error("The direct remote gate was not an approval.");
-    const answered = await pending.respond([{ requestId: request.requestId, optionId: "approve" }]);
+    const request = pending.requireInteraction({ toolName: "direct_approval_gate" });
+    if (request.kind !== "approval") throw new Error("The direct remote gate was not an approval.");
+    const answered = await pending.respond([
+      { interactionId: request.interactionId, optionId: "approve" },
+    ]);
     answered.expectOk();
     let session: EveEvalSession = answered.session;
     if (answered.message?.includes("PARENT-DIRECT-COMPLETE: DIRECT-APPROVAL-COMPLETE")) {
@@ -43,9 +44,7 @@ async function waitForDirectApproval(
   let session = initial;
   for (let attempt = 0; attempt < 8; attempt++) {
     if (
-      session.pendingInputRequests.some(
-        (request) => request.action.toolName === "direct_approval_gate",
-      )
+      session.pendingInteractions.some((request) => request.call?.name === "direct_approval_gate")
     )
       return session;
     const live = t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });

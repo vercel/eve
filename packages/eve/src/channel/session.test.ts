@@ -16,23 +16,21 @@ import {
   SessionIdKey,
 } from "#context/keys.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
-import { type InputResponse, parseInputResponses } from "#shared/input.js";
+import { type Answer, parseAnswers } from "#shared/input.js";
 
 function fixedSessionRespondTypeChecks(session: Session): void {
   const responsesWithMetadata = [
-    { kind: "tool-approval", optionId: "approve", requestId: "approval-1" },
+    { kind: "tool-approval", optionId: "approve", interactionId: "approval-1" },
   ] as const;
 
   // @ts-expect-error fixed sessions enforce the same exact input-response contract.
   void session.respond(responsesWithMetadata, { auth: null });
 
-  const widenedResponses: readonly InputResponse[] = responsesWithMetadata;
+  const widenedResponses: readonly Answer[] = responsesWithMetadata;
   // @ts-expect-error widened responses must be schema-validated before delivery.
   void session.respond(widenedResponses, { auth: null });
 
-  const validatedResponses = parseInputResponses([
-    { optionId: "approve", requestId: "approval-1" },
-  ]);
+  const validatedResponses = parseAnswers([{ optionId: "approve", interactionId: "approval-1" }]);
   void session.respond(validatedResponses, { auth: null });
 }
 
@@ -49,6 +47,7 @@ function createRuntime(): Runtime {
         status: "accepted",
       })),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };
@@ -61,7 +60,7 @@ describe("createSession#cancel", () => {
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_1", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel" },
+      command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_1",
     });
   });
@@ -73,7 +72,7 @@ describe("createSession#cancel", () => {
     await session.cancel({ turnId: "turn_2" });
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", turnId: "turn_2" },
+      command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_2" },
       sessionId: "sess_1",
     });
   });
@@ -84,7 +83,7 @@ describe("createSession#cancel", () => {
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_2", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel" },
+      command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_2",
     });
   });
@@ -146,7 +145,7 @@ describe("fixed session operations", () => {
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
 
     await session.send("hello", { auth: null });
-    await session.respond([{ optionId: "approve", requestId: "request_1" }], { auth: null });
+    await session.respond([{ optionId: "approve", interactionId: "request_1" }], { auth: null });
     await session.compact();
     await session.clear();
     await session.reset({ reason: "fresh start" });
@@ -165,21 +164,21 @@ describe("fixed session operations", () => {
       command: {
         auth: null,
         kind: "send",
-        payload: { inputResponses: [{ optionId: "approve", requestId: "request_1" }] },
+        payload: { answers: [{ optionId: "approve", interactionId: "request_1" }] },
         requestId: "req_1",
       },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(3, {
-      command: { kind: "compact" },
+      command: { deliveryId: expect.any(String), kind: "compact" },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(4, {
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(5, {
-      command: { kind: "reset", reason: "fresh start" },
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "fresh start" },
       sessionId: "sess_1",
     });
   });

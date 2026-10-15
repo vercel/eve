@@ -1,3 +1,4 @@
+import { interactionJsonSchema } from "#protocol/interaction-json.js";
 import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { parseJsonObject } from "#shared/json.js";
 import { z } from "#compiled/zod/index.js";
@@ -41,7 +42,7 @@ import {
   createMcpProtectedResourceMetadata,
   createMcpResourceChallenge,
 } from "#internal/mcp/protected-resource.js";
-import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
+import { answerSchema } from "#shared/input.js";
 import {
   escapeAuthChallengeParameter,
   readOAuthResourceOptions,
@@ -481,8 +482,8 @@ const MCP_SERVER_INSTRUCTIONS = [
   "Each invocation is one durable agent task.",
   "Call agent_start once per task and keep the returned invocationId.",
   "Poll agent_get, waiting at least pollAfterMs between calls, until status is completed, failed, or cancelled.",
-  "If status is input_required, answer every entry in inputRequests in one agent_update call; repeating accepted answers is safe.",
-  "If status is authorization_required, show the user the authorization url or instructions and keep polling.",
+  "If status is input_required, answer every entry in interactions in one agent_update call, each by its key as interactionId; repeating accepted answers is safe.",
+  "If status is authorization_required, show the user each entry's signIn url or instructions and keep polling.",
   "isError on a tool result means your call was rejected; a failed status means the task failed.",
   "agent_start is not idempotent and a lost response leaves no invocationId, so ask the user before starting again.",
   "Work continues after your connection drops; agent_cancel stops it, then poll until any terminal status.",
@@ -564,7 +565,8 @@ function createInvocationTools(
         },
         description:
           "Answers the pending input batch on an input_required invocation. Include one response per " +
-          "entry in inputRequests, each keyed by its requestId, in a single call; partial batches are rejected. " +
+          "entry in interactions, naming it by its key as interactionId, in a single call; partial batches " +
+          "are rejected. " +
           "Returns the current invocation state; repeating the same accepted answers is safe.",
         inputSchema: z.strictObject({
           invocationId: z.string().min(1).max(MAX_ID_CHARS),
@@ -650,21 +652,6 @@ function invocationResult(invocation: AgentInvocation): McpCallToolResult {
   };
 }
 
-const AUTHORIZATION_CHALLENGE_SCHEMA = z.strictObject({
-  displayName: z.string().optional(),
-  expiresAt: z.iso.datetime().optional(),
-  instructions: z.string().optional(),
-  url: z.url().optional(),
-  userCode: z.string().optional(),
-});
-
-const AUTHORIZATION_REQUEST_SCHEMA = z.strictObject({
-  authorization: AUTHORIZATION_CHALLENGE_SCHEMA.optional(),
-  description: z.string(),
-  name: z.string(),
-  webhookUrl: z.url().optional(),
-});
-
 // Bounds on caller-supplied text. The transport already caps the whole body
 // at MCP_REQUEST_BODY_MAX_BYTES; these keep individual durable fields sane.
 // Text bounds are UTF-8 bytes, matching the transport cap and the docs;
@@ -681,19 +668,10 @@ function utf8Bounded(maxBytes: number) {
   });
 }
 
-const MCP_INPUT_RESPONSE_SCHEMA = inputResponseSchema.safeExtend({
+const MCP_INPUT_RESPONSE_SCHEMA = answerSchema.safeExtend({
   optionId: z.string().max(MAX_ID_CHARS).optional(),
-  requestId: z.string().min(1).max(MAX_ID_CHARS),
+  interactionId: z.string().min(1).max(MAX_ID_CHARS),
   text: utf8Bounded(MAX_RESPONSE_TEXT_BYTES).optional(),
-});
-
-const MCP_INPUT_REQUEST_SCHEMA = inputRequestSchema.safeExtend({
-  action: z.strictObject({
-    callId: z.string(),
-    input: z.record(z.string(), z.json()),
-    kind: z.literal("tool-call"),
-    toolName: z.string(),
-  }),
 });
 
 const AGENT_INVOCATION_BASE_SCHEMA = z.strictObject({
@@ -709,12 +687,12 @@ const AGENT_INVOCATION_OUTPUT_SCHEMA = z.discriminatedUnion("status", [
     status: z.literal("working"),
   }),
   AGENT_INVOCATION_BASE_SCHEMA.extend({
-    inputRequests: z.record(z.string(), MCP_INPUT_REQUEST_SCHEMA),
+    interactions: z.record(z.string(), interactionJsonSchema),
     result: z.json().optional(),
     status: z.literal("input_required"),
   }),
   AGENT_INVOCATION_BASE_SCHEMA.extend({
-    authorizations: z.array(AUTHORIZATION_REQUEST_SCHEMA).min(1),
+    interactions: z.record(z.string(), interactionJsonSchema),
     pollAfterMs: z.number().int().nonnegative(),
     result: z.json().optional(),
     status: z.literal("authorization_required"),

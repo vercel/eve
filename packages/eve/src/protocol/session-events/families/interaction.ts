@@ -113,7 +113,7 @@ const subject = conforming<InteractionSubject>()(
 );
 
 /** Zod schema for what a person is asked. */
-const interactionRequestSchema = conforming<InteractionRequest>()(
+export const interactionRequestSchema = conforming<InteractionRequest>()(
   z.object({
     allowFreeform: z.boolean().optional(),
     display: known<InteractionDisplay>().optional(),

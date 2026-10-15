@@ -9,14 +9,17 @@ import { resolveAssistantStepText } from "#harness/messages.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 
 const log = createLogger("harness.tool-loop");
-/** How a recovery reissues the call. */
-type RecoveryCall = (options: {
-  readonly disabledProviderTools?: ReadonlySet<string>;
-  readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
-  readonly suppressStepStartedEmission?: boolean;
-  readonly trailingUserNote?: string;
-}) => Promise<HarnessStepResult>;
+/** How a recovery reissues the call, after the error it recovers from. */
+type RecoveryCall = (
+  options: {
+    readonly disabledProviderTools?: ReadonlySet<string>;
+    readonly extraSystemNote?: string;
+    readonly retryReason?: "empty-response";
+    readonly suppressStepStartedEmission?: boolean;
+    readonly trailingUserNote?: string;
+  },
+  error: unknown,
+) => Promise<HarnessStepResult>;
 
 /**
  * Recovers a failed model call, each recovery at most once and within the current step, so the
@@ -60,7 +63,9 @@ export async function recoverModelCall(input: {
       extraSystemNote: buildDisabledToolNote(disabled),
     };
     try {
-      return { result: await input.call({ ...options, suppressStepStartedEmission: true }) };
+      return {
+        result: await input.call({ ...options, suppressStepStartedEmission: true }, error),
+      };
     } catch (retryError) {
       error = retryError;
     }
@@ -70,12 +75,15 @@ export async function recoverModelCall(input: {
     log.warn("empty model response; reissuing the model call once", diagnostics);
     try {
       return {
-        result: await input.call({
-          ...options,
-          retryReason: "empty-response",
-          suppressStepStartedEmission: true,
-          trailingUserNote: EMPTY_RESPONSE_NUDGE,
-        }),
+        result: await input.call(
+          {
+            ...options,
+            retryReason: "empty-response",
+            suppressStepStartedEmission: true,
+            trailingUserNote: EMPTY_RESPONSE_NUDGE,
+          },
+          error,
+        ),
       };
     } catch (retryError) {
       error = retryError;

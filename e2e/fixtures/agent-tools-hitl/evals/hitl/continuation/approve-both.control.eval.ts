@@ -13,21 +13,23 @@ export default defineEval({
 
     // When the user approves both in one HTTP request.
     const live = await parked.session.startRespond([
-      { requestId: approvalA.requestId, optionId: "approve" },
-      { requestId: approvalB.requestId, optionId: "approve" },
+      { interactionId: approvalA.interactionId, optionId: "approve" },
+      { interactionId: approvalB.interactionId, optionId: "approve" },
     ]);
 
     // Then both changes execute once and the resumed turn replies that both resolved.
-    const reply = await expectResponseReply(t, live, "Both changes resolved.", approvalB.requestId);
-    reply.event("input.resolved", {
-      data: {
-        resolutions: (items) =>
-          [approvalA.requestId, approvalB.requestId].every((id) =>
-            items.some((item) => item.requestId === id && item.outcome === "approved"),
-          ),
-      },
-      count: 1,
-    });
+    const reply = await expectResponseReply(
+      t,
+      live,
+      "Both changes resolved.",
+      approvalB.interactionId,
+    );
+    for (const { interactionId } of [approvalA, approvalB]) {
+      reply.event("interaction.settled", {
+        data: { interactionId: interactionId, outcome: "accepted" },
+        count: 1,
+      });
+    }
     reply.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
     reply.calledTool("change-b", { status: "completed", output: { executions: 1 }, count: 1 });
   },

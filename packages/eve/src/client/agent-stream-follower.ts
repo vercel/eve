@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import {
   agentToolTask,
   isAgentSessionCaughtUp,
@@ -5,14 +6,13 @@ import {
 } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
 import type { StreamReconnectPolicy } from "#client/types.js";
-import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 
 /**
- * A followed session can stay silent while a person answers its question, and the dev server can
- * restart underneath it, so only an abort or a non-retryable failure ends a subscription.
+ * The dev server can restart underneath a followed session, so only an abort, the stream's end,
+ * or a non-retryable failure ends a subscription.
  */
 const agentStreamReconnectPolicy = {
-  streamIdleReconnectPolicy: { maxAttempts: Infinity },
   streamOpenReconnectPolicy: { maxAttempts: Infinity },
 } as const satisfies StreamReconnectPolicy;
 
@@ -21,7 +21,7 @@ export interface AgentStreamFollowerOptions {
   readonly session: ClientSession;
   readonly getState: () => ConversationState;
   readonly onFollowing: (sessionId: string) => void;
-  readonly onEvent: (sessionId: string, event: MessageStreamEvent) => void;
+  readonly onEvent: (sessionId: string, event: SessionStreamEvent) => void;
   readonly onIdle: (sessionId: string) => void;
   readonly onUnavailable: (sessionId: string) => void;
   /** Retained by the transport owner across detach and reattach. */
@@ -34,7 +34,7 @@ export interface AgentStreamFollowerOptions {
  */
 export class AgentStreamFollower {
   readonly #options: AgentStreamFollowerOptions;
-  readonly #started = new Map<string, AgentStartedStreamEvent>();
+  readonly #started = new Map<string, ChildOpened>();
   readonly #controllers = new Map<string, AbortController>();
   /** Sessions whose stream failed stay unavailable until the owner follows again. */
   readonly #failed = new Set<string>();
@@ -44,8 +44,8 @@ export class AgentStreamFollower {
     this.#options = options;
   }
 
-  acceptParentEvent(event: MessageStreamEvent): void {
-    if (event.type === "agent.started") this.#started.set(event.data.sessionId, event);
+  acceptParentEvent(event: SessionStreamEvent): void {
+    if (event.type === "child.opened") this.#started.set(event.data.sessionId, event);
   }
 
   /** Starts, resumes, or pauses subscriptions to match the conversation. */
@@ -80,15 +80,14 @@ export class AgentStreamFollower {
     this.#options.onFollowing(sessionId);
     const { cursors } = this.#options;
     void (async () => {
-      let cursor = cursors.get(sessionId) ?? 0;
       try {
-        for await (const event of this.#options.session.agent(started).stream({
+        for await (const { cursor, event } of this.#options.session.agent(started).follow({
           signal: controller.signal,
-          startIndex: cursor,
+          startIndex: cursors.get(sessionId) ?? 0,
           streamReconnectPolicy: agentStreamReconnectPolicy,
         })) {
           if (controller.signal.aborted) return;
-          cursors.set(sessionId, ++cursor);
+          cursors.set(sessionId, cursor);
           this.#options.onEvent(sessionId, event);
           this.reconcile();
         }

@@ -104,17 +104,22 @@ interface ConformanceChannel {
 
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
-/** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
-function noSignInRenderer(
+/**
+ * Rules a group declines: its sign-in shows a link-free status, since the challenge is a credential only its person
+ * may read, and the channel has no private place to send it without the person acting first.
+ */
+function signInKeptPrivate(
+  reason: string,
   ...rules: ContractRuleName[]
-): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      { reason: "the channel has no default sign-in renderer", symptom: SIGN_IN_NOT_SHOWN },
-    ]),
-  );
+): Partial<Record<ContractRuleName, string>> {
+  return Object.fromEntries(rules.map((rule) => [rule, reason]));
 }
+
+const SIGN_IN_SHOWN_RULES = [
+  "a sign-in names the service and shows its sign-in link",
+  "a sign-in shows its confirmation code",
+  "a sign-in without a link shows its instructions",
+] as const satisfies readonly ContractRuleName[];
 
 /**
  * Linq's group sign-in can't reach the person privately: its `openDM` needs a phone
@@ -149,27 +154,20 @@ const CHAT_SDK_BROKEN = {
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...noSignInRenderer(
-    "a sign-in names the service and shows its sign-in link",
-    "a sign-in shows its confirmation code",
-    "a sign-in without a link shows its instructions",
-    "completing a sign-in tells the person it succeeded",
-  ),
 };
 
-const SIGN_IN_PRESS_RULE = "someone else pressing a sign-in isn't shown its link or code";
-
-/** The challenge goes privately to the person signing in, so the thread has no sign-in to press. */
-const SIGN_IN_SENT_PRIVATELY = {
-  [SIGN_IN_PRESS_RULE]:
-    "the sign-in goes privately to the person signing in, so the thread shows nothing to press",
-} satisfies Partial<Record<ContractRuleName, string>>;
-
-const DISCORD_UNSUPPORTED = {
-  [SIGN_IN_PRESS_RULE]: "the channel shows no sign-in, so there's nothing to press",
+const DISCORD_UNSUPPORTED_BASE = {
   "a file sent earlier in the conversation is still there on a later message":
     "each slash command starts its own session, so no later message shares one with the file",
 } satisfies Partial<Record<ContractRuleName, string>>;
+
+const DISCORD_GROUP_UNSUPPORTED = {
+  ...DISCORD_UNSUPPORTED_BASE,
+  ...signInKeptPrivate(
+    "a server channel gets a link-free status that points to a DM, since the bot can't message the person privately on its own",
+    ...SIGN_IN_SHOWN_RULES,
+  ),
+};
 
 const SLACK_BROKEN = {
   ...staleAnsweredPrompts(
@@ -217,30 +215,26 @@ const WEB_CHAT_SINGLE_PERSON =
  *   failure (such as harness breakage) both turn it red.
  */
 const channelConformance = {
-  "chat-sdk": [
-    { driver: chatSdkDriver, broken: CHAT_SDK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY },
-    { driver: chatSdkTextDriver },
-  ],
+  "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
-  discord: [{ driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_UNSUPPORTED }],
+  discord: [
+    { driver: discordDriver, broken: DISCORD_BROKEN, unsupported: DISCORD_GROUP_UNSUPPORTED },
+  ],
   "discord-dm": [
     {
       dm: true,
       driver: () => discordDriver("private"),
       broken: DISCORD_BROKEN,
-      unsupported: DISCORD_UNSUPPORTED,
+      unsupported: DISCORD_UNSUPPORTED_BASE,
     },
   ],
   github: [
     {
       driver: githubDriver,
-      broken: {
-        ...noSignInRenderer(
-          "a sign-in without a link shows its instructions",
-          "completing a sign-in tells the person it succeeded",
-          "message after ignored sign-in tells user it was cancelled",
-        ),
-      },
+      unsupported: signInKeptPrivate(
+        "a public thread gets a status naming who must sign in, since nothing on GitHub is private to them",
+        "a sign-in without a link shows its instructions",
+      ),
     },
   ],
   linear: [
@@ -258,11 +252,30 @@ const channelConformance = {
   linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   photon: [{ driver: photonDriver }],
-  slack: [{ driver: slackDriver, broken: SLACK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY }],
+  slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
-  teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
+  teams: [
+    {
+      driver: teamsDriver,
+      broken: TEAMS_BROKEN,
+      unsupported: signInKeptPrivate(
+        "a group gets a link-free status that points to a personal chat, since the bot can't message the person privately here",
+        ...SIGN_IN_SHOWN_RULES,
+      ),
+    },
+  ],
   "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
-  telegram: [{ driver: telegramDriver, broken: TELEGRAM_BROKEN }],
+  telegram: [
+    {
+      driver: telegramDriver,
+      broken: TELEGRAM_BROKEN,
+      unsupported: signInKeptPrivate(
+        "a group's status sends the challenge privately once the person presses Authorize, which the driver doesn't press",
+        ...SIGN_IN_SHOWN_RULES,
+        "only the person signing in sees the sign-in link and code",
+      ),
+    },
+  ],
   "telegram-dm": [{ dm: true, driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
   tui: [
     {

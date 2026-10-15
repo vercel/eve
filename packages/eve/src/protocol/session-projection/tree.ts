@@ -215,3 +215,16 @@ export function scopeOf(
   }
   return scope;
 }
+
+/**
+ * The turn an entity belongs to: the turn at or above it, the turn whose run made a call, or for
+ * what a task owns, the turn whose call started the task.
+ */
+export function turnOf(view: SessionView, ref: Ref): string | undefined {
+  const scope = scopeOf(view, ref);
+  if (scope.turnId !== undefined || scope.taskId === undefined) return scope.turnId;
+  const startedBy = rowOf(view, "task", scope.taskId)?.startedBy.callId;
+  return startedBy === undefined
+    ? undefined
+    : scopeOf(view, { family: "call", id: startedBy }).turnId;
+}

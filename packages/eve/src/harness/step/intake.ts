@@ -12,7 +12,7 @@ import {
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
 import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
-import type { StepInput } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { Step } from "./context.js";
@@ -24,8 +24,8 @@ import type { Step } from "./context.js";
  */
 export async function settleRuntimeWork(
   step: Step,
-  input: StepInput | undefined,
-): Promise<{ readonly input: StepInput | undefined; readonly waited: boolean } | undefined> {
+  input: HarnessStepInput | undefined,
+): Promise<{ readonly input: HarnessStepInput | undefined; readonly waited: boolean } | undefined> {
   const runtime = runtimeWait(step.session.state);
   if (runtime === undefined) return { input, waited: false };
   const ready = resolveRuntimeActionResultsForCallIds({
@@ -43,13 +43,18 @@ export async function settleRuntimeWork(
   const parts = staged.flatMap((message) =>
     message.role === "tool" ? message.content.filter((part) => part.type === "tool-result") : [],
   );
+  const usage = input?.delegatedUsage ?? {};
   await step.apply(
     settle(step.view(), {
-      results: results.map((result, index) => ({ ...result, part: parts[index]! })),
+      results: results.map((result, index) => ({
+        ...result,
+        part: parts[index]!,
+        usage: usage[result.part.toolCallId],
+      })),
     }),
   );
   if (input === undefined) return { input, waited: true };
-  const { runtimeActionResults: _results, ...rest } = input;
+  const { delegatedUsage: _usage, runtimeActionResults: _results, ...rest } = input;
   return { input: rest, waited: true };
 }
 
@@ -72,7 +77,7 @@ export interface TurnInput {
  */
 export async function prepareTurnInput(
   step: Step,
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
   options: { readonly consumedMessage: boolean },
 ): Promise<TurnInput> {
   const turnId = activeTurnId(step.position());

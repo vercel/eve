@@ -10,22 +10,19 @@ export default defineEval({
   description: "HITL smoke: a denied once() call does not execute and re-gates the next call.",
   async test(t) {
     const { session } = await t.send('Call the guarded-echo tool with note "denied-call".');
-    const request = session.requireInputRequest({ toolName: "guarded-echo" });
+    const request = session.requireInteraction({ toolName: "guarded-echo" });
 
     const denied = await session.respondAll("cancel");
     denied.expectOk();
-    denied.event("action.result", {
+    denied.event("call.settled", {
       data: {
-        result: {
-          kind: "tool-result",
-          output: {
-            approval: { requestId: request.requestId, status: "denied" },
-            code: "TOOL_EXECUTION_DENIED",
-            tool: { result: "not_run" },
-          },
-          toolName: "guarded-echo",
+        callId: request.call?.callId,
+        outcome: "rejected",
+        output: {
+          approval: { interactionId: request.interactionId, status: "denied" },
+          code: "TOOL_EXECUTION_DENIED",
+          tool: { result: "not_run" },
         },
-        status: "rejected",
       },
       count: 1,
     });
@@ -37,7 +34,7 @@ export default defineEval({
 
     await session.send('Call the guarded-echo tool once more with note "retry-call".');
     // Denial does not grant: the follow-up call must re-park.
-    session.requireInputRequest({ toolName: "guarded-echo" });
+    session.requireInteraction({ toolName: "guarded-echo" });
 
     t.parked();
     t.calledTool("guarded-echo", { status: "rejected", count: 1 });

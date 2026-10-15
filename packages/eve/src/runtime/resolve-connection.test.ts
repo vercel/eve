@@ -9,7 +9,6 @@ import type { ConnectionToolCallDefinition } from "#public/definitions/connectio
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { toolResultFrom } from "#public/tools/result.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { ConnectionAuthResolver, HeadersDefinition } from "#shared/connection-types.js";
 
 describe("resolveConnectionDefinition", () => {
@@ -92,12 +91,13 @@ describe("toolResultFrom identity for connections sharing a host (#202)", () => 
     // A hook bundled separately imports its own instance of each connection module.
     const jira = defineJira();
     const confluence = defineConfluence();
-    const result = (toolName: string): RuntimeActionResult => ({
-      callId: "call_1",
-      kind: "tool-result",
-      output: {},
-      toolName,
-    });
+    const result = (name: string) =>
+      ({
+        callId: "call_1",
+        capability: { kind: "tool", name },
+        outcome: "completed",
+        output: {},
+      }) as const;
 
     expect(warn).not.toHaveBeenCalled();
     expect(toolResultFrom(result("jira__getIssue"), jira)?.connectionToolName).toBe("getIssue");
@@ -133,7 +133,12 @@ describe("toolResultFrom identity for connections sharing a host (#202)", () => 
     );
 
     const match = toolResultFrom(
-      { callId: "call_1", kind: "tool-result", output: {}, toolName: "spec_only__list" },
+      {
+        callId: "call_1",
+        capability: { kind: "tool", name: "spec_only__list" },
+        outcome: "completed",
+        output: {},
+      },
       define(),
     );
     expect(match?.connectionToolName).toBe("list");

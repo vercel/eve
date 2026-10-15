@@ -267,3 +267,5 @@ export type {
 } from "#protocol/session-projection/tables.js";
 
 export { interaction, signInEnding, type Interaction } from "#protocol/session-reader.js";
+
+export { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#protocol/interaction-options.js";

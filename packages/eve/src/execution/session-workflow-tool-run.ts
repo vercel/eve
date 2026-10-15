@@ -1,4 +1,4 @@
-import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
+import { deliverWorkflowRelay } from "#execution/tools/workflow/owner.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import {
   runMessageBatchBudget,
@@ -17,7 +17,7 @@ import { isWorkflowMessage, type SessionInboxReader } from "#execution/session-i
 import { isTaskRunMessage } from "#execution/tasks/session.js";
 import {
   workflowToolRunOutcomeToToolResult,
-  workflowToolRunRequestToInputRequestPayload,
+  workflowAskPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
 import {
   findBlockingWorkflowToolRun,
@@ -103,22 +103,21 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  if (message.request.kind === "authorization-request") {
-    const request = message.request;
-    await deliverWorkflowAuthorization({ ...message, request }, async () => {
+  const { runId } = message.from;
+  const { request } = message;
+  if (request.kind === "relay") {
+    await deliverWorkflowRelay({ ...message, request }, async () => {
       await cursor.advance((state) =>
-        runProxySubagentEventStep({ hookPayload: request.event, ...state }),
+        runProxySubagentEventStep({ hookPayload: request.event, runId, ...state }),
       );
     });
     return;
   }
   await cursor.advance((state) =>
     runProxySubagentEventStep({
-      ...(message.request.kind === "ask" && {
-        workflowAsk: createWorkflowAskRoute(message.request),
-      }),
-      hookPayload: workflowToolRunRequestToInputRequestPayload(message),
-      runId: message.from.runId,
+      hookPayload: workflowAskPayload({ ...message, request }),
+      runId,
+      workflowAsk: createWorkflowAskRoute(request),
       ...state,
     }),
   );

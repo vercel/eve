@@ -1,9 +1,8 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { Client } from "#client/client.js";
 import type { MessageResponse } from "#client/message-response.js";
-import type { EveAgentReducer } from "#client/reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientAuth,
@@ -27,13 +26,12 @@ export type EveAgentStoreStatus = "error" | "ready" | "resuming" | "streaming" |
 export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<SendTurnPayload>;
 
 /** Immutable projected state of an eve frontend session store. */
-export interface EveAgentStoreSnapshot<TData> {
-  readonly data: TData;
-  /** Canonical session facts, independent of the caller's data projection. */
-  readonly conversation: ConversationState;
+export interface EveAgentStoreSnapshot {
+  /** The conversation the session's stream and this client's own sends show. */
+  readonly data: ConversationState;
   /** The latest session creation, stream, resume, or turn failure. */
   readonly error: Error | undefined;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly session: ClientSessionState | undefined;
   readonly status: EveAgentStoreStatus;
 }
@@ -42,10 +40,10 @@ export interface EveAgentStoreSnapshot<TData> {
  * Hooks invoked during session creation and turn processing. The observation callbacks
  * do not alter execution; `prepareSend` may replace the outbound turn payload.
  */
-export interface EveAgentStoreCallbacks<TData> {
+export interface EveAgentStoreCallbacks {
   readonly onError?: (error: Error) => void;
-  readonly onEvent?: (event: MessageStreamEvent) => void;
-  readonly onFinish?: (snapshot: EveAgentStoreSnapshot<TData>) => void;
+  readonly onEvent?: (event: SessionStreamEvent) => void;
+  readonly onFinish?: (snapshot: EveAgentStoreSnapshot) => void;
   readonly onSessionChange?: (session: ClientSessionState | undefined) => void;
   readonly prepareSend?: PrepareSend;
 }
@@ -55,7 +53,7 @@ export interface EveAgentStoreCallbacks<TData> {
  * options or a configured `Client` for store-owned sessions, or an existing
  * `ClientSession`. Saved events must be an ordered prefix of the same session stream.
  */
-export interface EveAgentStoreInit<TData> {
+export interface EveAgentStoreInit {
   readonly prewarm?: boolean;
   /** Configured client for store-owned sessions; replaces `host`, `auth`, and `headers`. */
   readonly client?: Client;
@@ -63,12 +61,12 @@ export interface EveAgentStoreInit<TData> {
   readonly headers?: HeadersValue;
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   readonly initialSession?: ClientSessionState;
   readonly optimistic?: boolean;
   /**
-   * Follow each agent tool's session into `conversation.agents`, regardless of the data reducer,
-   * while the store streams its session or a framework binding has it mounted.
+   * Follow each agent tool's session into `data.agents` while the store streams its session or a
+   * framework binding has it mounted.
    */
   readonly followSubagents?: boolean;
   /**
@@ -80,7 +78,6 @@ export interface EveAgentStoreInit<TData> {
    * @default true
    */
   readonly followIdle?: boolean;
-  readonly reducer: EveAgentReducer<TData>;
   readonly session?: ClientSession;
 }
 
@@ -101,7 +98,7 @@ export interface ActiveTurn {
   readonly completion: Promise<void>;
   readonly followUpDispatches: Set<Promise<void>>;
   receivedFollowUps: number;
-  readonly receivedFollowUpEvents: Map<MessageStreamEvent, number>;
+  readonly receivedFollowUpEvents: Map<SessionStreamEvent, number>;
   readonly followUpSubmissionIds: Set<string>;
   readonly resolveCompletion: () => void;
   readonly response: Promise<MessageResponse | undefined>;

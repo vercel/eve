@@ -20,28 +20,27 @@ import {
   EVE_MESSAGE_STREAM_FORMAT,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
-  EVE_STREAM_CONTROL_VERSION,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_FORMAT_HEADER,
-  EVE_STREAM_LEASE_ENDED_CONTROL,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
 import {
+  HEARTBEAT_RECORD,
+  LEASE_ENDED_RECORD,
+  STREAM_ENDED_RECORD,
+} from "#protocol/session-events/envelope.js";
+import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
   readRemoteAgentProtocolVersion,
+  servesRemoteAgentCaller,
 } from "#protocol/remote-agent-protocol.js";
-import {
-  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
-  splitLegacyTaskFields,
-} from "#execution/legacy-remote-agent/protocol.js";
 import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
-import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
+import { isAnswer, type ValidatedAnswer } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
 import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
@@ -70,11 +69,10 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
-  const legacy = splitLegacyTaskFields(input);
-  const { payload } = legacy;
-  if (payload.inputResponses !== undefined) {
+  const payload = withoutLegacyTaskId(input);
+  if (payload.answers !== undefined) {
     return Response.json(
-      { error: "'inputResponses' is only accepted for an existing session.", ok: false },
+      { error: "'answers' is only accepted for an existing session.", ok: false },
       { status: 400 },
     );
   }
@@ -132,16 +130,13 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
-  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
-    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
-  }
   return result;
 }
 
 interface ParsedSessionMessageBody {
   callback?: SessionCallback;
   message?: string | UserContent;
-  inputResponses?: readonly ValidatedInputResponse[];
+  answers?: readonly ValidatedAnswer[];
   context?: readonly string[];
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
@@ -150,7 +145,7 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
-  const { payload } = splitLegacyTaskFields(input);
+  const payload = input;
   if (Object.hasOwn(payload, "stubs")) {
     return Response.json(
       { ok: false, error: "Tool stubs are fixed at session creation." },
@@ -164,8 +159,8 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  const inputResponses = parseInputResponses(payload.inputResponses);
-  if (inputResponses instanceof Response) return inputResponses;
+  const answers = parseAnswers(payload.answers);
+  if (answers instanceof Response) return answers;
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
@@ -173,19 +168,19 @@ export function parseSessionMessageBody(
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
   if (turnPolicy instanceof Response) return turnPolicy;
 
-  if (message === undefined && inputResponses === undefined) {
+  if (message === undefined && answers === undefined) {
     return Response.json(
       {
-        error: "Expected a non-empty 'message' or a non-empty 'inputResponses' array.",
+        error: "Expected a non-empty 'message' or a non-empty 'answers' array.",
         ok: false,
       },
       { status: 400 },
     );
   }
 
-  if (message !== undefined && inputResponses !== undefined) {
+  if (message !== undefined && answers !== undefined) {
     return Response.json(
-      { error: "'message' and 'inputResponses' are mutually exclusive.", ok: false },
+      { error: "'message' and 'answers' are mutually exclusive.", ok: false },
       { status: 400 },
     );
   }
@@ -193,7 +188,7 @@ export function parseSessionMessageBody(
   return {
     callback,
     message,
-    inputResponses,
+    answers,
     context,
     outputSchema,
     turnPolicy,
@@ -305,25 +300,25 @@ export async function createSessionStreamResponse(
   const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
-    // Resolve the tail before committing a response; otherwise an unknown or
-    // unreachable session would answer 200 and fail mid-body. Open the event
-    // stream alongside the tail lookup to avoid an extra round trip.
-    const eventsPromise = session.getEventStream({ follow, startIndex });
+    // An unknown or unreachable session would otherwise answer 200 and then fail mid-body, so
+    // the tail must resolve before any bytes are committed. A position cursor opens the stream
+    // alongside it to save a round trip; a tail-relative cursor needs the tail to become one.
+    const early =
+      startIndex === undefined || startIndex >= 0
+        ? session.getLineStream({ follow, startIndex: startIndex ?? 0 })
+        : undefined;
     // Handled below; this keeps an early rejection from being reported as unhandled.
-    eventsPromise.catch(() => {});
+    early?.catch(() => {});
     let tailIndex: number;
     try {
       tailIndex = await session.getStreamTailIndex();
     } catch (error) {
-      void eventsPromise.then((events) => events.cancel()).catch(() => {});
+      void early?.then((lines) => lines.cancel()).catch(() => {});
       throw error;
     }
-    const events = await eventsPromise;
-    const controlVersion =
-      new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
-      EVE_STREAM_CONTROL_VERSION
-        ? EVE_STREAM_CONTROL_VERSION
-        : undefined;
+    const from =
+      early === undefined ? Math.max(0, tailIndex + 1 + (startIndex ?? 0)) : (startIndex ?? 0);
+    const lines = await (early ?? session.getLineStream({ follow, startIndex: from }));
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -336,11 +331,10 @@ export async function createSessionStreamResponse(
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
-      serializeAsNdjson(
-        events,
+      serializeLines(
+        lines,
         request.signal,
-        includeTailIndex ? streamEventLimit(startIndex, tailIndex) : undefined,
-        controlVersion !== undefined,
+        includeTailIndex ? Math.max(0, tailIndex - from + 1) : undefined,
       ),
       { headers },
     );
@@ -382,6 +376,17 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
 }
 
+/**
+ * An eve 0.66–0.68 caller names the background task it delegates from as `callback.taskId`. This
+ * deployment never relays to such a caller, so the task id has no reader and is dropped.
+ */
+function withoutLegacyTaskId(input: Record<string, unknown>): Record<string, unknown> {
+  const { callback } = input;
+  if (callback === null || typeof callback !== "object" || !("taskId" in callback)) return input;
+  const { taskId: _taskId, ...rest } = callback;
+  return { ...input, callback: rest };
+}
+
 /** Delegating callers must speak a remote agent protocol this deployment serves. */
 function parseProtocolVersionField(value: unknown): number | Response {
   // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
@@ -392,12 +397,7 @@ function parseProtocolVersionField(value: unknown): number | Response {
     );
   }
   const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (
-    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
-    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
-  ) {
-    return callerVersion;
-  }
+  if (servesRemoteAgentCaller(callerVersion)) return callerVersion;
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,
@@ -549,27 +549,25 @@ export function checkUploadPolicy(
   );
 }
 
-function parseInputResponses(
-  value: unknown,
-): readonly ValidatedInputResponse[] | Response | undefined {
+function parseAnswers(value: unknown): readonly ValidatedAnswer[] | Response | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length === 0) {
     return Response.json(
-      { error: "Expected 'inputResponses' to be a non-empty array.", ok: false },
+      { error: "Expected 'answers' to be a non-empty array.", ok: false },
       { status: 400 },
     );
   }
-  const inputResponses = value.filter(isInputResponse);
-  if (inputResponses.length !== value.length) {
+  const answers = value.filter(isAnswer);
+  if (answers.length !== value.length) {
     return Response.json(
       {
-        error: "Expected every 'inputResponses' entry to match the HITL response schema.",
+        error: "Expected every 'answers' entry to match the HITL response schema.",
         ok: false,
       },
       { status: 400 },
     );
   }
-  return inputResponses;
+  return answers;
 }
 
 const CLIENT_CONTEXT_PREFIX = "Client context:\n";
@@ -643,28 +641,20 @@ export function parseStartIndex(request: Request): number | undefined | Response
   return parsed;
 }
 
-function streamEventLimit(
-  startIndex: number | undefined,
-  tailIndex: number | undefined,
-): number | undefined {
-  if (tailIndex === undefined) return undefined;
-  const resolvedStartIndex =
-    startIndex === undefined
-      ? 0
-      : startIndex < 0
-        ? Math.max(0, tailIndex + 1 + startIndex)
-        : startIndex;
-  return Math.max(0, tailIndex - resolvedStartIndex + 1);
-}
-
-function serializeAsNdjson(
-  events: ReadableStream<unknown>,
+/**
+ * Serializes stored lines as NDJSON, with the transport records every v27 reader understands: a
+ * heartbeat every 10 seconds of silence (and one first, so the response commits at once), a
+ * lease end after 60 seconds, and `stream.ended` when the durable stream is done. A bounded read
+ * ends after `lineLimit` lines, without `stream.ended`: the stream itself goes on.
+ */
+function serializeLines(
+  lines: ReadableStream<unknown>,
   signal: AbortSignal,
-  eventLimit?: number,
-  leased = false,
+  lineLimit?: number,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  let eventCount = 0;
+  const record = (value: unknown) => encoder.encode(`${JSON.stringify(value)}\n`);
+  let lineCount = 0;
   let heartbeat: ReturnType<typeof setTimeout> | undefined;
   let lease: ReturnType<typeof setTimeout> | undefined;
 
@@ -678,50 +668,48 @@ function serializeAsNdjson(
     clearTimeout(heartbeat);
     heartbeat = setTimeout(() => {
       try {
-        controller.enqueue(encoder.encode("\n"));
+        controller.enqueue(record(HEARTBEAT_RECORD));
         scheduleHeartbeat(controller);
       } catch {
         clearTimers();
       }
     }, SESSION_STREAM_HEARTBEAT_MS);
   };
-  const startLease = (controller: TransformStreamDefaultController<Uint8Array>) => {
-    scheduleHeartbeat(controller);
-    lease = setTimeout(() => {
-      clearTimers();
-      try {
-        controller.enqueue(encoder.encode(`${JSON.stringify(EVE_STREAM_LEASE_ENDED_CONTROL)}\n`));
-        controller.terminate();
-      } catch {
-        // The response was cancelled while the lease callback was already queued.
-      }
-    }, SESSION_STREAM_LEASE_MS);
-  };
 
   const transform = new TransformStream<unknown, Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode("\n"));
-      if (eventLimit === 0) {
+      controller.enqueue(record(HEARTBEAT_RECORD));
+      if (lineLimit === 0) {
         controller.terminate();
-      } else if (leased) {
-        startLease(controller);
+        return;
       }
+      scheduleHeartbeat(controller);
+      lease = setTimeout(() => {
+        clearTimers();
+        try {
+          controller.enqueue(record(LEASE_ENDED_RECORD));
+          controller.terminate();
+        } catch {
+          // The response was cancelled while the lease callback was already queued.
+        }
+      }, SESSION_STREAM_LEASE_MS);
     },
-    transform(event, controller) {
-      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-      eventCount += 1;
-      if (eventCount === eventLimit) {
+    transform(line, controller) {
+      controller.enqueue(record(line));
+      lineCount += 1;
+      if (lineCount === lineLimit) {
         clearTimers();
         controller.terminate();
-      } else if (leased) {
+      } else {
         scheduleHeartbeat(controller);
       }
     },
-    flush() {
+    flush(controller) {
       clearTimers();
+      controller.enqueue(record(STREAM_ENDED_RECORD));
     },
   });
-  void events
+  void lines
     .pipeTo(transform.writable, { signal })
     .catch(() => {})
     .finally(clearTimers);

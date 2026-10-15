@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { Client } from "#client/client.js";
 import type {
@@ -18,12 +19,10 @@ import type {
   SessionEventStream,
   SessionEventStreamOptions,
 } from "#client/session-event-stream.js";
-import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import { ConversationClient } from "#client/conversation-client.js";
 import type { ClientSession } from "#client/session.js";
 import { dispatchSessionTurn } from "#client/session-turn-dispatch.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   activeTurnForOptimisticFollowUp,
   assertAnswerable,
@@ -66,29 +65,29 @@ const attachStore = Symbol("attachEveAgentStore");
  * Framework bindings subscribe to snapshots and attach or detach transport with their lifecycle.
  * Reset clears local state; cancellation remains an explicit durable operation.
  */
-export class EveAgentStore<TData> {
+export class EveAgentStore {
   readonly #client: Client | undefined;
   readonly #autoPrewarm: boolean;
   #attached = false;
-  readonly #conversationClient: ConversationClient<TData>;
+  readonly #conversationClient: ConversationClient;
   readonly #followChildStreams: boolean;
   readonly #followIdle: boolean;
   readonly #externalSession: boolean;
   readonly #subscribers = new Set<() => void>();
   #activeTurn: ActiveTurn | undefined;
-  #callbacks: EveAgentStoreCallbacks<TData> = {};
+  #callbacks: EveAgentStoreCallbacks = {};
   #error: Error | undefined;
-  #events: readonly MessageStreamEvent[];
+  #events: readonly SessionStreamEvent[];
   readonly #messageSubmissions: OptimisticMessageSubmissions;
   #prewarmGeneration = 0;
   #prewarmPromise: Promise<void> | undefined;
   #prewarmController: AbortController | undefined;
   #resumePromise: Promise<void> | undefined;
   #session: ClientSession | undefined;
-  #snapshot: EveAgentStoreSnapshot<TData>;
+  #snapshot: EveAgentStoreSnapshot;
   #status: EveAgentStoreStatus = "ready";
 
-  constructor(init: EveAgentStoreInit<TData>) {
+  constructor(init: EveAgentStoreInit) {
     this.#autoPrewarm = init.prewarm ?? false;
     this.#followChildStreams = init.followSubagents ?? false;
     this.#followIdle = init.followIdle ?? true;
@@ -101,16 +100,12 @@ export class EveAgentStore<TData> {
           headers: init.headers,
           host: init.host ?? "",
         }));
-    this.#conversationClient = new ConversationClient(
-      new EveAgentProjection(init.reducer, []),
-      () => this.#publish(),
-      () => this.#publish(),
-    );
+    this.#conversationClient = new ConversationClient(() => this.#publish());
     this.#events = (init.initialEvents ?? []).filter((event) =>
       this.#conversationClient.hydrate(event),
     );
     this.#messageSubmissions = new OptimisticMessageSubmissions(
-      this.#conversationClient.projections,
+      (submissions) => this.#conversationClient.showSubmissions(submissions),
       init.optimistic ?? true,
     );
     this.#session =
@@ -124,11 +119,11 @@ export class EveAgentStore<TData> {
     this.#snapshot = this.#createSnapshot();
   }
 
-  get snapshot(): EveAgentStoreSnapshot<TData> {
+  get snapshot(): EveAgentStoreSnapshot {
     return this.#snapshot;
   }
 
-  setCallbacks(callbacks: EveAgentStoreCallbacks<TData>): void {
+  setCallbacks(callbacks: EveAgentStoreCallbacks): void {
     this.#callbacks = callbacks;
   }
 
@@ -216,12 +211,12 @@ export class EveAgentStore<TData> {
 
     let reader: SessionEventReader | undefined;
     let submissionId: string | undefined;
-    let retractResponses: (() => void) | undefined;
+    let retractAnswers: (() => void) | undefined;
     try {
       assertExclusiveTurnInput(input);
       // Echo the submission before preparation, which may wait on caller-owned work.
       submissionId = this.#messageSubmissions.submit(input, this.#events.length);
-      retractResponses = this.#conversationClient.projectResponses(input.inputResponses);
+      retractAnswers = this.#conversationClient.projectAnswers(input.answers);
       this.#publish();
       const preparedInput = await (prepareSend === undefined
         ? input
@@ -233,10 +228,7 @@ export class EveAgentStore<TData> {
       if (!this.#isActiveTurn(turn)) return;
       if (preparedInput !== input) {
         submissionId = this.#messageSubmissions.resubmit(submissionId, preparedInput);
-        retractResponses = this.#conversationClient.replaceResponses(
-          retractResponses,
-          preparedInput,
-        );
+        retractAnswers = this.#conversationClient.replaceAnswers(retractAnswers, preparedInput);
         this.#publish();
       }
 
@@ -245,7 +237,7 @@ export class EveAgentStore<TData> {
         signal: createAbortSignal(preparedInput.signal, turn.abortController.signal),
       };
       const dispatched = await this.#dispatchTurn(turnInput);
-      retractResponses = undefined;
+      retractAnswers = undefined;
       const response = dispatched.response;
       reader = dispatched.reader;
 
@@ -266,7 +258,7 @@ export class EveAgentStore<TData> {
       this.#status = settledStatus(this.#error, this.#conversationClient.conversation);
     } catch (error) {
       if (!this.#isActiveTurn(turn)) return;
-      retractResponses?.();
+      retractAnswers?.();
 
       if (isAbortError(error)) {
         this.#status = "ready";
@@ -443,21 +435,21 @@ export class EveAgentStore<TData> {
     const generation = this.#prewarmGeneration;
     const signal = createAbortSignal(input.signal, turn.abortController.signal);
     // Answers close their requests before preparation so no one answers them twice.
-    let retractResponses = this.#conversationClient.projectResponses(input.inputResponses);
+    let retractAnswers = this.#conversationClient.projectAnswers(input.answers);
     const preparedInput = await waitWithSignal(Promise.resolve(prepareSend?.(input)), signal)
       .then((prepared) => {
         const next = validateFollowUp(prepared ?? input);
         if (next === input) return next;
-        retractResponses = this.#conversationClient.replaceResponses(retractResponses, next);
+        retractAnswers = this.#conversationClient.replaceAnswers(retractAnswers, next);
         return next;
       })
       .catch((error: unknown) => {
-        retractResponses?.();
+        retractAnswers?.();
         throw error;
       });
     if (generation !== this.#prewarmGeneration) return;
     if (!this.#isActiveTurn(turn)) {
-      retractResponses?.();
+      retractAnswers?.();
       return await this.#submit(preparedInput);
     }
 
@@ -488,7 +480,7 @@ export class EveAgentStore<TData> {
             turn: { ...preparedInput, signal },
           })
         ).response;
-        retractResponses = undefined;
+        retractAnswers = undefined;
         // Answers settle through the active turn's stream; only steered messages extend it.
         if (preparedInput.message === undefined) return;
         turn.acceptedFollowUps += 1;
@@ -496,7 +488,7 @@ export class EveAgentStore<TData> {
       } catch (error) {
         if (this.#isActiveTurn(turn)) {
           this.#messageSubmissions.fail(toError(error), submissionId);
-          retractResponses?.();
+          retractAnswers?.();
           this.#publish();
         }
         throw error;
@@ -612,14 +604,14 @@ export class EveAgentStore<TData> {
     return this.#activeTurn === turn;
   }
 
-  #acceptServerEvent(event: MessageStreamEvent): boolean {
+  #acceptServerEvent(event: SessionStreamEvent): boolean {
     const wasStreaming = this.#status === "streaming";
     if (
       !this.#conversationClient.observe(event, {
         onAccepted: () => {
           this.#events = [...this.#events, event];
         },
-        project: (accepted) => {
+        reconcile: (accepted) => {
           this.#handleReconciliation(this.#messageSubmissions.apply(accepted));
         },
         notify: false,
@@ -655,7 +647,7 @@ export class EveAgentStore<TData> {
     // Unsettled tails include sign-ins whose callbacks resume the session from elsewhere.
     if (this.#events.length > 0 && !isSettledSessionTail(this.#events, conversation)) return;
     const working = Object.values(conversation.tasks).some((task) =>
-      Object.values(task.calls).some((call) => call.status === "working"),
+      Object.values(task.calls).some((call) => call.status !== "settled"),
     );
     if (!working) this.#conversationClient.closeStream();
   }
@@ -675,7 +667,7 @@ export class EveAgentStore<TData> {
     return true;
   }
 
-  #applyTerminalStreamFailure(event: MessageStreamEvent): void {
+  #applyTerminalStreamFailure(event: SessionStreamEvent): void {
     const error = toTerminalStreamFailureError(event);
     if (error === undefined) return;
     this.#status = "error";
@@ -687,10 +679,9 @@ export class EveAgentStore<TData> {
     }
   }
 
-  #createSnapshot(): EveAgentStoreSnapshot<TData> {
+  #createSnapshot(): EveAgentStoreSnapshot {
     return {
-      data: this.#conversationClient.data,
-      conversation: this.#conversationClient.conversation,
+      data: this.#conversationClient.conversation,
       error: this.#error,
       events: this.#events,
       session: this.#session?.state,
@@ -705,11 +696,11 @@ export class EveAgentStore<TData> {
 }
 
 /** @internal Detaches local transport without cancelling durable server work. */
-export function detachEveAgentStore<TData>(store: EveAgentStore<TData>): void {
+export function detachEveAgentStore(store: EveAgentStore): void {
   store[detachStore]();
 }
 
 /** @internal Starts mount-scoped session work after the framework commits. */
-export function attachEveAgentStore<TData>(store: EveAgentStore<TData>): void {
+export function attachEveAgentStore(store: EveAgentStore): void {
   store[attachStore]();
 }

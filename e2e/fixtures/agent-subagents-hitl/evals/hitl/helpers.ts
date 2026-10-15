@@ -1,19 +1,19 @@
-import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
+import type { EveEvalContext, EveEvalSession, EveEvalTurn, AskedInteraction } from "eve/evals";
 
 /**
- * Follows the parent session, turn by turn, until a child's request matching
- * `toolName` is pending on it. A child asks after its own model call, so the
+ * Follows the parent session, turn by turn, until a child's request about `toolName` (or, for a
+ * request about no call, such as the budget prompt, of that kind) is pending on it. A child asks after its own model call, so the
  * request may land a turn or two after the delegation.
  */
 export async function waitForRelayed(
   t: EveEvalContext,
   initial: EveEvalSession,
   toolName: string,
-): Promise<{ readonly request: InputRequest; readonly session: EveEvalSession }> {
+): Promise<{ readonly request: AskedInteraction; readonly session: EveEvalSession }> {
   let session = initial;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const request = session.pendingInputRequests.find(
-      (pending) => pending.action.toolName === toolName,
+    const request = session.pendingInteractions.find(
+      (pending) => (pending.call?.name ?? pending.kind) === toolName,
     );
     if (request !== undefined) return { request, session };
     session = (await next(t, session)).session;

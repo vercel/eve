@@ -1,3 +1,4 @@
+import type { Principal } from "#protocol/session-events/envelope.js";
 import type { ModelMessage, ToolExecutionOptions } from "ai";
 import type {
   StandardJSONSchemaV1,
@@ -11,7 +12,7 @@ import { stampDefinitionKey } from "#internal/authored-definition/source-identit
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
-import type { InputOption } from "#shared/input.js";
+import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 import {
   collectDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
@@ -115,7 +116,7 @@ export interface InternalToolDefinitionWithExecuteFn<
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
  * way they render tool approvals.
  */
-export interface ToolInputRequest {
+export interface ToolQuestion {
   /**
    * Whether the user may answer with free text instead of one of the
    * {@link options}.
@@ -124,19 +125,12 @@ export interface ToolInputRequest {
   /** Rendering hint: confirmation buttons, a selection list, or a text field. */
   readonly display?: "confirmation" | "select" | "text";
   /** Selectable answers. */
-  readonly options?: readonly InputOption[];
+  readonly options?: readonly InteractionOption[];
   readonly prompt: string;
 }
 
-/** Public identity fields for the authenticated person who answered a question. */
-export interface ToolInputResponseResponder {
-  readonly authenticator: string;
-  readonly principalId: string;
-  readonly principalType: string;
-}
-
 /**
- * The outcome of a {@link ToolInputRequest}.
+ * The outcome of a {@link ToolQuestion}.
  *
  * - `answered`: the user picked an option or typed an answer. An answer the
  *   session accepted before a withdrawal wins, even after a signal aborted.
@@ -145,13 +139,13 @@ export interface ToolInputResponseResponder {
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
-export type ToolInputResponse =
+export type ToolAnswer =
   | {
       readonly status: "answered";
       /** The selected option's `id`, when the user picked one. */
       readonly optionId?: string;
       /** Authenticated identity of the responder, without channel attributes. */
-      readonly responder?: ToolInputResponseResponder;
+      readonly responder?: Principal;
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }
@@ -159,7 +153,7 @@ export type ToolInputResponse =
   | { readonly status: "unavailable" };
 
 /** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
-export interface ToolInputRequestOptions {
+export interface ToolAskOptions {
   /**
    * Withdraws the request when it aborts: the channel stops offering the
    * question and the ask resolves as `cancelled`, unless the session accepted
@@ -303,7 +297,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    *
    * When omitted, the model sees the full `execute` return value
    * (default AI SDK serialization). Channel event handlers
-   * (`action.result`) always receive the full output regardless.
+   * (`call.settled`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }

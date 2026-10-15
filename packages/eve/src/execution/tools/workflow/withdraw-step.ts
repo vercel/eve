@@ -12,7 +12,7 @@ import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/me
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { readHitlState } from "#harness/hitl/index.js";
-import type { ProxyInputRequest } from "#harness/hitl/relays.js";
+import type { Relay } from "#harness/hitl/relays.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
 
 /**
@@ -71,7 +71,7 @@ export async function withdrawFinishedRunQuestionsStep(
  */
 export async function relayWithdrawnRequests(
   input: SessionStepState,
-  select: (requestId: string, route: ProxyInputRequest) => boolean,
+  select: (requestId: string, route: Relay) => boolean,
 ): Promise<PublishedSessionEvents> {
   const { state } = readDurableSession(input.sessionState);
   const requestIds = [...readHitlState(state).relays]

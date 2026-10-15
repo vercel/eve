@@ -1,13 +1,13 @@
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   answerTelegramCallbackQuery,
   callTelegramApi,
@@ -39,9 +39,9 @@ import {
 import {
   TELEGRAM_HITL_CALLBACK_PREFIX,
   isTelegramSyntheticResponse,
-  resolveTelegramInputResponses,
-  telegramCallbackInputResponse,
-  telegramReplyInputResponses,
+  resolveTelegramAnswers,
+  telegramCallbackAnswer,
+  telegramReplyAnswers,
   type TelegramHitlState,
 } from "#public/channels/telegram/hitl.js";
 import {
@@ -72,9 +72,6 @@ import { telegramInstrumentation } from "#public/channels/telegram/audience.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Minimal Telegram context (only `telegram`, no `state` or session ops), passed to `onMessage` and `onCallbackQuery` hooks before a session exists. Event handlers receive the richer {@link TelegramEventContext}. */
 export interface TelegramContext {
@@ -138,35 +135,28 @@ export type TelegramInboundResult = {
 /** Sync or async {@link TelegramInboundResult}. */
 export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
-type TelegramEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: TelegramEventContext,
-  ctx: SessionContext,
+type TelegramEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TelegramEventContext>,
 ) => void | Promise<void>;
 
-type TelegramSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TelegramEventContext,
-) => void | Promise<void>;
-
-/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)` and exposes the ID as `data.sessionId`; all others also receive the {@link SessionContext}. */
+/**
+ * Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default
+ * (handlers merge over {@link defaultEvents}). Every handler receives the event and a `ctx` whose
+ * `channel` is the Telegram context.
+ */
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
-  readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;
-  readonly "action.partial"?: TelegramEventHandler<"action.partial">;
-  readonly "action.result"?: TelegramEventHandler<"action.result">;
-  readonly "message.completed"?: TelegramEventHandler<"message.completed">;
-  readonly "message.appended"?: TelegramEventHandler<"message.appended">;
-  readonly "input.requested"?: TelegramEventHandler<"input.requested">;
-  readonly "input.resolved"?: TelegramEventHandler<"input.resolved">;
-  readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TelegramSessionFailedHandler;
-  readonly "session.completed"?: TelegramEventHandler<"session.completed">;
-  readonly "session.waiting"?: TelegramEventHandler<"session.waiting">;
-  readonly "authorization.required"?: TelegramEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TelegramEventHandler<"authorization.completed">;
+  readonly "call.requested"?: TelegramEventHandler<"call.requested">;
+  readonly "call.progress"?: TelegramEventHandler<"call.progress">;
+  readonly "call.settled"?: TelegramEventHandler<"call.settled">;
+  readonly "content.completed"?: TelegramEventHandler<"content.completed">;
+  readonly "content.delta"?: TelegramEventHandler<"content.delta">;
+  readonly "interaction.opened"?: TelegramEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TelegramEventHandler<"interaction.settled">;
+  readonly "turn.settled"?: TelegramEventHandler<"turn.settled">;
+  readonly "session.ended"?: TelegramEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TelegramEventHandler<"delivery.settled">;
 }
 
 /** Configuration for {@link telegramChannel}. */
@@ -636,7 +626,7 @@ async function dispatchCallbackQuery(input: {
       const source = input.from(telegramContinuationTokenFromState(state));
       // The presser acts as themselves, so a press that starts a turn lets
       // their next message steer it.
-      await source.respond([telegramCallbackInputResponse(input.query.data)], {
+      await source.respond([telegramCallbackAnswer(input.query.data)], {
         auth: defaultTelegramAuth({ ...input.query.message, from: input.query.from }),
       });
     } catch (error) {
@@ -670,13 +660,13 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   adapter.deliver = (payload: DeliverPayload, ctx: ChannelAdapterContext<TelegramChannelState>) => {
     const state = payload.state as Partial<TelegramChannelState> | undefined;
     const responses = [
-      ...(payload.inputResponses ?? []),
-      ...telegramReplyInputResponses(state?.replyToBotMessageId, payload.message),
+      ...(payload.answers ?? []),
+      ...telegramReplyAnswers(state?.replyToBotMessageId, payload.message),
     ];
     if (responses.some(isTelegramSyntheticResponse)) {
-      const resolved = resolveTelegramInputResponses(ctx.state, responses);
+      const resolved = resolveTelegramAnswers(ctx.state, responses);
       if (resolved.length > 0) {
-        return { inputResponses: resolved, context: payload.context };
+        return { answers: resolved, context: payload.context };
       }
       if (payload.message !== undefined) {
         return { message: payload.message, context: payload.context };

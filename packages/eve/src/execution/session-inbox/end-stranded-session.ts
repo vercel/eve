@@ -1,3 +1,5 @@
+import type { SessionControlIdentity } from "#channel/types.js";
+import { principalOf } from "#execution/session/delivery-facts.js";
 import { EVE_SESSION_ATTRIBUTE, EVE_TYPE_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import {
   logicalSessionInboxToken,
@@ -15,8 +17,8 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
-import { sessionFailed } from "#harness/session-machine/transitions.js";
-import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { encodeLine } from "#protocol/session-events/envelope.js";
 
 type World = Awaited<ReturnType<typeof getWorld>>;
 
@@ -30,6 +32,14 @@ const log = createLogger("execution.session-inbox");
 
 /** What made eve end a stranded session; recorded for operators. */
 export type StrandedSessionEndTrigger = "message" | "reset" | "timeout";
+
+/**
+ * The `session.ended` cause naming what ended a stranded session: `stranded-reset`,
+ * `stranded-message`, or `stranded-timeout`.
+ */
+export function strandedEndPolicy(trigger: StrandedSessionEndTrigger): string {
+  return `stranded-${trigger}`;
+}
 
 /**
  * Ends a stranded session without running any of its code, so none of its
@@ -51,7 +61,10 @@ export async function endStrandedSession(
   /** The address the caller used; a session address names the session outright. */
   address: string | SessionInboxAddress,
   trigger: StrandedSessionEndTrigger,
+  control?: SessionControlIdentity,
 ): Promise<string> {
+  if (trigger === "reset" && control === undefined)
+    throw new Error("A stranded reset requires its control delivery identity.");
   const sessionId =
     typeof address === "string" ? await resolveStrandedSessionId(stranded) : address.sessionId;
   const { ownerRunId } = stranded;
@@ -60,7 +73,7 @@ export async function endStrandedSession(
   // Listed before cancelling: a cancelled run's hooks are disposed and no longer listed.
   const ownedTokens = await listOwnedSessionTokens(world, ownerRunId);
   // Publish before cancellation can expire zero-retention data.
-  await publishTerminalEvent(sessionId, trigger);
+  await publishTerminalEvent(sessionId, trigger, control);
   // The session id is the original run; after a handoff it parks as the stream anchor.
   await cancelRuns(world, [ownerRunId, sessionId], "Session ended: its deployment was retired");
   await waitForSessionHooksRelease(
@@ -95,29 +108,47 @@ async function assertStillServesSession(sessionId: string, ownerRunId: string): 
 }
 
 /**
- * Appends `session.failed` and closes the stream without running authored
+ * Appends `session.ended` and closes the stream without running authored
  * hooks. Unavailable payload keys, an already-closed stream, or a stalled
  * write must not prevent the reset.
  */
 async function publishTerminalEvent(
   sessionId: string,
   trigger: StrandedSessionEndTrigger,
+  control?: SessionControlIdentity,
 ): Promise<void> {
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   const publication = (async () => {
+    // A replacement reading this history skips it when a reset ended the session.
+    const ended: SessionEvent = {
+      data: {
+        cause:
+          control === undefined
+            ? { policy: strandedEndPolicy(trigger) }
+            : { deliveryId: control.deliveryId },
+        error: { code: "session_stranded", message: "This session is no longer available." },
+        outcome: "failed",
+      },
+      type: "session.ended",
+    };
+    const facts: SessionEvent[] = [];
+    if (control !== undefined) {
+      const principal = principalOf(control.auth);
+      facts.push(
+        {
+          type: "delivery.admitted",
+          data: {
+            deliveryId: control.deliveryId,
+            source: { control: "reset" },
+            ...(principal !== undefined && { principal }),
+          },
+        },
+        { type: "delivery.settled", data: { deliveryId: control.deliveryId, outcome: "applied" } },
+      );
+    }
+    facts.push(ended);
     await writer.write(
-      encodeMessageStreamEvent(
-        stampMessageStreamEvent(
-          sessionFailed({
-            code: "session_stranded",
-            // A replacement reading this history skips it when a reset ended the session.
-            details: { trigger },
-            message: "This session is no longer available.",
-            sessionId,
-            usage: undefined,
-          }),
-        ),
-      ),
+      new TextEncoder().encode(encodeLine({ at: new Date().toISOString(), facts })),
     );
     await writer.close();
     return true;

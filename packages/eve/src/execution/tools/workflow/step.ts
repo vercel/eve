@@ -146,7 +146,7 @@ async function reconcileCompletedAuthorizations(
   for (const attemptId of authorized) {
     const challenge = pending.get(attemptId);
     if (challenge !== undefined) {
-      await reportAuthorization(run, signal, challenge, "authorized");
+      await reportAuthorization(run, signal, challenge, "accepted");
     }
     pending.delete(attemptId);
   }
@@ -215,7 +215,7 @@ async function reportAuthorization(
   run: WorkflowToolRunContext,
   signal: AbortSignal,
   challenge: IdentifiedAuthorizationChallenge,
-  outcome?: "authorized" | "failed",
+  outcome?: "accepted" | "failed",
 ): Promise<void> {
   const event = runSignIn(run.from, challenge, outcome);
   const acknowledged = createHook<void>();
@@ -230,13 +230,13 @@ async function reportAuthorization(
         from: run.from,
         replyTo: acknowledged.token,
         request: {
-          kind: "authorization-request",
+          kind: "relay",
           event: {
-            kind: "subagent-authorization-event",
+            kind: "subagent-interaction",
             callId: run.from.callId,
             childSessionId: run.from.runId,
             subagentName: run.from.toolName,
-            event,
+            events: [event],
           },
         },
       }),

@@ -1,13 +1,14 @@
 "use client";
 
 import type {
-  ConversationInput,
-  EveAuthorizationPart,
-  EveDynamicToolPart,
+  AskedInteraction,
+  ConversationInteraction,
+  EveInteractionPart,
   EveMessage,
-  EveMessageInputRequest,
   EveMessagePart,
+  EveToolPart,
 } from "eve/react";
+import { signInEnding } from "eve/react";
 import type { FormEvent } from "react";
 import {
   CheckCircleIcon,
@@ -42,9 +43,9 @@ import {
 } from "@/components/ui/questionnaire";
 import { cn } from "@/lib/utils";
 
-export type AgentInputResponse = {
+export type AgentAnswer = {
   readonly optionId?: string;
-  readonly requestId: string;
+  readonly interactionId: string;
   readonly text?: string;
 };
 
@@ -54,14 +55,14 @@ export function AgentMessage({
   canRespond,
   isStreaming,
   message,
-  onInputResponses,
+  onAnswers,
   questionsFor,
 }: {
-  readonly canRespond: (requestId: string) => boolean;
+  readonly canRespond: (interactionId: string) => boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly questionsFor: (callId: string) => readonly ConversationInput[];
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly questionsFor: (callId: string) => readonly ConversationInteraction[];
 }) {
   const lastTextIndex = message.parts.reduce(
     (last, part, index) => (part.type === "text" ? index : last),
@@ -82,7 +83,7 @@ export function AgentMessage({
             <AgentMessagePart
               canRespond={canRespond}
               key={partKey(part, index)}
-              onInputResponses={onInputResponses}
+              onAnswers={onAnswers}
               part={part}
               questionsFor={questionsFor}
               showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
@@ -96,20 +97,18 @@ export function AgentMessage({
 
 function AgentMessagePart({
   canRespond,
-  onInputResponses,
+  onAnswers,
   part,
   questionsFor,
   showCaret,
 }: {
-  readonly canRespond: (requestId: string) => boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly canRespond: (interactionId: string) => boolean;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly part: EveMessagePart;
-  readonly questionsFor: (callId: string) => readonly ConversationInput[];
+  readonly questionsFor: (callId: string) => readonly ConversationInteraction[];
   readonly showCaret: boolean;
 }) {
   switch (part.type) {
-    case "step-start":
-      return null;
     case "text":
       return (
         <MessageResponse caret="block" isAnimating={showCaret}>
@@ -125,20 +124,20 @@ function AgentMessagePart({
       );
     case "file":
       return <AttachmentPart part={part} />;
-    case "authorization":
-      return <AuthorizationPrompt part={part} />;
-    case "dynamic-tool": {
-      const questions = questionsFor(part.toolCallId);
+    case "interaction":
+      return <InteractionPrompt canRespond={canRespond} onAnswers={onAnswers} part={part} />;
+    case "tool": {
+      const questions = questionsFor(part.callId);
       if (questions.length > 0) {
         return (
           <div className="space-y-4">
-            {questions.map(({ request, response }) => (
+            {questions.map(({ request, answer }) => (
               <QuestionRequest
-                canRespond={canRespond(request.requestId)}
-                inputRequest={request}
-                inputResponse={response}
-                key={request.requestId}
-                onInputResponses={onInputResponses}
+                canRespond={canRespond(request.interactionId)}
+                interaction={request}
+                answer={answer}
+                key={request.interactionId}
+                onAnswers={onAnswers}
               />
             ))}
           </div>
@@ -149,32 +148,28 @@ function AgentMessagePart({
         <>
           <Tool>
             <ToolHeader
-              state={part.state}
-              title={part.toolMetadata?.eve?.label ?? part.toolName}
-              toolName={part.toolName}
-              type="dynamic-tool"
+              failed={part.outcome === "failed"}
+              status={toolStatus(part)}
+              title={part.label}
+              toolName={part.name}
             />
             <ToolContent>
-              {part.toolName === "bash" ? (
+              {part.name === "bash" ? (
                 <BashToolContent
-                  errorText={part.errorText}
+                  errorText={part.error?.message}
                   input={part.input}
                   output={part.output}
                 />
               ) : (
                 <>
                   <ToolInput input={part.input} />
-                  <ToolOutput errorText={part.errorText} output={part.output} />
+                  <ToolOutput errorText={part.error?.message} output={part.output} />
                 </>
               )}
             </ToolContent>
           </Tool>
           {/* Kept outside the collapsed card so a pending approval is always visible. */}
-          <InputRequestActions
-            canRespond={canRespond}
-            part={part}
-            onInputResponses={onInputResponses}
-          />
+          <ApprovalActions canRespond={canRespond} part={part} onAnswers={onAnswers} />
         </>
       );
     }
@@ -183,31 +178,31 @@ function AgentMessagePart({
 
 function QuestionRequest({
   canRespond,
-  inputRequest,
-  inputResponse,
-  onInputResponses,
+  interaction,
+  answer,
+  onAnswers,
 }: {
   readonly canRespond: boolean;
-  readonly inputRequest: EveMessageInputRequest;
-  readonly inputResponse?: AgentInputResponse;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly interaction: AskedInteraction;
+  readonly answer?: AgentAnswer;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
 }) {
-  const options = inputRequest.options ?? [];
-  const acceptsFreeform = inputRequest.allowFreeform === true || options.length === 0;
-  const disabled = !canRespond || inputResponse !== undefined;
+  const options = interaction.options ?? [];
+  const acceptsFreeform = interaction.allowFreeform === true || options.length === 0;
+  const disabled = !canRespond || answer !== undefined;
 
   const submitResponse = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const answer = new FormData(event.currentTarget).get(inputRequest.requestId);
-    if (typeof answer !== "string") {
+    const value = new FormData(event.currentTarget).get(interaction.interactionId);
+    if (typeof value !== "string") {
       return;
     }
 
-    const option = options.find(({ id }) => id === answer);
-    void onInputResponses([
+    const option = options.find(({ id }) => id === value);
+    void onAnswers([
       option === undefined
-        ? { requestId: inputRequest.requestId, text: answer.trim() }
-        : { optionId: option.id, requestId: inputRequest.requestId },
+        ? { interactionId: interaction.interactionId, text: value.trim() }
+        : { optionId: option.id, interactionId: interaction.interactionId },
     ]);
   };
 
@@ -220,15 +215,15 @@ function QuestionRequest({
       onSubmit={submitResponse}
       shortcuts="numbers"
     >
-      <QuestionnaireItem name={inputRequest.requestId} required>
+      <QuestionnaireItem name={interaction.interactionId} required>
         <QuestionnaireTitle className="text-sm font-medium">
-          {inputRequest.prompt}
+          {interaction.prompt}
         </QuestionnaireTitle>
         <QuestionnaireChoices>
           {options.map((option) => (
             <QuestionnaireChoice
-              className={cn(inputResponse?.optionId === option.id && "data-disabled:opacity-100")}
-              defaultChecked={inputResponse?.optionId === option.id}
+              className={cn(answer?.optionId === option.id && "data-disabled:opacity-100")}
+              defaultChecked={answer?.optionId === option.id}
               disabled={disabled}
               key={option.id}
               value={option.id}
@@ -244,8 +239,8 @@ function QuestionRequest({
           {acceptsFreeform ? (
             <QuestionnaireInput
               aria-label="Answer"
-              className={cn(inputResponse?.text !== undefined && "disabled:opacity-100")}
-              defaultValue={inputResponse?.text}
+              className={cn(answer?.text !== undefined && "disabled:opacity-100")}
+              defaultValue={answer?.text}
               disabled={disabled}
               placeholder="Type your answer…"
             />
@@ -293,12 +288,52 @@ function AttachmentPart({ part }: { readonly part: EveFilePart }) {
   );
 }
 
-function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) {
-  const isAuthorized = part.state === "completed" && part.outcome === "authorized";
-  const isCompleted = part.state === "completed";
+/** An interaction no call carries: a sign-in, the budget prompt, or a question of its own. */
+function InteractionPrompt({
+  canRespond,
+  onAnswers,
+  part,
+}: {
+  readonly canRespond: (interactionId: string) => boolean;
+  readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly part: EveInteractionPart;
+}) {
+  const { request } = part;
+  if (request.signIn !== undefined) return <SignInPrompt part={part} />;
+  if (request.kind === "question") {
+    return (
+      <QuestionRequest
+        answer={part.answer}
+        canRespond={canRespond(request.interactionId)}
+        interaction={request}
+        onAnswers={onAnswers}
+      />
+    );
+  }
+  return (
+    <InteractionActions
+      answer={part.answer}
+      canRespond={canRespond}
+      interaction={request}
+      onAnswers={onAnswers}
+    />
+  );
+}
+
+function SignInPrompt({ part }: { readonly part: EveInteractionPart }) {
+  const signIn = part.request.signIn;
+  const name = signIn?.displayName ?? signIn?.name ?? "the service";
+  const isAuthorized = part.outcome === "accepted";
+  const isCompleted = part.status === "settled";
   const Icon = isAuthorized ? CheckCircleIcon : isCompleted ? XCircleIcon : KeyRoundIcon;
-  const instructions = part.authorization?.instructions;
-  const shouldShowInstructions = instructions !== undefined && instructions !== part.description;
+  const instructions = signIn?.instructions;
+  const description = isCompleted
+    ? isAuthorized
+      ? `${name} connected.`
+      : `${name} authorization ${signInEnding(part.outcome ?? "withdrawn")}${
+          part.reason !== undefined ? ` (${part.reason})` : ""
+        }.`
+    : part.request.prompt;
 
   return (
     <div
@@ -325,24 +360,30 @@ function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) 
           <Icon className="size-4" />
         </span>
         <div className="min-w-0 flex-1 space-y-2">
-          <p className="font-medium text-sm">{authorizationTitle(part)}</p>
-          <p className="text-muted-foreground text-sm">{authorizationDescription(part)}</p>
-          {shouldShowInstructions ? (
+          <p className="font-medium text-sm">
+            {isCompleted
+              ? isAuthorized
+                ? `${name} connected`
+                : `${name} authorization ${signInEnding(part.outcome ?? "withdrawn")}`
+              : `Connect ${name}`}
+          </p>
+          <p className="text-muted-foreground text-sm">{description}</p>
+          {!isCompleted && instructions !== undefined && instructions !== description ? (
             <p className="text-muted-foreground text-sm">{instructions}</p>
           ) : null}
-          {part.state === "required" && part.authorization?.userCode ? (
+          {!isCompleted && signIn?.userCode ? (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-muted-foreground">Code</span>
               <code className="rounded-md bg-background px-2 py-1 font-mono">
-                {part.authorization.userCode}
+                {signIn.userCode}
               </code>
             </div>
           ) : null}
-          {part.state === "required" && part.authorization?.url ? (
+          {!isCompleted && signIn?.url ? (
             <Button asChild size="sm">
-              <a href={part.authorization.url} rel="noreferrer" target="_blank">
+              <a href={signIn.url} rel="noreferrer" target="_blank">
                 <ExternalLinkIcon className="size-4" />
-                Sign in with {part.displayName}
+                Sign in with {name}
               </a>
             </Button>
           ) : null}
@@ -350,40 +391,6 @@ function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) 
       </div>
     </div>
   );
-}
-
-function authorizationTitle(part: EveAuthorizationPart): string {
-  if (part.state === "required") {
-    return `Connect ${part.displayName}`;
-  }
-  if (part.outcome === "authorized") {
-    return `${part.displayName} connected`;
-  }
-  return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}`;
-}
-
-function authorizationDescription(part: EveAuthorizationPart): string {
-  if (part.state === "required") {
-    return part.description;
-  }
-  if (part.outcome === "authorized") {
-    return `${part.displayName} connected.`;
-  }
-  const tail = part.reason !== undefined ? ` (${part.reason})` : "";
-  return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}${tail}.`;
-}
-
-function formatAuthorizationOutcome(outcome: NonNullable<EveAuthorizationPart["outcome"]>): string {
-  switch (outcome) {
-    case "authorized":
-      return "authorized";
-    case "declined":
-      return "declined";
-    case "failed":
-      return "failed";
-    case "timed-out":
-      return "timed out";
-  }
 }
 
 function formatBytes(size: number | undefined): string | undefined {
@@ -399,54 +406,92 @@ function formatBytes(size: number | undefined): string | undefined {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function InputRequestActions({
+function ApprovalActions({
   canRespond,
-  onInputResponses,
+  onAnswers,
   part,
 }: {
-  readonly canRespond: (requestId: string) => boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly part: EveDynamicToolPart;
+  readonly canRespond: (interactionId: string) => boolean;
+  readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly part: EveToolPart;
 }) {
-  const inputRequest = part.toolMetadata?.eve?.inputRequest;
-  if (!inputRequest) {
+  const interaction = part.interaction;
+  if (interaction?.request.kind !== "approval") {
     return null;
   }
-
-  const inputResponse = part.toolMetadata?.eve?.inputResponse;
-  const selectedOption = inputRequest.options?.find(
-    (option) => option.id === inputResponse?.optionId,
-  );
-  // An approval can settle before its batch resolves, without an input response.
-  const settledApproval =
-    part.approval?.approved === undefined
+  // An approval can settle without an answer, such as when its turn is cancelled.
+  const decision =
+    interaction.status !== "settled"
       ? undefined
-      : part.approval.approved
+      : interaction.outcome === "accepted"
         ? "Approved"
-        : "Denied";
+        : interaction.outcome === "declined"
+          ? "Denied"
+          : "Cancelled";
+  return (
+    <InteractionActions
+      answer={interaction.answer}
+      canRespond={canRespond}
+      decision={decision}
+      interaction={interaction.request}
+      onAnswers={onAnswers}
+    />
+  );
+}
+
+/** How a call reads in its header, from its row; nothing once it completed. */
+function toolStatus(part: EveToolPart): string | undefined {
+  if (part.status === "streaming") return "Pending";
+  if (part.interaction?.request.kind === "approval" && part.interaction.status !== "settled")
+    return "Awaiting Approval";
+  if (part.status !== "settled") return "Running";
+  switch (part.outcome) {
+    case "completed":
+      return undefined;
+    case "rejected":
+      return "Denied";
+    case "interrupted":
+      return "Cancelled";
+    default:
+      return "Error";
+  }
+}
+
+/** An interaction's prompt with a button for each option, or how it was answered. */
+function InteractionActions({
+  answer,
+  canRespond,
+  decision,
+  interaction,
+  onAnswers,
+}: {
+  readonly answer?: AgentAnswer;
+  readonly canRespond: (interactionId: string) => boolean;
+  readonly decision?: string;
+  readonly interaction: AskedInteraction;
+  readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
+}) {
+  const selectedOption = interaction.options?.find((option) => option.id === answer?.optionId);
+  const settledApproval = decision;
 
   return (
     <div className="space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
-      <p className="text-muted-foreground text-sm">{inputRequest.prompt}</p>
-      {inputResponse || settledApproval ? (
+      <p className="text-muted-foreground text-sm">{interaction.prompt}</p>
+      {answer || settledApproval ? (
         <p className="font-medium text-sm">
-          Responded:{" "}
-          {selectedOption?.label ??
-            inputResponse?.text ??
-            inputResponse?.optionId ??
-            settledApproval}
+          Responded: {selectedOption?.label ?? answer?.text ?? answer?.optionId ?? settledApproval}
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {inputRequest.options?.map((option) => (
+          {interaction.options?.map((option) => (
             <Button
-              disabled={!canRespond(inputRequest.requestId)}
+              disabled={!canRespond(interaction.interactionId)}
               key={option.id}
               onClick={() => {
-                void onInputResponses([
+                void onAnswers([
                   {
                     optionId: option.id,
-                    requestId: inputRequest.requestId,
+                    interactionId: interaction.interactionId,
                   },
                 ]);
               }}
@@ -465,12 +510,10 @@ function InputRequestActions({
 
 function partKey(part: EveMessagePart, index: number): string {
   switch (part.type) {
-    case "authorization":
-      return part.attemptId === undefined
-        ? `authorization:${part.turnId}:${part.stepIndex}:${part.name}`
-        : `authorization:${part.attemptId}`;
-    case "dynamic-tool":
-      return part.toolCallId;
+    case "interaction":
+      return `interaction:${part.request.interactionId}`;
+    case "tool":
+      return part.callId;
     case "reasoning":
     case "text":
       return `${part.type}:${part.id ?? index}`;

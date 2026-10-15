@@ -8,12 +8,11 @@ import type {
   ConversationTask,
 } from "#client/conversation-state.js";
 import type {
-  EveAuthorizationPart,
-  EveDynamicToolPart,
+  EveInteractionPart,
+  EveToolPart,
   EveMessage,
   EveMessagePart,
-} from "#client/message-reducer-types.js";
-import { toolCallState } from "#client/tool-call-state.js";
+} from "#client/message-types.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import type { Block, ToolStatus } from "./blocks.js";
 import { formatTurnDuration } from "./stream-format.js";
@@ -27,6 +26,7 @@ import {
   toolDisplayTitle,
   type ToolPresentationContext,
 } from "./tool-presentation.js";
+import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
 
 export type ToolState = {
   readonly status: ToolStatus;
@@ -70,11 +70,11 @@ export function taskNeedsApproval(
   task: ConversationTask,
 ): boolean {
   if (
-    Object.values(conversation.inputs).some(
+    Object.values(conversation.interactions).some(
       (input) =>
         input.taskId === task.taskId &&
         input.status === "open" &&
-        input.request.kind === "tool-approval",
+        input.request.kind === "approval",
     )
   )
     return true;
@@ -83,8 +83,8 @@ export function taskNeedsApproval(
     agent?.observation.status === "not-followed" ? undefined : agent?.observation.conversation;
   return (
     child !== undefined &&
-    Object.values(child.inputs).some(
-      (input) => input.status === "open" && input.request.kind === "tool-approval",
+    Object.values(child.interactions).some(
+      (input) => input.status === "open" && input.request.kind === "approval",
     )
   );
 }
@@ -106,7 +106,7 @@ export function startLine(record: TaskRecord): Block {
 /** A later call that reached a working task: a message to it, not a new delegation. */
 export function followUpLine(
   record: TaskRecord,
-  part: EveDynamicToolPart,
+  part: EveToolPart,
   label: string | undefined,
 ): Block {
   if (record.kind === "agent") {
@@ -118,7 +118,7 @@ export function followUpLine(
       live: false,
     };
   }
-  const presentation = presentTool(part.toolName, part.input, labelContext(label));
+  const presentation = presentTool(part.name, part.input, labelContext(label));
   return {
     kind: "task",
     taskKind: "tool",
@@ -130,21 +130,21 @@ export function followUpLine(
 
 export function nestedTaskRecord(
   callId: string,
-  part: EveDynamicToolPart,
+  part: EveToolPart,
   task: ConversationTask,
   block: Block,
 ): TaskRecord {
   const name =
     task.kind === "agent"
-      ? agentDisplayName(stripTerminalControls(part.toolName))
-      : stripTerminalControls(toolDisplayTitle(part.toolName));
+      ? agentDisplayName(stripTerminalControls(part.name))
+      : stripTerminalControls(toolDisplayTitle(part.name));
   return {
     callId,
     taskId: task.taskId,
-    callIds: [part.toolCallId],
+    callIds: [part.callId],
     kind: task.kind,
     name,
-    toolName: part.toolName,
+    toolName: part.name,
     input: part.input,
     label: undefined,
     purpose:
@@ -156,30 +156,33 @@ export function nestedTaskRecord(
   };
 }
 
-/** The shared tool call state, in the transcript's vocabulary. */
-export function toolState(
-  part: EveDynamicToolPart,
-  conversation: ConversationState,
-  working: boolean,
-): ToolState {
-  const state = toolCallState(conversation, part.toolCallId, { streaming: working });
-  if (state === undefined) return { status: "running" };
-  switch (state.status) {
-    case "running":
-      return state.output === undefined
-        ? { status: "running" }
-        : { status: "running", output: state.output };
-    case "awaiting-input":
+/** The call's row, in the transcript's vocabulary. */
+export function toolState(part: EveToolPart, working: boolean): ToolState {
+  const errorText = part.error?.message;
+  if (part.status !== "settled") {
+    // An approval waits until the stream settles it, an answer this client sent included.
+    const asked = part.interaction;
+    if (
+      part.taskId === undefined &&
+      asked?.request.kind === "approval" &&
+      asked.status !== "settled"
+    )
       return { status: "approval" };
+    // A call still open when the stream stopped never settled here; a task's call outlives it.
+    if (!working && part.taskId === undefined) return { status: "error", errorText: "interrupted" };
+    return part.output === undefined
+      ? { status: "running" }
+      : { status: "running", output: part.output };
+  }
+  switch (part.outcome) {
     case "completed":
-      return { status: "done", output: state.output };
+      return { status: "done", output: part.output };
     case "rejected":
-      return { status: "denied", errorText: state.errorText ?? "Denied by user." };
-    case "interrupted":
-      return { status: "error", errorText: "interrupted" };
-    case "cancelled":
-    case "failed":
-      return { status: "error", errorText: state.errorText };
+      if (part.taskId === undefined)
+        return { status: "denied", errorText: errorText ?? "Denied by user." };
+      return { status: "error", errorText };
+    default:
+      return { status: "error", errorText };
   }
 }
 
@@ -188,13 +191,13 @@ export function isActive(status: ToolStatus): boolean {
 }
 
 export function toolBlock(
-  part: EveDynamicToolPart,
+  part: EveToolPart,
   state: ToolState,
   context: ToolPresentationContext | undefined,
 ): Omit<Block, "kind"> {
-  const { toolName, input } = part;
+  const { name: toolName, input } = part;
   const presentation =
-    part.state === "input-streaming"
+    part.status === "streaming"
       ? presentPreparingTool(toolName, context)
       : presentTool(toolName, input, context);
   const block: Omit<Block, "kind"> = {
@@ -224,7 +227,7 @@ export function toolBlock(
 /** A task's end line: how long it took and what it did, or why it failed, or that it stopped. */
 export function endLine(
   record: TaskRecord,
-  call: Pick<ConversationTaskCall, "status" | "output" | "error">,
+  call: Pick<ConversationTaskCall, "status" | "outcome" | "output" | "error">,
   childTools: readonly Block[] | undefined,
   /** The theme's `·`, which separates the line's facts. */
   separator: string,
@@ -237,7 +240,7 @@ export function endLine(
     title: record.kind === "agent" ? agentTaskLabel(record.name) : record.name,
     live: false,
   };
-  switch (call.status) {
+  switch (call.outcome) {
     case "completed": {
       const elapsed = `finished in ${formatTurnDuration((record.settledAtMs ?? Date.now()) - record.startedAtMs)}`;
       const outcome =
@@ -251,7 +254,9 @@ export function endLine(
         outcome === undefined || outcome.length === 0 ? elapsed : `${elapsed}${dot}${outcome}`;
       break;
     }
-    case "failed": {
+    case "failed":
+    case "rejected":
+    case "abandoned": {
       const reason = firstLine(stripTerminalControls(call.error?.message ?? ""));
       line.status = "error";
       line.body = reason === undefined ? "failed" : `failed${dot}${reason}`;
@@ -308,7 +313,7 @@ export function subagentSteps(messages: readonly EveMessage[]): SubagentStep[] {
         });
         reasoning = "";
       }
-      if (part.type === "dynamic-tool" && reasoning) {
+      if (part.type === "tool" && reasoning) {
         steps.push({
           key: `${message.id}:${index}:reasoning`,
           order: order - 0.5,
@@ -344,7 +349,7 @@ export function childToolCallIds(conversation: ConversationState): Set<string> {
     if (agent.observation.status === "not-followed") continue;
     for (const message of agent.observation.conversation?.messages ?? []) {
       for (const part of message.parts) {
-        if (part.type === "dynamic-tool") ids.add(part.toolCallId);
+        if (part.type === "tool") ids.add(part.callId);
       }
     }
   }
@@ -352,11 +357,8 @@ export function childToolCallIds(conversation: ConversationState): Set<string> {
 }
 
 /** A tool call, including one whose input is still streaming and so has no kind yet. */
-export function isToolCallRow(part: EveMessagePart): part is EveDynamicToolPart {
-  return (
-    part.type === "dynamic-tool" &&
-    (part.state === "input-streaming" || isTerminalToolCallPart(part))
-  );
+export function isToolCallRow(part: EveMessagePart): part is EveToolPart {
+  return part.type === "tool" && (part.status === "streaming" || isTerminalToolCallPart(part));
 }
 
 /** Every call that started or reached a task, by call ID. */
@@ -372,7 +374,7 @@ export function taskCallsById(
 
 /** Tools a step runs in parallel settle together, so a finished one waits for its siblings. */
 export function activeToolSteps(
-  states: ReadonlyMap<EveDynamicToolPart, ToolState>,
+  states: ReadonlyMap<EveToolPart, ToolState>,
 ): Set<number | undefined> {
   const steps = new Set<number | undefined>();
   for (const [part, state] of states) if (isActive(state.status)) steps.add(part.stepIndex);
@@ -394,21 +396,26 @@ export function userText(message: EveMessage): string {
 
 export function authorizationTerminalMessage(state: string): string | undefined {
   switch (state) {
-    case "authorized":
+    case "accepted":
       return "Authorization complete";
     case "declined":
       return "Authorization declined";
     case "failed":
       return "Authorization failed";
-    case "timed-out":
+    case "expired":
       return "Authorization timed out";
+    case "withdrawn":
+    case "interrupted":
+    case "abandoned":
+      return "Authorization cancelled";
     default:
       return undefined;
   }
 }
 
 export function formatAuthorization(
-  part: EveAuthorizationPart,
+  part: EveInteractionPart,
+  challenge: SignInChallenge,
   terminalMessage: string | undefined,
 ): { body: string; link?: string } {
   const lines: string[] = [];
@@ -416,9 +423,8 @@ export function formatAuthorization(
   if (terminalMessage !== undefined) {
     lines.push(terminalMessage);
   } else {
-    const description = stripTerminalControls(part.description);
+    const description = stripTerminalControls(part.request.prompt);
     if (description.length > 0) lines.push(description);
-    const challenge = part.authorization;
     // The URL gets a row of its own; returning it as `link` (the block's
     // `Block.link`) lets the renderer hyperlink every wrapped row to it.
     if (challenge?.url) {
@@ -429,7 +435,7 @@ export function formatAuthorization(
     if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
     if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));
   }
-  if (part.state === "completed" && part.reason !== undefined) {
+  if (part.status === "settled" && part.reason !== undefined) {
     const reason = stripTerminalControls(part.reason);
     if (reason.length > 0) lines.push(`Reason: ${reason}`);
   }

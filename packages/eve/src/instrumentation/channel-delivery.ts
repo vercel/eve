@@ -142,15 +142,15 @@ export async function instrumentChannelDelivery(
 function projectDeliveryInput(payload: DeliverPayload) {
   const projected: {
     context?: DeliverPayload["context"];
-    inputResponses?: Array<{ optionId?: string; text?: string }>;
+    answers?: Array<{ optionId?: string; text?: string }>;
     message?: DeliverPayload["message"];
     outputSchema?: DeliverPayload["outputSchema"];
   } = {};
   if (payload.context !== undefined) projected.context = payload.context;
   if (payload.message !== undefined) projected.message = payload.message;
   if (payload.outputSchema !== undefined) projected.outputSchema = payload.outputSchema;
-  if (payload.inputResponses !== undefined) {
-    projected.inputResponses = payload.inputResponses.map((response) => {
+  if (payload.answers !== undefined) {
+    projected.answers = payload.answers.map((response) => {
       const item: { optionId?: string; text?: string } = {};
       if (response.optionId !== undefined) item.optionId = response.optionId;
       if (response.text !== undefined) item.text = response.text;

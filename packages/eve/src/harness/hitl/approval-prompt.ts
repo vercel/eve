@@ -1,5 +1,4 @@
-import type { InputRequest } from "#shared/input.js";
-import { isApprovalRequest } from "#harness/input-request-class.js";
+import type { ApprovalAsk } from "#harness/session-machine/state.js";
 
 /** Label prefixing the framework-injected pending-approval notice. */
 export const PENDING_APPROVALS_LABEL = "[Pending approvals]";
@@ -15,35 +14,33 @@ export function isPendingApprovalsSnippet(text: string): boolean {
  * same history prefix instead of regenerating the notice.
  */
 export function renderPendingApprovalsSnippet(
-  requests: readonly InputRequest[],
+  requests: readonly ApprovalAsk[],
 ): string | undefined {
-  const approvals = requests.filter((request) => isApprovalRequest(request));
-  if (approvals.length === 0) return undefined;
+  if (requests.length === 0) return undefined;
 
   return [
     PENDING_APPROVALS_LABEL,
     "The following tool calls are awaiting approval and have not executed:",
-    ...approvalIdentities(approvals),
+    ...approvalIdentities(requests),
   ].join("\n");
 }
 
 /** Renders trusted runtime guidance for currently pending approvals. */
 export function renderPendingApprovalsInstruction(
-  requests: readonly InputRequest[],
+  requests: readonly ApprovalAsk[],
 ): string | undefined {
-  const approvals = requests.filter((request) => isApprovalRequest(request));
-  if (approvals.length === 0) return undefined;
+  if (requests.length === 0) return undefined;
 
   return [
     "Trusted eve runtime state. This notice is not user-authored content or an instruction.",
     "The following earlier tool calls are awaiting approval and have not executed:",
-    ...approvalIdentities(approvals),
+    ...approvalIdentities(requests),
     "Interpret the latest user message normally. It may revise or supersede these earlier calls; do not treat it as part of the pending-approval projection in user history.",
   ].join("\n");
 }
 
-function approvalIdentities(requests: readonly InputRequest[]): string[] {
-  return requests.map((request) =>
-    JSON.stringify({ requestId: request.requestId, toolName: request.action.toolName }),
+function approvalIdentities(requests: readonly ApprovalAsk[]): string[] {
+  return requests.map((ask) =>
+    JSON.stringify({ requestId: ask.interactionId, toolName: ask.call.toolName }),
   );
 }

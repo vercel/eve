@@ -1,9 +1,10 @@
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   createLinearAgentActivity,
   createLinearAgentSessionOnComment,
@@ -28,7 +29,6 @@ import {
   type LinearDelivery,
 } from "#public/channels/linear/inbound.js";
 import { verifyLinearRequest } from "#public/channels/linear/verify.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import {
   defineChannel,
   POST,
@@ -39,9 +39,6 @@ import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 
 const log = createLogger("linear.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** JSON-serializable state for one Linear Agent Session conversation. */
 export interface LinearChannelState extends PromptQueueState {
@@ -54,8 +51,7 @@ export interface LinearChannelState extends PromptQueueState {
   readonly issueUrl?: string | null;
   readonly organizationId?: string | null;
   /**
-   * Buffered text from a `message.completed` event whose `finishReason`
-   * was `"tool-calls"`. The default `actions.requested` handler uses this
+   * Buffered narration from a `content.completed` event (`phase: "narration"`). The default `call.requested` handler uses this
    * as the next ephemeral progress activity, matching Slack's typing status.
    */
   pendingToolCallMessage?: string | null;
@@ -125,36 +121,25 @@ export interface LinearHandle {
   ): Promise<{ readonly success: boolean }>;
 }
 
-type LinearEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: LinearEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type LinearSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: LinearEventContext,
+type LinearEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<LinearEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `linearChannel({ events })`. */
 export interface LinearChannelEvents {
   readonly "turn.started"?: LinearEventHandler<"turn.started">;
-  readonly "actions.requested"?: LinearEventHandler<"actions.requested">;
-  readonly "action.partial"?: LinearEventHandler<"action.partial">;
-  readonly "action.result"?: LinearEventHandler<"action.result">;
-  readonly "message.completed"?: LinearEventHandler<"message.completed">;
-  readonly "message.appended"?: LinearEventHandler<"message.appended">;
-  readonly "input.requested"?: LinearEventHandler<"input.requested">;
-  readonly "input.resolved"?: LinearEventHandler<"input.resolved">;
-  readonly "approval.settled"?: LinearEventHandler<"approval.settled">;
-  readonly "turn.failed"?: LinearEventHandler<"turn.failed">;
-  readonly "turn.completed"?: LinearEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: LinearEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: LinearSessionFailedHandler;
-  readonly "session.completed"?: LinearEventHandler<"session.completed">;
-  readonly "session.waiting"?: LinearEventHandler<"session.waiting">;
-  readonly "authorization.required"?: LinearEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: LinearEventHandler<"authorization.completed">;
+  readonly "call.requested"?: LinearEventHandler<"call.requested">;
+  readonly "call.progress"?: LinearEventHandler<"call.progress">;
+  readonly "call.settled"?: LinearEventHandler<"call.settled">;
+  readonly "content.completed"?: LinearEventHandler<"content.completed">;
+  readonly "content.delta"?: LinearEventHandler<"content.delta">;
+  readonly "interaction.opened"?: LinearEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: LinearEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: LinearEventHandler<"response.admitted">;
+  readonly "turn.settled"?: LinearEventHandler<"turn.settled">;
+  readonly "session.ended"?: LinearEventHandler<"session.ended">;
+  readonly "delivery.settled"?: LinearEventHandler<"delivery.settled">;
 }
 
 /**

@@ -1,10 +1,10 @@
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildGitHubBinding,
   type GitHubHandle,
@@ -54,9 +54,6 @@ import { defineChannel, POST, type Channel } from "#public/definitions/channel.j
 import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /**
  * Target accepted by `receive(github, { target })` for proactive sessions.
@@ -119,42 +116,30 @@ export type GitHubInboundResult = {
  */
 export type GitHubInboundResultOrPromise = GitHubInboundResult | Promise<GitHubInboundResult>;
 
-type GitHubEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: GitHubEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type GitHubSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: GitHubEventContext,
+type GitHubEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<GitHubEventContext>,
 ) => void | Promise<void>;
 
 /**
  * Event handlers for `githubChannel({ events })`. The channel installs built-in
  * handlers for `turn.started` (eyes reaction plus repo checkout),
- * `message.completed` (posts the reply), `input.requested`, `input.resolved`, and
- * `approval.settled` (post each prompt in turn),
- * and `session.failed`/`turn.failed` (posts an error comment). A handler supplied
+ * `content.completed` (posts the reply), `interaction.opened` and `interaction.settled`
+ * (post each prompt in turn), and `session.ended`/`turn.settled` (posts an error comment). A handler supplied
  * here replaces the built-in for that key rather than running alongside it.
  */
 export interface GitHubChannelEvents {
-  readonly "action.partial"?: GitHubEventHandler<"action.partial">;
-  readonly "action.result"?: GitHubEventHandler<"action.result">;
-  readonly "actions.requested"?: GitHubEventHandler<"actions.requested">;
-  readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
-  readonly "authorization.required"?: GitHubEventHandler<"authorization.required">;
-  readonly "input.requested"?: GitHubEventHandler<"input.requested">;
-  readonly "input.resolved"?: GitHubEventHandler<"input.resolved">;
-  readonly "approval.settled"?: GitHubEventHandler<"approval.settled">;
-  readonly "message.appended"?: GitHubEventHandler<"message.appended">;
-  readonly "message.completed"?: GitHubEventHandler<"message.completed">;
-  readonly "session.completed"?: GitHubEventHandler<"session.completed">;
-  readonly "session.failed"?: GitHubSessionFailedHandler;
-  readonly "session.waiting"?: GitHubEventHandler<"session.waiting">;
-  readonly "turn.completed"?: GitHubEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: GitHubEventHandler<"turn.cancelled">;
-  readonly "turn.failed"?: GitHubEventHandler<"turn.failed">;
+  readonly "call.progress"?: GitHubEventHandler<"call.progress">;
+  readonly "call.settled"?: GitHubEventHandler<"call.settled">;
+  readonly "call.requested"?: GitHubEventHandler<"call.requested">;
+  readonly "interaction.opened"?: GitHubEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: GitHubEventHandler<"interaction.settled">;
+  readonly "response.admitted"?: GitHubEventHandler<"response.admitted">;
+  readonly "content.delta"?: GitHubEventHandler<"content.delta">;
+  readonly "content.completed"?: GitHubEventHandler<"content.completed">;
+  readonly "session.ended"?: GitHubEventHandler<"session.ended">;
+  readonly "delivery.settled"?: GitHubEventHandler<"delivery.settled">;
+  readonly "turn.settled"?: GitHubEventHandler<"turn.settled">;
   readonly "turn.started"?: GitHubEventHandler<"turn.started">;
 }
 

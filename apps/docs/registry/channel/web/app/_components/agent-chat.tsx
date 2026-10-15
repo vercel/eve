@@ -72,8 +72,7 @@ export function AgentChat({
   const isEmpty = agent.data.messages.length === 0;
   const lastMessage = agent.data.messages.at(-1);
   const isPendingAssistantShell =
-    lastMessage?.role === "assistant" &&
-    lastMessage.parts.every((part) => part.type === "step-start");
+    lastMessage?.role === "assistant" && lastMessage.parts.length === 0;
   const showPendingThinking =
     isBusy &&
     (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
@@ -83,12 +82,12 @@ export function AgentChat({
   const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
   // Answers are accepted while work runs; the server's settlement closes each request.
-  const canRespond = (requestId: string) =>
-    !isResuming && agent.data.inputs[requestId]?.status === "open";
+  const canRespond = (interactionId: string) =>
+    !isResuming && agent.data.interactions[interactionId]?.status === "open";
   // A tool call can ask several questions at once, and its message part holds only the latest.
   const questionsFor = (callId: string) =>
-    Object.values(agent.data.inputs).filter(
-      (input) => input.request.kind === "question" && input.request.action.callId === callId,
+    Object.values(agent.data.interactions).filter(
+      (input) => input.request.kind === "question" && input.request.call?.callId === callId,
     );
 
   const requestCancellation = () => {
@@ -176,9 +175,9 @@ export function AgentChat({
                   key={message.id}
                   message={message}
                   questionsFor={questionsFor}
-                  onInputResponses={(inputResponses) => {
+                  onAnswers={(answers) => {
                     setCancellationError(undefined);
-                    return agent.respond(inputResponses);
+                    return agent.respond(answers);
                   }}
                 />
               ),
@@ -304,17 +303,14 @@ function getLatestTurnFailure(
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
 
-    if (event.type === "turn.failed") {
-      return event.data.code === "MODEL_CALL_FAILED"
+    if (event.type === "turn.settled") {
+      if (event.data.outcome !== "failed") return undefined;
+      return event.data.error?.code === "MODEL_CALL_FAILED"
         ? "The model is temporarily unavailable. Please try again."
-        : event.data.message;
+        : (event.data.error?.message ?? "The turn failed.");
     }
 
-    if (event.type === "turn.completed" || event.type === "turn.cancelled") {
-      return undefined;
-    }
-
-    if (event.type === "message.received") {
+    if (event.type === "delivery.consumed") {
       return undefined;
     }
   }

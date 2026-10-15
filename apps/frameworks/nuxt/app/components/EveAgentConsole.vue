@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
+import type { EveMessagePart, EveToolPart } from "eve/vue";
 
 const { cancel, data, status, error, prewarm, respond, send } = useEveAgent();
 
@@ -69,10 +69,10 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-function handleInputResponses(
+function handleAnswers(
   responses: readonly {
     readonly optionId?: string;
-    readonly requestId: string;
+    readonly interactionId: string;
     readonly text?: string;
   }[],
 ) {
@@ -81,7 +81,7 @@ function handleInputResponses(
 }
 
 function partKey(part: EveMessagePart, index: number): string {
-  if (part.type === "dynamic-tool") return part.toolCallId;
+  if (part.type === "tool") return part.callId;
   return `${part.type}:${index}`;
 }
 
@@ -248,10 +248,10 @@ function formatBytes(size: number | undefined): string | undefined {
                 </div>
 
                 <ToolBlock
-                  v-else-if="part.type === 'dynamic-tool'"
-                  :part="part as EveDynamicToolPart"
+                  v-else-if="part.type === 'tool'"
+                  :part="part as EveToolPart"
                   :can-respond="!isInputDisabled"
-                  @input-responses="handleInputResponses"
+                  @answers="handleAnswers"
                 />
               </template>
             </div>

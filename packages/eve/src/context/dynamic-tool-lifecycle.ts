@@ -19,7 +19,10 @@ import {
 } from "#context/dynamic-tool-metadata.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import { createLogger } from "#internal/logging.js";
-import type { SessionStartedStreamEvent, StepStartedStreamEvent } from "#protocol/message.js";
+import type {
+  SessionStartedPoint as SessionStartedStreamEvent,
+  StepStartedPoint as StepStartedStreamEvent,
+} from "#harness/session-machine/change-points.js";
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
@@ -389,7 +392,7 @@ async function resolveToolsFromEvent(
       if (handler === undefined) return null;
       clearDurableDynamicCallbacks(sessionId, { scope, resolverSlug: resolver.slug });
       try {
-        const rawResult = await handler(event, buildResolveContext(ctx, messages));
+        const rawResult = await handler(event.fact, buildResolveContext(ctx, messages));
         if (rawResult === null || rawResult === undefined) return null;
         const { entries, isSingle } = readDynamicToolResult(resolver, rawResult);
         const named = qualifyDynamicToolNames(resolver, isSingle, entries);

@@ -43,7 +43,7 @@ export interface ReadFileResult {
   readonly content: string;
   /**
    * Set when the file is a PNG, JPEG, GIF, or WebP image or a PDF that the
-   * model reads natively. Carries no bytes, so `action.result` stays small.
+   * model reads natively. Carries no bytes, so `call.settled` stays small.
    */
   readonly file?: MediaMetadata;
   readonly nextOffset?: number;

@@ -1,5 +1,6 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#shared/input.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { Scope } from "#protocol/session-events/envelope.js";
+import type { Interaction } from "#protocol/session-reader.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
@@ -62,9 +63,7 @@ export interface EveEvalSubagentCallMatchOptions {
   readonly callId?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the id of the agent's session. */
   readonly childSessionId?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `agent.started` remote URL. */
-  readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the output of the call's `task.settled`. */
+  /** Matcher over the output of the call's `call.settled`. */
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];
@@ -72,31 +71,35 @@ export interface EveEvalSubagentCallMatchOptions {
   readonly count?: EveEvalCountMatcher;
 }
 
-/** Constraints accepted by `requireInputRequest`. */
-export interface EveEvalInputRequestMatchOptions {
+/** Constraints accepted by `requireInteraction`. */
+export interface EveEvalInteractionMatchOptions {
   /** Matcher over the request's display hint. */
-  readonly display?: EveEvalValueMatcher<InputRequest["display"]>;
+  readonly display?: EveEvalValueMatcher<Interaction["request"]["display"]>;
   /** Partial-deep matcher over a tool-call action's input. */
   readonly input?: EveEvalValueMatcher<JsonObject>;
   /** Matcher over the complete option-id list in request order. */
   readonly optionIds?: EveEvalValueMatcher<readonly string[]>;
   /** Matcher over the request prompt. */
   readonly prompt?: EveEvalValueMatcher<string>;
-  /** Required tool name for a tool-call action. */
+  /** Required kind: `approval`, `question`, or `budget`. */
+  readonly kind?: Interaction["request"]["kind"];
+  /** Required name of the tool the request asks about. */
   readonly toolName?: string;
 }
 
 /** One typed stream-event matcher used by scoped event assertions. */
 export type EveEvalEventMatch<
-  TType extends MessageStreamEvent["type"] = MessageStreamEvent["type"],
-> = TType extends MessageStreamEvent["type"]
+  TType extends SessionStreamEvent["type"] = SessionStreamEvent["type"],
+> = TType extends SessionStreamEvent["type"]
   ? {
       /** Stream-event type to match. */
       readonly type: TType;
       /** Partial-deep matcher over the event data. */
       readonly data?: EveEvalDeepMatcher<
-        Extract<MessageStreamEvent, { type: TType }> extends { data: infer TData } ? TData : never
+        Extract<SessionStreamEvent, { type: TType }> extends { data: infer TData } ? TData : never
       >;
+      /** Partial-deep matcher over the event scope: the turn, task, run, or change it belongs to. */
+      readonly scope?: EveEvalDeepMatcher<Scope>;
       /** Constraint over the matching event count. Defaults to "at least one". */
       readonly count?: EveEvalCountMatcher;
     }
@@ -146,7 +149,7 @@ export function toolCallMatches(
 }
 
 /**
- * Returns true when one derived subagent call satisfies the `remoteUrl`/
+ * Returns true when one derived subagent call satisfies the `callId`, `childSessionId`, and
  * `output` constraints.
  */
 export function subagentCallMatches(
@@ -162,9 +165,6 @@ export function subagentCallMatches(
   ) {
     return false;
   }
-  if (options.remoteUrl !== undefined && !matchesValue(options.remoteUrl, call.remoteUrl)) {
-    return false;
-  }
   if (options.output !== undefined && !matchesValue(options.output, call.output)) {
     return false;
   }
@@ -173,24 +173,26 @@ export function subagentCallMatches(
 }
 
 /** Returns true when one HITL request satisfies every supplied constraint. */
-export function inputRequestMatches(
-  request: InputRequest,
-  options: EveEvalInputRequestMatchOptions,
+export function interactionMatches(
+  request: Interaction,
+  options: EveEvalInteractionMatchOptions,
 ): boolean {
-  if (options.display !== undefined && !matchesValue(options.display, request.display))
+  if (options.display !== undefined && !matchesValue(options.display, request.request.display))
     return false;
-  if (options.prompt !== undefined && !matchesValue(options.prompt, request.prompt)) return false;
+  if (options.prompt !== undefined && !matchesValue(options.prompt, request.request.prompt))
+    return false;
+  if (options.kind !== undefined && request.request.kind !== options.kind) return false;
   if (options.optionIds !== undefined) {
-    const optionIds = (request.options ?? []).map((option) => option.id);
+    const optionIds = (request.request.options ?? []).map((option) => option.id);
     if (!matchesValue(options.optionIds, optionIds)) return false;
   }
   if (options.toolName !== undefined) {
-    if (request.action.kind !== "tool-call" || request.action.toolName !== options.toolName) {
+    if (request.call?.name !== options.toolName) {
       return false;
     }
   }
   if (options.input !== undefined) {
-    if (request.action.kind !== "tool-call" || !matchesValue(options.input, request.action.input)) {
+    if (request.call === undefined || !matchesValue(options.input, request.call.input)) {
       return false;
     }
   }
@@ -198,11 +200,12 @@ export function inputRequestMatches(
 }
 
 /** Returns true when one stream event satisfies a typed event matcher. */
-export function eventMatches(event: MessageStreamEvent, matcher: EveEvalEventMatch): boolean {
+export function eventMatches(event: SessionStreamEvent, matcher: EveEvalEventMatch): boolean {
   return (
     event.type === matcher.type &&
     (matcher.data === undefined ||
-      matchesValue(matcher.data, "data" in event ? event.data : undefined))
+      matchesValue(matcher.data, "data" in event ? event.data : undefined)) &&
+    (matcher.scope === undefined || matchesValue(matcher.scope, event.scope ?? {}))
   );
 }
 

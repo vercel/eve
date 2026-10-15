@@ -11,11 +11,11 @@ import {
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type {
-  CompactionCompletedStreamEvent,
-  CompactionRequestedStreamEvent,
-  TurnCompletedStreamEvent,
-  TurnStartedStreamEvent,
-} from "#protocol/message.js";
+  CompactionCompletedPoint as CompactionCompletedStreamEvent,
+  CompactionRequestedPoint as CompactionRequestedStreamEvent,
+  TurnCompletedPoint as TurnCompletedStreamEvent,
+  TurnStartedPoint as TurnStartedStreamEvent,
+} from "#harness/session-machine/change-points.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import {

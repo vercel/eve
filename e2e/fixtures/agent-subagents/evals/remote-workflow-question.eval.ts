@@ -8,11 +8,13 @@ export default defineEval({
     const started = await t.send(`${REMOTE_QUESTION_DIRECTIVE}: ask Alice for her approval word.`);
     started.expectOk();
     const pending = await waitForInput(t, started.session);
-    const request = pending.requireInputRequest({ toolName: "remote_question" });
+    const request = pending.requireInteraction({ toolName: "remote_question" });
     if (request.kind !== "question" || request.prompt !== "What is Alice's approval word?") {
       throw new Error("Remote workflow question did not reach the parent.");
     }
-    const answered = await pending.respond([{ requestId: request.requestId, text: "alice-ok" }]);
+    const answered = await pending.respond([
+      { interactionId: request.interactionId, text: "alice-ok" },
+    ]);
     answered.expectOk();
     const completion = answered.message?.includes("PARENT-QUESTION-COMPLETE")
       ? answered
@@ -28,9 +30,7 @@ export default defineEval({
 async function waitForInput(t: EveEvalContext, initial: EveEvalSession): Promise<EveEvalSession> {
   let session = initial;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (
-      session.pendingInputRequests.some((request) => request.action.toolName === "remote_question")
-    )
+    if (session.pendingInteractions.some((request) => request.call?.name === "remote_question"))
       return session;
     const turn = await t.target
       .watchTurn(session.sessionId, { startIndex: session.state.streamIndex })

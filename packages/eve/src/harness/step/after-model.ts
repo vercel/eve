@@ -21,7 +21,6 @@ import type { Step } from "#harness/step/context.js";
 import {
   fail,
   finishTurn,
-  hold,
   suspendStep,
   type ToolResultPart,
   withResult,
@@ -119,7 +118,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   const approvalRequests = result.approvalRequests ?? [];
   // Only unanswered calls can dispatch: automatic denials already have results.
   const blockedCallIds = new Set([
-    ...approvalRequests.map((request) => request.action.callId),
+    ...approvalRequests.map((ask) => ask.call.callId),
     ...extractToolResultCallIds(responseMessages),
   ]);
   const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
@@ -177,9 +176,6 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
         history: step.session.history,
       });
     }
-    if (dispatched.workflowRequests.some((task) => task.entry.entryPoint === "execute")) {
-      await step.apply(hold(step.view(), { on: "tasks" }));
-    }
     return { next: null, session: step.session };
   }
 
@@ -224,7 +220,6 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // The turn rule: no turn ends while its tasks work. The session waits for
   // one to settle, then calls the model again in the same turn.
   if (workingTasks.length > 0) {
-    await step.apply(hold(step.view(), { on: "tasks" }));
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
 
@@ -390,7 +385,7 @@ async function settleTurn(
     history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
     outputSchema: undefined,
   };
-  await step.apply(finishTurn(step.view(), { result: structured }), step.session.history);
+  await step.apply(finishTurn(step.view()), step.session.history);
   return { next: null, session: step.session, settledTurn: { output: structured } };
 }
 

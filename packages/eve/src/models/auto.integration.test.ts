@@ -49,8 +49,13 @@ function context(
   };
 }
 
+/** What a `step.started` handler receives: the turn's request for a model run. */
 function event(turnId = "turn_1") {
-  return { type: "step.started", data: { turnId } };
+  return {
+    data: { owner: { turnId }, runId: "run_0" },
+    scope: { runId: "run_0", turnId },
+    type: "model.requested",
+  };
 }
 
 function decisionModel(choice = "openai/small", modelId = "fixture-decider") {
@@ -172,6 +177,22 @@ describe("auto", () => {
     expect(Object.keys(serializeContext(runtime.state!))).toEqual([
       expect.stringMatching(/^eve\.experimental\.decide\.model\./),
     ]);
+  });
+
+  it("decides for a compaction's summary run by its context change", async () => {
+    const decider = decisionModel();
+    const handler = auto({ model: decider.model, options }).events["step.started"]!;
+    const summary = {
+      data: { owner: { changeId: "change_1" }, runId: "run_1" },
+      scope: { changeId: "change_1", runId: "run_1" },
+      type: "model.requested",
+    };
+
+    await handler(summary, context());
+    await handler(summary, context());
+    await handler(event(), context());
+
+    expect(decider.doDecide).toHaveBeenCalledTimes(2);
   });
 
   it("uses and retains the fallback model when decision fails", async () => {

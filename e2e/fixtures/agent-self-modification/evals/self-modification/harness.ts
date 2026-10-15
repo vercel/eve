@@ -177,11 +177,11 @@ export class SelfModificationHarness {
     );
     const started = sessionEvents.find(
       (event) =>
-        event.type === "agent.started" &&
+        event.type === "child.opened" &&
         task?.type === "task.started" &&
-        event.data.taskId === task.data.taskId,
+        event.scope?.taskId === task.data.taskId,
     );
-    if (started?.type !== "agent.started") {
+    if (started?.type !== "child.opened") {
       throw new Error("Self-modification parent turn did not start its child agent.");
     }
     const child = await this.#readChild(
@@ -277,7 +277,7 @@ export class SelfModificationHarness {
     for (const turn of this.#turns) {
       sessionIds.add(turn.sessionId);
       for (const event of turn.events) {
-        if (event.type === "agent.started") sessionIds.add(event.data.sessionId);
+        if (event.type === "child.opened") sessionIds.add(event.data.sessionId);
       }
     }
     const signal = AbortSignal.timeout(CLEANUP_TIMEOUT_MS);
@@ -340,7 +340,9 @@ export class SelfModificationHarness {
       if (
         message === undefined ||
         turn.events.some(
-          (event) => event.type === "message.received" && event.data.message?.includes(message),
+          (event) =>
+            event.type === "delivery.consumed" &&
+            event.data.parts.some((part) => part.kind === "text" && part.text.includes(message)),
         )
       )
         return turn;

@@ -17,11 +17,7 @@ import {
   type InstrumentationProviderDefinition,
   type InstrumentationToolCallCompletedEvent,
 } from "#instrumentation/lifecycle.js";
-import {
-  findInstrumentationActionScopeForCall,
-  instrumentationStateSlot,
-  rememberInstrumentationActionScope,
-} from "#instrumentation/state.js";
+import { instrumentationStateSlot } from "#instrumentation/state.js";
 
 const { logDebug, logWarn } = vi.hoisted(() => ({ logDebug: vi.fn(), logWarn: vi.fn() }));
 
@@ -169,11 +165,11 @@ describe("provider state lifecycle", () => {
     ]);
     await contextStorage.run(context, async () => {
       await starts.publish({
-        action: { callId: "call-1", name: "weather" },
+        call: { callId: "call-1", name: "weather" },
         idempotencyKey: key,
-        kind: "tool-approval",
+        kind: "approval",
         request: { prompt: "Approve weather?" },
-        requestId: "request-1",
+        interactionId: "request-1",
         scope,
         type: "input.requested",
       });
@@ -195,10 +191,10 @@ describe("provider state lifecycle", () => {
     await contextStorage.run(restored, async () => {
       await terminals.publish({
         idempotencyKey: key,
-        kind: "tool-approval",
-        outcome: "approved",
-        requestId: "request-1",
-        response: { optionId: "approve" },
+        kind: "approval",
+        outcome: "accepted",
+        interactionId: "request-1",
+        answer: { optionId: "approve" },
         scope,
         type: "input.resolved",
       });
@@ -284,46 +280,6 @@ describe("provider state lifecycle", () => {
       expect(instrumentationStateSlot("sink", actionKey).get()).toBe("open");
     });
   });
-
-  it("terminalizes and releases pending actions when a turn is cancelled", async () => {
-    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
-    const failed = vi.fn();
-    const hooks = createInstrumentationHooks([
-      {
-        events: {
-          "tool.call.failed": failed,
-          "tool.call.started": (_event, ctx) => ctx.state.set("open"),
-        },
-        name: "sink",
-      },
-    ]);
-    await contextStorage.run(new ContextContainer(), async () => {
-      rememberInstrumentationActionScope(actionKey, scope);
-      await hooks.publish({
-        callId: "call-1",
-        idempotencyKey: actionKey,
-        input: {},
-        kind: "tool-call",
-        toolName: "tool",
-        scope,
-        type: "tool.call.started",
-      });
-      await hooks.publish({
-        idempotencyKey: turnIdempotencyKey(scope.sessionId, scope.turnId),
-        sessionId: scope.sessionId,
-        turnId: scope.turnId,
-        type: "turn.cancelled",
-      });
-      expect(instrumentationStateSlot("sink", actionKey).get()).toBeUndefined();
-      expect(findInstrumentationActionScopeForCall(scope.sessionId, "call-1")).toBeUndefined();
-    });
-    expect(failed).toHaveBeenCalledOnce();
-    expect(failed.mock.calls[0]?.[0]).toMatchObject({
-      errorCode: "ACTION_CANCELLED",
-      outcome: "cancelled",
-      type: "tool.call.failed",
-    });
-  });
 });
 
 describe("provider handler deadlines", () => {
@@ -384,11 +340,11 @@ describe("provider handler deadlines", () => {
     );
     await contextStorage.run(context, () =>
       starts.publish({
-        action: { callId: "call-1", name: "weather" },
+        call: { callId: "call-1", name: "weather" },
         idempotencyKey: key,
-        kind: "tool-approval",
+        kind: "approval",
         request: { prompt: "Approve weather?" },
-        requestId: "request-1",
+        interactionId: "request-1",
         scope,
         type: "input.requested",
       }),
@@ -402,9 +358,9 @@ describe("provider handler deadlines", () => {
     await contextStorage.run(restored, () =>
       terminals.publish({
         idempotencyKey: key,
-        kind: "tool-approval",
-        outcome: "approved",
-        requestId: "request-1",
+        kind: "approval",
+        outcome: "accepted",
+        interactionId: "request-1",
         scope,
         type: "input.resolved",
       }),
@@ -1214,32 +1170,32 @@ describe("trace policies", () => {
     const idempotencyKey = inputIdempotencyKey(scope.sessionId, scope.turnId, "request-1");
 
     await hooks.publish({
-      action: { callId: "call-1", name: "weather" },
+      call: { callId: "call-1", name: "weather" },
       idempotencyKey,
-      kind: "tool-approval",
+      kind: "approval",
       request: { prompt: "Approve private input?" },
-      requestId: "request-1",
+      interactionId: "request-1",
       scope,
       type: "input.requested",
     });
     await hooks.publish({
       idempotencyKey,
-      kind: "tool-approval",
-      outcome: "denied",
-      requestId: "request-1",
-      response: { optionId: "deny", text: "private reason" },
+      kind: "approval",
+      outcome: "declined",
+      interactionId: "request-1",
+      answer: { optionId: "deny", text: "private reason" },
       scope,
       type: "input.resolved",
     });
 
     expect(metadataEvents).toMatchObject([
       { request: undefined, type: "input.requested" },
-      { response: undefined, type: "input.resolved" },
+      { answer: undefined, type: "input.resolved" },
     ]);
     expect(contentEvents).toMatchObject([
       { request: { prompt: "Approve private input?" }, type: "input.requested" },
       {
-        response: { optionId: "deny", text: "private reason" },
+        answer: { optionId: "deny", text: "private reason" },
         type: "input.resolved",
       },
     ]);

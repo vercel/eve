@@ -2,7 +2,7 @@ import {
   Client,
   ClientError,
   type ClientSession,
-  type MessageStreamEvent,
+  type SessionStreamEvent,
   type ClientSessionState,
 } from "#client/index.js";
 import type { SendTurnPayload } from "#client/types.js";
@@ -20,7 +20,7 @@ import {
   type InvokeAuthenticationFailure,
   type InvokeResult,
   type InvokeResume,
-  projectInvocationInputRequest,
+  projectInvocationInteraction,
 } from "./result.js";
 
 export type InvokeOperation =
@@ -67,11 +67,11 @@ export async function runInvoke(input: RunInvokeInput): Promise<InvokeResult> {
       session = client.sessions.attach(resume.session.sessionId, {
         streamIndex: resume.session.streamIndex,
       });
-      const { inputResponses, message, ...options } = payload;
+      const { answers, message, ...options } = payload;
       response =
-        inputResponses === undefined
+        answers === undefined
           ? await session.send(message!, options)
-          : await session.respond(inputResponses, options);
+          : await session.respond(answers, options);
     }
   } catch (error) {
     const authentication = authenticationFailure(error, undefined, deploymentResolution);
@@ -95,16 +95,16 @@ export function resolveInvokeOperation(input: {
     return { kind: "send", payload: { message: prompt } };
   }
 
-  if (previous.status === "input-required") {
-    if (!prompt) throw new Error("This invocation is waiting for an input response.");
+  // An answer resumes with a prompt; a sign-in, which completes elsewhere, resumes without one.
+  const signingIn =
+    previous.status === "input-required" &&
+    previous.interactions.every((interaction) => interaction.request.kind === "sign-in");
+  if (previous.status === "input-required" && !signingIn) {
+    if (!prompt) throw new Error("This invocation is waiting for an answer.");
     return { kind: "send", payload: { message: prompt }, resume: previous.resume };
   }
 
-  if (
-    previous.status === "running" ||
-    previous.status === "authorization-required" ||
-    previous.status === "authentication-required"
-  ) {
+  if (signingIn || previous.status === "running" || previous.status === "authentication-required") {
     if (prompt) {
       throw new Error(
         previous.status === "running"
@@ -142,7 +142,7 @@ async function createInvokeClient(input: RunInvokeInput): Promise<{
 async function observeSafely(
   input: RunInvokeInput,
   session: ClientSession,
-  response: AsyncIterable<MessageStreamEvent>,
+  response: AsyncIterable<SessionStreamEvent>,
   deploymentResolution?: VercelDeploymentResolution,
 ): Promise<InvokeResult> {
   try {
@@ -162,33 +162,25 @@ async function observeSafely(
 async function observeInvocation(
   target: RemoteDevelopmentTarget,
   session: ClientSession,
-  response: AsyncIterable<MessageStreamEvent>,
+  response: AsyncIterable<SessionStreamEvent>,
 ): Promise<InvokeResult> {
   const summary = summarizeTurnEvents(await collectTurnEvents(response));
   if (summary.boundary === undefined) return runningResult(target, session.state);
-  if (summary.boundary.type === "session.failed") {
-    return { status: "failed", message: summary.boundary.data.message };
+  if (summary.boundary.type === "session.ended" && summary.boundary.data.outcome === "failed") {
+    return { status: "failed", message: summary.failure?.message ?? "The session failed." };
   }
 
   const resume = createResume(target, session.state);
-  if (summary.failure?.type === "turn.failed") {
+  if (summary.failure !== undefined) {
     return {
       status: "ready",
-      outcome: { status: "failed", message: summary.failure.data.message },
+      outcome: { status: "failed", message: summary.failure.message },
       resume,
     };
   }
-  if (summary.inputRequests.length > 0) {
-    return {
-      status: "input-required",
-      requests: summary.inputRequests.map(projectInvocationInputRequest),
-      resume,
-    };
-  }
-
-  const authorizations = summary.pendingAuthorizations;
-  if (authorizations.length > 0) {
-    return { status: "authorization-required", authorizations, resume };
+  const [first, ...rest] = summary.interactions.map(projectInvocationInteraction);
+  if (first !== undefined) {
+    return { interactions: [first, ...rest], resume, status: "input-required" };
   }
 
   const outcome =

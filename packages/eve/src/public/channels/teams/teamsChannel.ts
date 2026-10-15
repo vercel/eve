@@ -1,13 +1,13 @@
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   buildTeamsTurnMessage,
   collectTeamsFileParts,
@@ -35,19 +35,14 @@ import {
   type TeamsPostedActivity,
 } from "#public/channels/teams/api.js";
 import {
-  answerTeamsAuthorizationReveal,
-  readTeamsAuthorizationReveal,
-  type TeamsAuthorizationReveal,
-} from "#public/channels/teams/authorization.js";
-import {
   defaultEvents,
   defaultOnMessage,
   defaultTeamsAuth,
   teamsMentionUser,
 } from "#public/channels/teams/defaults.js";
 import {
-  deriveTeamsInputResponses,
-  isTeamsInputResponseActivity,
+  deriveTeamsAnswers,
+  isTeamsAnswerActivity,
   isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
   readTeamsToolApprovalPrompt,
@@ -67,12 +62,9 @@ import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import type { InputOption } from "#shared/input.js";
+import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 
 const log = createLogger("teams.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Teams context passed to invoke hooks. */
 export interface TeamsContext {
@@ -99,7 +91,7 @@ export interface TeamsEventContext extends TeamsChannelContext, ChannelContinuat
 export interface TeamsPendingPromptCard {
   readonly activityId: string;
   /** A question's options, so its card can show the chosen label. */
-  readonly options?: readonly Pick<InputOption, "id" | "label">[];
+  readonly options?: readonly Pick<InteractionOption, "id" | "label">[];
   readonly prompt: string;
 }
 
@@ -165,7 +157,7 @@ export type TeamsInboundResult = {
 export type TeamsInboundResultOrPromise = TeamsInboundResult | Promise<TeamsInboundResult>;
 
 /** Result of a Teams HITL submission authorization hook. Return `null` to reject. */
-export type TeamsInputResponseResult = { readonly auth: SessionAuthContext | null } | null;
+export type TeamsAnswerResult = { readonly auth: SessionAuthContext | null } | null;
 
 /** Result of a non-HITL Teams invoke hook. A `Response` returns verbatim, a plain object is JSON-encoded as the body, and `null`/`undefined` yields a 200 OK. */
 export type TeamsInvokeResult = Record<string, unknown> | Response | null | undefined;
@@ -173,37 +165,24 @@ export type TeamsInvokeResult = Record<string, unknown> | Response | null | unde
 /** Sync or async {@link TeamsInvokeResult}. */
 export type TeamsInvokeResultOrPromise = TeamsInvokeResult | Promise<TeamsInvokeResult>;
 
-type TeamsEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: TeamsEventContext,
-  ctx: SessionContext,
-) => void | Promise<void>;
-
-type TeamsSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TeamsEventContext,
+type TeamsEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TeamsEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `teamsChannel({ events })`. */
 export interface TeamsChannelEvents {
-  readonly "approval.candidate"?: TeamsEventHandler<"approval.candidate">;
-  readonly "approval.settled"?: TeamsEventHandler<"approval.settled">;
-  readonly "input.resolved"?: TeamsEventHandler<"input.resolved">;
+  readonly "interaction.opened"?: TeamsEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TeamsEventHandler<"interaction.settled">;
   readonly "turn.started"?: TeamsEventHandler<"turn.started">;
-  readonly "actions.requested"?: TeamsEventHandler<"actions.requested">;
-  readonly "action.partial"?: TeamsEventHandler<"action.partial">;
-  readonly "action.result"?: TeamsEventHandler<"action.result">;
-  readonly "message.completed"?: TeamsEventHandler<"message.completed">;
-  readonly "message.appended"?: TeamsEventHandler<"message.appended">;
-  readonly "input.requested"?: TeamsEventHandler<"input.requested">;
-  readonly "turn.failed"?: TeamsEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TeamsEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TeamsEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TeamsSessionFailedHandler;
-  readonly "session.completed"?: TeamsEventHandler<"session.completed">;
-  readonly "session.waiting"?: TeamsEventHandler<"session.waiting">;
-  readonly "authorization.required"?: TeamsEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TeamsEventHandler<"authorization.completed">;
+  readonly "call.requested"?: TeamsEventHandler<"call.requested">;
+  readonly "call.progress"?: TeamsEventHandler<"call.progress">;
+  readonly "call.settled"?: TeamsEventHandler<"call.settled">;
+  readonly "content.completed"?: TeamsEventHandler<"content.completed">;
+  readonly "content.delta"?: TeamsEventHandler<"content.delta">;
+  readonly "turn.settled"?: TeamsEventHandler<"turn.settled">;
+  readonly "session.ended"?: TeamsEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TeamsEventHandler<"delivery.settled">;
 }
 
 /** Configuration for {@link teamsChannel}. */
@@ -230,10 +209,10 @@ export interface TeamsChannelConfig {
   ): TeamsInboundResultOrPromise;
 
   /** Authorizes HITL card submissions. Defaults to the submitting Teams user. */
-  onInputResponse?(
+  onAnswers?(
     ctx: TeamsContext,
     activity: TeamsInvokeActivity | TeamsMessageActivity,
-  ): TeamsInputResponseResult | Promise<TeamsInputResponseResult>;
+  ): TeamsAnswerResult | Promise<TeamsAnswerResult>;
 
   /** Handler for non-HITL Teams invoke activities. Return a body, a Response, or `null`/`undefined` for a 200 OK. */
   onInvoke?(ctx: TeamsContext, activity: TeamsInvokeActivity): TeamsInvokeResultOrPromise;
@@ -298,9 +277,8 @@ export interface TeamsChannel extends Channel<
 export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
   const filesPolicy = normalizeTeamsFilesPolicy(config.files);
   const onMessage = config.onMessage ?? defaultOnMessage;
-  const onInputResponse =
-    config.onInputResponse ??
-    (config.onMessage === undefined ? defaultOnInputResponse : rejectInput);
+  const onAnswers =
+    config.onAnswers ?? (config.onMessage === undefined ? defaultOnAnswers : rejectInput);
   const mergedEvents: TeamsChannelEvents = { ...defaultEvents, ...config.events };
 
   return defineChannel<
@@ -367,8 +345,8 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
           if (activity.type === "message") {
             waitUntil(
-              isTeamsInputResponseActivity(activity)
-                ? dispatchInputResponses({ activity, config, from, onInputResponse })
+              isTeamsAnswerActivity(activity)
+                ? dispatchAnswers({ activity, config, from, onAnswers })
                 : dispatchMessage({
                     activity,
                     config,
@@ -385,8 +363,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
             return handleInvoke({
               activity,
               config,
-              onInputResponse,
-              resolveSession,
+              onAnswers,
               waitUntil,
               from,
             });
@@ -682,19 +659,15 @@ async function handleInvoke(input: {
   readonly activity: TeamsInvokeActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
-  readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-  readonly resolveSession: ChannelResolveSession;
+  readonly onAnswers: NonNullable<TeamsChannelConfig["onAnswers"]>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
-  const reveal = readTeamsAuthorizationReveal(input.activity);
-  if (reveal !== null) return Response.json(await revealAuthorization({ ...input, reveal }));
-
-  if (isTeamsInputResponseActivity(input.activity)) {
+  if (isTeamsAnswerActivity(input.activity)) {
     input.waitUntil(
-      dispatchInputResponses({
+      dispatchAnswers({
         activity: input.activity,
         config: input.config,
-        onInputResponse: input.onInputResponse,
+        onAnswers: input.onAnswers,
         from: input.from,
       }),
     );
@@ -709,67 +682,29 @@ async function handleInvoke(input: {
   return teamsOk();
 }
 
-/** Identifies the presser the same way a HITL card submission does. */
-async function revealAuthorization(input: {
-  readonly activity: TeamsInvokeActivity;
-  readonly config: TeamsChannelConfig;
-  readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-  readonly resolveSession: ChannelResolveSession;
-  readonly reveal: TeamsAuthorizationReveal;
-}): Promise<JsonObject> {
-  const state = stateFromActivity(input.activity);
-  const ctx = buildTeamsBinding({ config: input.config, state });
-  let auth: SessionAuthContext | null = null;
-  try {
-    auth = (await input.onInputResponse(ctx, input.activity))?.auth ?? null;
-  } catch (error) {
-    log.error("Teams sign-in press authorization failed", { error });
-  }
-  const token = cardContinuationToken(
-    input.activity,
-    state,
-    input.reveal.replyToActivityId ?? null,
-  );
-  return await answerTeamsAuthorizationReveal({
-    adaptiveCardVersion: input.config.adaptiveCardVersion ?? "1.5",
-    auth,
-    presser: input.activity.from,
-    resolveSession: () => input.resolveSession(token),
-    reveal: input.reveal,
-  });
-}
-
-async function dispatchInputResponses(input: {
+async function dispatchAnswers(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
-  readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
+  readonly onAnswers: NonNullable<TeamsChannelConfig["onAnswers"]>;
 }): Promise<void> {
-  const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
-  if (inputResponses.length === 0) return;
+  const answers = deriveTeamsAnswers(input.activity as TeamsActivity);
+  if (answers.length === 0) return;
   const state = stateFromActivity(input.activity);
   const ctx = buildTeamsBinding({ config: input.config, state });
-  let result: TeamsInputResponseResult;
+  let result: TeamsAnswerResult;
   try {
-    result = await input.onInputResponse(ctx, input.activity);
+    result = await input.onAnswers(ctx, input.activity);
   } catch (error) {
     log.error("Teams input response authorization failed", { error });
     return;
   }
   if (result === null) return;
   try {
-    await input
-      .from(
-        cardContinuationToken(
-          input.activity,
-          state,
-          readTeamsInputReplyToActivityId(input.activity),
-        ),
-      )
-      .respond(inputResponses, {
-        auth: result.auth,
-        state: approvalResponseStatePatch(input.activity, result.auth),
-      });
+    await input.from(resolveInputContinuationToken(input.activity, state)).respond(answers, {
+      auth: result.auth,
+      state: approvalResponseStatePatch(input.activity, result.auth),
+    });
   } catch (error) {
     log.error("Teams input response delivery failed", { error });
   }
@@ -796,12 +731,11 @@ function stateFromActivity(
   };
 }
 
-/** Continues the thread a card recorded when posted, or the activity's own thread. */
-function cardContinuationToken(
+function resolveInputContinuationToken(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
   state: TeamsChannelState,
-  replyToActivityId: string | null,
 ): string {
+  const replyToActivityId = readTeamsInputReplyToActivityId(activity);
   if (replyToActivityId === null) return stateToken(state);
   return teamsContinuationToken({
     conversationId: activity.conversation.id,
@@ -817,7 +751,7 @@ function approvalResponseStatePatch(
   if (auth?.principalId === undefined || !isTeamsToolApprovalResponseActivity(activity)) {
     return undefined;
   }
-  const requestId = deriveTeamsInputResponses(activity)[0]?.requestId;
+  const requestId = deriveTeamsAnswers(activity)[0]?.interactionId;
   const activityId = activity.replyToId;
   if (requestId === undefined || activityId === undefined) {
     return { approvalResponderAccounts: { [auth.principalId]: activity.from } };
@@ -833,10 +767,10 @@ function approvalResponseStatePatch(
   };
 }
 
-function defaultOnInputResponse(
+function defaultOnAnswers(
   _ctx: TeamsContext,
   activity: TeamsInvokeActivity | TeamsMessageActivity,
-): TeamsInputResponseResult {
+): TeamsAnswerResult {
   return { auth: defaultTeamsAuth(activity) };
 }
 

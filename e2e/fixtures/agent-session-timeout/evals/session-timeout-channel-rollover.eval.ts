@@ -42,16 +42,16 @@ export default defineEval({
 
     const activeTurn = await t.target.watchTurn(expiredSessionId).result();
     activeTurn.expectOk();
-    activeTurn.notEvent("turn.failed");
+    activeTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
     await t.require(activeTurn.message, equals("timeout-ack:SLOW-TURN"));
 
     const terminal = await t.target
-      .watchTurn(expiredSessionId, { startIndex: activeTurn.events.length })
+      .watchTurn(expiredSessionId, { startIndex: activeTurn.session.state!.streamIndex })
       .result();
     await t.require(terminal.status, equals("completed"));
-    terminal.event("session.completed");
-    terminal.notEvent("turn.failed");
-    terminal.notEvent("session.failed");
+    terminal.event("session.ended", { data: { outcome: "completed" } });
+    terminal.notEvent("turn.settled", { data: { outcome: "failed" } });
+    terminal.notEvent("session.ended", { data: { outcome: "failed" } });
 
     let owner: OwnerResponse = { sessionId: expiredSessionId };
     for (let attempt = 0; attempt < 50 && owner.sessionId !== null; attempt += 1) {
@@ -76,8 +76,8 @@ export default defineEval({
 
     const replacementTurn = await t.target.watchTurn(replacement.sessionId!).result();
     replacementTurn.expectOk();
-    replacementTurn.notEvent("turn.failed");
-    replacementTurn.notEvent("session.failed");
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     await t.require(replacementTurn.message, equals("timeout-ack:REPLACEMENT-TURN"));
   },
 });

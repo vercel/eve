@@ -53,9 +53,10 @@ export function getInputTokenCount(
     return estimateTokens(messages) + requestEnvelopeTokens;
   }
 
+  const appended = messages.slice(priorCount);
   return (
     prior +
-    estimateTokens(messages.slice(priorCount)) +
+    (appended.length === 0 ? 0 : estimateTokens(appended)) +
     Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
   );
 }

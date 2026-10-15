@@ -8,9 +8,7 @@ import {
   readHitlState,
   writeHitlState,
 } from "./requests.js";
-import { type ProxyInputRequest } from "./relays.js";
-
-const EVENT = { sequence: 1, stepIndex: 0, turnId: "turn_1" };
+import type { Relay } from "./relays.js";
 
 function signIn(name: string, attemptId: string): AuthorizationChallenge {
   return {
@@ -22,14 +20,8 @@ function signIn(name: string, attemptId: string): AuthorizationChallenge {
   };
 }
 
-function route(token: string, inputSource?: string): ProxyInputRequest {
-  return {
-    childContinuationToken: token,
-    event: EVENT,
-    ...(inputSource !== undefined && { inputSource }),
-    kind: "question",
-    reply: { allowFreeform: true },
-  };
+function route(token: string): Relay {
+  return { childContinuationToken: token };
 }
 
 function save(state: SessionStateMap | undefined, change: Parameters<typeof writeHitlState>[1]) {
@@ -40,7 +32,7 @@ describe("writeHitlState", () => {
   it("writes the sign-ins and the relay routes a transition changes", () => {
     const state = save(undefined, {
       relays: {
-        upsert: { entries: [["q-1", route("child")]], forChildContinuationToken: "child" },
+        upsert: { "q-1": route("child") },
       },
       signIns: [signIn("github", "a-1")],
     });
@@ -53,7 +45,7 @@ describe("writeHitlState", () => {
   it("leaves records the change doesn't name", () => {
     const before = save(undefined, {
       relays: {
-        upsert: { entries: [["q-1", route("child")]], forChildContinuationToken: "child" },
+        upsert: { "q-1": route("child") },
       },
       signIns: [signIn("github", "a-1")],
     });
@@ -65,41 +57,13 @@ describe("writeHitlState", () => {
   it("withdraws every sign-in on an empty list, and retires the routes it names", () => {
     const before = save(undefined, {
       relays: {
-        upsert: {
-          entries: [
-            ["q-1", route("child")],
-            ["q-2", route("child")],
-          ],
-          forChildContinuationToken: "child",
-        },
+        upsert: { "q-1": route("child"), "q-2": route("child") },
       },
       signIns: [signIn("github", "a-1")],
     });
     const after = save(before, { relays: { retire: ["q-1"] }, signIns: [] });
     expect(readHitlState(after).signIns).toEqual([]);
     expect([...readHitlState(after).relays.keys()]).toEqual(["q-2"]);
-  });
-
-  it("replaces only the routes of the batch's own input source", () => {
-    const first = save(undefined, {
-      relays: {
-        upsert: {
-          entries: [["q-a", route("child", "a")]],
-          forChildContinuationToken: "child",
-          inputSource: "a",
-        },
-      },
-    });
-    const second = save(first, {
-      relays: {
-        upsert: {
-          entries: [["q-b", route("child", "b")]],
-          forChildContinuationToken: "child",
-          inputSource: "b",
-        },
-      },
-    });
-    expect([...readHitlState(second).relays.keys()].sort()).toEqual(["q-a", "q-b"]);
   });
 });
 
@@ -119,7 +83,7 @@ describe("holdsHitlRequests", () => {
     expect(holdsHitlRequests(save(undefined, { signIns: [signIn("github", "a-1")] }))).toBe(true);
     const relayed = save(undefined, {
       relays: {
-        upsert: { entries: [["q-1", route("child")]], forChildContinuationToken: "child" },
+        upsert: { "q-1": route("child") },
       },
     });
     expect(holdsHitlRequests(relayed)).toBe(true);
@@ -132,7 +96,7 @@ describe("discardClearedHitlState", () => {
       { "eve.runtime.hitl.requests": { approvals: { activeCandidates: {} } } },
       {
         relays: {
-          upsert: { entries: [["q-1", route("child")]], forChildContinuationToken: "child" },
+          upsert: { "q-1": route("child") },
         },
         signIns: [signIn("github", "a-1")],
       },

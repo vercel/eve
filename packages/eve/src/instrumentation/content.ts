@@ -34,7 +34,7 @@ export function withInstrumentationDecision(
         : Object.freeze({
             ...event,
             error: decision.recordOutputs ? event.error : undefined,
-            response: decision.recordInputs ? event.response : undefined,
+            answer: decision.recordInputs ? event.answer : undefined,
           });
     case "tool.call.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });

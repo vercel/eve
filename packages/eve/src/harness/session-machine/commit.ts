@@ -1,10 +1,10 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import { getSessionUsage } from "#harness/turn-tag-state.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { readHitlState, writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
@@ -19,7 +19,7 @@ import type { SessionView } from "./view.js";
 /** What a machine transition returns; approval storage still has direct writers. */
 export interface Transition {
   readonly turn: TurnState;
-  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly events: readonly SessionEvent[];
   /** Messages the transition commits to the end of history. */
   readonly commit?: readonly ModelMessage[];
   /** The transition empties history, as `clear` does. */
@@ -30,9 +30,12 @@ export interface Transition {
   readonly relays?: RelayChange;
 }
 
-/** Publishes one event; `messages` is the conversation hooks see with it. */
+/**
+ * Publishes one event, or one transition's events as one commit; `messages` is the conversation
+ * the participants of the events that read history see.
+ */
 export type Publish = (
-  event: UnstampedMessageStreamEvent,
+  publication: SessionEvent | readonly SessionEvent[],
   messages?: readonly ModelMessage[],
 ) => Promise<void>;
 
@@ -51,18 +54,23 @@ export function sessionView(
 }
 
 /**
- * The events hooks and resolvers read the conversation at: a turn's and a step's boundaries. The
- * session starts before any history, so `session.started` never carries the turn's input.
+ * The facts participants read the conversation at: a turn's start and end, and each model run's
+ * request. The session starts before any history, so `session.started` never carries it.
  */
 const READS_HISTORY: ReadonlySet<string> = new Set([
   "turn.started",
-  "step.started",
-  "turn.completed",
+  "model.requested",
+  "turn.settled",
 ]);
 
+/** True for an event whose participants read the conversation. */
+export function readsHistory(type: string): boolean {
+  return READS_HISTORY.has(type);
+}
+
 /**
- * Publishes a transition's events, then saves what it changed. A transition that changes history
- * needs a session restored with it.
+ * Publishes a transition's events as one commit, then saves what it changed. A transition that
+ * changes history needs a session restored with it.
  */
 export async function applyTransition<T extends { readonly state?: SessionStateMap }>(
   session: T,
@@ -74,15 +82,13 @@ export async function applyTransition<T extends { readonly state?: SessionStateM
   return saveTransition(session, transition);
 }
 
-/** Publishes a transition's events, in order. */
+/** Publishes a transition's events as one commit. */
 export async function publishTransition(
   transition: Transition,
   publish: Publish,
   messages?: readonly ModelMessage[],
 ): Promise<void> {
-  for (const event of transition.events) {
-    await publish(event, READS_HISTORY.has(event.type) ? messages : undefined);
-  }
+  if (transition.events.length > 0) await publish(transition.events, messages);
 }
 
 /** Saves what a transition changes once its events are published. */
@@ -109,8 +115,8 @@ export function dropClosedRecords<T extends HarnessSessionBase>(
   projection: SessionProjection,
 ): T {
   const closed = [...readHitlState(session.state).relays.keys()].filter((requestId) => {
-    const input = projection.inputs[requestId];
-    return input === undefined || input.status === "settled";
+    const row = projection.view?.interactions[requestId];
+    return row === undefined || row.status === "settled";
   });
   return writeHitlState(session, { relays: { retire: closed } });
 }

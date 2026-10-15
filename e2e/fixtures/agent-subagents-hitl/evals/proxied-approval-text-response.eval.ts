@@ -36,7 +36,7 @@ async function waitForInput(
 ): Promise<EveEvalSession> {
   let session = initialSession;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.pendingInputRequests.some((request) => request.action.toolName === toolName)) {
+    if (session.pendingInteractions.some((request) => request.call?.name === toolName)) {
       return session;
     }
     const live = watchNextTurn(t, session, "subagent input wait");

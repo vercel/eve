@@ -29,12 +29,16 @@ export function createAgentApprovalInstrumentation(input: {
     event: InstrumentationInputRequestedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
-    if (event.kind !== "tool-approval" || ctx.state.get() !== undefined) return;
-    const tool = await toolFor(event.scope.sessionId, event.scope.turnId, event.action.callId);
-    const approval = await tool?.approval({ requestId: event.requestId, request: event.request });
+    const { call } = event;
+    if (event.kind !== "approval" || call === undefined || ctx.state.get() !== undefined) return;
+    const tool = await toolFor(event.scope.sessionId, event.scope.turnId, call.callId);
+    const approval = await tool?.approval({
+      requestId: event.interactionId,
+      request: event.request,
+    });
     if (approval === undefined) return;
     ctx.state.set({
-      callId: event.action.callId,
+      callId: call.callId,
       sessionId: event.scope.sessionId,
       turnId: event.scope.turnId,
     });
@@ -49,15 +53,33 @@ export function createAgentApprovalInstrumentation(input: {
     const { callId, sessionId, turnId } = stored as Record<string, unknown>;
     if (typeof callId !== "string" || typeof sessionId !== "string" || typeof turnId !== "string")
       return;
-    const approval = (await toolFor(sessionId, turnId, callId))?.findApproval(event.requestId);
+    const approval = (await toolFor(sessionId, turnId, callId))?.findApproval(event.interactionId);
     if (approval === undefined) return;
     if (event.outcome === "failed") await approval.fail(event.error);
     else
       await approval.complete({
-        outcome: event.outcome as "approved" | "denied" | "cancelled" | "ignored" | "invalid",
-        response: event.response,
+        outcome: APPROVAL_OUTCOMES[event.outcome] ?? "invalid",
+        response: event.answer,
       });
   }
 
   return { "input.requested": onRequested, "input.resolved": onResolved };
 }
+
+/**
+ * Trace schema 4's approval outcomes. The instrumentation event carries the interaction's
+ * outcome; the span keeps the values dashboards already query.
+ */
+const APPROVAL_OUTCOMES: Partial<
+  Record<
+    InstrumentationInputResolvedEvent["outcome"],
+    "approved" | "denied" | "cancelled" | "ignored" | "invalid"
+  >
+> = {
+  abandoned: "cancelled",
+  accepted: "approved",
+  declined: "denied",
+  expired: "cancelled",
+  interrupted: "cancelled",
+  withdrawn: "ignored",
+};

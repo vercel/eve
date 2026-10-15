@@ -4,7 +4,7 @@ import { useEveAgent } from "eve/react";
 import { type FormEvent, type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { type Components, Streamdown } from "streamdown";
 
-import { traceReducer } from "./trace-reducer";
+import { traceTurns } from "./trace-turns";
 import {
   resolveTurnAssistantMessage,
   resolveTurnFailureMessage,
@@ -87,13 +87,14 @@ export function App() {
   const [composerInput, setComposerInput] = useState("");
   const [composerError, setComposerError] = useState<string | undefined>(undefined);
   const conversationStageRef = useRef<HTMLElement | null>(null);
-  const reducer = useMemo(() => traceReducer(), []);
   const agent = useEveAgent({
     prewarm: composerInput.trim().length > 0,
-    reducer,
   });
 
-  const turns = agent.data.turns;
+  const turns = useMemo(
+    () => traceTurns(agent.events, agent.data.messages),
+    [agent.events, agent.data.messages],
+  );
   const isComposeInProgress = agent.status === "submitted" || agent.status === "streaming";
   const hasComposerText = composerInput.trim().length > 0;
   const hasConversation = turns.length > 0 || isComposeInProgress;
@@ -138,7 +139,7 @@ export function App() {
 
     setComposerError(undefined);
     setComposerInput("");
-    if (agent.session?.sessionId === undefined && agent.data.turns.length > 0) {
+    if (agent.session?.sessionId === undefined && turns.length > 0) {
       agent.reset();
     }
     await agent.send(message);

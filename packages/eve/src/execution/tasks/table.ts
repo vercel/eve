@@ -6,7 +6,7 @@ import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { TaskCancelReason, TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason } from "#protocol/message.js";
 import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
 
 // The session's task table: the tasks part of its record of running work
@@ -59,7 +59,7 @@ export interface TaskRunCommands {
   readonly run: TaskRunAddress;
 }
 
-/** How a task call ended, as `task.settled` reports it. */
+/** How a task call ended, as `call.settled` reports it. */
 export type TaskOutcome =
   | { readonly output: JsonValue; readonly status: "completed" }
   | { readonly error: string; readonly status: "failed" }
@@ -80,7 +80,7 @@ export type TaskResult = Exclude<TaskOutcome, { readonly status: "cancelled" }> 
 export interface TaskRecord {
   readonly id: string;
   /** Whether the tool is an agent's, as `task.started` reports it. */
-  readonly kind: TaskStartedStreamEvent["data"]["kind"];
+  readonly kind: "agent" | "tool";
   /** The tool whose call started the task. */
   readonly name: string;
   /** A `serve` tool's task: it takes more calls by its id, and is idle between results. */
@@ -298,7 +298,7 @@ export function recordTaskCall(
 
 /**
  * Settles calls that share one outcome, as one reply does, in one step. Each
- * call settles once, with its own `task.settled`; the first outcome wins, so a
+ * call settles once, with its own `call.settled`; the first outcome wins, so a
  * call already settled, including one its owner cancelled, is dropped. The
  * model receives the outcome once, since every call it settles would repeat it.
  */

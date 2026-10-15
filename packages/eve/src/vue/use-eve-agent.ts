@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
 import type { UserContent } from "ai";
 
@@ -11,11 +12,8 @@ import {
   type PrepareSend,
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
-import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
-import { conversationReducer } from "#client/conversation-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientAuth,
@@ -41,22 +39,20 @@ export type UseEveAgentStatus = EveAgentStoreStatus;
  * `useEveAgent` passes this shape to callbacks such as `onFinish`, but exposes
  * the same fields as individual reactive refs on its return value.
  */
-export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
+export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
 
 /**
  * Reactive return value from `useEveAgent`.
  */
-export interface UseEveAgentReturn<TData> {
+export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
-  /** Projected state: the reducer folds every stream event into this value. */
-  readonly data: ComputedRef<TData>;
-  /** Canonical session state, regardless of the chosen data reducer. */
-  readonly conversation: ComputedRef<ConversationState>;
+  /** The conversation: messages, turns, interactions, tasks, and followed agent sessions. */
+  readonly data: ComputedRef<ConversationState>;
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: ComputedRef<Error | undefined>;
   /** Raw server events from this session (authoritative stream). */
-  readonly events: ComputedRef<readonly MessageStreamEvent[]>;
+  readonly events: ComputedRef<readonly SessionStreamEvent[]>;
   /** Replay the attached durable session and follow its in-flight turn, if any. */
   readonly resume: () => Promise<void>;
   /** Create the session without starting its first turn. */
@@ -70,7 +66,7 @@ export interface UseEveAgentReturn<TData> {
   ) => Promise<void>;
   /** Answer pending HITL input requests. */
   readonly respond: <TOutput = unknown>(
-    inputResponses: Parameters<ClientSession["respond"]>[0],
+    answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
   ) => Promise<void>;
   /** Current session identity and stream cursor. */
@@ -87,7 +83,7 @@ export interface UseEveAgentReturn<TData> {
  * Configuration for creating or binding a Vue eve agent session.
  *
  * Session configuration is read once when the composable creates its internal
- * store; to change the host, reducer, or session, remount the component. For
+ * store; to change the host or session, remount the component. For
  * credentials or headers that must change without remounting, pass function
  * values to `auth` or `headers`; the client resolves those before each request.
  *
@@ -95,7 +91,7 @@ export interface UseEveAgentReturn<TData> {
  * `prepareSend`) are inherited from {@link EveAgentStoreCallbacks} and synced on
  * every render.
  */
-export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
@@ -118,20 +114,20 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   /** Prior session cursor to resume from on mount. */
   readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
-   * `message.received` stream event.
+   * `delivery.consumed` fact.
    *
-   * Optimistic events are reducer-facing projection events only. They are not
-   * exposed through `events`, which remains the authoritative eve stream.
+   * Such a message shows in `data.messages` only; `events` remains the
+   * authoritative eve stream.
    *
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Follow each subagent call's session into `conversation.agents` while mounted. @default false */
+  /** Follow each subagent call's session into `data.agents` while mounted. @default false */
   readonly followSubagents?: boolean;
   /**
    * Keep the session stream open between turns to show events that arrive from schedules,
@@ -141,12 +137,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly followIdle?: boolean;
   /** Prewarm an owned session on mount and after reset. @default false */
   readonly prewarm?: boolean;
-  /**
-   * Projects stream events into `TData`.
-   *
-   * @default conversationReducer
-   */
-  readonly reducer?: EveAgentReducer<TData>;
   /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
   readonly resume?: boolean;
   /**
@@ -157,34 +147,21 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly session?: ClientSession;
 }
 
-export function useEveAgent(
-  options?: UseEveAgentOptions<ConversationState>,
-): UseEveAgentReturn<ConversationState>;
-
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> & { readonly reducer: EveAgentReducer<TData> },
-): UseEveAgentReturn<TData>;
-
 /**
  * Vue composable that drives one eve session and projects its event stream into
  * reactive UI state.
  *
- * Without a `reducer`, events project into conversation state including message parts;
- * pass `reducer` to project into a custom `TData`.
+ * `data` is the conversation, including its message parts; derive anything else from `events`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
  * `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. Configuration is read once on store creation;
  * remount to change it. On scope dispose, the in-flight request is detached and
  * the store unsubscribed.
  */
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> = {},
-): UseEveAgentReturn<TData> {
+export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
     throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
   }
-  const reducer = options.reducer ?? (conversationReducer as EveAgentReducer<TData>);
-
-  const store = new EveAgentStore<TData>({
+  const store = new EveAgentStore({
     auth: options.auth,
     headers: options.headers,
     host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
@@ -194,7 +171,6 @@ export function useEveAgent<TData>(
     followSubagents: options.followSubagents,
     followIdle: options.followIdle,
     prewarm: options.prewarm,
-    reducer,
     session: options.session,
   });
 
@@ -206,7 +182,7 @@ export function useEveAgent<TData>(
     prepareSend: options.prepareSend,
   });
 
-  const snapshot = shallowRef<EveAgentStoreSnapshot<TData>>(store.snapshot);
+  const snapshot = shallowRef<EveAgentStoreSnapshot>(store.snapshot);
 
   if ("window" in globalThis) {
     const unsubscribe = store.subscribe(() => {
@@ -224,15 +200,14 @@ export function useEveAgent<TData>(
   return {
     cancel: () => store.cancel(),
     data: computed(() => snapshot.value.data),
-    conversation: computed(() => snapshot.value.conversation),
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
     prewarm: () => store.prewarm(),
     reset: () => store.reset(),
     respond: <TOutput = unknown>(
-      inputResponses: Parameters<ClientSession["respond"]>[0],
+      answers: Parameters<ClientSession["respond"]>[0],
       options?: RespondTurnOptions<TOutput>,
-    ) => store.send({ ...options, inputResponses }),
+    ) => store.send({ ...options, answers }),
     resume: () => store.resume(),
     send: <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) =>
       store.send({ ...options, message }),

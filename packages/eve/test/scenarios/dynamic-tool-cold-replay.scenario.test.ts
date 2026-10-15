@@ -143,7 +143,7 @@ describe("dynamic tool cold replay", () => {
         const client = new Client({ host: server.url });
         const created = await client.sessions.create({ message: "Hello." });
         await expect(created.response.result()).resolves.toMatchObject({
-          inputRequests: [],
+          interactions: [],
           status: "waiting",
         });
 
@@ -152,7 +152,7 @@ describe("dynamic tool cold replay", () => {
         ).result();
         expect(waiting.status).toBe("waiting");
         expect(
-          waiting.inputRequests,
+          waiting.interactions,
           `Expected two approval requests.\n\nevents:\n${JSON.stringify(waiting.events, null, 2)}\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         ).toHaveLength(2);
 
@@ -185,9 +185,9 @@ describe("dynamic tool cold replay", () => {
         );
         const resumed = await (
           await resumedSession.respond(
-            waiting.inputRequests.map((request) => ({
+            waiting.interactions.map((request) => ({
               optionId: "approve",
-              requestId: request.requestId,
+              interactionId: request.interactionId,
             })),
           )
         ).result();
