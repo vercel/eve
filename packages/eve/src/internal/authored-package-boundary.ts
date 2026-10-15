@@ -321,7 +321,8 @@ function resolveConfiguredExternalDependency(
   );
 }
 
-function packageImportName(source: string): string {
+/** Returns the package part of a bare specifier: `@acme/db/x` → `@acme/db`, `pg/native` → `pg`. */
+export function packageImportName(source: string): string {
   return source.startsWith("@") ? source.split("/", 2).join("/") : source.split("/", 1)[0]!;
 }
 

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -9,6 +10,7 @@ import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
 } from "../../src/internal/application/package.js";
+import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { buildApplication } from "../../src/internal/nitro/host.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
@@ -64,6 +66,140 @@ async function readTracedServerPackageJson(outputDir: string): Promise<{
 
     throw error;
   }
+}
+
+/**
+ * Writes an isolated (pnpm-style, nothing hoisted) workspace: `apps/agent`
+ * depends on the `packages/backend` source package, which installs
+ * `fixture-workspace-external` in its own node_modules. The agent marks it
+ * external; with `appDeclaresExternal` the app installs it too.
+ */
+async function writeWorkspaceExternalFixture(input: {
+  readonly appDeclaresExternal: boolean;
+}): Promise<{ readonly appRoot: string }> {
+  const workspaceRoot = await createScratchDirectory("eve-workspace-external-dep-build-");
+  const appRoot = join(workspaceRoot, "apps", "agent");
+  const packageRoot = join(workspaceRoot, "packages", "backend");
+
+  await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+  await mkdir(join(appRoot, "node_modules", "@fixture"), { recursive: true });
+  await mkdir(join(packageRoot, "src"), { recursive: true });
+  const appDependencies: Record<string, string> = { "@fixture/backend": "workspace:*" };
+  if (input.appDeclaresExternal) {
+    appDependencies["fixture-workspace-external"] = "1.0.0";
+    await writeExternalInstallation(join(appRoot, "node_modules", "fixture-workspace-external"));
+  }
+  await writeFile(
+    join(appRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        dependencies: appDependencies,
+        name: "workspace-external-dependency-app",
+        private: true,
+        type: "module",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    join(appRoot, "agent", "agent.ts"),
+    [
+      "export default {",
+      "  build: {",
+      '    externalDependencies: ["fixture-workspace-external"],',
+      "  },",
+      '  model: "openai/gpt-5.4-mini",',
+      "};",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(join(appRoot, "agent", "instructions.md"), "Workspace external dependency.\n");
+  await writeFile(
+    join(appRoot, "agent", "tools", "use_backend.ts"),
+    [
+      'import { value } from "@fixture/backend";',
+      "",
+      "export default {",
+      '  description: "Use a workspace package.",',
+      "  execute() {",
+      "    return value;",
+      "  },",
+      "};",
+      "",
+    ].join("\n"),
+  );
+
+  await writeFile(
+    join(packageRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        dependencies: { "fixture-workspace-external": "1.0.0" },
+        exports: "./src/index.ts",
+        name: "@fixture/backend",
+        private: true,
+        type: "module",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    join(packageRoot, "src", "index.ts"),
+    'export { value } from "fixture-workspace-external";\n',
+  );
+  await writeExternalInstallation(join(packageRoot, "node_modules", "fixture-workspace-external"));
+  await symlink(packageRoot, join(appRoot, "node_modules", "@fixture", "backend"), "dir");
+
+  return { appRoot };
+}
+
+async function writeExternalInstallation(externalRoot: string): Promise<void> {
+  await mkdir(externalRoot, { recursive: true });
+  await writeFile(
+    join(externalRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        exports: "./index.js",
+        name: "fixture-workspace-external",
+        type: "module",
+        version: "1.0.0",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(join(externalRoot, "index.js"), 'export const value = "workspace external";\n');
+}
+
+/**
+ * Copies the build output away from the workspace, so no source installation
+ * is reachable, then resolves and imports the external exactly as the
+ * bundled authored module does.
+ */
+async function importRelocatedWorkspaceExternal(outputDir: string): Promise<unknown> {
+  const relocatedRoot = await createScratchDirectory("eve-workspace-external-relocated-");
+  await cp(outputDir, relocatedRoot, { recursive: true });
+  const serverDirectory = await realpath(join(relocatedRoot, "server"));
+  const entries = await readdir(serverDirectory, { recursive: true, withFileTypes: true });
+  const importers = (
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".mjs"))
+        .filter((entry) => !join(entry.parentPath, entry.name).includes("/node_modules/"))
+        .map(async (entry) => {
+          const path = join(entry.parentPath, entry.name);
+          return (await readFile(path, "utf8")).includes('"fixture-workspace-external"')
+            ? path
+            : null;
+        }),
+    )
+  ).filter((path) => path !== null);
+  expect(importers).not.toHaveLength(0);
+  const resolved = createRequire(importers[0]!).resolve("fixture-workspace-external");
+  expect(resolved.startsWith(serverDirectory)).toBe(true);
+  const module = (await import(pathToFileURL(resolved).href)) as { value: unknown };
+  return module.value;
 }
 
 describe("app runtime dependency tracing", () => {
@@ -740,6 +876,98 @@ describe("app runtime dependency tracing", () => {
       ).resolves.toContain('"name": "fixture-external-only-dep"');
     }
   }, 30_000);
+
+  it("fails the build when the app cannot resolve an external a workspace package imports", async () => {
+    // Hosted output resolves externals from the app. Building this fixture
+    // used to succeed and then fail at boot with ERR_MODULE_NOT_FOUND.
+    const { appRoot } = await writeWorkspaceExternalFixture({ appDeclaresExternal: false });
+
+    const build = buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+
+    await expect(build).rejects.toThrow(
+      /"fixture-workspace-external" is listed in build\.externalDependencies and imported by the hosted bundle \(.+\), but the build output does not contain it\./,
+    );
+    await expect(build).rejects.toThrow(
+      /Add "fixture-workspace-external" to the dependencies in \S*\/apps\/agent\/package\.json\./,
+    );
+  }, 60_000);
+
+  it("ships a workspace package's external once the app declares it", async () => {
+    const { appRoot } = await writeWorkspaceExternalFixture({ appDeclaresExternal: true });
+
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+
+    await expect(importRelocatedWorkspaceExternal(outputDir)).resolves.toBe("workspace external");
+  }, 60_000);
+
+  it("fails the build when only a mounted extension declares the missing external", async () => {
+    // A mounted extension declares the external and installs its own copy,
+    // but nothing makes Nitro's tracer copy it. This used to build and then
+    // fail to resolve from the relocated output.
+    const { appRoot } = await writeWorkspaceExternalFixture({ appDeclaresExternal: false });
+    const extensionRoot = join(appRoot, "node_modules", "@fixture", "ext");
+    await mkdir(join(extensionRoot, "dist", "extension"), { recursive: true });
+    await writeFile(
+      join(extensionRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          dependencies: { "fixture-workspace-external": "1.0.0" },
+          eve: { extension: { dist: "dist/extension", source: "extension" } },
+          exports: "./index.js",
+          name: "@fixture/ext",
+          type: "module",
+          version: "1.0.0",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(extensionRoot, "index.js"),
+      'import { value } from "fixture-workspace-external";\nexport default { name: "fx", value };\n',
+    );
+    await writeFile(
+      join(extensionRoot, "dist", "extension", "_manifest.json"),
+      `${JSON.stringify({
+        build: { externalDependencies: ["fixture-workspace-external"] },
+        builtWithEve: "0.0.0",
+        formatVersion: 2,
+        kind: "eve-extension",
+        requires: {},
+      })}\n`,
+    );
+    await writeExternalInstallation(
+      join(extensionRoot, "node_modules", "fixture-workspace-external"),
+    );
+    await mkdir(join(appRoot, "agent", "extensions"), { recursive: true });
+    await writeFile(
+      join(appRoot, "agent", "extensions", "fx.ts"),
+      'export { default } from "@fixture/ext";\n',
+    );
+    await mkdir(join(appRoot, "agent", "instrumentation"), { recursive: true });
+    await writeFile(
+      join(appRoot, "agent", "instrumentation", "provider.ts"),
+      [
+        'import { value } from "@fixture/backend";',
+        "",
+        "export default {",
+        "  setup() {",
+        "    (globalThis as Record<string, unknown>).__workspaceExternal = value;",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const compiled = await compileAgent({ startPath: join(appRoot, "agent") });
+    expect(compiled.manifest.extensionMounts.map((mount) => mount.externalDependencies)).toEqual([
+      ["fixture-workspace-external"],
+    ]);
+
+    await expect(buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS)).rejects.toThrow(
+      /"fixture-workspace-external" is listed in build\.externalDependencies and imported by the hosted bundle \(.+\), but the build output does not contain it\./,
+    );
+  }, 60_000);
 
   it("rewrites framework tool executors into hosted Vercel output", async () => {
     vi.stubEnv("VERCEL", "1");

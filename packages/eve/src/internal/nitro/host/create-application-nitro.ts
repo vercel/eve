@@ -37,6 +37,7 @@ import {
   configureProductionNitroRoutes,
 } from "#internal/nitro/host/configure-nitro-routes.js";
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
+import { createExternalDependencyOutputCheckPlugin } from "#internal/nitro/host/external-dependency-output-check-plugin.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
 import {
   createOptionalEngineDependencyPlugin,
@@ -112,14 +113,9 @@ function collectHostedTraceDependencies(
   const extensionExternalDependencies = new Set(
     collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
   );
-  const configuredExternalDependencies = [
-    ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
-    ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
-      subagent.configResolver === undefined
-        ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
-    ),
-  ];
+  const configuredExternalDependencies = collectConfiguredExternalDependencies(
+    preparedHost.compileResult.manifest,
+  );
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
@@ -138,6 +134,17 @@ function collectHostedTraceDependencies(
     (dependencyName) =>
       dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`,
   );
+}
+
+function collectConfiguredExternalDependencies(manifest: CompiledAgentManifest): string[] {
+  return [
+    ...(manifest.config.build?.externalDependencies ?? []),
+    ...manifest.subagents.flatMap((subagent) =>
+      subagent.configResolver === undefined
+        ? (subagent.agent.config.build?.externalDependencies ?? [])
+        : (subagent.configResolver.build?.externalDependencies ?? []),
+    ),
+  ];
 }
 
 function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): string[] {
@@ -610,6 +617,14 @@ function createApplicationNitroBundlerConfiguration(
     compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     createExtensionExternalDependencyPlugin(extensionMounts),
+    options.development
+      ? null
+      : createExternalDependencyOutputCheckPlugin({
+          appRoot: preparedHost.appRoot,
+          externalDependencies: collectConfiguredExternalDependencies(
+            preparedHost.compileResult.manifest,
+          ),
+        }),
     createExtensionMountPlugin(
       extensionMounts,
       extensionOverridePaths(preparedHost.compileResult.manifest),
