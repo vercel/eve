@@ -134,8 +134,9 @@
  *             machine's private state. The guard checks only those imports;
  *             it does not prove every state change emits events (approval
  *             candidates are still written directly, and `matchSignIns`
- *             emits none). The model step's streamed content (its calls and
- *             their inline results) is built where it streams.
+ *             emits none). The model step's streamed content (its calls) is
+ *             built where it streams, and their results where eve runs them
+ *             (`call-executor.ts`).
  *   rule 52 — The tracing library in `packages/tracing/src/` imports only
  *             itself and external packages. eve reaches it only through the
  *             vendored root, delegation, otel, and ai-sdk entrypoints under
@@ -586,8 +587,9 @@ const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
 const LIFECYCLE_EVENT_BUILDER_RE =
   /\bcreate(?:Session(?:Started|Waiting|Failed|Completed)|Turn(?:Started|Completed|Failed|Cancelled|Waiting)|MessageReceived|Step(?:Started|Failed)|Input(?:Requested|Resolved)|Authorization(?:Required|Completed)|Approval(?:Candidate|Settled)|Task(?:Started|Settled)|ContextCleared|ResultCompleted)Event\b/;
 const CALL_EVENT_BUILDER_RE = /\bcreateAction(?:Result|sRequested)Event\b/;
-/** Where the model step streams its calls, their inline results, and the calls they made. */
+/** Where the model step streams its calls, runs them, and reports the calls they made. */
 const STREAM_CONTENT_FILES = new Set([
+  "packages/eve/src/harness/call-executor.ts",
   "packages/eve/src/harness/emission.ts",
   "packages/eve/src/harness/nested-actions.ts",
   "packages/eve/src/harness/step-hooks.ts",

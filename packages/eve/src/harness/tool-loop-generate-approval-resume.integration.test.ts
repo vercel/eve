@@ -214,6 +214,43 @@ function createConfig(
   };
 }
 
+/** Instrumentation whose every attempt reports to `integration`, as a traced agent's does. */
+function attemptInstrumentation(
+  integration: Telemetry,
+  onEvent?: (event: { readonly type: string }, attemptIndex: number | undefined) => void,
+): NonNullable<ToolLoopHarnessConfig["instrumentation"]> {
+  return {
+    installAiSdkWarningLogger: () => {},
+    runStep: async (input, run) =>
+      await run({
+        createHandleEvent:
+          ({ getAttemptScope }) =>
+          async (event) => {
+            onEvent?.(event, getAttemptScope?.()?.attemptIndex);
+          },
+        prepareAttempt: ({ attemptIndex, stepIndex, turnId }) => ({
+          complete: async () => {},
+          fail: async () => {},
+          scope: {
+            attemptId: `${turnId}:${stepIndex}:${attemptIndex}`,
+            attemptIndex,
+            sessionId: input.session.sessionId,
+            stepIndex,
+            turnId,
+          } as InstrumentationAttemptScope,
+          telemetry: { integrations: [integration], isEnabled: true },
+        }),
+        preparePreamble: async () => undefined,
+        publishInputResolutions: async () => {},
+        recordError: () => {},
+        resolveRuntimeContext: () => undefined,
+        session: input.session,
+        setTurnId: () => {},
+        telemetry: () => undefined,
+      }),
+  };
+}
+
 function findPart(
   messages: readonly ModelMessage[],
   type: "tool-approval-response" | "tool-call" | "tool-result",
@@ -867,37 +904,9 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       },
     };
     const resultAttempts: Array<number | undefined> = [];
-    const instrumentation: NonNullable<ToolLoopHarnessConfig["instrumentation"]> = {
-      installAiSdkWarningLogger: () => {},
-      runStep: async (input, run) =>
-        await run({
-          createHandleEvent:
-            ({ getAttemptScope }) =>
-            async (event) => {
-              if (event.type === "action.result")
-                resultAttempts.push(getAttemptScope?.()?.attemptIndex);
-            },
-          prepareAttempt: ({ attemptIndex, stepIndex, turnId }) => ({
-            complete: async () => {},
-            fail: async () => {},
-            scope: {
-              attemptId: `${turnId}:${stepIndex}:${attemptIndex}`,
-              attemptIndex,
-              sessionId: input.session.sessionId,
-              stepIndex,
-              turnId,
-            } as InstrumentationAttemptScope,
-            telemetry: { integrations: [integration], isEnabled: true },
-          }),
-          preparePreamble: async () => undefined,
-          publishInputResolutions: async () => {},
-          recordError: () => {},
-          resolveRuntimeContext: () => undefined,
-          session: input.session,
-          setTurnId: () => {},
-          telemetry: () => undefined,
-        }),
-    };
+    const instrumentation = attemptInstrumentation(integration, (event, attemptIndex) => {
+      if (event.type === "action.result") resultAttempts.push(attemptIndex);
+    });
 
     await contextStorage.run(createApprovalContext(), () =>
       createToolLoopHarness({ ...createConfig(model, execute), instrumentation })(
@@ -916,6 +925,46 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       "model operation",
     ]);
     expect(resultAttempts).toEqual([0]);
+  });
+
+  it("runs a model's call inside its attempt's telemetry, under the model call that made it", async () => {
+    const execute = vi.fn(async () => "/workspace");
+    let streams = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () =>
+        streams++ === 0
+          ? toolCallStreamResult({
+              input: JSON.stringify(toolCall.input),
+              toolCallId: "fresh-call",
+              toolName: toolCall.toolName,
+            })
+          : textStreamResult("The command returned /workspace."),
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const operations: string[] = [];
+    const executions: { readonly callId: string; readonly toolCallId: string }[] = [];
+    const integration: Telemetry = {
+      onStart: (event) => {
+        operations.push(event.callId);
+      },
+      executeTool: async ({ callId, execute: run, toolCallId }) => {
+        executions.push({ callId, toolCallId });
+        return await run();
+      },
+    };
+
+    const result = await contextStorage.run(createApprovalContext(), () =>
+      createToolLoopHarness({
+        ...createConfig(model, execute),
+        instrumentation: attemptInstrumentation(integration),
+      })(createBaseSession(), { message: "Run pwd." }),
+    );
+
+    expect(execute).toHaveBeenCalledOnce();
+    // The integration's wrapper nests the call, so work it does is attributed to it.
+    expect(executions).toEqual([{ callId: operations[0], toolCallId: "fresh-call" }]);
+    expect(typeof result.next).toBe("function");
   });
 
   it("persists the approved pre-model tool result without an event handler", async () => {
