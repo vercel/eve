@@ -12,12 +12,12 @@ import {
 } from "#instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
 import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local/traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
-import { otelTelemetry } from "#compiled/@eve/tracing/index.js";
+import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import type { RegisteredOtelPipeline } from "#tracing/eve/otel-registration.js";
 import { registerOtel } from "#tracing/eve/otel-registration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";

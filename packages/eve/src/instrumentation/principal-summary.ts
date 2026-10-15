@@ -11,7 +11,7 @@ import {
 } from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { resolveTracePolicyDecision } from "#shared/trace-policy.js";
-import { boundedPrincipalId } from "#compiled/@eve/tracing/otel.js";
+import { boundedPrincipalId } from "#compiled/@vercel/agent-runs/otel.js";
 
 export function summarizeInstrumentationPrincipal(
   principal: SessionAuthContext | null | undefined,

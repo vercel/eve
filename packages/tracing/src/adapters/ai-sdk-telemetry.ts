@@ -1,5 +1,5 @@
 import type { Telemetry } from "ai";
-import type { AgentTracing, TurnInput } from "../agent-tracing.js";
+import type { AgentRun, TurnInput } from "../agent-run.js";
 import type {
   AttemptOperation,
   ModelOperation,
@@ -30,7 +30,7 @@ const ABANDONED = { outcome: "abandoned" } as const;
  * Pass it to `telemetry.integrations` of `generateText`, `streamText`, or an
  * agent such as `HarnessAgent`.
  */
-export function aiSdkTelemetry(tracing: AgentTracing, options: AiSdkTelemetryOptions): Telemetry {
+export function aiSdkTelemetry(tracing: AgentRun, options: AiSdkTelemetryOptions): Telemetry {
   const generations = new Map<string, Generation>();
 
   function generation(callId: string): Generation {

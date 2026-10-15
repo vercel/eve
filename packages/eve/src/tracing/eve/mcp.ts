@@ -10,7 +10,7 @@ import {
   otelTelemetry,
   type CaptureDecision,
   type ContentSerializer,
-} from "#compiled/@eve/tracing/index.js";
+} from "#compiled/@vercel/agent-runs/index.js";
 import {
   activeTraceOperation,
   contentAttribute,
@@ -18,7 +18,7 @@ import {
   truncateTelemetryText,
   type McpLifecycle,
   type McpUpdate,
-} from "#compiled/@eve/tracing/otel.js";
+} from "#compiled/@vercel/agent-runs/otel.js";
 import { eveOutputMapping } from "./profile.js";
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

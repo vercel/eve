@@ -35,7 +35,7 @@ import type {
   AgentTelemetry,
   AttemptOperation,
   ModelOperation,
-} from "#compiled/@eve/tracing/index.js";
+} from "#compiled/@vercel/agent-runs/index.js";
 import { isUserMessageKind } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
 

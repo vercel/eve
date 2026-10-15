@@ -6,11 +6,11 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import { resumeTool } from "#tracing/eve/agent-tool-instrumentation.js";
 import type { AgentActionTraceState } from "#tracing/eve/agent-trace-state.js";
-import type { AgentTracing } from "#compiled/@eve/tracing/index.js";
+import type { AgentRun } from "#compiled/@vercel/agent-runs/index.js";
 
 /** Approval spans live under their tool call; hook state keeps only the locator. */
 export function createAgentApprovalInstrumentation(input: {
-  readonly tracing: AgentTracing;
+  readonly tracing: AgentRun;
   readonly actionStateFor: (
     sessionId: string,
     turnId: string,

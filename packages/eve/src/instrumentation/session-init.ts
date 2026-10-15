@@ -30,7 +30,7 @@ import {
   resolveTracePolicy,
   resolveTracePolicyDecision,
 } from "#shared/trace-policy.js";
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 
