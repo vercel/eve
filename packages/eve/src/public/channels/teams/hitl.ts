@@ -113,18 +113,15 @@ export function renderAnsweredInputRequestMessage(input: {
 }
 
 /**
- * Renders the card that replaces a prompt no session can answer anymore. A
- * press carries only an approval's prompt, so other cards show just `notice`.
+ * Renders the card that replaces a prompt no session can answer anymore: its
+ * prompt, then `label`, as the session would have resolved it.
  */
-export function renderInactiveInputRequestMessage(
-  prompt: string | undefined,
-  notice: string,
-): TeamsMessageBody {
-  return renderSettledInputRequestMessage(prompt, { text: notice });
+export function renderInactiveInputRequestMessage(prompt: string, label: string): TeamsMessageBody {
+  return renderSettledInputRequestMessage(prompt, { text: label });
 }
 
 function renderSettledInputRequestMessage(
-  prompt: string | undefined,
+  prompt: string,
   status: { readonly color?: string; readonly text: string },
 ): TeamsMessageBody {
   return {
@@ -133,15 +130,11 @@ function renderSettledInputRequestMessage(
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
           body: [
-            ...(prompt === undefined
-              ? []
-              : [
-                  {
-                    text: truncate(prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-                    type: "TextBlock",
-                    wrap: true,
-                  },
-                ]),
+            {
+              text: truncate(prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+              type: "TextBlock",
+              wrap: true,
+            },
             { ...status, type: "TextBlock", wrap: true },
           ],
           type: "AdaptiveCard",
@@ -167,6 +160,11 @@ export function isTeamsToolApprovalResponseActivity(activity: TeamsActivity): bo
 
 /** Reads the original prompt from a tool-approval submit activity. */
 export function readTeamsToolApprovalPrompt(activity: TeamsActivity): string | undefined {
+  return isTeamsToolApprovalResponseActivity(activity) ? readTeamsInputPrompt(activity) : undefined;
+}
+
+/** Reads the prompt a submit activity answers, which every eve card carries in its submit data. */
+export function readTeamsInputPrompt(activity: TeamsActivity): string | undefined {
   const value = readActivityValue(activity);
   const payload = value && readHitlPayload(value);
   const prompt = payload?.[TEAMS_HITL_PROMPT_KEY];
@@ -269,11 +267,13 @@ function renderActions(
   replyToActivityId: string | undefined,
 ): readonly Record<string, unknown>[] {
   const payload = (optionId?: string): Record<string, unknown> => {
-    const value: Record<string, unknown> = { requestId: request.requestId };
-    if (request.kind === "tool-approval") {
-      value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
-      value[TEAMS_HITL_PROMPT_KEY] = request.prompt;
-    }
+    // The prompt rides along so a card can be retired without the session
+    // that posted it, such as when that session is gone.
+    const value: Record<string, unknown> = {
+      requestId: request.requestId,
+      [TEAMS_HITL_PROMPT_KEY]: request.prompt,
+    };
+    if (request.kind === "tool-approval") value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
     if (replyToActivityId !== undefined) value.replyToActivityId = replyToActivityId;
     if (optionId !== undefined) value.optionId = optionId;
     return value;

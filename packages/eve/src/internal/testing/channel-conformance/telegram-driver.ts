@@ -236,7 +236,7 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
           data,
           from: PEOPLE[person],
           id: `callback-${updateId}`,
-          message: { chat: CHAT, date: 0, message_id: messageId },
+          message: { chat: CHAT, date: 0, message_id: messageId, text: texts.get(messageId) },
         },
       });
     },

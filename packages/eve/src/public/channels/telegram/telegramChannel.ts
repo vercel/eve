@@ -1,10 +1,7 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import {
-  INACTIVE_REQUEST_NOTICE,
-  isUnanswerableResponseError,
-} from "#channel/session-not-active-error.js";
+import { respondOrRetireInactivePrompt } from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -46,6 +43,7 @@ import {
   resolveTelegramInputResponses,
   telegramCallbackInputResponse,
   telegramReplyInputResponses,
+  telegramResolvedPromptText,
   type TelegramHitlState,
 } from "#public/channels/telegram/hitl.js";
 import {
@@ -54,6 +52,7 @@ import {
   type TelegramCallbackQuery,
   type TelegramChatType,
   type TelegramMessage,
+  type TelegramMessageReference,
 } from "#public/channels/telegram/inbound.js";
 import {
   mergeUploadPolicy,
@@ -630,21 +629,23 @@ async function dispatchCallbackQuery(input: {
     let answer = "Answer received.";
     const message = input.query.message;
     if (message && state.chatId) {
-      try {
-        const source = input.from(telegramContinuationTokenFromState(state));
+      const source = input.from(telegramContinuationTokenFromState(state));
+      const data = input.query.data;
+      await respondOrRetireInactivePrompt(
         // The presser acts as themselves, so a press that starts a turn lets
         // their next message steer it.
-        await source.respond([telegramCallbackInputResponse(input.query.data)], {
-          auth: defaultTelegramAuth({ ...message, from: input.query.from }),
-        });
-      } catch (error) {
-        if (isUnanswerableResponseError(error)) {
-          answer = INACTIVE_REQUEST_NOTICE;
-          await retireInactivePrompt(telegram, message.messageId, error);
-        } else {
-          log.error("callback query delivery failed", { error });
-        }
-      }
+        () =>
+          source.respond([telegramCallbackInputResponse(data)], {
+            auth: defaultTelegramAuth({ ...message, from: input.query.from }),
+          }),
+        {
+          retirePrompt: (label) => retireInactivePrompt(telegram, message, label),
+          notifyPresser: async (notice) => {
+            answer = notice;
+          },
+        },
+        log,
+      );
     }
     try {
       await telegram.telegram.answerCallbackQuery({
@@ -677,23 +678,25 @@ async function dispatchCallbackQuery(input: {
 }
 
 /**
- * A press that reached no session can never be taken, and eve will never
- * withdraw the prompt, so its keyboard is removed here.
+ * Edits a prompt no session holds the way `input.resolved` edits a resolved
+ * one. The session's record of the prompt is gone, so its text comes from the
+ * pressed message.
  */
 async function retireInactivePrompt(
   telegram: TelegramContext,
-  messageId: string,
-  error: unknown,
+  message: TelegramMessageReference,
+  label: string,
 ): Promise<void> {
-  log.warn("Telegram HITL answer reached no active session", { error });
-  try {
-    await telegram.telegram.editMessageReplyMarkup({
-      messageId,
-      replyMarkup: { inline_keyboard: [] },
-    });
-  } catch (editError) {
-    log.warn("Telegram inactive prompt edit failed", { error: editError });
+  const replyMarkup = { inline_keyboard: [] };
+  if (message.text === undefined) {
+    await telegram.telegram.editMessageReplyMarkup({ messageId: message.messageId, replyMarkup });
+    return;
   }
+  await telegram.telegram.editMessageText({
+    messageId: message.messageId,
+    replyMarkup,
+    text: telegramResolvedPromptText(message.text, label),
+  });
 }
 
 function attachTelegramDeliver(channel: TelegramChannel): void {

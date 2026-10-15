@@ -1,10 +1,7 @@
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import {
-  INACTIVE_REQUEST_NOTICE,
-  isUnanswerableResponseError,
-} from "#channel/session-not-active-error.js";
+import { respondOrRetireInactivePrompt } from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -55,6 +52,7 @@ import {
   isTeamsToolApprovalResponseActivity,
   readTeamsInputReplyToActivityId,
   readTeamsToolApprovalPrompt,
+  readTeamsInputPrompt,
   renderInactiveInputRequestMessage,
   teamsInvokeResponse,
 } from "#public/channels/teams/hitl.js";
@@ -695,15 +693,14 @@ async function handleInvoke(input: {
   if (reveal !== null) return Response.json(await revealAuthorization({ ...input, reveal }));
 
   if (isTeamsInputResponseActivity(input.activity)) {
-    input.waitUntil(
-      dispatchInputResponses({
-        activity: input.activity,
-        config: input.config,
-        onInputResponse: input.onInputResponse,
-        from: input.from,
-      }),
-    );
-    return Response.json(teamsInvokeResponse());
+    // Answered after delivery, so the presser learns when no session took it.
+    const notice = await dispatchInputResponses({
+      activity: input.activity,
+      config: input.config,
+      onInputResponse: input.onInputResponse,
+      from: input.from,
+    });
+    return Response.json(teamsInvokeResponse(notice === undefined ? {} : { message: notice }));
   }
 
   if (input.config.onInvoke === undefined) return teamsOk();
@@ -744,14 +741,18 @@ async function revealAuthorization(input: {
   });
 }
 
+/**
+ * Delivers a card submission. Returns the notice for the person who submitted
+ * when no session could take it, which only an invoke's response can show them.
+ */
 async function dispatchInputResponses(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-}): Promise<void> {
+}): Promise<string | undefined> {
   const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
-  if (inputResponses.length === 0) return;
+  if (inputResponses.length === 0) return undefined;
   const state = stateFromActivity(input.activity);
   const ctx = buildTeamsBinding({ config: input.config, state });
   let result: TeamsInputResponseResult;
@@ -759,44 +760,36 @@ async function dispatchInputResponses(input: {
     result = await input.onInputResponse(ctx, input.activity);
   } catch (error) {
     log.error("Teams input response authorization failed", { error });
-    return;
+    return undefined;
   }
-  if (result === null) return;
-  try {
-    await input
-      .from(
-        cardContinuationToken(
-          input.activity,
-          state,
-          readTeamsInputReplyToActivityId(input.activity),
-        ),
-      )
-      .respond(inputResponses, {
-        auth: result.auth,
-        state: approvalResponseStatePatch(input.activity, result.auth),
-      });
-  } catch (error) {
-    if (!isUnanswerableResponseError(error)) {
-      log.error("Teams input response delivery failed", { error });
-      return;
-    }
-    // No session can take the answer, and eve will never withdraw the
-    // request, so its card stops offering choices here.
-    log.warn("Teams input response reached no active session", { error });
-    const activityId = input.activity.replyToId;
-    if (activityId === undefined) return;
-    try {
-      await ctx.thread.update(
-        activityId,
-        renderInactiveInputRequestMessage(
-          readTeamsToolApprovalPrompt(input.activity),
-          INACTIVE_REQUEST_NOTICE,
-        ),
-      );
-    } catch (updateError) {
-      log.error("Teams inactive card update failed", { error: updateError });
-    }
-  }
+  if (result === null) return undefined;
+  const auth = result.auth;
+  const activity = input.activity;
+  let notice: string | undefined;
+  await respondOrRetireInactivePrompt(
+    () =>
+      input
+        .from(cardContinuationToken(activity, state, readTeamsInputReplyToActivityId(activity)))
+        .respond(inputResponses, {
+          auth,
+          state: approvalResponseStatePatch(activity, auth),
+        }),
+    {
+      async retirePrompt(label) {
+        const prompt = readTeamsInputPrompt(activity);
+        if (activity.replyToId === undefined || prompt === undefined) return;
+        await ctx.thread.update(
+          activity.replyToId,
+          renderInactiveInputRequestMessage(prompt, label),
+        );
+      },
+      async notifyPresser(text) {
+        notice = text;
+      },
+    },
+    log,
+  );
+  return notice;
 }
 
 function stateFromActivity(

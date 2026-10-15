@@ -138,30 +138,6 @@ const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
 const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
 
-const INACTIVE_PROMPT_RULES = [
-  "pressing Approve after the session's run ended outside eve runs nothing and clears the approval's buttons",
-  "pressing an option after the session's run ended outside eve clears the question's buttons",
-  "pressing an option after the session's run ended outside eve tells the person it is no longer active",
-  "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active",
-] as const satisfies readonly ContractRuleName[];
-
-/** A press no session can take is only logged, so the prompt stays live and nobody is told (#4835). */
-function inactivePromptsUnhandled(): Partial<Record<ContractRuleName, BrokenCell>> {
-  return Object.fromEntries(
-    INACTIVE_PROMPT_RULES.map((rule) => [
-      rule,
-      {
-        reason: "a press no session can take is only logged; the prompt stays live",
-        symptom:
-          /the answered prompt still offers|Timed out waiting for the bot to show \/no longer active/u,
-      },
-    ]),
-  );
-}
-
-const INACTIVE_QUESTION_RULE =
-  "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active" satisfies ContractRuleName;
-
 const CHAT_SDK_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
     "approvalPress",
@@ -169,20 +145,16 @@ const CHAT_SDK_BROKEN = {
     "questionPress",
     "questionText",
   ]),
-  ...Object.fromEntries(
-    INACTIVE_PROMPT_RULES.map((rule) => [
-      rule,
-      {
-        reason: "a press no session can take throws out of the action handler",
-        symptom: /the target session was not found via continuation token/u,
-      },
-    ]),
-  ),
+  "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active":
+    {
+      reason:
+        "a press carries only the card's message id, and the session that knew its prompt is gone, so the retired card shows only how it ended",
+      symptom: /the inactive prompt reads .* to contain/u,
+    },
 };
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...inactivePromptsUnhandled(),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -219,11 +191,6 @@ const SLACK_BROKEN = {
 
 const TEAMS_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
-  [INACTIVE_QUESTION_RULE]: {
-    reason:
-      "a press carries only an approval's prompt, so an inactive question's card shows the notice alone",
-    symptom: /the inactive prompt reads .* to contain/u,
-  },
 } satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
 const TELEGRAM_BROKEN = {
@@ -233,11 +200,6 @@ const TELEGRAM_BROKEN = {
     "questionPress",
     "questionText",
   ]),
-  [INACTIVE_QUESTION_RULE]: {
-    reason:
-      "only the presser's callback answer says the prompt is no longer active; the prompt keeps its text",
-    symptom: /the inactive prompt reads .* to match/u,
-  },
 };
 
 const TUI_TYPED_APPROVAL =

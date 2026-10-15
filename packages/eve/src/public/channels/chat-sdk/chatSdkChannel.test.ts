@@ -4,7 +4,9 @@ import type { Message as ExternalMessage, Thread as ExternalThread } from "chat"
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import { INACTIVE_REQUEST_NOTICE } from "#channel/inactive-prompt.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
@@ -112,6 +114,7 @@ async function firePost(
   channel: unknown,
   path: string,
   body: Record<string, unknown>,
+  sendError?: Error,
 ): Promise<{
   cancel: ReturnType<typeof vi.fn>;
   response: Response;
@@ -124,6 +127,7 @@ async function firePost(
     throw new Error(`Expected POST ${path}.`);
   }
   const send = vi.fn().mockResolvedValue({ id: "session-1" });
+  if (sendError) send.mockRejectedValue(sendError);
   const cancel = vi.fn().mockResolvedValue({ sessionId: "session-1", status: "accepted" });
   const waitUntil = vi.fn();
   const channelContext = mockChannelContext<ChatSdkChannelState>(send);
@@ -353,6 +357,67 @@ describe("chatSdkChannel", () => {
         inputResponses: [{ optionId: "approve", requestId: "request-1" }],
       }),
     );
+  });
+
+  describe("pressing a button no session can take", () => {
+    const press = { actionId: "eve_input:request-1:approve", kind: "action", value: "approve" };
+
+    async function pressWith(adapter: TestAdapter & Adapter, error: Error) {
+      const ephemerals: Array<{ message: AdapterPostableMessage; userId: string }> = [];
+      adapter.postEphemeral = async (threadId, userId, posted) => {
+        ephemerals.push({ message: posted, userId });
+        return { id: "e1", raw: {}, threadId, usedFallback: false };
+      };
+      const bridge = chatSdkChannel({
+        adapters: { test: adapter },
+        concurrency: "concurrent",
+        logger: "warn",
+        state: memoryState(),
+        userName: "bot",
+      });
+      const { response } = await firePost(bridge.channel, "/eve/v1/test", press, error);
+      expect(response.status).toBe(200);
+      return ephemerals;
+    }
+
+    it("retires the pressed card and tells only the presser", async () => {
+      const adapter = testAdapter();
+
+      const ephemerals = await pressWith(adapter, new SessionNotActiveError());
+
+      expect(adapter.edited).toMatchObject([
+        {
+          message: {
+            card: { type: "card", children: [{ type: "text", content: "No longer active" }] },
+            fallbackText: "No longer active",
+          },
+          messageId: "message-1",
+          threadId: THREAD_ID,
+        },
+      ]);
+      expect(ephemerals).toEqual([
+        { message: { markdown: INACTIVE_REQUEST_NOTICE }, userId: author().userId },
+      ]);
+    });
+
+    it("still tells the presser when the adapter can't edit", async () => {
+      const adapter = testAdapter();
+      adapter.editError = new NotImplementedError("editMessage");
+
+      const ephemerals = await pressWith(adapter, new SessionNotActiveError());
+
+      expect(adapter.edited).toEqual([]);
+      expect(ephemerals).toHaveLength(1);
+    });
+
+    it("leaves the card live after a failure a retry may fix", async () => {
+      const adapter = testAdapter();
+
+      const ephemerals = await pressWith(adapter, new Error("network down"));
+
+      expect(adapter.edited).toEqual([]);
+      expect(ephemerals).toEqual([]);
+    });
   });
 
   it("fails loudly when bridge.send is called outside a Chat SDK webhook", async () => {

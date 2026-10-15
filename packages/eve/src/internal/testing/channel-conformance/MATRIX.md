@@ -71,10 +71,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `photon` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| pressing Approve after the session's run ended outside eve runs nothing and clears the approval's buttons | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> |  | —<sup>[1](#note-1)</sup> | ❌<sup>[16](#note-16)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
-| pressing an option after the session's run ended outside eve clears the question's buttons | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> |  | —<sup>[1](#note-1)</sup> | ❌<sup>[16](#note-16)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
-| pressing an option after the session's run ended outside eve tells the person it is no longer active | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> |  | —<sup>[1](#note-1)</sup> | ❌<sup>[16](#note-16)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
-| a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> |  | —<sup>[1](#note-1)</sup> | ❌<sup>[16](#note-16)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ❌<sup>[17](#note-17)</sup> |  | ❌<sup>[18](#note-18)</sup> |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing Approve after the session's run ended outside eve runs nothing and clears the approval's buttons | ✅ | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing an option after the session's run ended outside eve clears the question's buttons | ✅ | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing an option after the session's run ended outside eve tells the person it is no longer active | ✅ | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active | ✅ | ✅ | ❌<sup>[15](#note-15)</sup> |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
 
 ## Budget prompts
 
@@ -91,15 +91,15 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `photon` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| a sign-in names the service and shows its sign-in link | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[19](#note-19)</sup> | ❌<sup>[19](#note-19)</sup> | ❌<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[21](#note-21)</sup> | ✅ | ✅ | ✅ |
-| a sign-in shows its confirmation code | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[19](#note-19)</sup> | ❌<sup>[19](#note-19)</sup> | ❌<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[21](#note-21)</sup> | ✅ | ✅ | ✅ |
-| only the person signing in sees the sign-in link and code | —<sup>[22](#note-22)</sup> | —<sup>[22](#note-22)</sup> | ✅ | —<sup>[22](#note-22)</sup> | —<sup>[22](#note-22)</sup> | ✅ | —<sup>[22](#note-22)</sup> | ✅ | —<sup>[22](#note-22)</sup> | ✅ | —<sup>[22](#note-22)</sup> | ✅ | —<sup>[22](#note-22)</sup> | ✅ | —<sup>[22](#note-22)</sup> | ✅ | ❌<sup>[23](#note-23)</sup> | —<sup>[22](#note-22)</sup> | —<sup>[22](#note-22)</sup> |
-| someone else pressing a sign-in isn't shown its link or code | —<sup>[9](#note-9)</sup> | —<sup>[9](#note-9)</sup> | —<sup>[24](#note-24)</sup> | —<sup>[9](#note-9)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[25](#note-25)</sup> | —<sup>[9](#note-9)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[24](#note-24)</sup> | —<sup>[9](#note-9)</sup> | ✅ | —<sup>[9](#note-9)</sup> | ✅ | —<sup>[9](#note-9)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[10](#note-10)</sup> |
-| a sign-in without a link shows its instructions | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[19](#note-19)</sup> | ❌<sup>[19](#note-19)</sup> | ❌<sup>[20](#note-20)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ |
+| a sign-in names the service and shows its sign-in link | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ❌<sup>[16](#note-16)</sup> | ❌<sup>[17](#note-17)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[18](#note-18)</sup> | ✅ | ✅ | ✅ |
+| a sign-in shows its confirmation code | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ❌<sup>[16](#note-16)</sup> | ❌<sup>[17](#note-17)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[18](#note-18)</sup> | ✅ | ✅ | ✅ |
+| only the person signing in sees the sign-in link and code | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | ✅ | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> | ✅ | —<sup>[19](#note-19)</sup> | ✅ | —<sup>[19](#note-19)</sup> | ✅ | —<sup>[19](#note-19)</sup> | ✅ | —<sup>[19](#note-19)</sup> | ✅ | —<sup>[19](#note-19)</sup> | ✅ | ❌<sup>[20](#note-20)</sup> | —<sup>[19](#note-19)</sup> | —<sup>[19](#note-19)</sup> |
+| someone else pressing a sign-in isn't shown its link or code | —<sup>[9](#note-9)</sup> | —<sup>[9](#note-9)</sup> | —<sup>[21](#note-21)</sup> | —<sup>[9](#note-9)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[22](#note-22)</sup> | —<sup>[9](#note-9)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[21](#note-21)</sup> | —<sup>[9](#note-9)</sup> | ✅ | —<sup>[9](#note-9)</sup> | ✅ | —<sup>[9](#note-9)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[10](#note-10)</sup> | —<sup>[10](#note-10)</sup> |
+| a sign-in without a link shows its instructions | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ❌<sup>[16](#note-16)</sup> | ❌<sup>[17](#note-17)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ✅ | ✅ | ✅ |
 | after signing in, the agent carries on with the request | ✅ | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ | ✅ |
-| completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[19](#note-19)</sup> | ❌<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ |
+| completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ❌<sup>[16](#note-16)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ✅ | ✅ | ✅ |
 | message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[19](#note-19)</sup> | ✅ | ✅ | ✅ |
+| message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ✅ | ✅ | ✅ |
 
 ## Tool callers
 
@@ -112,10 +112,10 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 
 | Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `photon` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| an image a person sends reaches the agent with its bytes and type | —<sup>[26](#note-26)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[26](#note-26)</sup> | ✅ | ✅ | ✅ |
-| a PDF a person sends reaches the agent with its bytes and type | —<sup>[26](#note-26)</sup> | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[26](#note-26)</sup> | ✅ | ✅ | ✅ |
-| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[26](#note-26)</sup> | —<sup>[27](#note-27)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[26](#note-26)</sup> | ✅ | ✅ | ✅ |
-| a file sent earlier in the conversation is still there on a later message | —<sup>[26](#note-26)</sup> | ✅ | ✅ |  | ✅ | —<sup>[28](#note-28)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[26](#note-26)</sup> | ✅ | ✅ | ✅ |
+| an image a person sends reaches the agent with its bytes and type | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
+| a PDF a person sends reaches the agent with its bytes and type | —<sup>[23](#note-23)</sup> | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
+| a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[23](#note-23)</sup> | —<sup>[24](#note-24)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
+| a file sent earlier in the conversation is still there on a later message | —<sup>[23](#note-23)</sup> | ✅ | ✅ |  | ✅ | —<sup>[25](#note-25)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[23](#note-23)</sup> | ✅ | ✅ | ✅ |
 
 ## Notes
 
@@ -133,17 +133,14 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 12. <a id="note-12"></a>one person answers at their own terminal; there's nobody else to tell
 13. <a id="note-13"></a>one person answers in their own browser tab; there's nobody else to tell
 14. <a id="note-14"></a>a resolved prompt doesn't say who answered; input.resolved carries no responder
-15. <a id="note-15"></a>a press no session can take throws out of the action handler
-16. <a id="note-16"></a>a press no session can take is only logged; the prompt stays live
-17. <a id="note-17"></a>a press carries only an approval's prompt, so an inactive question's card shows the notice alone
-18. <a id="note-18"></a>only the presser's callback answer says the prompt is no longer active; the prompt keeps its text
-19. <a id="note-19"></a>the channel has no default sign-in renderer
-20. <a id="note-20"></a>Linq's openDM needs the person's phone handle, but a message names its sender by an opaque handle id, so the bot can only say to continue in a direct message
-21. <a id="note-21"></a>the rule applies only where the conversation is shared or private, and this one is public
-22. <a id="note-22"></a>the rule applies only where the conversation is public or shared, and this one is private
-23. <a id="note-23"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
-24. <a id="note-24"></a>the sign-in goes privately to the person signing in, so the thread shows nothing to press
-25. <a id="note-25"></a>the channel shows no sign-in, so there's nothing to press
-26. <a id="note-26"></a>the platform has no files a person can send
-27. <a id="note-27"></a>the browser sends a file's bytes with the message, so there is no download to fail
-28. <a id="note-28"></a>each slash command starts its own session, so no later message shares one with the file
+15. <a id="note-15"></a>a press carries only the card's message id, and the session that knew its prompt is gone, so the retired card shows only how it ended
+16. <a id="note-16"></a>the channel has no default sign-in renderer
+17. <a id="note-17"></a>Linq's openDM needs the person's phone handle, but a message names its sender by an opaque handle id, so the bot can only say to continue in a direct message
+18. <a id="note-18"></a>the rule applies only where the conversation is shared or private, and this one is public
+19. <a id="note-19"></a>the rule applies only where the conversation is public or shared, and this one is private
+20. <a id="note-20"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
+21. <a id="note-21"></a>the sign-in goes privately to the person signing in, so the thread shows nothing to press
+22. <a id="note-22"></a>the channel shows no sign-in, so there's nothing to press
+23. <a id="note-23"></a>the platform has no files a person can send
+24. <a id="note-24"></a>the browser sends a file's bytes with the message, so there is no download to fail
+25. <a id="note-25"></a>each slash command starts its own session, so no later message shares one with the file

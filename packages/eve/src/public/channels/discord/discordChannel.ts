@@ -1,5 +1,6 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
+import { respondOrRetireInactivePrompt } from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -25,6 +26,7 @@ import {
   defaultDiscordAuth,
   defaultEvents,
   defaultOnCommand,
+  editDiscordResolvedPrompt,
 } from "#public/channels/discord/defaults.js";
 import {
   deriveComponentInputResponses,
@@ -34,6 +36,7 @@ import {
 } from "#public/channels/discord/hitl.js";
 import {
   commandInteractionMessage,
+  DISCORD_EPHEMERAL_MESSAGE_FLAG,
   DISCORD_INTERACTION_RESPONSE_TYPE,
   DISCORD_INTERACTION_TYPE,
   formatDiscordContextBlock,
@@ -708,12 +711,13 @@ async function dispatchInputResponses(input: {
     hasMessageAnchor: input.conversationId !== input.interaction.id,
     initialResponseSent: true,
   });
+  const discord = buildDiscordHandle({ config: input.config, state });
   let result: DiscordInputResponseResult;
   try {
     result = await input.onInputResponse(
       {
         defaultAuth: defaultDiscordAuth(input.interaction),
-        discord: buildDiscordHandle({ config: input.config, state }),
+        discord,
       },
       input.interaction,
     );
@@ -722,15 +726,28 @@ async function dispatchInputResponses(input: {
     return;
   }
   if (result === null) return;
-  try {
-    await input
-      .from(discordContinuationToken(input.interaction.channelId, input.conversationId))
-      .respond(input.inputResponses, {
-        auth: result.auth,
-      });
-  } catch (error) {
-    log.error("interaction response delivery failed", { error });
-  }
+  const { auth } = result;
+  const source = input.from(
+    discordContinuationToken(input.interaction.channelId, input.conversationId),
+  );
+  await respondOrRetireInactivePrompt(
+    () => source.respond(input.inputResponses, { auth }),
+    {
+      // The session's record of the prompt is gone, so its text comes from the
+      // pressed message. A modal submitted outside a message has neither, and
+      // editing without the prompt would erase it.
+      retirePrompt: async (label) => {
+        const messageId = input.interaction.messageId;
+        const content = readMessageContent(input.interaction.raw);
+        if (messageId === undefined || content === undefined) return;
+        await editDiscordResolvedPrompt(discord, { content, messageId }, label);
+      },
+      notifyPresser: async (notice) => {
+        await discord.followup({ content: notice, flags: DISCORD_EPHEMERAL_MESSAGE_FLAG });
+      },
+    },
+    log,
+  );
 }
 
 function acceptAsPresser(ctx: DiscordInputResponseContext): DiscordInputResponseResult {

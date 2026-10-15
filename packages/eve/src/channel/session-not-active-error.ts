@@ -32,7 +32,3 @@ export class SessionNotActiveError extends Error {
 export function isUnanswerableResponseError(error: unknown): boolean {
   return SessionNotActiveError.is(error) || SessionStrandedError.is(error);
 }
-
-/** What a channel tells the person whose answer can never be taken. */
-export const INACTIVE_REQUEST_NOTICE =
-  "This request is no longer active. Send a new message to start again.";

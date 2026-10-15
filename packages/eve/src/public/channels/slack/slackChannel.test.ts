@@ -5036,7 +5036,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(slackOperations(fetchMock)).toEqual([]);
     expect(logs.records).toContainEqual(
-      expect.objectContaining({ level: "error", message: "HITL interaction delivery failed" }),
+      expect.objectContaining({ level: "error", message: "input response delivery failed" }),
     );
   });
 

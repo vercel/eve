@@ -49,6 +49,8 @@ export interface TelegramMessageReference {
   readonly from?: TelegramUser;
   readonly messageId: string;
   readonly messageThreadId?: number;
+  /** The message's text, which Telegram includes on a callback query's message. */
+  readonly text?: string;
 }
 
 /**
@@ -188,6 +190,7 @@ function parseMessageReference(value: unknown): TelegramMessageReference | undef
     messageId,
     messageThreadId:
       typeof value.message_thread_id === "number" ? value.message_thread_id : undefined,
+    text: typeof value.text === "string" ? value.text : undefined,
   };
 }
 

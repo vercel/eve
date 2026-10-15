@@ -1,11 +1,13 @@
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import { INACTIVE_REQUEST_NOTICE } from "#channel/inactive-prompt.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
@@ -131,9 +133,10 @@ function signedRequest(input: {
 async function firePost(
   channel: unknown,
   request: Request,
+  send: Mock<(...args: any[]) => any> = vi.fn().mockResolvedValue({ id: "s1" }),
 ): Promise<{
   response: Response;
-  send: ReturnType<typeof vi.fn>;
+  send: Mock<(...args: any[]) => any>;
   waitUntil: ReturnType<typeof vi.fn>;
 }> {
   const compiled = asCompiled(channel);
@@ -141,7 +144,6 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected discord channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ id: "s1" });
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
@@ -303,7 +305,7 @@ describe("discordChannel() inbound route", () => {
       })[0] as { components: Array<{ custom_id: string }> }
     ).components[0]!.custom_id;
     /** A press of Approve in guild G01, as Discord sends it: the presser on `member`. */
-    const press = (userId: string) =>
+    const press = (userId: string, content: string | null = "Approve?") =>
       signedRequest({
         body: JSON.stringify({
           application_id: "APP1",
@@ -312,7 +314,7 @@ describe("discordChannel() inbound route", () => {
           guild_id: "G01",
           id: `I-${userId}`,
           member: { user: { id: userId, username: userId } },
-          message: { id: "M01" },
+          message: { content, id: "M01" },
           token: "tok2",
           type: 3,
           version: 1,
@@ -371,6 +373,74 @@ describe("discordChannel() inbound route", () => {
 
       expect(send).not.toHaveBeenCalled();
       expect(logs.records).toContainEqual(expect.objectContaining(log));
+    });
+
+    describe("when no session takes the press", () => {
+      const notActive = () => vi.fn().mockRejectedValue(new SessionNotActiveError());
+      const discordApi = (config: Parameters<typeof discordChannel>[0] = {}) => {
+        const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) =>
+          Response.json({ channel_id: "C01", id: "M02" }),
+        );
+        return {
+          channel: discordChannel({
+            api: { fetch: fetchMock as typeof fetch },
+            credentials: { applicationId: "APP1", botToken: "bot-token", publicKey: publicKeyHex },
+            ...config,
+          }),
+          calls: () =>
+            fetchMock.mock.calls.map(([url, init]) => ({
+              body: JSON.parse(String(init?.body)) as unknown,
+              method: init?.method,
+              url: String(url),
+            })),
+        };
+      };
+      const prompt = {
+        body: { components: [], content: "Approve?\n\nNo longer active" },
+        method: "PATCH",
+        url: "https://discord.com/api/v10/channels/C01/messages/M01",
+      };
+      const notice = {
+        body: { allowed_mentions: { parse: [] }, content: INACTIVE_REQUEST_NOTICE, flags: 64 },
+        method: "POST",
+        url: "https://discord.com/api/v10/webhooks/APP1/tok2",
+      };
+
+      it("retires the pressed prompt and tells only the presser", async () => {
+        captureLogRecords();
+        const { channel, calls } = discordApi();
+
+        await firePost(channel, press("U01"), notActive());
+
+        expect(calls()).toEqual([prompt, notice]);
+      });
+
+      it("only tells the presser when the press carries no prompt to keep", async () => {
+        captureLogRecords();
+        const { channel, calls } = discordApi();
+
+        await firePost(channel, press("U01", null), notActive());
+
+        expect(calls()).toEqual([notice]);
+      });
+
+      it("leaves the prompt alone when delivery fails for another reason", async () => {
+        captureLogRecords();
+        const { channel, calls } = discordApi();
+
+        await firePost(channel, press("U01"), vi.fn().mockRejectedValue(new Error("boom")));
+
+        expect(calls()).toEqual([]);
+      });
+
+      it("leaves the prompt alone when onInputResponse drops the press", async () => {
+        captureLogRecords();
+        const { channel, calls } = discordApi({ onInputResponse: () => null });
+
+        await firePost(channel, press("U01"), notActive());
+
+        expect(calls()).toEqual([]);
+      });
     });
   });
 
