@@ -48,7 +48,16 @@ export default defineEval({
           break;
         }
         await t.require(history.status, equals(200));
-        if ((await history.text()).trim().length === 0) {
+        let body: string;
+        try {
+          body = await history.text();
+        } catch (error) {
+          // A purge can interrupt a read after the server commits its 200 response.
+          if (!(error instanceof TypeError)) throw error;
+          t.signal.throwIfAborted();
+          continue;
+        }
+        if (body.trim().length === 0) {
           purged = true;
           break;
         }
