@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
-import type { SessionContext } from "eve/context";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
+import type { ToolContext } from "eve/tools";
 
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
@@ -359,7 +359,7 @@ test("rejects repositories outside the configured organization before minting", 
 test("attributes pull requests to the person the tool context resolves", async () => {
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const contexts: unknown[] = [];
-  const context = { session: { id: "session-1" } } as SessionContext;
+  const context = { session: { id: "session-1" } } as ToolContext;
   await executeGitHubShell(
     { ...READ, command: 'gh pr create --repo vercel/internal-agents --title T --body "Why."' },
     {

@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 import { getToken, type ConnectTokenParams } from "@vercel/connect";
-import type { SessionContext } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
+import type { ToolContext } from "eve/tools";
 
 import { attributeCommand, coAuthorTrailer, type GitHubCoAuthor } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
@@ -34,10 +34,12 @@ export interface GitHubConfig {
   /**
    * Resolves who the current turn publishes for. When it returns a person,
    * `gh-signed-commit` messages and `gh pr create` bodies end with their
-   * `Co-authored-by` trailer. Return `null` to publish without one.
+   * `Co-authored-by` trailer. Return `null` to publish without one. It
+   * receives the `gh` tool's context, so `ctx.getToken` can resolve the
+   * requester's linked accounts.
    */
   readonly attribution?: (
-    ctx: SessionContext,
+    ctx: ToolContext,
   ) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
   readonly broker: (
     sandbox: SandboxSession,
@@ -59,7 +61,7 @@ export interface GitHubLeaseRule {
 
 interface GitHubShellDependencies {
   /** The calling tool's context, passed to `attribution`. */
-  readonly context?: SessionContext;
+  readonly context?: ToolContext;
   readonly getConnectToken?: typeof getToken;
   readonly getSandbox: () => Promise<SandboxSession>;
   /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
