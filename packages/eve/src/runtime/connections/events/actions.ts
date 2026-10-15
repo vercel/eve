@@ -259,7 +259,7 @@ export class ConnectionEventActions {
           ttlMs > MAX_TTL_MS)
       )
         throw new Error(
-          "ttlMs must be an integer from 120000 to 31536000000, or null to watch until stopped.",
+          `ttlMs must be an integer from ${MIN_TTL_MS} to ${MAX_TTL_MS}, or null to watch until stopped.`,
         );
       const id = createHash("sha256")
         .update(
