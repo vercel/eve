@@ -49,6 +49,7 @@ export function connectionEventStore(
         const saved: EventBinding = {
           ...binding,
           retired: binding.retired === true || existing?.retired === true ? true : undefined,
+          terminationDeliveryId: existing?.terminationDeliveryId ?? binding.terminationDeliveryId,
         };
         try {
           await backend.write({

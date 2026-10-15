@@ -43,9 +43,10 @@ it("preserves concurrent subscription creations", async () => {
 it("does not reactivate a retired watch when a stale writer retries", async () => {
   const store = connectionEventStore(connection(), owner);
   await store.save(binding);
-  await Promise.all([store.save({ ...binding, retired: true }), store.save(binding)]);
-  expect((await store.list()).watch?.retired).toBe(true);
-  expect((await store.save(binding)).retired).toBe(true);
+  const retirement = { retired: true as const, terminationDeliveryId: "terminated-1" };
+  await Promise.all([store.save({ ...binding, ...retirement }), store.save(binding)]);
+  expect((await store.list()).watch).toMatchObject(retirement);
+  expect(await store.save(binding)).toMatchObject(retirement);
 });
 
 it("scopes the registry to both principals and the authored connection", async () => {

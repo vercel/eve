@@ -3,10 +3,7 @@ import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { connectionEventStore } from "#runtime/connections/events/store.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { principalOf } from "#execution/session/principal.js";
-import {
-  connectionEventWorkflow,
-  connectionEventHookToken,
-} from "#runtime/connections/events/workflow.js";
+import { connectionEventHookToken } from "#runtime/connections/events/workflow.js";
 import { start, resumeHook } from "#internal/workflow/runtime.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
@@ -592,13 +589,53 @@ it("keeps failed callbacks pending for durable retry and prevents a duplicate su
   expect(callback).toHaveBeenCalledTimes(2);
 });
 
+it("retries termination after losing the registry write response without accepting new deliveries", async () => {
+  await watch();
+  initial = { ...initial, serializedContext: serializeContext(ctx) };
+  const normal = payload();
+  const { event: _event, ...envelope } = normal.delivery as Extract<
+    typeof normal.delivery,
+    { event: unknown }
+  >;
+  const message: ConnectionEventPayload = {
+    ...normal,
+    delivery: {
+      ...envelope,
+      control: { type: "terminated", error: { code: 1, message: "Ended" } },
+    },
+  };
+  const storage = connection.experimental_events!.storage!;
+  const write = storage.write.bind(storage);
+  vi.spyOn(storage, "write").mockImplementationOnce(async (input) => {
+    await write(input);
+    throw new Error("registry write response lost");
+  });
+  await expect(prepare(message)).rejects.toThrow("registry write response lost");
+  // A retry starts with the previous step's state, without its pending receipt.
+  expect((await prepare(normal)).accepted).toBe(false);
+  expect(
+    (
+      await prepare({
+        ...message,
+        delivery: { ...message.delivery, deliveryId: "another-termination" },
+      })
+    ).accepted,
+  ).toBe(false);
+  expect((await prepare(message)).accepted).toBe(true);
+  await dispatch(message);
+  expect(terminated).toHaveBeenCalledTimes(1);
+  expect((await prepare(message)).accepted).toBe(false);
+});
+
 it("registers and retires a durable event handler without a conversation session", async () => {
   await watch();
   const bindingId = crypto.randomUUID();
   const binding = { ...initial.state!.binding, id: bindingId };
-  const run = await start(connectionEventWorkflow, [{ binding, serializedContext: {} }]);
+  const run = await start(workflowRuntime.connectionEventWorkflowReference, [
+    { binding, serializedContext: {} },
+  ]);
   try {
-    await waitForHook(run, { token: connectionEventHookToken(bindingId) });
+    await waitForHook(run, { token: connectionEventHookToken(bindingId), timeout: 10_000 });
     await resumeHook(connectionEventHookToken(bindingId), { kind: "retire" });
     await run.returnValue;
     expect(callback).not.toHaveBeenCalled();

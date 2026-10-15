@@ -79,7 +79,12 @@ export async function prepareConnectionEventStep(input: {
   if (current === undefined || resolveBinding(ctx, input.payload, current) === undefined)
     return result(false);
   binding = current;
-  if (receipt === "complete" || (binding.retired && receipt !== "pending")) return result(false);
+  const resumingTermination =
+    "control" in delivery &&
+    delivery.control.type === "terminated" &&
+    binding.terminationDeliveryId === delivery.deliveryId;
+  if (receipt === "complete" || (binding.retired && receipt !== "pending" && !resumingTermination))
+    return result(false);
   // A timeout may have hidden Connect's successful subscribe response. Reconcile
   // the saved intent with its original idempotency key before trusting the ID.
   if (binding.subscription === undefined) {
@@ -116,7 +121,7 @@ export async function prepareConnectionEventStep(input: {
     return result(false);
   let next: EventBinding =
     "control" in delivery && delivery.control.type === "terminated"
-      ? { ...binding, retired: true }
+      ? { ...binding, retired: true, terminationDeliveryId: delivery.deliveryId }
       : binding;
   if ("control" in delivery && delivery.control.type === "gap")
     next = { ...next, gap: { cursor: delivery.control.cursor, deliveryId: delivery.deliveryId } };

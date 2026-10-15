@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { listToolMetadata } from "#execution/catalog/connection-auth.js";
 import type { ConnectionClient, ConnectionToolMetadata } from "#shared/connection-types.js";
 
@@ -34,6 +35,18 @@ it("keeps management actions available when MCP tool discovery fails", async () 
   const connection = client();
   vi.mocked(connection.getToolMetadata).mockRejectedValue(new Error("MCP unavailable"));
   expect(await listToolMetadata("issues", connection)).toEqual([management]);
+});
+
+it.each([
+  { remote: true, events: true },
+  { remote: true, events: false },
+  { remote: false, events: true },
+])("preserves sign-in when discovery requires authorization: %j", async (required) => {
+  const connection = client();
+  const error = new ConnectionAuthorizationRequiredError("issues");
+  if (required.remote) vi.mocked(connection.getToolMetadata).mockRejectedValue(error);
+  if (required.events) vi.mocked(connection.eventActions!.metadata).mockRejectedValue(error);
+  await expect(listToolMetadata("issues", connection)).rejects.toBe(error);
 });
 
 it("does not let hung event discovery hide responsive MCP tools", async () => {

@@ -18,6 +18,8 @@ export interface EventBinding {
   readonly request: ManagedEventSubscribeInput;
   readonly subscription?: ManagedEventSubscription;
   readonly retired?: true;
+  /** The termination delivery may finish after its retirement write is retried. */
+  readonly terminationDeliveryId?: string;
   readonly gap?: { readonly cursor: string | null; readonly deliveryId: string };
 }
 export interface ConnectionEventHandlerState {

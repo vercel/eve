@@ -126,6 +126,11 @@ async function listConnectionMetadata(
     client.getToolMetadata(),
     listEventActions(actions),
   ]);
+  // An auth challenge must reach the sign-in flow, not become a partial catalog.
+  for (const result of [remoteResult, actionResult]) {
+    if (result.status === "rejected" && isConnectionAuthorizationRequiredError(result.reason))
+      throw result.reason;
+  }
   const generated = actionResult.status === "fulfilled" ? actionResult.value : [];
   if (remoteResult.status === "rejected") {
     if (generated.length > 0) return generated;
@@ -149,7 +154,8 @@ async function listEventActions(
   });
   try {
     return await Promise.race([actions.metadata(), timeout]);
-  } catch {
+  } catch (error) {
+    if (isConnectionAuthorizationRequiredError(error)) throw error;
     return actions.recoveryMetadata();
   } finally {
     clearTimeout(timer);
