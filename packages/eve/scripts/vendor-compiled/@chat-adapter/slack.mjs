@@ -89,8 +89,6 @@ export default {
   ],
   plugins: [createOptionalNativeStubPlugin(["bufferutil", "utf-8-validate"])],
   copyDeclarations: createDeclarationCopier({
-    discoverExtraFiles: (distEntries) =>
-      distEntries.filter((entry) => /^types-.*\.d\.ts$/u.test(entry)),
     files: [
       { source: "index.d.ts", output: "index.d.ts" },
       { source: "blocks.d.ts", output: "blocks.d.ts" },
