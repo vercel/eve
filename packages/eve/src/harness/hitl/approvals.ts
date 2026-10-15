@@ -160,8 +160,7 @@ export interface ResponsePolicyPass {
     | "continue"
     | "continue-coordination"
     | "authorization-required"
-    | "responses-completed"
-    | "park";
+    | "responses-completed";
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
   /** The delivery minus the answers the policies took, plus the settlements they reached. */
@@ -232,7 +231,6 @@ export function answer(
     turn = withQueued(turn, queued);
   };
 
-  if (policy.kind === "park") return done({ next: "park" });
   if (policy.kind === "continue-coordination") {
     queue(policy.stepInput);
     return done({ next: "repeat" });

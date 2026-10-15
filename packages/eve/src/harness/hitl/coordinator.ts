@@ -57,8 +57,7 @@ interface ApprovalDeliveryResult {
     | "continue"
     | "continue-coordination"
     | "authorization-required"
-    | "responses-completed"
-    | "park";
+    | "responses-completed";
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }
@@ -108,17 +107,7 @@ export async function coordinateApprovalDelivery(input: {
     batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
   );
   const settledRequestIds = new Set(audit.settlements.map((settlement) => settlement.requestId));
-  if (batches.length === 0) {
-    const discardedDuplicate = hasResponseForRequest(input.stepInput, settledRequestIds);
-    const deduplicatedInput = discardedDuplicate
-      ? removeConsumedResponses(input.stepInput, settledRequestIds)
-      : input.stepInput;
-    return deliveryResult(
-      session,
-      deduplicatedInput,
-      discardedDuplicate && !hasMeaningfulInput(deduplicatedInput) ? "park" : "continue",
-    );
-  }
+  if (batches.length === 0) return deliveryResult(session, input.stepInput);
 
   const stepInput = input.stepInput;
   const authorizationRequiredRequestIds = new Set(
@@ -451,27 +440,6 @@ function failCandidate(input: {
       }),
     },
   };
-}
-
-function hasResponseForRequest(
-  stepInput: StepInput | undefined,
-  requestIds: ReadonlySet<string>,
-): boolean {
-  return (
-    stepInput?.attributedInputResponses?.some(({ response }) =>
-      requestIds.has(response.requestId),
-    ) === true ||
-    stepInput?.inputResponses?.some((response) => requestIds.has(response.requestId)) === true
-  );
-}
-
-function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
-  return (
-    stepInput?.message !== undefined ||
-    (stepInput?.attributedInputResponses?.length ?? 0) > 0 ||
-    (stepInput?.inputResponses?.length ?? 0) > 0 ||
-    (stepInput?.runtimeActionResults?.length ?? 0) > 0
-  );
 }
 
 function appendSettledResponses(
