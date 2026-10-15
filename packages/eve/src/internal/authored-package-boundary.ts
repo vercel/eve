@@ -312,7 +312,8 @@ export function normalizeExternalDependencies(
   return [...new Set(externalDependencies)].sort();
 }
 
-function resolveConfiguredExternalDependency(
+/** Returns the configured external that `source` imports (the entry itself or one of its subpaths). */
+export function resolveConfiguredExternalDependency(
   source: string,
   externalDependencies: readonly string[],
 ): string | undefined {

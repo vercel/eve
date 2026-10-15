@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -8,27 +8,57 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 
 const createDirectory = useTemporaryDirectories();
 
-async function writePackage(root: string): Promise<void> {
-  await mkdir(join(root, "node_modules", "pg"), { recursive: true });
-  await writeFile(join(root, "node_modules", "pg", "package.json"), '{"name":"pg"}\n');
+const APP_ROOT = join("/app");
+
+// A `pg` install whose exports include `./lib/client` only when `withClient`.
+async function writePackage(packageDir: string, input: { readonly withClient: boolean }) {
+  await mkdir(join(packageDir, "lib"), { recursive: true });
+  await writeFile(join(packageDir, "index.js"), "export default {};\n");
+  await writeFile(join(packageDir, "lib", "client.js"), "export default {};\n");
+  const exports = input.withClient
+    ? { ".": "./index.js", "./lib/client": "./lib/client.js" }
+    : { ".": "./index.js" };
+  await writeFile(join(packageDir, "package.json"), JSON.stringify({ exports, name: "pg" }));
 }
 
-async function checkOutput(input: { readonly installAt: "server" | "above" | "nowhere" }) {
+async function checkOutput(input: {
+  readonly installAt: "server" | "above" | "linked" | "nowhere";
+  readonly withClient?: boolean;
+}) {
   const root = await createDirectory("eve-external-output-check-");
   const serverDir = join(root, "server");
   await mkdir(join(serverDir, "_chunks"), { recursive: true });
-  if (input.installAt === "server") await writePackage(serverDir);
-  if (input.installAt === "above") await writePackage(root);
+  const withClient = input.withClient ?? true;
+  if (input.installAt === "server") {
+    await writePackage(join(serverDir, "node_modules", "pg"), { withClient });
+  }
+  if (input.installAt === "above") {
+    await writePackage(join(root, "node_modules", "pg"), { withClient });
+  }
+  if (input.installAt === "linked") {
+    // pnpm's layout: the output's node_modules entry links to a store
+    // outside it (on Windows, possibly another drive).
+    await writePackage(join(root, "store", "pg"), { withClient });
+    await mkdir(join(serverDir, "node_modules"), { recursive: true });
+    await symlink(join(root, "store", "pg"), join(serverDir, "node_modules", "pg"), "junction");
+  }
 
   const plugin = createExternalDependencyOutputCheckPlugin({
-    appRoot: "/app",
+    appRoot: APP_ROOT,
     externalDependencies: ["pg"],
   });
-  plugin?.writeBundle(
+  await plugin?.writeBundle(
     { dir: serverDir },
     {
-      "_chunks/db.mjs": { fileName: "_chunks/db.mjs", imports: ["pg/lib/client"], type: "chunk" },
+      "_chunks/db.mjs": {
+        code: "",
+        dynamicImports: [],
+        fileName: "_chunks/db.mjs",
+        imports: ["pg/lib/client"],
+        type: "chunk",
+      },
       "index.mjs": {
+        code: "",
         dynamicImports: ["pg"],
         fileName: "index.mjs",
         imports: ["_chunks/db.mjs", "zod"],
@@ -38,24 +68,41 @@ async function checkOutput(input: { readonly installAt: "server" | "above" | "no
   );
 }
 
+const missing = (specifier: string, chunk: string) =>
+  `"${specifier}" is listed in build.externalDependencies and imported by the hosted bundle (${chunk}), but the build output cannot resolve it. Add "pg" to the dependencies in ${join(APP_ROOT, "package.json")}.`;
+
 describe("external dependency output check", () => {
-  it("accepts a configured external the output contains", async () => {
+  it("accepts a configured external the output resolves", async () => {
     await expect(checkOutput({ installAt: "server" })).resolves.toBeUndefined();
   });
 
   it("rejects a configured external the output does not contain", async () => {
     await expect(checkOutput({ installAt: "nowhere" })).rejects.toThrow(
-      '"pg" is listed in build.externalDependencies and imported by the hosted bundle (_chunks/db.mjs), but the build output does not contain it. Add "pg" to the dependencies in /app/package.json.',
+      missing("pg/lib/client", "_chunks/db.mjs"),
     );
   });
 
   it("rejects a package that only resolves from above the output", async () => {
-    await expect(checkOutput({ installAt: "above" })).rejects.toThrow('"pg" is listed');
+    await expect(checkOutput({ installAt: "above" })).rejects.toThrow(
+      missing("pg/lib/client", "_chunks/db.mjs"),
+    );
+  });
+
+  it("rejects a package linked into the output from outside it", async () => {
+    await expect(checkOutput({ installAt: "linked" })).rejects.toThrow(
+      missing("pg/lib/client", "_chunks/db.mjs"),
+    );
+  });
+
+  it("rejects an imported subpath the packaged version does not export", async () => {
+    await expect(checkOutput({ installAt: "server", withClient: false })).rejects.toThrow(
+      missing("pg/lib/client", "_chunks/db.mjs"),
+    );
   });
 
   it("does nothing when no externals are configured", () => {
     expect(
-      createExternalDependencyOutputCheckPlugin({ appRoot: "/app", externalDependencies: [] }),
+      createExternalDependencyOutputCheckPlugin({ appRoot: APP_ROOT, externalDependencies: [] }),
     ).toBeNull();
   });
 });

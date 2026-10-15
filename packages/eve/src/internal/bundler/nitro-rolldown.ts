@@ -6,7 +6,7 @@ import {
   onVendoredDependencyLog,
 } from "#internal/bundler/vendored-dependency-log.js";
 
-type RolldownOutputChunk = {
+export type RolldownOutputChunk = {
   readonly type: "chunk";
   readonly code: string;
   readonly fileName: string;
@@ -14,7 +14,7 @@ type RolldownOutputChunk = {
   readonly dynamicImports: readonly string[];
 };
 
-type RolldownOutputAsset = {
+export type RolldownOutputAsset = {
   readonly type: "asset";
   readonly fileName: string;
   readonly source: string | Uint8Array;
@@ -71,6 +71,45 @@ function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
   })();
 
   return rolldownParseAstPromise;
+}
+
+type RolldownResolveResult = { readonly path?: string; readonly error?: string };
+
+type RolldownResolver = {
+  sync(directory: string, specifier: string): RolldownResolveResult;
+};
+
+type RolldownExperimentalModule = {
+  readonly ResolverFactory: new (options: Record<string, unknown>) => RolldownResolver;
+};
+
+let rolldownNodeImportResolverPromise: Promise<RolldownResolver> | undefined;
+
+/**
+ * Returns Rolldown's resolver (oxc-resolver), loaded from Nitro's dependency
+ * tree and configured like Node's ESM loader resolving an `import`: `node` and
+ * `import` export conditions, fully specified subpaths, no `NODE_PATH`.
+ * Results are realpaths.
+ */
+export function loadNitroRolldownNodeImportResolver(): Promise<RolldownResolver> {
+  rolldownNodeImportResolverPromise ??= (async () => {
+    const require = createRequire(import.meta.url);
+    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
+    const experimentalPath = nitroRequire.resolve("rolldown/experimental");
+    const { ResolverFactory } = (await import(
+      pathToFileURL(experimentalPath).href
+    )) as RolldownExperimentalModule;
+    return new ResolverFactory({
+      conditionNames: ["node", "import"],
+      extensions: [".js", ".mjs", ".cjs", ".json", ".node"],
+      fullySpecified: true,
+      mainFields: ["main"],
+      nodePath: false,
+      symlinks: true,
+    });
+  })();
+
+  return rolldownNodeImportResolverPromise;
 }
 
 function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
