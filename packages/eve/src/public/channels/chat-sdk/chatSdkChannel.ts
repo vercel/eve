@@ -2,7 +2,7 @@ import { errorHintOf } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { type PromptQueueState, promptQueueEvents } from "#channel/prompt-queue.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type {
   ChannelFrom,
@@ -248,7 +248,7 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
    * Use `channel.receive(...)` for proactive sends that are not handling an
    * inbound Chat SDK webhook.
    */
-  send(message: string | UserContent, options: ChatSdkSendOptions): Promise<Session>;
+  send(message: MessageContent, options: ChatSdkSendOptions): Promise<Session>;
   /**
    * Answers pending input requests on the thread's session from inside a Chat
    * SDK webhook handler. Never creates a session.
@@ -648,7 +648,7 @@ async function postFailure(
 
 async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
-  message: string | UserContent,
+  message: MessageContent,
   options: ChatSdkSendOptions,
 ): Promise<Session> {
   const from = activeFrom("send");
@@ -712,7 +712,7 @@ function initialState(): ChatSdkChannelState {
 }
 
 /**
- * Downloads an attachment `messageToUserContent` deferred to the step: rebuilds
+ * Downloads an attachment `messageContentOf` deferred to the step: rebuilds
  * the download with the adapter's `rehydrateAttachment`, since the message's
  * own `fetchData` didn't survive the queue.
  */

@@ -1,5 +1,3 @@
-import type { UserContent } from "ai";
-
 import {
   deserializeUrlFilePart,
   hasInternalRefScheme,
@@ -7,25 +5,22 @@ import {
 } from "#internal/attachments/url-refs.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import type { UserPart } from "#protocol/session-events/envelope.js";
+import type { MessageContent } from "#shared/message-content.js";
 
 // What a person sent, as `delivery.consumed` reports it: text, and files as metadata. Bytes
 // never reach the stream. A file keeps a URL only when a client can resolve it over http(s);
 // otherwise it's marked unavailable until an attachment store can serve it.
 
-const FALLBACK_MEDIA_TYPE = "application/octet-stream";
-
 /** The parts of one message. */
-export function userPartsOf(message: string | UserContent): readonly UserPart[] {
+export function userPartsOf(message: MessageContent): readonly UserPart[] {
   if (typeof message === "string") return [{ kind: "text", text: message }];
   const parts: UserPart[] = [];
   for (const part of message) {
-    if (part.type === "text") {
-      parts.push({ kind: "text", text: part.text });
-    } else if (part.type === "file") {
-      parts.push(filePart(part.data, part.mediaType, part.filename));
-    } else if (part.type === "image") {
-      parts.push(filePart(part.image, part.mediaType ?? FALLBACK_MEDIA_TYPE, undefined));
-    }
+    parts.push(
+      part.type === "text"
+        ? { kind: "text", text: part.text }
+        : filePart(part.data, part.mediaType, part.filename),
+    );
   }
   return parts;
 }

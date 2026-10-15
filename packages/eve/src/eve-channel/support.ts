@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -155,7 +155,7 @@ export async function resolveOnMessage(input: {
   readonly auth: SessionAuthContext | null;
   readonly config: EveChannelInput;
   readonly invocation?: EveHandle["invocation"];
-  readonly message: string | UserContent;
+  readonly message: MessageContent;
   readonly request: Request;
   readonly sessionId?: string;
 }): Promise<OnMessageOutcome | Response> {

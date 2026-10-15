@@ -7,7 +7,7 @@ import type {
 } from "#channel/channel-operations.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Answer, StrictAnswers } from "#shared/input.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 type SlackSource = ChannelSource<SlackChannelState>;
@@ -24,7 +24,7 @@ export type SlackRespondOptions = Omit<ChannelRespondOptions<SlackChannelState>,
 
 /** Current-owner operations already bound to one Slack thread. */
 export interface SlackSessionOperations {
-  send(message: string | UserContent, options?: SlackSendOptions): ReturnType<SlackSource["send"]>;
+  send(message: MessageContent, options?: SlackSendOptions): ReturnType<SlackSource["send"]>;
   respond<const TResponses extends readonly Answer[]>(
     answers: StrictAnswers<TResponses>,
     options?: SlackRespondOptions,

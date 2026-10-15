@@ -10,6 +10,7 @@ import {
 } from "#protocol/routes.js";
 import { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError, createClientError } from "#client/client-error.js";
+import { messageForRequest } from "#client/file-parts.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable, sleep, type FollowedEvent } from "#client/open-stream.js";
 import {
@@ -459,7 +460,7 @@ function createMessageBody(
   requireMessage: boolean,
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
-  if (input.message !== undefined) body.message = input.message;
+  if (input.message !== undefined) body.message = messageForRequest(input.message);
   if (input.answers !== undefined && input.answers.length > 0) {
     body.answers = input.answers;
   }

@@ -5,7 +5,7 @@ import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type {
   CancelTurnResult,
   ClearSessionResult,
@@ -43,10 +43,7 @@ export interface Session {
    * replacement. Throws `SessionStrandedError` when the session's owner cannot
    * execute here; nothing is delivered. Call {@link reset} to end it.
    */
-  send(
-    message: string | UserContent,
-    options: SessionSendOptions,
-  ): Promise<SessionSendCommandResult>;
+  send(message: MessageContent, options: SessionSendOptions): Promise<SessionSendCommandResult>;
   /** Answers pending input requests on this exact session ID. Throws `SessionStrandedError` like {@link send}. */
   respond<const TResponses extends readonly Answer[]>(
     answers: StrictAnswers<TResponses>,
@@ -120,7 +117,7 @@ export function createSession(
       const caller = sessionCallbackToTurnCaller(options.callback);
       const payload = attachClientContext<{
         context?: readonly string[];
-        message: string | UserContent | undefined;
+        message: MessageContent | undefined;
         outputSchema?: JsonObject;
       }>({ message: serializeFilePartsInMessage(message) }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;

@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type {
   ChannelReceiveContext,
@@ -9,7 +9,7 @@ import type {
 import { type Answer, answerSchema } from "#shared/input.js";
 
 export type ObservedChannelDelivery<TState> =
-  | (ChannelSendOptions<TState> & { readonly message: string | UserContent })
+  | (ChannelSendOptions<TState> & { readonly message: MessageContent })
   | (ChannelRespondOptions<TState> & { readonly answers: readonly Answer[] });
 
 type DeliveryObserver<TState> = (

@@ -11,7 +11,7 @@ import type {
   ApprovalResponseContext,
   ApprovalResponseDecision,
 } from "#approval/definition.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReference } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
@@ -199,7 +199,7 @@ export interface ScheduleClient<TPayload> {
 export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
-) => { send(message: string | UserContent): Promise<Session> };
+) => { send(message: MessageContent): Promise<Session> };
 
 type SchedulePayloadApproval<TPrepared> =
   | ((

@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
@@ -60,17 +60,15 @@ export type { RuntimeIdentity, TraceContext } from "#protocol/session-events/fam
 /**
  * JSON request accepted by the canonical message route.
  *
- * `message` is either a plain text string or an AI SDK `UserContent`
- * array (mixing `text`, `image`, and `file` parts). Clients pass
- * multimodal attachments with the same shape AI SDK's `useChat`
- * `sendMessage({ files })` produces. `clientContext` is turn-scoped
- * client/page context; the channel converts it into internal model context
- * for every model call in that turn.
+ * `message` is either a plain text string or an array of message parts (`text`
+ * and `file`); a file's `data` is a string: base64, a `data:` URL, or a URL.
+ * `clientContext` is turn-scoped client/page context; the channel converts it
+ * into internal model context for every model call in that turn.
  */
 export type HandleMessageRequestBody =
   | {
       readonly answers?: never;
-      readonly message: string | UserContent;
+      readonly message: MessageContent;
       readonly clientContext?: string | readonly string[] | JsonObject;
       readonly outputSchema?: JsonObject;
     }

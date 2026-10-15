@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
@@ -173,13 +173,12 @@ export interface TurnCaller {
  * Slack adapters add `interaction`) and receive the extended type through the
  * generic payload on their `deliver` hook.
  *
- * `message` is a plain text string or an AI SDK `UserContent` array (mixing
- * `text`, `image`, and `file` parts), letting channels forward file
- * attachments and other multimodal input straight to the harness.
+ * `message` is a plain text string or an array of message parts (`text` and
+ * `file`), letting channels forward file attachments straight to the harness.
  */
 export interface DeliverPayload {
   readonly answers?: readonly Answer[];
-  readonly message?: string | UserContent;
+  readonly message?: MessageContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
   readonly [key: string]: unknown;
@@ -552,7 +551,7 @@ export interface RunInput {
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly input: {
     /** Omitted only when creating a conversation session before its first turn. */
-    readonly message?: string | UserContent;
+    readonly message?: MessageContent;
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
     /** Channel payload state for the first delivery, as later deliveries carry it. */

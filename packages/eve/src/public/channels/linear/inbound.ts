@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import { isObject, readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -136,7 +136,7 @@ export function parseLinearWebhookEvent(input: {
 }
 
 /** Builds the user-facing message for a Linear Agent Session event. */
-export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEvent): UserContent {
+export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEvent): MessageContent {
   if (event.action === "prompted") {
     const body = event.agentActivity?.body;
     if (body !== undefined && body.trim().length > 0) return body;

@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { Answer } from "#shared/input.js";
 import { isLocalDevelopmentServerUrl } from "#services/dev-client/local-host.js";
 import {
@@ -21,7 +21,7 @@ export interface DevelopmentRuntimeArtifactRefresher {
    */
   refresh(input: {
     readonly answers?: readonly Answer[];
-    readonly message?: string | UserContent;
+    readonly message?: MessageContent;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
@@ -67,7 +67,7 @@ class LocalDevelopmentRuntimeArtifactRefresher implements DevelopmentRuntimeArti
 
   async refresh(input: {
     readonly answers?: readonly Answer[];
-    readonly message?: string | UserContent;
+    readonly message?: MessageContent;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
@@ -133,7 +133,7 @@ class LocalDevelopmentRuntimeArtifactRefresher implements DevelopmentRuntimeArti
 
 function shouldRefreshRuntimeArtifactsForTurn(input: {
   readonly answers?: readonly Answer[];
-  readonly message?: string | UserContent;
+  readonly message?: MessageContent;
 }): boolean {
   return input.message !== undefined && (input.answers?.length ?? 0) === 0;
 }

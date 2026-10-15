@@ -1,3 +1,4 @@
+import type { MessageContent } from "#shared/message-content.js";
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -86,7 +87,7 @@ export interface OpenedAgentSession {
  */
 export interface AgentSessionMessage {
   readonly auth: SessionAuth;
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly replyTo: string;
 }

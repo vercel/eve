@@ -1,3 +1,4 @@
+import type { MessageContent } from "#shared/message-content.js";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
@@ -51,7 +52,7 @@ export type AgentMessageResult<TOutput = unknown> = Pick<
   "data" | "message" | "status"
 > & {
   /** Why the turn failed, present only when `status` is `"failed"`. */
-  readonly error?: { readonly message: string };
+  readonly error?: { readonly message: MessageContent<string | URL> };
 };
 
 /** The response to one message sent to a `ctx.agent` session. */
@@ -71,7 +72,7 @@ export interface AgentSession {
    * running turn ends before the agent reads it.
    */
   send<TOutput = unknown>(
-    message: string,
+    message: MessageContent<string | URL>,
     options?: AgentSendOptions<TOutput>,
   ): Promise<AgentResponse<TOutput>>;
 }

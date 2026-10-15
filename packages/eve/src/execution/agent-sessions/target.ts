@@ -1,3 +1,5 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { FatalError } from "#compiled/@workflow/core/index.js";
 
 import type { DurableDynamicSubagentSelection } from "#context/keys.js";
@@ -21,7 +23,7 @@ export type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSu
 
 /** One message to an agent, addressed by its invocation name. */
 export interface AgentActionInput {
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly target: string;
 }
@@ -54,11 +56,10 @@ export function resolveAgentAction(input: {
   if (definition === undefined) {
     throw new FatalError(`Agent target "${input.input.target}" is not available to this agent.`);
   }
-  const actionInput: {
-    message: string;
-    outputSchema?: JsonObject;
-  } = { message: input.input.message };
-  if (input.input.outputSchema !== undefined) actionInput.outputSchema = input.input.outputSchema;
+  const actionInput: JsonObject = {
+    message: normalizeAgentMessage(input.input.message),
+    ...(input.input.outputSchema !== undefined && { outputSchema: input.input.outputSchema }),
+  };
   const common = {
     callId: input.callId,
     description: definition.description ?? "",

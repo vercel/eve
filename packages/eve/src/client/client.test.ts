@@ -162,6 +162,41 @@ describe("Client request policy", () => {
     }
   });
 
+  it("sends a file part's bytes as a data: URL", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(endedStream());
+    const client = new Client({ host: "https://eve.test" });
+    const hello = new TextEncoder().encode("hello");
+
+    await (
+      await client.sessions.create({
+        message: [
+          { text: "Two copies of a note.", type: "text" },
+          { data: hello, mediaType: "text/plain", type: "file" },
+          { data: hello.buffer, filename: "note.txt", mediaType: "text/plain", type: "file" },
+          { data: new URL("https://files.test/note.txt"), mediaType: "text/plain", type: "file" },
+        ],
+      })
+    ).response.result();
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.message).toEqual([
+      { text: "Two copies of a note.", type: "text" },
+      { data: "data:text/plain;base64,aGVsbG8=", mediaType: "text/plain", type: "file" },
+      {
+        data: "data:text/plain;base64,aGVsbG8=",
+        filename: "note.txt",
+        mediaType: "text/plain",
+        type: "file",
+      },
+      { data: "https://files.test/note.txt", mediaType: "text/plain", type: "file" },
+    ]);
+  });
+
   it("includes response headers in info request errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("Redirecting...", {

@@ -1,6 +1,5 @@
-import type { UserContent } from "ai";
-
-import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
+import { appendMessage, normalizeMessage } from "#harness/messages.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { isSessionLimitContinuationRequestId } from "#harness/hitl/budget-request.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { askedCall } from "#protocol/session-reader.js";
@@ -13,7 +12,7 @@ type StaleResponseConversion =
       readonly stepInput?: HarnessStepInput;
     }
   | {
-      readonly displayMessage: string | UserContent;
+      readonly displayMessage: MessageContent;
       readonly kind: "converted";
       readonly stepInput: HarnessStepInput;
     };
@@ -164,13 +163,13 @@ function formatDisplayMessage(responses: readonly Answer[], view: SessionView): 
 }
 
 function appendOptionalUserContent(
-  existing: string | UserContent | undefined,
+  existing: MessageContent | undefined,
   appended: string,
-): string | UserContent {
-  const normalizedExisting = normalizeUserContent(existing);
+): MessageContent {
+  const normalizedExisting = normalizeMessage(existing);
   if (normalizedExisting === undefined) {
     return appended;
   }
 
-  return appendUserContent({ appended, existing: normalizedExisting });
+  return appendMessage({ appended, existing: normalizedExisting });
 }

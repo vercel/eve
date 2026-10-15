@@ -12,7 +12,7 @@ import {
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { ClientSession } from "#client/session.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type {
   CancelSessionResult,
   ClientAuth,
@@ -55,7 +55,7 @@ export interface UseEveAgentHelpers extends UseEveAgentSnapshot {
   readonly reset: () => void;
   /** Sends a message. While a turn is active, pass `turnPolicy: "steer"` to replace it. */
   readonly send: <TOutput = unknown>(
-    message: string | UserContent,
+    message: MessageContent,
     options?: SendTurnOptions<TOutput>,
   ) => Promise<void>;
   /** Answers pending HITL input requests. Rejects if a turn is already in flight. */
@@ -237,7 +237,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelper
   const prewarm = useCallback(() => store.prewarm(), [store]);
   const resume = useCallback(() => store.resume(), [store]);
   const send = useCallback(
-    <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) => {
+    <TOutput = unknown>(message: MessageContent, options?: SendTurnOptions<TOutput>) => {
       return store.send({ ...options, message });
     },
     [store],

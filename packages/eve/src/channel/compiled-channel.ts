@@ -1,5 +1,5 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
@@ -48,7 +48,7 @@ export interface CompiledChannel<
   readonly __metadata?: TMetadata;
   readonly receive?: (
     input: {
-      readonly message: string | UserContent;
+      readonly message: MessageContent;
       readonly target: Readonly<TReceiveTarget>;
       readonly auth: SessionAuthContext | null;
     },

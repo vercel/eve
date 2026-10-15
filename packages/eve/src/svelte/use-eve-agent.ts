@@ -1,7 +1,7 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { onMount } from "svelte";
 import { createSubscriber } from "svelte/reactivity";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import {
   attachEveAgentStore,
@@ -64,7 +64,7 @@ export interface UseEveAgentReturn {
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
   readonly send: <TOutput = unknown>(
-    message: string | UserContent,
+    message: MessageContent,
     options?: SendTurnOptions<TOutput>,
   ) => Promise<void>;
   /** Answer pending HITL input requests. */
@@ -218,7 +218,7 @@ class SvelteEveAgent implements UseEveAgentReturn {
   };
 
   send = <TOutput = unknown>(
-    message: string | UserContent,
+    message: MessageContent,
     options?: SendTurnOptions<TOutput>,
   ): Promise<void> => {
     return this.#store.send({ ...options, message });

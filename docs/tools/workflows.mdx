@@ -522,7 +522,19 @@ or `disableTool()`. Delegated root copies and declared subagent contexts do not 
 root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it.
 An unavailable name rejects the first `send`.
 
-`send(message, options?)` accepts:
+`send(message, options?)` accepts text or `MessageContent<string | URL>`: up to 64 text and
+file parts. File `data` must be an HTTP(S) URL, as a string or `URL` object. Inline bytes, base64,
+and `data:` URLs are rejected before dispatch so attachment bytes do not enter durable workflow
+inputs. Upload a local file first, then send its URL:
+
+```ts
+await reviewer.send([
+  { type: "text", text: "Review Alice's report." },
+  { type: "file", data: "https://files.example/report.pdf", mediaType: "application/pdf" },
+]);
+```
+
+The options are:
 
 | Option         | Description                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------------------- |

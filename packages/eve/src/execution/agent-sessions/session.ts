@@ -1,3 +1,5 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
@@ -100,12 +102,10 @@ class RunAgentSession implements AgentSession {
   }
 
   async send<TOutput = unknown>(
-    message: string,
+    message: MessageContent<string | URL>,
     options: AgentSendOptions<TOutput> = {},
   ): Promise<AgentResponse<TOutput>> {
-    if (typeof message !== "string" || message.trim() === "") {
-      throw new TypeError(`ctx.agent("${this.#name}").send() requires a non-empty message.`);
-    }
+    message = normalizeAgentMessage(message);
     // The reply's shape and the child's output mode must agree on whether a
     // schema was requested, and an empty one requests none.
     const outputSchema = normalizeRequestedOutputSchema(

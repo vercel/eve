@@ -1,5 +1,5 @@
 import { parseToolStubs } from "#tool-stubs/rules.js";
-import type { FilePart, TextPart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart, MessageTextPart } from "#shared/message-content.js";
 
 import type {
   SessionAuthContext,
@@ -135,7 +135,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
 interface ParsedSessionMessageBody {
   callback?: SessionCallback;
-  message?: string | UserContent;
+  message?: MessageContent;
   answers?: readonly ValidatedAnswer[];
   context?: readonly string[];
   outputSchema?: JsonObject;
@@ -433,7 +433,7 @@ function parseCapabilitiesField(value: unknown): SessionCapabilities | Response 
   return requestInput === undefined ? {} : { requestInput };
 }
 
-function parseMessageField(value: unknown): string | UserContent | undefined | Response {
+function parseMessageField(value: unknown): MessageContent | undefined | Response {
   if (value === undefined) return undefined;
   if (typeof value === "string") return value.length > 0 ? value : undefined;
 
@@ -446,7 +446,7 @@ function parseMessageField(value: unknown): string | UserContent | undefined | R
 
   if (value.length === 0) return undefined;
 
-  const parts: Array<TextPart | FilePart> = [];
+  const parts: Array<MessageTextPart | MessageFilePart> = [];
   for (const raw of value) {
     const parsed = parseMessagePart(raw);
     if (parsed instanceof Response) return parsed;
@@ -455,7 +455,7 @@ function parseMessageField(value: unknown): string | UserContent | undefined | R
   return parts;
 }
 
-function parseMessagePart(raw: unknown): TextPart | FilePart | Response {
+function parseMessagePart(raw: unknown): MessageTextPart | MessageFilePart | Response {
   if (raw === null || typeof raw !== "object") {
     return Response.json(
       { error: "Expected each message part to be an object.", ok: false },
@@ -496,11 +496,10 @@ function parseMessagePart(raw: unknown): TextPart | FilePart | Response {
         { status: 400 },
       );
     }
-    const filePart: FilePart = { type: "file", mediaType: part.mediaType, data: part.data };
-    if (typeof part.filename === "string" && part.filename.length > 0) {
-      filePart.filename = part.filename;
-    }
-    return filePart;
+    const filePart: MessageFilePart = { type: "file", mediaType: part.mediaType, data: part.data };
+    return typeof part.filename === "string" && part.filename.length > 0
+      ? { ...filePart, filename: part.filename }
+      : filePart;
   }
 
   return Response.json(

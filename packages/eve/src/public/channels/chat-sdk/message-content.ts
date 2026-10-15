@@ -1,17 +1,15 @@
-import type { UserContent } from "ai";
+import type { MessageContent, MessagePart } from "#shared/message-content.js";
 
 import type { Attachment, Message } from "#compiled/chat/index.js";
 import { encodeChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
-
-type UserContentParts = Exclude<UserContent, string>;
 
 /**
  * Converts a Chat SDK `Message` into the input shape `chatSdkChannel().send`
  * accepts.
  *
  * Returns `message.text` when the message has no attachments. Otherwise
- * returns an AI SDK `UserContent` array: the text (when non-empty) followed by
+ * returns message parts: the text (when non-empty) followed by
  * one part per attachment.
  *
  * An attachment the adapter can download (`fetchData`) becomes a file part the
@@ -22,13 +20,13 @@ type UserContentParts = Exclude<UserContent, string>;
  * reaches the agent as a short note. An attachment with only a URL is passed as
  * that URL. Attachments with neither are skipped.
  */
-export function messageToUserContent(message: Message): string | UserContent {
+export function messageContentOf(message: Message): MessageContent {
   const attachments = message.attachments ?? [];
   if (attachments.length === 0) {
     return message.text;
   }
 
-  const parts: UserContentParts = [];
+  const parts: MessagePart[] = [];
   if (message.text) {
     parts.push({ text: message.text, type: "text" });
   }
@@ -41,10 +39,7 @@ export function messageToUserContent(message: Message): string | UserContent {
   return parts.length > 0 ? parts : message.text;
 }
 
-function attachmentToPart(
-  adapter: string,
-  attachment: Attachment,
-): UserContentParts[number] | null {
+function attachmentToPart(adapter: string, attachment: Attachment): MessagePart | null {
   const mediaType = attachment.mimeType ?? "application/octet-stream";
   if (attachment.fetchData === undefined) {
     if (!attachment.url) return null;

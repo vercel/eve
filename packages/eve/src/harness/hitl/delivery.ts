@@ -1,5 +1,5 @@
 import { openRequests, promptQueueHead } from "#protocol/session-reader.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import { answerFromText } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -30,7 +30,7 @@ export function deliver(
   options: { readonly takeQueued: boolean },
 ): {
   readonly input?: HarnessStepInput;
-  readonly displayMessage?: string | UserContent;
+  readonly displayMessage?: MessageContent;
   readonly takeQueued: boolean;
 } {
   const queued = options.takeQueued ? view.turn.queued : undefined;
