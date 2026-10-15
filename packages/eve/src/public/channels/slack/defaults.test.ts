@@ -342,7 +342,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
       "chat.update",
       expect.objectContaining({
         channel: "C123",
-        text: "Answered: No longer needed",
+        text: "No longer needed",
         ts: "card-ts",
       }),
     );

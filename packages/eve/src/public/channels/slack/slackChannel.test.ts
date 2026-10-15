@@ -5047,10 +5047,12 @@ describe("slackChannel() HITL interaction pipeline", () => {
     await firePost(channel, buildHitlButtonRequest(), { send });
 
     expect(slackOperations(fetchMock)).toEqual(["chat.update", "chat.postEphemeral"]);
-    expect(parseSlackRequestBody(slackCalls(fetchMock, "chat.update")[0]?.[1])).toMatchObject({
-      text: "Answered: No longer active",
-      ts: "1700000000.000010",
-    });
+    const update = parseSlackRequestBody(slackCalls(fetchMock, "chat.update")[0]?.[1]);
+    expect(update).toMatchObject({ text: "No longer active", ts: "1700000000.000010" });
+    // Nobody's answer was taken, so the retired card credits nobody.
+    const shown = JSON.stringify(update.blocks);
+    expect(shown).toContain("No longer active");
+    expect(shown).not.toContain("U_APPROVER");
     expect(
       parseSlackRequestBody(slackCalls(fetchMock, "chat.postEphemeral")[0]?.[1]),
     ).toMatchObject({

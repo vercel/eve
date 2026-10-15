@@ -37,7 +37,8 @@ import {
 } from "#public/channels/slack/hitl.js";
 import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
 import {
-  updateAnsweredFreeformCard,
+  settleFreeformCard,
+  settleHitlCard,
   updateAnsweredHitlCard,
 } from "#public/channels/slack/interaction-cards.js";
 import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
@@ -506,7 +507,7 @@ async function dispatchBlockInputResponses(input: {
           state: withSlackResponder(undefined, input.submission.user.id),
         }),
     {
-      retirePrompt: (label) => updateAnsweredHitlCard(input.interaction, input.deps, label),
+      retirePrompt: (label) => settleHitlCard(input.interaction, input.deps, { label }),
       notifyPresser: (notice) =>
         postEphemeralNotice({
           channelId: input.interaction.channelId,
@@ -717,8 +718,8 @@ async function dispatchViewInputResponse(input: {
       }),
     {
       retirePrompt: (label) =>
-        updateAnsweredFreeformCard({
-          answerLabel: label,
+        settleFreeformCard({
+          card: { label },
           channelId: cardChannelId,
           deps: input.deps,
           installationTeamId: input.installationTeamId,
@@ -741,13 +742,12 @@ async function dispatchViewInputResponse(input: {
   if (outcome !== "delivered") return;
 
   try {
-    await updateAnsweredFreeformCard({
+    await settleFreeformCard({
+      card: { label: input.text, userId: input.submission.user.id },
       channelId: cardChannelId,
-      messageTs: input.metadata.messageTs,
-      answerLabel: input.text,
-      userId: input.submission.user.id,
-      installationTeamId: input.installationTeamId,
       deps: input.deps,
+      installationTeamId: input.installationTeamId,
+      messageTs: input.metadata.messageTs,
     });
   } catch (error) {
     log.error("freeform answered-card update failed", { error });

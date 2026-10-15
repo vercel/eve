@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -84,7 +84,7 @@ async function firePost(
   body: unknown,
   options: {
     readonly resolveSession?: () => Promise<any>;
-    readonly send?: ReturnType<typeof vi.fn>;
+    readonly send?: Mock<(...args: any[]) => Promise<unknown>>;
   } = {},
 ): Promise<{
   readonly response: Response;
@@ -332,7 +332,7 @@ describe("telegramChannel() inbound route", () => {
       releaseEdit = resolve;
     });
     const methods: string[] = [];
-    const fetchMock = vi.fn(async (url: string | URL) => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
       const method = String(url).split("/").pop()!;
       methods.push(method);
       if (method === "editMessageText") await editHeld;

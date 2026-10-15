@@ -14,7 +14,10 @@ import {
   renderInputRequestPostParts,
   type SlackInputRequestPostPart,
 } from "#public/channels/slack/hitl.js";
-import { answeredBlocksFromActionBlock } from "#public/channels/slack/interaction-cards.js";
+import {
+  answeredBlocksFromActionBlock,
+  settledCardText,
+} from "#public/channels/slack/interaction-cards.js";
 import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   truncateMessageText,
@@ -154,7 +157,7 @@ async function settleApprovalCard(
       answeredBlocksFromActionBlock({
         answerLabel: answer.label,
         block,
-        userId: answer.userId ?? "",
+        userId: answer.userId,
       }) ?? buildAnsweredBlocks({ answerLabel: answer.label, promptBlocks: [] })
     );
   });
@@ -166,7 +169,7 @@ async function settleApprovalCard(
   await settleRequest(channel, "chat.update", requestId, {
     blocks,
     channel: messageChannelId,
-    text: `Answered: ${answer.label}`,
+    text: settledCardText(answer),
     ts: card.messageTs,
   });
 
