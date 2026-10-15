@@ -8,6 +8,7 @@ import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
 import { taskSystemMessages } from "#execution/tasks/model-step.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
 import {
+  CONTINUATION_MESSAGE,
   createFrameworkUserMessage,
   type HarnessModelMessage,
   type UserModelMessage,
@@ -81,12 +82,23 @@ export function modelInstructions(input: {
   );
 }
 
-/** A retry's note, trailing the call's messages. */
+/**
+ * The call's messages as sent: a retry's note trails them, and for a provider that rejects a
+ * prompt ending on an assistant message, a continuation does. Neither is stored in history.
+ */
 export function withTrailingUserNote(
   messages: readonly ModelMessage[],
-  note?: string,
+  note: string | undefined,
+  profile: Pick<ModelProfile, "rejectsAssistantFinalPrompt">,
 ): ModelMessage[] {
-  return note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
+  if (note) return [...messages, createFrameworkUserMessage("execution.retry", note)];
+  if (profile.rejectsAssistantFinalPrompt && messages.at(-1)?.role === "assistant") {
+    return [
+      ...messages,
+      createFrameworkUserMessage("execution.continuation", CONTINUATION_MESSAGE),
+    ];
+  }
+  return [...messages];
 }
 
 export function mergeSystemInstructions(

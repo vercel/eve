@@ -251,7 +251,11 @@ export class ModelCaller {
     this.requestEnvelopeTokens = await estimateRequestEnvelope({
       history: this.projectedMessages,
       instructions: this.instructions(options.extraSystemNote),
-      messages: withTrailingUserNote(this.request.nonSystemMessages, options.trailingUserNote),
+      messages: withTrailingUserNote(
+        this.request.nonSystemMessages,
+        options.trailingUserNote,
+        this.profile,
+      ),
       tools,
     });
     return tools;
@@ -332,7 +336,11 @@ export class ModelCaller {
     if (options.retryReason) runtimeContext["eve.retry.reason"] = options.retryReason;
     // A trailing note rather than a system one keeps the provider's cached prefix valid; the
     // step commits its prompt messages, so the note exists only on this call's request.
-    const callMessages = withTrailingUserNote(this.modelMessages, options.trailingUserNote);
+    const callMessages = withTrailingUserNote(
+      this.modelMessages,
+      options.trailingUserNote,
+      this.profile,
+    );
 
     const position = step.position();
     const attempt = step.instrumentation?.prepareAttempt({

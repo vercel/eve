@@ -60,6 +60,9 @@ export function createUserMessage(
 }
 
 /** Builds a framework-authored user-role message for model history. */
+/** Text of the `execution.continuation` message that keeps a prompt from ending on an assistant turn. */
+export const CONTINUATION_MESSAGE = "Continue.";
+
 export function createFrameworkUserMessage(
   kind: FrameworkMessageKind,
   content: UserContent,

@@ -5,9 +5,6 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 
 export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
-/** Synthetic resumption prompt used when no real user message can be replayed. */
-export const COMPACTION_RESUMPTION_MESSAGE = "Continue.";
-
 const COMPACTION_SYSTEM_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
 Include:

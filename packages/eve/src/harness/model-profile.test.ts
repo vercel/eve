@@ -14,6 +14,7 @@ const direct = {
   filesOutsideToolResults: false,
   gateway: false,
   googleSearchDropsTools: false,
+  rejectsAssistantFinalPrompt: false,
 };
 
 describe("resolveModelProfile", () => {
@@ -22,7 +23,7 @@ describe("resolveModelProfile", () => {
     [
       "a Gateway instance used by local auth",
       createGateway({ apiKey: "test-key" })("anthropic/claude-opus-5"),
-      { ...direct, gateway: true, provider: "anthropic" },
+      { ...direct, gateway: true, provider: "anthropic", rejectsAssistantFinalPrompt: true },
     ],
     [
       "a namespaced Gateway provider",
@@ -32,17 +33,32 @@ describe("resolveModelProfile", () => {
     [
       "direct Anthropic",
       model("anthropic.messages"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "anthropic" },
+      {
+        ...direct,
+        anthropicCache: { ttl: "5m" },
+        provider: "anthropic",
+        rejectsAssistantFinalPrompt: true,
+      },
     ],
     [
       "Vertex Anthropic",
       model("vertex.anthropic"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "vertex" },
+      {
+        ...direct,
+        anthropicCache: { ttl: "5m" },
+        provider: "vertex",
+        rejectsAssistantFinalPrompt: true,
+      },
     ],
     [
       "Bedrock Converse with an Anthropic model id",
       model("amazon-bedrock", "ANTHROPIC.claude-3-5-sonnet-20241022-v2:0"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "amazon-bedrock" },
+      {
+        ...direct,
+        anthropicCache: { ttl: "5m" },
+        provider: "amazon-bedrock",
+        rejectsAssistantFinalPrompt: true,
+      },
     ],
     [
       "Bedrock Converse with another model id",
@@ -75,19 +91,29 @@ describe("resolveModelProfile", () => {
     [
       "an opaque Bedrock inference profile declared as Anthropic",
       model("amazon-bedrock", "arn:aws:bedrock:us-east-1:123:application-inference-profile/abc"),
-      { ...direct, anthropicCache: { ttl: "5m" }, provider: "amazon-bedrock" },
+      {
+        ...direct,
+        anthropicCache: { ttl: "5m" },
+        provider: "amazon-bedrock",
+        rejectsAssistantFinalPrompt: true,
+      },
       { anthropic: {} },
     ],
     [
       "direct Anthropic with a 1-hour cache",
       model("anthropic.messages"),
-      { ...direct, anthropicCache: { ttl: "1h" }, provider: "anthropic" },
+      {
+        ...direct,
+        anthropicCache: { ttl: "1h" },
+        provider: "anthropic",
+        rejectsAssistantFinalPrompt: true,
+      },
       { anthropic: { ttl: "1h" } },
     ],
     [
       "a Gateway model, which caches on its own",
       "anthropic/claude-opus-5",
-      { ...direct, gateway: true, provider: "anthropic" },
+      { ...direct, gateway: true, provider: "anthropic", rejectsAssistantFinalPrompt: true },
       { anthropic: { ttl: "1h" } },
     ],
   ])("describes %s", (_, input, expected, promptCache) => {
