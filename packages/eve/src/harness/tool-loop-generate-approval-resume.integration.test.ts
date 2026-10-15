@@ -169,6 +169,36 @@ function createTwoPendingApprovalSession(): HarnessSession {
   });
 }
 
+/** One parked step asking for both calls; `responseAuthRequiredRequestIds` have a response policy. */
+function createOneBatchTwoApprovalSession(
+  responseAuthRequiredRequestIds?: readonly string[],
+): HarnessSession {
+  return withParkedStep(createBaseSession(), {
+    event: { sequence: 1, stepIndex: 0, turnId: "turn-1" },
+    messages: [
+      {
+        content: [toolCall, approvalRequest, secondToolCall, secondApprovalRequest],
+        role: "assistant",
+      },
+    ],
+    requests: [
+      pendingApprovalInputRequest,
+      {
+        ...pendingApprovalInputRequest,
+        action: {
+          ...pendingApprovalInputRequest.action,
+          callId: secondToolCall.toolCallId,
+          input: secondToolCall.input,
+        },
+        requestId: secondApprovalRequest.approvalId,
+      },
+    ],
+    responseAuthRequiredRequestIds: responseAuthRequiredRequestIds && [
+      ...responseAuthRequiredRequestIds,
+    ],
+  });
+}
+
 function createModel(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     doStream: textStreamResult("The command returned /workspace."),
@@ -560,28 +590,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     const runStep = createToolLoopHarness(
       createConfig(createModel(), execute, { request: () => "user-approval", response }),
     );
-    const parked = withParkedStep(createBaseSession(), {
-      event: { sequence: 1, stepIndex: 0, turnId: "turn-1" },
-      messages: [
-        {
-          content: [toolCall, approvalRequest, secondToolCall, secondApprovalRequest],
-          role: "assistant",
-        },
-      ],
-      requests: [
-        pendingApprovalInputRequest,
-        {
-          ...pendingApprovalInputRequest,
-          action: {
-            ...pendingApprovalInputRequest.action,
-            callId: secondToolCall.toolCallId,
-            input: secondToolCall.input,
-          },
-          requestId: secondApprovalRequest.approvalId,
-        },
-      ],
-      responseAuthRequiredRequestIds: [approvalRequest.approvalId],
-    });
+    const parked = createOneBatchTwoApprovalSession([approvalRequest.approvalId]);
     const session = withOpenTurn(parked, { sequence: 1, stepIndex: 1, turnId: "turn-1" });
 
     const result = await contextStorage.run(createApprovalContext(), async () => {
@@ -598,6 +607,36 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
 
     expect(response).toHaveBeenCalledOnce();
     expect(execute).toHaveBeenCalledTimes(2);
+    expect(parkedSteps(result.session)).toEqual([]);
+  });
+
+  it("keeps the first answer when a repeated answer to the same approval disagrees", async () => {
+    const execute = vi.fn(async () => "eve");
+    const runStep = createToolLoopHarness(createConfig(createModel(), execute));
+    const session = withOpenTurn(createOneBatchTwoApprovalSession(), {
+      sequence: 1,
+      stepIndex: 1,
+      turnId: "turn-1",
+    });
+
+    const result = await contextStorage.run(createApprovalContext(), async () => {
+      const cancelled = await runStep(session, {
+        inputResponses: [{ optionId: "cancel", requestId: approvalRequest.approvalId }],
+      });
+      expect(parkedSteps(cancelled.session)).toHaveLength(1);
+      return await runStep(cancelled.session, {
+        inputResponses: [
+          { optionId: "approve", requestId: approvalRequest.approvalId },
+          { optionId: "approve", requestId: secondApprovalRequest.approvalId },
+        ],
+      });
+    });
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledWith(
+      secondToolCall.input,
+      expect.objectContaining({ toolCallId: secondToolCall.toolCallId }),
+    );
     expect(parkedSteps(result.session)).toEqual([]);
   });
 

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Answering a tool approval twice, for example with a double click, no longer leaves the session waiting when the tool has an approval response policy. The policy runs once and the approved call runs. The same holds when the answer to a sibling approval without a policy arrives while the policy check is pending.
+The first answer to a tool approval now decides it. A repeated answer, for example from a double click, no longer leaves the session waiting when the tool has an approval response policy, and no longer overrides an earlier answer when it doesn't: Cancel followed by Approve stays cancelled. An unauthenticated answer to an approval that has a requester is rejected instead of passing through.

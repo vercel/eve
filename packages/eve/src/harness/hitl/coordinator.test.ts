@@ -538,6 +538,58 @@ describe("approval responses without a response policy", () => {
     expect(parkedSteps(result.session)).toHaveLength(1);
   });
 
+  it("keeps the first answer when a repeated answer disagrees", async () => {
+    const second: InputRequest = {
+      ...request,
+      action: { ...request.action, callId: "call-2" },
+      requestId: "approval-2",
+    };
+    const parked = withParkedStep(
+      { ...parkedSession(), state: undefined },
+      { requester: alice, requests: [request, second] },
+    );
+    const answer = (session: HarnessSession, ...responses: [string, string][]) =>
+      coordinateApprovalDelivery({
+        now: 100,
+        session,
+        stepInput: {
+          attributedInputResponses: responses.map(([requestId, optionId]) => ({
+            auth: alice,
+            response: { optionId, requestId },
+          })),
+        },
+        tools: new Map(),
+      });
+
+    const cancelled = await answer(parked, [request.requestId, "cancel"]);
+    const repeated = await answer(
+      cancelled.session,
+      [request.requestId, "approve"],
+      [second.requestId, "approve"],
+    );
+    expect(repeated.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId },
+      { optionId: "approve", requestId: second.requestId },
+    ]);
+  });
+
+  it("settles nothing for an unauthenticated answer to a requester's call", async () => {
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedFor(alice),
+      stepInput: {
+        attributedInputResponses: [
+          { auth: null, response: { optionId: "approve", requestId: request.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    expect(result.feedback).toEqual(["Authentication is required to respond to this approval."]);
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
+    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(parkedSteps(result.session)).toHaveLength(1);
+  });
+
   it("lets anyone respond when the requester is unauthenticated", async () => {
     const result = await respond(parkedFor(null), bob);
     expect(result.feedback).toEqual([]);
