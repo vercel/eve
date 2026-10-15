@@ -1,4 +1,12 @@
-import { allOf, anyOf, messageMatches, nameIs, typeIs, type SemanticErrorRule } from "../rule.js";
+import {
+  allOf,
+  anyOf,
+  codeIs,
+  messageMatches,
+  nameIs,
+  typeIs,
+  type SemanticErrorRule,
+} from "../rule.js";
 
 /** The summary `name` shared by the gateway-auth rule variants. */
 const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
@@ -123,5 +131,15 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     when: anyOf(nameIs("GatewayTimeoutError"), typeIs("timeout_error", "overloaded_error")),
     message: "The model provider is overloaded or timing out upstream of AI Gateway.",
     hint: "This is transient — retry shortly, or switch models with `/model` in `eve dev`.",
+  },
+  {
+    id: "gateway-stream-timeout",
+    name: "AI Gateway stream timed out",
+    tags: ["gateway", "transient"],
+    // The gateway aborts a long stream with a payload that carries `code`,
+    // not the body `type` the rule above reads, so it needs its own match.
+    when: codeIs("gateway_stream_timeout"),
+    message: "AI Gateway ended the model stream before the response finished.",
+    hint: "Retries are automatic. If it persists, split the task into smaller turns or switch models with `/model` in `eve dev`.",
   },
 ];

@@ -137,6 +137,17 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "gateway-upstream-unavailable",
     },
     {
+      title: "gateway stream timeout",
+      error: new Error("Stream exceeded maximum duration before function timeout", {
+        cause: {
+          code: "gateway_stream_timeout",
+          message: "Stream exceeded maximum duration before function timeout",
+          origin: "gateway",
+        },
+      }),
+      id: "gateway-stream-timeout",
+    },
+    {
       title: "provider api key missing",
       error: named("LoadAPIKeyError", "OpenAI API key is missing."),
       id: "model-provider-api-key-missing",
