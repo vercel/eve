@@ -15,7 +15,7 @@ describe("Slack app manifests", () => {
         },
         bot_user: { display_name: "support" },
       },
-      oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+      oauth_config: { scopes: { bot: ["app_mentions:read", "channels:read", "chat:write"] } },
       settings: {
         event_subscriptions: { bot_events: ["app_mention"] },
         org_deploy_enabled: false,
