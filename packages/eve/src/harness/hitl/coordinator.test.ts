@@ -476,6 +476,30 @@ describe("coordinateApprovalDelivery", () => {
     ]);
   });
 
+  it("keeps the note an authorized Cancel was sent with", async () => {
+    const ingested = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedSession(),
+      stepInput: {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            response: {
+              optionId: "cancel",
+              requestId: request.requestId,
+              text: "only the three-pack",
+            },
+          },
+        ],
+      },
+      tools: new Map(),
+    });
+    const settled = await authorize(ingested.session, () => ({ status: "allowed" }));
+    expect(settled.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId, text: "only the three-pack" },
+    ]);
+  });
+
   it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
     const messageAuth: SessionAuthContext = { ...responder, principalId: "user-2" };
     const result = await coordinateApprovalDelivery({
@@ -571,6 +595,115 @@ describe("approval responses without a response policy", () => {
       { optionId: "cancel", requestId: request.requestId },
       { optionId: "approve", requestId: second.requestId },
     ]);
+  });
+
+  it("keeps the first answer's note when a repeated answer disagrees", async () => {
+    const second: InputRequest = {
+      ...request,
+      action: { ...request.action, callId: "call-2" },
+      requestId: "approval-2",
+    };
+    const parked = withParkedStep(
+      { ...parkedSession(), state: undefined },
+      { requester: alice, requests: [request, second] },
+    );
+    const cancelled = await coordinateApprovalDelivery({
+      now: 100,
+      session: parked,
+      stepInput: {
+        attributedInputResponses: [
+          {
+            auth: alice,
+            response: {
+              optionId: "cancel",
+              requestId: request.requestId,
+              text: "only the three-pack",
+            },
+          },
+        ],
+      },
+      tools: new Map(),
+    });
+    const repeated = await coordinateApprovalDelivery({
+      now: 101,
+      session: cancelled.session,
+      stepInput: {
+        attributedInputResponses: [
+          {
+            auth: alice,
+            response: { optionId: "cancel", requestId: request.requestId, text: "never mind" },
+          },
+          { auth: alice, response: { optionId: "approve", requestId: second.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    expect(repeated.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId, text: "only the three-pack" },
+      { optionId: "approve", requestId: second.requestId },
+    ]);
+  });
+
+  it("doesn't recheck a settled answer replayed with another responder's delivery", async () => {
+    const second: InputRequest = {
+      ...request,
+      action: { ...request.action, callId: "call-2" },
+      requestId: "approval-2",
+    };
+    const parked = withParkedStep(
+      { ...parkedSession(), state: undefined },
+      { requester: alice, requests: [request, second] },
+    );
+    const settled = await respond(parked, alice);
+    // `answer` queues the settled response while the batch waits; Bob's delivery brings it back.
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: bob, initiator: alice },
+      sessionId: parked.sessionId,
+      turn: { id: "turn-2", sequence: 2 },
+    });
+    const replayed = await contextStorage.run(ctx, () =>
+      coordinateApprovalDelivery({
+        now: 101,
+        session: settled.session,
+        stepInput: {
+          attributedInputResponses: [
+            { auth: bob, response: { optionId: "approve", requestId: second.requestId } },
+          ],
+          inputResponses: settled.stepInput?.inputResponses,
+        },
+        tools: new Map(),
+      }),
+    );
+    expect(replayed.feedback).toEqual([
+      "Only the person who requested this action can respond to this approval.",
+    ]);
+    expect(
+      getApprovalAuditState(replayed.session.state).settlements.map((entry) => entry.requestId),
+    ).toEqual([request.requestId]);
+    expect(replayed.stepInput?.inputResponses).toEqual([
+      { optionId: "approve", requestId: request.requestId },
+    ]);
+  });
+
+  it.each([
+    ["an unknown option", { optionId: "bogus" }],
+    ["text alone", { text: "hmm, not sure" }],
+  ])("rejects %s with feedback and settles nothing", async (_label, answer) => {
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedFor(alice),
+      stepInput: {
+        attributedInputResponses: [
+          { auth: alice, response: { ...answer, requestId: request.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    expect(result.feedback).toEqual(["Respond to this approval with Approve or Cancel."]);
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
+    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(parkedSteps(result.session)).toHaveLength(1);
   });
 
   it("settles nothing for an unauthenticated answer to a requester's call", async () => {

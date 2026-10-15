@@ -48,6 +48,8 @@ export interface ApprovalSettlementAuditRecord {
   readonly requestId: string;
   readonly settledAt: number;
   readonly candidateId?: string;
+  /** What the settling responder wrote with their answer, such as why they cancelled. */
+  readonly text?: string;
 }
 
 export interface ActiveApprovalCandidate {
@@ -59,6 +61,8 @@ export interface ActiveApprovalCandidate {
   readonly createdAt: number;
   readonly expiresAt: number;
   readonly authorizationChallenges?: readonly AuthorizationChallenge[];
+  /** What the responder wrote with their answer; the settlement keeps it once allowed. */
+  readonly text?: string;
 }
 
 export interface DurableApprovalState {
@@ -82,6 +86,7 @@ export function createApprovalCandidate(input: {
   readonly requestId: string;
   readonly responder: SessionAuthContext;
   readonly state: SessionStateMap | undefined;
+  readonly text?: string;
 }): ApprovalStateTransition {
   const expiredState = expireApprovalCandidates({ now: input.createdAt, state: input.state });
   const approvalState = readApprovalState(expiredState);
@@ -124,6 +129,7 @@ export function createApprovalCandidate(input: {
     requestId: input.requestId,
     responder,
     status: "pending",
+    ...(input.text !== undefined && { text: input.text }),
   };
   const next: DurableApprovalState = {
     ...approvalState,
@@ -231,6 +237,7 @@ export function settleAllowedCandidate(input: {
     responder: candidate.responder,
     settledAt: input.settledAt,
     state: expiredState,
+    text: candidate.text,
   });
 }
 
@@ -265,6 +272,7 @@ export function settleDirectApprovalResponse(input: {
   readonly requestId: string;
   readonly settledAt: number;
   readonly state: SessionStateMap | undefined;
+  readonly text?: string;
 }): ApprovalStateTransition {
   const state = expireApprovalCandidates({ now: input.settledAt, state: input.state });
   return settleRequest({
@@ -273,6 +281,7 @@ export function settleDirectApprovalResponse(input: {
     responder: input.actor,
     settledAt: input.settledAt,
     state,
+    text: input.text,
   });
 }
 
@@ -307,6 +316,7 @@ function settleRequest(input: {
   readonly responder: SessionAuthContext | null;
   readonly settledAt: number;
   readonly state: SessionStateMap | undefined;
+  readonly text?: string;
 }): ApprovalStateTransition {
   const approvalState = readApprovalState(input.state);
   const existing = approvalState.settlements[input.requestId];
@@ -322,6 +332,7 @@ function settleRequest(input: {
     outcome: input.outcome,
     requestId: input.requestId,
     settledAt: input.settledAt,
+    ...(input.text !== undefined && { text: input.text }),
   };
   const activeCandidates: Record<string, ActiveApprovalCandidate> = {};
   const candidateHistory = [...approvalState.candidateHistory];
@@ -358,6 +369,7 @@ function toCandidateAuditRecord(input: {
   const {
     authorizationChallenges: _authorizationChallenges,
     responder,
+    text: _text,
     ...candidate
   } = input.candidate;
   return {

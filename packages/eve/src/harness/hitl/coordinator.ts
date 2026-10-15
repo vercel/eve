@@ -38,6 +38,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
+const INVALID_APPROVAL_FEEDBACK = "Respond to this approval with Approve or Cancel.";
 const REQUESTER_ONLY_APPROVAL_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
 const UNAVAILABLE_TOOL_APPROVAL_REASON =
@@ -106,18 +107,12 @@ export async function coordinateApprovalDelivery(input: {
   const pendingRequestIds = new Set(
     batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
   );
-  // Discard answers to requests that settled and have left pending input entirely. Answers to
-  // pending requests are consumed below.
-  const deduplicableSettledRequestIds = new Set(
-    audit.settlements
-      .map((settlement) => settlement.requestId)
-      .filter((requestId) => !pendingRequestIds.has(requestId)),
-  );
-  const discardedDuplicate = hasResponseForRequest(input.stepInput, deduplicableSettledRequestIds);
-  const deduplicatedInput = discardedDuplicate
-    ? removeConsumedResponses(input.stepInput, deduplicableSettledRequestIds)
-    : input.stepInput;
+  const settledRequestIds = new Set(audit.settlements.map((settlement) => settlement.requestId));
   if (batches.length === 0) {
+    const discardedDuplicate = hasResponseForRequest(input.stepInput, settledRequestIds);
+    const deduplicatedInput = discardedDuplicate
+      ? removeConsumedResponses(input.stepInput, settledRequestIds)
+      : input.stepInput;
     return deliveryResult(
       session,
       deduplicatedInput,
@@ -125,7 +120,7 @@ export async function coordinateApprovalDelivery(input: {
     );
   }
 
-  const stepInput = deduplicatedInput;
+  const stepInput = input.stepInput;
   const authorizationRequiredRequestIds = new Set(
     batches.flatMap((batch) => batch.responseAuthRequiredRequestIds ?? []),
   );
@@ -145,10 +140,15 @@ export async function coordinateApprovalDelivery(input: {
     const request = requests.get(response.requestId);
     if (request === undefined || !isApprovalRequest(request)) continue;
     // First answer wins: every answer to a pending approval is consumed here, and only the
-    // request's recorded settlement reaches `answer`. A later answer can't override it.
+    // request's recorded settlement reaches `answer`. An answer to a request that settled before
+    // this delivery is discarded unchecked; the settlement already decided it.
     consumed.add(response.requestId);
+    if (settledRequestIds.has(response.requestId)) continue;
     const decision = toCandidateDecision(response.optionId);
-    if (decision === undefined) continue;
+    if (decision === undefined) {
+      feedback.push(INVALID_APPROVAL_FEEDBACK);
+      continue;
+    }
 
     if (!authorizationRequiredRequestIds.has(response.requestId)) {
       const context = contextStorage.getStore();
@@ -179,6 +179,7 @@ export async function coordinateApprovalDelivery(input: {
         requestId: response.requestId,
         settledAt: now,
         state: session.state,
+        text: response.text,
       });
       session = { ...session, state: settled.state };
       continue;
@@ -203,6 +204,7 @@ export async function coordinateApprovalDelivery(input: {
       requestId: request.requestId,
       responder,
       state: session.state,
+      text: response.text,
     });
     session = { ...session, state: created.state };
     didCommit ||= created.changed;
@@ -485,6 +487,7 @@ function appendSettledResponses(
       ...settlements.map((settlement) => ({
         optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
         requestId: settlement.requestId,
+        ...(settlement.text !== undefined && { text: settlement.text }),
       })),
     ],
   };
