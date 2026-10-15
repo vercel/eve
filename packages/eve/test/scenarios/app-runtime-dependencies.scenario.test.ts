@@ -76,6 +76,7 @@ async function readTracedServerPackageJson(outputDir: string): Promise<{
  */
 async function writeWorkspaceExternalFixture(input: {
   readonly appDeclaresExternal: boolean;
+  readonly dynamicImport?: boolean;
 }): Promise<{ readonly appRoot: string }> {
   const workspaceRoot = await createScratchDirectory("eve-workspace-external-dep-build-");
   const appRoot = join(workspaceRoot, "apps", "agent");
@@ -146,7 +147,9 @@ async function writeWorkspaceExternalFixture(input: {
   );
   await writeFile(
     join(packageRoot, "src", "index.ts"),
-    'export { value } from "fixture-workspace-external";\n',
+    input.dynamicImport === true
+      ? 'export const value = async () => (await import("fixture-workspace-external")).value;\n'
+      : 'export { value } from "fixture-workspace-external";\n',
   );
   await writeExternalInstallation(join(packageRoot, "node_modules", "fixture-workspace-external"));
   await symlink(packageRoot, join(appRoot, "node_modules", "@fixture", "backend"), "dir");
@@ -889,6 +892,17 @@ describe("app runtime dependency tracing", () => {
     );
     await expect(build).rejects.toThrow(
       /Add "fixture-workspace-external" to the dependencies in \S*\/apps\/agent\/package\.json\./,
+    );
+  }, 60_000);
+
+  it("fails the build when a literal dynamic import needs an external the output lacks", async () => {
+    const { appRoot } = await writeWorkspaceExternalFixture({
+      appDeclaresExternal: false,
+      dynamicImport: true,
+    });
+
+    await expect(buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS)).rejects.toThrow(
+      /"fixture-workspace-external" is listed in build\.externalDependencies and imported by the hosted bundle \(.+\), but the build output does not contain it\./,
     );
   }, 60_000);
 

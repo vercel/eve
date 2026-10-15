@@ -28,7 +28,12 @@ async function checkOutput(input: { readonly installAt: "server" | "above" | "no
     { dir: serverDir },
     {
       "_chunks/db.mjs": { fileName: "_chunks/db.mjs", imports: ["pg/lib/client"], type: "chunk" },
-      "index.mjs": { fileName: "index.mjs", imports: ["_chunks/db.mjs", "zod"], type: "chunk" },
+      "index.mjs": {
+        dynamicImports: ["pg"],
+        fileName: "index.mjs",
+        imports: ["_chunks/db.mjs", "zod"],
+        type: "chunk",
+      },
     },
   );
 }

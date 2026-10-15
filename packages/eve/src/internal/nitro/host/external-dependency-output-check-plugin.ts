@@ -8,6 +8,7 @@ interface WrittenOutput {
   readonly type: string;
   readonly fileName: string;
   readonly imports?: readonly string[];
+  readonly dynamicImports?: readonly string[];
 }
 
 interface ExternalDependencyOutputCheckPlugin {
@@ -19,7 +20,8 @@ interface ExternalDependencyOutputCheckPlugin {
 }
 
 /**
- * Fails the hosted build when a written chunk statically imports a configured
+ * Fails the hosted build when a written chunk imports (statically or by a
+ * literal dynamic import) a configured
  * external that the output itself cannot resolve. Nitro's tracer only warns
  * when it cannot find a package to copy, so without this check the build
  * succeeds and the deployed function fails with ERR_MODULE_NOT_FOUND.
@@ -37,7 +39,11 @@ export function createExternalDependencyOutputCheckPlugin(input: {
     writeBundle(outputOptions, bundle) {
       const outputDir = realpathSync(outputOptions.dir);
       for (const output of Object.values(bundle)) {
-        for (const specifier of output.type === "chunk" ? (output.imports ?? []) : []) {
+        const specifiers =
+          output.type === "chunk"
+            ? [...(output.imports ?? []), ...(output.dynamicImports ?? [])]
+            : [];
+        for (const specifier of specifiers) {
           const dependency = input.externalDependencies.find(
             (name) => specifier === name || specifier.startsWith(`${name}/`),
           );
