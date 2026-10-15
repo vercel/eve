@@ -360,25 +360,30 @@ test("attributes pull requests to the person the tool context resolves", async (
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const contexts: unknown[] = [];
   const context = { session: { id: "session-1" } } as ToolContext;
+  const config = {
+    ...CONFIG,
+    attribution(ctx: ToolContext) {
+      contexts.push(ctx);
+      return { name: "octocat", email: "1+octocat@users.noreply.github.com" };
+    },
+  };
+  const dependencies = {
+    context,
+    sessionId: "session-1",
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+    },
+  };
+  await executeGitHubShell(READ, config, dependencies);
+  assert.deepEqual(contexts, [], "read commands never resolve attribution");
+
   await executeGitHubShell(
     { ...READ, command: 'gh pr create --repo vercel/internal-agents --title T --body "Why."' },
-    {
-      ...CONFIG,
-      attribution(ctx) {
-        contexts.push(ctx);
-        return { name: "octocat", email: "1+octocat@users.noreply.github.com" };
-      },
-    },
-    {
-      context,
-      sessionId: "session-1",
-      async getConnectToken() {
-        return "secret-token";
-      },
-      async getSandbox() {
-        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
-      },
-    },
+    config,
+    dependencies,
   );
 
   assert.deepEqual(contexts, [context]);

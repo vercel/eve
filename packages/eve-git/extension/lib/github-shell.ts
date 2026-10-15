@@ -3,7 +3,12 @@ import { getToken, type ConnectTokenParams } from "@vercel/connect";
 import type { SandboxSession } from "eve/sandbox";
 import type { ToolContext } from "eve/tools";
 
-import { attributeCommand, coAuthorTrailer, type GitHubCoAuthor } from "./attribution.ts";
+import {
+  attributeCommand,
+  coAuthorTrailer,
+  isAttributable,
+  type GitHubCoAuthor,
+} from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
@@ -107,7 +112,7 @@ export async function executeGitHubShell(
   const invocationId = crypto.randomUUID();
   const bodyFile = `/tmp/eve-git-body-${invocationId}.md`;
   const coAuthor =
-    config.attribution && dependencies.context
+    config.attribution && dependencies.context && isAttributable(argv)
       ? await config.attribution(dependencies.context)
       : null;
   const commandArgv = coAuthor

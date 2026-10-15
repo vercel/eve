@@ -32,6 +32,13 @@ export function withTrailer(body: string, trailer: string): string {
   return trimmed ? `${trimmed}\n\n${trailer}` : trailer;
 }
 
+/** True for the commands whose bodies carry attribution. */
+export function isAttributable(argv: readonly string[]): boolean {
+  return (
+    argv[0] === "gh-signed-commit" || (argv[0] === "gh" && argv[1] === "pr" && argv[2] === "create")
+  );
+}
+
 /**
  * Add the trailer to the bodies eve publishes: `gh-signed-commit` commit
  * messages and `gh pr create` descriptions. Other commands are unchanged.
