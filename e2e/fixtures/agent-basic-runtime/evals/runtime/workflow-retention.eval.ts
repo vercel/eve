@@ -48,7 +48,7 @@ export default defineEval({
           break;
         }
         await t.require(history.status, equals(200));
-        if ((await history.text()).length === 0) {
+        if ((await history.text()).trim().length === 0) {
           purged = true;
           break;
         }
