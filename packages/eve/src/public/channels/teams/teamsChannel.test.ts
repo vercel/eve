@@ -5,7 +5,9 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { INACTIVE_REQUEST_NOTICE } from "#channel/inactive-prompt.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,
@@ -308,6 +310,75 @@ describe("teamsChannel", () => {
         },
       }),
     );
+  });
+
+  it("answers an inactive press without waiting for its card to clear", async () => {
+    let releaseUpdate!: () => void;
+    const updateHeld = new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    });
+    const updates: string[] = [];
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        updates.push(String(url));
+        await updateHeld;
+      }
+      return new Response(JSON.stringify({ id: "updated-card" }));
+    });
+    const channel = asCompiled<TeamsChannelState>(
+      teamsChannel({
+        api: { fetch: fetchMock },
+        credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
+      }),
+    );
+    const post = channel.routes.find((route) => route.method === "POST");
+    if (!post || !isHttpRouteDefinition(post)) throw new Error("Expected a POST route.");
+    const send = vi.fn().mockRejectedValue(new SessionNotActiveError());
+    const waitUntil = vi.fn();
+
+    const response = await post.handler(
+      new Request("https://eve.test/eve/v1/teams", {
+        body: JSON.stringify({
+          ...baseActivity({ conversationType: "channel" }),
+          replyToId: "approval-card",
+          name: "adaptiveCard/action",
+          type: "invoke",
+          value: {
+            action: {
+              data: {
+                eve_input: {
+                  kind: "tool-approval",
+                  prompt: "Approve deployment?",
+                  optionId: "approve",
+                  replyToActivityId: "THREAD_ROOT",
+                  requestId: "REQ",
+                },
+              },
+            },
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      {
+        ...mockAgentRouteArgs(),
+        from: mockChannelContext<TeamsChannelState>(send).from,
+        resolveSession: vi.fn().mockResolvedValue(undefined) as never,
+        attachSession: vi.fn() as any,
+        params: {},
+        to: vi.fn(),
+        requestIp: null,
+        waitUntil,
+      },
+    );
+
+    expect(await response.json()).toMatchObject({ value: INACTIVE_REQUEST_NOTICE });
+    expect(updates).toEqual([
+      "https://smba.example.test/teams/v3/conversations/CONV/activities/approval-card",
+    ]);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    releaseUpdate();
+    await Promise.all(waitUntil.mock.calls.map(([task]) => task as Promise<unknown>));
   });
 
   it("updates a posted approval card after a durable cancel settlement", async () => {
