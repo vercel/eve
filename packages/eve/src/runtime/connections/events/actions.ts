@@ -1,9 +1,4 @@
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
-import {
-  findConnectionEventOwner,
-  startConnectionEventOwner,
-  retireConnectionEventOwner,
-} from "#runtime/connections/events/owner.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { principalOf } from "#execution/session/principal.js";
@@ -184,6 +179,9 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
+    // Discovery also runs in the harness. Load the workflow runtime only when executing an action.
+    const { findConnectionEventOwner, startConnectionEventOwner, retireConnectionEventOwner } =
+      await import("#runtime/connections/events/owner.js");
     if (name === GET || name === STOP) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
