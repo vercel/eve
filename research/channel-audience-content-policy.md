@@ -237,6 +237,11 @@ completed transcripts can return `410 session_expired`. Records and attributes
 Worlds older than spec version 4 reject `0`; version 4 Worlds without retention
 support keep the data.
 
+Before serving a session stream, eve checks the run's payload-free expiry
+metadata alongside its stream tail. A World can retain chunk records after
+purging their contents, so a nonempty tail alone cannot establish readability.
+Expired metadata produces `410 session_expired` before response headers are sent.
+
 ## Compatibility
 
 Instrumentation providers deprecate the experimental `capture` field in favor
