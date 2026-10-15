@@ -5716,7 +5716,7 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("accepts an empty 'stop' response without retrying or failing the turn", async () => {
+    it("accepts an empty 'stop' response in a root session without retrying or failing the turn", async () => {
       setupMockAgent(emptyStopResult);
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness(createTestConfig(emit));
@@ -5735,6 +5735,35 @@ describe("createToolLoopHarness", () => {
         "session.waiting",
       ]);
       expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries an empty 'stop' response in a delegated session and reports failure if still empty", async () => {
+      captureLogRecords();
+      setupMockAgent(emptyStopResult);
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig(emit));
+      const ctx = new ContextContainer();
+      setDelegatedParent(ctx);
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Summarize Alice's report for Bob." }),
+      );
+
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toEqual({
+        isError: true,
+        output: expect.stringContaining("did not return a response"),
+      });
+      expect(events.map((event) => event.type)).toEqual([
+        "session.started",
+        "turn.started",
+        "message.received",
+        "step.started",
+        "step.failed",
+        "turn.failed",
+        "session.waiting",
+      ]);
+      expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(2);
     });
 
     it("reissues once and recovers when the stream rejects with NoOutputGeneratedError", async () => {

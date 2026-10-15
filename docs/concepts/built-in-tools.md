@@ -422,7 +422,7 @@ export default noReply();
 
 `no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes. Remove the file to remove the tool.
 
-A successful model call can also return no text with `finishReason: "stop"`; eve does not retry or report a model-call failure solely because that response is empty. A turn that settles with no text completes without a final message. Use `no_reply` when the agent should record an explicit choice to stay quiet, including an optional reason.
+A root session also accepts a successful model call that returns no text with `finishReason: "stop"`, without retrying or reporting a model-call failure. A turn that settles with no text completes without a final message. Use `no_reply` when the agent should record an explicit choice to stay quiet, including an optional reason. Delegated sessions still retry an empty reply once and report a failure if it remains empty, so the caller can act on the failure.
 
 ### `sleep`
 
