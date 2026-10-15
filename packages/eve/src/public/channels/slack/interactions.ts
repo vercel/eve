@@ -53,7 +53,10 @@ import type {
   SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import { respondOrRetireInactivePrompt } from "#channel/inactive-prompt.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+} from "#channel/inactive-prompt.js";
 import {
   bindSlackSessionOperations,
   withSlackResponder,
@@ -480,6 +483,7 @@ function dispatchInteractionHook(
 async function dispatchBlockInputResponses(input: {
   readonly ctx: {
     from: ChannelFrom<SlackChannelState>;
+    waitUntil: (task: Promise<unknown>) => void;
   };
   readonly deps: InteractionHandlerDeps;
   readonly interaction: ParsedBlockActionsPayload;
@@ -508,19 +512,20 @@ async function dispatchBlockInputResponses(input: {
         }),
     {
       retirePrompt: (label) => settleHitlCard(input.interaction, input.deps, { label }),
-      notifyPresser: (notice) =>
-        postEphemeralNotice({
-          channelId: input.interaction.channelId,
-          deps: input.deps,
-          installationTeamId: input.interaction.installationTeamId,
-          notice,
-          teamId: input.interaction.teamId,
-          threadTs: input.interaction.threadTs,
-          userId: input.submission.user.id,
-        }),
+      waitUntil: input.ctx.waitUntil,
     },
     log,
   );
+  if (outcome === "inactive") {
+    await postEphemeralNotice({
+      channelId: input.interaction.channelId,
+      deps: input.deps,
+      installationTeamId: input.interaction.installationTeamId,
+      teamId: input.interaction.teamId,
+      threadTs: input.interaction.threadTs,
+      userId: input.submission.user.id,
+    });
+  }
   if (outcome !== "delivered") return;
 
   if (
@@ -536,12 +541,11 @@ async function dispatchBlockInputResponses(input: {
   }
 }
 
-/** Tells only `userId` something about the card they answered. */
+/** Tells only `userId` that the card they answered is no longer active. */
 async function postEphemeralNotice(input: {
   readonly channelId: string;
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
-  readonly notice: string;
   readonly teamId: string | undefined;
   readonly threadTs: string;
   readonly userId: string;
@@ -554,7 +558,11 @@ async function postEphemeralNotice(input: {
     teamId: input.teamId,
     threadTs: input.threadTs,
   });
-  await thread.postEphemeral(input.userId, input.notice);
+  try {
+    await thread.postEphemeral(input.userId, INACTIVE_REQUEST_NOTICE);
+  } catch (error) {
+    log.error("inactive prompt notice failed", { error });
+  }
 }
 
 async function openFreeformModal(input: {
@@ -691,7 +699,10 @@ async function handleViewSubmission(
 }
 
 async function dispatchViewInputResponse(input: {
-  readonly ctx: { from: ChannelFrom<SlackChannelState> };
+  readonly ctx: {
+    from: ChannelFrom<SlackChannelState>;
+    waitUntil: (task: Promise<unknown>) => void;
+  };
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
   readonly metadata: HitlFreeformModalMetadata;
@@ -725,20 +736,21 @@ async function dispatchViewInputResponse(input: {
           installationTeamId: input.installationTeamId,
           messageTs: input.metadata.messageTs,
         }),
-      notifyPresser: (notice) =>
-        postEphemeralNotice({
-          channelId: cardChannelId,
-          deps: input.deps,
-          installationTeamId: input.installationTeamId,
-          notice,
-          teamId: input.teamId ?? undefined,
-          // A card routed to another conversation only records the thread it answers.
-          threadTs: cardChannelId === input.metadata.channelId ? input.metadata.threadTs : "",
-          userId: input.submission.user.id,
-        }),
+      waitUntil: input.ctx.waitUntil,
     },
     log,
   );
+  if (outcome === "inactive") {
+    await postEphemeralNotice({
+      channelId: cardChannelId,
+      deps: input.deps,
+      installationTeamId: input.installationTeamId,
+      teamId: input.teamId ?? undefined,
+      // A card routed to another conversation only records the thread it answers.
+      threadTs: cardChannelId === input.metadata.channelId ? input.metadata.threadTs : "",
+      userId: input.submission.user.id,
+    });
+  }
   if (outcome !== "delivered") return;
 
   try {

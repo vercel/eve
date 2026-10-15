@@ -1,7 +1,11 @@
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import { respondOrRetireInactivePrompt } from "#channel/inactive-prompt.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+  type PromptResponseOutcome,
+} from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -371,7 +375,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           if (activity.type === "message") {
             waitUntil(
               isTeamsInputResponseActivity(activity)
-                ? dispatchInputResponses({ activity, config, from, onInputResponse })
+                ? dispatchInputResponses({ activity, config, from, onInputResponse, waitUntil })
                 : dispatchMessage({
                     activity,
                     config,
@@ -694,13 +698,16 @@ async function handleInvoke(input: {
 
   if (isTeamsInputResponseActivity(input.activity)) {
     // Answered after delivery, so the presser learns when no session took it.
-    const notice = await dispatchInputResponses({
+    const outcome = await dispatchInputResponses({
       activity: input.activity,
       config: input.config,
       onInputResponse: input.onInputResponse,
       from: input.from,
+      waitUntil: input.waitUntil,
     });
-    return Response.json(teamsInvokeResponse(notice === undefined ? {} : { message: notice }));
+    return Response.json(
+      teamsInvokeResponse(outcome === "inactive" ? { message: INACTIVE_REQUEST_NOTICE } : {}),
+    );
   }
 
   if (input.config.onInvoke === undefined) return teamsOk();
@@ -742,15 +749,17 @@ async function revealAuthorization(input: {
 }
 
 /**
- * Delivers a card submission. Returns the notice for the person who submitted
- * when no session could take it, which only an invoke's response can show them.
+ * Delivers a card submission and reports what became of it. A submission no
+ * session can take is told through an invoke's response, which the caller
+ * owns; its card is retired without holding that response.
  */
 async function dispatchInputResponses(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onInputResponse: NonNullable<TeamsChannelConfig["onInputResponse"]>;
-}): Promise<string | undefined> {
+  readonly waitUntil: (task: Promise<unknown>) => void;
+}): Promise<PromptResponseOutcome | undefined> {
   const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
   if (inputResponses.length === 0) return undefined;
   const state = stateFromActivity(input.activity);
@@ -765,8 +774,7 @@ async function dispatchInputResponses(input: {
   if (result === null) return undefined;
   const auth = result.auth;
   const activity = input.activity;
-  let notice: string | undefined;
-  await respondOrRetireInactivePrompt(
+  return respondOrRetireInactivePrompt(
     () =>
       input
         .from(cardContinuationToken(activity, state, readTeamsInputReplyToActivityId(activity)))
@@ -783,13 +791,10 @@ async function dispatchInputResponses(input: {
           renderInactiveInputRequestMessage(prompt, label),
         );
       },
-      async notifyPresser(text) {
-        notice = text;
-      },
+      waitUntil: input.waitUntil,
     },
     log,
   );
-  return notice;
 }
 
 function stateFromActivity(

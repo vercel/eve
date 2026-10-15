@@ -1,6 +1,9 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
-import { respondOrRetireInactivePrompt } from "#channel/inactive-prompt.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+} from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -633,6 +636,7 @@ function handleComponentInteraction(input: {
         inputResponses,
         interaction: input.interaction,
         from: input.from,
+        waitUntil: input.waitUntil,
       }),
     );
   }
@@ -656,6 +660,7 @@ function handleModalSubmitInteraction(input: {
         inputResponses,
         interaction: input.interaction,
         from: input.from,
+        waitUntil: input.waitUntil,
       }),
     );
   }
@@ -704,6 +709,7 @@ async function dispatchInputResponses(input: {
   readonly inputResponses: readonly ValidatedInputResponse[];
   readonly interaction: DiscordInputResponseInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
+  readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<void> {
   const state = stateFromInteraction(input.interaction, {
     conversationId: input.conversationId,
@@ -730,7 +736,7 @@ async function dispatchInputResponses(input: {
   const source = input.from(
     discordContinuationToken(input.interaction.channelId, input.conversationId),
   );
-  await respondOrRetireInactivePrompt(
+  const outcome = await respondOrRetireInactivePrompt(
     () => source.respond(input.inputResponses, { auth }),
     {
       // The session's record of the prompt is gone, so its text comes from the
@@ -742,12 +748,19 @@ async function dispatchInputResponses(input: {
         if (messageId === undefined || content === undefined) return;
         await editDiscordResolvedPrompt(discord, { content, messageId }, label);
       },
-      notifyPresser: async (notice) => {
-        await discord.followup({ content: notice, flags: DISCORD_EPHEMERAL_MESSAGE_FLAG });
-      },
+      waitUntil: input.waitUntil,
     },
     log,
   );
+  if (outcome !== "inactive") return;
+  try {
+    await discord.followup({
+      content: INACTIVE_REQUEST_NOTICE,
+      flags: DISCORD_EPHEMERAL_MESSAGE_FLAG,
+    });
+  } catch (error) {
+    log.error("inactive prompt notice failed", { error });
+  }
 }
 
 function acceptAsPresser(ctx: DiscordInputResponseContext): DiscordInputResponseResult {
