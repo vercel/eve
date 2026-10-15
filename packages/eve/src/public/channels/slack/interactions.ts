@@ -497,7 +497,7 @@ async function dispatchBlockInputResponses(input: {
   });
   if (result === null) return;
 
-  const delivered = await respondOrRetireInactivePrompt(
+  const outcome = await respondOrRetireInactivePrompt(
     () =>
       input.ctx
         .from(slackContinuationToken(channelId, threadTs))
@@ -520,7 +520,7 @@ async function dispatchBlockInputResponses(input: {
     },
     log,
   );
-  if (!delivered) return;
+  if (outcome !== "delivered") return;
 
   if (
     input.submission.actions.some((action) => decodeHitlResponse(action)?.kind === "tool-approval")
@@ -709,7 +709,7 @@ async function dispatchViewInputResponse(input: {
   if (result === null) return;
 
   const cardChannelId = input.metadata.messageChannelId ?? input.metadata.channelId;
-  const delivered = await respondOrRetireInactivePrompt(
+  const outcome = await respondOrRetireInactivePrompt(
     () =>
       input.ctx.from(input.metadata.continuationToken).respond(input.submission.inputResponses, {
         auth: result.auth,
@@ -738,7 +738,7 @@ async function dispatchViewInputResponse(input: {
     },
     log,
   );
-  if (!delivered) return;
+  if (outcome !== "delivered") return;
 
   try {
     await updateAnsweredFreeformCard({

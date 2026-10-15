@@ -1,7 +1,10 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import { respondOrRetireInactivePrompt } from "#channel/inactive-prompt.js";
+import {
+  respondOrRetireInactivePrompt,
+  type PromptResponseOutcome,
+} from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -625,13 +628,18 @@ async function dispatchCallbackQuery(input: {
   }
 
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
-    // Answered after delivery, so the presser learns when no session took it.
-    let answer = "Answer received.";
+    // Telegram takes one answer per callback, so it waits for delivery: a press
+    // no session can take is answered with the inactive notice instead.
+    const callbackQueryId = input.query.id;
+    const acknowledge = async (text: string): Promise<void> => {
+      await telegram.telegram.answerCallbackQuery({ callbackQueryId, text });
+    };
     const message = input.query.message;
+    let outcome: PromptResponseOutcome = "failed";
     if (message && state.chatId) {
       const source = input.from(telegramContinuationTokenFromState(state));
       const data = input.query.data;
-      await respondOrRetireInactivePrompt(
+      outcome = await respondOrRetireInactivePrompt(
         // The presser acts as themselves, so a press that starts a turn lets
         // their next message steer it.
         () =>
@@ -640,18 +648,14 @@ async function dispatchCallbackQuery(input: {
           }),
         {
           retirePrompt: (label) => retireInactivePrompt(telegram, message, label),
-          notifyPresser: async (notice) => {
-            answer = notice;
-          },
+          notifyPresser: acknowledge,
         },
         log,
       );
     }
+    if (outcome === "inactive") return;
     try {
-      await telegram.telegram.answerCallbackQuery({
-        callbackQueryId: input.query.id,
-        text: answer,
-      });
+      await acknowledge("Answer received.");
     } catch (error) {
       log.warn("Telegram callback-query acknowledgement failed", { error });
     }
