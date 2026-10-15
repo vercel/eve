@@ -87,21 +87,62 @@ export function shouldDispatchGitHubComment(input: {
   return extractGitHubCommentTrigger(input) !== null;
 }
 
-/** Extracts and strips the bot `@mention` from a comment body. */
+/**
+ * Extracts and strips the bot `@mention` from a comment body.
+ *
+ * Quoted lines, such as those GitHub's "Quote reply" inserts, stay in the message but neither
+ * trigger the bot nor answer a pending request: the mention must be typed outside a quote, and
+ * `typedText` leaves the quote out, so `@bot Approve` under a quoted approval prompt approves it.
+ */
 export function extractGitHubCommentTrigger(input: {
   readonly body: string;
   readonly botName?: string;
 }): GitHubCommentTrigger | null {
   const botName = input.botName?.trim();
   if (!botName) return null;
-  const mention = new RegExp(`@${escapeRegExp(botName)}(?=$|[^A-Za-z0-9_-])`, "iu").exec(
-    input.body,
+  const mention = new RegExp(`@${escapeRegExp(botName)}(?=$|[^A-Za-z0-9_-])`, "iu");
+  const lines = commentLines(input.body);
+  const index = lines.findIndex((line) => !line.quoted && mention.test(line.text));
+  if (index === -1) return null;
+  const token = mention.exec(lines[index]!.text)![0];
+  const stripped = lines.map((line, i) =>
+    i === index ? { ...line, text: line.text.replace(mention, "").trim() } : line,
   );
-  if (mention === null) return null;
-  const start = mention.index;
-  const end = start + mention[0].length;
-  const message = `${input.body.slice(0, start)}${input.body.slice(end)}`.trim();
-  return { kind: "mention", message, token: mention[0] };
+  const join = (selected: readonly CommentLine[]) =>
+    selected
+      .map((line) => line.text)
+      .join("\n")
+      .trim();
+  return {
+    kind: "mention",
+    message: join(stripped),
+    token,
+    typedText: join(stripped.filter((line) => !line.quoted)),
+  };
+}
+
+interface CommentLine {
+  readonly quoted: boolean;
+  readonly text: string;
+}
+
+/** Splits a Markdown comment into lines, marking block quotes outside fenced code. */
+function commentLines(body: string): readonly CommentLine[] {
+  let fence: string | undefined;
+  return body.split("\n").map((text) => {
+    const marker = /^ {0,3}(`{3,}|~{3,})/u.exec(text)?.[1];
+    if (fence !== undefined) {
+      if (marker !== undefined && marker[0] === fence[0] && marker.length >= fence.length) {
+        fence = undefined;
+      }
+      return { quoted: false, text };
+    }
+    if (marker !== undefined) {
+      fence = marker;
+      return { quoted: false, text };
+    }
+    return { quoted: /^ {0,3}>/u.test(text), text };
+  });
 }
 
 /** Parses GitHub webhook headers and body into an eve-owned event shape. */

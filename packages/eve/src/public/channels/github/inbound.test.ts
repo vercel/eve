@@ -289,6 +289,44 @@ describe("GitHub inbound parsing", () => {
     ).toBeNull();
   });
 
+  it("answers with the typed text under a quote reply, not the quoted prompt", () => {
+    const body = [
+      "> Approve tool call: deploy",
+      ">",
+      "> 1. Approve",
+      "> 2. Cancel",
+      ">",
+      "> Answer by mentioning me in a reply, e.g. `@testbot Approve`.",
+      "",
+      "@testbot Approve",
+    ].join("\n");
+
+    expect(extractGitHubCommentTrigger({ body, botName: "testbot" })).toEqual({
+      kind: "mention",
+      message: body.replace(/@testbot Approve$/u, "Approve"),
+      token: "@testbot",
+      typedText: "Approve",
+    });
+  });
+
+  it("does not trigger on a mention that only appears inside a quote", () => {
+    expect(
+      extractGitHubCommentTrigger({
+        body: "> @testbot can you look?\n\nAgreed, this needs a look.",
+        botName: "testbot",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps `>` lines inside fenced code as typed text", () => {
+    const body = "@testbot run this\n```sh\n> echo hi\n```";
+
+    expect(extractGitHubCommentTrigger({ body, botName: "testbot" })).toMatchObject({
+      message: "run this\n```sh\n> echo hi\n```",
+      typedText: "run this\n```sh\n> echo hi\n```",
+    });
+  });
+
   it("ignores bot and hidden-marker comments in default dispatch", () => {
     expect(
       shouldDispatchGitHubComment({
