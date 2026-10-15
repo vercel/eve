@@ -572,7 +572,7 @@ export default defineDynamic({
   });
 
   // https://github.com/vercel/eve/issues/4860
-  it.fails("captures locals bound by an array rest element", async () => {
+  it("captures locals bound by an array rest element", async () => {
     const { callHandler } = await transformAndEval(
       "tools/array-rest.ts",
       `
@@ -596,7 +596,7 @@ export default defineDynamic({
   });
 
   // https://github.com/vercel/eve/issues/4860
-  it.fails("captures a rest parameter of the resolver", async () => {
+  it("captures a rest parameter of the resolver", async () => {
     const { callHandler } = await transformAndEval(
       "tools/rest-param.ts",
       `
