@@ -464,7 +464,7 @@ spec version 4 rejects `0`; a spec version 4 World without retention support
 keeps the data. Confirm support with your World provider. See
 [Workflow data retention](https://workflow-sdk.dev/docs/observability/retention).
 
-> ⚠️ **At `0`, completed session transcripts become unreadable.** Deletion races reads of finished runs. A client reading expired session history receives `410` with `code: "session_expired"`. Persist anything you need to keep from inside a tool, or set `retention: "default"` to preserve completed-session reads independently of tracing.
+> ⚠️ **At `0`, completed session transcripts become unreadable.** Deletion races reads of finished runs. Depending on the World, reading deleted session history returns either an empty stream or `410` with `code: "session_expired"`. Persist anything you need to keep from inside a tool, or set `retention: "default"` to preserve completed-session reads independently of tracing.
 
 ## Other defineAgent fields
 

@@ -1,5 +1,5 @@
 import { defineEval } from "eve/evals";
-import { equals } from "eve/evals/expect";
+import { equals, satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
@@ -38,19 +38,28 @@ export default defineEval({
         continue;
       }
 
-      let expired = false;
+      let purged = false;
       for (const delayMs of [0, 50, 100, 200, 400, 800, 1_600, 3_200]) {
         await t.sleep(delayMs);
         const history = await readHistory();
         if (history.status === 410) {
           await t.require((await history.json()).code, equals("session_expired"));
-          expired = true;
+          purged = true;
           break;
         }
         await t.require(history.status, equals(200));
-        await history.body?.cancel();
+        if ((await history.text()).length === 0) {
+          purged = true;
+          break;
+        }
       }
-      await t.require(expired, equals(true));
+      await t.require(
+        purged,
+        satisfies(
+          (value: boolean) => value,
+          "metadata-only session history is expired or empty after reset",
+        ),
+      );
     }
   },
 });
