@@ -303,6 +303,12 @@ function getLatestTurnFailure(
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
 
+    // A session that fails ends its open turn cancelled; the error is the session's.
+    if (event.type === "session.ended") {
+      if (event.data.outcome !== "failed") return undefined;
+      return event.data.error?.message ?? "The session failed.";
+    }
+
     if (event.type === "turn.settled") {
       if (event.data.outcome !== "failed") return undefined;
       return event.data.error?.code === "MODEL_CALL_FAILED"

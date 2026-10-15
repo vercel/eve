@@ -565,7 +565,9 @@ export async function publishTerminalSessionEvent(input: {
     });
   } catch (error) {
     log.error(`failed to restore context for terminal ${type} event`, { ...fields, error });
-    await writeUnroutedSessionEvent(input.sessionWritable, facts).catch((writeError) =>
+    // The writer that would close what the session leaves open isn't available: close it here.
+    const closed = input.projection === undefined ? facts : cascade(input.projection.view, facts);
+    await writeUnroutedSessionEvent(input.sessionWritable, closed).catch((writeError) =>
       log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
     );
     return;

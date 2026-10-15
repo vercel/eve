@@ -151,7 +151,7 @@ function failedTask(view: SessionView, row: CallRow): boolean {
 
 /** A task stopped before it finished for any reason but the model's own `eve__task_cancel`. */
 function isInterrupted(view: SessionView, row: CallRow): boolean {
-  return callState(view, row.callId) === "cancelled" && row.reason !== "task_cancel";
+  return callState(view, row.callId) === "cancelled" && row.reason !== "task-cancel";
 }
 
 function countTasks(count: number): string {
@@ -232,11 +232,11 @@ function outputLine(card: TaskCard, row: CallRow): string | undefined {
 
 function stoppedLine(reason: CallRow["reason"]): string {
   switch (reason) {
-    case "task_cancel":
+    case "task-cancel":
       return "Stopped early since it was no longer needed";
-    case "turn_cancelled":
+    case "turn-cancelled":
       return "Stopped by request";
-    case "turn_ended":
+    case "turn-ended":
       return "Stopped when the turn ended";
     default:
       return "Stopped";

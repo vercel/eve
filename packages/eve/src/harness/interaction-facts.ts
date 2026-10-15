@@ -3,7 +3,7 @@
 // private.
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { Cause, Scope } from "#protocol/session-events/envelope.js";
+import type { Cause } from "#protocol/session-events/envelope.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type {
   InteractionOpenedData,
@@ -29,7 +29,6 @@ export function interactionOpened(input: {
   readonly interactionId: string;
   readonly request: InteractionRequest;
   readonly subject: InteractionSubject;
-  readonly scope: Scope;
   readonly origin?: InteractionOpenedData["origin"];
   readonly audience?: InteractionOpenedData["audience"];
 }): FactOf<"interaction.opened"> {
@@ -40,15 +39,14 @@ export function interactionOpened(input: {
   };
   if (input.origin !== undefined) data.origin = input.origin;
   if (input.audience !== undefined) data.audience = input.audience;
-  return { type: "interaction.opened", data, scope: input.scope };
+  return { type: "interaction.opened", data };
 }
 
 /** An approval opens about its call. */
-export function approvalOpened(ask: ApprovalAsk, turnId: string): FactOf<"interaction.opened"> {
+export function approvalOpened(ask: ApprovalAsk): FactOf<"interaction.opened"> {
   return interactionOpened({
     interactionId: ask.interactionId,
     request: ask.request,
-    scope: { turnId },
     subject: { callId: ask.call.callId },
   });
 }
@@ -65,7 +63,6 @@ export function signInOpened(
   challenge: AuthorizationChallenge,
   input: {
     readonly subject: InteractionSubject;
-    readonly scope: Scope;
     readonly origin?: InteractionOpenedData["origin"];
     readonly prompt?: string;
   },
@@ -92,7 +89,7 @@ export function signInOpened(
   if (challenge.principalId !== undefined)
     data.audience = { principalIds: [challenge.principalId] };
   if (input.origin !== undefined) data.origin = input.origin;
-  return { type: "interaction.opened", data, scope: input.scope };
+  return { type: "interaction.opened", data };
 }
 
 /** An interaction ends. `cause` names the response that decided it, or what else settled it. */
@@ -100,7 +97,6 @@ export function interactionSettled(
   interactionId: string,
   outcome: InteractionOutcome,
   input: {
-    readonly scope?: Scope;
     readonly reason?: string;
     readonly cause?: Cause;
     readonly response?: ResponseValue;
@@ -115,9 +111,7 @@ export function interactionSettled(
     if (input.response.text !== undefined) detail.text = input.response.text;
     if (Object.keys(detail).length > 0) data.response = detail;
   }
-  return input.scope === undefined || Object.keys(input.scope).length === 0
-    ? { type: "interaction.settled", data }
-    : { type: "interaction.settled", data, scope: input.scope };
+  return { type: "interaction.settled", data };
 }
 
 export function responseSubmitted(binding: ResponseSubmittedData): FactOf<"response.submitted"> {

@@ -583,7 +583,7 @@ describe("SessionExecution checkpoints", () => {
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
     expect(inbox.next).not.toHaveBeenCalled();
     expect(cancelTasksStep).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "turn_cancelled", turnCalls: true }),
+      expect.objectContaining({ reason: "turn-cancelled", turnCalls: true }),
     );
   });
 

@@ -239,6 +239,34 @@ describe("EveAcpAdapter", () => {
     ).resolves.toEqual({ stopReason: "cancelled" });
   });
 
+  it("fails the prompt with the session's error when its session fails", async () => {
+    const { adapter } = adapterWith([
+      [
+        ...opening(),
+        { data: { outcome: "interrupted", runId }, scope, type: "model.settled" },
+        {
+          data: { outcome: "cancelled", turnId },
+          scope: { turnId },
+          type: "turn.settled",
+        },
+        {
+          data: { deliveryId: "d_0", outcome: "failed", reason: "session-ended" },
+          type: "delivery.settled",
+        },
+        {
+          data: { error: { code: "BOOM", message: "It broke." }, outcome: "failed" },
+          type: "session.ended",
+        },
+      ],
+    ]);
+    const { sessionId } = await adapter.newSession({ cwd: process.cwd(), mcpServers: [] });
+    const { client } = acpClient();
+
+    await expect(
+      adapter.prompt(textPrompt(sessionId), client, new AbortController().signal),
+    ).rejects.toThrow(/It broke/);
+  });
+
   it("fails the prompt with the turn's error, ending its running calls", async () => {
     const { adapter } = adapterWith([
       [

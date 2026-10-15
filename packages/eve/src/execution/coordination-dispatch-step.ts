@@ -90,7 +90,10 @@ async function dispatchCoordination(
 
   for (const start of starts) {
     const { task } = start;
-    const dispatched = await dispatchWorkflowCall({ ...start, session: nextSession }, admissionView);
+    const dispatched = await dispatchWorkflowCall(
+      { ...start, session: nextSession },
+      admissionView,
+    );
     nextSession = dispatched.session;
     if (dispatched.result !== undefined) results.push(dispatched.result);
     // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
@@ -112,7 +115,6 @@ async function dispatchCoordination(
         callSettledFrom(dispatched.result, {
           rejected: true,
           cause: { policy: dispatched.refusal },
-          scope: { turnId: batch.event.turnId },
         }),
       );
   }

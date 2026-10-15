@@ -128,7 +128,7 @@ export class SessionExecution {
       // The turn rule holds a turn while its tasks work, so a turn that ends
       // anyway, such as by failing, cancels them.
       if (outcome.kind === "park" && outcome.settled !== undefined) {
-        await cancelWorkingTasks(this.input.cursor, "turn_ended");
+        await cancelWorkingTasks(this.input.cursor, "turn-ended");
       }
       return {
         ...outcome,
@@ -386,7 +386,7 @@ export class SessionExecution {
    * case, skips that durable step.
    */
   async cancelTurnWork(): Promise<void> {
-    await cancelWorkingTasks(this.input.cursor, "turn_cancelled", { turnCalls: true });
+    await cancelWorkingTasks(this.input.cursor, "turn-cancelled", { turnCalls: true });
   }
 
   /** `session.cancel()` stops the turn, the calls it waits on, and every working task. */
