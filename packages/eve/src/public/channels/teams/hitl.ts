@@ -116,27 +116,34 @@ export function renderAnsweredInputRequestMessage(input: {
  * Renders the card that replaces a prompt no session can answer anymore: its
  * prompt, then `label`, as the session would have resolved it.
  */
-export function renderInactiveInputRequestMessage(prompt: string, label: string): TeamsMessageBody {
+export function renderInactiveInputRequestMessage(
+  prompt: string | undefined,
+  label: string,
+): TeamsMessageBody {
   return renderSettledInputRequestMessage(prompt, { text: label });
 }
 
+/** A card without its choices: `status` under the prompt, when the prompt is known. */
 function renderSettledInputRequestMessage(
-  prompt: string,
+  prompt: string | undefined,
   status: { readonly color?: string; readonly text: string },
 ): TeamsMessageBody {
+  const promptBlocks =
+    prompt === undefined
+      ? []
+      : [
+          {
+            text: truncate(prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+            type: "TextBlock",
+            wrap: true,
+          },
+        ];
   return {
     attachments: [
       {
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          body: [
-            {
-              text: truncate(prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-              type: "TextBlock",
-              wrap: true,
-            },
-            { ...status, type: "TextBlock", wrap: true },
-          ],
+          body: [...promptBlocks, { ...status, type: "TextBlock", wrap: true }],
           type: "AdaptiveCard",
           version: "1.5",
         }),

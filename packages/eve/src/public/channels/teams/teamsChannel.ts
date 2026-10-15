@@ -786,11 +786,11 @@ async function dispatchInputResponses(input: {
         }),
     {
       async retirePrompt(label) {
-        const prompt = readTeamsInputPrompt(activity);
-        if (activity.replyToId === undefined || prompt === undefined) return;
+        if (activity.replyToId === undefined) return;
+        // A card posted before prompts rode in its data still loses its buttons.
         await ctx.thread.update(
           activity.replyToId,
-          renderInactiveInputRequestMessage(prompt, label),
+          renderInactiveInputRequestMessage(readTeamsInputPrompt(activity), label),
         );
       },
     },
