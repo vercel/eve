@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { z } from "#compiled/zod/index.js";
 import { resolveApprovalPolicy, type ApprovalConfiguration } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { callableJsonSchema } from "#internal/testing/callable-schema.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { schedules } from "#public/experimental/schedules/client.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
@@ -30,6 +32,26 @@ async function bindCaller() {
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     }),
   );
+}
+
+type TestRuntime = Awaited<ReturnType<typeof createTestRuntime>>;
+
+async function loadScheduleTools(
+  app: TestRuntime,
+  collection: string,
+): Promise<Record<string, DynamicToolEntry>> {
+  const wrapper = app.manifest.dynamicTools.find(
+    (entry) => entry.logicalPath === `tools/schedule__${collection}.ts`,
+  )!;
+  const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!.default as ReturnType<
+    typeof import("#dynamic/definition.js").defineDynamic
+  >;
+  return (await dynamic.events["turn.started"]!(undefined, {
+    model: null,
+    session: { id: "alice", auth: { current: alice, initiator: null } },
+    channel: {},
+    messages: [],
+  })) as Record<string, DynamicToolEntry>;
 }
 
 describe("schedule creation and invocation", () => {
@@ -83,17 +105,7 @@ describe("schedule creation and invocation", () => {
     });
     await app.runAsSession(undefined, async () => {
       await bindCaller();
-      const wrapper = app.manifest.dynamicTools.find(
-        (entry) => entry.logicalPath === "tools/schedule__requests.ts",
-      )!;
-      const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!
-        .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
-      const tools = (await dynamic.events["turn.started"]!(undefined, {
-        model: null,
-        session: { id: "alice", auth: { current: alice, initiator: null } },
-        channel: {},
-        messages: [],
-      })) as Record<string, DynamicToolEntry>;
+      const tools = await loadScheduleTools(app, "requests");
       expect(Object.keys(tools).sort()).toEqual(
         ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
           (operation) => `schedule__requests__${operation}`,
@@ -197,6 +209,87 @@ describe("schedule creation and invocation", () => {
       await expect(
         tools.schedule__requests__get!.execute(invoked, {} as never),
       ).resolves.toBeNull();
+    });
+  });
+
+  it("advertises and validates payloads with a non-Zod callable Standard Schema", async () => {
+    const provider = inMemoryScheduleProvider();
+    const write = vi.spyOn(provider, "create");
+    const subscription = defineDynamicSchedules({
+      inputSchema: callableJsonSchema<{ task: string }>({
+        type: "object",
+        properties: { task: { type: "string" } },
+        required: ["task"],
+      }),
+      provider,
+      approval: { create: () => "user-approval" },
+      auth: () => alice,
+      run: async () => {},
+    });
+    const app = await createTestRuntime({
+      modules: [
+        {
+          logicalPath: "schedules/callable.ts",
+          loadNamespace: async () => ({ default: subscription }),
+        },
+      ],
+    });
+    await app.runAsSession(undefined, async () => {
+      await bindCaller();
+      const tools = await loadScheduleTools(app, "callable");
+      const create = tools.schedule__callable__create!;
+      const update = tools.schedule__callable__update!;
+      const payloadSchema = {
+        type: "object",
+        properties: { task: { type: "string" } },
+        required: ["task"],
+      };
+      expect(serializeInputSchema(create.inputSchema)).toMatchObject({
+        required: ["name", "expression", "payload"],
+        properties: { payload: payloadSchema },
+      });
+      const updateSchema = serializeInputSchema(update.inputSchema);
+      expect(updateSchema).toMatchObject({
+        required: ["name"],
+        properties: { payload: payloadSchema },
+      });
+
+      const input = {
+        name: "joke",
+        expression: { type: "delay" as const, minutes: 1 },
+        payload: { task: "A joke" },
+      };
+      const validate = (tool: DynamicToolEntry, value: unknown) =>
+        (tool.inputSchema as StandardSchemaV1)["~standard"].validate(value);
+      await expect(validate(create, input)).resolves.toEqual({ value: input });
+      await expect(validate(create, { ...input, payload: { task: 1 } })).resolves.toMatchObject({
+        issues: [{ path: ["payload", "task"] }],
+      });
+      await expect(
+        validate(create, { name: "joke", expression: input.expression }),
+      ).resolves.toMatchObject({
+        issues: [{ path: ["payload"] }],
+      });
+      await expect(validate(update, { name: "joke" })).resolves.toMatchObject({
+        issues: [{ message: "Schedule update requires an expression or replacement payload." }],
+      });
+      await expect(
+        validate(update, { name: "joke", expression: { type: "delay", minutes: 5 } }),
+      ).resolves.not.toHaveProperty("issues");
+
+      const request = resolveApprovalPolicy(create.approval!);
+      await expect(
+        request({
+          callId: "accepted",
+          toolInput: input,
+          approvedTools: new Set<string>(),
+          toolName: "schedule__callable__create",
+        } as never),
+      ).resolves.toBe("user-approval");
+      await create.execute(input, { callId: "accepted" } as never);
+      expect(write.mock.calls[0]![1].payload).toMatchObject({
+        envelope: { payload: { task: "A joke" } },
+      });
     });
   });
 

@@ -4,6 +4,7 @@ import type {
   ScheduleProvider,
 } from "#public/schedules/subscription.js";
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
+import { getStandardSchemaProperties } from "#tools/schema-emission.js";
 
 const SCHEDULE_OPERATIONS = [
   "create",
@@ -55,14 +56,9 @@ export function normalizeScheduleCollectionDefinition(
     (typeof record.description !== "string" || record.description.trim() === "")
   )
     throw new Error(`${message} "description" must be a non-empty string when provided.`);
-  const schema = expectObjectRecord(
-    record.inputSchema,
-    `${message} "inputSchema" is required and must be a Standard Schema.`,
-  );
-  const standard = expectObjectRecord(
-    schema["~standard"],
-    `${message} "inputSchema" must be a Standard Schema.`,
-  );
+  const standard = getStandardSchemaProperties(record.inputSchema);
+  if (standard === undefined)
+    throw new Error(`${message} "inputSchema" is required and must be a Standard Schema.`);
   if (typeof standard.validate !== "function")
     throw new Error(`${message} "inputSchema" must supply a Standard Schema validate function.`);
   if (record.preparePayload !== undefined && typeof record.preparePayload !== "function")

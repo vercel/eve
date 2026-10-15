@@ -26,10 +26,12 @@ import {
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { MAX_SCHEDULE_DELAY_MINUTES } from "#runtime/schedules/validation.js";
 import { parseJsonObject } from "#shared/json.js";
+import { isObject } from "#shared/guards.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
+import { serializeInputSchema, type ToolSchema } from "#tools/schema.js";
 import {
   readDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
@@ -82,6 +84,17 @@ const expressionSchema = z.discriminatedUnion("type", [
 ]);
 const timingGuidance =
   "For relative requests use expression { type: 'delay', minutes: 1 }; eve resolves timing after approval and rounds up to minute precision (up to 59 seconds later). Do not guess the clock or ask for a timezone for delays.";
+const createFields = z
+  .object({ name: nameSchema, expression: expressionSchema, payload: z.unknown() })
+  .strict();
+const updateFields = createFields
+  .partial({ expression: true, payload: true })
+  .extend({ name: nameInput.shape.name })
+  .refine((input) => input.expression !== undefined || input.payload !== undefined, {
+    message: "Schedule update requires an expression or replacement payload.",
+  });
+type CreateInput<TInput> = Omit<z.output<typeof createFields>, "payload"> & { payload: TInput };
+type UpdateInput<TInput> = Omit<z.output<typeof updateFields>, "payload"> & { payload?: TInput };
 
 export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared = TInput>(
   definition: DynamicSchedulesDefinition<TInput, StandardSchemaV1<unknown, TInput>, TPrepared>,
@@ -105,30 +118,25 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
           const prefix = `${scheduleCollectionToolPrefix(identity.collection)}__`;
           const keyFor = (operation: "create" | "update", callId: string) =>
             `${prefix}${operation}:${callId}`;
-          const createSchema = z
-            .object({
-              name: nameSchema,
-              expression: expressionSchema,
-              payload: definition.inputSchema,
-            })
-            .strict();
-          const updateSchema = createSchema
-            .partial({ expression: true, payload: true })
-            .extend({ name: nameInput.shape.name })
-            .refine((input) => input.expression !== undefined || input.payload !== undefined, {
-              message: "Schedule update requires an expression or replacement payload.",
-            });
+          const createSchema = withPayloadSchema(createFields, definition.inputSchema, true);
+          const updateSchema = withPayloadSchema(updateFields, definition.inputSchema, false);
           const createApproval = writeApproval(
             definition.approval?.create ?? always(),
             (callId) => keyFor("create", callId),
-            async (input) => (await bind()).prepareCreate(await createSchema.parseAsync(input)),
+            async (input) =>
+              (await bind()).prepareCreate(
+                await parseInput<CreateInput<TInput>>(createSchema, input),
+              ),
             (prepared) => prepared.envelope.payload,
           );
           const updateApproval = writeApproval(
             definition.approval?.update ?? always(),
             (callId) => keyFor("update", callId),
             async (input) => {
-              const { name, expression, payload } = await updateSchema.parseAsync(input);
+              const { name, expression, payload } = await parseInput<UpdateInput<TInput>>(
+                updateSchema,
+                input,
+              );
               const client = await bind();
               return expression === undefined
                 ? client.prepareUpdate(name, { payload })
@@ -359,4 +367,56 @@ function stampCallbacks(tool: ToolDefinition<any, unknown>): void {
       };
   }
   stampDurableDynamicToolCallbacks(tool, callbacks);
+}
+
+/**
+ * Composes the operation fields with the collection's own payload schema, which
+ * may come from any Standard Schema library rather than eve's Zod copy.
+ */
+function withPayloadSchema(
+  fields: z.ZodType,
+  payload: StandardSchemaV1,
+  required: boolean,
+): ToolSchema {
+  const emit = (): Record<string, unknown> => {
+    const { required: fieldKeys, ...json } = serializeInputSchema(fields);
+    const properties = isObject(json.properties) ? json.properties : {};
+    const keys: unknown[] = Array.isArray(fieldKeys) ? fieldKeys : [];
+    const others = keys.filter((key) => key !== "payload");
+    const requiredKeys = required ? [...others, "payload"] : others;
+    return {
+      ...json,
+      properties: { ...properties, payload: serializeInputSchema(payload) },
+      ...(requiredKeys.length > 0 && { required: requiredKeys }),
+    };
+  };
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "eve",
+      validate: async (value) => {
+        const result = await fields["~standard"].validate(value);
+        if (result.issues !== undefined || !isObject(result.value)) return result;
+        const input = result.value;
+        if (!required && input.payload === undefined) return result;
+        const checked = await payload["~standard"].validate(input.payload);
+        return checked.issues === undefined
+          ? { value: { ...input, payload: checked.value } }
+          : {
+              issues: checked.issues.map((issue) => ({
+                ...issue,
+                path: ["payload", ...(issue.path ?? [])],
+              })),
+            };
+      },
+      jsonSchema: { input: emit, output: emit },
+    },
+  };
+}
+
+async function parseInput<T>(schema: ToolSchema, input: unknown): Promise<T> {
+  const result = await schema["~standard"].validate(input);
+  if (result.issues !== undefined)
+    throw new Error(result.issues.map((issue) => issue.message).join("; "));
+  return result.value as T;
 }

@@ -3,8 +3,19 @@ import { z } from "#compiled/zod/index.js";
 import { defineDurableSchema, readDurableSchema } from "#tools/durable-schema.js";
 import { defineTool } from "#tools/definition.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
+import { callableJsonSchema } from "#internal/testing/callable-schema.js";
 
 describe("defineDurableSchema", () => {
+  it("makes callable Standard Schemas replayable", async () => {
+    const source = callableJsonSchema({ type: "string" });
+    const schema = defineDurableSchema({ closure: {}, schema: () => source });
+
+    expect(readDurableSchema(schema)).toBeDefined();
+    expect(serializeInputSchema(schema)).toEqual({ type: "string" });
+    expect(await schema["~standard"].validate("ok")).toEqual({ value: "ok" });
+    expect(await schema["~standard"].validate(1)).toHaveProperty("issues");
+  });
+
   it.each([false, true])("preserves nested Zod composition (frozen: %s)", (frozen) => {
     const source = z.object({ value: z.string().trim().min(1) });
     if (frozen) {

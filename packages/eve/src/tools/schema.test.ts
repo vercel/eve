@@ -14,6 +14,7 @@ import {
   toOutputSchema,
 } from "#tools/schema.js";
 import { serializeModelInputSchema } from "#public/tools/index.js";
+import { callableJsonSchema } from "#internal/testing/callable-schema.js";
 
 const AI_SDK_SCHEMA = Symbol.for("vercel.ai.schema");
 
@@ -378,6 +379,14 @@ describe("defineJsonSchema", () => {
 });
 
 describe("toModelSchema", () => {
+  it("lowers callable Standard Schemas instead of treating them as lazy AI SDK schemas", async () => {
+    const model = asSchema(toModelSchema(callableJsonSchema({ type: "string" }), "input"));
+
+    expect(await model.jsonSchema).toEqual({ type: "string" });
+    await expect(model.validate?.("ok")).resolves.toEqual({ success: true, value: "ok" });
+    await expect(model.validate?.(1)).resolves.toMatchObject({ success: false });
+  });
+
   it("lowers Standard Schemas onto AI SDK schemas the AI SDK uses as-is", async () => {
     const sources = [
       defineJsonSchema({ properties: { city: { type: "string" } }, type: "object" }),
@@ -468,10 +477,13 @@ describe("tool schema conversion", () => {
   });
 
   it("preserves a live validated schema", () => {
-    const schema = z.object({ prompt: z.string() });
-
-    expect(toInputSchema(schema)).toBe(schema);
-    expect(toOutputSchema(schema)).toBe(schema);
+    for (const schema of [
+      z.object({ prompt: z.string() }),
+      callableJsonSchema({ type: "string" }),
+    ]) {
+      expect(toInputSchema(schema)).toBe(schema);
+      expect(toOutputSchema(schema)).toBe(schema);
+    }
   });
 
   it("passes null and undefined through every conversion", () => {
@@ -492,6 +504,13 @@ describe("tool schema conversion", () => {
       required: ["prompt"],
       type: "object",
     });
+  });
+
+  it("serializes both directions of a callable Standard Schema", () => {
+    const schema = callableJsonSchema({ type: "string" });
+
+    expect(serializeInputSchema(schema)).toEqual({ type: "string" });
+    expect(serializeOutputSchema(schema)).toEqual({ type: "string" });
   });
 
   it("serializes and validates a Zod 3 input schema", async () => {
@@ -559,8 +578,19 @@ describe("tool schema conversion", () => {
   it("identifies validating JSON-Schema-capable values", () => {
     expect(isToolSchema(z.object({}))).toBe(true);
     expect(isToolSchema(UNSPECIFIED_INPUT_SCHEMA)).toBe(true);
+    expect(isToolSchema(callableJsonSchema({}))).toBe(true);
     expect(isToolSchema({ type: "object" })).toBe(false);
     expect(isToolSchema(null)).toBe(false);
+  });
+
+  it.each([
+    ["no Standard Schema metadata", function schema() {}],
+    ["function-valued metadata", Object.assign(function schema() {}, { "~standard": () => ({}) })],
+  ])("rejects a function with %s", (_label, source) => {
+    expect(isToolSchema(source)).toBe(false);
+    expect(() => serializeInputSchema(source as never)).toThrow(
+      "Expected a JSON-serializable value.",
+    );
   });
 
   it("accepts any input via UNSPECIFIED_INPUT_SCHEMA", () => {

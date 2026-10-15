@@ -54,7 +54,10 @@ export function readJsonSchemaEmitter(
 }
 
 export function getStandardSchemaProperties(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== "object" || value === null || !("~standard" in value)) return undefined;
+  // Some implementations (e.g. ArkType) are callable functions that carry `~standard`.
+  if (typeof value !== "function" && (typeof value !== "object" || value === null))
+    return undefined;
+  if (!("~standard" in value)) return undefined;
 
   const standard = (value as Record<string, unknown>)["~standard"];
   return typeof standard === "object" && standard !== null

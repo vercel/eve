@@ -10,18 +10,12 @@ import {
   type ToolSchemaSource,
 } from "#tools/schema.js";
 import type { JsonObject } from "#shared/json.js";
+import { getStandardSchemaProperties } from "#tools/schema-emission.js";
 
 const DURABLE_SCHEMA = Symbol.for("eve:durable-dynamic-schema");
 
 export function hasSchemaValidator(source: unknown): source is StandardSchemaV1 {
-  if (typeof source !== "object" || source === null || !("~standard" in source)) return false;
-  const standard = source["~standard"];
-  return (
-    typeof standard === "object" &&
-    standard !== null &&
-    "validate" in standard &&
-    typeof standard.validate === "function"
-  );
+  return typeof getStandardSchemaProperties(source)?.validate === "function";
 }
 
 type DurableSchema<TSchema> = TSchema extends StandardSchemaV1

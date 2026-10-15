@@ -261,7 +261,7 @@ export function toModelSchema(
   schema: FlexibleSchema | undefined,
   direction: SchemaDirection,
 ): FlexibleSchema | undefined {
-  if (schema === undefined || typeof schema === "function" || !("~standard" in schema)) {
+  if (schema === undefined || !("~standard" in schema)) {
     return schema;
   }
   const source = schema as StandardSchemaV1;

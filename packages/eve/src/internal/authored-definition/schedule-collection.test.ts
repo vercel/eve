@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
+import { callableJsonSchema } from "#internal/testing/callable-schema.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 
@@ -15,6 +16,11 @@ describe("normalizeScheduleCollectionDefinition", () => {
   it.each([
     ["no auth", { auth: undefined }, '"auth" is required'],
     ["no input schema", { inputSchema: undefined }, '"inputSchema" is required'],
+    [
+      "a function without Standard Schema metadata",
+      { inputSchema: () => ({}) },
+      '"inputSchema" is required',
+    ],
     ["a malformed schema", { inputSchema: { "~standard": {} } }, "validate function"],
     ["no run", { run: undefined }, '"run" is required'],
     [
@@ -68,5 +74,13 @@ describe("normalizeScheduleCollectionDefinition", () => {
     expect(() =>
       normalizeScheduleCollectionDefinition(defineDynamicSchedules(valid), "Invalid."),
     ).not.toThrow();
+  });
+
+  it("accepts a callable Standard Schema", () => {
+    const definition = defineDynamicSchedules({
+      ...valid,
+      inputSchema: callableJsonSchema<{ task: string }>({ type: "object" }),
+    });
+    expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).not.toThrow();
   });
 });
