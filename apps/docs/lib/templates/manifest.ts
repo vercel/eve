@@ -164,6 +164,36 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-coding-agent-template",
+    title: "Coding Agent on Slack",
+    setupPrompt:
+      "Set up the eve coding agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-coding-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Slack, GitHub, and Vercel setup steps.",
+    description:
+      "A coding agent you mention in Slack or on GitHub that investigates bugs, reviews changes, and opens pull requests from an isolated Vercel Sandbox, with GitHub tokens scoped to one repository per command.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-coding-agent-template",
+    category: "Collaboration",
+    model: "anthropic/claude-opus-5.5",
+    integrations: ["Slack", "GitHub", "Vercel"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-coding-agent-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/channels/github.ts",
+      "agent/extensions/code.ts",
+      "agent/extensions/git.ts",
+      "agent/hooks/reset-github-egress.ts",
+      "agent/instructions.md",
+      "agent/lib/github.ts",
+      "agent/sandbox.ts",
+    ],
+  },
+  {
     slug: "eve-data-analyst-template",
     title: "Data Analyst",
     setupPrompt:

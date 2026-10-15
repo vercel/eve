@@ -63,8 +63,18 @@ try {
     process.stdout.write(`\nChecking ${template} against ${tarballs[0]}\n`);
     run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
     run("pnpm", ["typecheck"], { cwd: destination });
-    run("pnpm", ["exec", "eve", "build"], { cwd: destination });
-    run("pnpm", ["build"], { cwd: destination });
+
+    // Preparing a Vercel Sandbox snapshot needs Vercel credentials, which this
+    // check does not have. Such templates build with `eve build` alone.
+    const sandboxPath = join(destination, "agent", "sandbox.ts");
+    const vercelSandbox =
+      existsSync(sandboxPath) && readFileSync(sandboxPath, "utf8").includes("eve/sandbox/vercel");
+    if (vercelSandbox) {
+      run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], { cwd: destination });
+    } else {
+      run("pnpm", ["exec", "eve", "build"], { cwd: destination });
+      run("pnpm", ["build"], { cwd: destination });
+    }
   }
 } finally {
   rmSync(temporaryDirectory, { force: true, recursive: true });
