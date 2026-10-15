@@ -9,7 +9,8 @@ import {
 import {
   parseSignInCancelTarget,
   SIGN_IN_CANCEL_ACTION_ID,
-} from "#public/channels/slack/sign-in-cancel.js";
+  SIGN_IN_CONNECT_ACTION_ID,
+} from "#public/channels/slack/sign-in-prompt.js";
 
 describe("formatConnectionDisplayName", () => {
   it("title-cases the first character", () => {
@@ -93,6 +94,7 @@ describe("buildAuthEphemeralBlocks", () => {
         elements: [
           {
             type: "button",
+            action_id: SIGN_IN_CONNECT_ACTION_ID,
             text: { type: "plain_text", text: "Connect Linear" },
             url: "https://connect.example.com/authorize/sca_abc",
             style: "primary",
@@ -146,5 +148,8 @@ describe("buildAuthEphemeralBlocks", () => {
         { type: "mrkdwn", text: "If Notion asks for a confirmation code, enter `OTB-DGO`." },
       ],
     });
+    // The code must stay visible while the person signs in.
+    const actions = blocks[1] as { elements: Array<Record<string, unknown>> };
+    expect(actions.elements[0]).not.toHaveProperty("action_id");
   });
 });

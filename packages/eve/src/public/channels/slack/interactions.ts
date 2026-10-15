@@ -23,7 +23,7 @@ import {
   slackContinuationToken,
 } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
-import { dispatchSignInCancel } from "#public/channels/slack/sign-in-cancel.js";
+import { dispatchSignInPromptAction } from "#public/channels/slack/sign-in-prompt.js";
 import {
   buildFreeformModalView,
   decodeFreeformHitlActionId,
@@ -295,7 +295,7 @@ export async function handleInteractionPost(
     return ack;
   }
 
-  if (dispatchSignInCancel(payload.raw, ctx)) return ack;
+  if (dispatchSignInPromptAction(payload.raw, ctx)) return ack;
 
   const interaction = parseBlockActionsPayload(payload);
   if (!interaction) return ack;

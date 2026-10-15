@@ -4571,6 +4571,35 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(JSON.parse(String(removal?.[1]?.body))).toEqual({ delete_original: true });
   });
 
+  it("removes the private prompt when the person clicks Connect", async () => {
+    fetchMock.mockImplementation(async () => new Response("ok"));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const { cancel, send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada", team_id: "T01" },
+        container: { type: "message", is_ephemeral: true, channel_id: "C01" },
+        response_url: "https://hooks.slack.com/actions/T01/1/abc",
+        actions: [
+          {
+            action_id: "eve_sign_in:connect",
+            text: { type: "plain_text", text: "Connect Linear" },
+          },
+        ],
+      }),
+    );
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    const removal = fetchMock.mock.calls.find(
+      ([url]) => String(url) === "https://hooks.slack.com/actions/T01/1/abc",
+    );
+    expect(JSON.parse(String(removal?.[1]?.body))).toEqual({ delete_original: true });
+  });
+
   it("resets the interaction's Slack thread from onInteraction", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },

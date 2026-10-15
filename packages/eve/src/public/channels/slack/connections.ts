@@ -20,8 +20,9 @@ import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
 import { truncatePlainText } from "#public/channels/slack/limits.js";
 import {
   SIGN_IN_CANCEL_ACTION_ID,
+  SIGN_IN_CONNECT_ACTION_ID,
   type SignInCancelTarget,
-} from "#public/channels/slack/sign-in-cancel.js";
+} from "#public/channels/slack/sign-in-prompt.js";
 import { displayProperName } from "#shared/display-name.js";
 
 export type { ConnectionAuthorizationOutcome };
@@ -81,6 +82,8 @@ interface AuthEphemeralPrompt {
  * why it is asking before the button, because the user may not remember which
  * request needed it. A device-code flow's `userCode` is a fallback the
  * provider shows only sometimes, so it is a quiet hint below the button.
+ * Clicking Connect removes the prompt unless it carries a code or
+ * instructions the person may still need while signing in.
  */
 export function buildAuthEphemeralBlocks(
   input: AuthEphemeralPrompt & {
@@ -101,28 +104,27 @@ export function buildAuthEphemeralBlocks(
       },
     },
   ];
-  const buttons = [
-    ...(!hasText(input.url)
-      ? []
-      : [
-          {
-            type: "button",
-            text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
-            url: input.url,
-            style: "primary",
-          },
-        ]),
-    ...(input.cancel === undefined
-      ? []
-      : [
-          {
-            type: "button",
-            action_id: SIGN_IN_CANCEL_ACTION_ID,
-            text: { type: "plain_text", text: "Cancel" },
-            value: JSON.stringify(input.cancel),
-          },
-        ]),
-  ];
+  const buttons: Record<string, unknown>[] = [];
+  if (hasText(input.url)) {
+    const connect: Record<string, unknown> = {
+      type: "button",
+      text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
+      url: input.url,
+      style: "primary",
+    };
+    if (!hasText(input.userCode) && !hasText(input.instructions)) {
+      connect.action_id = SIGN_IN_CONNECT_ACTION_ID;
+    }
+    buttons.push(connect);
+  }
+  if (input.cancel !== undefined) {
+    buttons.push({
+      type: "button",
+      action_id: SIGN_IN_CANCEL_ACTION_ID,
+      text: { type: "plain_text", text: "Cancel" },
+      value: JSON.stringify(input.cancel),
+    });
+  }
   if (buttons.length > 0) blocks.push({ type: "actions", elements: buttons });
   if (hasText(input.userCode)) {
     blocks.push({
