@@ -410,14 +410,34 @@ describe("chatSdkChannel", () => {
       expect(ephemerals).toHaveLength(1);
     });
 
-    it("leaves the card live after a failure a retry may fix", async () => {
-      const adapter = testAdapter();
+    it.each([
+      ["authorization", { resolveInputAuth: () => Promise.reject(new Error("auth down")) }],
+      ["delivery", {}, new Error("network down")],
+    ] as const)(
+      "lets Chat SDK see a failed %s and leaves the card live",
+      async (_, config, sendError?: Error) => {
+        const adapter = testAdapter();
+        adapter.postEphemeral = vi.fn();
+        const bridge = chatSdkChannel({
+          adapters: { test: adapter },
+          concurrency: "concurrent",
+          logger: "warn",
+          state: memoryState(),
+          userName: "bot",
+          ...config,
+        });
+        const later = vi.fn();
+        bridge.bot.onAction(later);
 
-      const ephemerals = await pressWith(adapter, new Error("network down"));
+        await expect(firePost(bridge.channel, "/eve/v1/test", press, sendError)).rejects.toThrow(
+          sendError?.message ?? "auth down",
+        );
 
-      expect(adapter.edited).toEqual([]);
-      expect(ephemerals).toEqual([]);
-    });
+        expect(later).not.toHaveBeenCalled();
+        expect(adapter.edited).toEqual([]);
+        expect(adapter.postEphemeral).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it("fails loudly when bridge.send is called outside a Chat SDK webhook", async () => {

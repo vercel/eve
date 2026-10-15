@@ -307,18 +307,18 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
+    const auth = config.resolveInputAuth ? await config.resolveInputAuth(event) : null;
     const answer = await respondOrRetireInactivePrompt(
-      async () =>
-        bridgeRespond(bot, [response], {
-          auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-          thread: thread.toJSON(),
-        }),
+      () => bridgeRespond(bot, [response], { auth, thread: thread.toJSON() }),
       {
         retirePrompt: (label) => retireInputCard(thread, event.messageId, label),
       },
       log,
     );
-    if (answer.outcome !== "inactive") return;
+    // Chat SDK stops its action handlers at a throw, as it did before inactive
+    // presses were told apart from other failures.
+    if (answer.outcome === "failed") throw answer.error;
+    if (answer.outcome === "delivered") return;
     await Promise.all([
       answer.retirement,
       thread

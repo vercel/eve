@@ -21,8 +21,11 @@ export interface InactivePromptRetirement {
 export type PromptResponse =
   /** A session took the answer. */
   | { readonly outcome: "delivered" }
-  /** Delivery failed in a way a retry may fix; the prompt is left as it was. */
-  | { readonly outcome: "failed" }
+  /**
+   * Delivery failed in a way a retry may fix; the prompt is left as it was.
+   * `error` is what delivery threw, for a caller whose platform expects it.
+   */
+  | { readonly outcome: "failed"; readonly error: unknown }
   /**
    * No session can ever take it. `retirement` is the prompt's edit, already
    * started; it logs its own failure and never rejects.
@@ -50,7 +53,7 @@ export async function respondOrRetireInactivePrompt(
   } catch (error) {
     if (!isUnanswerableResponseError(error)) {
       log.error("input response delivery failed", { error });
-      return { outcome: "failed" };
+      return { outcome: "failed", error };
     }
     log.warn("input response reached no active session", { error });
   }
