@@ -333,8 +333,8 @@ interface EnsureTemplateInput {
 
 /**
  * Returns the prepared snapshot for one template key. Builds of the same
- * revision share it through a pointer: a stopped sandbox named by the key
- * whose tag names a snapshot that finished preparing. Preparation itself runs
+ * revision share it through a pointer: a stopped sandbox named by the key,
+ * created from a snapshot that finished preparing. Preparation itself runs
  * in a private sandbox no other build can see, so nothing under the shared
  * name ever holds unfinished work, and deleting a stale pointer can never
  * remove another build's preparation.
@@ -346,7 +346,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<string> {
     sandboxModule,
     sandboxName: input.templateKey,
   });
-  const publishedSnapshotId = pointer?.tags?.[TEMPLATE_SNAPSHOT_TAG];
+  const publishedSnapshotId = pointer?.sourceSnapshotId;
   if (
     publishedSnapshotId !== undefined &&
     (await isVercelSnapshotCreated({
@@ -360,15 +360,16 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<string> {
   }
 
   const snapshotId = await prepareTemplateSnapshot(input, sandboxModule);
-  if (pointer !== null) {
-    try {
-      await pointer.delete();
-    } catch (error) {
-      // Another build that saw the same stale pointer deleted it first.
-      if (!isVercelSandboxMissingError(error)) throw error;
-    }
-  }
-  await publishTemplatePointer(input, sandboxModule, snapshotId);
+  /*
+   * The pointer only saves later builds a preparation; this build's snapshot
+   * is already valid. So publishing never fails the build, including when a
+   * build replacing the same stale pointer deletes this one mid-publish.
+   */
+  await publishTemplatePointer(input, sandboxModule, pointer, snapshotId).catch(
+    (error: unknown) => {
+      input.log?.(`could not publish sandbox template: ${errorMessage(error)}`);
+    },
+  );
   return snapshotId;
 }
 
@@ -426,15 +427,24 @@ async function prepareTemplateSnapshot(
 }
 
 /**
- * Records a finished snapshot under the template key. When another build
- * published first, its snapshot is as valid as this one, and this build keeps
- * its own: there is nothing to read back.
+ * Records a finished snapshot under the template key, replacing a stale
+ * pointer. When another build published first, its snapshot is as valid as
+ * this one, and this build keeps its own: there is nothing to read back.
  */
 async function publishTemplatePointer(
   input: EnsureTemplateInput,
   sandboxModule: VercelModule,
+  stalePointer: VercelSandbox | null,
   snapshotId: string,
 ): Promise<void> {
+  if (stalePointer !== null) {
+    try {
+      await stalePointer.delete();
+    } catch (error) {
+      // Another build that saw the same stale pointer deleted it first.
+      if (!isVercelSandboxMissingError(error)) throw error;
+    }
+  }
   // A snapshot source excludes `image`, `runtime`, and any authored source.
   const {
     image: _image,
@@ -451,7 +461,6 @@ async function publishTemplatePointer(
         name: input.templateKey,
         persistent: false,
         source: { snapshotId, type: "snapshot" },
-        tags: { [TEMPLATE_SNAPSHOT_TAG]: snapshotId },
       },
     });
   } catch (error) {
@@ -707,6 +716,3 @@ async function resolveVercelWritePath(
  * too short for multi-step workflows — the VM expires between steps.
  */
 const DEFAULT_SANDBOX_TIMEOUT_MS = 30 * 60 * 1_000;
-
-/** The pointer sandbox's tag naming the snapshot its build finished preparing. */
-const TEMPLATE_SNAPSHOT_TAG = "eveSnapshotId";
