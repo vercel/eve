@@ -46,7 +46,7 @@ import {
 } from "#execution/tasks/table.js";
 import { applyValueDelta } from "#shared/value-delta.js";
 import { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/hitl/approved-calls.js";
-import { textStreamResult } from "#internal/testing/approval-resume.js";
+import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { openInputs } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
 import { withSignIns } from "#harness/hitl/sign-ins.js";
@@ -1617,6 +1617,87 @@ describe("turnStep", () => {
       expect(resolutions(nextEvents)).toEqual([]);
       expect(execute).toHaveBeenCalledOnce();
     });
+  });
+
+  // Reproduces https://github.com/vercel/eve/issues/3103. Workflow re-runs a
+  // step from its recorded input when the process dies before the step's
+  // result is checkpointed. The first attempt already published its approval
+  // to the client, so the retry must keep that request answerable instead of
+  // calling the model again and asking a new one. Remove `.fails` once fixed.
+  it.fails("keeps an approval published before a lost checkpoint answerable", async () => {
+    const execute = vi.fn(async () => "/workspace");
+    const model = new MockLanguageModelV4({
+      doStream: async () =>
+        toolCallStreamResult({
+          input: JSON.stringify({ command: "pwd" }),
+          toolCallId: "call-pwd",
+          toolName: "bash",
+        }),
+    });
+    const requestIds: string[] = [];
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) =>
+      createToolLoopHarness({
+        abortSignal: input.abortSignal,
+        handleEvent: async (event, messages) => {
+          if (event.type === "input.requested") {
+            requestIds.push(...event.data.requests.map((request) => request.requestId));
+          }
+          await input.handleEvent?.(event, messages);
+        },
+        resolveModel: async () => model,
+        tools: new Map([
+          [
+            "bash",
+            {
+              approval: () => "user-approval" as const,
+              description: "Run a shell command.",
+              execute,
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
+          ],
+        ]),
+      }),
+    );
+    const adapter: ChannelAdapter = { kind: "answers" };
+    const bundle = Object.assign({}, createTurnStepTestBundle() as object, {
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+    }) as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "answers");
+    ctx.set(SessionIdKey, "sess-test");
+    const recordedInput = {
+      input: { kind: "deliver" as const, payloads: [{ message: "Run pwd." }] },
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    };
+
+    installSessionStoreMocks([createStubSession()]);
+    await turnStep({ ...recordedInput, sessionWritable: createTestWritable() });
+    const [published] = requestIds;
+    // The process dies here: the client saw `published`, but the step result
+    // was never checkpointed, so Workflow retries from the recorded input.
+    installSessionStoreMocks([createStubSession()]);
+    const retried = await turnStep({ ...recordedInput, sessionWritable: createTestWritable() });
+
+    installSessionStoreMocks([retried.sessionState.snapshot.session]);
+    await turnStep({
+      history: retried.history,
+      input: {
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: published! }] }],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: retried.serializedContext,
+      sessionState: retried.sessionState,
+    });
+
+    expect(requestIds.slice(0, 2)).toEqual([published, published]);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("keeps one model call per Workflow step by default", async () => {
