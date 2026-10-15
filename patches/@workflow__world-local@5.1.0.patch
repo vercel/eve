@@ -1,0 +1,141 @@
+diff --git a/dist/streamer.js b/dist/streamer.js
+index bf2b36639aefba8a6db54a8f77a45bb735571aef..05f9e763e2c8a00a604c9d7ed8ffaa07df89aaed 100644
+--- a/dist/streamer.js
++++ b/dist/streamer.js
+@@ -377,24 +377,34 @@ export function createStreamer(basedir, tag) {
+                         // Track chunks delivered via events to prevent duplicates and maintain order.
+                         const deliveredChunkIds = new Set();
+                         // Buffer for chunks that arrive via events during disk reading
+-                        const bufferedEventChunks = [];
++                        const bufferedEventChunks = new Map();
++                        let isPolling = false;
++                        let retryPending = false;
+                         let isReadingFromDisk = true;
+                         // Buffer close event if it arrives during disk reading
+                         let pendingClose = false;
++                        // Sort buffered chunks by ULID (chronological order)
++                        const flushBufferedChunks = (before) => {
++                            for (const [chunkId, chunkData] of [...bufferedEventChunks].sort(([a], [b]) => a.localeCompare(b))) {
++                                if (before !== undefined && chunkId >= before)
++                                    break;
++                                bufferedEventChunks.delete(chunkId);
++                                if (!deliveredChunkIds.has(chunkId)) {
++                                    deliveredChunkIds.add(chunkId);
++                                    controller.enqueue(Uint8Array.from(chunkData));
++                                }
++                            }
++                        };
+                         const chunkListener = (event) => {
+                             // Skip empty chunks to maintain consistency with disk reading behavior
+                             if (event.chunkData.byteLength === 0) {
+                                 deliveredChunkIds.add(event.chunkId);
+                                 return;
+                             }
+-                            if (isReadingFromDisk) {
+-                                deliveredChunkIds.add(event.chunkId);
++                            if (isReadingFromDisk || isPolling || retryPending) {
+                                 // Buffer chunks that arrive during disk reading to maintain order
+                                 // Create a copy to prevent ArrayBuffer detachment when enqueued later
+-                                bufferedEventChunks.push({
+-                                    chunkId: event.chunkId,
+-                                    chunkData: Uint8Array.from(event.chunkData),
+-                                });
++                                bufferedEventChunks.set(event.chunkId, Uint8Array.from(event.chunkData));
+                             }
+                             else if (!deliveredChunkIds.has(event.chunkId)) {
+                                 // Guard against duplicates: polling may have already claimed this
+@@ -407,7 +417,7 @@ export function createStreamer(basedir, tag) {
+                         };
+                         const closeListener = () => {
+                             // Buffer close event if disk reading is still in progress
+-                            if (isReadingFromDisk) {
++                            if (isReadingFromDisk || isPolling || retryPending) {
+                                 pendingClose = true;
+                                 return;
+                             }
+@@ -465,12 +475,16 @@ export function createStreamer(basedir, tag) {
+                             }
+                             const ext = fileExtMap.get(file) ?? '.bin';
+                             const chunk = deserializeChunk(await readBuffer(path.join(chunksDir, `${file}${ext}`)));
++                            if (streamClosed)
++                                return;
++                            flushBufferedChunks(chunkId);
+                             if (chunk?.eof === true) {
+                                 isComplete = true;
+                                 break;
+                             }
+                             // Track as handled so polling doesn't re-deliver
+                             deliveredChunkIds.add(chunkId);
++                            bufferedEventChunks.delete(chunkId);
+                             if (chunk.chunk.byteLength) {
+                                 // Create a copy to prevent ArrayBuffer detachment
+                                 controller.enqueue(Uint8Array.from(chunk.chunk));
+@@ -478,12 +492,7 @@ export function createStreamer(basedir, tag) {
+                         }
+                         // Finished reading from disk - now deliver buffered event chunks in chronological order
+                         isReadingFromDisk = false;
+-                        // Sort buffered chunks by ULID (chronological order)
+-                        bufferedEventChunks.sort((a, b) => a.chunkId.localeCompare(b.chunkId));
+-                        for (const buffered of bufferedEventChunks) {
+-                            // Create a copy for defense in depth (already copied at storage, but be extra safe)
+-                            controller.enqueue(Uint8Array.from(buffered.chunkData));
+-                        }
++                        flushBufferedChunks();
+                         if (isComplete) {
+                             streamClosed = true;
+                             teardown();
+@@ -524,11 +533,11 @@ export function createStreamer(basedir, tag) {
+                         // The EventEmitter only works in-process; when the writer is in a
+                         // separate process (e.g. e2e test runner ↔ workbench app), polling
+                         // the shared filesystem is the fallback delivery mechanism.
+-                        let isPolling = false;
+                         pollInterval = setInterval(async () => {
+                             if (isPolling)
+                                 return;
+                             isPolling = true;
++                            let scanCompleted = false;
+                             try {
+                                 const { files: currentFiles, extMap: currentExtMap } = await listChunkFilesForStream(chunksBaseDir, name, tag);
+                                 for (const file of currentFiles) {
+@@ -536,9 +545,13 @@ export function createStreamer(basedir, tag) {
+                                     const chunkId = file;
+                                     if (deliveredChunkIds.has(chunkId))
+                                         continue;
+-                                    deliveredChunkIds.add(chunkId);
+                                     const ext = currentExtMap.get(file) ?? '.bin';
+                                     const chunk = deserializeChunk(await readBuffer(path.join(chunksDir, `${file}${ext}`)));
++                                    if (streamClosed)
++                                        return;
++                                    flushBufferedChunks(chunkId);
++                                    deliveredChunkIds.add(chunkId);
++                                    bufferedEventChunks.delete(chunkId);
+                                     if (chunk?.eof === true) {
+                                         streamClosed = true;
+                                         teardown();
+@@ -558,8 +571,10 @@ export function createStreamer(basedir, tag) {
+                                         controller.enqueue(Uint8Array.from(chunk.chunk));
+                                     }
+                                 }
++                                scanCompleted = true;
+                             }
+                             catch (err) {
++                                retryPending = true;
+                                 // Silently ignore transient filesystem errors (ENOENT, EACCES, etc.)
+                                 // Surface unexpected errors so bugs aren't hidden
+                                 if (!(err instanceof Error && 'code' in err)) {
+@@ -567,6 +582,15 @@ export function createStreamer(basedir, tag) {
+                                 }
+                             }
+                             finally {
++                                if (scanCompleted && !streamClosed) {
++                                    retryPending = false;
++                                    flushBufferedChunks();
++                                    if (pendingClose) {
++                                        streamClosed = true;
++                                        teardown();
++                                        controller.close();
++                                    }
++                                }
+                                 isPolling = false;
+                             }
+                         }, 100);
