@@ -2,7 +2,7 @@ import type { ConnectionPrincipal } from "#shared/connection-types.js";
 import type { Experimental_ConnectionEvent } from "#public/definitions/connections/events.js";
 
 // The bridge is structural so auth helpers do not need a runtime dependency on eve.
-export type EventJson = string | number | boolean | null | EventJson[] | EventJsonObject;
+export type EventJson = string | number | boolean | null | readonly EventJson[] | EventJsonObject;
 export type EventJsonObject = { [key: string]: EventJson | undefined };
 export interface ManagedEventSubscription {
   id: string;
@@ -17,8 +17,10 @@ export type ManagedEventSubscribeInput = {
   arguments: EventJsonObject;
   context?: EventJsonObject;
   idempotencyKey: string;
+  /** Application lifetime in milliseconds, or null until explicitly stopped. */
+  ttlMs: number | null;
   options?: { signal?: AbortSignal; timeout?: number; maxTotalTimeout?: number };
-} & ({ ttlMs: number; expiresAt?: never } | { expiresAt: string | null; ttlMs?: never });
+};
 export interface ConnectionEventsAdapter {
   subscribe(input: ManagedEventSubscribeInput): Promise<ManagedEventSubscription>;
   getSubscription(input: {

@@ -36,6 +36,8 @@ import type { ManagedEventSubscription } from "#shared/connection-events.js";
 const GET = "events_get_subscription";
 const STOP = "events_unsubscribe";
 const PREFIX = "events_subscribe_";
+const MIN_TTL_MS = 120_000;
+const MAX_TTL_MS = 31_536_000_000;
 
 export function isEventAction(name: string): boolean {
   return name === GET || name === STOP || name.startsWith(PREFIX);
@@ -165,7 +167,7 @@ export class ConnectionEventActions {
       return [
         ...catalog.map((event) => ({
           name: actionName(event.name),
-          description: `Watch ${event.name}. ${event.description ?? ""} Events reach this connection's authored callback until ttlMs passes or the watch is stopped.`,
+          description: `Watch ${event.name}. ${event.description ?? ""} Events reach this connection's authored callback for ttlMs milliseconds or until stopped. Set ttlMs to null to watch indefinitely.`,
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -173,9 +175,11 @@ export class ConnectionEventActions {
             properties: {
               arguments: event.inputSchema,
               ttlMs: {
-                type: "integer",
-                minimum: 1,
-                description: "How long to watch, in milliseconds",
+                type: ["integer", "null"],
+                minimum: MIN_TTL_MS,
+                maximum: MAX_TTL_MS,
+                description:
+                  "How long to watch, in milliseconds (2 minutes to 365 days), or null until stopped",
               },
             },
           },
@@ -247,8 +251,16 @@ export class ConnectionEventActions {
         throw new Error("Event arguments do not match the authorized catalog schema.");
       const eventArguments = parseJsonObject(valid.value);
       const ttlMs = args.ttlMs;
-      if (typeof ttlMs !== "number" || !Number.isSafeInteger(ttlMs) || ttlMs < 1)
-        throw new Error("ttlMs must be a positive whole number of milliseconds.");
+      if (
+        ttlMs !== null &&
+        (typeof ttlMs !== "number" ||
+          !Number.isSafeInteger(ttlMs) ||
+          ttlMs < MIN_TTL_MS ||
+          ttlMs > MAX_TTL_MS)
+      )
+        throw new Error(
+          "ttlMs must be an integer from 120000 to 31536000000, or null to watch until stopped.",
+        );
       const id = createHash("sha256")
         .update(
           JSON.stringify([

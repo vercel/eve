@@ -284,24 +284,41 @@ it("discovers through the released AI SDK and subscribes through the backend wit
   expect(initial.state!.subscription.id).toBe("sub_0");
 });
 
-it("subscribes with ttlMs, the lifetime Connect's API accepts", async () => {
-  await watch();
-  expect(requested[0]).toMatchObject({ ttlMs: TTL_MS, idempotencyKey: initial.state!.binding.id });
-  expect(requested[0]).not.toHaveProperty("expiresAt");
+it.each([120_000, 31_536_000_000, null])(
+  "subscribes with the requested ttlMs=%s and preserves it in the handler's input",
+  async (ttlMs) => {
+    await watch("watch-1", ttlMs);
+    expect(requested[0]).toMatchObject({ ttlMs, idempotencyKey: initial.state!.binding.id });
+    expect(requested[0]).not.toHaveProperty("expiresAt");
+    expect(initial.state!.binding.request.ttlMs).toBe(ttlMs);
+    const [tool] = await contextStorage.run(ctx, () => actions.metadata());
+    const { toInputSchema } = await import("#tools/schema.js");
+    const schema = toInputSchema(tool!.inputSchema);
+    expect(
+      await schema["~standard"].validate({ arguments: { project: "ABC" }, ttlMs }),
+    ).not.toHaveProperty("issues");
+  },
+);
+
+it.each([
+  {},
+  { expiresAt: null },
+  { ttlMs: 119_999 },
+  { ttlMs: 120_000.5 },
+  { ttlMs: 31_536_000_001 },
+  { ttlMs: "120000" },
+])("rejects an unsupported lifetime %j before starting a watch", async (lifetime) => {
   const [tool] = await contextStorage.run(ctx, () => actions.metadata());
-  expect(tool!.inputSchema).toMatchObject({ required: ["arguments", "ttlMs"] });
+  const input = { arguments: { project: "ABC" }, ...lifetime };
+  const { toInputSchema } = await import("#tools/schema.js");
+  expect(await toInputSchema(tool!.inputSchema)["~standard"].validate(input)).toHaveProperty(
+    "issues",
+  );
   await expect(
-    contextStorage.run(ctx, () =>
-      actions.execute(
-        tool!.name,
-        { arguments: { project: "ABC" }, expiresAt: null },
-        {
-          callId: "legacy",
-        },
-      ),
-    ),
+    contextStorage.run(ctx, () => actions.execute(tool!.name, input, { callId: "invalid" })),
   ).rejects.toThrow("ttlMs");
-  expect(subscriber).toHaveBeenCalledTimes(1);
+  expect(subscriber).not.toHaveBeenCalled();
+  expect(handlers.size).toBe(0);
 });
 
 it.each(["available", "filtered", "catalog unavailable", "connection unavailable"])(
@@ -397,13 +414,13 @@ function setUser(id: string) {
   });
 }
 const TTL_MS = 3_600_000;
-async function watch(callId = "watch-1") {
+async function watch(callId = "watch-1", ttlMs: number | null = TTL_MS) {
   return contextStorage.run(ctx, async () => {
     const tools = await actions.metadata();
     try {
       return (await actions.execute(
         tools[0]!.name,
-        { arguments: { project: "ABC" }, ttlMs: TTL_MS },
+        { arguments: { project: "ABC" }, ttlMs },
         { callId },
       )) as ManagedEventSubscription & { subscriptionId: string };
     } finally {

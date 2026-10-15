@@ -22,10 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 91,
+    current: 92,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 84,
-      85, 86, 87, 88, 89, 90, 91,
+      85, 86, 87, 88, 89, 92,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -86,13 +86,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       75: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
       79: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
       83: 'webSearch provider "openai" was replaced by "native" before it shipped in a release',
+      90: "Experimental event adapters now require ttlMs as a duration or null; rebuild with the matching Connect SDK instead of expiresAt creation inputs.",
+      91: "Experimental event adapters now require ttlMs as a duration or null; rebuild with the matching Connect SDK instead of expiresAt creation inputs.",
     },
   },
   dynamicTool: {
-    current: 84,
+    current: 85,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
+      60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 85,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -130,6 +132,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       59: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       71: "AI SDK evaluation models became decision models; auto() accepts decision models only",
       74: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      84: "Experimental event adapters now require ttlMs as a duration or null; rebuild with the matching Connect SDK instead of expiresAt creation inputs.",
     },
   },
   channel: {
@@ -188,10 +191,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 50,
+    current: 51,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 32, 33, 34,
-      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49, 50,
+      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 51,
     ],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
@@ -204,6 +207,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       30: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       31: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
       42: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
+      49: "Experimental event adapters now require ttlMs as a duration or null; rebuild with the matching Connect SDK instead of expiresAt creation inputs.",
+      50: "Experimental event adapters now require ttlMs as a duration or null; rebuild with the matching Connect SDK instead of expiresAt creation inputs.",
     },
   },
   hook: {

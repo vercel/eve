@@ -272,7 +272,11 @@ replacement session.
 
 `eve__search` exposes subscribe actions from the event catalog, plus get and
 stop actions. `eve__tool` applies the connection's approval and auth gates.
-Supply event arguments and a `ttlMs` lifetime in milliseconds.
+Supply event arguments and an explicit `ttlMs`: an integer from 120,000
+(2 minutes) to 31,536,000,000 (365 days), or `null` to watch until stopped.
+Creation does not accept `expiresAt`. Connect returns the calculated deadline in
+`expiresAt`, or `null` for an indefinite watch. Retries reuse the saved duration
+and idempotency key, so they do not extend the original deadline.
 Registration mounts the receiver; it does not create a subscription.
 
 Each subscription is owned by one durable handler workflow. Subscribing starts it:
