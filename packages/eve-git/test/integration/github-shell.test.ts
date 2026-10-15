@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
+import type { SessionContext } from "eve/context";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
 
 type NetworkPolicySandboxSession = SandboxSession & {
@@ -353,6 +354,38 @@ test("rejects repositories outside the configured organization before minting", 
     /outside vercel/u,
   );
   assert.equal(tokenRequested, false);
+});
+
+test("attributes pull requests to the person the tool context resolves", async () => {
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const contexts: unknown[] = [];
+  const context = { session: { id: "session-1" } } as SessionContext;
+  await executeGitHubShell(
+    { ...READ, command: 'gh pr create --repo vercel/internal-agents --title T --body "Why."' },
+    {
+      ...CONFIG,
+      attribution(ctx) {
+        contexts.push(ctx);
+        return { name: "octocat", email: "1+octocat@users.noreply.github.com" };
+      },
+    },
+    {
+      context,
+      sessionId: "session-1",
+      async getConnectToken() {
+        return "secret-token";
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+      },
+    },
+  );
+
+  assert.deepEqual(contexts, [context]);
+  assert.match(
+    runs.at(-1)?.command ?? "",
+    /'--body' 'Why\.\n\nCo-authored-by: octocat <1\+octocat@users\.noreply\.github\.com>'$/u,
+  );
 });
 
 function fakeSandbox(

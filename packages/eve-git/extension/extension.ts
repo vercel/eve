@@ -4,7 +4,9 @@ import { z } from "zod";
 import type { GitHubConfig } from "./lib/github-shell.ts";
 
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
+export type { GitHubCoAuthor } from "./lib/github-shell.ts";
 export type GitHubLeaseBroker = GitHubConfig["broker"];
+export type GitHubAttribution = NonNullable<GitHubConfig["attribution"]>;
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 
@@ -20,6 +22,11 @@ export default defineExtension({
         connector: z.string().min(1),
         org: z.string().min(1),
         broker: fn<GitHubLeaseBroker>(),
+        /**
+         * Resolves the person each turn publishes for. Their
+         * `Co-authored-by` trailer ends signed commits and new pull requests.
+         */
+        attribution: fn<GitHubAttribution>().optional(),
       })
       .optional(),
   }),
