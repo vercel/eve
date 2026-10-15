@@ -803,6 +803,44 @@ describe("createVercelSandbox", () => {
     expect(template?.snapshot).toHaveBeenCalledTimes(1);
   });
 
+  it("replaces a template whose build stopped before snapshotting it", async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    // Another build created this template, then was cancelled mid-preparation.
+    const abandoned = createMockSandbox({ name: "abandoned" });
+    const replacement = createMockSandbox({ name: "replacement" });
+    let current: ReturnType<typeof createMockSandbox> | null = abandoned;
+    abandoned.delete.mockImplementation(async () => {
+      current = null;
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(async () => {
+          current = replacement;
+          return replacement;
+        }),
+        get: vi.fn(async () => current),
+      },
+    };
+    const prepare = vi.fn();
+    const build = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+      prepare,
+    }).prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+    abandoned.status = "stopped";
+    await vi.runAllTimersAsync();
+
+    await expect(build).resolves.toEqual({ snapshotId: "replacement-snapshot" });
+    expect(abandoned.delete).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(abandoned.snapshot).not.toHaveBeenCalled();
+  });
+
   it("forwards author source to template create as the base layer", async () => {
     /*
      * The real Vercel SDK pre-populates `currentSnapshotId` on a
