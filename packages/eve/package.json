@@ -511,6 +511,11 @@
       "import": "./dist/src/public/channels/discord/index.js",
       "default": "./dist/src/public/channels/discord/index.js"
     },
+    "./channels/discord/gateway": {
+      "types": "./dist/src/public/channels/discord/gateway/index.d.ts",
+      "import": "./dist/src/public/channels/discord/gateway/index.js",
+      "default": "./dist/src/public/channels/discord/gateway/index.js"
+    },
     "./channels/twilio": {
       "types": "./dist/src/public/channels/twilio/index.d.ts",
       "import": "./dist/src/public/channels/twilio/index.js",

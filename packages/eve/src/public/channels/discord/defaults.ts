@@ -9,7 +9,12 @@ import {
 import type {
   DiscordCommandInteraction,
   DiscordInteractionBase,
+  DiscordUser,
 } from "#public/channels/discord/inbound.js";
+import type {
+  DiscordGatewayMessage,
+  DiscordMessageResult,
+} from "#public/channels/discord/messages.js";
 import { renderInputRequestComponents } from "#public/channels/discord/hitl.js";
 import type {
   DiscordChannelEvents,
@@ -22,32 +27,51 @@ const log = createLogger("discord.defaults");
 /**
  * Builds the default {@link SessionAuthContext} for the user behind a Discord
  * interaction (a command, button press, select, or modal submission):
- * authenticator `discord-interaction`, guild-scoped issuer/principalId when
- * invoked in a guild (else user-scoped), and `principalType` `service` for bot
- * actors or `user` otherwise. Copies the channel, interaction, user, guild,
- * and member-nick attributes.
+ * authenticator `discord`, guild-scoped issuer/principalId when invoked in a
+ * guild (else user-scoped), and `principalType` `service` for bot actors or
+ * `user` otherwise. Copies the channel, interaction, user, guild, and
+ * member-nick attributes. A message from the same person gets the same
+ * principal from {@link defaultDiscordMessageAuth}.
  */
 export function defaultDiscordAuth(interaction: DiscordInteractionBase): SessionAuthContext {
   const attributes: Record<string, string> = {
     channel_id: interaction.channelId,
     interaction_id: interaction.id,
-    user_id: interaction.user.id,
-    username: interaction.user.username,
   };
-  if (interaction.guildId !== undefined) attributes.guild_id = interaction.guildId;
   if (interaction.member?.nick !== undefined) attributes.member_nick = interaction.member.nick;
+  return discordUserAuth(interaction.user, interaction.guildId, attributes);
+}
 
-  const issuer = interaction.guildId ? `discord:${interaction.guildId}` : "discord";
-  const principalId = interaction.guildId
-    ? `discord:${interaction.guildId}:${interaction.user.id}`
-    : `discord:${interaction.user.id}`;
+/**
+ * Builds the default {@link SessionAuthContext} for the author of a Discord
+ * message forwarded from the Gateway. The principal matches what
+ * {@link defaultDiscordAuth} builds for the same person, so their button
+ * presses answer approvals their messages asked for.
+ */
+export function defaultDiscordMessageAuth(message: DiscordGatewayMessage): SessionAuthContext {
+  return discordUserAuth(message.author, message.guildId, {
+    channel_id: message.channelId,
+    message_id: message.id,
+  });
+}
 
+function discordUserAuth(
+  user: DiscordUser,
+  guildId: string | undefined,
+  attributes: Record<string, string>,
+): SessionAuthContext {
+  const allAttributes: Record<string, string> = {
+    ...attributes,
+    user_id: user.id,
+    username: user.username,
+  };
+  if (guildId !== undefined) allAttributes.guild_id = guildId;
   return {
-    attributes,
-    authenticator: "discord-interaction",
-    issuer,
-    principalId,
-    principalType: interaction.user.isBot ? "service" : "user",
+    attributes: allAttributes,
+    authenticator: "discord",
+    issuer: guildId ? `discord:${guildId}` : "discord",
+    principalId: guildId ? `discord:${guildId}:${user.id}` : `discord:${user.id}`,
+    principalType: user.isBot ? "service" : "user",
   };
 }
 
@@ -57,6 +81,14 @@ export function defaultOnCommand(
   interaction: DiscordCommandInteraction,
 ): DiscordCommandResult {
   return { auth: defaultDiscordAuth(interaction) };
+}
+
+/** Default Gateway message hook: dispatch messages addressed to the bot with Discord user auth. */
+export function defaultOnMessage(
+  _ctx: DiscordContext,
+  message: DiscordGatewayMessage,
+): DiscordMessageResult {
+  return message.addressed ? { auth: defaultDiscordMessageAuth(message) } : null;
 }
 
 /** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
@@ -132,7 +164,7 @@ export const defaultEvents: DiscordChannelEvents = {
       [
         `This session could not recover from an error${hint}.`,
         "",
-        "Start a new command to continue.",
+        "Send a new message or command to continue.",
         ...(errorId ? ["", `Error id: ${errorId}`] : []),
       ].join("\n"),
     );
