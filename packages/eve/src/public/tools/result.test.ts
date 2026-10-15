@@ -263,4 +263,38 @@ describe("toolResultFrom", () => {
     });
     expect(toolResultFrom(toolResult("first__search", []), second)).toBeUndefined();
   });
+
+  // #3085: loaded definitions match by source identity, so a shared fallback
+  // key alone should not warn at registration time.
+  it.fails("does not warn when loaded connections share a fallback identity", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const key = connectionDefinitionKey("https://api.githubcopilot.com/mcp/", "GitHub");
+    const github = defineMcpClientConnection({
+      url: "https://api.githubcopilot.com/mcp/",
+      description: "GitHub",
+    });
+    const githubWrite = defineMcpClientConnection({
+      url: "https://api.githubcopilot.com/mcp/",
+      description: "GitHub",
+    });
+
+    registerDefinitionSource(
+      github,
+      { kind: "connection", logicalPath: "connections/github.ts", name: "github" },
+      key,
+    );
+    registerDefinitionSource(
+      githubWrite,
+      { kind: "connection", logicalPath: "connections/githubwrite.ts", name: "githubwrite" },
+      key,
+    );
+
+    expect(toolResultFrom(toolResult("github__search", []), github)?.connectionToolName).toBe(
+      "search",
+    );
+    expect(
+      toolResultFrom(toolResult("githubwrite__search", []), githubWrite)?.connectionToolName,
+    ).toBe("search");
+    expect(warn).not.toHaveBeenCalled();
+  });
 });
