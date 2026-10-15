@@ -1,4 +1,4 @@
-import { defaultGitHubAuth, type GitHubChannelConfig } from "eve/channels/github";
+import { defaultGitHubAuth, GitHubApiError, type GitHubChannelConfig } from "eve/channels/github";
 import { z } from "zod";
 
 const activeMembership = z.object({ state: z.literal("active") });
@@ -31,8 +31,9 @@ export function operatorComments(botName: string): NonNullable<GitHubChannelConf
         method: "GET",
         path: `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(team)}/memberships/${encodeURIComponent(ctx.sender.login)}`,
       });
-      if (!response.ok || !activeMembership.safeParse(response.body).success) return null;
-    } catch {
+      if (!activeMembership.safeParse(response.body).success) return null;
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404) return null;
       console.warn(
         "GitHub operator membership lookup failed. Check the team slug and the App's organization Members: read permission.",
       );

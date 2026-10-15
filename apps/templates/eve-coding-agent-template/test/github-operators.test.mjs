@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
+import { GitHubApiError } from "eve/channels/github";
 import { operatorComments } from "../agent/lib/github-operators.ts";
 
 const originalOrg = process.env.GITHUB_ORG;
@@ -59,7 +60,6 @@ test("admits an active operator with the verified sender's identity", async () =
 for (const [label, response] of [
   ["pending membership", { ok: true, status: 200, body: { state: "pending" } }],
   ["malformed membership data", { ok: true, status: 200, body: null }],
-  ["unsuccessful response", { ok: false, status: 403, body: { state: "active" } }],
 ]) {
   test(`repository collaborator cannot invoke with ${label}`, async () => {
     const { ctx, comment } = invocation(async () => response);
@@ -68,11 +68,30 @@ for (const [label, response] of [
   });
 }
 
-test("membership lookup failure denies a repository collaborator", async () => {
+for (const [status, warnings] of [
+  [404, 0],
+  [403, 1],
+]) {
+  test(`membership HTTP ${status} denies with ${warnings} configuration warnings`, async () => {
+    const { ctx, comment } = invocation(async () => {
+      throw new GitHubApiError({
+        status,
+        method: "GET",
+        path: "/orgs/example/teams/coding-agent-operators/memberships/alice",
+        body: { message: status === 404 ? "Not Found" : "Forbidden" },
+      });
+    });
+    assert.equal(await onComment(ctx, comment), null);
+    assert.equal(console.warn.mock.callCount(), warnings);
+  });
+}
+
+test("membership lookup failure denies a repository collaborator and warns", async () => {
   const { ctx, comment } = invocation(async () => {
     throw new Error("GitHub API failed");
   });
   assert.equal(await onComment(ctx, comment), null);
+  assert.equal(console.warn.mock.callCount(), 1);
 });
 
 for (const variable of ["GITHUB_ORG", "GITHUB_OPERATOR_TEAM"]) {
