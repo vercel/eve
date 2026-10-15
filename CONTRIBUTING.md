@@ -268,6 +268,17 @@ Adding an unpublished package directly to the automated release can fail after
 other packages have already published. For `@vercel/agent-runs`, bootstrap
 `0.0.0` before the planned `0.0.1` release.
 
+To check the OIDC connection without releasing any packages or container images:
+
+```sh
+gh workflow run release.yml --ref <branch> -f check_agent_runs_trust=true
+```
+
+This mode skips the release job and checks only npm's OIDC token exchange for
+`@vercel/agent-runs`. A successful exchange confirms that npm accepts the
+workflow's identity, not that the connection permits direct publishing. Only a
+real publication verifies the full publish path.
+
 ## Developer Certificate of Origin (DCO)
 
 We do not require a CLA. Instead, all contributions are made under the

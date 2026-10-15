@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      check_agent_runs_trust:
+        description: Check @vercel/agent-runs OIDC only; do not release anything
+        type: boolean
+        default: false
 
 # Queue runs instead of cancelling: aborting a run mid-`changeset publish`
 # can leave npm with only some of the packages published.
@@ -16,7 +21,51 @@ env:
   VCR_IMAGE: vcr.vercel.com/vercel/eve/base
 
 jobs:
+  check-agent-runs-trust:
+    if: github.event_name == 'workflow_dispatch' && inputs.check_agent_runs_trust
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check npm OIDC exchange without publishing
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            try {
+              const idToken = await core.getIDToken('npm:registry.npmjs.org');
+              core.setSecret(idToken);
+              const response = await fetch(
+                'https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@vercel%2Fagent-runs',
+                {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${idToken}` },
+                  redirect: 'error',
+                  signal: AbortSignal.timeout(20_000),
+                },
+              );
+              if (!response.ok) {
+                core.setFailed(
+                  `npm rejected the OIDC exchange for @vercel/agent-runs (HTTP ${response.status}). ` +
+                  'Verify the saved GitHub Actions publisher for vercel/eve, release.yml, with no environment restriction.',
+                );
+                return;
+              }
+              const result = await response.json();
+              if (typeof result.token !== 'string' || !result.token) {
+                core.setFailed('npm returned no credential; the trust check did not succeed.');
+                return;
+              }
+              core.setSecret(result.token);
+              core.info('npm accepted GitHub Actions OIDC for @vercel/agent-runs.');
+              core.info('No version was published. Direct publish permission was not tested.');
+            } catch {
+              core.setFailed('The OIDC check could not complete. No version was published.');
+            }
+
   release:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.check_agent_runs_trust)
     runs-on: ubuntu-latest
     permissions:
       contents: write
