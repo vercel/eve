@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { afterEach, expect, describe, it, vi } from "vitest";
 
-import type { CompiledChannel } from "#channel/compiled-channel.js";
+import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import type { Runtime } from "#channel/types.js";
 import { dispatchChannelRequest } from "#internal/nitro/routes/channel-dispatch.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
@@ -20,6 +20,11 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 }));
 
 const mockedResolveNitroChannelRuntimeBundle = vi.mocked(resolveNitroChannelRuntimeBundle);
+
+function asCompiled(channel: unknown): CompiledChannel {
+  if (!isCompiledChannel(channel)) throw new Error("Expected compiled channel.");
+  return channel;
+}
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -95,7 +100,8 @@ describe("an inactive press through the production dispatcher", () => {
     });
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     Object.assign(request, { ip: "127.0.0.1" });
-    const event = { context: { params: {} }, req: request, waitUntil } as unknown as H3Event;
+    const handOff: (task: Promise<unknown>) => void = waitUntil;
+    const event = { context: { params: {} }, req: request, waitUntil: handOff } as H3Event;
     await dispatchChannelRequest(event, "POST /press", {} as never);
     acknowledged.resolve();
     expect(waitUntil).toHaveBeenCalledTimes(1);
@@ -124,15 +130,17 @@ describe("an inactive press through the production dispatcher", () => {
 
   it("keeps a Teams button press's request alive until its card is retired", async () => {
     const edit = heldEdit();
-    const channel = teamsChannel({
-      api: {
-        fetch: async (input: string | URL | Request, init?: RequestInit) => {
-          if (new Request(input, init).method === "PUT") await edit.hold();
-          return new Response(JSON.stringify({ id: "card" }));
+    const channel = asCompiled(
+      teamsChannel({
+        api: {
+          fetch: async (input: string | URL | Request, init?: RequestInit) => {
+            if (new Request(input, init).method === "PUT") await edit.hold();
+            return new Response(JSON.stringify({ id: "card" }));
+          },
         },
-      },
-      credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
-    }) as unknown as CompiledChannel;
+        credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
+      }),
+    );
     // An Action.Submit button posts a message activity carrying its data.
     const request = new Request("https://eve.test/press", {
       body: JSON.stringify({
@@ -163,9 +171,11 @@ describe("an inactive press through the production dispatcher", () => {
       return Response.json({ ok: true, ts: "1700000000.000010" });
     });
     const signingSecret = "test-signing-secret";
-    const channel = slackChannel({
-      credentials: { botToken: "xoxb-test", signingSecret },
-    }) as unknown as CompiledChannel;
+    const channel = asCompiled(
+      slackChannel({
+        credentials: { botToken: "xoxb-test", signingSecret },
+      }),
+    );
     const body = new URLSearchParams({
       payload: JSON.stringify({
         actions: [
