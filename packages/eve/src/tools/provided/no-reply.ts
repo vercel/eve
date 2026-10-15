@@ -20,6 +20,9 @@ export interface NoReplyToolInput {
  *
  * A turn that ends with `no_reply` completes without a final message, so
  * channels and schedules post nothing. Only root sessions receive it.
+ * A model call returning no text with `finishReason: "stop"` is also accepted
+ * without retry. This tool records an explicit choice to stay quiet and an
+ * optional reason instead of relying on blank model output.
  */
 export function noReply(): ToolDefinition<NoReplyToolInput, string> {
   return frameworkTool(

@@ -100,8 +100,8 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
 }
 
 /**
- * A successful `stop` may intentionally produce no reply. Only other finish
- * reasons with no assistant text or tool work need empty-response recovery.
+ * `stop` reports a successful model call, not whether silence was intentional.
+ * Missing reply text alone must not turn that success into a model-call failure.
  */
 export function isEmptyModelResponse(step: HarnessStepResult): boolean {
   return (
