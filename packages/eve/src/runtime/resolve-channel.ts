@@ -1,6 +1,9 @@
 import { setChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
-import type { CompiledChannelDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledChannelDefinition,
+  CompiledReceiveOnlyChannelDefinition,
+} from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import {
   isHttpRouteDefinition,
@@ -30,7 +33,7 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
  * this resolver.
  */
 export async function resolveChannelDefinition(
-  definition: CompiledChannelDefinition,
+  definition: CompiledChannelDefinition | CompiledReceiveOnlyChannelDefinition,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
 ): Promise<ResolvedChannelDefinition> {
@@ -52,11 +55,15 @@ export async function resolveChannelDefinition(
       sourceId: definition.sourceId,
     });
 
-    const matchedRoute = channelDefinition.routes.find(
-      (route) =>
-        route.method.toUpperCase() === definition.method.toUpperCase() &&
-        route.path === definition.urlPath,
-    );
+    // Receive-only channels have no compiled route to match.
+    const routeEntry = "method" in definition ? definition : undefined;
+    const matchedRoute = routeEntry
+      ? channelDefinition.routes.find(
+          (route) =>
+            route.method.toUpperCase() === routeEntry.method.toUpperCase() &&
+            route.path === routeEntry.urlPath,
+        )
+      : undefined;
 
     const channelKind = `channel:${definition.name}`;
     setChannelInstrumentationKind(channelDefinition, channelKind);
@@ -67,14 +74,14 @@ export async function resolveChannelDefinition(
       (adapter as { kind: string }).kind = channelKind;
     }
 
-    const httpRoute = resolveHttpRoute(definition, matchedRoute);
-    const websocketRoute = resolveWebSocketRoute(definition, matchedRoute);
+    const httpRoute = routeEntry && resolveHttpRoute(routeEntry, matchedRoute);
+    const websocketRoute = routeEntry && resolveWebSocketRoute(routeEntry, matchedRoute);
 
     return {
       name: definition.name,
-      method: definition.method,
-      urlPath: definition.urlPath,
-      cors: definition.cors,
+      method: routeEntry?.method,
+      urlPath: routeEntry?.urlPath,
+      cors: routeEntry?.cors,
       fetch: async (req: Request, ctx: any) => {
         if (httpRoute) return httpRoute.handler(req, ctx);
         return Response.json({ error: "No matching route handler.", ok: false }, { status: 404 });

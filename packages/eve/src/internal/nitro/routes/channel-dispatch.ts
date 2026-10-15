@@ -69,7 +69,9 @@ export async function dispatchChannelRequest(
     const bundle = await resolveNitroChannelRuntimeBundle(config);
 
     const matchedChannel = bundle.channels.find(
-      (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
+      (channel) =>
+        channel.method !== undefined &&
+        `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
     );
 
     if (matchedChannel === undefined) {
@@ -149,7 +151,9 @@ export async function dispatchChannelWebSocketRequest(
   const bundle = await resolveNitroChannelRuntimeBundle(config);
 
   const matchedChannel = bundle.channels.find(
-    (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
+    (channel) =>
+      channel.method !== undefined &&
+      `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
   );
 
   if (matchedChannel === undefined || matchedChannel.websocket === undefined) {

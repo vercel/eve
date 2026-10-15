@@ -4,7 +4,10 @@ import { normalizeChannelDefinition } from "#internal/authored-definition/channe
 import { getChannelBuildMetadata } from "#channel/compiled-channel.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
-import type { CompiledChannelDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledChannelDefinition,
+  CompiledReceiveOnlyChannelDefinition,
+} from "#compiler/manifest.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { workflowCallbackErrorMessage } from "#shared/workflow-tool-context.js";
 import {
@@ -24,6 +27,8 @@ import {
  * `defineChannel`). Each route in the channel's `routes` array becomes
  * a separate compiled channel entry. The channel name is derived from
  * the filesystem path; the URL path comes from the route's `path` field.
+ * A channel with no routes but a `receive` hook compiles to one
+ * receive-only entry so schedules and other channels can target it.
  */
 export async function compileChannelDefinition(
   _agentRoot: string,
@@ -31,7 +36,11 @@ export async function compileChannelDefinition(
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<
   | { readonly kind: "disabled"; readonly name: string }
-  | { readonly definitions: readonly CompiledChannelDefinition[]; readonly kind: "channel" }
+  | {
+      readonly definitions: readonly CompiledChannelDefinition[];
+      readonly kind: "channel";
+      readonly receiveOnly?: CompiledReceiveOnlyChannelDefinition;
+    }
 > {
   const rawValue = await loadModuleBackedDefinition({
     binding: options.binding,
@@ -61,20 +70,28 @@ export async function compileChannelDefinition(
     }
   }
 
+  const base: CompiledReceiveOnlyChannelDefinition = {
+    kind: "channel",
+    name: channelName,
+    logicalPath: source.logicalPath,
+    sourceId: source.sourceId,
+    sourceKind: "module",
+    exportName: source.exportName,
+    adapterKind: extractAdapterKind(definition.adapter),
+    manifest: buildMetadata?.manifest,
+    vercelConnect: extractVercelConnectMetadata(buildMetadata?.externalCredentials),
+  };
+
+  if (definition.routes.length === 0 && definition.receive !== undefined) {
+    return { definitions: [], kind: "channel", receiveOnly: base };
+  }
+
   return {
     definitions: definition.routes.map((route) => ({
-      kind: "channel" as const,
-      name: channelName,
-      logicalPath: source.logicalPath,
+      ...base,
       method: route.method.toUpperCase() as ChannelRouteMethod,
       urlPath: route.path,
-      sourceId: source.sourceId,
-      sourceKind: "module" as const,
-      exportName: source.exportName,
-      adapterKind: extractAdapterKind(definition.adapter),
       cors: definition.cors,
-      manifest: buildMetadata?.manifest,
-      vercelConnect: extractVercelConnectMetadata(buildMetadata?.externalCredentials),
     })),
     kind: "channel",
   };

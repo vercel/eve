@@ -11,6 +11,7 @@ import {
   type CompiledAgentNodeManifest,
   type CompiledAgentResources,
   type CompiledChannelDefinition,
+  type CompiledReceiveOnlyChannelDefinition,
   type CompiledConnectionDefinition,
   type CompiledDynamicConnectionDefinition,
   type CompiledDynamicInstructionsDefinition,
@@ -465,6 +466,7 @@ class AgentGraphCompiler {
     const schedules: CompiledScheduleDefinition[] = [];
     const scheduleCollections: CompiledScheduleCollectionDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
+    const receiveOnlyChannels: CompiledReceiveOnlyChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
@@ -492,7 +494,10 @@ class AgentGraphCompiler {
             state.composed = disableComposedCandidate({ candidate, composed: state.composed });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);
-          } else channels.push(...result.definitions);
+          } else {
+            channels.push(...result.definitions);
+            if (result.receiveOnly !== undefined) receiveOnlyChannels.push(result.receiveOnly);
+          }
           break;
         }
         case "connection": {
@@ -631,7 +636,13 @@ class AgentGraphCompiler {
       toolNames: tools.map((tool) => tool.name),
     });
 
-    const channelRoutes = compileChannelRoutes(state, channels, this.diagnostics, input.nodeId);
+    const channelRoutes = compileChannelRoutes(
+      state,
+      channels,
+      receiveOnlyChannels,
+      this.diagnostics,
+      input.nodeId,
+    );
     const extensionMounts = compileExtensionMounts(input.manifest, state.composed, input.nodePath);
     for (const mount of extensionMounts) {
       state.evaluation.requireRuntimeEntry(mount.mountSourceId);

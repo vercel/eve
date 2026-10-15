@@ -2,6 +2,7 @@ import type {
   CompiledChannelDefinition,
   CompiledChannelPreflightDefinition,
   CompiledChannelRoutePlan,
+  CompiledReceiveOnlyChannelDefinition,
   CompiledShadowedChannelRoute,
 } from "#compiler/manifest.js";
 import type { AgentModuleBinding, AgentSourceDescriptor } from "#compiler/source-graph.js";
@@ -16,6 +17,7 @@ export function createCompiledChannelRoutePlan(input: {
   readonly channels: readonly CompiledChannelDefinition[];
   readonly diagnostics?: CompilerDiagnostic[];
   readonly nodeId: string;
+  readonly receiveOnly?: readonly CompiledReceiveOnlyChannelDefinition[];
   readonly sources: Readonly<Record<string, AgentSourceDescriptor>>;
 }): CompiledChannelRoutePlan {
   const effective: CompiledChannelDefinition[] = [];
@@ -65,6 +67,7 @@ export function createCompiledChannelRoutePlan(input: {
   return {
     effective: Object.freeze(effective),
     preflight: Object.freeze(preflight),
+    receiveOnly: Object.freeze([...(input.receiveOnly ?? [])]),
     shadowed: Object.freeze(shadowed),
   };
 }
