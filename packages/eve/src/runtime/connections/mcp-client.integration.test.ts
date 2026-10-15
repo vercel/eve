@@ -324,6 +324,24 @@ describe("MCP bearer refresh with the bundled client", () => {
     expect(evict).toHaveBeenCalledOnce();
   });
 
+  it("resolves credentials in the current execution context rather than the connect context", async () => {
+    await call();
+    token = acceptedToken = "next-execution-token";
+    const nextExecution = new ContextContainer();
+    nextExecution.set(AuthKey, ctx.get(AuthKey)!);
+    nextExecution.set(InitiatorAuthKey, ctx.get(InitiatorAuthKey)!);
+
+    await expect(
+      contextStorage.run(nextExecution, () =>
+        client.executeTool("whoami", {}, { callId: "next-execution" }),
+      ),
+    ).resolves.toMatchObject({ content: [{ text: "alice" }] });
+    expect(getToken).toHaveBeenCalledTimes(2);
+    expect(requests.filter((request) => request.method === "initialize")).toHaveLength(1);
+    expect(requests.at(-1)?.bearer).toBe("Bearer next-execution-token");
+    expect(evict).not.toHaveBeenCalled();
+  });
+
   it("requires consent when the refreshed bearer is also rejected, without looping", async () => {
     await call();
     token = "replacement-token";
@@ -338,6 +356,40 @@ describe("MCP bearer refresh with the bundled client", () => {
     vi.setSystemTime(Date.now() + 60_001);
     await expect(call()).rejects.toMatchObject({ name: "ConnectionAuthorizationRequiredError" });
     expect(requests.filter((request) => request.method === "tools/call").at(-1)?.bearer).toBeNull();
+  });
+
+  it("evicts a rejected replacement bearer even when another user makes an anonymous request", async () => {
+    await call();
+    token = "replacement-token";
+    acceptedToken = "unavailable-token";
+    getToken.mockImplementation(async ({ principal }) => {
+      if (principal.id === "bob") throw new ConnectionAuthorizationRequiredError("test");
+      return { token, expiresAt: Date.now() + 60_000 };
+    });
+    const bob = new ContextContainer();
+    bob.set(AuthKey, { ...ctx.get(AuthKey)!, principalId: "bob" });
+    const fetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const message = (await request.json()) as { id?: number; method: string };
+      if (request.headers.get("authorization") === null) {
+        return Response.json({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { content: [{ type: "text", text: "anonymous" }] },
+        });
+      }
+      if (request.headers.get("authorization") === "Bearer replacement-token") {
+        await expect(
+          contextStorage.run(bob, () => client.executeTool("whoami", {}, { callId: "bob" })),
+        ).resolves.toMatchObject({ content: [{ text: "anonymous" }] });
+      }
+      return await fetch(input, init);
+    });
+
+    await expect(call()).rejects.toMatchObject({ name: "ConnectionAuthorizationRequiredError" });
+    expect(evict).toHaveBeenCalledTimes(2);
+    expect(evict.mock.calls.map(([options]) => options.principal.id)).toEqual(["alice", "alice"]);
   });
 
   it("does not refresh or retry a team permission failure", async () => {

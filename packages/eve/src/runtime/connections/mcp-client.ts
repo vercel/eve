@@ -41,6 +41,28 @@ interface McpToolCache {
   readonly tools: ToolSet;
 }
 
+/** Carries the failing request's auth state through SDK error wrappers. */
+class McpUnauthorizedError extends Error {
+  readonly statusCode = 401;
+  readonly anonymous: boolean;
+
+  constructor(anonymous: boolean) {
+    super("MCP HTTP request failed (HTTP 401).");
+    this.anonymous = anonymous;
+  }
+}
+
+async function checkAuthorizationResponse(
+  response: Response,
+  anonymous: boolean,
+): Promise<Response> {
+  if (response.status === 401) {
+    await response.body?.cancel();
+    throw new McpUnauthorizedError(anonymous);
+  }
+  return response;
+}
+
 /**
  * Wraps one `MCPClient` from `@ai-sdk/mcp` for a single connection.
  *
@@ -59,8 +81,6 @@ export class McpConnectionClient implements ConnectionClient {
   #toolsPromise: Promise<McpToolCache> | undefined;
   #tools: McpToolCache | undefined;
   #connection: ResolvedConnectionDefinition;
-  /** Whether the current transport connected without a bearer because none was available yet. */
-  #anonymous = false;
   readonly eventActions: ConnectionClient["eventActions"];
 
   constructor(connection: ResolvedConnectionDefinition) {
@@ -120,10 +140,9 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   async #createClient(): Promise<MCPClient> {
-    const { anonymous, headers } = await resolveConnectionHeaders(this.#connection, {
+    const { headers } = await resolveConnectionHeaders(this.#connection, {
       anonymousWhenAuthorizationRequired: true,
     });
-    this.#anonymous = anonymous;
     const url = this.#connection.url;
     const fetch = createMcpTraceFetch({
       connectionName: this.#connection.connectionName,
@@ -154,7 +173,6 @@ export class McpConnectionClient implements ConnectionClient {
       const resolve = () =>
         resolveConnectionHeaders(this.#connection, { anonymousWhenAuthorizationRequired: true });
       const send = async (resolved: ResolvedConnectionHeaders) => {
-        this.#anonymous = resolved.anonymous;
         const headers = new Headers(init?.headers);
         for (const name of connectionHeaderNames) headers.delete(name);
         for (const [name, value] of Object.entries(resolved.headers)) headers.set(name, value);
@@ -169,18 +187,17 @@ export class McpConnectionClient implements ConnectionClient {
         this.#connection.authorization === undefined ||
         init?.signal?.aborted
       ) {
-        return response;
+        return await checkAuthorizationResponse(response, resolved.anonymous);
       }
 
       // A rejected access token need not mean the refresh grant needs consent.
       await this.#evictCachedToken();
       const refreshed = await resolve();
       if (refreshed.anonymous) {
-        this.#anonymous = true;
-        return response;
+        return await checkAuthorizationResponse(response, true);
       }
       await response.body?.cancel();
-      return await send(refreshed);
+      return await checkAuthorizationResponse(await send(refreshed), refreshed.anonymous);
     };
   }
 
@@ -340,7 +357,6 @@ export class McpConnectionClient implements ConnectionClient {
     this.#clientPromise = undefined;
     this.#toolsPromise = undefined;
     this.#tools = undefined;
-    this.#anonymous = false;
   }
 
   /**
@@ -353,8 +369,19 @@ export class McpConnectionClient implements ConnectionClient {
     if (!isMcpAuthRequiredError(error)) {
       throw error;
     }
+    const requestError = [...walkErrorChain(error)].find(
+      (candidate) => candidate instanceof McpUnauthorizedError,
+    );
+    const anonymous =
+      requestError?.anonymous ??
+      (
+        await resolveConnectionHeaders(this.#connection, {
+          anonymousWhenAuthorizationRequired: true,
+        })
+      ).anonymous;
     return await this.#requireAuthorization(
-      this.#anonymous ? "the server requires sign-in" : "the server rejected the token",
+      anonymous ? "the server requires sign-in" : "the server rejected the token",
+      anonymous,
     );
   }
 
@@ -365,8 +392,11 @@ export class McpConnectionClient implements ConnectionClient {
    * {@link ConnectionAuthorizationRequiredError} so the authorization flow
    * takes over.
    */
-  async #requireAuthorization(reason: string): Promise<never> {
-    if (!this.#anonymous) {
+  async #requireAuthorization(reason: string, anonymous?: boolean): Promise<never> {
+    anonymous ??= (
+      await resolveConnectionHeaders(this.#connection, { anonymousWhenAuthorizationRequired: true })
+    ).anonymous;
+    if (!anonymous) {
       await this.#evictCachedToken();
     }
     await this.close();
