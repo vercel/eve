@@ -11,8 +11,18 @@ import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import type { MemoryInstrumentation } from "#instrumentation/memory.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("memory");
+
+/** A memory recall failed: the turn fails and the session waits, so the next message can retry. */
+export class MemoryRecallError extends Error {
+  override readonly name = "MemoryRecallError";
+
+  constructor(error: unknown) {
+    super(toErrorMessage(error), { cause: error });
+  }
+}
 
 export async function dispatchMemoryLifecycleEvent(input: {
   readonly abortSignal?: AbortSignal;
@@ -28,15 +38,19 @@ export async function dispatchMemoryLifecycleEvent(input: {
   if (input.memories.length === 0) return messages;
 
   if (input.event.type === "turn.started") {
-    return await dispatchMemoryTurnStarted({
-      abortSignal: input.abortSignal,
-      appRoot: input.appRoot,
-      ctx: input.ctx,
-      event: input.event,
-      instrumentation: input.instrumentation,
-      memories: input.memories,
-      nodeId: input.nodeId,
-    });
+    try {
+      return await dispatchMemoryTurnStarted({
+        abortSignal: input.abortSignal,
+        appRoot: input.appRoot,
+        ctx: input.ctx,
+        event: input.event,
+        instrumentation: input.instrumentation,
+        memories: input.memories,
+        nodeId: input.nodeId,
+      });
+    } catch (error) {
+      throw new MemoryRecallError(error);
+    }
   }
   if (input.event.type === "compaction.requested") {
     await dispatchMemoryCompactionRequested({
@@ -50,14 +64,18 @@ export async function dispatchMemoryLifecycleEvent(input: {
       nodeId: input.nodeId,
     });
   } else if (input.event.type === "compaction.completed") {
-    messages = await dispatchMemoryCompactionCompleted({
-      abortSignal: input.abortSignal,
-      ctx: input.ctx,
-      event: input.event,
-      instrumentation: input.instrumentation,
-      memories: input.memories,
-      messages,
-    });
+    try {
+      messages = await dispatchMemoryCompactionCompleted({
+        abortSignal: input.abortSignal,
+        ctx: input.ctx,
+        event: input.event,
+        instrumentation: input.instrumentation,
+        memories: input.memories,
+        messages,
+      });
+    } catch (error) {
+      throw new MemoryRecallError(error);
+    }
   } else if (input.event.type === "turn.completed" && input.messages !== undefined) {
     try {
       await dispatchMemoryTurnCompleted({

@@ -189,8 +189,8 @@ export class ModelCaller {
   }
 
   /** A failed compaction fails the step, whatever recovery the call attempted. */
-  throwIfCompactionFailed(): void {
-    if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
+  failedCompaction(): { readonly error: unknown } | undefined {
+    return this.compactionFailure;
   }
 
   /** Steering interrupted the call: the step ends with what it committed, and runs again. */

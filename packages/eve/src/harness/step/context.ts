@@ -8,6 +8,7 @@ import {
 import { isDynamicConnectionResolutionError } from "#context/dynamic-connection-lifecycle.js";
 import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { ParentSessionKey, SessionCallbackKey, SessionPredecessorKey } from "#context/keys.js";
+import { MemoryRecallError } from "#context/memory-event-lifecycle.js";
 import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
@@ -167,24 +168,26 @@ export async function openTurn(
 
 /**
  * A lifecycle event failed to publish: a dynamic model selection failure ends the session, and a
- * dynamic connection resolver failure parks it. Anything else throws.
+ * dynamic connection resolver or memory recall failure parks it. Anything else throws.
  */
 export async function failBoundaryEvent(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   if (isTurnCancellation(error)) throw error;
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
-  if (isDynamicConnectionResolutionError(error)) return failConnectionResolution(step, error);
+  if (isDynamicConnectionResolutionError(error) || error instanceof MemoryRecallError) {
+    return parkFailedTurn(step, error);
+  }
   throw error;
 }
 
-/** A dynamic connection resolver threw: the session parks so the next message can retry. */
-export async function failConnectionResolution(step: Step, error: unknown): Promise<StepResult> {
+/** A turn's lifecycle handler threw: the turn fails and the session parks so the next message can retry. */
+async function parkFailedTurn(step: Step, error: unknown): Promise<StepResult> {
   if (step.emit === undefined) throw error;
   step.instrumentation?.recordError(error);
 
   const errorId = createErrorId();
   const message = toErrorMessage(error);
-  log.error("dynamic connection resolver failed — parking session", {
+  log.error("turn lifecycle handler failed — parking session", {
     error,
     errorId,
     sessionId: step.session.sessionId,

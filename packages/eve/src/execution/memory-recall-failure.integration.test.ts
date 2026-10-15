@@ -48,13 +48,13 @@ async function firstTurnEventTypes(runtime: TestRuntime, name: string): Promise<
   });
 }
 
-// #4896: a recall error escapes `turnStep`, so Workflow retries the step and the session fails.
+// #4896: a recall error fails the turn once instead of escaping `turnStep` into step retries.
 describe("memory recall failures", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it.fails("fails the turn once and keeps the session when turn.started recall throws", async () => {
+  it("fails the turn once and keeps the session when turn.started recall throws", async () => {
     let recalls = 0;
     const runtime = await createTestRuntime({
       agent: { name: "turn-started-recall-failure" },
@@ -74,7 +74,7 @@ describe("memory recall failures", () => {
     expect(recalls).toBe(1);
   });
 
-  it.fails("fails the turn once and keeps the session when compaction.completed recall throws", async () => {
+  it("fails the turn once and keeps the session when compaction.completed recall throws", async () => {
     let recalls = 0;
     let summaries = 0;
     // Test runs swap authored models for a canned mock; this case scripts its own.
