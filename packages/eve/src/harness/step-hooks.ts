@@ -207,12 +207,9 @@ export async function emitStepActions(
   step: HarnessStepResult,
   notRun: readonly ToolResultPart[],
 ): Promise<void> {
-  const { runId, turnId } = state;
-  const scope = runId === undefined ? { turnId } : { runId, turnId };
+  const { runId } = state;
   for (const part of notRun) {
-    await emitFn(
-      callSettledFrom(createRuntimeToolResultFromMessagePart(part, part.toolName), { scope }),
-    );
+    await emitFn(callSettledFrom(createRuntimeToolResultFromMessagePart(part, part.toolName)));
   }
   if (runId === undefined) return;
   const commit: SessionEvent[] = [];
@@ -220,7 +217,6 @@ export async function emitStepActions(
   if (result !== undefined) {
     commit.push({
       data: { kind: "result", partId: `${runId}.result`, phase: "reply", runId, value: result },
-      scope,
       type: "content.completed",
     });
   }
@@ -236,7 +232,7 @@ export async function emitStepActions(
   };
   const generationId = readGatewayGenerationId(step.providerMetadata);
   if (generationId !== undefined) settled.generationId = generationId;
-  commit.push({ data: settled, scope, type: "model.settled" });
+  commit.push({ data: settled, type: "model.settled" });
   const usage = runUsageOf({
     costUsd: extractGatewayCostUsd(step.providerMetadata),
     usage: step.usage,
@@ -244,7 +240,6 @@ export async function emitStepActions(
   if (usage !== undefined) {
     commit.push({
       data: { kind: "model", owner: { runId }, usage },
-      scope,
       type: "usage.recorded",
     });
   }

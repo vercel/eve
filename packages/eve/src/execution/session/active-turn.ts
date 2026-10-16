@@ -1,3 +1,5 @@
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import { settleCancelDeliveryStep } from "#execution/session/settle-cancel-delivery-step.js";
 import type { ControlOrigin } from "#execution/session/input-queue.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
@@ -285,9 +287,18 @@ export class ActiveTurn {
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return false;
       case "cancel":
-        if (this.cancelsThisTurn(value)) {
+        if (this.cancelsThisTurn(value) && this.#cancelledBy === undefined) {
           this.#cancelledBy ??= admitted.origin;
           this.abort();
+        } else if (admitted.origin !== undefined) {
+          const control = controlDeliveryOf(admitted.origin);
+          await this.input.cursor.advance((state) =>
+            settleCancelDeliveryStep({
+              ...state,
+              control,
+              outcome: "ignored",
+            }),
+          );
         }
         return false;
       case "consumed":

@@ -289,7 +289,11 @@ describe("SessionExecution checkpoints", () => {
         );
       await expect(
         createExecution({ inbox, sessionState: state("") }).runTurn(undefined),
-      ).resolves.toEqual({ cancelled: true, kind: "park" });
+      ).resolves.toEqual({
+        cancelled: true,
+        kind: "park",
+        cancelledBy: kind === "cancel" ? { deliveryId: "cancel-delivery" } : undefined,
+      });
       expect(turnStep).toHaveBeenCalledTimes(1);
     },
   );
@@ -583,7 +587,7 @@ describe("SessionExecution checkpoints", () => {
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
     expect(inbox.next).not.toHaveBeenCalled();
     expect(cancelTasksStep).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "turn_cancelled", turnCalls: true }),
+      expect.objectContaining({ reason: "turn-cancelled", turnCalls: true }),
     );
   });
 
@@ -632,7 +636,11 @@ describe("SessionExecution checkpoints", () => {
       execution.runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
       }),
-    ).resolves.toEqual({ cancelled: true, kind: "park" });
+    ).resolves.toEqual({
+      cancelled: true,
+      cancelledBy: { deliveryId: "cancel-delivery" },
+      kind: "park",
+    });
 
     expect(inbox.restore).not.toHaveBeenCalled();
     expect(queue.takeNext(undefined)).toMatchObject({ delivery: followUp, kind: "turn" });
@@ -959,7 +967,11 @@ describe("SessionExecution checkpoints", () => {
       execution.runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Start the work." }] },
       }),
-    ).resolves.toEqual({ cancelled: true, kind: "park" });
+    ).resolves.toEqual({
+      cancelled: true,
+      cancelledBy: { deliveryId: "cancel-delivery" },
+      kind: "park",
+    });
 
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: answer }),
@@ -1049,7 +1061,11 @@ describe("SessionExecution checkpoints", () => {
       createExecution({ inbox, sessionState }).runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
       }),
-    ).resolves.toEqual({ cancelled: true, kind: "park" });
+    ).resolves.toEqual({
+      cancelled: true,
+      cancelledBy: { deliveryId: "cancel-delivery" },
+      kind: "park",
+    });
 
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: answerAndCorrection }),
@@ -1113,7 +1129,11 @@ describe("SessionExecution checkpoints", () => {
       createExecution({ inbox, sessionState }).runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Wait for the research." }] },
       }),
-    ).resolves.toEqual({ cancelled: true, kind: "park" });
+    ).resolves.toEqual({
+      cancelled: true,
+      cancelledBy: { deliveryId: "cancel-delivery" },
+      kind: "park",
+    });
 
     // Only a task tool call is pending: nothing is dispatched, and the cancel has
     // no workflow tool run to stop.
@@ -1208,7 +1228,11 @@ describe("SessionExecution checkpoints", () => {
       execution.runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Hold the release." }] },
       }),
-    ).resolves.toEqual({ cancelled: true, kind: "park" });
+    ).resolves.toEqual({
+      cancelled: true,
+      cancelledBy: { deliveryId: "cancel-delivery" },
+      kind: "park",
+    });
 
     expect(getSessionTokenUsage(cursor.sessionState.snapshot.session)).toMatchObject({
       inputTokens: 250,
@@ -1297,7 +1321,11 @@ describe("SessionExecution checkpoints", () => {
       createExecution({ cursor, inbox, sessionState }).runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Triage the open issues." }] },
       }),
-    ).resolves.toEqual({ cancelled: true, kind: "park" });
+    ).resolves.toEqual({
+      cancelled: true,
+      cancelledBy: { deliveryId: "cancel-delivery" },
+      kind: "park",
+    });
 
     expect(cursor.serializedContext[PUBLISHED]).toEqual(["child-1+child-2+Two reviewers started."]);
   });

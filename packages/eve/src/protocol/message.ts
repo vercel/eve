@@ -98,4 +98,4 @@ export type ActionPresentationByCallId = Readonly<Record<string, ActionPresentat
  * someone cancelled the turn (or, between turns, the tasks still working), or
  * the turn ended while the task still worked.
  */
-export type TaskCancelReason = "task_cancel" | "turn_cancelled" | "turn_ended";
+export type TaskCancelReason = "task-cancel" | "turn-cancelled" | "turn-ended";

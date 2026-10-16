@@ -6,7 +6,6 @@ import {
   type CallOutcome,
   executeToolCall,
   type CallResult,
-  scopeOf,
   type ToolSignIn,
 } from "#harness/call-executor.js";
 import {
@@ -74,7 +73,7 @@ export async function runApprovedCalls(input: {
         message: unavailableToolMessage(toolName, searchable),
         toolName,
       });
-      await input.publish(callSettledFrom(failed.result, { scope: scopeOf(input.position) }));
+      await input.publish(callSettledFrom(failed.result));
       return { settled: [{ part: failed.part }], toolResults: [] };
     }),
   );
@@ -118,7 +117,7 @@ export async function rejectApprovedCall(input: {
         },
         toolName,
       },
-      { rejected: true, scope: scopeOf(input.position) },
+      { rejected: true },
     ),
   );
   return {

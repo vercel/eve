@@ -88,6 +88,38 @@ describe("cascade", () => {
     ]);
   });
 
+  it("withdraws an interaction's open answers with its reason", () => {
+    const answered: SessionEvent = {
+      data: { deliveryId: "d_1", interactionId: "i_1", responseId: "r_1", value: {} },
+      type: "response.submitted",
+    };
+    const events = cascade(viewOf(open, [answered]), [
+      {
+        data: { interactionId: "i_1", outcome: "withdrawn", reason: "asker-ended" },
+        type: "interaction.settled",
+      },
+    ]);
+    expect(outcomes(events)).toEqual([
+      "response.settled:withdrawn",
+      "interaction.settled:withdrawn",
+    ]);
+    expect(events[0]).toMatchObject({ data: { reason: "asker-ended", responseId: "r_1" } });
+  });
+
+  it("ends a turn its session's end closes with the reply it collected", () => {
+    const reply: SessionEvent = {
+      data: { kind: "text", partId: "p_1", phase: "reply", runId, value: "Done." },
+      type: "content.completed",
+    };
+    const events = cascade(viewOf(open, [reply]), [
+      { data: { outcome: "failed" }, type: "session.ended" },
+    ]);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "cancelled", reply: ["p_1"], turnId },
+    });
+    expect(events.at(-1)?.type).toBe("session.ended");
+  });
+
   it("stamps each fact with the owners the tree gives it", () => {
     const [requested] = cascade(viewOf(open.slice(0, 5)), [open[5]!]);
     expect(requested?.scope).toEqual({ runId, turnId });

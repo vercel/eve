@@ -215,14 +215,14 @@ describe("closing what a turn leaves open", () => {
     });
   });
 
-  it("ends the session with everything it left open, the task too", () => {
+  it("ends the session with everything it left open, the task too; its turn didn't fail", () => {
     const projection = storedProjection(busyTurn().state);
     const facts = cascade(projection.view, sessionEndedFacts(projection, { outcome: "failed" }));
 
     expect(settledBy(facts)).toMatchObject({
       "session.ended:": "failed",
       "task.ended:task-1": "cancelled",
-      "turn.settled:turn_0": "failed",
+      "turn.settled:turn_0": "cancelled",
     });
     expect(facts.at(-1)?.type).toBe("session.ended");
   });

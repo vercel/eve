@@ -37,7 +37,6 @@ export function announceWaiting(before: SessionView, after: SessionView): Sessio
         awaiting: now.interactions.map(({ interactionId }) => ({ interactionId })),
         turnId,
       },
-      scope: { turnId },
       type: "turn.paused",
     },
     ...answered.map((deliveryId): SessionEvent => ({

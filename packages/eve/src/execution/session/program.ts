@@ -1,3 +1,4 @@
+import { settleCancelDeliveryStep } from "#execution/session/settle-cancel-delivery-step.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
@@ -247,7 +248,17 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "cancel-working-tasks") {
-        await cancelWorkingTasks(cursor, "turn_cancelled");
+        await cancelWorkingTasks(cursor, "turn-cancelled");
+        if (next.origin !== undefined) {
+          const control = controlDeliveryOf(next.origin);
+          await cursor.advance((state) =>
+            settleCancelDeliveryStep({
+              ...state,
+              control,
+              outcome: "applied",
+            }),
+          );
+        }
         continue;
       }
       return next;
@@ -405,7 +416,10 @@ async function runSessionLoop(
           continue;
         case "cancel-turn":
           await execution.cancelTurnWork();
-          await settleCancelledTurn(false);
+          await settleCancelledTurn(
+            false,
+            next.origin === undefined ? undefined : controlDeliveryOf(next.origin),
+          );
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };
           continue;

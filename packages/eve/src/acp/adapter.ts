@@ -267,7 +267,9 @@ export class EveAcpAdapter {
         if (active.protocolCancelled) {
           throw RequestError.requestCancelled({ sessionId: params.sessionId });
         }
-        if (cancelled || active.cancelRequested) return { stopReason: "cancelled" };
+        // A session that fails ends its turn cancelled: its error, not the cancel, is the stop.
+        if (active.cancelRequested || (cancelled && failure === undefined))
+          return { stopReason: "cancelled" };
         if (failure !== undefined) {
           await this.#failRunningCalls(params.sessionId, session, client);
           throw eveFailure(failure);

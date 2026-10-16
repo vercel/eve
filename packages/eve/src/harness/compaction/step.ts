@@ -57,6 +57,9 @@ import {
   deliveryApplied,
   controlDeliveryFor,
   idle,
+  runRequested,
+  runSettledFacts,
+  runStarted,
 } from "#harness/session-machine/transitions.js";
 import { openWork } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -101,16 +104,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   let outcome: "applied" | "failed" = "applied";
   try {
     await step.apply(
-      {
-        events: [
-          {
-            data: { owner: { changeId }, runId },
-            scope: { changeId, runId },
-            type: "model.requested",
-          },
-        ],
-        turn: step.view().turn,
-      },
+      { events: [runRequested({ changeId }, runId)], turn: step.view().turn },
       messages,
     );
     const resolvedModel = await resolveEffectiveRuntimeModel({
@@ -121,11 +115,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     step.session = resolvedModel.session;
     const summaryModel =
       step.session.agent.compactionModelReference ?? requireSessionModelReference(step.session);
-    await step.publish({
-      data: { attempt: 0, modelId: summaryModel.id, runId },
-      scope: { changeId, runId },
-      type: "model.started",
-    });
+    await step.publish(runStarted({ attempt: 0, modelId: summaryModel.id, runId }));
     const compacted = await maybeCompact({
       abortSignal: config.abortSignal,
       auth: step.ctx?.get(AuthKey) ?? null,
@@ -185,23 +175,28 @@ function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage
   return usage;
 }
 
-/** The summary run and its change failed. */
+/** The summary run and its change failed; the run records what it spent. */
 function summaryFailed(
   view: SessionView,
   input: {
     readonly changeId: string;
     readonly error: unknown;
+    readonly spent?: { readonly runId: string; readonly usage: Usage };
   },
 ): SessionEvent[] {
   const error = { code: "COMPACTION_FAILED", message: toErrorMessage(input.error) };
   // The summary run failed, and its change with it; the writer closes what else they held.
   const runs = openWork(view, { changeId: input.changeId }).runs;
+  const { spent } = input;
   return [
-    ...runs.map((run): SessionEvent => ({
-      data: { error, outcome: "failed", runId: run.runId },
-      scope: { changeId: input.changeId, runId: run.runId },
-      type: "model.settled",
-    })),
+    ...runs.flatMap(({ runId }) =>
+      runSettledFacts({
+        error,
+        outcome: "failed",
+        runId,
+        ...(spent?.runId === runId && { usage: spent.usage }),
+      }),
+    ),
     {
       data: {
         changeId: input.changeId,
@@ -209,7 +204,6 @@ function summaryFailed(
         kind: view.changes[input.changeId]?.kind ?? "compaction",
         outcome: "failed",
       },
-      scope: { changeId: input.changeId },
       type: "context.settled",
     },
   ];
@@ -350,11 +344,6 @@ async function compactOnce(input: {
   };
 
   const { change } = input;
-  const changeScope =
-    change.turnId === undefined
-      ? { changeId: change.changeId }
-      : { changeId: change.changeId, turnId: change.turnId };
-  const runScope = { ...changeScope, runId: change.summaryRunId };
   {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
@@ -379,21 +368,10 @@ async function compactOnce(input: {
       );
       // A summary run inside a turn takes the run's model, with no participants of its own.
       if (needsSummary) {
+        const runId = change.summaryRunId;
         await publish([
-          {
-            data: { owner: { changeId: change.changeId }, runId: change.summaryRunId },
-            scope: runScope,
-            type: "model.requested",
-          },
-          {
-            data: {
-              attempt: 0,
-              modelId: gatewayModelId(model) ?? "unknown",
-              runId: change.summaryRunId,
-            },
-            scope: runScope,
-            type: "model.started",
-          },
+          runRequested({ changeId: change.changeId }, runId),
+          runStarted({ attempt: 0, modelId: gatewayModelId(model) ?? "unknown", runId }),
         ]);
       }
     }
@@ -449,23 +427,16 @@ async function compactOnce(input: {
         : addTurnUsage(session, emissionState.turnId, usage);
   }
   // What the summary calls spent belongs to the summary run, in the commit that settles it.
-  const usageFacts: SessionEvent[] = [];
   const usage = needsSummary ? summaryUsageOf(summaryUsage) : undefined;
-  if (usage !== undefined) {
-    usageFacts.push({
-      data: { kind: "model", owner: { runId: change.summaryRunId }, usage },
-      scope: runScope,
-      type: "usage.recorded",
-    });
-  }
+  const runId = change.summaryRunId;
   if (failure !== undefined) {
-    await publish([
-      ...summaryFailed(input.view(), {
+    await publish(
+      summaryFailed(input.view(), {
         changeId: change.changeId,
         error: failure.error,
+        ...(usage !== undefined && { spent: { runId, usage } }),
       }),
-      ...usageFacts,
-    ]);
+    );
     return { compacted: false, failure, messages: input.messages, session };
   }
   messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
@@ -475,17 +446,11 @@ async function compactOnce(input: {
     if (ctx !== undefined) {
       prepareMemoryCompaction(ctx, { history: messages, state: session.state });
     }
-    const settled: SessionEvent[] = [];
-    if (needsSummary) {
-      settled.push({
-        data: { finishReason: "stop", outcome: "completed", runId: change.summaryRunId },
-        scope: runScope,
-        type: "model.settled",
-      });
-    }
-    settled.push(...usageFacts, {
+    const settled: SessionEvent[] = needsSummary
+      ? runSettledFacts({ finishReason: "stop", outcome: "completed", runId, usage })
+      : [];
+    settled.push({
       data: { changeId: change.changeId, kind: "compaction", outcome: "completed" },
-      scope: changeScope,
       type: "context.settled",
     });
     await publish(

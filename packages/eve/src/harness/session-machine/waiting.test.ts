@@ -97,7 +97,6 @@ describe("announceWaiting", () => {
     expect(announceWaiting(before, after)).toEqual([
       {
         data: { awaiting: [{ interactionId: "i_1" }], turnId },
-        scope: { turnId },
         type: "turn.paused",
       },
       { data: { deliveryId: "d_1", outcome: "awaiting-input", turnId }, type: "delivery.settled" },

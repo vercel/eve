@@ -5,14 +5,7 @@ import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 import { closeUnder } from "#harness/session-machine/cascade.js";
 import { isOpen } from "#protocol/session-projection/tree.js";
-import {
-  activeTurn,
-  callTask,
-  callTurn,
-  interactionOwner,
-  type OpenWork,
-  openWork,
-} from "#protocol/session-projection/selectors.js";
+import { activeTurn, interactionOwner } from "#protocol/session-projection/selectors.js";
 import type {
   RuntimeIdentity,
   TraceContext,
@@ -33,6 +26,7 @@ import type {
 } from "#protocol/session-events/families/delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
+import type { ModelOwner } from "#protocol/session-events/families/model.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type {
   Cause,
@@ -164,12 +158,11 @@ export function receive(
       turnId,
     };
     if (input.trace !== undefined) data.trace = input.trace;
-    events.push({ data, scope: { turnId }, type: "turn.started" });
+    events.push({ data, type: "turn.started" });
   }
   for (const delivery of deliveries) {
     events.push({
       data: { deliveryId: delivery.deliveryId, parts: delivery.parts, turnId },
-      scope: { turnId },
       type: "delivery.consumed",
     });
   }
@@ -201,7 +194,6 @@ export function join(
   for (const delivery of open) {
     events.push({
       data: { deliveryId: delivery.deliveryId, parts: delivery.parts, turnId },
-      scope: { turnId },
       type: "delivery.consumed",
     });
   }
@@ -212,27 +204,28 @@ export function join(
 export function requestModel(view: SessionView): Transition & { readonly runId: string } {
   const { turnId } = at(view.projection);
   const runId = nextRunId(view.projection);
-  return {
-    ...unchanged(view, [
-      { data: { owner: { turnId }, runId }, scope: { runId, turnId }, type: "model.requested" },
-    ]),
-    runId,
-  };
+  return { ...unchanged(view, [runRequested({ turnId }, runId)]), runId };
+}
+
+/** A model run is asked for: a turn's, or a context change's summary run. */
+export function runRequested(owner: ModelOwner, runId: string): SessionEvent {
+  return { data: { owner, runId }, type: "model.requested" };
 }
 
 /** The run's model was chosen and an attempt at its provider call begins. */
-export function startModel(
-  view: SessionView,
-  input: { readonly runId: string; readonly modelId: string; readonly attempt: number },
-): Transition {
-  const owner = view.projection.view.runs[input.runId]?.owner;
-  return unchanged(view, [
-    {
-      data: { attempt: input.attempt, modelId: input.modelId, runId: input.runId },
-      scope: runScope(owner, input.runId),
-      type: "model.started",
-    },
-  ]);
+export function startModel(view: SessionView, input: RunStart): Transition {
+  return unchanged(view, [runStarted(input)]);
+}
+
+interface RunStart {
+  readonly runId: string;
+  readonly modelId: string;
+  readonly attempt: number;
+}
+
+export function runStarted(input: RunStart): SessionEvent {
+  const { attempt, modelId, runId } = input;
+  return { data: { attempt, modelId, runId }, type: "model.started" };
 }
 
 /** The run's attempt failed, and the run tries again. */
@@ -240,11 +233,9 @@ export function retryModel(
   view: SessionView,
   input: { readonly runId: string; readonly attempt: number; readonly error: ErrorInfo },
 ): Transition {
-  const owner = view.projection.view.runs[input.runId]?.owner;
   return unchanged(view, [
     {
       data: { attempt: input.attempt, error: input.error, runId: input.runId },
-      scope: runScope(owner, input.runId),
       type: "model.retried",
     },
   ]);
@@ -262,12 +253,11 @@ export interface RunSettlement {
 
 /** A run settles, with its usage in the same commit. */
 export function settleModel(view: SessionView, input: RunSettlement): Transition {
-  return unchanged(view, runSettledFacts(view.projection, input));
+  return unchanged(view, runSettledFacts(input));
 }
 
-function runSettledFacts(projection: SessionProjection, input: RunSettlement): SessionEvent[] {
-  const owner = projection.view.runs[input.runId]?.owner;
-  const scope = runScope(owner, input.runId);
+/** The facts that settle a run: its end, then what it spent. */
+export function runSettledFacts(input: RunSettlement): SessionEvent[] {
   const data: {
     -readonly [K in keyof FactOf<"model.settled">["data"]]: FactOf<"model.settled">["data"][K];
   } = {
@@ -277,25 +267,14 @@ function runSettledFacts(projection: SessionProjection, input: RunSettlement): S
   if (input.finishReason !== undefined) data.finishReason = input.finishReason;
   if (input.generationId !== undefined) data.generationId = input.generationId;
   if (input.error !== undefined) data.error = input.error;
-  const facts: SessionEvent[] = [{ data, scope, type: "model.settled" }];
+  const facts: SessionEvent[] = [{ data, type: "model.settled" }];
   if (input.usage !== undefined) {
     facts.push({
       data: { kind: "model", owner: { runId: input.runId }, usage: input.usage },
-      scope,
       type: "usage.recorded",
     });
   }
   return facts;
-}
-
-function runScope(
-  owner: { readonly turnId?: string; readonly changeId?: string } | undefined,
-  runId: string,
-) {
-  const scope: { runId: string; turnId?: string; changeId?: string } = { runId };
-  if (owner?.turnId !== undefined) scope.turnId = owner.turnId;
-  if (owner?.changeId !== undefined) scope.changeId = owner.changeId;
-  return scope;
 }
 
 /** How a turn ends. */
@@ -309,19 +288,13 @@ interface TurnEnding {
  * The fact that ends the open turn. The writer closes what it leaves open before it, and settles
  * the deliveries it answered after it (`cascade`).
  */
-function closeTurn(projection: SessionProjection, ending: TurnEnding): SessionEvent[] {
-  const turnId = activeTurn(projection.view)?.turnId;
-  return turnId === undefined ? [] : turnClosure(projection, turnId, ending).facts;
-}
-
-function turnClosure(
+function closeTurn(
   projection: SessionProjection,
-  turnId: string,
   ending: TurnEnding,
-): { readonly facts: SessionEvent[]; readonly closed: OpenWork } {
-  const tables = projection.view;
-  const open = openWork(tables, { turnId });
-  const turn = tables.turns[turnId];
+  turnId = activeTurn(projection.view)?.turnId,
+): SessionEvent[] {
+  if (turnId === undefined) return [];
+  const turn = projection.view.turns[turnId];
   const data: {
     -readonly [K in keyof FactOf<"turn.settled">["data"]]: FactOf<"turn.settled">["data"][K];
   } = {
@@ -331,7 +304,7 @@ function turnClosure(
   if (turn?.reply !== undefined && turn.reply.length > 0) data.reply = turn.reply;
   if (ending.cause !== undefined) data.cause = ending.cause;
   if (ending.error !== undefined) data.error = ending.error;
-  return { closed: open, facts: [{ data, scope: { turnId }, type: "turn.settled" }] };
+  return [{ data, type: "turn.settled" }];
 }
 
 /** Nothing is left to run: the turn completes. */
@@ -392,9 +365,9 @@ export function idle(view: SessionView): Transition {
 // ---------------------------------------------------------------------------
 
 /**
- * The facts that end a session, in one commit: an open turn ends first (failed with the session's
- * error, or cancelled), then everything else the session leaves open, and `session.ended` is
- * last. Every reader stops there.
+ * The facts that end a session, in one commit, `session.ended` last. The writer closes what the
+ * session leaves open before it (`cascade`): an open turn ends cancelled, since its session ended,
+ * not it; `failure(view, turnId)` reads the session's error. Every reader stops there.
  */
 export function sessionEndedFacts(
   projection: SessionProjection | undefined,
@@ -414,19 +387,6 @@ export function sessionEndedFacts(
   }
   const { control } = ending;
   if (control !== undefined) facts.push(controlAdmitted(control, "reset"));
-  // The shared tables, not an execution pointer, decide which turns are still open. This
-  // also works for degraded terminal publication from a checkpoint without live turn state. The
-  // writer closes what each turn, and then the session, leaves open (`cascade`).
-  if (projection !== undefined) {
-    for (const row of Object.values(projection.view.turns)) {
-      if (row.status === "settled") continue;
-      const turn = turnClosure(projection, row.turnId, {
-        error: ending.error,
-        outcome: ending.outcome === "failed" ? "failed" : "cancelled",
-      });
-      facts.push(...turn.facts);
-    }
-  }
   if (control !== undefined) facts.push(deliveryApplied(control.deliveryId));
   const data: {
     -readonly [K in keyof FactOf<"session.ended">["data"]]: FactOf<"session.ended">["data"][K];
@@ -454,11 +414,7 @@ export interface SettledCall {
 }
 
 /** What the agent behind a call spent, recorded against the call. */
-export function delegatedUsageFact(
-  callId: string,
-  usage: TokenUsage,
-  scope: { readonly turnId: string },
-): SessionEvent {
+export function delegatedUsageFact(callId: string, usage: TokenUsage): SessionEvent {
   const recorded: { -readonly [K in keyof Usage]: Usage[K] } = {
     cacheReadTokens: usage.cacheReadTokens,
     cacheWriteTokens: usage.cacheWriteTokens,
@@ -468,7 +424,6 @@ export function delegatedUsageFact(
   if (usage.costUsd !== undefined) recorded.costUsd = usage.costUsd;
   return {
     data: { kind: "model", owner: { callId }, usage: recorded },
-    scope,
     type: "usage.recorded",
   };
 }
@@ -489,10 +444,9 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
     if (result !== undefined && recorded?.taskId === undefined && recorded?.status !== "settled") {
       // A task's start receipt is model history only. Its public call stays open until the
       // task replies; the reply path publishes its actual settlement and delegated spend.
-      const scope = { turnId: step.event.turnId };
-      events.push(callSettledFrom(result, { scope }));
+      events.push(callSettledFrom(result));
       // A child's usage counts once, in the commit that settles its call.
-      if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage, scope));
+      if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage));
     }
   }
   const complete = steps.filter(isComplete);
@@ -532,7 +486,7 @@ export function discardAttempt(
           runId: input.runId,
           usage: input.usage,
         };
-  return unchanged(view, [...work, ...runSettledFacts(view.projection, run)]);
+  return unchanged(view, [...work, ...runSettledFacts(run)]);
 }
 
 /**
@@ -627,7 +581,6 @@ export function startTask(
   task: TaskCallStart,
   introducedTasks?: Set<string>,
 ): Transition {
-  const scope = { taskId: task.taskId, turnId: task.turnId };
   const events: SessionEvent[] = [];
   const introduced =
     introducedTasks?.has(task.taskId) ?? view.projection.view.tasks[task.taskId] !== undefined;
@@ -635,7 +588,6 @@ export function startTask(
     introducedTasks?.add(task.taskId);
     events.push({
       type: "task.started",
-      scope,
       data: {
         taskId: task.taskId,
         kind: task.kind,
@@ -644,7 +596,7 @@ export function startTask(
       },
     });
   }
-  events.push({ type: "call.started", scope, data: { callId: task.callId, taskId: task.taskId } });
+  events.push({ type: "call.started", data: { callId: task.callId, taskId: task.taskId } });
   return unchanged(view, events);
 }
 
@@ -666,7 +618,7 @@ export function settleTask(
     readonly outcome: TaskCallOutcome;
   },
 ): Transition {
-  const { outcome, task } = input;
+  const { outcome } = input;
   const settled = input.calls.map((call, index): SessionEvent => {
     const data: {
       -readonly [K in keyof FactOf<"call.settled">["data"]]: FactOf<"call.settled">["data"][K];
@@ -686,7 +638,7 @@ export function settleTask(
     }
     if (outcome.status === "failed") data.error = { code: "TASK_FAILED", message: outcome.error };
     if (outcome.status === "cancelled") data.reason = outcome.reason ?? "task-cancelled";
-    return { data, scope: { taskId: task.id, turnId: call.turnId }, type: "call.settled" };
+    return { data, type: "call.settled" };
   });
   return unchanged(view, settled);
 }
@@ -712,7 +664,7 @@ export function endTask(
     }),
     ...(outcome.status === "cancelled" && { reason: outcome.reason ?? "task-ended" }),
   };
-  return unchanged(view, [{ data, scope: { taskId: input.taskId }, type: "task.ended" }]);
+  return unchanged(view, [{ data, type: "task.ended" }]);
 }
 
 /**
@@ -733,31 +685,17 @@ export function finishRun(
   );
   return unchanged(
     view,
-    withdrawn.flatMap((row) => withdrawInteraction(tables, row.interactionId, "asker-ended")),
+    withdrawn.map((row) => withdrawInteraction(row.interactionId, "asker-ended")),
   );
 }
 
-/** An interaction nobody needs anymore, with the answers still open on it. */
+/** An interaction nobody needs anymore; the writer withdraws the answers still open on it. */
 function withdrawInteraction(
-  tables: PublicView,
   interactionId: string,
   reason: string,
   outcome: "withdrawn" | "interrupted" = "withdrawn",
-): SessionEvent[] {
-  const row = tables.interactions[interactionId];
-  if (row === undefined || row.status !== "open") return [];
-  const owner = interactionOwner(tables, row);
-  const scope: { turnId?: string; taskId?: string } = {};
-  if (owner.turnId !== undefined) scope.turnId = owner.turnId;
-  if (owner.taskId !== undefined) scope.taskId = owner.taskId;
-  return [
-    ...Object.values(tables.responses)
-      .filter(
-        (response) => response.interactionId === interactionId && response.status !== "settled",
-      )
-      .map((response) => responseSettled(response.responseId, "withdrawn", reason)),
-    interactionSettled(interactionId, outcome, { reason, scope }),
-  ];
+): SessionEvent {
+  return interactionSettled(interactionId, outcome, { reason });
 }
 
 // ---------------------------------------------------------------------------
@@ -782,12 +720,6 @@ export function relay(
 ): Transition {
   const { payload } = input;
   const tables = view.projection.view;
-  const serving = tables.calls[payload.callId];
-  const scope: { turnId?: string; taskId?: string } = {};
-  const turnId = serving === undefined ? undefined : callTurn(tables, serving);
-  const taskId = serving === undefined ? undefined : callTask(tables, serving);
-  if (turnId !== undefined) scope.turnId = turnId;
-  if (taskId !== undefined) scope.taskId = taskId;
   const route: Relay | undefined =
     payload.route === undefined
       ? undefined
@@ -812,7 +744,6 @@ export function relay(
             origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
             subject: { callId: payload.callId },
           },
-          scope,
           type: "interaction.opened",
         });
         // A person answers it here, and the answer goes back the way it came.
@@ -822,7 +753,7 @@ export function relay(
       }
       case "interaction.settled":
         if (mirror?.status !== "open") break;
-        events.push(...mirrorSettled(tables, event.data, scope));
+        events.push(...mirrorSettled(tables, event.data));
         retire.push(interactionId);
         break;
       case "response.admitted": {
@@ -856,7 +787,6 @@ export function relay(
 function mirrorSettled(
   tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
-  scope: { readonly turnId?: string; readonly taskId?: string },
 ): SessionEvent[] {
   const open = Object.values(tables.responses)
     .filter((row) => row.interactionId === settled.interactionId && row.status !== "settled")
@@ -865,13 +795,13 @@ function mirrorSettled(
     settled.outcome === "accepted" ||
     settled.outcome === "declined" ||
     settled.outcome === "invalid";
+  // The writer withdraws the answers that didn't decide (`cascade`).
   const decider = decided ? open.at(-1) : undefined;
-  const events: SessionEvent[] = open.map((row) =>
-    responseSettled(row.responseId, row === decider ? "applied" : "withdrawn", settled.reason),
-  );
+  const events: SessionEvent[] =
+    decider === undefined ? [] : [responseSettled(decider.responseId, "applied", settled.reason)];
   const data: { -readonly [K in keyof typeof settled]: (typeof settled)[K] } = { ...settled };
   if (decider !== undefined) data.cause = { responseId: decider.responseId };
-  events.push({ data, scope, type: "interaction.settled" });
+  events.push({ data, type: "interaction.settled" });
   return events;
 }
 
@@ -938,7 +868,6 @@ export function routeAnswer(
       const { parts, turnId } = delivery.consumed;
       events.push({
         data: { deliveryId: delivery.deliveryId, parts, turnId },
-        scope: { turnId },
         type: "delivery.consumed",
       });
     }
@@ -964,18 +893,13 @@ export function routeAnswer(
         .filter((binding) => binding.interactionId === row.interactionId)
         .map((binding) => binding.responseId),
     ];
+    // The latest answer decides; the writer withdraws the others (`cascade`).
     const decider = answers.at(-1);
-    for (const responseId of answers)
-      events.push(responseSettled(responseId, responseId === decider ? "applied" : "withdrawn"));
-    const owner = interactionOwner(tables, row);
-    const scope: { turnId?: string; taskId?: string } = {};
-    if (owner.turnId !== undefined) scope.turnId = owner.turnId;
-    if (owner.taskId !== undefined) scope.taskId = owner.taskId;
+    if (decider !== undefined) events.push(responseSettled(decider, "applied"));
     events.push(
       interactionSettled(row.interactionId, outcome, {
         cause: decider === undefined ? undefined : { responseId: decider },
         response: answer,
-        scope,
       }),
     );
   }
@@ -1006,12 +930,10 @@ export function runSignIn(
   outcome?: "accepted" | "failed",
 ): RelayedInteractionEvent {
   if (outcome === undefined) {
-    const scope: { turnId: string; taskId?: string } = { turnId: from.turnId };
-    if (from.taskId !== undefined) scope.taskId = from.taskId;
     return {
       data: signInOpened(challenge, {
         prompt: `Sign in to ${challenge.name} to continue.`,
-        scope,
+
         subject: from.taskId === undefined ? { turnId: from.turnId } : { taskId: from.taskId },
       }).data,
       type: "interaction.opened",
@@ -1064,15 +986,11 @@ export function completeSignIn(
       // One callback per attempt reaches the session, so the attempt names its delivery.
       const deliveryId = `callback_${interactionId}`;
       const responseId = `response_${deliveryId}`;
-      const owner = interactionOwner(tables, row);
-      const scope: { turnId?: string; taskId?: string } = {};
-      if (owner.turnId !== undefined) scope.turnId = owner.turnId;
-      if (owner.taskId !== undefined) scope.taskId = owner.taskId;
       return [
         { data: { deliveryId, source: { callback: "authorization" } }, type: "delivery.admitted" },
         responseSubmitted({ deliveryId, interactionId, responseId }),
         responseSettled(responseId, "applied"),
-        interactionSettled(interactionId, "accepted", { cause: { responseId }, scope }),
+        interactionSettled(interactionId, "accepted", { cause: { responseId } }),
         deliveryApplied(deliveryId),
       ];
     }),
@@ -1163,24 +1081,24 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
     stopped.flatMap((step) => step.requests.map((request) => request.interactionId)),
   );
   const tables = projection.view;
-  const closingTurn = activeTurn(tables)?.turnId ?? turnId;
-  const turn =
-    closingTurn === undefined
-      ? undefined
-      : turnClosure(projection, closingTurn, { cause: input.cause, outcome: "cancelled" });
-  const closed = new Set(turn?.closed.interactions.map((row) => row.interactionId));
-  // The cancel also stops the work behind every relayed request and the stopped steps' asks.
+  // The cancel also stops the work behind every relayed request and the stopped steps' asks,
+  // wherever they sit; the writer closes the rest of what the turn held.
   const events: SessionEvent[] = Object.values(tables.interactions)
     .filter(
       (row) =>
         row.status === "open" &&
-        !closed.has(row.interactionId) &&
         (view.relayedRequestIds.has(row.interactionId) ||
           stoppedRequestIds.has(row.interactionId) ||
           row.request.kind === "budget"),
     )
-    .flatMap((row) => withdrawInteraction(tables, row.interactionId, "Cancelled.", "interrupted"));
-  events.push(...(turn?.facts ?? []));
+    .map((row) => withdrawInteraction(row.interactionId, "Cancelled.", "interrupted"));
+  events.push(
+    ...closeTurn(
+      projection,
+      { cause: input.cause, outcome: "cancelled" },
+      activeTurn(tables)?.turnId ?? turnId,
+    ),
+  );
   return {
     commit: stopped.flatMap(cancelledTranscript),
     events,
@@ -1243,26 +1161,15 @@ export function clear(
 }
 
 /**
- * What a clear withdraws beyond the turn it closes: the requests the cleared history asked for
- * outside it. Requests relayed from live tasks stay.
+ * What a clear withdraws: every request the cleared history asked for, its turn's too. Requests
+ * relayed from live tasks stay.
  */
 function clearedInteractions(view: SessionView): SessionEvent[] {
   const tables = view.projection.view;
-  const turnId = activeTurn(tables)?.turnId;
-  const closed = new Set(
-    turnId === undefined
-      ? []
-      : openWork(tables, { turnId }).interactions.map((row) => row.interactionId),
-  );
   return Object.values(tables.interactions)
-    .filter(
-      (row) =>
-        row.status === "open" &&
-        !closed.has(row.interactionId) &&
-        !view.relayedRequestIds.has(row.interactionId),
-    )
-    .flatMap((row) =>
-      withdrawInteraction(tables, row.interactionId, "The context was cleared.", "interrupted"),
+    .filter((row) => row.status === "open" && !view.relayedRequestIds.has(row.interactionId))
+    .map((row) =>
+      withdrawInteraction(row.interactionId, "The context was cleared.", "interrupted"),
     );
 }
 
@@ -1284,6 +1191,6 @@ export function contextStarted(input: {
   if (input.cause !== undefined) data.cause = input.cause;
   if (input.trigger !== undefined) data.trigger = input.trigger;
   return input.turnId === undefined
-    ? { data, scope: { changeId: input.changeId }, type: "context.started" }
-    : { data, scope: { changeId: input.changeId, turnId: input.turnId }, type: "context.started" };
+    ? { data, type: "context.started" }
+    : { data, type: "context.started" };
 }

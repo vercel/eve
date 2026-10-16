@@ -63,7 +63,7 @@ epochs must be rebuilt.
 | `turn.cancelled`          | `turn.settled` with `outcome: "cancelled"`                                                                                  |
 | `session.waiting`         | `delivery.settled` (a message's response is done) or `turn.settled`; `idle(view)` from `eve/events` says nothing is running |
 | `session.completed`       | `session.ended` with `outcome: "completed"`                                                                                 |
-| `session.failed`          | `session.ended` with `outcome: "failed"`                                                                                    |
+| `session.failed`          | `session.ended` with `outcome: "failed"`; a turn it held settles `cancelled`, not failed                                    |
 
 New facts with no v26 counterpart: `delivery.admitted` and `delivery.settled` (every message,
 answer, control, and callback), `model.requested`, `model.retried`, `call.started`,
@@ -138,7 +138,8 @@ and MCP JSON results use the same nesting and omit `request.signIn.callbackUrl`.
 
 Call labels use `capability.label`, `call.progress.data.label`, `call.settled.data.label`, and
 `CallRow.label`. A prompt's heading still uses `request.title`. Stream parts use `kind`, because
-`type` names their event; authoring and UI parts keep their `type` discriminant.
+`type` names their event; authoring and UI parts keep their `type` discriminant. Task cancellation
+reasons use kebab case: `task-cancel`, `turn-cancelled`, and `turn-ended`.
 
 ## Hooks
 

@@ -133,7 +133,7 @@ async function consumeStreamContent(
     value: string,
     phase: "narration" | "reply",
   ): Promise<void> => {
-    await emitFn({ data: { kind, partId, phase, runId, value }, scope, type: "content.completed" });
+    await emitFn({ data: { kind, partId, phase, runId, value }, type: "content.completed" });
   };
 
   const flushCurrentMessage = async (): Promise<void> => {
@@ -184,9 +184,7 @@ async function consumeStreamContent(
 
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
-    await emitFn(
-      callRequested({ action, owner: { runId }, scope, label: projection.presentationLabel }),
-    );
+    await emitFn(callRequested({ action, owner: { runId }, label: projection.presentationLabel }));
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -237,7 +235,6 @@ async function consumeStreamContent(
         action,
         inputError: { code: "INVALID_TOOL_INPUT", message },
         owner: { runId },
-        scope,
       }),
     );
     await emitActionResult(result);
@@ -257,9 +254,7 @@ async function consumeStreamContent(
             actionInputs.get(result.callId),
             result.output,
           );
-    await emitFn(
-      callSettledFrom(result, { scope, label: resultPresentation?.[result.callId]?.label }),
-    );
+    await emitFn(callSettledFrom(result, { label: resultPresentation?.[result.callId]?.label }));
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
@@ -432,7 +427,6 @@ async function consumeStreamContent(
       if (reasoningPartId !== undefined && currentReasoning.length > 0)
         completed.push({
           type: "content.completed",
-          scope,
           data: {
             partId: reasoningPartId,
             runId,
@@ -445,7 +439,6 @@ async function consumeStreamContent(
       if (messagePartId !== undefined && currentMessage.length > 0)
         completed.push({
           type: "content.completed",
-          scope,
           data: {
             partId: messagePartId,
             runId,
