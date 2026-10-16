@@ -1,4 +1,3 @@
-import { ANONYMOUS_PRINCIPAL } from "#execution/session/principal.js";
 import type { ModelMessage } from "ai";
 
 import type { getApprovalAuditState } from "#harness/hitl/candidates.js";
@@ -459,7 +458,7 @@ function reportApprovalProgress(
       createApprovalSettledEvent({
         outcome: settlement.outcome === "allowed" ? "approved" : "cancelled",
         requestId: settlement.requestId,
-        responderPrincipalId: settlement.actor?.principalId ?? ANONYMOUS_PRINCIPAL,
+        responderPrincipalId: settlement.actor.principalId,
         ...at,
       }),
     );

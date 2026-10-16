@@ -1,3 +1,4 @@
+import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
 import { readHitlState } from "./requests.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -38,7 +39,6 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
-const INVALID_APPROVAL_FEEDBACK = "Respond to this approval with Approve or Cancel.";
 const REQUESTER_ONLY_APPROVAL_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
 const UNAVAILABLE_TOOL_APPROVAL_REASON =
@@ -101,12 +101,10 @@ export async function coordinateApprovalDelivery(input: {
     const view = sessionView(storedProjection(session.state), session.state);
     session = saveTransition(session, matchSignIns(view, { attemptIds: [...expiredChallengeIds] }));
   }
-  const audit = getApprovalAuditState(session.state);
   const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);
   const pendingRequestIds = new Set(
     batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
   );
-  const settledRequestIds = new Set(audit.settlements.map((settlement) => settlement.requestId));
   if (batches.length === 0) return deliveryResult(session, input.stepInput);
 
   const stepInput = input.stepInput;
@@ -129,15 +127,10 @@ export async function coordinateApprovalDelivery(input: {
     const request = requests.get(response.requestId);
     if (request === undefined || !isApprovalRequest(request)) continue;
     // First answer wins: every answer to a pending approval is consumed here, and only the
-    // request's recorded settlement reaches `answer`. An answer to a request that settled before
-    // this delivery is discarded unchecked; the settlement already decided it.
+    // request's recorded settlement reaches `answer`. A later answer can't replace a settlement.
     consumed.add(response.requestId);
-    if (settledRequestIds.has(response.requestId)) continue;
     const decision = toCandidateDecision(response.optionId);
-    if (decision === undefined) {
-      feedback.push(INVALID_APPROVAL_FEEDBACK);
-      continue;
-    }
+    if (decision === undefined) continue;
 
     if (!authorizationRequiredRequestIds.has(response.requestId)) {
       const context = contextStorage.getStore();
@@ -153,17 +146,14 @@ export async function coordinateApprovalDelivery(input: {
         suspendedSteps(session.state).find((step) =>
           step.requests.some((request) => request.requestId === response.requestId),
         )?.requester ?? null;
-      if (requester !== null && responder === null) {
-        feedback.push(UNAUTHENTICATED_APPROVAL_FEEDBACK);
-        continue;
-      }
       if (requester !== null && responder !== null && !sameResponder(requester, responder)) {
         feedback.push(REQUESTER_ONLY_APPROVAL_FEEDBACK);
         continue;
       }
-      // A direct settlement needs no authorizer pass; the settlements below carry it.
+      // A direct settlement needs no authorizer pass; the settlements below carry it. An
+      // unauthenticated responder settles as the anonymous principal `none()` gives such callers.
       const settled = settleDirectApprovalResponse({
-        actor: responder,
+        actor: responder ?? ANONYMOUS_SESSION_AUTH_CONTEXT,
         outcome: decision === "approve" ? "allowed" : "cancelled",
         requestId: response.requestId,
         settledAt: now,

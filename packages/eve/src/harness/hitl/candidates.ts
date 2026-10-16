@@ -36,8 +36,7 @@ export interface ApprovalResponderIdentity {
 }
 
 export interface ApprovalSettlementAuditRecord {
-  /** `null`: an unauthenticated responder settled a request that has no requester. */
-  readonly actor: ApprovalResponderIdentity | null;
+  readonly actor: ApprovalResponderIdentity;
   /**
    * The full auth of the person who approved, present only when allowed. The approved call reads
    * it as `ctx.approval.responder`; it never runs as it.
@@ -265,9 +264,9 @@ export function settleUnavailableCandidate(input: {
   });
 }
 
-/** Atomically settles a direct approval response; `null` actor: an unauthenticated responder. */
+/** Atomically settles a direct approval response. */
 export function settleDirectApprovalResponse(input: {
-  readonly actor: SessionAuthContext | null;
+  readonly actor: SessionAuthContext;
   readonly outcome: "allowed" | "cancelled";
   readonly requestId: string;
   readonly settledAt: number;
@@ -313,7 +312,7 @@ function settleRequest(input: {
   /** Why the settling candidate failed, for an unavailable request. */
   readonly reason?: string;
   readonly requestId: string;
-  readonly responder: SessionAuthContext | null;
+  readonly responder: SessionAuthContext;
   readonly settledAt: number;
   readonly state: SessionStateMap | undefined;
   readonly text?: string;
@@ -324,10 +323,9 @@ function settleRequest(input: {
     return { changed: false, state: input.state };
   }
 
-  const responder = input.responder;
   const settlement: ApprovalSettlementAuditRecord = {
-    actor: responder === null ? null : projectResponder(responder),
-    ...(input.outcome === "allowed" && responder !== null && { responder }),
+    actor: projectResponder(input.responder),
+    ...(input.outcome === "allowed" && { responder: input.responder }),
     candidateId: input.candidateId,
     outcome: input.outcome,
     requestId: input.requestId,
