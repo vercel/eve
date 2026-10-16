@@ -644,6 +644,68 @@ describe("approval responses without a response policy", () => {
     ]);
   });
 
+  it("doesn't recheck a settled answer replayed with another responder's delivery", async () => {
+    const second: InputRequest = {
+      ...request,
+      action: { ...request.action, callId: "call-2" },
+      requestId: "approval-2",
+    };
+    const parked = withParkedStep(
+      { ...parkedSession(), state: undefined },
+      { requester: alice, requests: [request, second] },
+    );
+    const settled = await respond(parked, alice);
+    // `answer` queues the settled response while the batch waits; Bob's delivery brings it back.
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: bob, initiator: alice },
+      sessionId: parked.sessionId,
+      turn: { id: "turn-2", sequence: 2 },
+    });
+    const replayed = await contextStorage.run(ctx, () =>
+      coordinateApprovalDelivery({
+        now: 101,
+        session: settled.session,
+        stepInput: {
+          attributedInputResponses: [
+            { auth: bob, response: { optionId: "approve", requestId: second.requestId } },
+          ],
+          inputResponses: settled.stepInput?.inputResponses,
+        },
+        tools: new Map(),
+      }),
+    );
+    expect(replayed.feedback).toEqual([
+      "Only the person who requested this action can respond to this approval.",
+    ]);
+    expect(
+      getApprovalAuditState(replayed.session.state).settlements.map((entry) => entry.requestId),
+    ).toEqual([request.requestId]);
+    expect(replayed.stepInput?.inputResponses).toEqual([
+      { optionId: "approve", requestId: request.requestId },
+    ]);
+  });
+
+  it.each([
+    ["an unknown option", { optionId: "bogus" }],
+    ["text alone", { text: "hmm, not sure" }],
+  ])("rejects %s with feedback and settles nothing", async (_label, answer) => {
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedFor(alice),
+      stepInput: {
+        attributedInputResponses: [
+          { auth: alice, response: { ...answer, requestId: request.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    expect(result.feedback).toEqual(["Respond to this approval with Approve or Cancel."]);
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
+    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(parkedSteps(result.session)).toHaveLength(1);
+  });
+
   it("lets anyone respond when the requester is unauthenticated", async () => {
     const result = await respond(parkedFor(null), bob);
     expect(result.feedback).toEqual([]);
