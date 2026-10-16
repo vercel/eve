@@ -1,4 +1,5 @@
 import type { ModelMessage, UserContent } from "ai";
+import type { DeliverHookPayload } from "#channel/types.js";
 
 import type { MessageFilePart } from "#shared/message-content.js";
 import type { HarnessStepInput } from "#harness/types.js";
@@ -16,6 +17,7 @@ import {
   normalizeModelMessages,
   normalizeMessage,
   resolveAssistantStepText,
+  selectDeliveryPayloads,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
@@ -49,8 +51,68 @@ describe("coalesceDeliveries", () => {
     ).toEqual({
       caller,
       kind: "deliver",
+      payloadCallers: [null, "call-1"],
       payloads: [{ context: ["earlier context"] }, { message: "question" }],
     });
+  });
+
+  it("preserves callerless payloads and receipt identities through filtering and rebatching", () => {
+    const metadata = (deliveryId: string) => ({
+      channelKind: "subagent",
+      channelName: "research",
+      deliveryId,
+      payloadIndex: 0,
+    });
+    const batch = coalesceDeliveries<DeliverHookPayload>([
+      {
+        kind: "deliver" as const,
+        caller: { ...caller, servedCallId: "first" },
+        payloads: [{ message: "First." }],
+        deliveryMetadata: [metadata("d1")],
+      },
+      {
+        kind: "deliver" as const,
+        payloads: [{ message: "A person's correction." }],
+        deliveryMetadata: [metadata("d2")],
+      },
+      {
+        kind: "deliver" as const,
+        caller: { ...caller, servedCallId: "second" },
+        payloads: [{ message: "Second." }],
+        deliveryMetadata: [metadata("d3")],
+      },
+    ]);
+    const selected = selectDeliveryPayloads(batch, [
+      { index: 2, payload: batch.payloads[2]! },
+      { index: 1, payload: batch.payloads[1]! },
+    ]);
+    const replayed: typeof selected = JSON.parse(JSON.stringify(selected));
+    const latest = {
+      ...caller,
+      servedCallId: "third",
+      replyTo: { kind: "hook" as const, token: "third-reply" },
+    };
+    const result = coalesceDeliveries<DeliverHookPayload>([
+      replayed,
+      {
+        kind: "deliver" as const,
+        caller: latest,
+        payloads: [{ message: "Third." }],
+        deliveryMetadata: [metadata("d4")],
+      },
+    ]);
+    expect(result.payloadCallers).toEqual(["second", null, "third"]);
+    expect(result.caller).toEqual(latest);
+    expect(
+      result.deliveryMetadata?.map(({ deliveryId, payloadIndex }) => ({
+        deliveryId,
+        payloadIndex,
+      })),
+    ).toEqual([
+      { deliveryId: "d3", payloadIndex: 0 },
+      { deliveryId: "d2", payloadIndex: 1 },
+      { deliveryId: "d4", payloadIndex: 2 },
+    ]);
   });
 
   it("rejects a batch with more than one turn caller", () => {

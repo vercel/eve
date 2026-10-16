@@ -13,7 +13,7 @@ interface HomeRouteMetadata {
  */
 export type RouteSessionCreator = (
   input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
-) => Promise<RunHandle>;
+) => Promise<RunHandle & { readonly deliveryId?: string }>;
 
 export type RemoteAgentStreamHeadersResolver = (input: {
   readonly name: string;

@@ -4,7 +4,7 @@ import { AgentStreamFollower } from "#client/agent-stream-follower.js";
 import { Conversation, type LocalSubmission } from "#client/conversation.js";
 import { assertAnswerable } from "#client/eve-agent-store-helpers.js";
 import type { SendTurnPayload } from "#client/types.js";
-import { createEventDeduper } from "#protocol/event-dedupe.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { Answer } from "#shared/input.js";
 import {
   SessionEventStream,
@@ -16,7 +16,6 @@ import type { ClientSession } from "#client/session.js";
 export class ConversationClient {
   #conversation = new Conversation();
   readonly #cursors = new Map<string, number>();
-  #seenEvents = createEventDeduper();
   #follower?: AgentStreamFollower;
   #stream?: SessionEventStream;
   readonly #onChange: () => void;
@@ -29,6 +28,14 @@ export class ConversationClient {
     return this.#conversation.state;
   }
 
+  get view(): SessionView {
+    return this.#conversation.view;
+  }
+
+  confirmSubmission(id: string, deliveryId: string): void {
+    this.#conversation.confirmSubmission(id, deliveryId);
+  }
+
   get following(): boolean {
     return this.#follower !== undefined;
   }
@@ -38,24 +45,30 @@ export class ConversationClient {
     this.#conversation.setSubmissions(submissions);
   }
 
-  /** Shows submitted answers as responded; the returned callback withdraws them if the server never accepts. */
-  projectAnswers(answers: readonly Answer[] | undefined): (() => void) | undefined {
+  /** Projects answers during the POST round trip, then hands ownership to the view. */
+  projectAnswers(answers: readonly Answer[] | undefined) {
     if (!answers?.length) return undefined;
     const conversation = this.#conversation;
-    const withdraw = conversation.answer(answers);
+    const pending = conversation.answer(answers);
     this.#onChange();
-    return () => {
+    const withdraw = () => {
       if (conversation !== this.#conversation) return;
-      withdraw();
+      pending();
       this.#onChange();
     };
+    withdraw.accept = (deliveryId: string) => {
+      if (conversation !== this.#conversation) return;
+      pending.accept(deliveryId);
+      this.#onChange();
+    };
+    return withdraw;
   }
 
   /** Swaps shown answers for a prepared payload's, which must still be answerable. */
   replaceAnswers(
-    retract: (() => void) | undefined,
+    retract: ReturnType<ConversationClient["projectAnswers"]>,
     input: SendTurnPayload,
-  ): (() => void) | undefined {
+  ) {
     retract?.();
     assertAnswerable(input, this.conversation);
     return this.projectAnswers(input.answers);
@@ -73,21 +86,18 @@ export class ConversationClient {
       notify?: boolean;
     } = {},
   ): boolean {
-    if (!this.#seenEvents.admit(event)) return false;
+    if (!this.#conversation.observe(event)) return false;
     options.onAccepted?.(event);
-    this.#conversation.observe(event);
     options.reconcile?.(event);
     if (options.notify !== false) this.#onChange();
     this.#follower?.acceptParentEvent(event);
-    this.#follower?.reconcile();
+    if (event.meta.endOfLine !== false) this.#follower?.reconcile();
     return true;
   }
 
   /** Admits and folds a saved root event without notifying subscribers. */
   hydrate(event: SessionStreamEvent): boolean {
-    if (!this.#seenEvents.admit(event)) return false;
-    this.#conversation.observe(event);
-    return true;
+    return this.#conversation.observe(event);
   }
 
   /** Starts following the agent sessions the root stream has announced so far. */
@@ -102,7 +112,10 @@ export class ConversationClient {
       cursors: this.#cursors,
       getState: () => this.conversation,
       onFollowing: (sessionId) => changed((c) => c.follow(sessionId, "following")),
-      onEvent: (sessionId, event) => changed((c) => c.observeAgent(sessionId, event)),
+      onEvent: (sessionId, event) => {
+        this.#conversation.observeAgent(sessionId, event);
+        if (event.meta.endOfLine !== false) this.#onChange();
+      },
       onIdle: (sessionId) => changed((c) => c.follow(sessionId, "idle")),
       onUnavailable: (sessionId) => changed((c) => c.follow(sessionId, "unavailable")),
     });
@@ -136,7 +149,6 @@ export class ConversationClient {
   reset(): void {
     this.stop();
     this.#cursors.clear();
-    this.#seenEvents = createEventDeduper();
     this.#conversation = new Conversation();
   }
 }

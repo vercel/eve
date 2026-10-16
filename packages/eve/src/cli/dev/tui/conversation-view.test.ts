@@ -24,11 +24,11 @@ function turn(turnId: string, runId: string): SessionEvent[] {
   ];
 }
 
-function call(callId: string, runId: string, title?: string): SessionEvent {
+function call(callId: string, runId: string, label?: string): SessionEvent {
   return {
     data: {
       callId,
-      capability: { kind: "tool", name: "search", ...(title !== undefined && { title }) },
+      capability: { kind: "tool", name: "search", ...(label !== undefined && { label }) },
       input: {},
       owner: { runId },
     },
@@ -88,7 +88,22 @@ describe("tuiSessionData", () => {
       { data: { cause: { turnId: "turn_2" }, error, outcome: "failed" }, type: "session.ended" },
     ]);
 
-    expect(data.failures).toEqual([error, error]);
+    expect(data.failures).toEqual([
+      { error, turnId: "turn_1" },
+      { error, turnId: "turn_2" },
+    ]);
     expect(data.sessionFailed).toBe(true);
+  });
+
+  it("reads a failed session's error as the failure of the turn it cancelled", () => {
+    const error = { code: "MODEL_FAILED", message: "The model failed." };
+    const data = read([
+      { data: {}, type: "session.started" },
+      ...turn("turn_1", "run_1"),
+      { data: { outcome: "cancelled", turnId: "turn_1" }, type: "turn.settled" },
+      { data: { cause: { turnId: "turn_1" }, error, outcome: "failed" }, type: "session.ended" },
+    ]);
+
+    expect(data.failures).toEqual([{ error, turnId: "turn_1" }]);
   });
 });

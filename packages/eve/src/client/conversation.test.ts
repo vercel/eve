@@ -5,6 +5,7 @@ import type { EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { InteractionOrigin } from "#protocol/session-events/families/interaction.js";
 import { stampTestEvent } from "#internal/testing/events.js";
+import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
 
 const turnId = "turn_0";
 const runId = "run_0";
@@ -77,6 +78,23 @@ function tool(conversation: Conversation): EveToolPart | undefined {
 }
 
 describe("the conversation", () => {
+  it("exposes a committed line together, retaining the preceding snapshot", () => {
+    const conversation = observe(started);
+    const before = conversation.state;
+    const at = "2026-10-10T00:00:00.000Z";
+    const events = eventsOfLine(
+      linesOf([requested, approval("i_0")], at)[0]!,
+      conversation.view.position,
+      at,
+    );
+    conversation.observe(events[0]!);
+    expect(conversation.state.view.calls.call_0).toBeUndefined();
+    conversation.observe(events[1]!);
+    expect(conversation.state.view.calls.call_0?.status).toBe("requested");
+    expect(conversation.state.view.interactions.i_0?.status).toBe("open");
+    expect(before.view.calls.call_0).toBeUndefined();
+  });
+
   it("shows a turn's parts and calls in the order the stream introduced them", () => {
     const conversation = observe([
       ...started,
@@ -107,18 +125,18 @@ describe("the conversation", () => {
     ]);
     expect(assistantParts(conversation)).toMatchObject([
       { state: "streaming", text: "Check", type: "text" },
-      { inputText: '{"env"', kind: "tool", name: "deploy", status: "streaming", type: "tool" },
+      { inputText: '{"env"', kind: "tool", name: "deploy", state: "streaming", type: "tool" },
     ]);
 
     observe([text("p_0", "Checking."), requested], conversation);
     expect(assistantParts(conversation)).toMatchObject([
       { state: "done", text: "Checking." },
-      { input: { env: "prod" }, kind: "tool", label: "Deploying", status: "requested" },
+      { input: { env: "prod" }, kind: "tool", label: "Deploying", state: "requested" },
     ]);
     expect(tool(conversation)?.inputText).toBeUndefined();
   });
 
-  it("reads a call's part from its row: status, outcome, output, and label", () => {
+  it("reads a call's part from its row: state, output, and label", () => {
     const conversation = observe([
       ...started,
       requested,
@@ -132,7 +150,7 @@ describe("the conversation", () => {
     expect(tool(conversation)).toMatchObject({
       label: "Deployed 1 of 2",
       output: { done: 1 },
-      status: "running",
+      state: "running",
     });
 
     observe(
@@ -147,9 +165,8 @@ describe("the conversation", () => {
     );
     expect(tool(conversation)).toMatchObject({
       label: "Deployed",
-      outcome: "completed",
       output: { done: 2 },
-      status: "settled",
+      state: "completed",
     });
   });
 
@@ -208,32 +225,65 @@ describe("the conversation", () => {
     });
   });
 
-  it("shows an answer this client sent as responded, until the stream refuses it", () => {
-    const conversation = observe([...started, requested, approval("approval_0")]);
-    conversation.answer([{ interactionId: "approval_0", optionId: "approve" }]);
-    expect(conversation.state.interactions.approval_0?.status).toBe("responded");
-    expect(tool(conversation)?.interaction?.status).toBe("responded");
-
-    observe(
-      [
+  it.each(["receipt-first", "stream-first"])(
+    "hands optimistic answers to the view (%s), then reopens a refused answer",
+    (order) => {
+      const conversation = observe([...started, requested, approval("approval_0")]);
+      const pending = conversation.answer([{ interactionId: "approval_0", optionId: "approve" }]);
+      expect(tool(conversation)?.interaction).toMatchObject({
+        status: "open",
+        answer: { optionId: "approve" },
+      });
+      if (order === "receipt-first") pending.accept("d_1");
+      const at = "2026-10-15T00:00:00Z";
+      for (const event of eventsOfLine(
         {
-          data: {
-            deliveryId: "d_1",
-            interactionId: "approval_0",
-            responseId: "response_0",
-            value: { optionId: "approve" },
+          at,
+          facts: [
+            { type: "delivery.admitted", data: { deliveryId: "d_1" } },
+            {
+              type: "response.submitted",
+              data: {
+                deliveryId: "d_1",
+                interactionId: "approval_0",
+                responseId: "response_0",
+                value: { optionId: "approve" },
+              },
+            },
+          ],
+        },
+        conversation.view.position,
+        at,
+      ))
+        conversation.observe(event);
+      if (order === "stream-first") pending.accept("d_1");
+      expect(tool(conversation)?.interaction).toMatchObject({
+        status: "open",
+        answer: { optionId: "approve" },
+      });
+      observe(
+        [
+          {
+            type: "response.settled",
+            data: { outcome: "refused", reason: "Wrong responder.", responseId: "response_0" },
           },
-          type: "response.submitted",
-        },
-        {
-          data: { outcome: "refused", reason: "Wrong responder.", responseId: "response_0" },
-          type: "response.settled",
-        },
-      ],
-      conversation,
-    );
-    expect(conversation.state.interactions.approval_0).toMatchObject({ status: "open" });
-    expect(conversation.state.interactions.approval_0?.answer).toBeUndefined();
+        ],
+        conversation,
+      );
+      expect(tool(conversation)?.interaction?.status).toBe("open");
+      expect(tool(conversation)?.interaction?.answer).toBeUndefined();
+    },
+  );
+
+  it("does not retract a newer answer when an earlier POST fails", () => {
+    const conversation = observe([...started, requested, approval("approval_0")]);
+    const retract = conversation.answer([{ interactionId: "approval_0", optionId: "approve" }]);
+    conversation.answer([{ interactionId: "approval_0", optionId: "deny" }]);
+    retract();
+    expect(tool(conversation)?.interaction?.answer).toEqual({
+      interactionId: "approval_0",
+      optionId: "deny",
+    });
   });
 
   it("keeps a settled turn's message while a later turn streams", () => {
@@ -275,7 +325,7 @@ describe("the conversation", () => {
     const state = conversationOf(
       [...started, text("p_0", "Done.")].map((event, index) => stampTestEvent(event, index)),
     );
-    expect(state.activeTurnId).toBe(turnId);
+    expect(state.view.turns[turnId]?.status).toBe("running");
     expect(state.messages).toHaveLength(2);
   });
 });

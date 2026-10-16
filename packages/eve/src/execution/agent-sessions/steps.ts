@@ -90,6 +90,8 @@ export interface AgentSessionMessage {
   readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly replyTo: string;
+  /** The call the run serves as it sends, which the session's delivery names. */
+  readonly servedCallId?: string;
 }
 
 /**
@@ -166,6 +168,8 @@ export async function sendAgentSessionMessageStep(
       caller: {
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
+        ...(input.servedCallId !== undefined &&
+          input.servedCallId !== context.parent.callId && { servedCallId: input.servedCallId }),
         subagentName: address.name,
       },
       kind: "send",

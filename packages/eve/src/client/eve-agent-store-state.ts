@@ -1,23 +1,17 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { Client } from "#client/client.js";
-import type { MessageResponse } from "#client/message-response.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
 import type {
-  CancelSessionResult,
   ClientAuth,
   ClientSessionState,
   HeadersValue,
   SendTurnPayload,
 } from "#client/types.js";
 
-/**
- * Lifecycle state of an eve frontend session store: `ready` (idle),
- * `resuming` (checking an attached session for continuation), `submitted`
- * (turn sent, awaiting the first event), `streaming` (events arriving), and
- * `error` (session creation, streaming, resume, or a turn failed).
- */
-export type EveAgentStoreStatus = "error" | "ready" | "resuming" | "streaming" | "submitted";
+/** Local transport activity; request and turn outcomes live in `view`, errors in `error`. */
+export type EveAgentStoreStatus = "idle" | "busy" | "resuming";
 
 /**
  * Prepares one outbound turn immediately before the client sends it, for
@@ -26,9 +20,14 @@ export type EveAgentStoreStatus = "error" | "ready" | "resuming" | "streaming" |
 export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<SendTurnPayload>;
 
 /** Immutable projected state of an eve frontend session store. */
-export interface EveAgentStoreSnapshot {
-  /** The conversation the session's stream and this client's own sends show. */
-  readonly data: ConversationState;
+export interface AcceptedDelivery {
+  readonly sessionId: string;
+  readonly deliveryId: string;
+}
+
+export interface EveAgentStoreSnapshot extends ConversationState {
+  /** Authoritative lifecycle tables as of this committed snapshot. */
+  readonly view: SessionView;
   /** The latest session creation, stream, resume, or turn failure. */
   readonly error: Error | undefined;
   readonly events: readonly SessionStreamEvent[];
@@ -65,7 +64,7 @@ export interface EveAgentStoreInit {
   readonly initialSession?: ClientSessionState;
   readonly optimistic?: boolean;
   /**
-   * Follow each agent tool's session into `data.agents` while the store streams its session or a
+   * Follow each agent tool's session into `agents` while the store streams its session or a
    * framework binding has it mounted.
    */
   readonly followSubagents?: boolean;
@@ -79,28 +78,4 @@ export interface EveAgentStoreInit {
    */
   readonly followIdle?: boolean;
   readonly session?: ClientSession;
-}
-
-export interface PendingMessageSubmission {
-  readonly createdAt: number;
-  readonly eventStartIndex: number;
-  readonly id: string;
-  readonly message: string;
-  readonly turnId?: string;
-  readonly requiresDeliveryId: boolean;
-  readonly deliveryId?: string;
-}
-
-export interface ActiveTurn {
-  readonly abortController: AbortController;
-  acceptedFollowUps: number;
-  readonly cancel: () => Promise<CancelSessionResult>;
-  readonly completion: Promise<void>;
-  readonly followUpDispatches: Set<Promise<void>>;
-  receivedFollowUps: number;
-  readonly receivedFollowUpEvents: Map<SessionStreamEvent, number>;
-  readonly followUpSubmissionIds: Set<string>;
-  readonly resolveCompletion: () => void;
-  readonly response: Promise<MessageResponse | undefined>;
-  readonly resolveResponse: (response: MessageResponse | undefined) => void;
 }

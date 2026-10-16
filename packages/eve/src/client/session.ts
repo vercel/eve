@@ -77,11 +77,11 @@ export class ClientSession {
     input: SendTurnInput<TOutput> & CreateSessionOptions,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true, input.stubs);
-    const { sessionId } = await readAcceptedMessage(response);
+    const { sessionId, deliveryId } = await readAcceptedMessage(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
     return {
-      response: session.#messageResponse<TOutput>(response, input, 0),
+      response: session.#messageResponse<TOutput>(response, input, 0, deliveryId),
       session,
     };
   }
@@ -225,8 +225,12 @@ export class ClientSession {
     response.body?.cancel().catch(() => {});
     return new MessageResponse<TOutput>({
       cancelTurn: async (turnId) => await this.cancel({ turnId }),
-      createStream: (source) =>
-        this.#createEventStream(initialStreamIndex, input, deliveryId, source),
+      createStream: () =>
+        this.#createEventStream(
+          initialStreamIndex,
+          input,
+          input.answers === undefined ? deliveryId : undefined,
+        ),
       deliveryId,
       sessionId: this.#state.sessionId,
     });
@@ -236,9 +240,7 @@ export class ClientSession {
     initialStreamIndex: number,
     input: SendTurnPayload,
     deliveryId?: string,
-    source?: AsyncIterable<SessionStreamEvent>,
   ): AsyncGenerator<SessionStreamEvent> {
-    // A caller's own source advances the cursor as it reads; only this read's own lines move it.
     let cursor = initialStreamIndex;
     // The response starts with the line that admits its delivery, and ends when it settles. A
     // prewarmed session starts in that same line, before the admission.
@@ -246,15 +248,12 @@ export class ClientSession {
     let admittingLine: SessionStreamEvent[] = [];
     let reachedBoundary = false;
     const segment = new ResponseSegment({ deliveryId });
-    const events: AsyncIterable<{ readonly event: SessionStreamEvent; readonly cursor?: number }> =
-      source === undefined
-        ? this.#readStream({
-            headers: input.headers,
-            signal: input.signal,
-            startIndex: initialStreamIndex,
-            streamReconnectPolicy: input.streamReconnectPolicy,
-          })
-        : withoutCursor(source);
+    const events = this.#readStream({
+      headers: input.headers,
+      signal: input.signal,
+      startIndex: initialStreamIndex,
+      streamReconnectPolicy: input.streamReconnectPolicy,
+    });
     try {
       for await (const { event, cursor: next } of events) {
         if (next !== undefined) cursor = next;
@@ -286,7 +285,7 @@ export class ClientSession {
         );
       }
     } finally {
-      if (source === undefined) this.#advanceStreamIndex(cursor);
+      this.#advanceStreamIndex(cursor);
     }
   }
 
@@ -345,12 +344,6 @@ export function followClientSession(
   options: FollowSessionOptions,
 ): AsyncIterable<SessionStreamEvent> {
   return session[followSession](options);
-}
-
-async function* withoutCursor(
-  source: AsyncIterable<SessionStreamEvent>,
-): AsyncGenerator<{ readonly event: SessionStreamEvent }> {
-  for await (const event of source) yield { event };
 }
 
 async function postSessionSend(

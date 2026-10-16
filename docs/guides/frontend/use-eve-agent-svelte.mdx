@@ -47,10 +47,11 @@ The state fields are reactive getters; the commands are ordinary methods:
 
 | Property                                                  | Svelte shape                      |
 | --------------------------------------------------------- | --------------------------------- |
-| `data`                                                    | `TData`                           |
+| `data`                                                    | `ConversationState`               |
+| `view`                                                    | `SessionView`                     |
 | `status`                                                  | `UseEveAgentStatus`               |
 | `error`                                                   | `Error \| undefined`              |
-| `events`                                                  | `readonly MessageStreamEvent[]`   |
+| `events`                                                  | `readonly SessionStreamEvent[]`   |
 | `session`                                                 | `ClientSessionState \| undefined` |
 | `send`, `respond`, `prewarm`, `resume`, `cancel`, `reset` | Methods                           |
 
@@ -58,7 +59,7 @@ Read the getters directly in templates, `$derived`, or `$effect`. The [shared re
 
 ## Send a message
 
-Call `agent.send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Svelte.
+Call `agent.send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Svelte. `send()` and `respond()` resolve with `{ sessionId, deliveryId }` when accepted, without waiting for execution to finish.
 
 ## Human-in-the-loop prompts
 

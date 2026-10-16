@@ -1,5 +1,6 @@
-import type { ConversationInteraction } from "#client/conversation-state.js";
-import type { CallOutcome, CapabilityKind } from "#protocol/session-events/families/call.js";
+import type { CallState } from "#protocol/session-projection/selectors.js";
+import type { Interaction } from "#protocol/session-reader.js";
+import type { CapabilityKind } from "#protocol/session-events/families/call.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 
 /**
@@ -66,44 +67,30 @@ export type EveMessagePart =
  * `request.signIn`), and `status`, `outcome`, and `answer` how it stands. An approval or a
  * question about one of the session's calls shows on that call's {@link EveToolPart} instead.
  */
-export type EveInteractionPart = ConversationInteraction & { readonly type: "interaction" };
+export type EveInteractionPart = Interaction & { readonly type: "interaction" };
 
-/**
- * A call the turn made, as its row in the session's tables stands: the same `status` and
- * `outcome` every eve reader reads.
- *
- * - `status` is `"streaming"` while the model still writes the input (`inputText` holds it so
- *   far), then `"requested"`, `"running"`, and `"settled"`.
- * - `outcome`, once settled: `"completed"` (with `output`), `"failed"` (with `error`),
- *   `"rejected"` (a person or a policy refused it), or `"interrupted"` (its turn or task was cut
- *   short before it finished). A newer eve can add outcomes; keep a default branch.
- * - `output` is the result once completed, and the latest preliminary output while running.
- * - `interaction` is the latest approval or question about the call, such as one a subagent the
- *   call runs relayed; while it is open, the call waits on a person.
- * - `label` is how the call reads to people, as eve's channels and terminal UI show it: the
- *   tool's label for its latest output or its completion, its label, or a readable form of its
- *   name.
- */
-export interface EveToolPart {
+/** A renderable call: partial input while streaming, then the shared call state. */
+export type EveToolPart = {
   readonly type: "tool";
   readonly callId: string;
-  readonly stepIndex?: number;
-  /**
-   * What the call invokes: a tool, an agent, a skill, or `control`, the model waiting on or
-   * cancelling its own tasks, which most activity displays leave out.
-   */
-  readonly kind?: CapabilityKind;
+  readonly stepIndex: number;
+  readonly kind: CapabilityKind;
   readonly name: string;
   readonly label: string;
-  readonly status: "streaming" | "requested" | "running" | "settled";
-  readonly outcome?: CallOutcome;
-  readonly input?: unknown;
-  readonly inputText?: string;
-  readonly output?: unknown;
-  readonly error?: ErrorInfo;
-  /** Why it ended as it did, such as `turn-cancelled`. */
-  readonly reason?: string;
-  /** The task that serves the call. */
-  readonly taskId?: string;
-  readonly interaction?: ConversationInteraction;
-}
+  readonly interaction?: Interaction;
+} & (
+  | {
+      readonly state: "streaming";
+      readonly inputText: string;
+      readonly input?: never;
+      readonly output?: never;
+      readonly error?: never;
+    }
+  | {
+      readonly state: CallState;
+      readonly inputText?: never;
+      readonly input?: unknown;
+      readonly output?: unknown;
+      readonly error?: ErrorInfo;
+    }
+);

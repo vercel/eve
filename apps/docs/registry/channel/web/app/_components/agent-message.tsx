@@ -1,14 +1,13 @@
 "use client";
 
 import type {
-  AskedInteraction,
-  ConversationInteraction,
+  Interaction,
   EveInteractionPart,
   EveMessage,
   EveMessagePart,
   EveToolPart,
 } from "eve/react";
-import { signInEnding } from "eve/react";
+import { signInEnding } from "eve/events";
 import type { FormEvent } from "react";
 import {
   CheckCircleIcon,
@@ -62,7 +61,7 @@ export function AgentMessage({
   readonly isStreaming: boolean;
   readonly message: EveMessage;
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
-  readonly questionsFor: (callId: string) => readonly ConversationInteraction[];
+  readonly questionsFor: (callId: string) => readonly Interaction[];
 }) {
   const lastTextIndex = message.parts.reduce(
     (last, part, index) => (part.type === "text" ? index : last),
@@ -105,7 +104,7 @@ function AgentMessagePart({
   readonly canRespond: (interactionId: string) => boolean;
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly part: EveMessagePart;
-  readonly questionsFor: (callId: string) => readonly ConversationInteraction[];
+  readonly questionsFor: (callId: string) => readonly Interaction[];
   readonly showCaret: boolean;
 }) {
   switch (part.type) {
@@ -133,7 +132,7 @@ function AgentMessagePart({
       if (questions.length > 0) {
         return (
           <div className="space-y-4">
-            {questions.map(({ request, answer }) => (
+            {questions.map(({ answer, ...request }) => (
               <QuestionRequest
                 canRespond={canRespond(request.interactionId)}
                 interaction={request}
@@ -150,7 +149,7 @@ function AgentMessagePart({
         <>
           <Tool>
             <ToolHeader
-              failed={part.outcome === "failed"}
+              failed={part.state === "failed"}
               status={toolStatus(part)}
               title={part.label}
               toolName={part.name}
@@ -185,12 +184,12 @@ function QuestionRequest({
   onAnswers,
 }: {
   readonly canRespond: boolean;
-  readonly interaction: AskedInteraction;
+  readonly interaction: Interaction;
   readonly answer?: AgentAnswer;
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
 }) {
-  const options = interaction.options ?? [];
-  const acceptsFreeform = interaction.allowFreeform === true || options.length === 0;
+  const options = interaction.request.options ?? [];
+  const acceptsFreeform = interaction.request.allowFreeform === true || options.length === 0;
   const disabled = !canRespond || answer !== undefined;
 
   const submitResponse = (event: FormEvent<HTMLFormElement>) => {
@@ -219,7 +218,7 @@ function QuestionRequest({
     >
       <QuestionnaireItem name={interaction.interactionId} required>
         <QuestionnaireTitle className="text-sm font-medium">
-          {interaction.prompt}
+          {interaction.request.prompt}
         </QuestionnaireTitle>
         <QuestionnaireChoices>
           {options.map((option) => (
@@ -306,8 +305,8 @@ function InteractionPrompt({
     return (
       <QuestionRequest
         answer={part.answer}
-        canRespond={canRespond(request.interactionId)}
-        interaction={request}
+        canRespond={canRespond(part.interactionId)}
+        interaction={part}
         onAnswers={onAnswers}
       />
     );
@@ -316,7 +315,7 @@ function InteractionPrompt({
     <InteractionActions
       answer={part.answer}
       canRespond={canRespond}
-      interaction={request}
+      interaction={part}
       onAnswers={onAnswers}
     />
   );
@@ -435,7 +434,7 @@ function ApprovalActions({
       answer={interaction.answer}
       canRespond={canRespond}
       decision={decision}
-      interaction={interaction.request}
+      interaction={interaction}
       onAnswers={onAnswers}
     />
   );
@@ -443,16 +442,21 @@ function ApprovalActions({
 
 /** How a call reads in its header, from its row; nothing once it completed. */
 function toolStatus(part: EveToolPart): string | undefined {
-  if (part.status === "streaming") return "Pending";
-  if (part.interaction?.request.kind === "approval" && part.interaction.status !== "settled")
-    return "Awaiting Approval";
-  if (part.status !== "settled") return "Running";
-  switch (part.outcome) {
+  switch (part.state) {
+    case "streaming":
+      return "Pending";
+    case "approval":
+      return "Awaiting Approval";
+    case "blocked":
+      return "Awaiting Input";
+    case "requested":
+    case "running":
+      return "Running";
     case "completed":
       return undefined;
     case "rejected":
       return "Denied";
-    case "interrupted":
+    case "cancelled":
       return "Cancelled";
     default:
       return "Error";
@@ -470,22 +474,24 @@ function InteractionActions({
   readonly answer?: AgentAnswer;
   readonly canRespond: (interactionId: string) => boolean;
   readonly decision?: string;
-  readonly interaction: AskedInteraction;
+  readonly interaction: Interaction;
   readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
 }) {
-  const selectedOption = interaction.options?.find((option) => option.id === answer?.optionId);
+  const selectedOption = interaction.request.options?.find(
+    (option) => option.id === answer?.optionId,
+  );
   const settledApproval = decision;
 
   return (
     <div className="space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
-      <p className="text-muted-foreground text-sm">{interaction.prompt}</p>
+      <p className="text-muted-foreground text-sm">{interaction.request.prompt}</p>
       {answer || settledApproval ? (
         <p className="font-medium text-sm">
           Responded: {selectedOption?.label ?? answer?.text ?? answer?.optionId ?? settledApproval}
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {interaction.options?.map((option) => (
+          {interaction.request.options?.map((option) => (
             <Button
               disabled={!canRespond(interaction.interactionId)}
               key={option.id}
@@ -513,7 +519,7 @@ function InteractionActions({
 function partKey(part: EveMessagePart, index: number): string {
   switch (part.type) {
     case "interaction":
-      return `interaction:${part.request.interactionId}`;
+      return `interaction:${part.interactionId}`;
     case "tool":
       return part.callId;
     case "reasoning":

@@ -5,6 +5,7 @@ import {
   attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
+  type AcceptedDelivery,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
@@ -47,22 +48,22 @@ export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
 export interface UseEveAgentHelpers extends UseEveAgentSnapshot {
   /** Requests durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
-  /** Replays the attached durable session and follows its in-flight turn, if any. */
+  /** Resolves at the durable tail; the session stream keeps following afterward. */
   readonly resume: () => Promise<void>;
   /** Creates the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
   /** Resets the session: detaches any local stream and clears events and projected data. */
   readonly reset: () => void;
-  /** Sends a message. While a turn is active, pass `turnPolicy: "steer"` to replace it. */
+  /** Resolves on acceptance. Use `turnPolicy` to steer or queue during a running turn. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ) => Promise<void>;
-  /** Answers pending HITL input requests. Rejects if a turn is already in flight. */
+  ) => Promise<AcceptedDelivery>;
+  /** Submits answers to open interactions and resolves on acceptance, not execution. */
   readonly respond: <TOutput = unknown>(
     answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ) => Promise<void>;
+  ) => Promise<AcceptedDelivery>;
 }
 
 /**
@@ -142,8 +143,8 @@ export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
  * plus the commands `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. `data` is the
- * conversation (`messages`, `turns`, `interactions`, `tasks`, `agents`); derive anything else
- * from `events`.
+ * conversation (`messages`, `interactions`, `agents`, `view`, `previews`). Read lifecycle from
+ * `view` with selectors from `eve/events`.
  *
  * Session-shaping options (`host`, `session`, `initialEvents`,
  * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are read once
@@ -250,7 +251,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelper
     [store],
   );
   const visibleSnapshot =
-    autoResumePending && snapshot.status === "ready"
+    autoResumePending && snapshot.status === "idle"
       ? { ...snapshot, status: "resuming" as const }
       : snapshot;
 
