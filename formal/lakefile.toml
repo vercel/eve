@@ -1,0 +1,9 @@
+name = "eve-formal"
+defaultTargets = ["Eve", "eve-formal"]
+
+[[lean_lib]]
+name = "Eve"
+
+[[lean_exe]]
+name = "eve-formal"
+root = "Main"

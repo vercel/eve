@@ -1,0 +1,39 @@
+name: Formal model
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "formal/**"
+      - "packages/eve/src/execution/session/step-decision*"
+      - ".github/workflows/formal.yml"
+  pull_request:
+    paths:
+      - "formal/**"
+      - "packages/eve/src/execution/session/step-decision*"
+      - ".github/workflows/formal.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lean:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and check the proofs
+        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          lake-package-directory: formal
+          leanchecker: "true"
+          # The package is `eve-formal`; its modules are under `Eve`.
+          leanchecker-args: "Eve"
+
+      - name: Check the committed decision table is the model's
+        working-directory: formal
+        run: lake exe eve-formal | diff - ../packages/eve/src/execution/session/step-decision.lean-table.ts
