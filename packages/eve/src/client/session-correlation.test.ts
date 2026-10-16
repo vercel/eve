@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ClientSession } from "#client/session.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 import { encodeTestLine, testTurnFacts as turn } from "#internal/testing/events.js";
 import { linesOf } from "#protocol/session-lines.js";
 

@@ -28,7 +28,6 @@ import {
   settleTaskCalls,
   writeTaskTable,
 } from "#execution/tasks/table.js";
-import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
@@ -1234,14 +1233,13 @@ describe("SessionExecution checkpoints", () => {
       kind: "park",
     });
 
-    expect(getSessionTokenUsage(cursor.sessionState.snapshot.session)).toMatchObject({
-      inputTokens: 250,
-      outputTokens: 25,
-    });
     // No call is open to own it, so the spend is the task's own late usage.
     expect(committed).toContainEqual(
       expect.objectContaining({
-        data: expect.objectContaining({ kind: "delegated-late" }),
+        data: expect.objectContaining({
+          kind: "delegated-late",
+          usage: expect.objectContaining({ inputTokens: 250, outputTokens: 25 }),
+        }),
         type: "usage.recorded",
       }),
     );

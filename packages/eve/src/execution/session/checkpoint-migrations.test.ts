@@ -16,7 +16,6 @@ describe("migrateSessionCheckpoint", () => {
   it("accepts a current checkpoint unchanged", () => {
     expect(migrateSessionCheckpoint(checkpoint(SESSION_CHECKPOINT_VERSION))).toEqual({
       checkpoint: checkpoint(SESSION_CHECKPOINT_VERSION),
-      childRunIdsToStop: [],
       kind: "current",
     });
   });

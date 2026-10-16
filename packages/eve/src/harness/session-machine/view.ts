@@ -1,8 +1,7 @@
-import type { TokenUsage } from "#shared/token-usage.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { PendingResponder } from "#harness/hitl/responders.js";
+import type { PendingResponder } from "#harness/hitl/index.js";
 import { pendingTaskToolCalls, type TaskToolCall } from "#execution/tasks/calls.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
@@ -13,6 +12,8 @@ import {
   turnCoordinates,
   type SessionProjection,
 } from "#protocol/session-projection.js";
+import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import { openRequests } from "#protocol/session-reader.js";
 import {
   readTurnState,
   type StepCoordinates,
@@ -39,8 +40,6 @@ export interface SessionView {
   readonly responders: Readonly<Record<string, PendingResponder>>;
   /** The sign-in attempts the session waits on, with what completing them needs. */
   readonly signIns: readonly AuthorizationChallenge[];
-  /** The session's token usage so far, which its waiting and terminal events report. */
-  readonly usage: TokenUsage;
 }
 
 /** Reads the authoritative lifecycle facts saved alongside execution state. */
@@ -156,4 +155,18 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
     taskToolCalls,
     tasks,
   };
+}
+
+/** Requests this session asked itself and still awaits; relayed requests answer elsewhere. */
+export function ownOpenRequestIds(view: Omit<SessionView, "turn">): ReadonlySet<string> {
+  return new Set(
+    openRequests(view.projection.view)
+      .filter(
+        (row) =>
+          row.origin === undefined &&
+          interactionOwner(view.projection.view, row).taskId === undefined &&
+          !view.relayedRequestIds.has(row.interactionId),
+      )
+      .map((row) => row.interactionId),
+  );
 }

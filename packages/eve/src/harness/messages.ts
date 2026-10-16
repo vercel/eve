@@ -240,22 +240,6 @@ export function followsToolResults(messages: readonly ModelMessage[]): boolean {
   return messages.findLast((message) => message.role !== "user")?.role === "tool";
 }
 
-export function createTurnInputMessages(input: HarnessStepInput | undefined): UserModelMessage[] {
-  const messages = [...(readClientContext(input) ?? []), ...(input?.context ?? [])].map((content) =>
-    createFrameworkUserMessage("context.instruction", content),
-  );
-  const message = normalizeMessage(input?.message);
-  if (message === undefined) return messages;
-  const content = userContentOf(message);
-  const kind = frameworkMessageKindForStepInput(input);
-  return [
-    ...messages,
-    kind === undefined
-      ? createUserMessage("user", content)
-      : createFrameworkUserMessage(kind, content),
-  ];
-}
-
 /** Removes blank text blocks that some providers reject from model-bound history. */
 export function normalizeModelMessages(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.flatMap((message) => {

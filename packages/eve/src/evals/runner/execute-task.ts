@@ -1,7 +1,7 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { Client } from "#client/client.js";
-import type { RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
 import type {

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "#channel/session.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
-import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/session-http.js";
 
 afterEach(() => vi.useRealTimers());
 

@@ -7,7 +7,7 @@ import type { SuspendedStep } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
+import { bumpSessionRuntimeUsageLimits } from "#harness/session-usage.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
@@ -176,7 +176,10 @@ export async function applyHumanDecisions(
 ): Promise<StepResult | undefined> {
   if (decided.limit !== undefined) {
     if (!decided.limit.granted) throw new SessionLimitDeclinedError();
-    step.session = bumpSessionRuntimeUsageLimits(step.session);
+    step.session = bumpSessionRuntimeUsageLimits(
+      step.session,
+      step.view().projection.view.usage.total,
+    );
   }
   await step.apply(settle(step.view(), { results: [] }));
   return runApproved(step, decided.approved);

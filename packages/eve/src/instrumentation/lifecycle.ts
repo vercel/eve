@@ -7,7 +7,7 @@ import type { ResponseValue } from "#protocol/session-events/families/response.j
 import { createInstrumentationDispatcher } from "#instrumentation/dispatch.js";
 import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
-import type { TraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";

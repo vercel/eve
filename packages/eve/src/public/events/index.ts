@@ -7,7 +7,6 @@
  */
 
 export {
-  STREAM_VERSION,
   type Family,
   type FactRole,
   type FactDescriptor,
@@ -48,10 +47,7 @@ export {
   type ReadRecord,
   classifyRecord,
   isStoredLine,
-  recordsOf,
   type Cause,
-  type CauseKind,
-  causeKind,
   type Principal,
   type ErrorInfo,
   type Usage,
@@ -60,25 +56,13 @@ export {
   type UserPart,
 } from "#protocol/session-events/envelope.js";
 
-export {
-  isKnownFact,
-  isTerminal,
-  familyOf,
-  isCompleted,
-  hasOutcome,
-  hasKind,
-  kindOf,
-  isCompaction,
-} from "#protocol/session-events/guards.js";
+export { isTerminal, isCompleted } from "#protocol/session-events/guards.js";
 
 export {
   type Fact,
   type Progress,
   type FactOf,
   type ProgressOf,
-  type SessionLine,
-  type SessionCommit,
-  type SessionProgress,
 } from "#protocol/session-events/facts.js";
 
 export {
@@ -186,6 +170,7 @@ export {
 
 export {
   type RuntimeIdentity,
+  type SessionPredecessor,
   type TraceContext,
   type SessionStartedData,
   type SessionOutcome,

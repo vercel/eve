@@ -1,5 +1,7 @@
 import type { ModelMessage } from "ai";
 
+import type { SessionEvent } from "#protocol/session-event.js";
+
 import type { AlsContext } from "#context/container.js";
 import {
   drainDynamicInstructionUserMessages,
@@ -13,6 +15,7 @@ import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness
 import { cascade } from "#harness/session-machine/cascade.js";
 import {
   applyTransition,
+  dropClosedRecords,
   type Publish,
   sessionView,
   type Transition,
@@ -63,7 +66,11 @@ export interface Step {
   readonly hasDelegatedCaller: boolean;
   view(): SessionView;
   position(): TurnPosition;
-  apply(transition: Transition, messages?: readonly ModelMessage[]): Promise<void>;
+  /** Publishes a transition, or facts that change nothing private, as one commit. */
+  apply(
+    change: Transition | readonly SessionEvent[],
+    messages?: readonly ModelMessage[],
+  ): Promise<void>;
   /** History as the model and hooks see it, under `state`, the session's by default. */
   projectHistory(
     messages: readonly ModelMessage[],
@@ -96,14 +103,14 @@ export function createStep(input: {
       ctx?.get(ParentSessionKey) !== undefined || ctx?.get(SessionCallbackKey) !== undefined,
     view: () => sessionView(live.read(), step.session.state),
     position: () => turnPosition(live.read()),
-    async apply(transition, messages) {
+    async apply(change, messages) {
+      const transition = "events" in change ? change : { events: change, turn: step.view().turn };
       // An owner's end closes what it holds in the same commit.
       const events = cascade(live.read().view, transition.events);
-      step.session = await applyTransition(
-        step.session,
-        { ...transition, events },
-        input.publish,
-        messages,
+      // Records whose rows the commit closed retire with it.
+      step.session = dropClosedRecords(
+        await applyTransition(step.session, { ...transition, events }, input.publish, messages),
+        live.read(),
       );
       if (ctx !== undefined) recordAppliedSession(ctx, step.session);
     },

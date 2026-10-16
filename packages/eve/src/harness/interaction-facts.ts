@@ -3,6 +3,7 @@
 // private.
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { defined, fact } from "#harness/facts.js";
 import type { Cause } from "#protocol/session-events/envelope.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type {
@@ -17,9 +18,7 @@ import type {
   ResponseSubmittedData,
   ResponseValue,
 } from "#protocol/session-events/families/response.js";
-import type { ApprovalAsk } from "#harness/session-machine/state.js";
-
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+import type { ApprovalAsk } from "#harness/session-machine/view.js";
 
 /**
  * A question, approval, or budget prompt opens. An approval is about its call, a budget prompt
@@ -32,14 +31,8 @@ export function interactionOpened(input: {
   readonly origin?: InteractionOpenedData["origin"];
   readonly audience?: InteractionOpenedData["audience"];
 }): FactOf<"interaction.opened"> {
-  const data: Mutable<InteractionOpenedData> = {
-    interactionId: input.interactionId,
-    request: input.request,
-    subject: input.subject,
-  };
-  if (input.origin !== undefined) data.origin = input.origin;
-  if (input.audience !== undefined) data.audience = input.audience;
-  return { type: "interaction.opened", data };
+  const { audience, interactionId, origin, request, subject } = input;
+  return fact("interaction.opened", { audience, interactionId, origin, request, subject });
 }
 
 /** An approval opens about its call. */
@@ -67,29 +60,30 @@ export function signInOpened(
     readonly prompt?: string;
   },
 ): FactOf<"interaction.opened"> {
-  const visible: Mutable<SignInChallenge> = { name: challenge.name };
   const details = challenge.challenge;
-  if (details.displayName !== undefined) visible.displayName = details.displayName;
-  if (details.url !== undefined) visible.url = details.url;
-  if (details.userCode !== undefined) visible.userCode = details.userCode;
-  if (details.expiresAt !== undefined) visible.expiresAt = details.expiresAt;
-  if (details.instructions !== undefined) visible.instructions = details.instructions;
-  if (challenge.hookUrl !== undefined) visible.callbackUrl = challenge.hookUrl;
-  const request: Mutable<InteractionRequest> = {
+  const signIn: SignInChallenge = defined({
+    callbackUrl: challenge.hookUrl,
+    displayName: details.displayName,
+    expiresAt: details.expiresAt,
+    instructions: details.instructions,
+    name: challenge.name,
+    url: details.url,
+    userCode: details.userCode,
+  });
+  const request: InteractionRequest = defined({
     kind: "sign-in",
+    link: details.url === undefined ? undefined : { url: details.url },
     prompt: input.prompt ?? details.instructions ?? `Authorization required for ${challenge.name}`,
-    signIn: visible,
-  };
-  if (details.url !== undefined) request.link = { url: details.url };
-  const data: Mutable<InteractionOpenedData> = {
+    signIn,
+  });
+  return fact("interaction.opened", {
+    audience:
+      challenge.principalId === undefined ? undefined : { principalIds: [challenge.principalId] },
     interactionId: signInInteractionId(challenge),
+    origin: input.origin,
     request,
     subject: input.subject,
-  };
-  if (challenge.principalId !== undefined)
-    data.audience = { principalIds: [challenge.principalId] };
-  if (input.origin !== undefined) data.origin = input.origin;
-  return { type: "interaction.opened", data };
+  });
 }
 
 /** An interaction ends. `cause` names the response that decided it, or what else settled it. */
@@ -102,27 +96,30 @@ export function interactionSettled(
     readonly response?: ResponseValue;
   } = {},
 ): FactOf<"interaction.settled"> {
-  const data: Mutable<FactOf<"interaction.settled">["data"]> = { interactionId, outcome };
-  if (input.reason !== undefined) data.reason = input.reason;
-  if (input.cause !== undefined) data.cause = input.cause;
-  if (input.response !== undefined) {
-    const detail: { optionId?: string; text?: string } = {};
-    if (input.response.optionId !== undefined) detail.optionId = input.response.optionId;
-    if (input.response.text !== undefined) detail.text = input.response.text;
-    if (Object.keys(detail).length > 0) data.response = detail;
-  }
-  return { type: "interaction.settled", data };
+  const response =
+    input.response === undefined
+      ? undefined
+      : defined<{ optionId?: string; text?: string }>({
+          optionId: input.response.optionId,
+          text: input.response.text,
+        });
+  return fact("interaction.settled", {
+    cause: input.cause,
+    interactionId,
+    outcome,
+    reason: input.reason,
+    response: response !== undefined && Object.keys(response).length > 0 ? response : undefined,
+  });
 }
 
 export function responseSubmitted(binding: ResponseSubmittedData): FactOf<"response.submitted"> {
-  const data: Mutable<ResponseSubmittedData> = {
-    deliveryId: binding.deliveryId,
-    interactionId: binding.interactionId,
-    responseId: binding.responseId,
-  };
-  if (binding.value !== undefined && Object.keys(binding.value).length > 0)
-    data.value = binding.value;
-  return { type: "response.submitted", data };
+  const { deliveryId, interactionId, responseId, value } = binding;
+  return fact("response.submitted", {
+    deliveryId,
+    interactionId,
+    responseId,
+    value: value !== undefined && Object.keys(value).length > 0 ? value : undefined,
+  });
 }
 
 export function responseAdmitted(responseId: string): FactOf<"response.admitted"> {
@@ -134,7 +131,5 @@ export function responseSettled(
   outcome: ResponseOutcome,
   reason?: string,
 ): FactOf<"response.settled"> {
-  return reason === undefined
-    ? { type: "response.settled", data: { outcome, responseId } }
-    : { type: "response.settled", data: { outcome, reason, responseId } };
+  return fact("response.settled", { outcome, reason, responseId });
 }

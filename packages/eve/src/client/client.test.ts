@@ -8,7 +8,7 @@ import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 import { encodeTestLine } from "#internal/testing/events.js";
 
 const AGENT_INFO = createTestAgentInfoResult({

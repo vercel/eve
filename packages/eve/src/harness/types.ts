@@ -5,7 +5,7 @@ import type { LanguageModel, ModelMessage } from "ai";
 import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
-import type { RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { Answer } from "#shared/input.js";

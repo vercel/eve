@@ -38,7 +38,7 @@ import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
-import type { SessionPredecessor } from "#protocol/message.js";
+import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type {
@@ -47,7 +47,7 @@ export type {
   SessionTraceRoot,
   SessionTurn,
 } from "#channel/types.js";
-export type { SessionPredecessor } from "#protocol/message.js";
+export type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 
 // ---------------------------------------------------------------------------
 // Session types (public API surface)

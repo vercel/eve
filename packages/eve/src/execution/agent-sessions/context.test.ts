@@ -7,7 +7,7 @@ import {
   writeTaskTable,
   type TaskTable,
 } from "#execution/tasks/table.js";
-import { setTurnUsageState } from "#harness/turn-tag-state.js";
+import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest, WorkflowToolCallEntry } from "#shared/action-types.js";
 
@@ -19,17 +19,12 @@ function aliceSession(table: TaskTable): HarnessSession {
     costUsd: 0.5,
     inputTokens: 400,
     outputTokens: 0,
-    sawCost: true,
   };
   const session = {
     limits: { maxInputTokensPerSession: 1_000, maxTokenCostUsdPerSession: 2 },
     sessionId: "alice-session",
   } as HarnessSession;
-  return setTurnUsageState(writeTaskTable(session, table), {
-    ...used,
-    session: used,
-    turnId: "turn_1",
-  });
+  return withSessionUsage(writeTaskTable(session, table), used);
 }
 
 function call(callId: string, entry: WorkflowToolCallEntry): RuntimeWorkflowTaskRequest {

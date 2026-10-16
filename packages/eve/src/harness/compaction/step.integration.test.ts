@@ -15,7 +15,7 @@ import {
   turnStartedForResolvers,
 } from "#harness/session-machine/change-points.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { attachClientContext } from "#internal/client-context.js";
@@ -97,7 +97,7 @@ describe("compaction summary call", () => {
       role: "assistant",
     });
     // Session limits see the summary call; a manual compaction has no turn to report it.
-    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({
+    expect(sessionUsage(result.session)).toMatchObject({
       inputTokens: 120,
       outputTokens: 8,
     });
@@ -150,7 +150,7 @@ describe("compaction summary call", () => {
 
     expect(result.session.history).toHaveLength(3);
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
-    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({ inputTokens: 120 });
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120 });
   });
 });
 

@@ -182,11 +182,6 @@ export function createEveCallbackRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/callback/${encodeURIComponent(token)}`;
 }
 
-/** Builds the capability path used to answer one remote child turn. */
-export function createEveTaskInputRoutePath(token: string): string {
-  return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
-}
-
 /** Builds the tool-stub verification route for one session. */
 export function createEveSessionStubsRoutePath(sessionId: string): string {
   return `${createEveSessionRoutePath(sessionId)}/stubs`;

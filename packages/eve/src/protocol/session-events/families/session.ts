@@ -22,6 +22,11 @@ export interface TraceContext {
   readonly traceFlags: number;
 }
 
+/** The retired session replaced by this one; its recorded history stays readable. */
+export interface SessionPredecessor {
+  readonly sessionId: string;
+}
+
 export interface SessionStartedData {
   /** The call whose agent opened this session, for a child session. */
   readonly parent?: { readonly sessionId: string; readonly callId: string };
@@ -29,7 +34,7 @@ export interface SessionStartedData {
    * The session this one replaced, when eve started it in place of one whose deployment was
    * retired. Its recorded stream stays readable.
    */
-  readonly predecessor?: { readonly sessionId: string };
+  readonly predecessor?: SessionPredecessor;
   readonly runtime?: RuntimeIdentity;
   readonly trace?: TraceContext;
 }

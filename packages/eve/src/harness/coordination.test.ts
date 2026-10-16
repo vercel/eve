@@ -18,7 +18,7 @@ import { withRelays } from "#internal/testing/session-machine.js";
 
 import { toolOutput } from "#tools/model-output.js";
 
-import { setTurnUsageState } from "#harness/turn-tag-state.js";
+import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
@@ -253,21 +253,7 @@ function createParkedSession(): HarnessSession {
     sessionId: "test-session",
   };
 
-  const ownUsage = {
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    costUsd: 0,
-    inputTokens: 1_000,
-    outputTokens: 100,
-    sawCost: false,
-  };
-  const withUsage = setTurnUsageState(base, {
-    ...ownUsage,
-    session: ownUsage,
-    turnId: "turn_0",
-  });
-
-  return withUsage;
+  return withSessionUsage(base, { inputTokens: 1_000, outputTokens: 100 });
 }
 
 describe("coordination batch identity", () => {
