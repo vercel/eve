@@ -2,10 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { checkoutGitHubRepository } from "#public/channels/github/checkout.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 const credentials = {
   installationToken: "ghs_checkout",
 };
+
+/** True when a policy is the checkout's token broker: open egress plus GitHub auth headers. */
+function isGitHubBrokerPolicy(policy: SandboxNetworkPolicy | undefined): boolean {
+  return typeof policy === "object" && JSON.stringify(policy).includes("Authorization");
+}
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -170,5 +176,56 @@ describe("GitHub checkout", () => {
         repo: "eve",
       }),
     ).rejects.toThrow("Verify the GitHub App installation has access to this repository");
+  });
+
+  // Regression for #3506: the broker policy (catch-all `"*"` plus GitHub auth
+  // transforms) must not stay in force after checkout, or a configured
+  // `deny-all` is silently widened for the rest of the session.
+  it.fails("does not leave the broker policy in force after a checkout", async () => {
+    const headSha = "a".repeat(40);
+    const sandbox = mockSandbox({
+      run(options) {
+        if (options.command.includes("git rev-parse HEAD 2>/dev/null")) {
+          return { exitCode: 128, stderr: "", stdout: "" };
+        }
+        if (options.command.includes("git rev-parse HEAD")) {
+          return { exitCode: 0, stderr: "", stdout: `${headSha}\n` };
+        }
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+
+    await checkoutGitHubRepository(sandbox.session, {
+      credentials,
+      headSha,
+      installationId: 55,
+      owner: "vercel",
+      repo: "eve",
+    });
+
+    expect(sandbox.commandLog.some((command) => command.includes("git fetch"))).toBe(true);
+    expect(isGitHubBrokerPolicy(sandbox.networkPolicyUpdates.at(-1))).toBe(false);
+  });
+
+  it.fails("does not leave the broker policy in force after a failed fetch", async () => {
+    const sandbox = mockSandbox({
+      run(options) {
+        if (options.command.includes("git fetch")) {
+          return { exitCode: 128, stderr: "fatal: could not read", stdout: "" };
+        }
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+
+    await expect(
+      checkoutGitHubRepository(sandbox.session, {
+        credentials,
+        headSha: "e".repeat(40),
+        installationId: 55,
+        owner: "vercel",
+        repo: "eve",
+      }),
+    ).rejects.toThrow();
+    expect(isGitHubBrokerPolicy(sandbox.networkPolicyUpdates.at(-1))).toBe(false);
   });
 });
