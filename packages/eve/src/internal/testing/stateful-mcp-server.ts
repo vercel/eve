@@ -1,21 +1,9 @@
 import { McpServer, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 
-/** The HTTP method and, for a POST, the JSON-RPC method. */
-export interface StatefulMcpRequestShape {
+export interface StatefulMcpRequest {
   readonly method: string;
-  readonly rpcMethod: string | undefined;
-}
-
-export interface StatefulMcpRequest extends StatefulMcpRequestShape {
   readonly sessionId: string | null;
   readonly status: number;
-}
-
-export interface HeldRequest {
-  /** Resolves once the held request has arrived. */
-  readonly reached: Promise<void>;
-  /** Lets the held request through to the server. */
-  release(): void;
 }
 
 export interface StatefulMcpServer {
@@ -27,11 +15,6 @@ export interface StatefulMcpServer {
   readonly liveSessions: ReadonlySet<string>;
   /** Resolves with the first answered request that matches, already answered or not. */
   waitForRequest(match: (request: StatefulMcpRequest) => boolean): Promise<StatefulMcpRequest>;
-  /**
-   * Holds the next matching request until `release()`, the way a server that
-   * stopped answering would. It still ends when the client aborts it.
-   */
-  hold(match: (request: StatefulMcpRequestShape) => boolean): HeldRequest;
 }
 
 /**
@@ -49,41 +32,10 @@ export function createStatefulMcpServer(): StatefulMcpServer {
     match: (request: StatefulMcpRequest) => boolean;
     resolve: (request: StatefulMcpRequest) => void;
   }[] = [];
-  const holds: {
-    match: (request: StatefulMcpRequestShape) => boolean;
-    arrive: () => void;
-    released: Promise<void>;
-  }[] = [];
 
-  async function shapeOf(request: Request): Promise<StatefulMcpRequestShape> {
-    const body: unknown = request.method === "POST" ? await request.clone().json() : undefined;
-    const rpcMethod =
-      typeof body === "object" &&
-      body !== null &&
-      "method" in body &&
-      typeof body.method === "string"
-        ? body.method
-        : undefined;
-    return { method: request.method, rpcMethod };
-  }
-
-  async function waitIfHeld(request: Request, shape: StatefulMcpRequestShape): Promise<void> {
-    const held = holds.find((candidate) => candidate.match(shape));
-    if (held === undefined) return;
-    holds.splice(holds.indexOf(held), 1);
-    held.arrive();
-    const signal = request.signal;
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => reject(signal.reason);
-      if (signal.aborted) onAbort();
-      signal.addEventListener("abort", onAbort, { once: true });
-      void held.released.then(resolve);
-    });
-  }
-
-  function record(request: Request, shape: StatefulMcpRequestShape, response: Response): Response {
+  function record(request: Request, response: Response): Response {
     const entry = {
-      ...shape,
+      method: request.method,
       sessionId: request.headers.get("mcp-session-id"),
       status: response.status,
     };
@@ -134,21 +86,7 @@ export function createStatefulMcpServer(): StatefulMcpServer {
   return {
     fetch: async (input, init) => {
       const request = new Request(input, init);
-      const shape = await shapeOf(request);
-      await waitIfHeld(request, shape);
-      return record(request, shape, await handle(request));
-    },
-    hold: (match) => {
-      let arrive!: () => void;
-      let release!: () => void;
-      const reached = new Promise<void>((resolve) => {
-        arrive = resolve;
-      });
-      const released = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      holds.push({ arrive, match, released });
-      return { reached, release };
+      return record(request, await handle(request));
     },
     liveSessions,
     requests,

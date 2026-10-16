@@ -84,7 +84,19 @@ describe("withContextScope MCP session lifecycle", () => {
   it("a step returns within the termination deadline when the server never answers DELETE", async () => {
     const ctx = stepContext();
     vi.useFakeTimers({ toFake: ["setTimeout"] });
-    const termination = server.hold((request) => request.method === "DELETE");
+    // A server that stopped answering: the DELETE arrives and never gets a response, but ends when aborted.
+    let deleteArrived!: () => void;
+    const terminationReached = new Promise<void>((resolve) => {
+      deleteArrived = resolve;
+    });
+    vi.stubGlobal("fetch", (...[input, init]: Parameters<typeof fetch>) => {
+      const signal = init?.signal;
+      if (init?.method !== "DELETE") return server.fetch(input, init);
+      deleteArrived();
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
     let settled = false;
     const scope = withContextScope(ctx, {} as HarnessSessionBase, async (session) => {
       await ctx.require(ConnectionRegistryKey).getClient("fixture").getToolMetadata();
@@ -93,7 +105,7 @@ describe("withContextScope MCP session lifecycle", () => {
       settled = true;
     });
 
-    await termination.reached;
+    await terminationReached;
     await vi.advanceTimersByTimeAsync(4_999);
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
