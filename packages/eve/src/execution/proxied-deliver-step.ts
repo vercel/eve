@@ -3,7 +3,7 @@ import { selectDeliveryPayloads } from "#harness/messages.js";
 import { routeAnswer } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { principalOf } from "#execution/session/delivery-facts.js";
-import { interactionOwner } from "#protocol/session-projection/selectors.js";
+import { activeTurn, interactionOwner, waiting } from "#protocol/session-projection/selectors.js";
 import type { ResponseSubmittedData } from "#protocol/session-events/families/response.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
@@ -94,6 +94,17 @@ async function routeProxiedDeliver(
   const answerDeliveryIds: string[] = [];
   // Relayed answers belong to the asking turn's resumed work, even without message text.
   const tables = storedProjection(durableSession.state).view;
+  const currentTurn = activeTurn(tables);
+  const blocked = currentTurn === undefined ? undefined : waiting(tables, currentTurn.turnId);
+  const askedTurn = (row: (typeof tables.interactions)[string]): string | undefined => {
+    const owned = interactionOwner(tables, row).turnId;
+    if (owned !== undefined && tables.turns[owned]?.status === "running") return owned;
+    // Detached tasks have no turn owner, but a task-wait can hold the active turn on their prompts.
+    return blocked?.on === "person" &&
+      blocked.interactions.some((request) => request.interactionId === row.interactionId)
+      ? currentTurn?.turnId
+      : undefined;
+  };
   const routedDeliveries: Parameters<typeof routeAnswer>[1]["deliveries"][number][] = [];
   const answers: ResponseSubmittedData[] = [];
 
@@ -117,10 +128,9 @@ async function routeProxiedDeliver(
         .map((response) => tables.interactions[response.interactionId])
         .find((row) => {
           if (row === undefined) return false;
-          const turnId = interactionOwner(tables, row).turnId;
-          return turnId !== undefined && tables.turns[turnId]?.status === "running";
+          return askedTurn(row) !== undefined;
         });
-      const turnId = askedIn === undefined ? undefined : interactionOwner(tables, askedIn).turnId;
+      const turnId = askedIn === undefined ? undefined : askedTurn(askedIn);
       if (routed.forSelf === undefined && turnId !== undefined) {
         answerDeliveryIds.push(...payloadMetadata.map((metadata) => metadata.deliveryId));
       }
