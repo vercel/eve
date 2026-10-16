@@ -380,9 +380,11 @@ describe("approval caller", () => {
     const { secondRequesters, seen, stages } = await withChainRun(
       "approval-caller-null-auth",
       async (run) => {
-        // Without a response policy, the approval stands; the call runs as the turn's caller.
-        await run.approve(null, "deploy_change");
-        // A response policy needs an authenticated responder, so this one stays pending.
+        // The call has a requester, so an unauthenticated answer settles nothing, with or
+        // without a response policy; the requester's own answer still decides it.
+        const refusedDirect = await run.approve(null, "deploy_change");
+        expect(filterEventsByType(refusedDirect, "input.resolved")).toEqual([]);
+        await run.approve(ALICE, "deploy_change");
         const refused = await run.approve(null, "publish_change");
         expect(filterEventsByType(refused, "input.resolved")).toEqual([]);
         await run.approve(ALICE, "publish_change");
@@ -393,6 +395,7 @@ describe("approval caller", () => {
     expect(seen.map((entry) => entry.caller)).toEqual(["alice", "alice", "alice"]);
     expect(secondRequesters).toEqual(["alice"]);
     expect(stages.flatMap((stage) => filterEventsByType(stage, "approval.settled"))).toMatchObject([
+      { data: { outcome: "approved", responderPrincipalId: "alice" } },
       { data: { outcome: "approved", responderPrincipalId: "alice" } },
     ]);
   }, 60_000);
