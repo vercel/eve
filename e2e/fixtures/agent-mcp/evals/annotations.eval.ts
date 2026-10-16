@@ -15,7 +15,7 @@ export default defineEval({
       "Alice asks the front desk to stop yesterday's kennel report run. MCP_CANCEL",
     );
     cancelled.expectOk();
-    cancelled.notEvent("input.requested");
+    cancelled.notEvent("interaction.opened");
     cancelled.calledTool("loopback__agent_cancel", {
       count: 1,
       output: mentions(DESTRUCTIVE_DENIAL),

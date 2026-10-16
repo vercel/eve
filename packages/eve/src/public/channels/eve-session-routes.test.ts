@@ -409,6 +409,53 @@ describe("eve ID-addressed session routes", () => {
     },
   );
 
+  it("creates once per operation id: a replay gets the session it created", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const created = new Map<string, string>();
+    const createSession = vi.fn(async (options: { continuationToken?: string }) => {
+      const sessionId = `wrun_${created.size}`;
+      created.set(options.continuationToken!, sessionId);
+      return { events: new ReadableStream(), sessionId };
+    });
+    const create = (auth: Parameters<typeof eveChannel>[0]["auth"], operationId: string) => {
+      const args = attachRouteSessionCreator(createArgs(), createSession as never);
+      return route("POST", "/eve/v1/session", { auth })(
+        new Request("https://eve.test/eve/v1/session", {
+          body: JSON.stringify({ message: "Deploy.", operationId }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        }),
+        {
+          ...args,
+          resolveSession: async (token: string) => {
+            const id = created.get(token);
+            return id === undefined ? undefined : createFixedSession({ id });
+          },
+        } as RouteHandlerArgs,
+      );
+    };
+    const asAlice = () => alice;
+
+    const first = await create(asAlice, "op-1");
+    const replay = await create(asAlice, "op-1");
+    const another = await create(asAlice, "op-2");
+
+    await expect(first.json()).resolves.toMatchObject({ sessionId: "wrun_0" });
+    await expect(replay.json()).resolves.toMatchObject({ sessionId: "wrun_0" });
+    await expect(another.json()).resolves.toMatchObject({ sessionId: "wrun_1" });
+    expect(createSession).toHaveBeenCalledTimes(2);
+
+    // Without a principal to scope it to, an operation id could name anyone's session.
+    const anonymous = await create(none(), "op-1");
+    expect(anonymous.status).toBe(400);
+    expect(createSession).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects input responses on session creation", async () => {
     const createSession = vi.fn();
     const args = attachRouteSessionCreator(createArgs(), createSession);

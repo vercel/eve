@@ -264,7 +264,10 @@ function instrumentationEventsOf(
           ? undefined
           : event.data.error === undefined
             ? event.data.output
-            : Object.assign(new Error(event.data.error.message), { code: event.data.error.code });
+            : Object.assign(new Error(event.data.error.message), {
+                code: event.data.error.code,
+                name: event.data.error.name ?? "Error",
+              });
       return [
         {
           acceptedAtMs: line.settledAtMs?.[callId],

@@ -64,6 +64,7 @@ describe("AI SDK model-call retry telemetry", () => {
             outputTokens: { reasoning: 0, text: 1, total: 1 },
           },
           warnings: [],
+          providerMetadata: { gateway: { cost: "0.01", generationId: "generation-1" } },
         };
       },
     });
@@ -100,6 +101,7 @@ describe("AI SDK model-call retry telemetry", () => {
       {
         outcome: "completed",
         finishReason: "stop",
+        providerMetadata: { gateway: { cost: "0.01", generationId: "generation-1" } },
         idempotencyKey: modelCallIdempotencyKey(scope, 0, 1),
         type: "model.call.settled",
         usage: { inputTokens: 1, outputTokens: 1 },

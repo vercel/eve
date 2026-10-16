@@ -7,7 +7,7 @@ export default defineEval({
     turn.eventsSatisfy("routing failure is reported", (events) =>
       events.some(
         (event) =>
-          event.type === "turn.settled" &&
+          event.type === "session.ended" &&
           event.data.outcome === "failed" &&
           event.data.error?.message.includes("Decision service unavailable"),
       ),

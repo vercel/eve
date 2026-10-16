@@ -41,7 +41,7 @@ export function requestMessages(
     projectedMessages: input.projectedMessages,
   });
   if (ctx !== undefined) messages.addSystem(buildDynamicInstructionMessages(ctx));
-  messages.addSystem(taskSystemMessages(input.catalog.offersTasks));
+  messages.addSystem(taskSystemMessages(input.catalog.offersTasks, step.finalReplyOnly));
   const announced = ctx?.get(HistoryStateKey)?.announcements;
   messages.addAnnouncements({
     ...catalogAnnouncements(input.catalog, announced),

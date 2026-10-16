@@ -31,7 +31,14 @@ export function deriveRunFacts(
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
   const view = emptySessionView();
-  for (const event of options?.usageEvents ?? events) foldReceivedEvent(view, event);
+  // Readers of one session, such as a turn's and a steering message's, record its lines in the
+  // order each read them; the fold skips a line behind the last it read, so it reads them in
+  // stream order.
+  const folded = [...(options?.usageEvents ?? events)].sort(
+    (a, b) =>
+      a.meta.position.line - b.meta.position.line || a.meta.position.index - b.meta.position.index,
+  );
+  for (const event of folded) foldReceivedEvent(view, event);
 
   // The turn each call happened in, in the order the segment first reports it.
   const callTurns = new Map<string, number>();
@@ -94,19 +101,21 @@ export function deriveRunFacts(
   const skillLoads: EveEvalSkillLoad[] = [];
   for (const [callId, turnIndex] of callTurns) {
     const row = view.calls[callId];
-    if (row?.capability.kind === "tool") {
-      const input = isJsonObjectValue(row.input) ? row.input : {};
-      toolCalls.push({
-        callId,
-        input,
-        name: row.capability.name,
-        sessionId,
-        turnIndex,
-        ...settled(row),
-      });
-    } else if (row?.capability.kind === "skill") {
+    if (row === undefined) continue;
+    if (row.capability.kind === "skill") {
       skillLoads.push({ sessionId, skill: row.capability.name, turnIndex, ...settled(row) });
+      continue;
     }
+    // Every other call is a tool the model called by name: a tool, an agent or a task control.
+    const input = isJsonObjectValue(row.input) ? row.input : {};
+    toolCalls.push({
+      callId,
+      input,
+      name: row.capability.name,
+      sessionId,
+      turnIndex,
+      ...settled(row),
+    });
   }
   const subagentCalls = [...agentCalls].flatMap(([callId, turnIndex]): EveEvalSubagentCall[] => {
     const row = view.calls[callId];

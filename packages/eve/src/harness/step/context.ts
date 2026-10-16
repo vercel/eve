@@ -9,7 +9,12 @@ import {
 } from "#context/dynamic-instruction-lifecycle.js";
 import { isDynamicConnectionResolutionError } from "#context/dynamic-connection-lifecycle.js";
 import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
-import { ParentSessionKey, SessionCallbackKey, SessionPredecessorKey } from "#context/keys.js";
+import {
+  ParentSessionKey,
+  ScheduleIdKey,
+  SessionCallbackKey,
+  SessionPredecessorKey,
+} from "#context/keys.js";
 import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { cascade } from "#harness/session-machine/cascade.js";
@@ -64,6 +69,11 @@ export interface Step {
   readonly instrumentation: InstrumentationStepScope<HarnessSession> | undefined;
   /** A child's caller or a schedule hears only the turn's real end. */
   readonly hasDelegatedCaller: boolean;
+  /**
+   * The session's reader sees only its final reply: a child's caller or a schedule. A held turn's
+   * text there narrates; a person reads it as a reply.
+   */
+  readonly finalReplyOnly: boolean;
   view(): SessionView;
   position(): TurnPosition;
   /** Publishes a transition, or facts that change nothing private, as one commit. */
@@ -90,6 +100,8 @@ export function createStep(input: {
   readonly session: HarnessSession;
 }): Step {
   const { ctx, live } = input;
+  const hasDelegatedCaller =
+    ctx?.get(ParentSessionKey) !== undefined || ctx?.get(SessionCallbackKey) !== undefined;
   const step: Step = {
     session: input.session,
     frameworkToolNames: new Set(),
@@ -99,8 +111,8 @@ export function createStep(input: {
     publish: input.publish,
     emit: input.emit,
     instrumentation: input.instrumentation,
-    hasDelegatedCaller:
-      ctx?.get(ParentSessionKey) !== undefined || ctx?.get(SessionCallbackKey) !== undefined,
+    hasDelegatedCaller,
+    finalReplyOnly: hasDelegatedCaller || ctx?.get(ScheduleIdKey) !== undefined,
     view: () => sessionView(live.read(), step.session.state),
     position: () => turnPosition(live.read()),
     async apply(change, messages) {

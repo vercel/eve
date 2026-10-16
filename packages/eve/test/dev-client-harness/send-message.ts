@@ -73,6 +73,7 @@ async function openDevelopmentSessionStream(input: {
   return openDevelopmentMessageStream({
     resourceUrl: streamResponse.resourceUrl,
     response: streamResponse.response,
+    startIndex: input.startIndex,
   });
 }
 
@@ -99,7 +100,7 @@ async function readDevelopmentTurnEvents(input: {
     });
 
     events.push(...nextEvents);
-    currentStreamIndex += nextEvents.length;
+    currentStreamIndex = currentStream.nextIndex;
 
     if (extractCurrentTurnBoundaryEvent(nextEvents)) {
       return {

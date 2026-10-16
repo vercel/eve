@@ -1,0 +1,159 @@
+import { createElement } from "react";
+import { act, create as createRenderer } from "react-test-renderer";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { effectScope } from "vue";
+
+import type { ConversationState } from "#client/conversation-state.js";
+import { testTurnFacts } from "#internal/testing/events.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/session-http.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { linesOf } from "#protocol/session-lines.js";
+import { useEveAgent as useReactAgent, type UseEveAgentHelpers } from "#react/use-eve-agent.js";
+import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
+import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
+
+// Each binding is a thin adapter over the shared agent store, which its own suite covers. What a
+// binding owns is its framework's lifecycle: it shows the store's changes, and stops reading the
+// session once the framework disposes it.
+
+const mounts: Array<() => void> = [];
+vi.mock("svelte", () => ({
+  onMount: (callback: () => () => void) => void mounts.push(callback()),
+}));
+
+afterEach(() => {
+  mounts.splice(0);
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+/** An agent whose session stream stays open, serving what `append` writes. */
+function agent() {
+  const log: string[] = [];
+  const open = new Set<ReadableStreamDefaultController<Uint8Array>>();
+  const encoder = new TextEncoder();
+  let deliveries = 0;
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+    const url = new URL(String(request instanceof Request ? request.url : request));
+    if ((init?.method ?? "GET") === "POST")
+      return Response.json(
+        { deliveryId: `d_${deliveries++}`, sessionId: "session_1", status: "accepted" },
+        { status: 202 },
+      );
+    const start = Number(url.searchParams.get("startIndex") ?? "0");
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(log.slice(start).join("")));
+          open.add(controller);
+          init?.signal?.addEventListener("abort", () => {
+            open.delete(controller);
+            controller.error(init.signal?.reason);
+          });
+        },
+      }),
+      {
+        headers: {
+          [EVE_STREAM_TAIL_INDEX_HEADER]: String(log.length - 1),
+          [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+        },
+      },
+    );
+  });
+  return {
+    append(events: readonly SessionEvent[]) {
+      const lines = events.flatMap((event) =>
+        linesOf([event], "2026-10-10T00:00:00.000Z").map((line) => `${JSON.stringify(line)}\n`),
+      );
+      log.push(...lines);
+      for (const controller of open) controller.enqueue(encoder.encode(lines.join("")));
+    },
+    /** How many session streams are still being read. */
+    get reading() {
+      return open.size;
+    },
+  };
+}
+
+interface Mounted {
+  /** What the binding shows; `undefined` when the framework renders nothing reactive. */
+  readonly data: () => Pick<ConversationState, "messages"> | undefined;
+  readonly send: (message: string) => Promise<unknown>;
+  readonly finished: ReturnType<typeof vi.fn>;
+  readonly dispose: () => void;
+}
+
+const bindings: Record<string, () => Mounted> = {
+  react() {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const finished = vi.fn();
+    let helpers: UseEveAgentHelpers | undefined;
+    function Probe() {
+      helpers = useReactAgent({ host: "https://eve.test", onFinish: finished });
+      return null;
+    }
+    let renderer: ReturnType<typeof createRenderer> | undefined;
+    void act(() => {
+      renderer = createRenderer(createElement(Probe));
+    });
+    return {
+      data: () => helpers,
+      dispose: () => void act(() => renderer?.unmount()),
+      finished,
+      send: (message) =>
+        act(async () => {
+          await helpers!.send(message);
+        }),
+    };
+  },
+  vue() {
+    vi.stubGlobal("window", {});
+    const finished = vi.fn();
+    const scope = effectScope();
+    const binding = scope.run(() => useVueAgent({ host: "https://eve.test", onFinish: finished }))!;
+    return {
+      data: () => ({ messages: binding.messages.value }),
+      dispose: () => scope.stop(),
+      finished,
+      send: (message) => binding.send(message),
+    };
+  },
+  svelte() {
+    vi.stubGlobal("window", {});
+    const finished = vi.fn();
+    const binding = useSvelteAgent({ host: "https://eve.test", onFinish: finished });
+    // Svelte shows the store's changes only inside a component's effects, which a unit test has
+    // none of; its lifecycle is what's left to check.
+    return {
+      data: () => undefined,
+      dispose: () => mounts.forEach((cleanup) => cleanup()),
+      finished,
+      send: (message) => binding.send(message),
+    };
+  },
+};
+
+describe("the framework bindings", () => {
+  it.each(Object.keys(bindings))(
+    "%s shows a sent message's reply, and stops reading the session once disposed",
+    async (name) => {
+      const server = agent();
+      const binding = bindings[name]!();
+
+      await binding.send("Weather?");
+      server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
+      await vi.waitFor(() => expect(binding.finished).toHaveBeenCalledTimes(1));
+      const data = binding.data();
+      if (data !== undefined)
+        expect(data.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+      expect(server.reading).toBe(1);
+
+      binding.dispose();
+      await vi.waitFor(() => expect(server.reading).toBe(0));
+    },
+  );
+});

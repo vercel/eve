@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
@@ -469,33 +470,36 @@ function messageActivity(input: { readonly conversationType: string }): Record<s
 
 describe("teamsChannel sign-in button", () => {
   const SIGN_IN_URL = "https://connect.example.test/a/attempt-1";
-  const required = (data: Record<string, unknown> = {}) =>
-    makeEvent("authorization.required", {
-      attemptId: "attempt-1",
-      authorization: { url: SIGN_IN_URL, userCode: "CODE-42" },
-      description: "Sign in to linear",
-      name: "linear",
-      principalId: "teams:TENANT:USER",
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "turn-1",
-      ...data,
-    });
-  const completed = makeEvent("authorization.completed", {
-    attemptId: "attempt-1",
-    name: "linear",
-    outcome: "declined",
-    sequence: 1,
-    stepIndex: 0,
-    turnId: "turn-1",
+  const required = (
+    data: { readonly principalId?: string } = { principalId: "teams:TENANT:USER" },
+  ): SessionEvent => ({
+    type: "interaction.opened",
+    data: {
+      interactionId: "attempt-1",
+      request: {
+        kind: "sign-in",
+        prompt: "Sign in to linear",
+        signIn: { name: "linear", url: SIGN_IN_URL, userCode: "CODE-42" },
+      },
+      subject: { turnId: "turn-1" },
+      audience: data.principalId === undefined ? undefined : { principalIds: [data.principalId] },
+    },
   });
+  const completed: SessionEvent = {
+    type: "interaction.settled",
+    data: { interactionId: "attempt-1", outcome: "declined" },
+  };
 
-  function sessionWith(events: readonly UnstampedMessageStreamEvent[]) {
+  function sessionWith(events: readonly SessionEvent[]) {
     return {
       getEventStream: async () =>
         new ReadableStream({
           start(controller) {
-            for (const event of events) controller.enqueue(event);
+            for (const [line, event] of events.entries())
+              controller.enqueue({
+                ...event,
+                meta: { position: { line, index: 0 }, endOfLine: true },
+              });
             controller.close();
           },
         }),
@@ -513,7 +517,7 @@ describe("teamsChannel sign-in button", () => {
         action: {
           data: {
             eve_authorization: {
-              attemptId: "attempt-1",
+              interactionId: "attempt-1",
               name: "linear",
               replyToActivityId: "THREAD_ROOT",
             },
@@ -554,16 +558,16 @@ describe("teamsChannel sign-in button", () => {
       reply: "Only the person who needs to sign in can open this sign-in.",
     },
     {
-      case: "onInputResponse rejects the press",
-      config: { onInputResponse: () => null },
+      case: "onAnswers rejects the press",
+      config: { onAnswers: () => null },
       events: [required()],
       from: undefined,
       reply: "Only the person who needs to sign in can open this sign-in.",
     },
     {
-      case: "onInputResponse throws",
+      case: "onAnswers throws",
       config: {
-        onInputResponse: () => {
+        onAnswers: () => {
           throw new Error("directory lookup failed");
         },
       },

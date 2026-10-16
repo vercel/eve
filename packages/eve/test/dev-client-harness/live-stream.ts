@@ -8,6 +8,7 @@ import type { ReadRecord } from "#protocol/session-events/envelope.js";
 export interface DevelopmentMessageStream {
   readonly resourceUrl: string;
   readonly closed: boolean;
+  readonly nextIndex: number;
   close(): Promise<void>;
   readEvents(input: {
     onEvent?(event: SessionStreamEvent): void;
@@ -22,11 +23,17 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
   readonly #abort = new AbortController();
   readonly #eventReader = createEventReader();
   #boundaryCount: number;
-  #position = 0;
+  #position: number;
   #closed = false;
   #isReading = false;
 
-  constructor(input: { boundaryCount?: number; resourceUrl: string; response: Response }) {
+  constructor(input: {
+    boundaryCount?: number;
+    resourceUrl: string;
+    response: Response;
+    startIndex?: number;
+  }) {
+    this.#position = input.startIndex ?? 0;
     this.resourceUrl = input.resourceUrl;
     this.#boundaryCount = input.boundaryCount ?? 0;
     this.#records =
@@ -38,6 +45,10 @@ class BufferedDevelopmentMessageStream implements DevelopmentMessageStream {
 
   get closed(): boolean {
     return this.#closed;
+  }
+
+  get nextIndex(): number {
+    return this.#position;
   }
 
   async close(): Promise<void> {
@@ -108,6 +119,7 @@ export function openDevelopmentMessageStream(input: {
   boundaryCount?: number;
   resourceUrl: string;
   response: Response;
+  startIndex?: number;
 }): DevelopmentMessageStream {
   return new BufferedDevelopmentMessageStream(input);
 }

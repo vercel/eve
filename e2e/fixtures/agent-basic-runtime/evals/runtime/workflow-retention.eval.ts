@@ -13,7 +13,7 @@ export default defineEval({
         : {};
       const turn = await t.send(message, { headers });
       turn.expectOk();
-      turn.event("message.completed", { count: 1 });
+      turn.event("content.completed", { count: 1, data: { kind: "text", phase: "reply" } });
       const sessionPath = `/eve/v1/session/${encodeURIComponent(turn.sessionId)}`;
       const readHistory = () =>
         t.target.fetch(`${sessionPath}/stream?follow=false&startIndex=0`, {

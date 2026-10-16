@@ -26,8 +26,10 @@ export default defineEval({
     const output = shown.requireToolCall(TOOL_NAME).output as { readonly imageBase64: string };
     const session = shown.session;
 
+    // A compaction between turns runs no turn, so the read ends when the compaction settles.
     const liveCompaction = t.target.watchTurn(session.sessionId, {
       startIndex: session.state!.streamIndex,
+      until: (event) => event.type === "context.settled",
     });
     const response = await t.target.fetch(
       `/eve/v1/session/${encodeURIComponent(session.sessionId)}/compact`,

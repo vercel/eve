@@ -345,7 +345,8 @@ export class ActiveTurn {
     return this.#cancelledBy;
   }
 
-  private abort(): void {
+  /** Also used by hooks on workflow reports while the turn waits. */
+  abort(): void {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
   }

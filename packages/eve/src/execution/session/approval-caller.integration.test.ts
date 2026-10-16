@@ -1,3 +1,4 @@
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -228,6 +229,7 @@ async function withChainRun(
           await resumeHook(commandInbox, {
             auth: approver,
             kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: {
               answers: [{ interactionId: request!.interactionId, optionId: "approve" }],
             },
@@ -244,13 +246,19 @@ async function withChainRun(
           return await next("approved");
         },
         async deliver(auth, payload) {
-          await resumeHook(commandInbox, { auth, kind: "send", payload });
+          await resumeHook(commandInbox, {
+            auth,
+            kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            payload,
+          });
           return await next("delivered");
         },
         async send(auth, message) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { message },
           });
           return await next("message");
@@ -524,6 +532,8 @@ describe("approval caller", () => {
       },
     );
 
-    expect(outputsOf(stages, "call-repeated")).toEqual([{ caller: "alice" }, { caller: "alice" }]);
+    // The repeat gets its own id, so turn 1's call keeps its row and both run as Alice.
+    expect(outputsOf(stages, "call-repeated")).toEqual([{ caller: "alice" }]);
+    expect(outputsOf(stages, "call-repeated_2")).toEqual([{ caller: "alice" }]);
   }, 60_000);
 });
