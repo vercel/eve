@@ -155,6 +155,8 @@ describe("EveEvalLiveTurn", () => {
       "third",
     ]);
     expect(answered.interactions.map((row) => row.interactionId)).toEqual(["second", "third"]);
+    expect(answered.events.some((event) => event.type === "interaction.opened")).toBe(false);
+    expect(session.view.interactions.third?.status).toBe("open");
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 

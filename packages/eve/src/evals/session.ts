@@ -21,6 +21,7 @@ import type {
 import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { failureOf, ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
+import { deliveryEvents } from "#client/delivery-events.js";
 import type { Answer } from "#shared/input.js";
 import type { Interaction } from "#protocol/session-reader.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -293,7 +294,8 @@ export class EvalSessionDriver implements EveEvalSession {
       events,
       observe: (event) => this.#observeEvent(sessionId, event),
       initialView: this.view,
-      record: (observed) => {
+      record: (observed, earlier) => {
+        this.#events.push(...earlier);
         if (message !== undefined) {
           this.#lastInput =
             typeof message === "string"
@@ -461,7 +463,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     readonly events: AsyncIterable<SessionStreamEvent>;
     readonly initialView: SessionView;
     readonly observe: (event: SessionStreamEvent) => void;
-    readonly record: (events: readonly SessionStreamEvent[]) => EveEvalTurn;
+    readonly record: (
+      events: readonly SessionStreamEvent[],
+      earlier: readonly SessionStreamEvent[],
+    ) => EveEvalTurn;
     readonly session: EveEvalSession;
     readonly sessionId: string;
   }) {
@@ -536,7 +541,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   async #consume(
     source: AsyncIterable<SessionStreamEvent>,
     observe: (event: SessionStreamEvent) => void,
-    record: (events: readonly SessionStreamEvent[]) => EveEvalTurn,
+    record: (
+      events: readonly SessionStreamEvent[],
+      earlier: readonly SessionStreamEvent[],
+    ) => EveEvalTurn,
     ending: {
       readonly deliveryId?: string;
       readonly endsWith?: (event: SessionStreamEvent) => boolean;
@@ -550,7 +558,16 @@ class EvalLiveTurn implements EveEvalLiveTurn {
       // delivery settles without one, as an answer routed to a child does.
       const turn = new ResponseSegment();
       const delivery = deliveryId === undefined ? undefined : new ResponseSegment({ deliveryId });
-      for await (const event of source) {
+      const earlier: SessionStreamEvent[] = [];
+      const events =
+        deliveryId === undefined
+          ? source
+          : deliveryEvents(source, deliveryId, undefined, (event) => {
+              earlier.push(event);
+              foldReceivedEvent(this.#initialView, event);
+              observe(event);
+            });
+      for await (const event of events) {
         this.#events.push(event);
         const endsTurn = turn.observe(event);
         if (endsWith?.(event) === true) matched = true;
@@ -584,7 +601,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
         throw new Error(`Stream for session "${this.sessionId}" closed before a turn boundary.`);
       }
 
-      return record(this.#events);
+      return record(this.#events, earlier);
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.#closeWaiters(normalized);

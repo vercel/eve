@@ -6,6 +6,7 @@ export async function* deliveryEvents(
   source: AsyncIterable<SessionStreamEvent>,
   deliveryId: string,
   signal?: AbortSignal,
+  beforeAdmission?: (event: SessionStreamEvent) => void,
 ): AsyncGenerator<SessionStreamEvent> {
   const segment = new ResponseSegment({ deliveryId });
   let started = false;
@@ -14,7 +15,10 @@ export async function* deliveryEvents(
     if (!started) {
       if (event.type === "session.ended")
         throw new Error("The session ended before admitting the accepted delivery.");
-      if (admittingLine[0]?.meta.position.line !== event.meta.position.line) admittingLine = [];
+      if (admittingLine[0]?.meta.position.line !== event.meta.position.line) {
+        for (const earlier of admittingLine) beforeAdmission?.(earlier);
+        admittingLine = [];
+      }
       admittingLine.push(event);
       if (event.type !== "delivery.admitted" || event.data.deliveryId !== deliveryId) continue;
       started = true;
