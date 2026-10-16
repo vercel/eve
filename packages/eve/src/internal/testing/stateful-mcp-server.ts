@@ -32,8 +32,6 @@ export interface StatefulMcpServer {
    * stopped answering would. It still ends when the client aborts it.
    */
   hold(match: (request: StatefulMcpRequestShape) => boolean): HeldRequest;
-  /** Answers the next matching request with `401`, the way a server rejecting the bearer would. */
-  rejectUnauthorized(match: (request: StatefulMcpRequestShape) => boolean): void;
 }
 
 /**
@@ -56,7 +54,6 @@ export function createStatefulMcpServer(): StatefulMcpServer {
     arrive: () => void;
     released: Promise<void>;
   }[] = [];
-  const unauthorized: ((request: StatefulMcpRequestShape) => boolean)[] = [];
 
   async function shapeOf(request: Request): Promise<StatefulMcpRequestShape> {
     const body: unknown = request.method === "POST" ? await request.clone().json() : undefined;
@@ -139,11 +136,6 @@ export function createStatefulMcpServer(): StatefulMcpServer {
       const request = new Request(input, init);
       const shape = await shapeOf(request);
       await waitIfHeld(request, shape);
-      const refused = unauthorized.findIndex((match) => match(shape));
-      if (refused !== -1) {
-        unauthorized.splice(refused, 1);
-        return record(request, shape, new Response(null, { status: 401 }));
-      }
       return record(request, shape, await handle(request));
     },
     hold: (match) => {
@@ -159,9 +151,6 @@ export function createStatefulMcpServer(): StatefulMcpServer {
       return { reached, release };
     },
     liveSessions,
-    rejectUnauthorized: (match) => {
-      unauthorized.push(match);
-    },
     requests,
     waitForRequest: (match) => {
       const answered = requests.find(match);
