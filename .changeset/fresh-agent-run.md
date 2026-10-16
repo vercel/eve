@@ -3,4 +3,4 @@
 "eve": patch
 ---
 
-Publish framework-neutral agent run tracing as `@vercel/agent-runs`, with the singular `createAgentRun` constructor and `AgentRun` types. eve continues to bundle the library without adding a runtime dependency.
+Publish framework-neutral tracing as `@vercel/agent-runs` with singular `createAgentRun` and `AgentRun` APIs; eve still bundles it without a new runtime dependency. Also fix a development-server build failure in npm-installed apps when generating source maps.
