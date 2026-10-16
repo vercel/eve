@@ -167,7 +167,7 @@ and the rest below. The pieces share `metadata.turnId`. A single event that coal
 deliveries remains one bubble. A turn settling does not close the connection. The transport reconnects from
 its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
-Unmounting or resetting closes the local stream without cancelling the old durable session.
+Unmounting or calling `newSession()` closes the local stream without cancelling the old durable session.
 
 An open stream reconnects for as long as the chat stays mounted, even when nothing happens. If
 your UI only shows replies to its own messages, such as a help sidebar that stays mounted across
@@ -178,8 +178,7 @@ the stream from the session cursor, so events that arrived in between are applie
 `followIdle` on when other sources, such as schedules, channels, or another tab, can start turns
 in the session while your UI is idle.
 
-`newSession()` reuses the hook instance and clears the local conversation. `reset()` instead retires the server-side session and returns its delivery. When `prewarm` is true after
-the reset, it prepares the next owned session; otherwise, the next send creates it. An explicitly
+`newSession()` reuses the hook instance and clears the local conversation. `reset()` instead retires the server-side session and returns its delivery. Call `newSession()` to clear the retired conversation and prepare a fresh one. If `prewarm` is true, that call prepares the next owned session; otherwise, the next send creates it. An explicitly
 supplied `session` remains externally owned and is never replaced by prewarming or `newSession()`. Use
 `initialSession` with `resume: true` to restore a saved chat.
 
@@ -249,9 +248,9 @@ Call `cancel()` to stop the durable turn without replacing it.
 
 `cancel()` targets the currently observed turn and keeps the event stream attached. If no turn is active, it waits for a submission pending when you called `cancel()` to identify its turn. This includes preparation, session creation, and POST acceptance. Cancellation always names the identified turn, so a delayed request cannot stop an unrelated later turn.
 
-This wait does not withdraw a queued message or prevent its turn from starting. If the pending deliveries settle without a running turn, cancellation returns `"no_active_turn"`. Calling `cancel()` while idle, with no pending submissions, does not arm cancellation for future messages. Resetting or unmounting aborts the wait.
+This wait does not withdraw a queued message or prevent its turn from starting. If the pending deliveries settle without a running turn, cancellation returns an accepted no-op delivery. Calling `cancel()` while idle, with no pending submissions, does not arm cancellation for future messages. Calling `newSession()` or unmounting aborts the wait.
 
-The promise resolves when eve accepts cancellation or reports no active turn. It rejects if submission, observation, or the cancellation request fails while waiting. An accepted cancellation settles cooperatively on the same stream with `outcome: "cancelled"`; a turn can finish before cancellation reaches the server.
+The promise resolves with the cancellation delivery when eve accepts it. It rejects if submission, observation, or the cancellation request fails while waiting. An accepted cancellation settles cooperatively on the same stream with `outcome: "cancelled"`; a turn can finish before cancellation reaches the server.
 
 ```tsx
 if (agent.status === "busy") {

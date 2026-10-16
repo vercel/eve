@@ -87,7 +87,6 @@ describe("eve ID-addressed session routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       sessionId: "wrun_A",
-      status: "accepted",
     });
     expect(onMessage).not.toHaveBeenCalled();
     expect(createSession).toHaveBeenCalledWith(
@@ -146,7 +145,6 @@ describe("eve ID-addressed session routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       sessionId: "wrun_A",
-      status: "accepted",
       deliveryId: "delivery_first",
     });
     expect(createSession).toHaveBeenCalledWith(
@@ -337,7 +335,6 @@ describe("eve ID-addressed session routes", () => {
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         sessionId: "wrun_A",
-        status: "accepted",
       });
       expect(createSession).toHaveBeenCalledWith(
         expect.objectContaining({

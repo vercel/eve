@@ -104,9 +104,8 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryI
     ok: true;
     protocolVersion?: number;
     sessionId: string;
-    status: "accepted";
     deliveryId?: string;
-  } = { ok: true, sessionId, status: "accepted" };
+  } = { ok: true, sessionId };
   if (deliveryId !== undefined) created.deliveryId = deliveryId;
   if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
   return created;
