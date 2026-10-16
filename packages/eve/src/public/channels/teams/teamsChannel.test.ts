@@ -91,7 +91,6 @@ describe("teamsChannel", () => {
     expect(channel.routes.map((route) => `${route.method} ${route.path}`)).toEqual([
       "POST /eve/v1/teams",
     ]);
-    expect(channel.adapter.kind).toBe("teams");
   });
 
   it.each([

@@ -9,9 +9,9 @@ import type {
   ChannelRespondOptions,
   ChannelSendOptions,
 } from "#channel/channel-operations.js";
-import { defaultDeliverResult } from "#channel/adapter.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -307,7 +307,6 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     ChatSdkReceiveTarget,
     ChatSdkInstrumentationMetadata
   >({
-    kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
     fetchFile: (url) => fetchAttachment(bot, url),
     state: initialState(),
@@ -357,7 +356,6 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
     ) {
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
-      return defaultDeliverResult(payload);
     },
     events: mergedEvents,
   });
@@ -652,10 +650,10 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
 function recordPrincipalUser(
   state: ChatSdkChannelState,
   caller: SessionAuthContext | null,
-  payload: DeliverPayload,
+  payload: ChannelDelivery<ChatSdkChannelState>,
 ): void {
   if (caller === null) return;
-  const thread = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread;
+  const thread = payload.state?.thread;
   const author = thread?.currentMessage?.author;
   if (author === undefined || author.isBot === true || author.isMe) return;
   const recorded = state.usersByPrincipal?.[caller.principalId];

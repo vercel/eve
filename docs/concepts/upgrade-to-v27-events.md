@@ -207,6 +207,23 @@ Read a row's `taskId` for a task, `callState(card.view, callId)` for its status,
 A channel that keeps something in step with the session can handle `committed`, once per
 committed line with the line's facts and `ctx.view`, instead of several facts.
 
+### Delivery hooks and channel identity
+
+A `deliver(payload, channel)` hook receives `ChannelDelivery<TState>` from `eve/channels`:
+`message`, `answers`, `context`, `outputSchema`, and typed per-delivery `state`. Return the same
+shape to replace the payload, or return nothing to keep it unchanged. To ignore a delivery,
+return `{}` instead of `undefined`. Stop importing harness input types or building a default
+harness projection in the hook.
+
+Authored channels use `channel:<name>` in hooks, instrumentation, and a delivery's
+`source.channel`, including channels that only declare routes. `isChannel` now matches those
+channels in hooks. The internal adapter key used to restore durable sessions is unchanged.
+Remove `kindHint` from channel definitions; the file path determines the public identity.
+
+Move a visibility classifier from `metadata().audience` to `audience(input)`. Metadata no longer
+classifies visibility, and a channel without an audience hook is `unknown`.
+See [Custom channels](../channels/custom) for payload and audience examples.
+
 ## Instrumentation
 
 Instrumentation events about what a session's stream records take the stream's names, and an

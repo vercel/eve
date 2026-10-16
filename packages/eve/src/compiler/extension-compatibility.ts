@@ -135,10 +135,9 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 62,
-    supported: [62],
+    current: 63,
+    supported: [63],
     dropped: {
-      61: "v27 replaces v26 session event payloads; rebuild the extension against eve/events facts",
       1: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       2: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       3: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
@@ -199,6 +198,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       58: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       59: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       60: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      61: "v27 replaces v26 session event payloads; rebuild the extension against eve/events facts",
+      62: "Channel deliver hooks return typed delivery payloads; void preserves input and kindHint is removed.",
     },
   },
   schedule: {

@@ -8,7 +8,7 @@ import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "./container.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { ContinuationTokenKey } from "./keys.js";
+import { ChannelInstrumentationKey, ContinuationTokenKey } from "./keys.js";
 import { currentView } from "#harness/session-machine/current.js";
 
 const log = createLogger("hooks");
@@ -89,7 +89,9 @@ function buildHookContext(
   const bundle = ctx.require(BundleKey);
   const channelAdapter = ctx.get(ChannelKey);
   const continuationToken = ctx.get(ContinuationTokenKey);
-  const kind = channelAdapter !== undefined ? getAdapterKind(channelAdapter) : undefined;
+  const kind =
+    ctx.get(ChannelInstrumentationKey)?.kind ??
+    (channelAdapter !== undefined ? getAdapterKind(channelAdapter) : undefined);
   const callbackCtx = buildCallbackContext();
 
   return {

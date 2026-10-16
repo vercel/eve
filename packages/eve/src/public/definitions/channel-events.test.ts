@@ -5,6 +5,8 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { emptySessionView } from "#protocol/session-projection/fold.js";
@@ -30,6 +32,75 @@ const SETTLED: SessionEvent = {
   scope: { turnId: "turn_0" },
   type: "turn.settled",
 } as SessionEvent;
+
+describe("defineChannel delivery", () => {
+  it.each([false, true])("preserves input when a %s async hook returns void", async (asyncHook) => {
+    const merge = (
+      payload: import("#shared/channel-delivery.js").ChannelDelivery<{ count: number }>,
+      channel: { state: { count: number } },
+    ) => {
+      channel.state.count += payload.state?.count ?? 0;
+    };
+    const channel = defineChannel<{ count: number }, { state: { count: number } }>({
+      state: { count: 0 },
+      context: (state) => ({ state }),
+      deliver: asyncHook ? async (payload, channel) => merge(payload, channel) : merge,
+      routes: [],
+    });
+    const adapter = adapterOf(channel);
+    const ctx = sessionContext();
+    const adapterCtx = buildAdapterContext(adapter, ctx);
+    const payload = attachClientContext(
+      attachInputText(
+        {
+          message: "A wrapped message",
+          answers: [{ interactionId: "question_1", text: "yes" }],
+          context: ["Saved context"],
+          outputSchema: { type: "object" },
+          state: { count: 2 },
+        },
+        "yes",
+      ),
+      ["Turn-only context"],
+    );
+    const result = await adapter.deliver!(payload, adapterCtx);
+    expect(result).toMatchObject({
+      message: payload.message,
+      answers: payload.answers,
+      context: payload.context,
+      outputSchema: payload.outputSchema,
+    });
+    expect(adapterCtx.state.count).toBe(2);
+    expect(readInputText(result ?? undefined)).toBe("yes");
+    expect(readClientContext(result ?? undefined)).toEqual(["Turn-only context"]);
+  });
+
+  it("ignores an empty replacement even when the input has private context", async () => {
+    const adapter = adapterOf(defineChannel({ routes: [], deliver: () => ({}) }));
+    const payload = attachClientContext(attachInputText({ message: "Alice's notes" }, "yes"), [
+      "Turn-only context",
+    ]);
+    expect(
+      await adapter.deliver!(payload, buildAdapterContext(adapter, sessionContext())),
+    ).toBeUndefined();
+  });
+
+  it("runs a deliver-only channel and preserves private context on a replacement", async () => {
+    const adapter = adapterOf(
+      defineChannel({
+        routes: [],
+        deliver: () => ({ message: "Transformed message" }),
+      }),
+    );
+    const payload = attachClientContext(attachInputText({ message: "Original message" }, "yes"), [
+      "Turn-only context",
+    ]);
+    const result = await adapter.deliver!(payload, buildAdapterContext(adapter, sessionContext()));
+    expect(result?.message).toBe("Transformed message");
+    expect(readInputText(result ?? undefined)).toBe("yes");
+    expect(readClientContext(result ?? undefined)).toEqual(["Turn-only context"]);
+  });
+});
 
 describe("defineChannel events", () => {
   it("hands a handler the event and a context holding the channel's own context", async () => {

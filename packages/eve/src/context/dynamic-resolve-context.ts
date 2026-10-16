@@ -11,8 +11,6 @@ import {
   ContinuationTokenKey,
   SessionPredecessorKey,
 } from "#context/keys.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getAdapterKind } from "#channel/adapter.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 
@@ -31,7 +29,6 @@ export function buildResolveContext(
   const sessionId = ctx.get(SessionIdKey) ?? "";
   const currentAuth = ctx.get(AuthKey) ?? null;
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
-  const channelAdapter = ctx.get(ChannelKey);
   const continuationToken = ctx.get(ContinuationTokenKey);
   const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
   const effectiveModel = getEffectiveModelSelection(ctx);
@@ -48,7 +45,7 @@ export function buildResolveContext(
       predecessor: ctx.get(SessionPredecessorKey),
     },
     channel: {
-      kind: channelAdapter !== undefined ? getAdapterKind(channelAdapter) : undefined,
+      kind: channelInstrumentation?.kind,
       continuationToken,
       metadata: channelInstrumentation?.metadata,
     },

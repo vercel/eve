@@ -228,8 +228,6 @@ async function dispatchInbound(
 }
 
 export default defineChannel<SendblueChannelState, SendblueChannelContext>({
-  kindHint: "sendblue",
-
   state: {
     threadId: null,
     contactNumber: null,

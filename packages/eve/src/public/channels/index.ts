@@ -31,6 +31,7 @@ export {
   type ChannelCors,
   type ChannelCorsOptions,
   type ChannelDefinition,
+  type ChannelDelivery,
   type DisabledRouteSentinel,
   type ChannelContinuationOps,
   type ChannelEvents,

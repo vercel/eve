@@ -12,10 +12,10 @@ import type {
   ChannelResolveSession,
   ChannelSource,
 } from "#channel/channel-operations.js";
-import { defaultDeliverResult } from "#channel/adapter.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
-import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -866,7 +866,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     SlackReceiveTarget,
     SlackInstrumentationMetadata
   >({
-    kindHint: "slack",
     turnPolicy: config.turnPolicy,
     uploadPolicy: config.uploadPolicy,
     state: {
@@ -900,7 +899,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     // is the caller of this delivery.
     deliver(payload, channel: SlackChannelContext & { readonly session: SessionHandle }) {
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
-      return defaultDeliverResult(withUndeliveredReplyNote(channel.state, payload));
+      return withUndeliveredReplyNote(channel.state, payload);
     },
 
     routes: [
@@ -1508,7 +1507,7 @@ function slackTypedText(text: string, botUserId: string | undefined): string {
 function recordSlackPrincipal(
   state: SlackChannelState,
   caller: SessionAuthContext | null,
-  payload: DeliverPayload,
+  payload: ChannelDelivery<SlackChannelState>,
 ): void {
   if (caller === null) return;
   const stamped = (payload.state as Partial<SlackChannelState> | undefined)?.triggeringUserId;

@@ -1,5 +1,5 @@
 import { replyTextOf } from "#public/channels/reply.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   SLACK_MARKDOWN_TEXT_MAX_LENGTH,
@@ -208,7 +208,7 @@ async function reportUndeliveredReply(
  * Tells the model, ahead of the next message, that its previous reply never
  * reached Slack, so it does not assume the user read that reply.
  */
-export function withUndeliveredReplyNote<T extends DeliverPayload>(
+export function withUndeliveredReplyNote<T extends ChannelDelivery<unknown>>(
   state: SlackChannelState,
   payload: T,
 ): T {

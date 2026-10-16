@@ -46,6 +46,7 @@ describe("buildResolveContext", () => {
 
     const resolveCtx = buildResolveContext(ctx, []);
 
+    expect(resolveCtx.channel.kind).toBe("channel:slack");
     expect(resolveCtx.channel.continuationToken).toBe("token-1");
     expect(resolveCtx.channel.metadata).toEqual({
       threadTs: "1234.5678",

@@ -9,10 +9,11 @@ import type {
   CommittedLine,
 } from "#channel/adapter.js";
 export type { CommittedLine } from "#channel/adapter.js";
-import {
-  createMetadataAudienceProjector,
-  type ChannelAudienceProjector,
-} from "#channel/audience.js";
+import type { ChannelAudienceProjector } from "#channel/audience.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
+export type { ChannelDelivery } from "#shared/channel-delivery.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import {
@@ -31,7 +32,10 @@ import type {
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { Session, SessionHandle } from "#channel/session.js";
+import type { SessionHandle } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
+export type { Delivery, DeliveryResult } from "#shared/delivery.js";
+export { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -53,7 +57,7 @@ export type {
   TurnPolicy,
 } from "#channel/types.js";
 export { SessionStrandedError } from "#channel/session-stranded-error.js";
-export type { Session, SessionHandle } from "#channel/session.js";
+export type { Session, SessionHandle, SessionOperations } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
   AudienceCaller,
@@ -286,7 +290,7 @@ export interface Channel<
   readonly receive?: (
     input: ReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
-  ) => Promise<Session>;
+  ) => Promise<Delivery>;
   readonly turnPolicy?: TurnPolicy;
 }
 
@@ -339,13 +343,15 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const audience = definition.audience;
   const uploadPolicy =
     definition.uploadPolicy === undefined ? undefined : mergeUploadPolicy(definition.uploadPolicy);
-  const hasBehavior = hasState || hasContext || hasMetadata || uploadPolicy !== undefined;
+  const hasBehavior =
+    hasState ||
+    hasContext ||
+    hasMetadata ||
+    uploadPolicy !== undefined ||
+    definition.deliver !== undefined;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
-  const legacyAudienceSource = {
-    kind: definition.kindHint ?? "defineChannel",
-  };
 
   const events = definition.events;
   for (const key of Object.keys(events ?? {})) {
@@ -386,7 +392,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
 
   if (!hasBehavior && !hasEventHandlers && !hasFetchFile) {
     return {
-      kind: definition.kindHint ?? HTTP_ADAPTER_KIND,
+      kind: HTTP_ADAPTER_KIND,
       ...(audience === undefined
         ? undefined
         : {
@@ -398,7 +404,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   }
 
   const adapter: ChannelAdapter<any> = {
-    kind: definition.kindHint ?? "defineChannel",
+    kind: "defineChannel",
     state: hasState ? { ...(definition.state as Record<string, unknown>) } : {},
     fetchFile: definition.fetchFile,
     uploadPolicy,
@@ -419,14 +425,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
                   },
                 }),
             ...(audience === undefined
-              ? metadata !== undefined
-                ? {
-                    audience: createMetadataAudienceProjector(
-                      legacyAudienceSource,
-                      metadata as (state: Record<string, unknown> | undefined) => unknown,
-                    ),
-                  }
-                : undefined
+              ? undefined
               : { audience: audience as ChannelAudienceProjector }),
           },
 
@@ -445,9 +444,17 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
       };
     },
 
-    deliver(payload: DeliverPayload, adapterCtx) {
-      if (definition.deliver === undefined) return defaultDeliverResult(payload);
-      return definition.deliver(payload, adapterCtx as TCtx);
+    async deliver(payload: DeliverPayload, adapterCtx) {
+      const replacement = await definition.deliver?.(
+        payload as ChannelDelivery<TState>,
+        adapterCtx as TCtx,
+      );
+      const delivered = defaultDeliverResult(replacement ?? payload);
+      if (delivered === undefined) return undefined;
+      return attachClientContext(
+        attachInputText(delivered, readInputText(payload)),
+        readClientContext(payload),
+      );
     },
 
     ...eventHandlers,

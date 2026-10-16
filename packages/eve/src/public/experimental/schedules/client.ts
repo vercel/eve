@@ -9,8 +9,6 @@ import {
   ContinuationTokenKey,
   ChannelInstrumentationKey,
 } from "#context/keys.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getAdapterKind } from "#channel/adapter.js";
 import type { DefinedDynamicSchedules, ScheduleClient } from "#public/schedules/subscription.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import {
@@ -37,7 +35,6 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
     `Invalid schedule subscription ${identity.logicalPath}.`,
   ) as DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>;
   const context = loadContext();
-  const channel = context.get(ChannelKey);
   return createScheduleCollectionClient(definition, {
     abortSignal: new AbortController().signal,
     session: {
@@ -49,7 +46,7 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
       },
     },
     channel: {
-      kind: channel === undefined ? undefined : getAdapterKind(channel),
+      kind: context.get(ChannelInstrumentationKey)?.kind,
       continuationToken: context.get(ContinuationTokenKey),
       metadata: context.get(ChannelInstrumentationKey)?.metadata,
     },

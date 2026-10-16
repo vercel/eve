@@ -1,6 +1,10 @@
-import { getAdapterKind } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ChannelInstrumentationKey,
+  InitiatorAuthKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { dynamicToolNames } from "#context/build-dynamic-tools.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
@@ -11,7 +15,7 @@ import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { DynamicConnectionResolveContext } from "#public/definitions/connections/dynamic.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveDynamicConnectionValue } from "#runtime/resolve-connection.js";
 import type {
   ResolvedConnectionDefinition,
@@ -198,7 +202,6 @@ function assertOwnsNoEntries(
 }
 
 function buildConnectionResolveContext(ctx: ContextContainer): DynamicConnectionResolveContext {
-  const channel = ctx.get(ChannelKey);
   return {
     session: {
       id: ctx.get(SessionIdKey) ?? "",
@@ -208,7 +211,7 @@ function buildConnectionResolveContext(ctx: ContextContainer): DynamicConnection
       },
     },
     channel: {
-      kind: channel === undefined ? undefined : getAdapterKind(channel),
+      kind: ctx.get(ChannelInstrumentationKey)?.kind,
     },
   };
 }

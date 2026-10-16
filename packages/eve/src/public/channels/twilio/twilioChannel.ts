@@ -292,7 +292,6 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     TwilioReceiveTarget,
     TwilioInstrumentationMetadata
   >({
-    kindHint: "twilio",
     turnPolicy: config.turnPolicy,
     state: {
       from: null as string | null,

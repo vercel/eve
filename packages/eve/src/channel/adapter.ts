@@ -8,6 +8,7 @@ import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { DeliverPayload } from "#channel/types.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import type { UploadPolicy } from "#public/channels/upload-policy.js";
 import type {
   FetchFileContext,
@@ -216,7 +217,9 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
  * payload so tool-approval responses (and other HITL replies) reach the
  * harness even when the channel has no bespoke deliver logic.
  */
-export function defaultDeliverResult(payload: DeliverPayload): StepInput | undefined {
+export function defaultDeliverResult(
+  payload: Pick<ChannelDelivery, "message" | "answers" | "context" | "outputSchema">,
+): StepInput | undefined {
   if (payload.message !== undefined) {
     return attachClientContext(
       attachInputText(

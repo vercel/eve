@@ -11,6 +11,8 @@ Custom channels live in `agent/channels/` at the root agent or in an [extension]
 
 The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
 
+Hooks, instrumentation, and `delivery.admitted.data.source.channel` identify an authored channel as `channel:<name>`, including channels that only declare routes. Use `isChannel(ctx.channel, importedChannel)` from `eve/channels` to match a channel in a hook.
+
 ## Define a channel
 
 Pass the platform's conversation identity to each operation:
@@ -196,6 +198,23 @@ Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. Befor
 A sent delivery can interrupt generation before your `deliver` hook runs. If the hook ignores the correction, eve resumes the original request with its original auth, delivery provenance, and channel state. Filter events before `send(...)` when they should never interrupt generation.
 
 Every `send()` and `respond()` delivery passes its `state` option to your channel's `deliver(payload, channel)` hook as `payload.state`, including deliveries to an existing session. Use it for values that belong to one delivery, such as the author of a message. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
+
+The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, and `state?: Partial<TState>`. Return a replacement payload to change the delivery, or return nothing to keep it unchanged. To ignore a delivery, return `{}`. The hook does not return a harness input or accept arbitrary extra fields.
+
+```ts
+import { defineChannel } from "eve/channels";
+
+export default defineChannel({
+  state: { author: "" },
+  deliver(payload) {
+    const author = payload.state?.author;
+    if (author && typeof payload.message === "string") {
+      return { ...payload, message: `${author}: ${payload.message}` };
+    }
+  },
+  routes: [/* your routes */],
+});
+```
 
 Configure `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
 
@@ -462,7 +481,7 @@ export default defineChannel({
 });
 ```
 
-The input contains the channel's `state`, `caller`, `channel`, and `environment`. A principal caller omits `principalId`, `issuer`, and `subject`, but its `attributes` come from route auth and can still contain identifying values. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`.
+The input contains the channel's `state`, `caller`, `channel`, and `environment`. A principal caller omits `principalId`, `issuer`, and `subject`, but its `attributes` come from route auth and can still contain identifying values. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`. A `metadata()` projection's `audience` field does not classify visibility; use `audience(input)`.
 
 When you explicitly annotate a callback, use `AudienceContext<TState>`. `AudienceInput<TState>` remains supported for existing callbacks while you migrate.
 

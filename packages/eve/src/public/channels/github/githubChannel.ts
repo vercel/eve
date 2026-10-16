@@ -235,7 +235,6 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   };
 
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
-    kindHint: "github",
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
 

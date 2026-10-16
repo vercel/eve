@@ -240,7 +240,6 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     TelegramReceiveTarget,
     TelegramInstrumentationMetadata
   >({
-    kindHint: "telegram",
     turnPolicy: config.turnPolicy,
     uploadPolicy: config.uploadPolicy,
     state: initialTelegramState(config.botUsername),

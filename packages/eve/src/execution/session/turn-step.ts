@@ -27,6 +27,7 @@ import {
   SessionKey,
   CapabilitiesKey,
   ChannelDeliveryKey,
+  ChannelInstrumentationKey,
   HandleEventKey,
   StaticModelReferenceKey,
   TurnDeliveryIdsKey,
@@ -312,7 +313,7 @@ async function runSessionStepBody(
       admission = admitDeliveries({
         parent: ctx.get(ParentSessionKey),
         sessionStarted: turnPosition(currentProjection(ctx)).sessionStarted,
-        channelKind: getAdapterKind(adapter),
+        channelKind: ctx.get(ChannelInstrumentationKey)?.kind ?? getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
         admitted: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId] !== undefined,
         payloads: delivered,

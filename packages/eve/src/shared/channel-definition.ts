@@ -3,8 +3,8 @@ import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { StepInput } from "#harness/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -67,7 +67,11 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
+  /** Return a replacement delivery, or void to deliver the original payload unchanged. */
+  deliver?(
+    payload: ChannelDelivery<TState>,
+    ctx: TCtx,
+  ): ChannelDelivery<TState> | void | Promise<ChannelDelivery<TState> | void>;
   readonly state?: TState;
   /**
    * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's
@@ -130,16 +134,4 @@ export interface GenericChannelDefinition<
    * confident; consumers treat it as non-public.
    */
   readonly audience?: (input: AudienceContext<TState>) => ChannelAudience;
-
-  /**
-   * Identifier of the adapter family this channel belongs to. Set by
-   * higher-level wrappers (e.g. `slackChannel` passes `"slack"`) so downstream
-   * consumers can render typed channel chips instead of bucketing everything
-   * under "unknown".
-   *
-   * Authors calling `defineChannel` directly do not need to set this; the
-   * framework defaults to `"http"` for stateless channels and `"defineChannel"`
-   * for stateful ones.
-   */
-  readonly kindHint?: string;
 }
