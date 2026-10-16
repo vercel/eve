@@ -10,7 +10,7 @@ import type { ChannelRouteMethod, RouteContext } from "#public/definitions/chann
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { Approval, ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
@@ -187,18 +187,7 @@ export type ResolvedToolDefinition = Readonly<
      * approval is required before executing this tool. See
      * {@link Approval} for the shared callback contract.
      */
-    readonly approval?: ToolApproval;
-    /**
-     * Optional function that derives a compound approval key from the tool
-     * input. When present, the runtime records this key (instead of just
-     * the tool name) in the session's approved-tools set after the user
-     * approves the tool call.
-     *
-     * This enables input-aware approval scoping. For example, a tool
-     * can record `"tool:<scope>"` so approval is per-scope rather
-     * than blanket.
-     */
-    readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
+    readonly approval?: Approval;
     /**
      * Optional projection that controls what the model sees as the tool
      * result. The full `execute` return is still visible to channel event

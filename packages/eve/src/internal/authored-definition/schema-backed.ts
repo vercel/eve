@@ -35,7 +35,7 @@ import {
   type ToolSchemaSource,
   UNSPECIFIED_INPUT_SCHEMA,
 } from "#tools/schema.js";
-import { normalizeToolApproval } from "#internal/authored-definition/approval.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
 import {
   assertDynamicResolverEvents,
@@ -163,7 +163,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "execute",
       "inputSchema",
       "approval",
-      "approvalKey",
       "outputSchema",
       "toModelOutput",
       ...(workflow === undefined ? [] : [workflow.entryPoint]),
@@ -236,11 +235,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
 
   if (record.approval !== undefined) {
-    normalizeToolApproval(record.approval, message);
-  }
-
-  if (record.approvalKey !== undefined) {
-    expectFunction(record.approvalKey, message);
+    normalizeApproval(record.approval, message);
   }
 
   if (record.toModelOutput !== undefined) {

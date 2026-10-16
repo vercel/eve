@@ -10,7 +10,7 @@ import type {
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { isApprovalRecheck } from "#harness/approval-recheck.js";
+import { isApprovalRecheck, inheritApprovalContext } from "#harness/approval-recheck.js";
 import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
 import { bindScheduleCollection, schedules } from "#public/experimental/schedules/client.js";
 import type {
@@ -283,11 +283,11 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
           loadContext().set(PreparedWritesKey, snapshots);
         }
         const payload = payloadFor(prepared);
-        const routed = {
+        const routed = inheritApprovalContext(context, {
           ...context,
           toolInput: { ...context.toolInput, payload },
           payload,
-        };
+        });
         return typeof policy === "function" ? await policy(routed) : await policy.request(routed);
       } catch (error) {
         return {

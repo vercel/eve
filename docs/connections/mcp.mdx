@@ -115,7 +115,7 @@ Use the shared `approval` option to gate every tool served by an MCP connection.
 
 ### Gate specific tools by name or input
 
-A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
+A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
 
 This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
 
@@ -178,7 +178,7 @@ export default defineMcpClientConnection({
 
 Annotations are hints from the server, not guarantees. Trust them only as far as you trust the server that sent them.
 
-[Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, how `approvedTools` and `session.auth` factor in, and how a gated call pauses and resumes durably.
+[Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, scoped approval state and `session.auth`, and how a gated call pauses and resumes durably.
 
 ## Forward the caller to an eve agent
 

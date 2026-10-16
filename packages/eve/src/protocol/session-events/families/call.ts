@@ -99,7 +99,7 @@ export type CallProgressRecord = CallInput | CallProgress;
 
 const owner = conforming<CallOwner>()(z.union([z.object({ runId: id }), z.object({ callId: id })]));
 
-const clearedBy = conforming<ClearedBy>()(
+export const clearedBySchema = conforming<ClearedBy>()(
   z.union([
     z.object({ policy: z.string() }),
     z.object({ grant: z.object({ interactionId: id }) }),
@@ -145,7 +145,7 @@ export const callSchemas = {
   "call.started": envelopeOf(
     "call.started",
     conforming<CallStartedData>()(
-      z.object({ callId: id, clearedBy: clearedBy.optional(), taskId: id.optional() }),
+      z.object({ callId: id, clearedBy: clearedBySchema.optional(), taskId: id.optional() }),
     ),
   ),
 };

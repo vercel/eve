@@ -3,12 +3,18 @@ import { type ToolSet, tool } from "ai";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
+import { resolveApprovalPolicy } from "#approval/definition.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { isAuthorizationSignal } from "#harness/authorization.js";
-import { markApprovalRecheck } from "#harness/approval-recheck.js";
+import {
+  approvalEvaluation,
+  type ApprovalGrant,
+  markApprovalRecheck,
+  withApprovalGrants,
+} from "#harness/approval-recheck.js";
+import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import { createLogger } from "#internal/logging.js";
@@ -17,15 +23,6 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import { executeWithToolStub } from "#tool-stubs/execute.js";
 
 const log = createLogger("harness.tools");
-
-type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
-
-type ApprovalFn = (
-  toolInput: unknown,
-  callId: string,
-  abortSignal: AbortSignal | undefined,
-  recheck: boolean,
-) => Promise<NativeApprovalStatus>;
 
 /**
  * Describes harness tools to the AI SDK, each as `describe` words it. The SDK only calls the
@@ -174,92 +171,54 @@ export async function buildToolSetWithProviderTools(input: {
   return tools;
 }
 
-function buildApprovalFn(
-  definition: HarnessToolDefinition,
-  input: { readonly approvedTools?: ReadonlySet<string> },
-): ApprovalFn {
-  return async (toolInput, callId, abortSignal, recheck) => {
-    if (definition.approval === undefined) return undefined;
-
-    const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
-    const context = {
-      ...buildCallbackContext(),
-      abortSignal: abortSignal ?? new AbortController().signal,
-      approvedTools: input.approvedTools ?? new Set<string>(),
-      callId,
-      toolInput: toolInputRecord,
-      toolName: definition.name,
-    };
-
-    const status = await resolveApprovalPolicy(definition.approval)(
-      recheck ? markApprovalRecheck(context) : context,
-    );
-    return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
-  };
+interface ApprovalCall {
+  readonly callId: string;
+  readonly input: unknown;
+  readonly abortSignal?: AbortSignal;
+  readonly approvalGrants?: readonly ApprovalGrant[];
+  readonly recheck?: boolean;
 }
 
-/** The tool's approval policy's decision for a call, in the AI SDK's status vocabulary. */
-export async function approvalStatus(
-  definition: HarnessToolDefinition,
-  call: {
-    readonly callId: string;
-    readonly input: unknown;
-    readonly abortSignal?: AbortSignal;
-    readonly approvedTools?: ReadonlySet<string>;
-    /** The call is one a person already approved, about to run. */
-    readonly recheck?: boolean;
-  },
-): Promise<NativeApprovalStatus> {
-  return await buildApprovalFn(definition, { approvedTools: call.approvedTools })(
-    call.input,
-    call.callId,
-    call.abortSignal,
-    call.recheck === true,
-  );
-}
-
-/**
- * Re-runs a tool's approval policy for a call a person approved, just before eve runs it, so the
- * policy can still refuse it, as when the connection it was approved against changed.
- */
+/** Rechecks a person's approved call, allowing a policy to deny it before execution. */
 export async function recheckApprovedCall(
   definition: HarnessToolDefinition,
-  call: {
-    readonly callId: string;
-    readonly input: unknown;
-    readonly abortSignal?: AbortSignal;
-    readonly approvedTools?: ReadonlySet<string>;
-  },
-): Promise<{ readonly denied: boolean; readonly reason?: string }> {
-  const status = await approvalStatus(definition, { ...call, recheck: true });
-  if (status === "denied") return { denied: true };
-  if (typeof status === "object" && status !== null && status.type === "denied") {
-    return { denied: true, reason: status.reason };
-  }
-  return { denied: false };
+  call: ApprovalCall,
+): Promise<ApprovalDecision> {
+  const decision = await decideApproval(definition, { ...call, recheck: true });
+  return decision.awaitsPerson === true ? { denied: false } : decision;
 }
 
-/**
- * Decides a call the model just made: it runs, waits for a person, or is denied, as the tool's
- * approval policy says.
- */
+/** Decides whether a call runs, needs a person's approval, or is denied. */
 export async function decideApproval(
   definition: HarnessToolDefinition,
-  call: {
-    readonly callId: string;
-    readonly input: unknown;
-    readonly abortSignal?: AbortSignal;
-    readonly approvedTools?: ReadonlySet<string>;
-  },
-): Promise<{ readonly awaitsPerson?: true; readonly denied: boolean; readonly reason?: string }> {
-  const status = await approvalStatus(definition, call);
-  if (status === "user-approval") return { awaitsPerson: true, denied: false };
-  if (typeof status === "object" && status !== null && status.type === "user-approval") {
-    return { awaitsPerson: true, denied: false };
+  call: ApprovalCall,
+): Promise<ApprovalDecision> {
+  if (definition.approval === undefined) return { denied: false };
+  const context = withApprovalGrants(
+    {
+      ...buildCallbackContext(),
+      abortSignal: call.abortSignal ?? new AbortController().signal,
+      callId: call.callId,
+      toolInput: isObject(call.input) ? call.input : undefined,
+      toolName: definition.name,
+    },
+    call.approvalGrants ?? [],
+  );
+  const status = await resolveApprovalPolicy(definition.approval)(
+    call.recheck === true ? markApprovalRecheck(context) : context,
+  );
+  const decision = approvalDecision(status);
+  const evaluation = approvalEvaluation(context);
+  if (decision.awaitsPerson === true && evaluation?.grant === undefined) {
+    return { ...decision, once: evaluation?.once };
   }
-  if (status === "denied") return { denied: true };
-  if (typeof status === "object" && status !== null && status.type === "denied") {
-    return { denied: true, reason: status.reason };
+  if (
+    (status === "not-applicable" ||
+      (typeof status === "object" && status.type === "not-applicable")) &&
+    decision.clearedBy === undefined &&
+    evaluation?.grant !== undefined
+  ) {
+    return { ...decision, clearedBy: { grant: { interactionId: evaluation.grant.interactionId } } };
   }
-  return { denied: false };
+  return decision;
 }

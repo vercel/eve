@@ -1,5 +1,5 @@
 import { readDurableSchema } from "#tools/durable-schema.js";
-import type { ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject, JsonPrimitive } from "#shared/json.js";
 
@@ -7,7 +7,6 @@ export type DurableDynamicCallbackPhase =
   | "labelComplete"
   | "labelDelta"
   | "labelStart"
-  | "approvalKey"
   | "approvalPrompt"
   | "approvalRequest"
   | "approvalResponse"
@@ -38,7 +37,6 @@ export interface DurableDynamicToolCallbacks {
     readonly delta?: DurableDynamicCallbackReference;
     readonly start?: DurableDynamicCallbackReference;
   };
-  readonly approvalKey?: DurableDynamicCallbackReference;
   readonly approvalPrompt?: DurableDynamicCallbackReference;
   readonly approvalRequest?: DurableDynamicCallbackReference;
   readonly approvalResponse?: DurableDynamicCallbackReference;
@@ -60,7 +58,6 @@ type LiveDurableDynamicToolCallbacks = Partial<{
     readonly delta?: StampedDurableDynamicCallback;
     readonly start?: StampedDurableDynamicCallback;
   };
-  approvalKey: StampedDurableDynamicCallback;
   approvalPrompt: StampedDurableDynamicCallback;
   approvalRequest: StampedDurableDynamicCallback;
   approvalResponse: StampedDurableDynamicCallback;
@@ -184,7 +181,6 @@ function durableCallbackPhases(
     ["labelComplete", callbacks.label?.complete],
     ["labelDelta", callbacks.label?.delta],
     ["labelStart", callbacks.label?.start],
-    ["approvalKey", callbacks.approvalKey],
     ["approvalPrompt", callbacks.approvalPrompt],
     ["approvalRequest", callbacks.approvalRequest],
     ["approvalResponse", callbacks.approvalResponse],
@@ -275,8 +271,7 @@ export function collectDurableDynamicToolCallbacks(input: {
     readonly delta?: (...args: never[]) => unknown;
     readonly start?: (...args: never[]) => unknown;
   };
-  readonly approval?: ToolApproval<never>;
-  readonly approvalKey?: (...args: never[]) => unknown;
+  readonly approval?: Approval<never>;
   readonly execute?: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
@@ -292,7 +287,6 @@ export function collectDurableDynamicToolCallbacks(input: {
       ? undefined
       : readDurableDynamicCallback(input.approval.response);
 
-  const approvalKey = readDurableDynamicCallback(input.approvalKey);
   const approvalPrompt = readDurableDynamicCallback(
     input.approval === undefined || typeof input.approval === "function"
       ? undefined
@@ -313,7 +307,6 @@ export function collectDurableDynamicToolCallbacks(input: {
       start: labelStart,
     };
   }
-  if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
   if (approvalPrompt !== undefined) callbacks.approvalPrompt = approvalPrompt;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;

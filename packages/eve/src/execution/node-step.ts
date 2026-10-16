@@ -231,7 +231,6 @@ function createRegisteredHarnessToolDefinition(input: {
       (def.owner.kind === "framework" && def.name === WEB_SEARCH_TOOL_NAME
         ? { start: resolveWebSearchActivityLabel }
         : undefined),
-    approvalKey: def.approvalKey,
     behavior: input.behavior,
     deferred: def.deferred,
     description: def.description,

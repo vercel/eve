@@ -30,6 +30,7 @@ export function withCallResults(input: {
   // AI SDK `StepResult` fields are prototype getters, so spreading the instance drops them.
   return {
     approvalRequests: calls.approvals,
+    policyApprovals: calls.policyApprovals,
     content: stepResult.content,
     finishReason: stepResult.finishReason,
     ...(input.invalidInputToolCallIds === undefined

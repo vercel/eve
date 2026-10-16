@@ -5,7 +5,7 @@ import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js"
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
-import { grantedApprovalKeys, askApprovals } from "#harness/hitl/approvals.js";
+import { askApprovals } from "#harness/hitl/approvals.js";
 import { suspendStep } from "#harness/session-machine/transitions.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
@@ -202,17 +202,6 @@ export function parkedSteps(session: Pick<HarnessSession, "state">): readonly Su
 
 export function positionOf(session: Pick<HarnessSession, "state">): TurnPosition {
   return turnPosition(storedProjection(session.state));
-}
-
-/** The approval keys `once()` approvals granted that no pending approval still asks about. */
-export function grantedKeys(
-  session: Pick<HarnessSession, "state">,
-  approvalKey: (approval: ApprovalAsk) => string | undefined = () => undefined,
-): ReadonlySet<string> {
-  return grantedApprovalKeys(
-    sessionView(storedProjection(session.state), session.state),
-    approvalKey,
-  );
 }
 
 /** `session` relaying requests for a child, as the session machine records them. */

@@ -5,7 +5,7 @@ import type {
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 
-import type { ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
@@ -100,8 +100,6 @@ export interface PublicToolDefinition<
    * The AI SDK can use this for tool result typing.
    */
   outputSchema?: PublicToolOutputSchema<TOutput>;
-  /** Derives the input-scoped key recorded when this tool is approved. */
-  approvalKey?: (input: Readonly<ApprovalContextInput<TInput>>) => string;
 }
 
 export interface InternalToolDefinitionWithExecuteFn<
@@ -281,7 +279,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * - {@link never}: never require approval
    * - {@link once}: require approval only the first time per session
    */
-  approval?: ToolApproval<ApprovalContextInput<TInput>>;
+  approval?: Approval<ApprovalContextInput<TInput>>;
   /**
    * Optional projection controlling what the model sees as the tool result.
    * Receives the full `TOutput` from {@link execute} and returns the
@@ -331,7 +329,6 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
-  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -355,7 +352,6 @@ export function defineTool<
     ToolOutputFromExecuteReturn<TReturn>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
-  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
@@ -379,7 +375,6 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -397,7 +392,6 @@ export function defineTool<TReturn>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
@@ -420,8 +414,7 @@ export function stampToolDefinition<
     readonly outputSchema?: unknown;
     readonly execute?: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
-    readonly approval?: ToolApproval<never>;
-    readonly approvalKey?: (...args: never[]) => unknown;
+    readonly approval?: Approval<never>;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
@@ -429,6 +422,11 @@ export function stampToolDefinition<
     throw new Error(
       `${definer}: The "auth" field is no longer supported. ` +
         `Pass auth providers inline to ctx.getToken(provider) or ctx.requireAuth(provider).`,
+    );
+  }
+  if ("approvalKey" in definition) {
+    throw new Error(
+      `${definer}: approvalKey is no longer supported. Use approval: once({ key: (input) => ... }) for scoped approval memory.`,
     );
   }
   Object.assign(definition, { [TOOL_BRAND]: true });
@@ -439,7 +437,6 @@ export function stampToolDefinition<
       outputSchema: definition.outputSchema,
       label: definition.label,
       approval: definition.approval,
-      approvalKey: definition.approvalKey,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
     }),

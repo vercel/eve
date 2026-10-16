@@ -2,6 +2,7 @@ import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { decide } from "#ai/decide.js";
+import { evaluateOnce } from "#harness/approval-recheck.js";
 import { parseJsonValue, type JsonObject } from "#shared/json.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
@@ -71,13 +72,6 @@ function neverApproval(_closure: JsonObject): "not-applicable" {
   return "not-applicable";
 }
 
-function onceApproval(
-  _closure: JsonObject,
-  context: ApprovalContext,
-): "not-applicable" | "user-approval" {
-  return context.approvedTools.has(context.toolName) ? "not-applicable" : "user-approval";
-}
-
 /**
  * Returns an `approval` callback that asks an AI SDK decision model whether
  * the exact tool call presents concrete security danger. Defaults to TypeSafe Jev.
@@ -115,17 +109,25 @@ export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
   });
 }
 
-/**
- * Returns an `approval` callback that requires approval until the user
- * approves this tool once in the current session. A tool is recorded as
- * approved only on an explicit approval; a denial (or continuing without
- * responding) leaves it unrecorded, so the next call prompts again. Keys off
- * the bare tool name, so it ignores compound approval keys.
- */
-export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(
-    ({ approvedTools, toolName }) =>
-      approvedTools.has(toolName) ? "not-applicable" : "user-approval",
-    { callback: onceApproval, closure: {} },
-  );
+/** Remembers a person's approval for this tool, optionally scoped to a key from its input. */
+export function once<TInput = unknown>(options?: {
+  readonly key?: (input: TInput) => string;
+}): ApprovalPolicy<TInput> {
+  const evaluate = (context: ApprovalContext<TInput>): "not-applicable" | "user-approval" => {
+    const grantable = options?.key === undefined || context.toolInput !== undefined;
+    const key =
+      options?.key !== undefined && context.toolInput !== undefined
+        ? options.key(context.toolInput as TInput)
+        : undefined;
+    if (grantable && options?.key !== undefined && typeof key !== "string") {
+      throw new TypeError("once({ key }) must return a string key.");
+    }
+    return evaluateOnce(context as ApprovalContext, { key, grantable })
+      ? "not-applicable"
+      : "user-approval";
+  };
+  return stampDurableDynamicCallback(evaluate, {
+    callback: (_closure: JsonObject, context: ApprovalContext<TInput>) => evaluate(context),
+    closure: {},
+  });
 }

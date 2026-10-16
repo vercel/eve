@@ -1,18 +1,69 @@
 import type { ApprovalContext } from "#approval/definition.js";
 
-/**
- * Approval contexts built for the re-check of a call a person already approved.
- * eve re-runs the approval policy just before such a call runs, and a `denied`
- * result there cancels it.
- */
-const rechecks = new WeakSet<object>();
+export interface ApprovalGrant {
+  readonly toolName: string;
+  readonly key?: string;
+  readonly interactionId: string;
+}
+
+export interface OnceApproval {
+  readonly key?: string;
+  readonly grantable: boolean;
+}
+
+interface Evaluation {
+  readonly grants: readonly ApprovalGrant[];
+  recheck?: boolean;
+  once?: OnceApproval;
+  grant?: ApprovalGrant;
+}
+
+// Enumerable symbols survive policy context spreads without entering JSON or the public type.
+const evaluationKey = Symbol("eve.approval-evaluation");
+type EvaluatedContext = ApprovalContext & { readonly [evaluationKey]?: Evaluation };
+
+export function withApprovalGrants<T extends ApprovalContext>(
+  context: T,
+  grants: readonly ApprovalGrant[],
+): T {
+  return Object.assign(context, {
+    [evaluationKey]: { grants, recheck: approvalEvaluation(context)?.recheck },
+  });
+}
+
+export function evaluateOnce(context: ApprovalContext, once: OnceApproval): boolean {
+  const evaluation = approvalEvaluation(context) ?? { grants: [] };
+  Object.assign(context, { [evaluationKey]: evaluation });
+  evaluation.once = once;
+  evaluation.grant = once.grantable
+    ? evaluation.grants.find(
+        (grant) => grant.toolName === context.toolName && grant.key === once.key,
+      )
+    : undefined;
+  return evaluation.grant !== undefined;
+}
+
+export function approvalEvaluation(context: ApprovalContext): Evaluation | undefined {
+  return (context as EvaluatedContext)[evaluationKey];
+}
 
 export function markApprovalRecheck<T extends ApprovalContext>(context: T): T {
-  rechecks.add(context);
-  return context;
+  const evaluation = approvalEvaluation(context) ?? { grants: [] };
+  evaluation.recheck = true;
+  return Object.assign(context, { [evaluationKey]: evaluation });
+}
+
+export function inheritApprovalContext<T extends ApprovalContext>(
+  source: ApprovalContext,
+  context: T,
+): T {
+  const evaluation = approvalEvaluation(source);
+  return evaluation === undefined
+    ? context
+    : Object.assign(context, { [evaluationKey]: evaluation });
 }
 
 /** Whether `context` is the re-check of an approved call just before it runs. */
 export function isApprovalRecheck(context: ApprovalContext): boolean {
-  return rechecks.has(context);
+  return approvalEvaluation(context)?.recheck === true;
 }

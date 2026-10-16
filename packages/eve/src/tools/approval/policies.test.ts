@@ -3,14 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const decide = vi.hoisted(() => vi.fn());
 vi.mock("#ai/decide.js", () => ({ decide }));
 
-import type { ApprovalContext } from "#approval/definition.js";
+import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
+import { defineTool } from "#tools/definition.js";
+import { z } from "zod";
+import { withApprovalGrants } from "#harness/approval-recheck.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";
 import { readDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
 function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
   return {
     abortSignal: new AbortController().signal,
-    approvedTools: new Set(),
     callId: "call-1",
     getSandbox: vi.fn(),
     session: {
@@ -125,20 +127,74 @@ describe("dynamic tool approval helpers", () => {
     await expect(auto()(context)).rejects.toBe(reason);
   });
 
-  it("replays once against the current approval context", async () => {
-    const reference = readDurableDynamicCallback(once())!;
+  it("replays a keyed once policy against the current approval context", async () => {
+    const reference = readDurableDynamicCallback(
+      once<Record<string, unknown>>({
+        key: (input) => String(input.environment),
+      }),
+    )!;
+    const input = { environment: "production" };
+    const context = approvalContext({ toolName: "guarded", toolInput: input });
+    expect(await reference.callback(reference.closure, context as never)).toBe("user-approval");
+    withApprovalGrants(context, [
+      { toolName: "guarded", key: "production", interactionId: "approval-1" },
+    ]);
+    expect(await reference.callback(reference.closure, context as never)).toBe("not-applicable");
+    input.environment = "development";
+    expect(await reference.callback(reference.closure, context as never)).toBe("user-approval");
+  });
 
-    expect(
-      await reference.callback(reference.closure, {
-        approvedTools: new Set(),
-        toolName: "guarded",
-      } as never),
-    ).toBe("user-approval");
-    expect(
-      await reference.callback(reference.closure, {
-        approvedTools: new Set(["guarded"]),
-        toolName: "guarded",
-      } as never),
-    ).toBe("not-applicable");
+  it("does not use an unkeyed grant when a keyed policy has no input", async () => {
+    const key = vi.fn((input: Record<string, unknown>) => String(input.environment));
+    const context = withApprovalGrants(approvalContext({ toolInput: undefined }), [
+      { toolName: "deploy", interactionId: "unkeyed-approval" },
+    ]);
+    expect(await once({ key })(context)).toBe("user-approval");
+    expect(key).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a JavaScript key callback does not return a string", async () => {
+    const policy = once({ key: (() => undefined) as never });
+    expect(() => policy(approvalContext())).toThrow("must return a string key");
+  });
+
+  it("infers keyed input from defineTool's schema in shorthand and configuration forms", async () => {
+    const inputSchema = z.object({ environment: z.enum(["dev", "prod"]), sha: z.string() });
+    const direct = defineTool({
+      description: "Deploy a release",
+      inputSchema,
+      approval: once({
+        key: (input) => {
+          // @ts-expect-error Key callbacks must use fields from inputSchema.
+          void input.missing;
+          return input.environment;
+        },
+      }),
+      execute: () => "deployed",
+    });
+    const configured = defineTool({
+      description: "Deploy a release",
+      inputSchema,
+      approval: {
+        request: once({
+          key: (input) => {
+            // @ts-expect-error Key callbacks must use fields from inputSchema.
+            void input.missing;
+            return input.environment;
+          },
+        }),
+        prompt: ({ input }) => `Deploy ${input.environment}?`,
+      },
+      execute: () => "deployed",
+    });
+    const context: ApprovalContext<z.infer<typeof inputSchema>> = withApprovalGrants(
+      {
+        ...approvalContext(),
+        toolInput: { environment: "prod", sha: "abc" },
+      },
+      [{ toolName: "deploy", key: "prod", interactionId: "approval-1" }],
+    );
+    expect(await resolveApprovalPolicy(direct.approval!)(context)).toBe("not-applicable");
+    expect(await resolveApprovalPolicy(configured.approval!)(context)).toBe("not-applicable");
   });
 });

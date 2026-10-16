@@ -144,7 +144,10 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
       messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests,
+      tasks: dispatched.workflowRequests.map((task) => ({
+        ...task,
+        clearedBy: result.policyApprovals?.[task.callId],
+      })),
     };
     if (approvalRequests.length > 0) {
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });

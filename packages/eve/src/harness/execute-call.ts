@@ -55,6 +55,7 @@ export function toEntryStep<T extends ModelMessage>(
   // SDK step fields are prototype getters, so each one is read explicitly.
   const entryStep: StepFields = {
     approvalRequests: step.approvalRequests,
+    policyApprovals: step.policyApprovals,
     callId: step.callId,
     content: (step.content ?? []).map((part) => toEntryPart(part, resolve)),
     finishReason: step.finishReason,

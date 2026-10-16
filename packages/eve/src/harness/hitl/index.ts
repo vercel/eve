@@ -1,3 +1,4 @@
+import type { ApprovalGrant } from "#harness/approval-recheck.js";
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -19,7 +20,7 @@ import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
 import {
   askApprovals,
-  grantedApprovalKeys,
+  grantedApprovals,
   pendingApprovals,
   openLimit,
   requestLimit,
@@ -131,18 +132,13 @@ export async function enforceBudget(
  * What a model call needs from the approvals: the keys `once()` approvals of `tools` granted, and
  * a note on the calls still awaiting approval, which a message may revise.
  */
-export function humanInputContext(
-  step: Step,
-  tools: HarnessToolLookup,
-): {
-  readonly approvedTools: ReadonlySet<string>;
+export function humanInputContext(step: Step): {
+  readonly approvalGrants: readonly ApprovalGrant[];
   readonly pendingApprovalsNote?: string;
 } {
   const view = step.view();
   return {
-    approvedTools: grantedApprovalKeys(view, ({ call }) =>
-      tools.get(call.toolName)?.approvalKey?.(call.input),
-    ),
+    approvalGrants: grantedApprovals(view),
     pendingApprovalsNote: renderPendingApprovalsInstruction(
       view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
     ),

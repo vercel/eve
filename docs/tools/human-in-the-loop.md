@@ -32,12 +32,12 @@ export default defineTool({
 });
 ```
 
-| Helper     | Behavior                                                                           |
-| ---------- | ---------------------------------------------------------------------------------- |
-| `never()`  | Never require approval (the default when omitted).                                 |
-| `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
-| `always()` | Require approval before every call.                                                |
-| `auto()`   | Ask a decision model whether to run the exact call or require user approval.       |
+| Helper     | Behavior                                                                      |
+| ---------- | ----------------------------------------------------------------------------- |
+| `never()`  | Never require approval (the default when omitted).                            |
+| `once()`   | Remember approval for this tool in the session, optionally scoped with `key`. |
+| `always()` | Require approval before every call.                                           |
+| `auto()`   | Ask a decision model whether to run the exact call or require user approval.  |
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
@@ -86,7 +86,7 @@ export default defineTool({
 
 Channels render this prompt in their approval UI. Slack also includes the complete tool input in a collapsed **Tool input** block so an approver can inspect the original structured value.
 
-When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, approvedTools, callId, abortSignal }` (connection tools also get `toolAnnotations`), and returns an AI SDK 7 approval status synchronously or as a promise. Use `abortSignal` for asynchronous policy work so cancellation stops it with the turn. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
+When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, callId, abortSignal }` (connection tools also get `toolAnnotations`), and returns an AI SDK 7 approval status synchronously or as a promise. Use `abortSignal` for asynchronous policy work so cancellation stops it with the turn. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
 
 ```ts
 approval: ({ session, toolInput }) => {
@@ -100,9 +100,50 @@ approval: ({ session, toolInput }) => {
 
 For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
 
-Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
+Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "denied", reason }` when the model should receive a reason for denying the call. An explicit `"approved"` result records `clearedBy: { policy: "approval" }` on `call.started`. A call cleared by `once()` records `{ grant: { interactionId } }`, identifying the approval it remembered; a call approved by a person records `{ interactionId }`. Calls that need no approval omit `clearedBy`. The `Approval`, `ApprovalConfiguration`, `ApprovalContext`, `ApprovalPolicy`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
 Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
+
+### Remember approval for a scope
+
+`once()` without options remembers approval for the tool across turns and context clears,
+until the session ends. Pass `key` to remember approval for one input scope instead:
+
+```ts title="agent/tools/deploy.ts"
+import { defineTool } from "eve/tools";
+import { once } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Deploy a release.",
+  inputSchema: z.object({ environment: z.enum(["dev", "prod"]), sha: z.string() }),
+  approval: once({ key: (input) => input.environment }),
+  async execute(input) {
+    return deploy(input);
+  },
+});
+```
+
+Approving `dev` does not approve `prod`. Grants belong to the resolved tool name as well as the
+key, so two tools that return the same key cannot clear each other. A denial creates no grant,
+and approving a prompt asked by `always()` or a policy that does not call `once()` creates no grant.
+Existing pending prompts remain independent decisions.
+
+You can wrap `once()` in another policy. Pass the context through unchanged so eve can remember
+the key when the person approves:
+
+```ts
+const perEnvironment = once<{ environment: string }>({ key: (input) => input.environment });
+
+// In defineTool({ ... }):
+approval: (ctx) =>
+  ctx.toolInput?.environment === "dev" ? "not-applicable" : perEnvironment(ctx),
+```
+
+The executor must still authorize access for the current caller. A remembered approval is consent,
+not authorization. For tenant-specific consent, validate the tenant against the authenticated
+caller before consulting the remembered policy. `approvalKey` and the policy context's
+`approvedTools` are no longer supported.
 
 ### Authorizing approval responses
 

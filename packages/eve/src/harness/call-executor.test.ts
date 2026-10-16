@@ -1,11 +1,112 @@
 import { eventsOf } from "#harness/publication.js";
 import { jsonSchema } from "ai";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import type { ApprovalStatus } from "#approval/definition.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { executeInlineCalls } from "#harness/call-executor.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+
+it.each([
+  [undefined, "run"],
+  [false, "run"],
+  [true, "ask"],
+  ["not-applicable", "run"],
+  ["approved", "run"],
+  ["denied", "deny"],
+  ["user-approval", "ask"],
+  [{ type: "not-applicable" }, "run"],
+  [{ type: "approved", reason: "Within the team's policy." }, "run"],
+  [{ type: "denied", reason: "Outside the team's policy." }, "deny"],
+  [{ type: "user-approval" }, "ask"],
+] as const)("preserves policy return %j and records the decision", async (status, outcome) => {
+  const execute = vi.fn(() => "saved");
+  const ctx = new ContextContainer();
+  ctx.set(SessionKey, {
+    auth: { current: null, initiator: null },
+    sessionId: "session-1",
+    turn: { id: "turn_0", sequence: 0 },
+  });
+  const events: import("#protocol/session-event.js").SessionEvent[] = [];
+  const results = await contextStorage.run(ctx, () =>
+    executeInlineCalls({
+      abortSignal: undefined,
+      approvalGrants: [],
+      beforeExecute: () => {},
+      excludedCallIds: new Set(),
+      messages: [],
+      position: { turnId: "turn_0" },
+      publish: async (publication) => {
+        events.push(...eventsOf(publication));
+      },
+      toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "save", type: "tool-call" }],
+      tools: new Map([
+        [
+          "save",
+          {
+            name: "save",
+            description: "Save notes",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute,
+            approval: () => status,
+          },
+        ],
+      ]),
+    }),
+  );
+  expect(execute).toHaveBeenCalledTimes(outcome === "run" ? 1 : 0);
+  expect(results.approvals).toHaveLength(outcome === "ask" ? 1 : 0);
+  const reason = typeof status === "object" && "reason" in status ? status.reason : undefined;
+  if (outcome === "run") {
+    const type = typeof status === "object" ? status.type : status;
+    expect(events.find((event) => event.type === "call.started")?.data.clearedBy).toEqual(
+      type === "approved" ? { policy: "approval" } : undefined,
+    );
+    expect(results.parts[0]?.output).toEqual({ type: "text", value: "saved" });
+  } else if (outcome === "deny") {
+    expect(results.parts[0]?.output).toMatchObject({ type: "execution-denied", reason });
+  }
+});
+
+it.each([null, "allow", { type: "approved", reason: 123 }])(
+  "fails closed for an invalid JavaScript approval return %j",
+  async (status) => {
+    const execute = vi.fn();
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn_0", sequence: 0 },
+    });
+    const result = await contextStorage.run(ctx, () =>
+      executeInlineCalls({
+        abortSignal: undefined,
+        approvalGrants: [],
+        beforeExecute: () => {},
+        excludedCallIds: new Set(),
+        messages: [],
+        position: { turnId: "turn_0" },
+        publish: async () => {},
+        toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "save", type: "tool-call" }],
+        tools: new Map([
+          [
+            "save",
+            {
+              name: "save",
+              description: "Save notes",
+              inputSchema: jsonSchema({ type: "object" }),
+              execute,
+              approval: () => status as ApprovalStatus,
+            },
+          ],
+        ]),
+      }),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.parts[0]?.output).toMatchObject({ type: "error-text" });
+  },
+);
 
 it("asks with the prompt a tool's approval writes for the call", async () => {
   const sendPayment: HarnessToolDefinition = {
@@ -28,7 +129,7 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
   const results = await contextStorage.run(ctx, () =>
     executeInlineCalls({
       abortSignal: undefined,
-      approvedTools: new Set(),
+      approvalGrants: [],
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
@@ -53,7 +154,7 @@ it("keeps a thrown tool error's name in the durable call ending", async () => {
   const events: import("#protocol/session-event.js").SessionEvent[] = [];
   await executeInlineCalls({
     abortSignal: undefined,
-    approvedTools: new Set(),
+    approvalGrants: [],
     beforeExecute: () => {},
     excludedCallIds: new Set(),
     messages: [],

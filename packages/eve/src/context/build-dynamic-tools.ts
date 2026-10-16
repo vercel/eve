@@ -123,11 +123,6 @@ export function replayDynamicTools(
   }
   return metadata.map((entry) => {
     const owner = { ...entry, ...scope };
-    const approvalKeyReference = entry.callbacks.approvalKey;
-    const approvalKey =
-      approvalKeyReference === undefined
-        ? undefined
-        : lookupDurableDynamicCallback(owner, "approvalKey");
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(owner, "execute");
     const labelComplete = bindDynamicCallback(
@@ -175,26 +170,6 @@ export function replayDynamicTools(
       inputSchema: replayDynamicToolSchema(entry, owner, "inputSchema")!,
       name: entry.name,
       approval: buildReplayedApproval(entry, owner),
-      ...(approvalKeyReference === undefined
-        ? {}
-        : {
-            approvalKey: (input: Readonly<Record<string, unknown>>) => {
-              if (approvalKey === undefined) {
-                throw missingCallbackError(entry, "approvalKey");
-              }
-              const key = callDurableDynamicCallback(
-                approvalKey,
-                approvalKeyReference.closure,
-                input,
-              );
-              if (typeof key !== "string") {
-                throw new Error(
-                  `Dynamic tool "${entry.name}" approvalKey callback must return a string.`,
-                );
-              }
-              return key;
-            },
-          }),
       outputSchema: replayDynamicToolSchema(entry, owner, "outputSchema"),
     };
     if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {

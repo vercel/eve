@@ -23,7 +23,6 @@ type CallbackPhase =
   | "labelComplete"
   | "labelDelta"
   | "labelStart"
-  | "approvalKey"
   | "approvalPrompt"
   | "approvalRequest"
   | "approvalResponse"
@@ -32,7 +31,6 @@ type CallbackPhase =
   | "inputSchema"
   | "outputSchema";
 type CallbackPropertyName =
-  | "approvalKey"
   | "label"
   | "approval"
   | "prompt"
@@ -170,14 +168,6 @@ function collectToolCallbacks(
   if (!isWorkflowExecute(execute, context)) {
     collectCallbackProperty(source, execute, "execute", "execute", results, nestedScopes);
   }
-  collectCallbackProperty(
-    source,
-    findProperty(tool, "approvalKey"),
-    "approvalKey",
-    "approvalKey",
-    results,
-    nestedScopes,
-  );
   const label = findProperty(tool, "label");
   const labelValue = label?.value as AstNode | undefined;
   if (labelValue?.type === "ObjectExpression") {

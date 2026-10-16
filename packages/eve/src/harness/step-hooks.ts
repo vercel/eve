@@ -54,6 +54,9 @@ export type HarnessStepResult = Pick<
   readonly invalidInputToolCallIds?: ReadonlySet<string>;
   /** The calls eve ran that wait on a person's approval. */
   readonly approvalRequests?: readonly ApprovalAsk[];
+  readonly policyApprovals?: Readonly<
+    Record<string, import("#protocol/session-events/families/call.js").ClearedBy>
+  >;
   /** The calls eve ran that stopped for a sign-in. */
   readonly signIns?: readonly ToolSignIn[];
 };

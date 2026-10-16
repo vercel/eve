@@ -1,6 +1,6 @@
 import type { FlexibleSchema } from "ai";
 
-import type { ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import type {
   InternalToolDefinition,
   InternalToolLabelDefinition,
@@ -15,7 +15,6 @@ import type { PreparedToolBehavior } from "#tools/behavior.js";
 export interface HarnessToolDefinition {
   readonly availableInSubagents?: boolean;
   readonly label?: InternalToolLabelDefinition;
-  readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   /** Kept out of the model's tool list; the model reaches it through `eve__search` and `eve__tool`. */
   readonly deferred?: boolean;
@@ -29,7 +28,7 @@ export interface HarnessToolDefinition {
   readonly frameworkAction?: "task-cancel" | "task-wait";
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
-  readonly approval?: ToolApproval;
+  readonly approval?: Approval;
   readonly outputSchema?: FlexibleSchema;
   /**
    * Advertise this tool only to the root session, hiding it from subagent

@@ -11,6 +11,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { once } from "#tools/approval/policies.js";
+import { withApprovalGrants } from "#harness/approval-recheck.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
@@ -115,11 +116,8 @@ describe("schedule creation and invocation", () => {
         required: ["name", "expression", "payload"],
       });
       expect(tools.schedule__requests__list!.approval).toBeUndefined();
-      const policyContext = (
-        callId: string,
-        toolInput: unknown,
-        approvedTools = new Set<string>(),
-      ) => ({ callId, toolInput, approvedTools, toolName: "schedule__requests__create" }) as never;
+      const policyContext = (callId: string, toolInput: unknown) =>
+        ({ callId, toolInput, toolName: "schedule__requests__create" }) as never;
       const request = resolveApprovalPolicy(create.approval!);
       await expect(
         request(policyContext("invalid", { ...input, payload: {} })),
@@ -193,11 +191,13 @@ describe("schedule creation and invocation", () => {
       ).resolves.toMatchObject({ state: "active" });
       const invoke = tools.schedule__requests__invoke!;
       const invoked = { name: created.name };
-      const invokeContext = {
-        toolName: "schedule__requests__invoke",
-        toolInput: invoked,
-        approvedTools: new Set(["schedule__requests__invoke"]),
-      } as never;
+      const invokeContext = withApprovalGrants(
+        {
+          toolName: "schedule__requests__invoke",
+          toolInput: invoked,
+        } as never,
+        [{ toolName: "schedule__requests__invoke", interactionId: "approval-1" }],
+      );
       expect(await resolveApprovalPolicy(invoke.approval!)(invokeContext)).toBe("not-applicable");
       expect(
         await resolveApprovalPolicy(tools.schedule__requests__delete!.approval!)(invokeContext),

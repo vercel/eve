@@ -1,6 +1,7 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
+import { resolveApprovalPolicy } from "#approval/definition.js";
+import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
 import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
 import {
   compiledToolOwner,
@@ -315,24 +316,24 @@ async function runCall(input: {
   const { callId, definition, observer } = input;
   const signal = input.signal ?? new AbortController().signal;
 
+  let approval: ApprovalDecision = { denied: false };
   if (definition.approval !== undefined) {
-    let status: ApprovalStatus;
     try {
-      status = await resolveApprovalPolicy(definition.approval)({
-        ...buildCallbackContext(),
-        abortSignal: signal,
-        approvedTools: new Set<string>(),
-        callId,
-        toolInput: input.input,
-        toolName: definition.name,
-      });
+      approval = approvalDecision(
+        await resolveApprovalPolicy(definition.approval)({
+          ...buildCallbackContext(),
+          abortSignal: signal,
+          callId,
+          toolInput: input.input,
+          toolName: definition.name,
+        }),
+      );
     } catch (error) {
       observer.failedWith(error);
       return failedFromError(error, definition.name, "approval policy failed");
     }
-    const decision = decideApproval(status);
-    if (decision.kind === "denied") return denied(decision.reason);
-    if (decision.kind === "user-approval") return { status: "approval-required" };
+    if (approval.denied) return denied(approval.reason);
+    if (approval.awaitsPerson === true) return { status: "approval-required" };
   }
 
   const executeOptions: ToolExecuteOptions = {
@@ -399,21 +400,6 @@ async function runCall(input: {
     observer.failedWith(error);
     return failedFromError(error, definition.name, "tool output could not be serialized");
   }
-}
-
-function decideApproval(
-  status: ApprovalStatus,
-):
-  | { readonly kind: "run" }
-  | { readonly kind: "user-approval" }
-  | { readonly kind: "denied"; readonly reason?: string } {
-  if (status === true || status === "user-approval") return { kind: "user-approval" };
-  if (status === "denied") return { kind: "denied" };
-  if (typeof status === "object" && status !== null) {
-    if (status.type === "user-approval") return { kind: "user-approval" };
-    if (status.type === "denied") return { kind: "denied", reason: status.reason };
-  }
-  return { kind: "run" };
 }
 
 async function lastIterated(iterable: AsyncIterable<unknown>): Promise<unknown> {

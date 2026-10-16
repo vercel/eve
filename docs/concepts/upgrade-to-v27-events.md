@@ -224,6 +224,19 @@ Move a visibility classifier from `metadata().audience` to `audience(input)`. Me
 classifies visibility, and a channel without an audience hook is `unknown`.
 See [Custom channels](../channels/custom) for payload and audience examples.
 
+## Approval policies
+
+Existing policy return values still work, including booleans and the string and object statuses.
+`call.started` records whether a policy or a remembered approval cleared the call. Response
+policies keep `{ status: "allowed" | "rejected" }`.
+
+Replace `approvalKey` with [`once({ key })`](../human-in-the-loop#remember-approval-for-a-scope)
+and remove uses of `ApprovalContext.approvedTools`. `once()` without options still remembers
+approval by tool name; only prompts asked by `once()` create its grants. Replace `ToolApproval`
+and `ToolApprovalConfiguration` imports with `Approval` and `ApprovalConfiguration`, which
+support the optional `prompt`. Rebuild tool, dynamic-tool, and connection extensions against
+the new capability epochs.
+
 ## Instrumentation
 
 Instrumentation events about what a session's stream records take the stream's names, and an

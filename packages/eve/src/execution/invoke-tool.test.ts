@@ -293,6 +293,17 @@ describe("invokeTool", () => {
         false,
       ],
       [() => "not-applicable", { output: "ran", status: "completed" }, true],
+      [() => true, { status: "approval-required" }, false],
+      [() => false, { output: "ran", status: "completed" }, true],
+      [
+        () => ({ type: "approved", reason: "Within the team's policy." }),
+        {
+          status: "completed",
+          output: "ran",
+          modelOutput: { type: "text", value: "ran" },
+        },
+        true,
+      ],
     ];
     for (const [approval, expected, ran] of policies) {
       const execute = vi.fn(() => "ran");

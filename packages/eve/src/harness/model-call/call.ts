@@ -1,3 +1,4 @@
+import type { ApprovalGrant } from "#harness/approval-recheck.js";
 import {
   isStepCount,
   type LanguageModel,
@@ -98,7 +99,7 @@ interface ModelCallerInput {
   readonly model: LanguageModel;
   readonly generation: GenerationSteering;
   readonly turnMessages: readonly UserModelMessage[];
-  readonly approvedTools: ReadonlySet<string>;
+  readonly approvalGrants: readonly ApprovalGrant[];
   readonly pendingApprovalsNote: string | undefined;
   /** The prompt as the step started it, projected for the model. */
   readonly projectedMessages: HarnessModelMessage[];
@@ -492,7 +493,7 @@ export class ModelCaller {
     const { step } = this;
     const results = await executeInlineCalls({
       abortSignal: this.input.generation.signal,
-      approvedTools: this.input.approvedTools,
+      approvalGrants: this.input.approvalGrants,
       beforeExecute: () => this.input.generation.protectToolExecution(),
       excludedCallIds: options.excludedCallIds ?? new Set(),
       messages,

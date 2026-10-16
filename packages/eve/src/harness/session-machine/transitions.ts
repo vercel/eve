@@ -10,6 +10,7 @@ import {
   delegatedUsageFact,
   errorInfoOf,
   fact,
+  defined,
   runSettledFacts,
   sessionEndedFacts,
   turnSettled,
@@ -289,6 +290,7 @@ export function suspendStep(
 
 /** Private dispatch metadata for a call that starts or reaches a task. */
 export interface TaskCallStart {
+  readonly clearedBy?: import("#protocol/session-events/families/call.js").ClearedBy;
   readonly callId: string;
   readonly taskId: string;
   readonly turnId: string;
@@ -317,7 +319,10 @@ export function startTask(
       },
     });
   }
-  events.push({ type: "call.started", data: { callId: task.callId, taskId: task.taskId } });
+  events.push({
+    type: "call.started",
+    data: defined({ callId: task.callId, taskId: task.taskId, clearedBy: task.clearedBy }),
+  });
   return unchanged(view, events);
 }
 

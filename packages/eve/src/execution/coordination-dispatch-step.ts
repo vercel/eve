@@ -97,7 +97,8 @@ async function dispatchCoordination(
     nextSession = dispatched.session;
     if (dispatched.result !== undefined) results.push(dispatched.result);
     // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
-    else if (task.entry.entryPoint === "execute") executing.push(callStarted(task.callId));
+    else if (task.entry.entryPoint === "execute")
+      executing.push(callStarted(task.callId, { clearedBy: task.clearedBy }));
     if (dispatched.started !== undefined) {
       started.push(dispatched.started);
       const shadow = sessionView(

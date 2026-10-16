@@ -187,7 +187,6 @@ export function validateDurableDynamicToolCallbacks(
       key !== "inputSchema" &&
       key !== "outputSchema" &&
       key !== "label" &&
-      key !== "approvalKey" &&
       key !== "approvalPrompt" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
@@ -233,13 +232,6 @@ export function validateDurableDynamicToolCallbacks(
     phase: "labelStart",
     stamped: raw.label?.start,
     required: false,
-  });
-  const approvalKey = validateReference({
-    name,
-    owner,
-    phase: "approvalKey",
-    stamped: raw.approvalKey,
-    required: entry.approvalKey !== undefined,
   });
   const approvalPrompt = validateReference({
     name,
@@ -294,7 +286,6 @@ export function validateDurableDynamicToolCallbacks(
       delta?: DurableDynamicCallbackReference;
       start?: DurableDynamicCallbackReference;
     };
-    approvalKey?: DurableDynamicCallbackReference;
     approvalPrompt?: DurableDynamicCallbackReference;
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
@@ -309,7 +300,6 @@ export function validateDurableDynamicToolCallbacks(
       start: labelStart,
     };
   }
-  if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
   if (approvalPrompt !== undefined) callbacks.approvalPrompt = approvalPrompt;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;

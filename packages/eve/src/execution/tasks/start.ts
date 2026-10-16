@@ -227,6 +227,7 @@ function unknownTaskResult(input: TaskDispatchInput): RuntimeToolResultActionRes
 function taskCallStart(input: TaskDispatchInput, record: TaskRecord): TaskCallStart {
   return {
     callId: input.task.callId,
+    clearedBy: input.task.clearedBy,
     kind: record.kind,
     name: input.task.toolName,
     taskId: input.taskId,

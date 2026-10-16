@@ -27,14 +27,19 @@ it("keeps what the sandbox provider commits when a session step saves a transiti
     const published = await runtime.run(() =>
       commitSessionStep(
         { serializedContext, sessionState: createTestSessionState(), sessionWritable },
-        (view) => [{ events: [], turn: { ...view.turn, grants: ["deploy"] } }],
+        (view) => [
+          {
+            events: [],
+            turn: { ...view.turn, grants: [{ toolName: "deploy", interactionId: "approval-1" }] },
+          },
+        ],
         { origin: "relayed" },
       ),
     );
     expect(commit).toHaveBeenCalled();
     expect(published.sessionState.snapshot.session.sandboxState).toEqual(captured);
     expect(readTurnState(readDurableSession(published.sessionState).state).grants).toEqual([
-      "deploy",
+      { toolName: "deploy", interactionId: "approval-1" },
     ]);
   } finally {
     commit.mockRestore();

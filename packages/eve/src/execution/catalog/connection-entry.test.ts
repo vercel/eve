@@ -55,7 +55,6 @@ function setup(getToolMetadata: ConnectionClient["getToolMetadata"] = async () =
     const approval = connectionEntry(registry, connection, toolName).approval!;
     const context: ApprovalContext = {
       abortSignal: new AbortController().signal,
-      approvedTools: new Set<string>(),
       callId: `call-${toolName}`,
       getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
       session: {} as ApprovalContext["session"],

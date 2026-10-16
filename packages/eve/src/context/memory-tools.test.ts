@@ -144,7 +144,6 @@ describe("memory provider tools", () => {
     if (replayed.approval === undefined) throw new Error("Expected replayed approval callback.");
     await expect(
       resolveApprovalPolicy(replayed.approval)({
-        approvedTools: new Set(),
         callId: "call_1",
         session: {
           auth: { current: null, initiator: null },
