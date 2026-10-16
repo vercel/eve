@@ -80,7 +80,7 @@ The stream route also sends transport records that are not session events: `{"$e
 
 ### Facts
 
-Facts are grouped into families. Each family has a lifecycle: one fact introduces an entity, others update it, and one terminal fact settles it with an outcome from a closed set. Every fact carries `type` and `data`, and most carry a `scope` naming the turn, run, task, or context change it belongs to.
+Facts are grouped into families. Each family has a lifecycle: one fact introduces an entity, others update it, and one terminal fact settles it with an outcome. Every fact carries `type` and `data`, and most carry a `scope` naming the turn, run, task, or context change it belongs to.
 
 | Family        | Facts                                                                | What it is                                                                                                                                                                                                                                                                                                             |
 | ------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

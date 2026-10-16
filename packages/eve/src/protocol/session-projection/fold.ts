@@ -1,9 +1,9 @@
 // The shared fold: client, server, and anyone else fold a session's lines into the same tables.
 //
 // The fold is tolerant, as every reader must be. It ignores unknown fact and progress types,
-// facts about entities it never saw introduced (or no longer retains), a second terminal, and
-// a terminal whose outcome is outside its closed set: the first terminal wins, and nothing is
-// inferred. It folds a line in place, replacing the rows the line changes, because a session can
+// facts about entities it never saw introduced (or no longer retains), and a second terminal:
+// the first terminal wins, and nothing is inferred. A terminal ends its row whatever its
+// outcome, so a reader older than its writer still sees every entity end. It folds a line in place, replacing the rows the line changes, because a session can
 // run to many thousands of lines; take `copyView` before a fold to keep the state before it.
 
 import { FACT_CATALOG, isFactType, isProgressType } from "#protocol/session-events/catalog.js";
