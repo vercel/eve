@@ -1,6 +1,6 @@
 {
   "name": "@vercel/agent-runs",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": false,
   "description": "Framework-neutral agent run tracing with OpenTelemetry and durable checkpoints.",
   "license": "Apache-2.0",

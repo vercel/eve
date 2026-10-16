@@ -1,5 +1,14 @@
 # eve
 
+## 0.80.1
+
+### Patch Changes
+
+- a3654ef: Compaction now keeps the start and end of an oversized tool result instead of only its start, so failures, errors, and the `bash` exit code at the end of the output survive.
+- 5666d2f: Hosted builds now fail with a clear error when the build output imports a `build.externalDependencies` package, or a subpath of one, that Node's ESM resolver does not resolve to a file inside the output. Previously the build succeeded and the deployed function crashed at boot with `ERR_MODULE_NOT_FOUND` (for example when only a workspace package installed the dependency) or `ERR_PACKAGE_PATH_NOT_EXPORTED` (when the copied version does not export the imported subpath). The error names the import and the app `package.json` to add the package to.
+- c1b079c: Publish framework-neutral tracing as `@vercel/agent-runs` with singular `createAgentRun` and `AgentRun` APIs; eve still bundles it without a new runtime dependency. Also fix a development-server build failure in npm-installed apps when generating source maps.
+- 0857ff4: Reject OpenAPI path parameter values equal to `.` or `..` before sending requests, so URL normalization cannot change the intended route. This validation also applies to application-provided arguments.
+
 ## 0.80.0
 
 ### Minor Changes
