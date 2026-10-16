@@ -525,6 +525,35 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  // #4817: a second press of the same Approve reaches the pass that should authorize the first.
+  it.fails("authorizes a pending approval when a duplicate answer joins its pass", async () => {
+    const execute = vi.fn(async () => "/workspace");
+    const response = vi.fn(() => ({ status: "allowed" as const }));
+    const runStep = createToolLoopHarness(
+      createConfig(createModel(), execute, { request: () => "user-approval", response }),
+    );
+    const approve = {
+      inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+    };
+    const session = withOpenTurn(createPendingApprovalSession(undefined, true), {
+      sequence: 1,
+      stepIndex: 1,
+      turnId: "turn-1",
+    });
+
+    const result = await contextStorage.run(createApprovalContext(), async () => {
+      const first = await runStep(session, approve);
+      if (typeof first.next !== "function") {
+        throw new TypeError("Expected the answer to schedule an authorization pass.");
+      }
+      return await first.next(first.session, approve);
+    });
+
+    expect(response).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(parkedSteps(result.session)).toEqual([]);
+  });
+
   it("executes approved siblings concurrently and exactly once each", async () => {
     const bothStarted = Promise.withResolvers<void>();
     let started = 0;
