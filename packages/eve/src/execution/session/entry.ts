@@ -2,7 +2,12 @@ import { readSerializedSessionSchedule } from "#context/session-schedule.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  RunInput,
+  SessionCapabilities,
+  SessionAuthContext,
+} from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
@@ -318,6 +323,7 @@ function createInitialDelivery(
 ): DeliverHookPayload | undefined {
   if (input.input.message === undefined) return undefined;
   return {
+    auth: serializedContext["eve.auth"] as SessionAuthContext | null | undefined,
     schedule: readSerializedSessionSchedule(serializedContext),
     deliveryMetadata:
       serializedContext["eve.channelDelivery"] === undefined

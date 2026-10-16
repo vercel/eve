@@ -107,6 +107,26 @@ beforeEach(() => {
 });
 
 describe("bootInitialOwner timeout startup", () => {
+  it("preserves the authenticated creator on the first delivery", async () => {
+    vi.mocked(createSessionInbox).mockReturnValue(createInbox() as never);
+    const auth = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const boot = await bootInitialOwner(
+      initialInput({
+        serializedContext: { "eve.auth": auth, "eve.bundle": { source: { kind: "bundled" } } },
+      }),
+      "session-1",
+    );
+    expect(boot?.session.start.kind).toBe("turn");
+    expect(
+      boot?.session.start.kind === "turn" ? boot.session.start.input?.auth : undefined,
+    ).toEqual(auth);
+  });
+
   it("prepares controls and starts the timeout while session creation is pending", async () => {
     const sessionCreation = deferred<never>();
     const timeoutStartup = deferred<{ runId: string }>();
