@@ -43,7 +43,6 @@ export async function recoverDynamicConnectionRehydration(input: {
     input.emit,
   );
   return {
-    next: null,
     session: { ...session, outputSchema: undefined },
     settledTurn: { isError: true, output: message },
   };

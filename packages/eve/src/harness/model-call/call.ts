@@ -213,11 +213,8 @@ export class ModelCaller {
         }),
       );
     }
-    return {
-      next: step.runStep,
-      session: { ...step.session, history: [...this.request.history] },
-      steered: true,
-    };
+    // The steering message is the model's next input.
+    return { again: true, session: { ...step.session, history: [...this.request.history] } };
   }
 
   /** The step's result counted its usage, so an interrupted call's usage no longer applies. */

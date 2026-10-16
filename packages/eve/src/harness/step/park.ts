@@ -49,14 +49,11 @@ export function blocked(view: SessionView, state: Step["session"]["state"]): boo
 
 /**
  * Nothing the step holds can run. Input the turn holds runs next step, past whatever it steers;
- * otherwise the turn stops, waiting on the person it asked or on the runtime's calls.
+ * otherwise the turn stops, and the session reads what it waits on from its state.
  */
 export function park(step: Step): StepResult {
   const view = step.view();
-  if (hasQueuedTurnInput(view) && !holdsMessages(view)) {
-    return { next: step.runStep, session: step.session };
-  }
-  if (resumesOnPerson(view))
-    return { held: { kind: "request" }, next: null, session: step.session };
-  return { next: null, session: step.session };
+  if (hasQueuedTurnInput(view) && !holdsMessages(view))
+    return { again: true, session: step.session };
+  return { session: step.session };
 }

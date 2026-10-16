@@ -230,7 +230,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
       { message: "Hi" },
     );
 
-    expect(inertResult.next).toBe(bareResult.next);
+    expect(inertResult.again).toBe(bareResult.again);
     expect(inert.events.map((event) => event.type)).toEqual(bare.events.map((event) => event.type));
   });
 });

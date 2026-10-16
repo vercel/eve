@@ -258,7 +258,7 @@ describe("memory recalled after a compaction", () => {
       sessionId: "memory-compaction-session",
     };
     const result = await contextStorage.run(ctx, async () => {
-      let stepped = await createToolLoopHarness({
+      const runStep = createToolLoopHarness({
         compactOnly: options.compactOnly,
         // The memory points the session's participants dispatch from these facts.
         handleEvent: foldingHandler(async (event, messages) => {
@@ -316,8 +316,9 @@ describe("memory recalled after a compaction", () => {
             },
           ],
         ]),
-      })(session, options.input);
-      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+      });
+      let stepped = await runStep(session, options.input);
+      while (stepped.again === true) stepped = await runStep(stepped.session);
       return stepped;
     });
     const history = result.session.history.flatMap((message) =>

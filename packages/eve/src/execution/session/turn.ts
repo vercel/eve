@@ -33,7 +33,7 @@ import {
 } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import type { TurnPause } from "#execution/session/pending-turn-state.js";
+import type { TurnPause } from "#execution/session/step-decision.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,

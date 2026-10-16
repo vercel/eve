@@ -201,12 +201,10 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasQueuedTurnInput(step.view()));
-  if (continueLoop) return { next: step.runStep, session: step.session };
-  // The turn rule: no turn ends while its tasks work. The session waits for
-  // one to settle, then calls the model again in the same turn.
-  if (workingTasks.length > 0) {
-    return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
-  }
+  if (continueLoop) return { again: true, session: step.session };
+  // The turn rule: no turn ends while its tasks work. The turn stays open, and the session waits
+  // for one to settle, then calls the model again in the same turn.
+  if (workingTasks.length > 0) return { session: step.session };
 
   return settleTurn(step, {
     history: promptMessages,
@@ -352,7 +350,7 @@ async function settleTurn(
       turnSettled(step.view().projection, { outcome: "completed" }),
       step.session.history,
     );
-    return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
+    return { session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
   const structured = extractFinalOutput(result);
@@ -362,7 +360,6 @@ async function settleTurn(
     step.session = { ...step.session, outputSchema: undefined };
     await step.apply(fail(step.view(), OUTPUT_SCHEMA_NOT_FULFILLED));
     return {
-      next: null,
       session: step.session,
       settledTurn: { isError: true, output: OUTPUT_SCHEMA_NOT_FULFILLED.message },
     };
@@ -377,7 +374,7 @@ async function settleTurn(
     turnSettled(step.view().projection, { outcome: "completed" }),
     step.session.history,
   );
-  return { next: null, session: step.session, settledTurn: { output: structured } };
+  return { session: step.session, settledTurn: { output: structured } };
 }
 
 function createNextCompactionConfig(

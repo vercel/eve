@@ -194,29 +194,6 @@ export interface HarnessStepInput extends Omit<StepInput, "answers"> {
   readonly deliveries?: readonly ConsumedDelivery[];
 }
 
-/**
- * Terminal result indicating the conversation is finished.
- */
-export interface StepDone {
-  readonly done: true;
-  readonly output: unknown;
-  /**
-   * Marks a terminal turn that failed. For a delegated subagent this routes
-   * the result to the parent as an error tool-result rather than an empty
-   * success.
-   */
-  readonly isError?: boolean;
-}
-
-/**
- * The harness's instruction to the runtime about what to do next.
- *
- * - A `StepFn` reference means "call this step immediately" (tool loop continuation).
- * - `null` means "park and wait for the next user message."
- * - `StepDone` means "the conversation is finished."
- */
-export type StepNext = StepDone | StepFn | null;
-
 /** User-facing answer produced when a conversation turn settles. */
 export interface SettledTurn {
   readonly output: unknown;
@@ -230,32 +207,33 @@ export interface SettledTurn {
 }
 
 /**
- * Result returned by one harness step invocation.
+ * What one harness step did. A step reports what only it knows; the session decides what
+ * happens next from its state (`decideStep`): whether the turn waits on a person, on calls, or on
+ * tasks, whether the session parks, and whether it ended.
  */
 export interface StepResult {
-  readonly steered?: true;
-  readonly next: StepNext;
   readonly session: HarnessSession;
+  /**
+   * The turn runs another step at once: the model has input it hasn't read, such as tool
+   * results, a steering message, or queued input, or answers wait for the next step to weigh
+   * them. None of that is in the session's state yet, so only the step can say it.
+   */
+  readonly again?: true;
   /**
    * Present when a conversation turn settled with a user-facing answer; carried
    * across the park boundary so a delegated parent can be notified.
    */
   readonly settledTurn?: SettledTurn;
   /**
-   * Present when the turn stays open: the model ended it while tasks work, or
-   * it waits on a sign-in or tool approval it raised. It resumes when a task
-   * settles, or when the person answers, steers, or cancels.
+   * Present when the step ended the session: its result for a delegated caller. `isError`
+   * routes the result to the parent as an error tool result rather than an empty success.
    */
-  readonly held?: TurnHold;
+  readonly ended?: { readonly output: unknown; readonly isError?: boolean };
 }
-
-export type TurnHold =
-  | { readonly kind: "tasks"; readonly taskIds: readonly string[] }
-  | { readonly kind: "request" };
 
 /**
  * A single step of AI work. Takes the current session and optional user input,
- * returns the updated session and an instruction for the runtime.
+ * and returns the updated session with what the step did.
  */
 export type StepFn = (session: HarnessSession, input?: HarnessStepInput) => Promise<StepResult>;
 

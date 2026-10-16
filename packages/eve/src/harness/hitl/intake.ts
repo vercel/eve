@@ -118,7 +118,7 @@ export async function admitHumanInput(
     // The answers are recorded before any policy runs: the next step weighs them, with the rest
     // of the delivery.
     await step.apply(queueInput(step.view(), compactInput(withoutResponses(answered))));
-    return { kind: "stop", result: { next: step.runStep, session: step.session } };
+    return { kind: "stop", result: { again: true, session: step.session } };
   }
   const consumedMessage = answered?.messageConsumed === true;
   return {

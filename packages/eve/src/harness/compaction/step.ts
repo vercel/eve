@@ -83,7 +83,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const changeId = nextChangeId(projection);
   if (step.session.history.length === 0) {
     await step.apply([controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)]);
-    return { next: null, session: step.session };
+    return { session: step.session };
   }
   const messages = validateHarnessModelMessages(step.projectHistory(step.session.history));
   await step.apply(
@@ -140,7 +140,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   // Applied, not only published: the step's applied session is the compacted one.
   const reason = outcome === "failed" ? "compaction-failed" : undefined;
   await step.apply([fact("delivery.settled", { deliveryId, outcome, reason })]);
-  return { next: null, session: step.session };
+  return { session: step.session };
 }
 
 /** What a compaction's summary calls spent, together, as the summary run records it. */

@@ -62,7 +62,8 @@ import type {
   TurnStepInput,
   TurnStepResult,
 } from "#execution/session/turn-step-types.js";
-import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
+import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
+import { announcesWaiting, decideStep, readStepState } from "#execution/session/step-decision.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import {
   checksSessionEvents,
@@ -478,10 +479,10 @@ async function runSessionStepBody(
           ? { history: input.history, sessionState: input.sessionState }
           : createDurableSessionValues(aliased);
 
-      return pausedOrParked(aliased, {
+      return resolveSessionStepResult({ session: aliased }, () => ({
         serializedContext: nextSerializedContext,
         ...nextValues,
-      });
+      })).result;
     }
 
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
@@ -603,8 +604,9 @@ async function runSessionStepBody(
                 ? completedAuths.map(({ challenge }) => challenge)
                 : undefined;
             const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
-            // Only the step knows whether it stopped for a person; the tables say who.
-            await publisher.finish({ announce: stoppedForPerson(harnessResult) });
+            // The session's state says whether the turn stopped to wait; the tables say on whom.
+            const decision = decideStep(readStepState(harnessResult.session, harnessResult));
+            await publisher.finish({ announce: announcesWaiting(decision) });
             return harnessResult;
           });
           // The waiting boundary may reach the client before this step returns.
@@ -643,8 +645,13 @@ async function runSessionStepBody(
     const nextSerializedContext = serializeContext(ctx);
     stepResult = { ...stepResult, session: aliased };
 
-    const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
+    const { decision, result: durableResult } = resolveSessionStepResult(stepResult, (session) => ({
+      serializedContext: nextSerializedContext,
+      ...createDurableSessionValues(session),
+    }));
     if (checksSessionEvents()) {
+      if (decision.kind === "park" && decision.turnOpen === true)
+        log.warn("a turn step left its turn open with nothing to wake it");
       const disagreement = stepDisagreement(durableResult, currentProjection(ctx).view);
       if (disagreement !== undefined && disagreement !== "dispatch-deferred")
         log.warn("a turn step's decision disagrees with the session's tables", { disagreement });
@@ -654,15 +661,6 @@ async function runSessionStepBody(
   } finally {
     publisher.writer.release();
   }
-}
-
-/**
- * The step stopped for a person: it says so, or it stopped with nothing of its own to wait on,
- * and the tables say whether that's a person (`announceWaiting`).
- */
-function stoppedForPerson(result: StepResult): boolean {
-  if (result.held !== undefined) return result.held.kind === "request";
-  return result.next === null && result.settledTurn === undefined;
 }
 
 /** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */

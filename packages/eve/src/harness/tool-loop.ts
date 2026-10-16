@@ -168,7 +168,7 @@ interface Ended {
  */
 async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
   const runtime = await settleRuntimeWork(step, input);
-  if (runtime === undefined) return { ended: { next: null, session: step.session } } as Ended;
+  if (runtime === undefined) return { ended: { session: step.session } } as Ended;
   await step.apply(openDeferredApprovals(step.view()));
   return runtime;
 }
@@ -221,7 +221,7 @@ async function turnInput(
     await step.apply(join(step.view(), { deliveries }));
   }
   if (!intake.opensTurn && activeTurnIdOf(step.view().projection) === undefined) {
-    return { ended: { next: null, session: step.session } } as Ended;
+    return { ended: { session: step.session } } as Ended;
   }
   return turn;
 }
@@ -241,7 +241,7 @@ async function clearContext(step: Step): Promise<StepResult> {
     ...step.session,
     state: clearMemorySessionState(step.session.state),
   });
-  return { next: null, session: replaceSessionHistory(cleared, []) };
+  return { session: replaceSessionHistory(cleared, []) };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

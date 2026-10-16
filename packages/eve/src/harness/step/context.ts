@@ -221,7 +221,6 @@ export async function failConnectionResolution(step: Step, error: unknown): Prom
   );
   step.session = { ...step.session, outputSchema: undefined };
   return {
-    next: null,
     session: step.session,
     settledTurn: { isError: true, output: message },
   };
@@ -251,9 +250,7 @@ export async function failModelSelection(step: Step, error: unknown): Promise<St
     }),
   );
   return {
-    next: step.hasDelegatedCaller
-      ? { done: true, isError: true, output: message }
-      : { done: true, output: "" },
+    ended: step.hasDelegatedCaller ? { isError: true, output: message } : { output: "" },
     session: step.session,
   };
 }

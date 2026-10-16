@@ -125,7 +125,7 @@ export async function enforceBudget(
       terminal: { sessionId: step.session.sessionId },
     }),
   );
-  return { next: { done: true, output: "" }, session: step.session };
+  return { ended: { output: "" }, session: step.session };
 }
 
 /**
