@@ -43,7 +43,7 @@ interface McpToolCache {
 /**
  * Wraps one `MCPClient` from `@ai-sdk/mcp` for a single connection.
  *
- * Created lazily per-connection per-session. Caches tool metadata after
+ * Created lazily per connection per step. Caches tool metadata after
  * the first `getToolMetadata()` call.
  *
  * When the connection declares `authorization` but no token is available
