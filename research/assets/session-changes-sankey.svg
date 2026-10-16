@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="933" viewBox="0 0 1080 933" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+<rect width="100%" height="100%" rx="6" fill="#ffffff"/>
+<text x="540.0" y="30.0" text-anchor="middle" font-size="15" font-weight="600" fill="#1f2328">v27 (PRs 1–10), production lines by area</text>
+<path d="M344.0,50.0 C438.5,50.0 438.5,71.0 533.0,71.0 L533.0,226.8 C438.5,226.8 438.5,205.8 344.0,205.8 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="50.0" width="14" height="155.8" fill="#cf222e"/>
+<path d="M344.0,212.8 C438.5,212.8 438.5,226.8 533.0,226.8 L533.0,312.4 C438.5,312.4 438.5,298.4 344.0,298.4 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="212.8" width="14" height="85.7" fill="#cf222e"/>
+<path d="M344.0,305.4 C438.5,305.4 438.5,312.4 533.0,312.4 L533.0,372.9 C438.5,372.9 438.5,365.9 344.0,365.9 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="305.4" width="14" height="60.4" fill="#cf222e"/>
+<path d="M344.0,372.9 C438.5,372.9 438.5,372.9 533.0,372.9 L533.0,393.8 C438.5,393.8 438.5,393.8 344.0,393.8 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="372.9" width="14" height="20.9" fill="#cf222e"/>
+<path d="M344.0,400.8 C438.5,400.8 438.5,393.8 533.0,393.8 L533.0,405.1 C438.5,405.1 438.5,412.1 344.0,412.1 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="400.8" width="14" height="11.3" fill="#cf222e"/>
+<path d="M344.0,419.1 C438.5,419.1 438.5,405.1 533.0,405.1 L533.0,416.9 C438.5,416.9 438.5,430.9 344.0,430.9 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="419.1" width="14" height="11.8" fill="#cf222e"/>
+<path d="M344.0,437.9 C438.5,437.9 438.5,416.9 533.0,416.9 L533.0,424.8 C438.5,424.8 438.5,445.8 344.0,445.8 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="437.9" width="14" height="7.9" fill="#cf222e"/>
+<text x="322.0" y="127.9" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Old v26 protocol and builders</tspan><tspan fill="#cf222e" font-weight="600" dx="6">2,832</tspan></text>
+<text x="322.0" y="255.6" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Client reducers</tspan><tspan fill="#cf222e" font-weight="600" dx="6">1,558</tspan></text>
+<text x="322.0" y="335.7" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">HITL candidates and coordinator</tspan><tspan fill="#cf222e" font-weight="600" dx="6">1,099</tspan></text>
+<text x="322.0" y="383.3" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Instrumentation state</tspan><tspan fill="#cf222e" font-weight="600" dx="6">380</tspan></text>
+<text x="322.0" y="406.5" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Channel card model and handlers</tspan><tspan fill="#cf222e" font-weight="600" dx="6">206</tspan></text>
+<text x="322.0" y="425.0" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Private usage tallies</tspan><tspan fill="#cf222e" font-weight="600" dx="6">214</tspan></text>
+<text x="322.0" y="442.0" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Checkpoint migrations and legacy</tspan><tspan fill="#cf222e" font-weight="600" dx="6">144</tspan></text>
+<path d="M547.0,71.0 C651.5,71.0 651.5,50.0 756.0,50.0 L756.0,159.9 C651.5,159.9 651.5,180.9 547.0,180.9 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="50.0" width="14" height="109.9" fill="#0969da"/>
+<path d="M547.0,180.9 C651.5,180.9 651.5,166.9 756.0,166.9 L756.0,267.3 C651.5,267.3 651.5,281.3 547.0,281.3 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="166.9" width="14" height="100.4" fill="#0969da"/>
+<path d="M547.0,281.3 C651.5,281.3 651.5,274.3 756.0,274.3 L756.0,338.6 C651.5,338.6 651.5,345.6 547.0,345.6 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="274.3" width="14" height="64.3" fill="#0969da"/>
+<path d="M547.0,345.6 C651.5,345.6 651.5,345.6 756.0,345.6 L756.0,365.7 C651.5,365.7 651.5,365.7 547.0,365.7 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="345.6" width="14" height="20.1" fill="#0969da"/>
+<path d="M547.0,365.7 C651.5,365.7 651.5,372.7 756.0,372.7 L756.0,390.9 C651.5,390.9 651.5,383.9 547.0,383.9 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="372.7" width="14" height="18.2" fill="#0969da"/>
+<path d="M547.0,383.9 C651.5,383.9 651.5,397.9 756.0,397.9 L756.0,409.6 C651.5,409.6 651.5,395.6 547.0,395.6 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="397.9" width="14" height="11.7" fill="#0969da"/>
+<path d="M547.0,395.6 C651.5,395.6 651.5,416.6 756.0,416.6 L756.0,445.8 C651.5,445.8 651.5,424.8 547.0,424.8 Z" fill="#1a7f37" fill-opacity="0.55"/>
+<rect x="756" y="416.6" width="14" height="29.2" fill="#1a7f37"/>
+<text x="778.0" y="105.0" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Read model</tspan><tspan fill="#0969da" font-weight="600" dx="6">1,999</tspan></text>
+<text x="778.0" y="217.1" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Event contract</tspan><tspan fill="#0969da" font-weight="600" dx="6">1,825</tspan></text>
+<text x="778.0" y="306.5" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Writer and session machine</tspan><tspan fill="#0969da" font-weight="600" dx="6">1,169</tspan></text>
+<text x="778.0" y="355.7" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Other v27 additions</tspan><tspan fill="#0969da" font-weight="600" dx="6">366</tspan></text>
+<text x="778.0" y="381.8" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Dev checker</tspan><tspan fill="#0969da" font-weight="600" dx="6">331</tspan></text>
+<text x="778.0" y="403.8" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Temporary dynamic adapter</tspan><tspan fill="#0969da" font-weight="600" dx="6">212</tspan></text>
+<text x="778.0" y="431.2" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Net removed by v27</tspan><tspan fill="#1a7f37" font-weight="600" dx="6">531</tspan></text>
+<rect x="533.0" y="71.0" width="14" height="353.8" fill="#57606a"/>
+<text x="540.0" y="63.0" text-anchor="middle" font-weight="600" fill="#1f2328" paint-order="stroke" stroke="#ffffff" stroke-width="5" stroke-linejoin="round">v27 · 6,433</text>
+<text x="540.0" y="499.8" text-anchor="middle" font-size="15" font-weight="600" fill="#1f2328">Reactions (#4616), production lines by area</text>
+<path d="M344.0,519.8 C438.5,519.8 438.5,537.3 533.0,537.3 L533.0,661.2 C438.5,661.2 438.5,643.7 344.0,643.7 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="519.8" width="14" height="123.9" fill="#cf222e"/>
+<path d="M344.0,650.7 C438.5,650.7 438.5,661.2 533.0,661.2 L533.0,730.9 C438.5,730.9 438.5,720.4 344.0,720.4 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="650.7" width="14" height="69.6" fill="#cf222e"/>
+<path d="M344.0,727.4 C438.5,727.4 438.5,730.9 533.0,730.9 L533.0,788.3 C438.5,788.3 438.5,784.8 344.0,784.8 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="727.4" width="14" height="57.5" fill="#cf222e"/>
+<path d="M344.0,791.8 C438.5,791.8 438.5,788.3 533.0,788.3 L533.0,823.5 C438.5,823.5 438.5,827.0 344.0,827.0 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="791.8" width="14" height="35.2" fill="#cf222e"/>
+<path d="M344.0,834.0 C438.5,834.0 438.5,823.5 533.0,823.5 L533.0,849.0 C438.5,849.0 438.5,859.5 344.0,859.5 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="834.0" width="14" height="25.5" fill="#cf222e"/>
+<path d="M344.0,866.5 C438.5,866.5 438.5,849.0 533.0,849.0 L533.0,865.3 C438.5,865.3 438.5,882.8 344.0,882.8 Z" fill="#cf222e" fill-opacity="0.55"/>
+<rect x="330" y="866.5" width="14" height="16.3" fill="#cf222e"/>
+<text x="322.0" y="581.8" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Per-kind lifecycles</tspan><tspan fill="#cf222e" font-weight="600" dx="6">2,253</tspan></text>
+<text x="322.0" y="685.5" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Durable callbacks and tool rebuilding</tspan><tspan fill="#cf222e" font-weight="600" dx="6">1,266</tspan></text>
+<text x="322.0" y="756.1" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Closure transforms</tspan><tspan fill="#cf222e" font-weight="600" dx="6">1,045</tspan></text>
+<text x="322.0" y="809.4" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Other reactions deletions</tspan><tspan fill="#cf222e" font-weight="600" dx="6">640</tspan></text>
+<text x="322.0" y="846.8" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Participants and change points</tspan><tspan fill="#cf222e" font-weight="600" dx="6">463</tspan></text>
+<text x="322.0" y="874.7" text-anchor="end" dominant-baseline="middle"><tspan fill="#1f2328">Memory state</tspan><tspan fill="#cf222e" font-weight="600" dx="6">297</tspan></text>
+<path d="M547.0,537.3 C651.5,537.3 651.5,530.3 756.0,530.3 L756.0,677.3 C651.5,677.3 651.5,684.3 547.0,684.3 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="530.3" width="14" height="147.0" fill="#0969da"/>
+<path d="M547.0,684.3 C651.5,684.3 651.5,684.3 756.0,684.3 L756.0,697.1 C651.5,697.1 651.5,697.1 547.0,697.1 Z" fill="#0969da" fill-opacity="0.55"/>
+<rect x="756" y="684.3" width="14" height="12.8" fill="#0969da"/>
+<path d="M547.0,697.1 C651.5,697.1 651.5,704.1 756.0,704.1 L756.0,872.3 C651.5,872.3 651.5,865.3 547.0,865.3 Z" fill="#1a7f37" fill-opacity="0.55"/>
+<rect x="756" y="704.1" width="14" height="168.2" fill="#1a7f37"/>
+<text x="778.0" y="603.8" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Runner and kinds</tspan><tspan fill="#0969da" font-weight="600" dx="6">2,672</tspan></text>
+<text x="778.0" y="690.7" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Definitions</tspan><tspan fill="#0969da" font-weight="600" dx="6">233</tspan></text>
+<text x="778.0" y="788.2" text-anchor="start" dominant-baseline="middle"><tspan fill="#1f2328">Net removed by reactions</tspan><tspan fill="#1a7f37" font-weight="600" dx="6">3,059</tspan></text>
+<rect x="533.0" y="537.3" width="14" height="328.0" fill="#57606a"/>
+<text x="540.0" y="529.3" text-anchor="middle" font-weight="600" fill="#1f2328" paint-order="stroke" stroke="#ffffff" stroke-width="5" stroke-linejoin="round">Reactions · 5,964</text>
+<rect x="390.0" y="904.8" width="12" height="12" rx="2" fill="#cf222e"/>
+<text x="408.0" y="910.8" dominant-baseline="middle" fill="#57606a">removed</text>
+<rect x="500.0" y="904.8" width="12" height="12" rx="2" fill="#0969da"/>
+<text x="518.0" y="910.8" dominant-baseline="middle" fill="#57606a">written</text>
+<rect x="610.0" y="904.8" width="12" height="12" rx="2" fill="#1a7f37"/>
+<text x="628.0" y="910.8" dominant-baseline="middle" fill="#57606a">net saving</text>
+</svg>
