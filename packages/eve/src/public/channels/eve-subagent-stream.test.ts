@@ -162,8 +162,7 @@ describe("eveChannel remote subagent stream", () => {
     await expect(response.text()).resolves.toBe("remote denied");
   });
 
-  // Remove `.fails` with the fix for https://github.com/vercel/eve/issues/4966.
-  it.fails("stops reading the parent stream at the matching agent.started event", async () => {
+  it("stops reading the parent stream at the matching agent.started event", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
     const laterEvents = Array.from({ length: 1_000 }, (_, index) =>
       stampTestEvent(
