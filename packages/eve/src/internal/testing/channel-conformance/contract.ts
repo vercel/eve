@@ -757,6 +757,67 @@ const answeredPromptRules = [
   },
 ] as const satisfies readonly ContractRule[];
 
+/**
+ * A run cancelled outside eve, such as by an operator in the workflow world,
+ * never withdraws its pending prompts, so their buttons stay pressable. A press
+ * can then reach no session (#4835).
+ */
+async function pressAfterRunEnded(
+  conversation: ChannelConversation,
+  kind: "approval" | "question",
+) {
+  const options =
+    kind === "approval" ? await askToDeploy(conversation) : await askWhichDay(conversation);
+  await conversation.cancelRunsInWorld();
+  await conversation.press(option(options, kind === "approval" ? APPROVE_LABELS : "Saturday"));
+}
+
+const NO_LONGER_ACTIVE = /no longer active/iu;
+
+const inactivePromptRules = [
+  {
+    rule: "pressing Approve after the session's run ended outside eve runs nothing and clears the approval's buttons",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "approval");
+      expect(conversation.runsOf(GATED_TOOL), `${GATED_TOOL} ran with no session`).toBe(0);
+      await expectButtonsCleared(conversation, APPROVAL_PROMPT);
+    },
+  },
+  {
+    rule: "pressing an option after the session's run ended outside eve clears the question's buttons",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "question");
+      await expectButtonsCleared(conversation, PROMPT);
+    },
+  },
+  {
+    rule: "pressing an option after the session's run ended outside eve tells the person it is no longer active",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "question");
+      await conversation.waitForShown(NO_LONGER_ACTIVE);
+    },
+  },
+  {
+    rule: "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active",
+    source: "#4835",
+    requires: ["buttons"],
+    async run(conversation) {
+      await pressAfterRunEnded(conversation, "question");
+      await conversation.waitForShown(NO_LONGER_ACTIVE);
+      const { text } = await conversation.shownPrompt(PROMPT);
+      const message = `the inactive prompt reads ${JSON.stringify(text)}`;
+      expect(text, message).toContain(PROMPT);
+      expect(text, message).toMatch(NO_LONGER_ACTIVE);
+    },
+  },
+] as const satisfies readonly ContractRule[];
+
 const budgetRules = [
   {
     rule: "running out of budget opens budget prompt",
@@ -1128,6 +1189,7 @@ export const channelContractSections = [
   { title: "Tool approvals", rules: approvalRules },
   { title: "Approval permissions", rules: approvalPermissionRules },
   { title: "Answered prompts", rules: answeredPromptRules },
+  { title: "Inactive prompts", rules: inactivePromptRules },
   { title: "Budget prompts", rules: budgetRules },
   { title: "Sign-ins", rules: signInRules },
   { title: "Tool callers", rules: callerRules },

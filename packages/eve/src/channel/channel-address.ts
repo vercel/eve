@@ -8,6 +8,7 @@ import {
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type {
   CancelTurnResult,
   ClearSessionResult,
@@ -41,6 +42,7 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
  * Only {@link send} may create a session: when the address is unowned, or in
  * place of a stranded session that another eve version built. Sends to a session whose
  * owner is only unavailable throw `SessionStrandedError` and deliver nothing.
+ * Responses to an address no session holds throw `SessionNotActiveError`.
  */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
@@ -140,9 +142,7 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       if (result.status === "accepted") return toSession(result.sessionId);
       if (payload.inputResponses && payload.inputResponses.length > 0) {
-        throw new Error(
-          "Cannot deliver inputResponses — the target session was not found via continuation token.",
-        );
+        throw new SessionNotActiveError();
       }
       return toSession((await input.runtime.createSession(runInput)).sessionId);
     },

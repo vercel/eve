@@ -9,11 +9,21 @@ import type {
   ParsedBlockActionsPayload,
 } from "#public/channels/slack/interactions.js";
 
-function buildAnsweredHitlMessageBlocks(input: {
+/**
+ * What a settled card shows in place of its controls: the line that replaces
+ * them, the notification text of the update, such as `Answered: Saturday` or
+ * `No longer active`, and who answered when the card credits someone.
+ */
+export interface SettledCard {
+  readonly label: string;
+  readonly text: string;
+  readonly userId?: string;
+}
+
+function buildSettledHitlMessageBlocks(input: {
   readonly actionId: string;
-  readonly answerLabel: string;
+  readonly card: SettledCard;
   readonly messageBlocks: readonly unknown[];
-  readonly userId: string;
 }): unknown[] {
   const actionBlockIndex = input.messageBlocks.findIndex((block) =>
     blockContainsActionId(block, input.actionId),
@@ -21,22 +31,22 @@ function buildAnsweredHitlMessageBlocks(input: {
   if (actionBlockIndex === -1) {
     return buildAnsweredBlocks({
       promptBlocks: findPromptBlocks(input.messageBlocks),
-      answerLabel: input.answerLabel,
-      userId: input.userId,
+      answerLabel: input.card.label,
+      userId: input.card.userId,
     });
   }
 
   const actionBlock = input.messageBlocks[actionBlockIndex];
   const answeredBlocks =
     answeredBlocksFromActionBlock({
-      answerLabel: input.answerLabel,
+      answerLabel: input.card.label,
       block: actionBlock,
-      userId: input.userId,
+      userId: input.card.userId,
     }) ??
     buildAnsweredBlocks({
       promptBlocks: promptBlocksFromActionBlock(actionBlock),
-      answerLabel: input.answerLabel,
-      userId: input.userId,
+      answerLabel: input.card.label,
+      userId: input.card.userId,
     });
   return [
     ...input.messageBlocks.slice(0, actionBlockIndex),
@@ -75,7 +85,7 @@ function actionsContainActionId(actions: unknown, actionId: string): boolean {
 export function answeredBlocksFromActionBlock(input: {
   readonly answerLabel: string;
   readonly block: unknown;
-  readonly userId: string;
+  readonly userId?: string;
 }): unknown[] | undefined {
   if (!isObjectRecord(input.block) || input.block.type !== "card") return undefined;
 
@@ -96,9 +106,9 @@ const ANSWERED_CARD_SUBTEXT_SUFFIX = "*";
 
 function formatAnsweredCardSubtext(input: {
   readonly answerLabel: string;
-  readonly userId: string;
+  readonly userId?: string;
 }): string {
-  const attribution = input.userId.length > 0 ? ` by <@${input.userId}>` : "";
+  const attribution = input.userId === undefined ? "" : ` by <@${input.userId}>`;
   const labelBudget =
     SLACK_CARD_SUBTEXT_MAX_LENGTH -
     ANSWERED_CARD_SUBTEXT_PREFIX.length -
@@ -132,25 +142,37 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/** Settles a pressed HITL card as answered by the presser with the choice they pressed. */
 export async function updateAnsweredHitlCard(
   interaction: ParsedBlockActionsPayload,
   deps: InteractionHandlerDeps,
 ): Promise<void> {
   const hitlAction = interaction.actions.find((action) => isHitlAction(action.actionId));
-  if (!hitlAction?.messageTs) return;
-
-  const answerLabel = hitlAction.label ?? hitlAction.selectedOptionValue ?? hitlAction.value;
-  if (!answerLabel) return;
-
-  const blocks = buildAnsweredHitlMessageBlocks({
-    actionId: hitlAction.actionId,
-    answerLabel,
-    messageBlocks: interaction.messageBlocks,
+  const label = hitlAction?.label ?? hitlAction?.selectedOptionValue ?? hitlAction?.value;
+  if (!hitlAction || !label) return;
+  await settleHitlCard(interaction, deps, {
+    label,
+    text: `Answered: ${label}`,
     userId: hitlAction.user.id,
   });
-  await updateAnsweredCard({
-    answerLabel,
-    blocks,
+}
+
+/** Replaces a pressed HITL card's controls with `card`. */
+export async function settleHitlCard(
+  interaction: ParsedBlockActionsPayload,
+  deps: InteractionHandlerDeps,
+  card: SettledCard,
+): Promise<void> {
+  const hitlAction = interaction.actions.find((action) => isHitlAction(action.actionId));
+  if (!hitlAction?.messageTs) return;
+
+  await updateSettledCard({
+    blocks: buildSettledHitlMessageBlocks({
+      actionId: hitlAction.actionId,
+      card,
+      messageBlocks: interaction.messageBlocks,
+    }),
+    card,
     channelId: interaction.channelId,
     deps,
     installationTeamId: interaction.installationTeamId,
@@ -158,27 +180,27 @@ export async function updateAnsweredHitlCard(
   });
 }
 
-export async function updateAnsweredFreeformCard(input: {
+/** Replaces a freeform card's controls with `card`. */
+export async function settleFreeformCard(input: {
+  readonly card: SettledCard;
   readonly channelId: string;
-  readonly messageTs: string;
-  readonly answerLabel: string;
-  readonly userId?: string;
-  readonly installationTeamId?: string;
   readonly deps: InteractionHandlerDeps;
+  readonly installationTeamId?: string;
+  readonly messageTs: string;
 }): Promise<void> {
-  await updateAnsweredCard({
+  await updateSettledCard({
     ...input,
     blocks: buildAnsweredBlocks({
       promptBlocks: [],
-      answerLabel: input.answerLabel,
-      userId: input.userId,
+      answerLabel: input.card.label,
+      userId: input.card.userId,
     }),
   });
 }
 
-async function updateAnsweredCard(input: {
-  readonly answerLabel: string;
+async function updateSettledCard(input: {
   readonly blocks: unknown[];
+  readonly card: SettledCard;
   readonly channelId: string;
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId?: string;
@@ -193,7 +215,7 @@ async function updateAnsweredCard(input: {
       channel: input.channelId,
       ts: input.messageTs,
       blocks: input.blocks,
-      text: `Answered: ${input.answerLabel}`,
+      text: input.card.text,
     },
   });
 }

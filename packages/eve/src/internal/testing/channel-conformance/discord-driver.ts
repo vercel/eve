@@ -16,6 +16,8 @@ import {
 let nextChannel = 0;
 const PERSON = { id: "U_CONFORMANCE", username: "alice" } as const;
 const PEOPLE = { alice: PERSON, bob: { id: "U_BOB", username: "bob" } } as const;
+/** Discord's message flag (1 << 6) for a message only its recipient sees. */
+const EPHEMERAL_FLAG = 64;
 
 /** A message component eve renders for a choice: a button (type 2) or a select menu (type 3). */
 interface DiscordComponent {
@@ -28,6 +30,8 @@ interface DiscordComponent {
 interface PressHandle {
   readonly customId: string;
   readonly messageId: string;
+  /** The pressed message's text, which Discord sends with every component press. */
+  readonly content?: string;
   /** Set for a select menu option; a button press carries no value. */
   readonly value?: string;
 }
@@ -197,6 +201,8 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
       return {
         id: (call.response as { readonly id: string }).id,
         links: linkTargets((call.body as { readonly components?: unknown }).components),
+        onlyPerson:
+          (((call.body as { readonly flags?: number }).flags ?? 0) & EPHEMERAL_FLAG) !== 0,
         options: choicesOf(call),
         text: (call.body as { readonly content?: string }).content ?? "",
       };
@@ -217,7 +223,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
               : { component_type: 3, custom_id: handle.customId, values: [handle.value] },
           id,
           ...where(PEOPLE[person]),
-          message: { id: handle.messageId },
+          message: { content: handle.content, id: handle.messageId },
           token: `tok-${id}`,
           type: 3,
           version: 1,
@@ -234,22 +240,31 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
 function choicesOf(call: PlatformCall): RenderedOption[] {
   const body = call.body as {
     readonly components?: readonly { readonly components?: readonly DiscordComponent[] }[];
+    readonly content?: string;
   };
   const messageId = (call.response as { readonly id: string }).id;
   return (body.components ?? []).flatMap((row) =>
-    (row.components ?? []).flatMap((component) => visibleChoices(component, messageId)),
+    (row.components ?? []).flatMap((component) =>
+      visibleChoices(component, messageId, body.content),
+    ),
   );
 }
 
-function visibleChoices(component: DiscordComponent, messageId: string): RenderedOption[] {
+function visibleChoices(
+  component: DiscordComponent,
+  messageId: string,
+  content: string | undefined,
+): RenderedOption[] {
   if (component.custom_id === undefined) return [];
   const customId = component.custom_id;
   if (component.type === 2 && component.label !== undefined) {
-    return [{ handle: { customId, messageId } satisfies PressHandle, label: component.label }];
+    return [
+      { handle: { content, customId, messageId } satisfies PressHandle, label: component.label },
+    ];
   }
   if (component.type === 3) {
     return (component.options ?? []).map((option) => ({
-      handle: { customId, messageId, value: option.value } satisfies PressHandle,
+      handle: { content, customId, messageId, value: option.value } satisfies PressHandle,
       label: option.label,
     }));
   }
