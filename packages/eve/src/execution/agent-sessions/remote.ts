@@ -48,6 +48,29 @@ import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js
 import { writeConversationBaggage } from "#tracing/eve/conversation-context.js";
 import { agentDelegation } from "#tracing/eve/delegation.js";
 
+const DeliveryReceiptResponseSchema = z.object({
+  ok: z.literal(true),
+  sessionId: z.string().min(1),
+  deliveryId: z.string().min(1),
+});
+
+const RemoteCancelResponseSchema = z.union([
+  DeliveryReceiptResponseSchema.transform(({ sessionId }) => ({
+    sessionId,
+    status: "accepted" as const,
+  })),
+  CancelTurnResponseSchema,
+]);
+
+const RemoteResetResponseSchema = z.union([
+  DeliveryReceiptResponseSchema.transform(({ sessionId }) => ({
+    ok: true as const,
+    previousSessionId: sessionId,
+    status: "reset" as const,
+  })),
+  ResetResponseSchema,
+]);
+
 const CreateSessionResponseSchema = z
   .object({
     ok: z.literal(true),
@@ -367,7 +390,7 @@ export async function cancelRemoteAgentTurn(input: {
     throw new Error(`Remote agent "${input.remote.name}" cancel-turn response was not valid JSON.`);
   }
 
-  const result = CancelTurnResponseSchema.safeParse(body);
+  const result = RemoteCancelResponseSchema.safeParse(body);
   if (
     !result.success ||
     (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
@@ -412,7 +435,7 @@ export async function resetRemoteAgentSession(input: {
       `Remote agent "${input.remote.name}" reset-session request failed with HTTP ${response.status}.`,
     );
   }
-  const result = ResetResponseSchema.safeParse(await response.json());
+  const result = RemoteResetResponseSchema.safeParse(await response.json());
   if (
     !result.success ||
     (result.data.status === "reset" && result.data.previousSessionId !== input.sessionId)

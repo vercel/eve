@@ -1098,7 +1098,7 @@ describe("cancelRemoteAgentTurn", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, status: "no_active_turn" }, { status: 200 }))
       .mockResolvedValueOnce(
         Response.json(
-          { ok: true, sessionId: "remote/session id", status: "accepted" },
+          { ok: true, sessionId: "remote/session id", deliveryId: "cancel-delivery" },
           { status: 202 },
         ),
       );
@@ -1189,8 +1189,8 @@ describe("resetRemoteAgentSession", () => {
       .fn()
       .mockResolvedValue(
         Response.json(
-          { ok: true, previousSessionId: "remote/session id", status: "reset" },
-          { status: 200 },
+          { ok: true, sessionId: "remote/session id", deliveryId: "reset-delivery" },
+          { status: 202 },
         ),
       );
     vi.stubGlobal("fetch", fetchMock);
