@@ -1,7 +1,7 @@
 import type {
   InstrumentationHandlerContext,
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
+  InstrumentationInteractionOpenedEvent,
+  InstrumentationInteractionSettledEvent,
   InstrumentationProviderDefinition,
 } from "#instrumentation/lifecycle.js";
 import { resumeTool } from "#tracing/eve/agent-tool-instrumentation.js";
@@ -18,7 +18,7 @@ export function createAgentApprovalInstrumentation(input: {
   ) => Promise<AgentActionTraceState | undefined>;
 }): Pick<
   NonNullable<InstrumentationProviderDefinition["events"]>,
-  "input.requested" | "input.resolved"
+  "interaction.opened" | "interaction.settled"
 > {
   async function toolFor(sessionId: string, turnId: string, callId: string) {
     const state = await input.actionStateFor(sessionId, turnId, callId);
@@ -26,10 +26,11 @@ export function createAgentApprovalInstrumentation(input: {
   }
 
   async function onRequested(
-    event: InstrumentationInputRequestedEvent,
+    event: InstrumentationInteractionOpenedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
     const { call } = event;
+    if (event.scope.turnId === undefined) return;
     if (event.kind !== "approval" || call === undefined || ctx.state.get() !== undefined) return;
     const tool = await toolFor(event.scope.sessionId, event.scope.turnId, call.callId);
     const approval = await tool?.approval({
@@ -45,7 +46,7 @@ export function createAgentApprovalInstrumentation(input: {
   }
 
   async function onResolved(
-    event: InstrumentationInputResolvedEvent,
+    event: InstrumentationInteractionSettledEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
     const stored = ctx.state.get();
@@ -63,7 +64,7 @@ export function createAgentApprovalInstrumentation(input: {
       });
   }
 
-  return { "input.requested": onRequested, "input.resolved": onResolved };
+  return { "interaction.opened": onRequested, "interaction.settled": onResolved };
 }
 
 /**
@@ -72,7 +73,7 @@ export function createAgentApprovalInstrumentation(input: {
  */
 const APPROVAL_OUTCOMES: Partial<
   Record<
-    InstrumentationInputResolvedEvent["outcome"],
+    InstrumentationInteractionSettledEvent["outcome"],
     "approved" | "denied" | "cancelled" | "ignored" | "invalid"
   >
 > = {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { setChannelInstrumentationKind, type CompiledChannel } from "#channel/compiled-channel.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
-import { isChannel, type InstrumentationChannel } from "#public/instrumentation/index.js";
+import { isChannel, type InstrumentationChannel } from "#public/channels/index.js";
 
 type SupportMetadata = {
   readonly priority: "high";

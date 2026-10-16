@@ -22,9 +22,11 @@ export function capabilityOf(action: RuntimeActionRequest, label?: string): Capa
   const capability: Capability =
     action.kind === "load-skill"
       ? { kind: "skill", name: action.name }
-      : action.kind === "subagent-call" || action.kind === "remote-agent-call"
+      : action.kind === "subagent-call"
         ? { kind: "agent", name: action.name }
-        : { kind: toolKind(action.toolName), name: action.toolName };
+        : action.kind === "remote-agent-call"
+          ? { kind: "agent", name: action.name, remote: true }
+          : { kind: toolKind(action.toolName), name: action.toolName };
   return label === undefined ? capability : { ...capability, label };
 }
 

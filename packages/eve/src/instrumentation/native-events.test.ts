@@ -1,3 +1,4 @@
+import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -36,6 +37,7 @@ function session() {
     sessionId: "s",
   })!;
   return {
+    ctx,
     heard,
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(facts)),
   };
@@ -72,22 +74,22 @@ describe("step attempts from the stream", () => {
       type: "model.settled",
     });
 
-    expect(heard.filter((event) => event.type.startsWith("step.attempt."))).toMatchObject([
+    expect(heard.filter((event) => event.type.startsWith("model."))).toMatchObject([
       {
         error: new Error("Overloaded"),
-        idempotencyKey: "step:s:turn_0:0:0",
+        idempotencyKey: "model-run:s:run_0:0",
         scope: {
-          attemptId: "s:turn_0:0:0",
-          attemptIndex: 0,
+          runId: "run_0",
+          attempt: 0,
           functionId: "assistant",
-          stepIndex: 0,
         },
-        type: "step.attempt.failed",
+        type: "model.retried",
       },
       {
-        idempotencyKey: "step:s:turn_0:0:1",
-        scope: { attemptId: "s:turn_0:0:1", attemptIndex: 1, stepIndex: 0 },
-        type: "step.attempt.completed",
+        outcome: "completed",
+        idempotencyKey: "model-run:s:run_0:1",
+        scope: { runId: "run_0", attempt: 1 },
+        type: "model.settled",
       },
     ]);
   });
@@ -115,11 +117,11 @@ describe("step attempts from the stream", () => {
 
     expect(
       heard
-        .filter((event) => event.type.startsWith("step.attempt."))
-        .map((event) => ("scope" in event ? [event.type, event.scope.attemptId] : [])),
+        .filter((event) => event.type.startsWith("model."))
+        .map((event) => ("scope" in event ? [event.type, attemptIdempotencyKey(event.scope)] : [])),
     ).toEqual([
-      ["step.attempt.failed", "s:turn_0:0:0"],
-      ["step.attempt.completed", "s:turn_0:1:1"],
+      ["model.settled", "model-run:s:run_0:0"],
+      ["model.settled", "model-run:s:run_1:1"],
     ]);
   });
 
@@ -145,8 +147,70 @@ describe("step attempts from the stream", () => {
 
     expect(
       heard
-        .filter((event) => event.type.startsWith("step.attempt.") || event.type.startsWith("tool."))
-        .map((event) => event.type),
-    ).toEqual(["tool.call.started", "tool.call.failed", "step.attempt.failed"]);
+        .filter((event) => event.type.startsWith("model.") || event.type.startsWith("call."))
+        .map((event) => [event.type, "outcome" in event ? event.outcome : undefined]),
+    ).toEqual([
+      ["call.requested", undefined],
+      ["call.settled", "interrupted"],
+      ["model.settled", "interrupted"],
+    ]);
+  });
+});
+
+describe("calls and deliveries from the stream", () => {
+  function agentCall(callId: string, remote?: true): SessionEvent {
+    return {
+      data: {
+        callId,
+        capability: { kind: "agent", name: "research", ...(remote && { remote }) },
+        input: { message: "Find the 2025 report." },
+        owner: { runId: "run_0" },
+      },
+      scope: scope("run_0"),
+      type: "call.requested",
+    } as SessionEvent;
+  }
+
+  it("reports a remote agent's call as one, and a subagent's as a subagent call", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(started("run_0", 0));
+    await commit(agentCall("call_remote", true), agentCall("call_local"));
+
+    expect(
+      heard.flatMap((event) =>
+        event.type === "call.requested" ? [[event.callId, event.capability]] : [],
+      ),
+    ).toEqual([
+      ["call_remote", { kind: "agent", name: "research", remote: true }],
+      ["call_local", { kind: "agent", name: "research" }],
+    ]);
+  });
+
+  it("publishes delivery settlement in committed fact order without synthesizing a terminal", async () => {
+    const { commit, heard } = session();
+    await commit(...opening);
+    await commit(
+      { type: "delivery.admitted", data: { deliveryId: "d_0" } },
+      { type: "delivery.consumed", data: { deliveryId: "d_0", turnId: "turn_0", parts: [] } },
+    );
+    await commit({
+      data: { outcome: "completed", turnId: "turn_0" },
+      scope: turn,
+      type: "turn.settled",
+    } as SessionEvent);
+
+    expect(
+      heard
+        .filter(
+          (event) =>
+            (event.type === "delivery.settled" && event.outcome === "handled") ||
+            event.type === "turn.settled",
+        )
+        .map((event) => [event.type, "turnId" in event ? event.turnId : undefined]),
+    ).toEqual([
+      ["turn.settled", "turn_0"],
+      ["delivery.settled", "turn_0"],
+    ]);
   });
 });

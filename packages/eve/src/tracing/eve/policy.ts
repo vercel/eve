@@ -2,10 +2,7 @@ import { contextStorage } from "#context/container.js";
 import { SessionTraceSeedKey } from "#context/keys.js";
 import { withoutInstrumentationContent } from "#instrumentation/content.js";
 import { instrumentationEventForTraceDecision } from "#instrumentation/content-policy.js";
-import type {
-  InstrumentationEvent,
-  InstrumentationAttemptScope,
-} from "#instrumentation/lifecycle.js";
+import type { InstrumentationEvent, InstrumentationScope } from "#instrumentation/lifecycle.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#shared/trace-policy.js";
 import {
@@ -80,7 +77,7 @@ export function createEveCapturePolicy(input: {
         { applyAudienceCeiling: false },
       );
     },
-    async forOperation(scope: InstrumentationAttemptScope) {
+    async forOperation(scope: InstrumentationScope) {
       const session = await input.stateStore.get("session", scope.sessionId);
       const seed = resolveForwardedTraceSeed(contextStorage.getStore()?.get(SessionTraceSeedKey));
       const decision = seed?.decision ?? session?.decision;
@@ -107,7 +104,7 @@ function audienceForEvent(
   event: InstrumentationEvent,
   sessionAudience: ChannelAudience | undefined,
 ): ChannelAudience {
-  if ("delivery" in event) return normalizeChannelAudience(event.delivery.channelAudience);
+  if ("delivery" in event) return normalizeChannelAudience(event.delivery?.channelAudience);
   if ("scope" in event && event.scope.channelAudience !== undefined)
     return normalizeChannelAudience(event.scope.channelAudience);
   if (event.type === "session.started") return normalizeChannelAudience(event.channelAudience);
