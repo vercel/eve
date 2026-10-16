@@ -86,6 +86,78 @@ describe("EveEvalLiveTurn", () => {
     expect(turn.status).toBe("completed");
   });
 
+  it("keeps earlier and intervening questions when an answer delivery settles", async () => {
+    const question = (interactionId: string): SessionEvent => ({
+      type: "interaction.opened",
+      data: {
+        interactionId,
+        request: { kind: "question", prompt: interactionId, allowFreeform: true },
+        subject: { turnId },
+      },
+    });
+    const paused: SessionEvent = {
+      type: "turn.paused",
+      data: { turnId, awaiting: [{ interactionId: "first" }, { interactionId: "second" }] },
+    };
+    const response = (events: readonly SessionEvent[]) =>
+      new Response(events.map(encodeTestLine).join(""), {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      });
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        response([
+          ...testTurnFacts(0, "", ["initial"]).slice(0, 3),
+          question("first"),
+          question("second"),
+          paused,
+        ]),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ ok: true, sessionId: "session_1", deliveryId: "answer" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        response([
+          question("third"),
+          { type: "delivery.admitted", data: { deliveryId: "answer" } },
+          { type: "delivery.consumed", data: { deliveryId: "answer", parts: [], turnId } },
+          {
+            type: "response.submitted",
+            data: {
+              deliveryId: "answer",
+              interactionId: "first",
+              responseId: "r_1",
+              value: { text: "Alice's answer" },
+            },
+          },
+          { type: "response.settled", data: { responseId: "r_1", outcome: "applied" } },
+          {
+            type: "interaction.settled",
+            data: { interactionId: "first", outcome: "accepted", cause: { responseId: "r_1" } },
+          },
+          {
+            type: "delivery.settled",
+            data: { deliveryId: "answer", outcome: "awaiting-input", turnId },
+          },
+        ]),
+      );
+    const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
+    const session = manager.attach("session_1");
+    await session.nextTurn();
+    expect(session.pendingInteractions.map((row) => row.interactionId)).toEqual([
+      "first",
+      "second",
+    ]);
+    const answered = await session.respond([{ interactionId: "first", text: "Alice's answer" }]);
+    expect(answered.status).toBe("awaiting-input");
+    expect(session.pendingInteractions.map((row) => row.interactionId)).toEqual([
+      "second",
+      "third",
+    ]);
+    expect(answered.interactions.map((row) => row.interactionId)).toEqual(["second", "third"]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("attaches without I/O and advances the same session cursor across nextTurn and watch", async () => {
     const first = testTurnFacts(0, "First.", ["first"]);
     const second = testTurnFacts(1, "Second.", ["second"]);

@@ -7,7 +7,9 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 import { createTextWithFileContent } from "#client/file-parts.js";
-import type { ClientSession } from "#client/session.js";
+import { followClientSession, type ClientSession } from "#client/session.js";
+import { openInteractions } from "#protocol/session-projection/selectors.js";
+import { interaction } from "#protocol/session-reader.js";
 import type {
   ClientSessionState,
   SendTurnInput,
@@ -162,8 +164,11 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   async compact(): Promise<EveEvalTurn> {
-    const delivery = await this.#session.compact();
-    return this.consume(delivery, undefined, { deliveryId: delivery.deliveryId }).result();
+    const startIndex = this.#session.state.streamIndex;
+    const delivery = await this.#session.compact({ signal: this.#signal });
+    return this.consume(this.#session.stream({ startIndex, signal: this.#signal }), undefined, {
+      deliveryId: delivery.deliveryId,
+    }).result();
   }
 
   agent(opened: ChildOpened): EveEvalAgentSession {
@@ -254,12 +259,23 @@ export class EvalSessionDriver implements EveEvalSession {
 
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
     const { answers, message, ...options } = attachSignal(input, this.#signal);
+    const startIndex = this.#session.state.streamIndex;
     const response =
       answers === undefined
         ? await this.#session.send(message!, options)
         : await this.#session.respond(answers, options);
     const deliveryId = response.deliveryId;
-    return this.consume(response, message, { deliveryId });
+    // Delivery streams omit earlier facts, but the eval's cursor and view must not skip them.
+    return this.consume(
+      followClientSession(this.#session, {
+        startIndex,
+        signal: options.signal,
+        headers: options.headers,
+        streamReconnectPolicy: options.streamReconnectPolicy,
+      }),
+      message,
+      { deliveryId },
+    );
   }
 
   /** @internal */
@@ -353,14 +369,17 @@ export class EvalSessionDriver implements EveEvalSession {
   #recordTurn(input: {
     readonly data: unknown;
     readonly events: readonly SessionStreamEvent[];
-    readonly interactions: readonly Interaction[];
     readonly message: string | undefined;
     readonly sessionId: string;
     readonly sessionEnded: boolean;
     readonly status: RequestStatus;
   }): EveEvalTurn {
     this.#events.push(...input.events);
-    this.#pendingInteractions = input.status === "awaiting-input" ? input.interactions : [];
+    const view = this.view;
+    const interactions = openInteractions(view).flatMap(
+      (row) => interaction(view, row.interactionId) ?? [],
+    );
+    this.#pendingInteractions = input.status === "awaiting-input" ? interactions : [];
 
     const derived = deriveRunFacts(input.events, {
       sessionId: input.sessionId,
@@ -369,11 +388,11 @@ export class EvalSessionDriver implements EveEvalSession {
     const turn = new EvalTurn({
       collector: this.#collector,
       data: input.data,
-      view: this.view,
+      view,
       sessionEnded: input.sessionEnded,
       derived,
       events: input.events,
-      interactions: input.interactions,
+      interactions,
       message: input.message,
       session: this,
       sessionId: input.sessionId,
@@ -394,7 +413,6 @@ export class EvalSessionDriver implements EveEvalSession {
     return this.#recordTurn({
       data: summary.result,
       events,
-      interactions: summary.interactions,
       message: summary.message,
       sessionEnded: summary.sessionEnded,
       sessionId,
