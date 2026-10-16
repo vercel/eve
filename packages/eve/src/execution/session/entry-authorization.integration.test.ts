@@ -358,6 +358,44 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("reports a sign-in once when two calls in one step wait on it, and runs both", async () => {
+    const { executions, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-shared");
+    const continuationToken = "http:workflow-entry-auth-shared";
+
+    await runtime.run(async () => {
+      const run = await startWeatherRun(
+        continuationToken,
+        "Call tools in parallel: get_weather, get_forecast",
+      );
+      const stream = captureEvents(run);
+
+      try {
+        const beforeSignIn = await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil("authorization hold", (event) => event.type === "turn.waiting");
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [weatherCallback(authorizationAttemptId(beforeSignIn))],
+        });
+        const afterSignIn = await stream.nextUntil(
+          "turn after sign-in",
+          (event) => event.type === "session.waiting",
+        );
+
+        const events = [...beforeSignIn, ...afterSignIn];
+        expect(filterEventsByType(events, "authorization.required")).toHaveLength(1);
+        expect(filterEventsByType(events, "authorization.completed")).toHaveLength(1);
+        expect(executions()).toHaveLength(2);
+        expect(filterEventsByType(events, "step.started")).toHaveLength(2);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("queues another person's message behind a held sign-in", async () => {
     const { completeCalls, completedPrincipals, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-queued",
@@ -615,10 +653,11 @@ async function createWeatherAuthRuntime(
       return { token: "weather-token" };
     },
   };
-  const getWeatherTool: ResolvedToolDefinition = {
-    description: "Get the current weather for a city.",
+  // Both tools sign in to the same connection, so one callback serves a step that calls both.
+  const weatherTool = (name: string): ResolvedToolDefinition => ({
+    description: `${name} for a city.`,
     execute: createToolExecuteWithAuth({
-      scope: "get_weather",
+      scope: name,
       async execute(rawInput, rawCtx) {
         const ctx = rawCtx as ToolContext;
         const token = await ctx.getToken(weatherAuth, {
@@ -648,26 +687,29 @@ async function createWeatherAuthRuntime(
       required: ["city"],
       type: "object",
     }),
-    logicalPath: "tools/get_weather.ts",
-    name: "get_weather",
+    logicalPath: `tools/${name}.ts`,
+    name,
     owner: { kind: "application" },
-    sourceId: "tools/get_weather.ts",
+    sourceId: `tools/${name}.ts`,
     sourceKind: "module",
-  };
+  });
+  const tools = [weatherTool("get_weather"), weatherTool("get_forecast")];
   const runtime = await createTestRuntime({
     agent: { name: agentName },
     modules,
-    tools: [getWeatherTool],
+    tools,
   });
-  const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
-  if (manifestTool === undefined) {
-    throw new Error("Expected get_weather to be present in the test manifest.");
+  for (const tool of tools) {
+    const manifestTool = runtime.manifest.tools.find((entry) => entry.name === tool.name);
+    if (manifestTool === undefined) {
+      throw new Error(`Expected ${tool.name} to be present in the test manifest.`);
+    }
+    runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
+      default: {
+        execute: tool.execute,
+      },
+    };
   }
-  runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
-    default: {
-      execute: getWeatherTool.execute,
-    },
-  };
   return {
     completeCalls: () => completeCalls,
     completedPrincipals: () => completedPrincipals,
@@ -699,12 +741,15 @@ function userAuth(principalId: string) {
   };
 }
 
-async function startWeatherRun(continuationToken: string) {
+async function startWeatherRun(
+  continuationToken: string,
+  message = "Use the get_weather tool to check the weather in Lisbon.",
+) {
   return await startSessionOwner(workflowEntry, [
     {
       kind: "initial",
       ownerDeploymentId: "dpl_inline",
-      input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+      input: { message },
       serializedContext: buildSerializedContext({
         auth: userAuth("user-1"),
         channelKind: "http",

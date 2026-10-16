@@ -354,9 +354,20 @@ export function withoutApproved(step: SuspendedStep, callIds: ReadonlySet<string
   return approved.length === 0 ? rest : { ...rest, approved };
 }
 
-/** Approved calls of suspended steps that haven't run. */
-export function approvedCalls(turn: TurnState): readonly ApprovedCall[] {
-  return turn.suspended.flatMap((step) => step.approved ?? []);
+/**
+ * The approved calls of `step` that can run. A call a sign-in stopped is approved too, but waits
+ * until every sign-in it stopped on has called back.
+ */
+export function runnableCalls(view: SessionView, step: SuspendedStep): readonly ApprovedCall[] {
+  const waiting = new Set(view.signIns.map(signInAttemptKey));
+  return (step.approved ?? []).filter((call) =>
+    (call.signIns ?? []).every((challenge) => !waiting.has(signInAttemptKey(challenge))),
+  );
+}
+
+/** Approved calls of suspended steps that can run and haven't. */
+export function approvedCalls(view: SessionView): readonly ApprovedCall[] {
+  return view.turn.suspended.flatMap((step) => runnableCalls(view, step));
 }
 
 export function suspend(turn: TurnState, step: SuspendedStep): TurnState {
@@ -650,44 +661,30 @@ export function runSignIn(
 
 /**
  * Sign-in callbacks matched the attempts `attemptIds` name: the session stops waiting on them.
- * A call they stopped runs once every sign-in it waits on has called back, and reports their
- * outcome; any other sign-in's completion reports when the turn it resumes runs (`completeSignIn`).
+ * A call they stopped runs once every sign-in it waits on has called back (`runnableCalls`); any
+ * other completion reports once the turn it resumes runs (`completeSignIn`).
  */
 export function matchSignIns(
   view: SessionView,
   input: { readonly attemptIds: readonly string[] },
 ): Transition {
   const matched = new Set(input.attemptIds);
-  const signIns = view.signIns.filter((challenge) => !matched.has(signInAttemptKey(challenge)));
-  const waiting = new Set(signIns.map(signInAttemptKey));
-  const suspended = view.turn.suspended.map((step) => {
-    const ready = (step.awaitingSignIn ?? []).filter((call) =>
-      (call.signIns ?? []).every((challenge) => !waiting.has(signInAttemptKey(challenge))),
-    );
-    if (ready.length === 0) return step;
-    const { awaitingSignIn, ...rest } = step;
-    const stillWaiting = (awaitingSignIn ?? []).filter((call) => !ready.includes(call));
-    return {
-      ...rest,
-      approved: [...(step.approved ?? []), ...ready],
-      ...(stillWaiting.length > 0 && { awaitingSignIn: stillWaiting }),
-    };
-  });
-  return { events: [], signIns, turn: { ...view.turn, suspended } };
+  return {
+    ...unchanged(view, []),
+    signIns: view.signIns.filter((challenge) => !matched.has(signInAttemptKey(challenge))),
+  };
 }
 
-/** The sign-ins calls wait on or run for, which the calls report when they settle. */
+/** The sign-ins calls stopped on, which the calls report when they settle. */
 export function callSignIns(turn: TurnState): readonly AuthorizationChallenge[] {
   return turn.suspended.flatMap((step) =>
-    [...(step.approved ?? []), ...(step.awaitingSignIn ?? [])].flatMap(
-      (call) => call.signIns ?? [],
-    ),
+    (step.approved ?? []).flatMap((call) => call.signIns ?? []),
   );
 }
 
 /**
- * The `stopped` calls wait for a sign-in: their results leave the step, and they wait in it to run
- * once the sign-ins call back, rather than the model asking for them again.
+ * The `stopped` calls wait for a sign-in: their results leave the step, and they stay approved,
+ * to run once the sign-ins call back, rather than the model asking for them again.
  */
 export function awaitSignIns(
   step: SuspendedStep,
@@ -703,11 +700,12 @@ export function awaitSignIns(
   const stopped = input.stopped.filter(({ action }) => ids.has(action.callId));
   if (stopped.length === 0) return step;
   const calls = stopped.map(({ action, connections }): ApprovedCall => {
-    // Sign-ins the call already waited on report with the call, beside the ones it waits on now.
+    // A call approved before keeps its request, and the sign-ins it already waited on report with
+    // it, beside the ones it waits on now.
     const earlier = step.approved?.find((approved) => approved.action.callId === action.callId);
     return {
       action,
-      requestId: action.callId,
+      requestId: earlier?.requestId ?? action.callId,
       signIns: [
         ...(earlier?.signIns ?? []),
         ...input.challenges.filter((challenge) => connections.includes(challenge.name)),
@@ -716,9 +714,10 @@ export function awaitSignIns(
   });
   const callIds = new Set(calls.map((call) => call.action.callId));
   return {
-    ...withoutApproved({ ...step, messages: withoutResults(step.messages, callIds) }, callIds),
-    awaitingSignIn: [
-      ...(step.awaitingSignIn ?? []).filter((call) => !callIds.has(call.action.callId)),
+    ...step,
+    messages: withoutResults(step.messages, callIds),
+    approved: [
+      ...(step.approved ?? []).filter((call) => !callIds.has(call.action.callId)),
       ...calls,
     ],
   };

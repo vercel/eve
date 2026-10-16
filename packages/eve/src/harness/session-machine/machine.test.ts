@@ -31,11 +31,13 @@ import { saveProjection } from "./current.js";
 import {
   CANCELLED_CALL_RESULT,
   cancel,
+  awaitSignIns,
   clear,
   completeSignIn,
   hold,
   matchSignIns,
   receive,
+  runnableCalls,
   relay,
   settle,
   suspendStep,
@@ -473,10 +475,10 @@ describe("session machine", () => {
       }),
     );
     const waiting = () => suspendedSteps(machine.session.state)[0];
-    expect(waiting()?.awaitingSignIn?.map((call) => call.action.callId)).toEqual([
-      "call-1",
-      "call-2",
-    ]);
+    const runnable = () =>
+      runnableCalls(machine.view(), waiting()!).map((call) => call.action.callId);
+    expect(waiting()?.approved?.map((call) => call.action.callId)).toEqual(["call-1", "call-2"]);
+    expect(runnable()).toEqual([]);
     expect(machine.session.history).toEqual([]);
 
     // The first sign-in calls back: its call runs, and the call reports it, not the callback.
@@ -484,8 +486,7 @@ describe("session machine", () => {
     const before = machine.events.length;
     await machine.apply(completeSignIn(machine.view(), { completions: [google] }));
     expect(machine.eventsSince(before)).toEqual([]);
-    expect(waiting()?.approved?.map((call) => call.action.callId)).toEqual(["call-1"]);
-    expect(waiting()?.awaitingSignIn?.map((call) => call.action.callId)).toEqual(["call-2"]);
+    expect(runnable()).toEqual(["call-1"]);
 
     // A new message ends the second sign-in, and the call that waited for it fails with why.
     await machine.apply(
@@ -496,8 +497,24 @@ describe("session machine", () => {
       "action.result",
     ]);
     expect(machine.projection.authorizations["attempt-slack"]?.status).toBe("declined");
-    expect(waiting()?.awaitingSignIn).toBeUndefined();
     expect(waiting()?.approved?.map((call) => call.action.callId)).toEqual(["call-1"]);
+    expect(runnable()).toEqual(["call-1"]);
+  });
+
+  it("keeps the request of an approved call that a sign-in stops again", async () => {
+    const machine = createMachine();
+    await machine.apply(receive(machine.view(), { message: "Deploy." }));
+    await machine.apply(startStep(machine.view(), { modelId: "test-model" }));
+    const call = stopped("call-1", "google");
+    const step = {
+      event: { ...machine.position() },
+      messages: [callMessage("call-1")],
+      requests: [],
+      tasks: [],
+      approved: [{ action: call.action, requestId: "approval-1" }],
+    };
+    const next = awaitSignIns(step, { stopped: [call], challenges: [] });
+    expect(next.approved?.map((approved) => approved.requestId)).toEqual(["approval-1"]);
   });
 
   it("cancels the call a sign-in stopped with its turn, answering it as cancelled", async () => {

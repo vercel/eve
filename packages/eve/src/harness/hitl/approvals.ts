@@ -52,6 +52,7 @@ import {
   awaitSignIns,
   hold,
   ownOpenRequestIds,
+  runnableCalls,
   settle,
   stepCallIds,
   withoutApproved,
@@ -542,8 +543,10 @@ export function stepForRequest(view: SessionView, requestId: string): SuspendedS
  * responder's for one of its approvals, and the calls that waited for them fail with `reason`.
  */
 export function withdrawSignIns(view: SessionView, reason: string): Transition {
-  const awaiting = view.turn.suspended.flatMap((step) => step.awaitingSignIn ?? []);
-  const withdrawn = [...view.signIns, ...awaiting.flatMap((call) => call.signIns ?? [])];
+  const waiting = view.turn.suspended.flatMap((step) =>
+    (step.approved ?? []).filter((call) => !runnableCalls(view, step).includes(call)),
+  );
+  const withdrawn = [...view.signIns, ...waiting.flatMap((call) => call.signIns ?? [])];
   const events = [
     ...new Map(withdrawn.map((challenge) => [signInAttemptKey(challenge), challenge])),
   ]
@@ -551,20 +554,11 @@ export function withdrawSignIns(view: SessionView, reason: string): Transition {
     .flatMap((attempt) =>
       attempt?.status === "required" ? [signInWithdrawn(attempt, reason)] : [],
     );
-  const settled = settle(
-    {
-      ...view,
-      turn: {
-        ...view.turn,
-        suspended: view.turn.suspended.map(({ awaitingSignIn: _awaiting, ...step }) => step),
-      },
-    },
-    {
-      results: awaiting.map(({ action }) =>
-        failedCall({ callId: action.callId, failure: reason, toolName: action.toolName }),
-      ),
-    },
-  );
+  const settled = settle(view, {
+    results: waiting.map(({ action }) =>
+      failedCall({ callId: action.callId, failure: reason, toolName: action.toolName }),
+    ),
+  });
   return { ...settled, events: [...events, ...settled.events], signIns: [] };
 }
 

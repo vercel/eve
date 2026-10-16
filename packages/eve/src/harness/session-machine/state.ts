@@ -42,14 +42,11 @@ export interface SuspendedStep {
   readonly requests: readonly InputRequest[];
   /**
    * Calls a person approved that haven't run. They run when the turn next calls the model, after
-   * its step starts and its budget allows it, as calls the model makes do.
+   * its step starts and its budget allows it, as calls the model makes do. A call a sign-in
+   * stopped is one of them, once the sign-ins it lists have called back, so the call that asked
+   * runs, rather than the model deciding again.
    */
   readonly approved?: readonly ApprovedCall[];
-  /**
-   * Calls a sign-in stopped. They become approved once every sign-in they wait on calls back, so
-   * the call that asked runs, rather than the model deciding again.
-   */
-  readonly awaitingSignIn?: readonly ApprovedCall[];
   /** Workflow and agent calls the runtime runs for the step. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];

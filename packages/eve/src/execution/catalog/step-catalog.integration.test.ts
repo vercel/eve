@@ -361,10 +361,10 @@ describe("step catalog in the harness (real AI SDK)", () => {
         (pending) => pending.attemptId !== challenge!.attemptId,
       ),
     });
-    reply(
-      calls(call("items-after-sign-in", CALL_TOOL_NAME, { name: "private__list_items" })),
-      text("The private catalog has Alice's lamp."),
-    );
+    // The callback arrives in a later step, whose virtual context starts empty, and the call the
+    // sign-in stopped runs by itself: the model is only asked to read its result.
+    ctx.clearVirtualContext();
+    reply(text("The private catalog has Alice's lamp."));
     await drive();
     expect(privateCatalog.calls).toEqual([{ input: {}, tool: "list_items" }]);
 
@@ -616,8 +616,7 @@ describe("step catalog in the harness (real AI SDK)", () => {
       "deploy_service",
       "research",
       "billing_specialist",
-      // The call that parked for sign-in, then the model's call after it.
-      "private__list_items",
+      // The call that parked for sign-in runs once, without the model asking again.
       "private__list_items",
       "products__get_status",
       SEARCH_TOOL_NAME,

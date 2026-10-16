@@ -6463,7 +6463,7 @@ describe("createToolLoopHarness", () => {
       expect(parked[0]?.messages).toEqual([
         { content: [delegateCall, signInCall], role: "assistant" },
       ]);
-      expect(parked[0]?.awaitingSignIn?.map((call) => call.action.callId)).toEqual([
+      expect(parked[0]?.approved?.map((call) => call.action.callId)).toEqual([
         signInCall.toolCallId,
       ]);
       expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
@@ -6574,7 +6574,7 @@ describe("createToolLoopHarness", () => {
       expect(actionResults).toHaveLength(0);
       // The step waits whole: the sign-in's call has no result, so nothing reaches history yet.
       const [parked] = parkedSteps(result.session);
-      expect(parked?.awaitingSignIn?.map((call) => call.action.callId)).toEqual(["call-1"]);
+      expect(parked?.approved?.map((call) => call.action.callId)).toEqual(["call-1"]);
       expect(answeredCallIds(parked?.messages ?? [])).toEqual(new Set(["call-2"]));
       expect(JSON.stringify(result.session.history)).not.toContain("call-");
     });
