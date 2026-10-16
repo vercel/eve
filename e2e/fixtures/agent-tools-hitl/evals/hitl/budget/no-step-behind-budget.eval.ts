@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
-import { SAY, asAlice, budgetQuestion, expectNoModelCallWhileOpen } from "../helpers.ts";
+import { SAY, answers, asAlice, budgetQuestion, expectNoModelCallWhileOpen } from "../helpers.ts";
 
 /**
  * While the budget question waits, Alice adds a message. The turn must stay
@@ -14,8 +15,11 @@ export default defineEval({
   async test(t) {
     const { request, session } = await budgetQuestion(t);
 
-    const added = await session.send(SAY.deadline, asAlice);
-    added.notEvent("model.started");
+    const added = await session.start(SAY.deadline, asAlice);
+    await added.waitForEvent("turn.paused");
+    t.check(added.events.filter((event) => event.type === "model.started").length, equals(0));
+    (await session.respond(answers("approve", request), asAlice)).expectOk();
+    (await added.result()).expectOk();
     expectNoModelCallWhileOpen(session, request.interactionId);
   },
 });

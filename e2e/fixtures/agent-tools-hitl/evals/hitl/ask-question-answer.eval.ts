@@ -23,9 +23,15 @@ export default defineEval({
     const production = choice.request.options?.find((option) => /production/i.test(option.label));
     if (production === undefined) throw new Error("ask_question did not offer Production.");
 
-    const chosen = await session.respond([
+    const liveChoice = await session.startRespond([
       { optionId: production.id, interactionId: choice.interactionId },
     ]);
+    let chosen;
+    try {
+      chosen = await liveChoice.result();
+    } finally {
+      t.log(JSON.stringify(liveChoice.events.slice(-16)));
+    }
     chosen.expectOk();
     chosen.calledTool("ask_question", {
       count: 1,

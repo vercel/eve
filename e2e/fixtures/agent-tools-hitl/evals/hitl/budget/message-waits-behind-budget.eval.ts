@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
-import { REPLY, SAY, answers, asAlice, budgetQuestion, expectHeld } from "../helpers.ts";
+import { REPLY, SAY, answers, asAlice, budgetQuestion } from "../helpers.ts";
 
 /**
  * While the budget question waits, Alice adds that the note should mention
@@ -18,12 +19,20 @@ export default defineEval({
   async test(t) {
     const { request, session } = await budgetQuestion(t);
 
-    const added = await session.send(SAY.deadline, asAlice);
-    added.notEvent("delivery.consumed");
-    expectHeld(added);
-    added.notEvent("interaction.settled");
-    added.notEvent("model.requested");
-    added.notEvent("content.completed");
+    const pending = await session.start(SAY.deadline, asAlice);
+    await pending.waitForEvent("turn.paused");
+    const added = { events: [...pending.events] };
+    t.check(
+      added.events.filter((event) =>
+        [
+          "delivery.consumed",
+          "interaction.settled",
+          "model.requested",
+          "content.completed",
+        ].includes(event.type),
+      ).length,
+      equals(0),
+    );
 
     const resumed = (await session.respond(answers("approve", request), asAlice)).expectOk();
     resumed.event("delivery.consumed", {
@@ -34,5 +43,6 @@ export default defineEval({
       data: { phase: "reply", value: REPLY.statusNoteWithDeadline },
     });
     resumed.notEvent("turn.started");
+    (await pending.result()).expectOk();
   },
 });
