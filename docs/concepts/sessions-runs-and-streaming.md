@@ -109,6 +109,31 @@ The full catalog, its outcome sets, and TypeScript types are exported from `eve/
 import { FACT_CATALOG, foldEvents, activeTurn, reply } from "eve/events";
 ```
 
+#### Who owns what
+
+Every entity has at most one owner, and an owner's end closes everything still open under it in
+the same commit, leaves first. Readers never infer that something ended; its terminal fact is on
+the stream. The owner tells you where an entity belongs, such as which turn a call is part of:
+
+| Entity         | Owner                                                                                                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| model run      | its turn or context change (`owner`)                                                                                                                                    |
+| content part   | its run                                                                                                                                                                 |
+| call           | the task serving it, once `call.started` names a `taskId`; otherwise the call it was made inside, or the run that made it, then that run's owner once the run completes |
+| interaction    | what it's about (`subject`): a call, turn, task, or response                                                                                                            |
+| response       | its interaction                                                                                                                                                         |
+| delivery       | the turn that consumed it, until it settles                                                                                                                             |
+| context change | its turn, when it runs inside one                                                                                                                                       |
+| child session  | the call or task that opened it                                                                                                                                         |
+| turn, task     | nothing: each ends by its own fact                                                                                                                                      |
+
+A call outlives the run that made it when the run completes: the turn waits for its result, and
+the turn's end closes it. Which run made a call stays on its row (`owner`) for attribution. Only a
+fact changes an owner: `call.started` with a `taskId`, `delivery.consumed`, and a run completing.
+
+Ids such as `turnId`, `callId`, and `deliveryId` are opaque strings, unique within their session.
+Compare them; don't parse them or rely on how they look.
+
 #### What a later release can add
 
 Within stream version 27, a later minor release can add:
