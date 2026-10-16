@@ -305,9 +305,15 @@ function getLatestTurnFailure(
     const event = events[index];
 
     if (event.type === "turn.failed") {
-      return event.data.code === "MODEL_CALL_FAILED"
-        ? "The model is temporarily unavailable. Please try again."
-        : event.data.message;
+      if (event.data.code !== "MODEL_CALL_FAILED") return event.data.message;
+      // Recognized failures (e.g. AI Gateway billing setup required) carry a curated message
+      // with the fix; unrecognized ones keep the generic copy instead of raw provider prose.
+      const knownMessage = event.data.details?.semanticErrorId
+        ? event.data.details.message
+        : undefined;
+      return typeof knownMessage === "string"
+        ? knownMessage
+        : "The model is temporarily unavailable. Please try again.";
     }
 
     if (event.type === "turn.completed" || event.type === "turn.cancelled") {
