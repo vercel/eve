@@ -13,8 +13,15 @@ import { copyView, emptySessionView, foldLine } from "#protocol/session-projecti
 import {
   activeTurn,
   activity,
+  blockedBy,
+  callState,
+  failure,
   idle,
+  openInteractions,
   openWork,
+  queue,
+  reply,
+  tasks,
   waiting,
 } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -367,24 +374,49 @@ function moves(v: SessionView, ids: () => string): Move[] {
   return out;
 }
 
-/** What readers ask of a view, for comparing two retentions. */
-function answers(view: SessionView) {
+/**
+ * What readers ask of a view, for comparing two retentions: the selectors an operational view,
+ * a hook's `ctx.view`, promises to answer as a complete one does, about what it holds. The list
+ * is the one `docs/guides/hooks.md` publishes.
+ */
+function answers(view: SessionView, held: SessionView = view) {
+  const ids = (rows: readonly { readonly [key: string]: unknown }[], key: string) =>
+    rows.map((row) => row[key]);
   const turnId = activeTurn(view)?.turnId;
-  const waits = turnId === undefined ? undefined : waiting(view, turnId);
   const latest = view.session.latestTurnId;
+  const waits = turnId === undefined ? undefined : waiting(view, turnId);
+  const doing = activity(view);
+  const per = <T>(keys: readonly string[], read: (key: string) => T) =>
+    Object.fromEntries(keys.map((key) => [key, read(key)]));
   return {
-    activity: activity(view).kind,
+    activity: {
+      kind: doing.kind,
+      ...("interactions" in doing && { interactions: ids(doing.interactions, "interactionId") }),
+      ...("tasks" in doing && { tasks: ids(doing.tasks, "taskId") }),
+      ...("names" in doing && { names: doing.names }),
+    },
+    blockedBy: per(Object.keys(held.calls), (callId) =>
+      ids(blockedBy(view, { callId }), "interactionId"),
+    ),
+    callState: per(Object.keys(held.calls), (callId) => callState(view, callId)),
+    failure: latest === undefined ? undefined : failure(view, latest),
     idle: idle(view),
     open: Object.values(openWork(view, { session: true })).map((rows) => rows.length),
-    reply: latest === undefined ? undefined : view.turns[latest]?.reply,
+    openInteractions: ids(openInteractions(view), "interactionId"),
+    queue: ids(queue(view), "deliveryId"),
+    reply: latest === undefined ? undefined : ids(reply(view, latest), "partId"),
+    tasks: {
+      idle: ids(tasks(view, { status: "idle" }), "taskId"),
+      working: ids(tasks(view, { status: "working" }), "taskId"),
+    },
     turnId,
     waiting:
       waits === undefined
         ? undefined
         : waits.on === "person"
-          ? waits.interactions.map((row) => row.interactionId)
+          ? { person: ids(waits.interactions, "interactionId") }
           : waits.on === "work"
-            ? waits.calls.map((row) => row.callId)
+            ? { calls: ids(waits.calls, "callId"), tasks: ids(waits.tasks, "taskId") }
             : "session",
   };
 }
@@ -414,7 +446,7 @@ function brokenPromise(seed: number, cascades = true): string | undefined {
     const before = [copyView(complete), copyView(operational)] as const;
     foldLine(complete, line, complete.position);
     foldLine(operational, line, operational.position, { retention: "operational" });
-    if (JSON.stringify(answers(complete)) !== JSON.stringify(answers(operational)))
+    if (JSON.stringify(answers(complete, operational)) !== JSON.stringify(answers(operational)))
       return "selectors";
     if (
       plain(announceWaiting(before[0], complete)) !== plain(announceWaiting(before[1], operational))
