@@ -305,6 +305,59 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it.fails("runs the call a sign-in was for without asking the model again", async () => {
+    const { executions, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-no-reask");
+    const continuationToken = "http:workflow-entry-auth-no-reask";
+
+    await runtime.run(async () => {
+      const run = await startWeatherRun(continuationToken);
+      const stream = captureEvents(run);
+
+      try {
+        const beforeSignIn = await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil("authorization hold", (event) => event.type === "turn.waiting");
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "authorization-callback",
+          payloads: [weatherCallback(authorizationAttemptId(beforeSignIn))],
+        });
+        const afterSignIn = await stream.nextUntil(
+          "turn after sign-in",
+          (event) => event.type === "session.waiting",
+        );
+
+        // The call that stopped for sign-in is the call that runs: the model is
+        // not asked to decide again between the sign-in and that call's result.
+        const completedAt = afterSignIn.findIndex(
+          (event) => event.type === "authorization.completed",
+        );
+        const resultAt = afterSignIn.findIndex((event) => event.type === "action.result");
+        const modelCallsBetween = afterSignIn
+          .slice(completedAt, resultAt)
+          .filter((event) => event.type === "step.started");
+        expect(
+          modelCallsBetween,
+          "model calls between authorization.completed and the tool call's action.result",
+        ).toHaveLength(0);
+
+        // One model call asks for the tool, one reads its result. Today a third
+        // call sits between the sign-in and the tool running.
+        const modelCalls = [...beforeSignIn, ...afterSignIn].filter(
+          (event) => event.type === "step.started",
+        );
+        expect(modelCalls, "model calls in the turn").toHaveLength(2);
+
+        // The tool runs once, with the arguments of the original call.
+        expect(executions()).toEqual([{ city: "Lisbon" }]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("queues another person's message behind a held sign-in", async () => {
     const { completeCalls, completedPrincipals, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-queued",
@@ -503,6 +556,8 @@ describe("workflowEntry integration", () => {
 });
 
 interface WeatherAuthRuntime {
+  /** The input of each get_weather call that got its token and ran. */
+  executions(): readonly { city: string }[];
   completeCalls(): number;
   completedPrincipals(): readonly ConnectionPrincipal[];
   runtime: Awaited<ReturnType<typeof createTestRuntime>>;
@@ -520,6 +575,7 @@ async function createWeatherAuthRuntime(
 ): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
   const completedPrincipals: ConnectionPrincipal[] = [];
+  const executions: { city: string }[] = [];
   const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
     principalType: "user",
     async getToken(): Promise<TokenResult> {
@@ -565,6 +621,7 @@ async function createWeatherAuthRuntime(
           typeof (rawInput as { city?: unknown }).city === "string"
             ? (rawInput as { city: string }).city
             : "Lisbon";
+        executions.push({ city });
         return {
           city,
           condition: "Sunny",
@@ -604,6 +661,7 @@ async function createWeatherAuthRuntime(
   return {
     completeCalls: () => completeCalls,
     completedPrincipals: () => completedPrincipals,
+    executions: () => executions,
     runtime,
   };
 }
