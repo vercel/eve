@@ -990,7 +990,7 @@ describe("compactMessages: deferred provider tool results", () => {
     role: "assistant",
   };
 
-  it.fails("keeps the deferred result with its call", async () => {
+  it("keeps the deferred result with its call", async () => {
     // `compact` fails on any kept result whose call was summarized away.
     await compact(
       [
@@ -1005,7 +1005,7 @@ describe("compactMessages: deferred provider tool results", () => {
     );
   });
 
-  it.fails("ends on the local result while the search waits", async () => {
+  it("ends on the local result while the search waits", async () => {
     const { result } = await compact(searchRun, {
       recentWindowSize: 2,
       threshold: HEURISTICS_FORBIDDEN,

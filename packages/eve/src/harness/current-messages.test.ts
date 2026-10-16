@@ -63,6 +63,55 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
+  it("holds announcements while a provider tool's result is still to come", () => {
+    const history = [
+      { role: "user" as const, content: "search and date", kind: "user" as const },
+      {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool-call" as const,
+            toolCallId: "srvtoolu_1",
+            toolName: "web_search",
+            input: {},
+            providerExecuted: true,
+          },
+          { type: "tool-call" as const, toolCallId: "toolu_1", toolName: "bash", input: {} },
+        ],
+      },
+      {
+        role: "tool" as const,
+        content: [
+          {
+            type: "tool-result" as const,
+            toolCallId: "toolu_1",
+            toolName: "bash",
+            output: { type: "text" as const, value: "done" },
+          },
+        ],
+      },
+    ];
+    const announcements = { skills: { value: "v2", render: () => "skills changed" } };
+
+    const waiting = createCurrentMessages(history, {
+      historyState: { announcements: { skills: "v1" } },
+    });
+    waiting.addAnnouncements(announcements);
+
+    // The request still ends on the local result, and the old baseline stays for the next one.
+    expect(waiting.nonSystemMessages.at(-1)).toEqual(history[2]);
+    expect(waiting.history).toEqual(history);
+    expect(waiting.historyState).toEqual({ announcements: { skills: "v1" } });
+
+    const settled = createCurrentMessages(history.slice(0, 1), {
+      historyState: { announcements: { skills: "v1" } },
+    });
+    settled.addAnnouncements(announcements);
+
+    expect(settled.nonSystemMessages.at(-1)).toMatchObject({ content: "skills changed" });
+    expect(settled.historyState).toEqual({ announcements: { skills: "v2" } });
+  });
+
   it("appends messages without interpreting their text", () => {
     const current = createCurrentMessages([
       { role: "user", content: "[Skills]\nuser-authored text", kind: "user" },

@@ -28,6 +28,7 @@ import {
   ModelStreamStalledError,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
+import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { discardAttempt } from "#harness/session-machine/transitions.js";
@@ -231,13 +232,27 @@ export class ModelCaller {
     });
   }
 
-  private instructions(extraSystemNote: string | undefined) {
-    return modelInstructions({
-      anthropicCache: this.profile.anthropicCache,
-      extraSystemNote,
-      session: this.step.session,
-      systemMessages: this.request.systemMessages,
-    });
+  /**
+   * The call's instructions and messages, with the attempt's notes. A trailing user note keeps the
+   * provider's cached prefix valid, and the step commits its prompt messages, so the note exists
+   * only on this call's request. It would end the request on a user message, which a provider
+   * tool's pending result must not follow, so then it joins the system note.
+   */
+  private framing(options: ModelCallOptions, messages: readonly ModelMessage[]) {
+    const note = options.trailingUserNote;
+    const asSystem = note !== undefined && awaitsProviderToolResult(messages);
+    const extraSystemNote = asSystem
+      ? [options.extraSystemNote, note].filter((part) => part !== undefined).join("\n\n")
+      : options.extraSystemNote;
+    return {
+      instructions: modelInstructions({
+        anthropicCache: this.profile.anthropicCache,
+        extraSystemNote,
+        session: this.step.session,
+        systemMessages: this.request.systemMessages,
+      }),
+      messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
+    };
   }
 
   private async prepare(options: ModelCallOptions): Promise<ToolSet> {
@@ -250,8 +265,7 @@ export class ModelCaller {
     this.request = this.buildRequest();
     this.requestEnvelopeTokens = await estimateRequestEnvelope({
       history: this.projectedMessages,
-      instructions: this.instructions(options.extraSystemNote),
-      messages: withTrailingUserNote(this.request.nonSystemMessages, options.trailingUserNote),
+      ...this.framing(options, this.request.nonSystemMessages),
       tools,
     });
     return tools;
@@ -320,7 +334,7 @@ export class ModelCaller {
     if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
     }
-    const instructions = this.instructions(options.extraSystemNote);
+    const { instructions, messages: callMessages } = this.framing(options, this.modelMessages);
     const runtimeContext =
       step.instrumentation?.resolveRuntimeContext({
         emissionState: step.position(),
@@ -330,9 +344,6 @@ export class ModelCaller {
       }) ?? {};
     // Label a reissued call's telemetry; otherwise a retry shows only as a second span.
     if (options.retryReason) runtimeContext["eve.retry.reason"] = options.retryReason;
-    // A trailing note rather than a system one keeps the provider's cached prefix valid; the
-    // step commits its prompt messages, so the note exists only on this call's request.
-    const callMessages = withTrailingUserNote(this.modelMessages, options.trailingUserNote);
 
     const position = step.position();
     const attempt = step.instrumentation?.prepareAttempt({

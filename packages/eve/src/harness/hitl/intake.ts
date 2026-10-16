@@ -2,6 +2,7 @@ import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
+import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import {
   approvedCalls,
@@ -185,14 +186,17 @@ export async function acceptHumanInput(
   }
   // What the answers resolved comes before the delivery's own input, as with the AI SDK: the model
   // reads the approved calls' results and the denials first, and the input waits a step. A
-  // message that steers past unanswered approvals joins this step.
+  // message that steers past unanswered approvals joins this step. Input also waits while a
+  // provider tool's result is still to come.
   const answeredApprovals = decision.resolved.some(
     (batch) =>
       batch.inputs.some((entry) => entry.request.kind === "tool-approval") &&
       batch.inputs.every((entry) => entry.response !== undefined),
   );
   const deferred =
-    answeredApprovals || approvedCalls(step.view().turn).length > 0
+    answeredApprovals ||
+    approvedCalls(step.view().turn).length > 0 ||
+    awaitsProviderToolResult(step.session.history)
       ? turnInputOnly(decision.input)
       : undefined;
   if (deferred !== undefined) await step.apply(deferInput(step.view(), deferred));

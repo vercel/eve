@@ -1235,7 +1235,7 @@ describe("createToolLoopHarness", () => {
   // Anthropic defers a web search called beside a local tool: the search runs once the local
   // results are in, and its result opens the next response. A request that adds anything after
   // those results ends the turn early and fails with a 400.
-  it.fails("holds a steering message until a deferred web search result arrives", async () => {
+  describe("a deferred web search result", () => {
     const searchCall = {
       input: { query: "node lts" },
       providerExecuted: true,
@@ -1262,74 +1262,113 @@ describe("createToolLoopHarness", () => {
       type: "tool-result" as const,
     };
     const answerText = { text: "Node 24 is LTS.", type: "text" as const };
-    setupMockAgentSequence([
-      {
-        content: [searchCall, bashCall],
-        finishReason: "tool-calls",
-        response: {
-          messages: [
-            { content: [searchCall, bashCall], role: "assistant" },
-            { content: [bashResult], role: "tool" },
-          ],
-        },
-        text: "",
-        toolCalls: [searchCall, bashCall],
-        toolResults: [bashResult],
-      },
-      {
-        content: [{ ...searchResult, providerExecuted: true }, answerText],
-        finishReason: "stop",
-        response: { messages: [{ content: [searchResult, answerText], role: "assistant" }] },
-        text: "Node 24 is LTS.",
-        toolCalls: [],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "npm 11 ships with it.", role: "assistant" }] },
-        text: "npm 11 ships with it.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ]);
-    const runStep = createToolLoopHarness(
-      createTestConfig(undefined, {
-        tools: new Map([
-          [
-            "bash",
-            {
-              description: "Run shell commands",
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "bash",
-            },
-          ],
-        ]),
-      }),
-    );
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "anthropic/claude-sonnet-5-5" },
-        system: "You are a test assistant.",
-        tools: [
-          { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
+    const callingBoth = {
+      content: [searchCall, bashCall],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          { content: [searchCall, bashCall], role: "assistant" },
+          { content: [bashResult], role: "tool" },
         ],
       },
-    });
-    const promptOf = (call: number): ModelMessage[] => {
+      text: "",
+      toolCalls: [searchCall, bashCall],
+      toolResults: [bashResult],
+    };
+    const answering = {
+      content: [{ ...searchResult, providerExecuted: true }, answerText],
+      finishReason: "stop",
+      response: { messages: [{ content: [searchResult, answerText], role: "assistant" }] },
+      text: "Node 24 is LTS.",
+      toolCalls: [],
+      toolResults: [],
+    };
+    const empty = {
+      content: [],
+      finishReason: "other",
+      response: { messages: [] },
+      text: "",
+      toolCalls: [],
+      toolResults: [],
+    };
+    const harness = () =>
+      createToolLoopHarness(
+        createTestConfig(undefined, {
+          tools: new Map([
+            [
+              "bash",
+              {
+                description: "Run shell commands",
+                inputSchema: jsonSchema({ type: "object" }),
+                name: "bash",
+              },
+            ],
+          ]),
+        }),
+      );
+    const startSession = () =>
+      createTestSession({
+        agent: {
+          modelReference: { id: "anthropic/claude-sonnet-5-5" },
+          system: "You are a test assistant.",
+          tools: [
+            { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
+          ],
+        },
+      });
+    const requestOf = (call: number) => {
       const agent = vi.mocked(ToolLoopAgent).mock.results[call]!.value as {
         stream: ReturnType<typeof vi.fn>;
       };
-      return agent.stream.mock.calls[0]?.[0].messages;
+      return agent.stream.mock.calls[0]?.[0];
     };
 
-    const first = await runStep(session, { message: "Run date and search for the Node LTS." });
-    const second = await runStep(first.session, { message: "Also tell me the npm version." });
-    if (typeof second.next === "function") await second.next(second.session);
+    it("holds a steering message until the result arrives", async () => {
+      setupMockAgentSequence([
+        callingBoth,
+        answering,
+        {
+          finishReason: "stop",
+          response: { messages: [{ content: "npm 11 ships with it.", role: "assistant" }] },
+          text: "npm 11 ships with it.",
+          toolCalls: [],
+          toolResults: [],
+        },
+      ]);
+      const runStep = harness();
 
-    expect(promptOf(1).at(-1)).toEqual({ content: [bashResult], role: "tool" });
-    expect(promptOf(2).at(-1)).toMatchObject({
-      content: "Also tell me the npm version.",
-      role: "user",
+      const first = await runStep(startSession(), {
+        message: "Run date and search for the Node LTS.",
+      });
+      const second = await runStep(first.session, { message: "Also tell me the npm version." });
+      if (typeof second.next === "function") await second.next(second.session);
+
+      expect(requestOf(1).messages.at(-1)).toEqual({ content: [bashResult], role: "tool" });
+      expect(requestOf(2).messages.at(-1)).toMatchObject({
+        content: "Also tell me the npm version.",
+        role: "user",
+      });
+    });
+
+    it("sends an empty-response retry's note as instructions", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        setupMockAgentSequence([callingBoth, empty, answering]);
+        const runStep = harness();
+
+        const first = await runStep(startSession(), {
+          message: "Run date and search for the Node LTS.",
+        });
+        if (typeof first.next === "function") await first.next(first.session);
+
+        // The retry's request still ends on the local result.
+        expect(requestOf(2).messages.at(-1)).toEqual({ content: [bashResult], role: "tool" });
+        expect(vi.mocked(ToolLoopAgent).mock.calls[2]?.[0].instructions).toMatchObject({
+          content: expect.stringContaining("was not delivered"),
+        });
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 

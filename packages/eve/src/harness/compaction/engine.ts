@@ -11,6 +11,7 @@ import {
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
+import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
@@ -334,11 +335,13 @@ function withResumptionGuard(
   if (lastRole !== undefined && lastRole !== "assistant") {
     // A retained tool tail must not displace a task that can fit in the budget.
     // Including it here lets tail selection make room before accepting a candidate.
+    // A provider tool's pending result must directly follow the tail, so nothing joins it.
     if (
       lastRole === "tool" &&
       replay !== undefined &&
       !alreadyKept &&
-      estimateTokens([replay]) <= threshold
+      estimateTokens([replay]) <= threshold &&
+      !awaitsProviderToolResult(messages)
     ) {
       return [...messages, replay];
     }
@@ -489,9 +492,10 @@ function splitMessagesForCompaction(
 
   // The recent tail survives verbatim, so it must not open with tool results
   // whose tool calls fall in the older region — providers reject a tool_result
-  // without its preceding tool_use. Snap such messages into the older region.
+  // without its preceding tool_use. Snap such messages into the older region,
+  // including a response that opens with a deferred provider tool result.
   let split = messages.length - keep;
-  while (split < messages.length && messages[split]?.role === "tool") {
+  while (split < messages.length && opensWithEarlierResult(messages[split]!)) {
     split += 1;
   }
 
@@ -499,4 +503,13 @@ function splitMessagesForCompaction(
     older: messages.slice(0, split),
     recent: messages.slice(split),
   };
+}
+
+function opensWithEarlierResult(message: ModelMessage): boolean {
+  if (message.role === "tool") return true;
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return false;
+  const calls = new Set(
+    message.content.flatMap((part) => (part.type === "tool-call" ? [part.toolCallId] : [])),
+  );
+  return message.content.some((part) => part.type === "tool-result" && !calls.has(part.toolCallId));
 }
