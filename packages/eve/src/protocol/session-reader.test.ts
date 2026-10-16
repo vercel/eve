@@ -7,6 +7,7 @@ import {
   callLabel,
   callState,
   callOutputSource,
+  unweighedAnswers,
   waiting,
 } from "#protocol/session-projection/selectors.js";
 import { callPlace, interaction, runPlace } from "#protocol/session-reader.js";
@@ -97,6 +98,39 @@ describe("turns and steps", () => {
       ]);
     expect(waiting(running("eve__task_wait"), "turn_0")?.on).toBe("work");
     expect(waiting(running("lookup"), "turn_0")).toBeUndefined();
+  });
+
+  it("waits on the asker's work once it forwards an answer, with nothing to weigh", () => {
+    const view = viewOf(
+      started,
+      [
+        turn("turn_0"),
+        run("run_0", "turn_0"),
+        call("c_0", "run_0"),
+        { data: { callId: "c_0" }, scope: { turnId: "turn_0" }, type: "call.started" },
+        runSettled("run_0", "turn_0"),
+      ],
+      [
+        {
+          data: {
+            interactionId: "i_0",
+            origin: { interactionId: "child_i_0", sessionId: "child" },
+            request: { kind: "approval", prompt: "Deploy?" },
+            subject: { callId: "c_0" },
+          },
+          type: "interaction.opened",
+        },
+      ],
+      [
+        { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
+        {
+          data: { deliveryId: "d_1", interactionId: "i_0", responseId: "r_0" },
+          type: "response.submitted",
+        },
+      ],
+    );
+    expect(unweighedAnswers(view, "turn_0")).toBe(false);
+    expect(waiting(view, "turn_0")?.on).toBe("work");
   });
 
   it("places each run at its step within its turn, and each call at its run's", () => {

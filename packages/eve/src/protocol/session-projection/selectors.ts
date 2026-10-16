@@ -301,7 +301,7 @@ export function waiting(
   // An interaction already answered, such as one of a batch still waiting for the rest or one
   // forwarded to the child that asked it, doesn't wait on a person. A request relayed from a
   // task this turn's call started belongs to the task, but the turn still waits on its person.
-  const answered = answeredInteractionIds(view);
+  const answered = new Set([...answeredInteractionIds(view), ...forwarded(open)]);
   // A question about a call that already ended, such as a cancelled stretch's before its run
   // withdraws it, holds nothing.
   const people = openInteractions(view).filter(
@@ -316,7 +316,7 @@ export function waiting(
 
 /**
  * Whether the turn has an answer the session hasn't weighed, which is its work, unless its
- * responder must sign in first.
+ * responder must sign in first or the session forwarded it.
  */
 export function unweighedAnswers(view: SessionView, turnId: string): boolean {
   return weighsAnswers(openWork(view, { turnId }));
@@ -328,8 +328,27 @@ function weighsAnswers(open: OpenWork): boolean {
       "responseId" in row.subject ? [row.subject.responseId] : [],
     ),
   );
+  const sent = new Set(forwarded(open));
   return open.responses.some(
-    (response) => response.status === "submitted" && !signingIn.has(response.responseId),
+    (response) =>
+      response.status === "submitted" &&
+      !signingIn.has(response.responseId) &&
+      !sent.has(response.interactionId),
+  );
+}
+
+/**
+ * Relayed requests with an answer the session forwarded to their asker, which hasn't admitted it
+ * yet. The session forwards an answer in the step that records it, so the asker weighs it.
+ */
+function forwarded(open: OpenWork): readonly string[] {
+  const relayed = new Set(
+    open.interactions.flatMap((row) => (row.origin === undefined ? [] : [row.interactionId])),
+  );
+  return open.responses.flatMap((response) =>
+    response.status === "submitted" && relayed.has(response.interactionId)
+      ? [response.interactionId]
+      : [],
   );
 }
 

@@ -182,7 +182,8 @@ inductive Arrival where
   deriving DecidableEq, Repr
 
 def arrive : Arrival → State → State
-  -- The session weighs answers only to requests it asked; it forwards the rest.
+  -- The session weighs answers only to requests it asked. It forwards the rest to their asker,
+  -- and `unweighedAnswers` leaves them out (`forwarded` in `selectors.ts`).
   | .answer all weigh, s =>
     { s with requests := s.requests && !all, unweighed := s.unweighed || (weigh && s.requests) }
   | .callback all, s => { s with signIns := s.signIns && !all }
