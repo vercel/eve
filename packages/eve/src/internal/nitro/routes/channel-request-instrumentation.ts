@@ -10,7 +10,7 @@ import {
   type SpanContext,
 } from "#compiled/@opentelemetry/api/index.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { withErrorContent } from "#compiled/@eve/tracing/otel.js";
+import { withErrorContent } from "#compiled/@vercel/agent-runs/otel.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 
 export interface ChannelRequestTrace {

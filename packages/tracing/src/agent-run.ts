@@ -21,7 +21,7 @@ import type {
   TraceReference,
 } from "./core/types.js";
 
-export interface AgentTracingOptions {
+export interface AgentRunOptions {
   /** Span output and context propagation. Defaults to the global OpenTelemetry provider. */
   readonly telemetry?: AgentTelemetry;
   /**
@@ -87,7 +87,7 @@ interface MemoryInput<T> {
   };
 }
 
-export interface AgentTracing {
+export interface AgentRun {
   turn: import("./operations.js").WrappedOperation<TurnInput, TurnOperation>;
   /** Returns a saved durable turn, without starting one. */
   resume(input: ResumeInput): Promise<TurnOperation | undefined>;
@@ -110,7 +110,7 @@ interface LiveTurn {
   writes: number;
 }
 
-export function createAgentTracing(input: AgentTracingOptions): AgentTracing {
+export function createAgentRun(input: AgentRunOptions): AgentRun {
   const telemetry = input.telemetry ?? otelTelemetry();
   const checkpointer = input.checkpointer;
   if (checkpointer !== undefined && telemetry.ids === undefined)

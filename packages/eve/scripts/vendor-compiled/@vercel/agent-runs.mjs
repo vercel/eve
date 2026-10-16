@@ -8,7 +8,7 @@ import { collectFilesRecursively, createDeclarationCopier } from "../_shared.mjs
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const tscPath = join(dirname(require.resolve("typescript/package.json")), "bin", "tsc");
-const packageRoot = dirname(require.resolve("@eve/tracing/package.json"));
+const packageRoot = dirname(require.resolve("@vercel/agent-runs/package.json"));
 const sources = (await collectFilesRecursively(join(packageRoot, "src"), [".ts"]))
   .filter((file) => !file.endsWith(".test.ts"))
   .map((file) => relative(packageRoot, file).replaceAll("\\", "/"))
@@ -28,13 +28,13 @@ const copyDeclarations = createDeclarationCopier({
 });
 
 /**
- * Bundle the private workspace tracing library so the published eve package
+ * Bundle the agent run library so the published eve package
  * stays self-contained. It shares the `workflow` chunk group with the vendored
  * `@opentelemetry/api`, so eve and the library use one OpenTelemetry copy.
  */
 export default {
-  packageName: "@eve/tracing",
-  compiledPath: "@eve/tracing",
+  packageName: "@vercel/agent-runs",
+  compiledPath: "@vercel/agent-runs",
   chunkGroup: "workflow",
   entries: ["index", "delegation", "otel", "ai-sdk"].map((name) => ({
     entry: `src/${name}.ts`,

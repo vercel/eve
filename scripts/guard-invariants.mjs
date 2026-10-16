@@ -139,7 +139,7 @@
  *   rule 52 — The tracing library in `packages/tracing/src/` imports only
  *             itself and external packages. eve reaches it only through the
  *             vendored root, delegation, otel, and ai-sdk entrypoints under
- *             `#compiled/@eve/tracing/`, never the workspace package itself.
+ *             `#compiled/@vercel/agent-runs/`, never the workspace package itself.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -322,8 +322,10 @@ async function scanRepo(state) {
     if (posix.startsWith("packages/eve/")) {
       lines.forEach((line, index) => {
         const privateImport =
-          /['"]#compiled\/@eve\/tracing\/(?!(?:index|delegation|otel|ai-sdk)\.js['"])/.test(line) ||
-          /(?:from\s+|import\s*\()['"]@eve\/tracing(?:\/[^'"]*)?['"]/.test(line) ||
+          /['"]#compiled\/@vercel\/agent-runs\/(?!(?:index|delegation|otel|ai-sdk)\.js['"])/.test(
+            line,
+          ) ||
+          /(?:from\s+|import\s*\()['"]@vercel\/agent-runs(?:\/[^'"]*)?['"]/.test(line) ||
           [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)].some(
             (match) =>
               match[2].startsWith(".") &&
@@ -337,7 +339,7 @@ async function scanRepo(state) {
             file: posix,
             line: index + 1,
             message:
-              "Import the tracing library from #compiled/@eve/tracing/{index,delegation,otel,ai-sdk}.js, not the workspace package or its private modules.",
+              "Import the tracing library from #compiled/@vercel/agent-runs/{index,delegation,otel,ai-sdk}.js, not the workspace package or its private modules.",
           });
       });
     }

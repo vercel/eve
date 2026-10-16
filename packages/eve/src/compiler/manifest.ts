@@ -767,7 +767,7 @@ const compiledScheduleCollectionDefinitionSchema = z
     providerKind: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    tools: z.boolean().optional(),
+    tools: z.union([z.boolean(), z.literal("deferred")]).optional(),
   })
   .strict();
 

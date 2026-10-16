@@ -1,4 +1,4 @@
-import type { Attributes } from "#compiled/@eve/tracing/index.js";
+import type { Attributes } from "#compiled/@vercel/agent-runs/index.js";
 import {
   context as otelContext,
   createContextKey,

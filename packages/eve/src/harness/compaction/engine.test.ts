@@ -619,27 +619,49 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(second[2]).toEqual(capped);
   });
 
-  it("does not split a UTF-16 surrogate pair when capping tool results", async () => {
-    // JSON.stringify of this output places 📥's high surrogate at index 1886,
-    // the last unit of the 1887-unit cut the annotation leaves of the
-    // 2000-unit TRANSCRIPT_PAYLOAD_LIMIT.
-    const content = `${"x".repeat(1851)}📥${"y".repeat(500)}`;
+  it("does not split a UTF-16 surrogate pair at either cut when capping tool results", async () => {
+    // Astral characters across the whole cut window: both the head and the
+    // tail cut fall inside surrogate pairs at one of the two offsets.
+    for (const offset of [0, 1]) {
+      const content = `${"x".repeat(offset)}${"📥".repeat(2_000)}`;
+      const { result } = await compact(
+        [
+          user("investigate"),
+          ...toolResultExchange({ type: "json", value: { content } }),
+          user("next"),
+        ],
+        { recentWindowSize: 1 },
+      );
+      const value = toolResultValue(result[2]);
+      expect(value.startsWith("[Truncated by eve")).toBe(true);
+      expect(value.length).toBeLessThanOrEqual(2_000);
+      expect(value).toBe(value.toWellFormed());
+      expect(value).toContain("chars omitted");
+      expect(value.endsWith('📥"}}')).toBe(true);
+    }
+  });
+
+  it("keeps the failure and exit code of a large bash result when capping", async () => {
+    const stdout = `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts\nTest Files  1 failed`;
     const call: ModelMessage = {
-      content: [{ input: {}, toolCallId: "call-0", toolName: "grep", type: "tool-call" }],
+      content: [{ input: {}, toolCallId: "call-0", toolName: "bash", type: "tool-call" }],
       role: "assistant",
     };
     const resultMsg: ModelMessage = {
       content: [
         {
-          output: { type: "json", value: { content } },
+          output: {
+            type: "json",
+            value: { stderr: "", stdout, truncated: false, exitCode: 1, status: "completed" },
+          },
           toolCallId: "call-0",
-          toolName: "grep",
+          toolName: "bash",
           type: "tool-result",
         },
       ],
       role: "tool",
     };
-    const messages = [user("investigate"), call, resultMsg, user("what did you find?")];
+    const messages = [user("run the tests"), call, resultMsg, user("what failed?")];
 
     const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
 
@@ -650,11 +672,11 @@ describe("compactMessages: tool-result cap heuristic", () => {
       typeof output === "object" && output !== null && "value" in output
         ? String(output.value)
         : "";
-    expect(value).toContain("Truncated by eve");
-    expect(value).toBe(value.toWellFormed());
-    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(value)).toBe(false);
-    expect(value).not.toContain("📥");
-    expect(value).toContain("x".repeat(1851));
+    expect(value.startsWith("[Truncated by eve")).toBe(true);
+    expect(value).toContain("✓ passing test");
+    expect(value).toContain("chars omitted");
+    expect(value).toContain(String.raw`FAIL src/auth.test.ts\nTest Files  1 failed`);
+    expect(value).toContain('"exitCode":1,"status":"completed"}');
   });
 
   it.each([
@@ -684,8 +706,11 @@ describe("compactMessages: tool-result cap heuristic", () => {
   });
 
   it.each([
-    ["plain JSON", { content: `${"x".repeat(1_700)}KEPT-END-7781${"z".repeat(4_000)}` }],
-    ["escape-heavy JSON", { content: `${'q"\\'.repeat(300)}KEPT-END-7781${"z".repeat(4_000)}` }],
+    ["plain JSON", { content: `KEPT-HEAD-7781${"z".repeat(4_000)}KEPT-TAIL-7781` }],
+    [
+      "escape-heavy JSON",
+      { content: `KEPT-HEAD-7781${"z".repeat(4_000)}${'q"\\'.repeat(300)}KEPT-TAIL-7781` },
+    ],
   ])(
     "keeps the whole capped %s content when a later compaction summarizes",
     async (_name, value) => {
@@ -696,7 +721,9 @@ describe("compactMessages: tool-result cap heuristic", () => {
       ];
       const { result: first } = await compact(history, { recentWindowSize: 1 });
       const cappedValue = toolResultValue(first[2]);
-      expect(cappedValue).toContain("KEPT-END-7781");
+      expect(cappedValue).toContain("KEPT-HEAD-7781");
+      expect(cappedValue.split("chars omitted").length - 1).toBe(1);
+      expect(cappedValue.endsWith('KEPT-TAIL-7781"}}')).toBe(true);
 
       const summarize = summarizeWith("forced checkpoint");
       await compactMessages(first, { recentWindowSize: 1, threshold: ROOMY }, summarize, true);

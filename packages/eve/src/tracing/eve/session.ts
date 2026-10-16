@@ -33,14 +33,14 @@ import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { withOperationConversation } from "#tracing/eve/conversation-context.js";
 import type {
   AgentSpanIdGenerator,
-  AgentTracing,
+  AgentRun,
   ExecutionContext,
   TraceLink,
   TurnOperation,
-} from "#compiled/@eve/tracing/index.js";
+} from "#compiled/@vercel/agent-runs/index.js";
 
 interface EveSessionTracingInput {
-  readonly tracing: AgentTracing;
+  readonly tracing: AgentRun;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly environment: ConversationEnvironment;
   readonly frameworkVersion: string;

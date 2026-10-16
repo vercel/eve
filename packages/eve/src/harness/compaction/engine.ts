@@ -1,12 +1,12 @@
 import type { ModelMessage } from "ai";
 
 import {
+  clipMiddleUtf16Safe,
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
   serializeToolResultOutput,
-  sliceUtf16Safe,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
@@ -266,8 +266,8 @@ const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
  * tool_use/tool_result pairing untouched. The cap matches the transcript
  * payload clip, so a later summarization sees the same content the model
  * kept — capping never destroys material the summarizer would need, unlike
- * dropping results outright. The annotation leads the value so it survives
- * prefix-capped renderings.
+ * dropping results outright. The cap keeps the head and tail of the output,
+ * where failures and exit codes usually are.
  *
  * Capping is idempotent: the capped value, annotation included, fits the
  * same limit it was measured against, and a text output is measured by its
@@ -302,7 +302,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
         ...part,
         output: {
           type: "text" as const,
-          value: `${CAPPED_RESULT_PREFIX}${sliceUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,
+          value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,
         },
       };
     });

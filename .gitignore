@@ -36,6 +36,8 @@ test-results/
 packages/eve/docs/
 packages/eve/LICENSE
 packages/eve/NOTICE
+packages/tracing/LICENSE
+packages/tracing/NOTICE
 
 # Logs
 *.log

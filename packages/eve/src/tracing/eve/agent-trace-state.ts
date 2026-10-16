@@ -6,7 +6,7 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import type { TraceSnapshot } from "#compiled/@eve/tracing/index.js";
+import type { TraceSnapshot } from "#compiled/@vercel/agent-runs/index.js";
 
 export interface AgentSessionTraceState {
   readonly traceSessionId: string;

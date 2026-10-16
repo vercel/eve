@@ -424,13 +424,14 @@ describe("compileAgentManifest source graph", () => {
             inputSchema: z.object({ task: z.string() }),
             auth: () => null,
             run: async () => {},
+            tool: "deferred",
           }),
         }),
       },
     ]);
     const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
     expect(compiled.scheduleCollections).toContainEqual(
-      expect.objectContaining({ name: "billing/requests" }),
+      expect.objectContaining({ name: "billing/requests", tools: "deferred" }),
     );
     const wrapper = compiled.dynamicTools.find(
       (tool) => tool.logicalPath === "tools/schedule__billing-requests.ts",
@@ -455,6 +456,7 @@ describe("compileAgentManifest source graph", () => {
       ),
     );
     const entries = tools as Record<string, import("#tools/dynamic.js").DynamicToolEntry>;
+    expect(Object.values(entries).every((entry) => entry.deferred)).toBe(true);
     expect(
       entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
     ).toBe("Create schedule: daily-digest");

@@ -18,7 +18,6 @@ import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 import eveCatalog from "./@eve/catalog.mjs";
-import eveTracing from "./@eve/tracing.mjs";
 import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
 import linqChatSdkAdapter from "./@linqapp/chat-sdk-adapter.mjs";
 
@@ -26,6 +25,7 @@ import modelContextProtocolServer from "./@modelcontextprotocol/server.mjs";
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
+import vercelAgentRuns from "./@vercel/agent-runs.mjs";
 import vercelBlob from "./@vercel/blob.mjs";
 import vercelConnect from "./@vercel/connect.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
@@ -76,7 +76,6 @@ export const MODULES = [
   eventsourceParserStream,
   envRunner,
   eveCatalog,
-  eveTracing,
   google,
   jose,
   jsYaml,
@@ -99,6 +98,7 @@ export const MODULES = [
   shadcnRegistry,
   standardSchemaSpec,
   turndown,
+  vercelAgentRuns,
   vercelBlob,
   vercelConnect,
   vercelDetectAgent,

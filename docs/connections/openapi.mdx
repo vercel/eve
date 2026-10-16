@@ -119,6 +119,8 @@ Filters match `operationId`. If an operation does not declare one, use the deter
 
 When an operation path contains dynamic segments, the spec must declare matching OpenAPI path parameters. eve exposes path, query, header, and cookie parameters as top-level tool inputs, then substitutes `in: "path"` values into the matching `{name}` placeholder before making the request.
 
+Path parameter values must not be exactly `.` or `..`. eve rejects these values before URL parsing can normalize them and change the route, including values resolved through `toolCall.providedArguments`. Other values remain URL-encoded during substitution, including embedded slashes.
+
 ```ts title="agent/connections/cart.ts"
 import { defineOpenAPIConnection } from "eve/connections";
 

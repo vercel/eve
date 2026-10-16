@@ -5,12 +5,12 @@ import {
   trace,
   type SpanContext,
 } from "#compiled/@opentelemetry/api/index.js";
-import { otelTelemetry } from "#compiled/@eve/tracing/index.js";
+import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import {
   activeTraceOperation,
   truncateTelemetryText,
   withErrorContent,
-} from "#compiled/@eve/tracing/otel.js";
+} from "#compiled/@vercel/agent-runs/otel.js";
 import { contextStorage, type AlsContext } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";

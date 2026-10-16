@@ -112,6 +112,50 @@ test("runs clone without approval while retaining repository-scoped write-capabl
   assert.equal(runs.length, 1);
 });
 
+test("asks authorize with the caller, repository, and token before running", async () => {
+  const auth = {
+    attributes: {},
+    authenticator: "github-webhook",
+    principalId: "github:octocat",
+    principalType: "user",
+    subject: "octocat",
+  };
+  const requests: unknown[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const dependencies = {
+    auth,
+    sessionId: "session-authorize",
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" });
+    },
+  };
+
+  await assert.rejects(
+    executeGitHubShell(
+      READ,
+      {
+        ...CONFIG,
+        authorize: (request) => {
+          requests.push(request);
+          return false;
+        },
+      },
+      dependencies,
+    ),
+    /not authorized to access vercel\/internal-agents/u,
+  );
+  assert.deepEqual(requests, [
+    { auth, repository: "vercel/internal-agents", token: "secret-token" },
+  ]);
+  assert.equal(runs.length, 0);
+
+  await executeGitHubShell(READ, { ...CONFIG, authorize: async () => true }, dependencies);
+  assert.equal(runs.length, 1);
+});
+
 test("approves the full syntactically valid gh surface", () => {
   for (const command of [
     "gh api repos/vercel/internal-agents",

@@ -14,8 +14,16 @@ import { resolveInstrumentationEnvironment } from "#internal/application/dev-env
 import { createLogger, formatError } from "#internal/logging.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
-import { otelTelemetry, type Attributes, type SpanWriter } from "#compiled/@eve/tracing/index.js";
-import { contentAttribute, mcpLifecycle, withErrorContent } from "#compiled/@eve/tracing/otel.js";
+import {
+  otelTelemetry,
+  type Attributes,
+  type SpanWriter,
+} from "#compiled/@vercel/agent-runs/index.js";
+import {
+  contentAttribute,
+  mcpLifecycle,
+  withErrorContent,
+} from "#compiled/@vercel/agent-runs/otel.js";
 import { DIRECT_TOOL_CALL_ATTRIBUTE, DIRECT_TOOL_CALL_VALUE } from "#tracing/local/inspection.js";
 import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";

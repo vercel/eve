@@ -421,7 +421,14 @@ export class OpenApiConnectionClient implements ConnectionClient {
         continue;
       }
       if (param.location === "path") {
-        path = path.replace(`{${param.name}}`, encodeURIComponent(String(value)));
+        const pathValue = String(value);
+        // URL parsing normalizes dot segments even after encodeURIComponent.
+        if (pathValue === "." || pathValue === "..") {
+          throw new Error(
+            `Path parameter "${param.name}" for tool "${operation.toolName}" in connection "${this.#connection.connectionName}" must not be "." or "..".`,
+          );
+        }
+        path = path.replace(`{${param.name}}`, encodeURIComponent(pathValue));
       } else if (param.location === "query") {
         appendQuery(query, param.name, value);
       } else if (param.location === "cookie") {

@@ -1829,9 +1829,6 @@ importers:
       '@eve/catalog':
         specifier: workspace:*
         version: link:../eve-catalog
-      '@eve/tracing':
-        specifier: workspace:*
-        version: link:../tracing
       '@linqapp/chat-sdk-adapter':
         specifier: ^0.5.1
         version: 0.5.1(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
@@ -1880,6 +1877,9 @@ importers:
       '@types/react-test-renderer':
         specifier: 19.1.0
         version: 19.1.0
+      '@vercel/agent-runs':
+        specifier: workspace:*
+        version: link:../tracing
       '@vercel/blob':
         specifier: 2.8.0
         version: 2.8.0

@@ -32,8 +32,8 @@ import {
 } from "#instrumentation/lifecycle.js";
 import { bindInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
-import { otelTelemetry } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
+import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-store.js";
