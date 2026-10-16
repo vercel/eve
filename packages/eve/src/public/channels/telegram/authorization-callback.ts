@@ -1,10 +1,6 @@
-import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ChannelResolveSession } from "#channel/channel-operations.js";
-import type { Session } from "#channel/session.js";
+import { findPendingAuthorization } from "#channel/pending-authorization.js";
 import { createLogger } from "#internal/logging.js";
-import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-import { openSignIns } from "#protocol/session-reader.js";
-import { signInOf } from "#channel/sign-in.js";
 import {
   TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
   renderTelegramAuthorizationPrompt,
@@ -41,7 +37,10 @@ export async function dispatchTelegramAuthorizationCallback(input: {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
     }
-    const authorization = await findOpenAuthorization(session);
+    const authorization = await findPendingAuthorization(
+      session,
+      (signIn) => signIn.responseId === undefined,
+    );
     if (authorization === undefined) {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
@@ -70,24 +69,4 @@ async function inactiveAuthorization(
     showAlert: true,
     text: "This authorization request is no longer active.",
   });
-}
-
-/** The latest sign-in still open. An approval responder's sign-in has its own prompt. */
-async function findOpenAuthorization(session: Session) {
-  const view = emptySessionView();
-  for await (const event of eventsToTail(session)) foldReceivedEvent(view, event);
-  const row = openSignIns(view).findLast((entry) => !("responseId" in entry.subject));
-  return row === undefined ? undefined : signInOf(view, row.interactionId);
-}
-
-/** The session's events through the line at its tail when the read starts. */
-async function* eventsToTail(session: Session): AsyncGenerator<SessionStreamEvent> {
-  const tailIndex = await session.getStreamTailIndex();
-  if (tailIndex < 0) return;
-  // Leaving the loop cancels the stream.
-  for await (const event of await session.getEventStream({ startIndex: 0 })) {
-    yield event;
-    const { endOfLine, position } = event.meta;
-    if (position.line >= tailIndex && endOfLine !== false) return;
-  }
 }

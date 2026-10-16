@@ -35,6 +35,11 @@ import {
   type TeamsPostedActivity,
 } from "#public/channels/teams/api.js";
 import {
+  answerTeamsAuthorizationReveal,
+  readTeamsAuthorizationReveal,
+  type TeamsAuthorizationReveal,
+} from "#public/channels/teams/authorization.js";
+import {
   defaultEvents,
   defaultOnMessage,
   defaultTeamsAuth,
@@ -364,6 +369,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
               activity,
               config,
               onAnswers,
+              resolveSession,
               waitUntil,
               from,
             });
@@ -660,8 +666,11 @@ async function handleInvoke(input: {
   readonly from: ChannelFrom<TeamsChannelState>;
   readonly config: TeamsChannelConfig;
   readonly onAnswers: NonNullable<TeamsChannelConfig["onAnswers"]>;
+  readonly resolveSession: ChannelResolveSession;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
+  const reveal = readTeamsAuthorizationReveal(input.activity);
+  if (reveal !== null) return Response.json(await revealAuthorization({ ...input, reveal }));
   if (isTeamsAnswerActivity(input.activity)) {
     input.waitUntil(
       dispatchAnswers({
@@ -680,6 +689,36 @@ async function handleInvoke(input: {
   if (result instanceof Response) return result;
   if (result && typeof result === "object") return Response.json(result);
   return teamsOk();
+}
+
+/** Identifies the presser the same way a HITL card submission does. */
+async function revealAuthorization(input: {
+  readonly activity: TeamsInvokeActivity;
+  readonly config: TeamsChannelConfig;
+  readonly onAnswers: NonNullable<TeamsChannelConfig["onAnswers"]>;
+  readonly resolveSession: ChannelResolveSession;
+  readonly reveal: TeamsAuthorizationReveal;
+}): Promise<JsonObject> {
+  const state = stateFromActivity(input.activity);
+  const ctx = buildTeamsBinding({ config: input.config, state });
+  let auth: SessionAuthContext | null = null;
+  try {
+    auth = (await input.onAnswers(ctx, input.activity))?.auth ?? null;
+  } catch (error) {
+    log.error("Teams sign-in press authorization failed", { error });
+  }
+  const token = cardContinuationToken(
+    input.activity,
+    state,
+    input.reveal.replyToActivityId ?? null,
+  );
+  return await answerTeamsAuthorizationReveal({
+    adaptiveCardVersion: input.config.adaptiveCardVersion ?? "1.5",
+    auth,
+    presser: input.activity.from,
+    resolveSession: () => input.resolveSession(token),
+    reveal: input.reveal,
+  });
 }
 
 async function dispatchAnswers(input: {
@@ -701,10 +740,18 @@ async function dispatchAnswers(input: {
   }
   if (result === null) return;
   try {
-    await input.from(resolveInputContinuationToken(input.activity, state)).respond(answers, {
-      auth: result.auth,
-      state: approvalResponseStatePatch(input.activity, result.auth),
-    });
+    await input
+      .from(
+        cardContinuationToken(
+          input.activity,
+          state,
+          readTeamsInputReplyToActivityId(input.activity),
+        ),
+      )
+      .respond(answers, {
+        auth: result.auth,
+        state: approvalResponseStatePatch(input.activity, result.auth),
+      });
   } catch (error) {
     log.error("Teams input response delivery failed", { error });
   }
@@ -731,11 +778,12 @@ function stateFromActivity(
   };
 }
 
-function resolveInputContinuationToken(
+/** Continues the thread a card recorded when posted, or the activity's own thread. */
+function cardContinuationToken(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
   state: TeamsChannelState,
+  replyToActivityId: string | null,
 ): string {
-  const replyToActivityId = readTeamsInputReplyToActivityId(activity);
   if (replyToActivityId === null) return stateToken(state);
   return teamsContinuationToken({
     conversationId: activity.conversation.id,

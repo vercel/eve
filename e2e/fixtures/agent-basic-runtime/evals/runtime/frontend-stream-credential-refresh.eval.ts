@@ -1,3 +1,4 @@
+import { waitForStore } from "@eve-e2e/config/frontend";
 import { EveAgentStore } from "eve/client";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
@@ -13,6 +14,7 @@ export default defineEval({
       resolveReconnectAuthorization = resolve;
     });
     let disconnectStream: (() => void) | undefined;
+    let awaitingForcedReconnect = false;
     const store = new EveAgentStore({
       host,
       initialSession: session.state,
@@ -21,37 +23,51 @@ export default defineEval({
     globalThis.fetch = async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.origin !== host) return originalFetch(input, init);
+      const forcedReconnect = awaitingForcedReconnect;
       const response = await t.target.fetch(`${url.pathname}${url.search}`, init);
       if (!url.pathname.endsWith("/stream") || !response.ok || response.body === null) {
         return response;
       }
-      if (disconnectStream !== undefined) {
+      if (forcedReconnect) {
         resolveReconnectAuthorization(new Headers(init?.headers).get("authorization"));
         return response;
       }
       const transport = new TransformStream<Uint8Array, Uint8Array>({
         start(controller) {
-          disconnectStream = () => controller.terminate();
+          disconnectStream = () => {
+            awaitingForcedReconnect = true;
+            controller.terminate();
+          };
         },
       });
       return new Response(response.body.pipeThrough(transport), response);
     };
 
     try {
-      await store.send({
+      const first = await store.send({
         message: "Reply with first.",
         headers: { authorization: "Bearer old" },
         signal: t.signal,
       });
+      await waitForStore(
+        store,
+        (snapshot) => snapshot.view.deliveries[first.deliveryId]?.status === "settled",
+        t.signal,
+      );
       await t.require(store.snapshot.error, equals(undefined));
       const firstTurn = await t.target.watchTurn(session.sessionId).result();
       firstTurn.expectOk();
 
-      await store.send({
+      const second = await store.send({
         message: "Reply with second.",
         headers: { authorization: "Bearer fresh" },
         signal: t.signal,
       });
+      await waitForStore(
+        store,
+        (snapshot) => snapshot.view.deliveries[second.deliveryId]?.status === "settled",
+        t.signal,
+      );
       await t.require(store.snapshot.error, equals(undefined));
 
       if (disconnectStream === undefined)

@@ -47,7 +47,7 @@ import {
 } from "#harness/model-call/usage.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
-import { addTokenUsage } from "#shared/token-usage.js";
+import { addTokenUsage } from "#shared/token-usage-math.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { controlDeliveryFor } from "#harness/session-machine/transitions.js";
 import {

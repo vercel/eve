@@ -1,3 +1,4 @@
+import { isHookCancellableEvent } from "#execution/session/turn-event-handler.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
@@ -101,20 +102,34 @@ export interface PublishedSessionEvents {
 export async function publishSessionEvents(
   target: SessionStepState,
   events: readonly SessionEvent[],
-): Promise<PublishedSessionEvents> {
-  return await publishEventsFromStep(target, "own", events);
+  options?: { readonly canCancelTurn?: boolean },
+): Promise<PublishedSessionEvents & { readonly cancelled: boolean }> {
+  let cancelled = false;
+  const published = await publishEventsFromStep(
+    target,
+    "own",
+    events,
+    options?.canCancelTurn
+      ? () => {
+          cancelled = true;
+        }
+      : undefined,
+  );
+  return { ...published, cancelled };
 }
 
 async function publishEventsFromStep(
   target: SessionStepState,
   origin: SessionEventOrigin,
   events: readonly SessionEvent[],
+  cancelTurn?: () => void,
 ): Promise<PublishedSessionEvents> {
   if (events.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
   }
   const restored = await restoreSessionStep(target);
   const { published } = await publishFromSessionStep(restored, {
+    cancelTurn,
     origin,
     async publish(emit) {
       await emit(events);
@@ -149,6 +164,8 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
  * restored with its history.
  */
 export interface SessionStepPublication<T, R, S extends HarnessSessionBase = HarnessSessionBase> {
+  /** A hook stops this publication's running turn; its owner adopts the cancellation after commit. */
+  readonly cancelTurn?: () => void;
   readonly origin: SessionEventOrigin;
   /** Where a relayed input batch came from; the channel adapter and its forwarding see it. */
   readonly inputSource?: string;
@@ -243,6 +260,7 @@ async function publishInSessionScope<T>(
       : undefined;
 
   const publisher = openSessionEventPublisher({
+    cancelTurn: publication.cancelTurn,
     ctx,
     inputSource: publication.inputSource,
     origin: publication.origin,
@@ -346,6 +364,7 @@ function checksSessionEvents(): boolean {
 }
 
 export function openSessionEventPublisher(input: {
+  readonly cancelTurn?: () => void;
   readonly ctx: ContextContainer;
   readonly origin: SessionEventOrigin;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -420,7 +439,9 @@ export function openSessionEventPublisher(input: {
     return next;
   };
   const publish = async (publication: SessionPublication): Promise<void> => {
-    await dispatcher.runHooks(await emit(publication));
+    await dispatcher.runHooks(await emit(publication), (event) =>
+      isHookCancellableEvent(event.type) ? input.cancelTurn : undefined,
+    );
   };
   return {
     dispatcher,
@@ -644,6 +665,7 @@ export async function commitSessionStep(
   decide: (view: MachineView) => readonly Transition[],
   options: {
     readonly origin: SessionEventOrigin;
+    readonly cancelTurn?: () => void;
     /** Where a relayed input batch came from; see `SessionStepPublication.inputSource`. */
     readonly inputSource?: string;
   },
@@ -669,10 +691,15 @@ export async function commitSessionStep(
 async function commit(
   restored: RestoredSessionStep,
   transitions: readonly Transition[],
-  options: { readonly origin: SessionEventOrigin; readonly inputSource?: string },
+  options: {
+    readonly origin: SessionEventOrigin;
+    readonly inputSource?: string;
+    readonly cancelTurn?: () => void;
+  },
 ): Promise<PublishedSessionEvents> {
   const { published } = await publishFromSessionStep(restored, {
     inputSource: options.inputSource,
+    cancelTurn: options.cancelTurn,
     origin: options.origin,
     async publish(emit) {
       // One commit: the batch's events are one atomic line.

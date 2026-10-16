@@ -51,7 +51,7 @@ import {
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
 import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
-import { matchSignIns } from "#harness/session-machine/transitions.js";
+import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
@@ -407,8 +407,10 @@ async function runSessionStepBody(
       // A user-role instruction the session's start resolves enters history ahead of the turn's
       // input, as it would from the turn's own preamble.
       prepareDynamicInstructionPreamble(ctx, history.initial.messages);
+      // Instrumentation hears the admission like any commit, so providers see the session start.
+      const publish = instrumentation?.createHandleEvent({ handleEvent }) ?? handleEvent;
       try {
-        await contextStorage.run(ctx, () => handleEvent([...facts, ...admission.facts]));
+        await contextStorage.run(ctx, () => publish([...facts, ...admission.facts]));
       } finally {
         const instructions = drainDynamicInstructionUserMessages(ctx);
         if (instructions.length > 0) {
@@ -430,8 +432,34 @@ async function runSessionStepBody(
       }
     };
 
+    /**
+     * A cancel stops the turn its input was selected for. Input it hadn't consumed yet joins that
+     * turn first, opening it if need be, so the cancel settles each delivery with the turn and the
+     * history that keeps the message agrees with the stream.
+     */
+    const consumeCancelledInput = async (): Promise<void> => {
+      const projection = currentProjection(ctx);
+      const waiting = (resolved?.deliveries ?? []).filter(
+        ({ deliveryId }) => projection.view.deliveries[deliveryId]?.status === "admitted",
+      );
+      if (waiting.length === 0) return;
+      const { events } = receive(sessionView(projection, initialSession.state), {
+        deliveries: waiting,
+      });
+      // The turn is already stopping, so this commit's hooks have nothing left to cancel.
+      const emit = createTurnEventHandler({
+        canCancelTurn: false,
+        hookCancellation: new AbortController(),
+        participants,
+        publisher,
+      });
+      const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
+      await contextStorage.run(ctx, () => publish(events));
+    };
+
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
-      await publishAdmission(buildRuntimeIdentity(effectiveNode));
+      // Nothing here starts a turn, so a cancel has nothing to stop.
+      await publishAdmission(buildRuntimeIdentity(effectiveNode)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -474,8 +502,11 @@ async function runSessionStepBody(
     try {
       await publishAdmission(runtimeIdentity);
     } catch (error) {
-      await instrumentation?.flush();
-      throw error;
+      // A hook's cancel on the admission stops the turn below, like a cancel that arrives now.
+      if (!isTurnCancellation(error)) {
+        await instrumentation?.flush();
+        throw error;
+      }
     }
 
     const modelCallsPerStep =
@@ -551,7 +582,7 @@ async function runSessionStepBody(
               }
             } catch (error) {
               const recovered = await recoverDynamicConnectionRehydration({
-                emit: handleEvent,
+                emit: instrumentation?.createHandleEvent({ handleEvent }) ?? handleEvent,
                 error,
                 projection: currentProjection(ctx),
                 session: schemaSession,
@@ -583,6 +614,7 @@ async function runSessionStepBody(
         await instrumentation?.flush();
         throw error;
       }
+      if (completedModelCall === undefined) await consumeCancelledInput();
       return createCancelledModelCallBatchResult({
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
@@ -626,4 +658,9 @@ function stoppedForPerson(
     result.settledTurn === undefined &&
     waitsOnPerson(result.session, currentProjection(ctx))
   );
+}
+
+/** A cancel the commit's hooks raised after it was written; the cancel already underway handles it. */
+function ignoreTurnCancellation(error: unknown): void {
+  if (!isTurnCancellation(error)) throw error;
 }

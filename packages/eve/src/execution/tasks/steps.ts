@@ -23,7 +23,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { usageSince } from "#shared/token-usage.js";
+import { usageSince } from "#shared/token-usage-math.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   PublishedSessionEvents,

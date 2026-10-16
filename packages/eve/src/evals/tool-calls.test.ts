@@ -53,4 +53,27 @@ describe("toolCallsOf", () => {
       { callId: "call_b", name: "lookup", output: { found: "b" }, status: "completed" },
     ]);
   });
+
+  it("counts every call the model makes by name except a skill load", () => {
+    const requested = (callId: string, kind: string, name: string): SessionEvent =>
+      ({
+        data: { callId, capability: { kind, name }, input: {}, owner: { runId: "run_0" } },
+        scope: { runId: "run_0", turnId: "turn_0" },
+        type: "call.requested",
+      }) as SessionEvent;
+    const calls = toolCallsOf(
+      stream([
+        {
+          data: { cause: { deliveryId: "d_0" }, follows: null, turnId: "turn_0" },
+          type: "turn.started",
+        },
+        requested("call_tool", "tool", "lookup"),
+        requested("call_agent", "agent", "researcher"),
+        requested("call_wait", "control", "eve__task_wait"),
+        requested("call_skill", "skill", "triage"),
+      ]),
+    );
+
+    expect(calls.map((call) => call.name)).toEqual(["lookup", "researcher", "eve__task_wait"]);
+  });
 });

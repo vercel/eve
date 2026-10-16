@@ -47,8 +47,8 @@ interface EmittedStreamContent {
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
   /**
-   * The turn holds while its tasks work, so a text step can't end it: its text narrates, and
-   * only the reply after the tasks report is the turn's.
+   * The turn holds while its tasks work and its caller reads only the final reply, so a text step
+   * can't end it: its text narrates, and only the reply after the tasks report is the turn's.
    */
   readonly held?: boolean;
   readonly tools: HarnessToolLookup;
@@ -94,7 +94,8 @@ export async function emitStreamContent(
 
 /**
  * Whether the run's last text replies. Text the turn continues after narrates: text before calls,
- * and a held turn's text, which waits on its tasks before the turn can reply.
+ * and a held turn's text in a session whose caller reads only the final reply. A person reads a
+ * held turn's text as a reply.
  */
 function finalPhase(finishReason: AssistantStepFinishReason, held: boolean) {
   if (finishReason === "tool-calls") return "narration";

@@ -1,3 +1,4 @@
+import { rebuildSerializableError } from "#execution/workflow-errors.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type {
   WorkflowToolAskRequest,
@@ -22,6 +23,7 @@ export function workflowToolRunOutcomeToToolResult(
   }
   return {
     callId: from.callId,
+    ...(result.status === "failed" && { errorName: rebuildSerializableError(result.error).name }),
     isError: true,
     kind: "tool-result",
     output:

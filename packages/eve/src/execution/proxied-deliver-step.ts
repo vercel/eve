@@ -190,6 +190,31 @@ async function routeProxiedDeliver(
     }
   }
 
+  // Like a steering message, an answering message joins the open turn, so the turn's later events
+  // carry its delivery ids too.
+  const published: PublishedSessionEvents = {
+    serializedContext: joinTurnDeliveryIds(serializedContext, answerDeliveryIds),
+    sessionState: input.sessionState,
+  };
+  // The typed answer's hooks run before it reaches the waiting tool. A hook cancel stops the
+  // owner turn instead, leaving the request open for the normal cancellation cascade.
+  let cancelled = false;
+  const consumed = routedDeliveries.filter((delivery) => delivery.consumed !== undefined);
+  const admitted =
+    consumed.length === 0
+      ? published
+      : await commitSessionStep(
+          { ...published, sessionWritable: input.sessionWritable },
+          (view) => [routeAnswer(view, { deliveries: consumed, forwarded: [], decided: [] })],
+          {
+            origin: "own",
+            cancelTurn: () => {
+              cancelled = true;
+            },
+          },
+        );
+  if (cancelled) return { ...admitted, kind: "cancel-turn" };
+
   // A workflow run publishes nothing of its own: the session settles its questions as it answers.
   const decided: { answer: Answer; outcome: "accepted" | "declined" }[] = [];
   for (const child of children.values()) {
@@ -229,14 +254,8 @@ async function routeProxiedDeliver(
     }
   }
 
-  // Like a steering message, an answering message joins the open turn, so the turn's later events
-  // carry its delivery ids too.
-  const published: PublishedSessionEvents = {
-    serializedContext: joinTurnDeliveryIds(serializedContext, answerDeliveryIds),
-    sessionState: input.sessionState,
-  };
   const context = await commitSessionStep(
-    { ...published, sessionWritable: input.sessionWritable },
+    { ...admitted, sessionWritable: input.sessionWritable },
     (view) => [
       routeAnswer(view, {
         decided:

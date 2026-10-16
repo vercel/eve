@@ -29,7 +29,11 @@ function project(events: readonly SessionEvent[]) {
   const view = conversationView(snapshot, tuiSessionData(conversation.state));
   return new ConversationTranscript()
     .project(view, OPTIONS)
-    .map((block) => `${block.kind}: ${block.body ?? ""}`);
+    .map((block) =>
+      block.kind === "tool"
+        ? `tool: ${block.title} ${block.status}`
+        : `${block.kind}: ${block.body ?? ""}`,
+    );
 }
 
 describe("ConversationTranscript", () => {
@@ -84,6 +88,128 @@ describe("ConversationTranscript", () => {
       "user: one.",
       "assistant: One.",
       "error: MODEL_FAILED: The model failed.",
+    ]);
+  });
+
+  it("shows a turn's narration, each call's outcome, and its reply in stream order", () => {
+    const turn = { turnId: "turn_0" };
+    const run = (runId: string) => ({ runId, turnId: "turn_0" });
+    const blocks = project([
+      { data: {}, type: "session.started" },
+      { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
+      {
+        data: { cause: { deliveryId: "d_0" }, follows: null, turnId: "turn_0" },
+        scope: turn,
+        type: "turn.started",
+      },
+      {
+        data: {
+          deliveryId: "d_0",
+          parts: [{ kind: "text", text: "Deploy it." }],
+          turnId: "turn_0",
+        },
+        scope: turn,
+        type: "delivery.consumed",
+      },
+      { data: { owner: turn, runId: "run_0" }, scope: run("run_0"), type: "model.requested" },
+      {
+        data: {
+          kind: "text",
+          partId: "p_0",
+          phase: "narration",
+          runId: "run_0",
+          value: "Checking first.",
+        },
+        scope: run("run_0"),
+        type: "content.completed",
+      },
+      {
+        data: {
+          callId: "call_check",
+          capability: { kind: "tool", name: "check" },
+          input: {},
+          owner: { runId: "run_0" },
+        },
+        scope: run("run_0"),
+        type: "call.requested",
+      },
+      {
+        data: {
+          callId: "call_deploy",
+          capability: { kind: "tool", name: "deploy" },
+          input: {},
+          owner: { runId: "run_0" },
+        },
+        scope: run("run_0"),
+        type: "call.requested",
+      },
+      {
+        data: { callId: "call_check", outcome: "completed", output: "ok" },
+        scope: run("run_0"),
+        type: "call.settled",
+      },
+      {
+        data: {
+          interactionId: "i_0",
+          request: {
+            kind: "approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "deny", label: "Deny" },
+            ],
+            prompt: "Deploy?",
+          },
+          subject: { callId: "call_deploy" },
+        },
+        scope: turn,
+        type: "interaction.opened",
+      },
+      {
+        data: { outcome: "completed", runId: "run_0" },
+        scope: run("run_0"),
+        type: "model.settled",
+      },
+      {
+        data: { cause: { responseId: "r_0" }, interactionId: "i_0", outcome: "declined" },
+        scope: turn,
+        type: "interaction.settled",
+      },
+      {
+        data: { callId: "call_deploy", cause: { interactionId: "i_0" }, outcome: "rejected" },
+        scope: run("run_0"),
+        type: "call.settled",
+      },
+      { data: { owner: turn, runId: "run_1" }, scope: run("run_1"), type: "model.requested" },
+      {
+        data: {
+          kind: "text",
+          partId: "p_1",
+          phase: "reply",
+          runId: "run_1",
+          value: "Not deployed.",
+        },
+        scope: run("run_1"),
+        type: "content.completed",
+      },
+      {
+        data: { outcome: "completed", runId: "run_1" },
+        scope: run("run_1"),
+        type: "model.settled",
+      },
+      {
+        data: { outcome: "completed", reply: ["p_1"], turnId: "turn_0" },
+        scope: turn,
+        type: "turn.settled",
+      },
+    ] as SessionEvent[]);
+
+    expect(blocks).toEqual([
+      "user: Deploy it.",
+      "assistant: Checking first.",
+      "tool: Check done",
+      // A call its approver declined reads as denied, not failed.
+      "tool: Deploy denied",
+      "assistant: Not deployed.",
     ]);
   });
 });

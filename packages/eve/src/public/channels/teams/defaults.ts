@@ -16,7 +16,10 @@ import type {
   TeamsInboundResult,
 } from "#public/channels/teams/teamsChannel.js";
 import { displayProperName } from "#protocol/session-projection/display-name.js";
-import { parseJsonObject } from "#shared/json.js";
+import {
+  renderTeamsAuthorizationPrompt,
+  renderTeamsAuthorizationStatus,
+} from "#public/channels/teams/authorization.js";
 
 /** Default auth projection for Teams message actors. */
 export function defaultTeamsAuth(
@@ -119,8 +122,18 @@ function teamsSignIns(channel: TeamsHandlerChannel): SignInSurface {
   return {
     private: channel.state.conversationType === "personal",
     postChallenge: async (signIn) =>
-      (await channel.thread.post(teamsSignInCard(signIn, channel))).id,
+      (
+        await channel.thread.post(
+          renderTeamsAuthorizationPrompt(signIn, signInOptions(channel, signIn)),
+        )
+      ).id,
     post: async (text) => (await channel.thread.post({ text })).id,
+    postStatus: async (signIn) =>
+      (
+        await channel.thread.post(
+          renderTeamsAuthorizationStatus(signIn, signInOptions(channel, signIn)),
+        )
+      ).id,
     async edit(activityId, text) {
       await channel.thread.update(activityId, renderAnsweredInteractionMessage({ prompt: text }));
     },
@@ -129,46 +142,16 @@ function teamsSignIns(channel: TeamsHandlerChannel): SignInSurface {
   };
 }
 
-function teamsSignInCard(signIn: SignIn, channel: TeamsHandlerChannel) {
-  const { displayName, instructions, url, userCode } = signIn;
-  const codeHint = userCode
-    ? `If ${displayName} asks for a confirmation code, enter ${userCode}.`
-    : undefined;
-  const text = [
-    url
-      ? `Authorization required for ${displayName}: ${url}`
-      : `Authorization required for ${displayName}.`,
-    instructions,
-    codeHint,
-  ]
-    .filter(Boolean)
-    .join(" ");
+function signInOptions(channel: TeamsHandlerChannel, signIn: SignIn) {
+  const responder =
+    signIn.principalId === undefined
+      ? undefined
+      : channel.state.approvalResponderAccounts?.[signIn.principalId];
+  const user = responder ?? (signIn.responseId === undefined ? channel.state.triggeringUser : null);
   return {
-    attachments: [
-      {
-        content: parseJsonObject({
-          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          actions: url
-            ? [{ title: `Sign in with ${displayName}`, type: "Action.OpenUrl", url }]
-            : [],
-          body: [
-            {
-              text: `Authorization required for ${displayName}`,
-              type: "TextBlock",
-              weight: "Bolder",
-              wrap: true,
-            },
-            ...[instructions, codeHint]
-              .filter((line): line is string => Boolean(line))
-              .map((line) => ({ text: line, type: "TextBlock", wrap: true })),
-          ],
-          type: "AdaptiveCard",
-          version: channel.adaptiveCardVersion,
-        }),
-        contentType: "application/vnd.microsoft.card.adaptive",
-      },
-    ],
-    text,
+    adaptiveCardVersion: channel.adaptiveCardVersion,
+    replyToActivityId: channel.teams.replyToActivityId,
+    requester: user === null || user === undefined ? undefined : (user.name ?? user.id),
   };
 }
 

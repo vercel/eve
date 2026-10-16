@@ -356,8 +356,8 @@ export default defineHook({ events: { "turn.started": async () => {
         "",
         "export default defineHook({",
         "  events: {",
-        '    "action.result"(event) {',
-        "      console.info(event.data.result);",
+        '    "call.settled"(event) {',
+        "      console.info(event.data.output);",
         "    },",
         "  },",
         "});",
@@ -370,7 +370,7 @@ export default defineHook({ events: { "turn.started": async () => {
 
     const declaration = await readFile(join(outDir, "extension", "hooks", "audit.d.ts"), "utf8");
     expect(declaration).toMatch(
-      /import\(["']eve\/hooks["']\)\.HookDefinition<["']action\.result["']>/,
+      /import\(["']eve\/hooks["']\)\.HookDefinition<["']call\.settled["']>/,
     );
     expect(declaration).not.toContain("protocol/message");
   });

@@ -1,3 +1,4 @@
+import { waitForStore } from "@eve-e2e/config/frontend";
 import { EveAgentStore, type EveToolPart } from "eve/client";
 import { defineEval, type EveEvalContext } from "eve/evals";
 import { equals } from "eve/evals/expect";
@@ -51,13 +52,18 @@ async function expectAnswerable(
 
 async function refuse(t: EveEvalContext, store: Store, callId: string, interactionId: string) {
   const start = store.snapshot.events.length;
-  await settles(
+  const accepted = await settles(
     "Refused approval submission",
     store.send({
       headers: ALICE,
       answers: [{ interactionId, optionId: "approve" }],
       signal: t.signal,
     }),
+  );
+  await waitForStore(
+    store,
+    (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
+    t.signal,
   );
   const events = store.snapshot.events.slice(start);
   const submitted = events.filter(
@@ -117,9 +123,14 @@ export default defineEval({
           initialSession: session.state,
         });
         stores.push(page);
-        await settles(
+        const accepted = await settles(
           "Initial approval request",
           page.send({ message: "Prepare an authorized change.", signal: t.signal }),
+        );
+        await waitForStore(
+          page,
+          (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
+          t.signal,
         );
         const parked = (await t.target.watchTurn(session.sessionId).result()).expectOk();
         const approval = parked.session.requireInteraction({ toolName: TOOL });
@@ -165,6 +176,7 @@ export default defineEval({
             signal: t.signal,
           }),
         );
+        await waitForStore(reload, (snapshot) => snapshot.status === "ready", t.signal);
         await t.require(reload.snapshot.status, equals("ready"));
         await t.require(reload.snapshot.error, equals(undefined));
         const finished = (

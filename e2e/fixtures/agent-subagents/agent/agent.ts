@@ -1,4 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { latestTaskResult, playScript } from "@eve-e2e/config/mock-script";
 import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
@@ -25,6 +26,31 @@ import {
 if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
 }
+
+const DYNAMIC_SUBAGENT_PROBE = "E2E_DYNAMIC_SUBAGENT_CATALOG";
+const dynamicSubagentProbe = mockModel({
+  modelId: "dynamic-subagent-catalog",
+  respond(request) {
+    if (!request.tools.some((tool) => tool.name === "conditional-marker")) {
+      throw new Error("The resolved dynamic subagent is missing from the model's tools.");
+    }
+    if (request.tools.some((tool) => tool.name === "omitted-marker")) {
+      throw new Error("A dynamic subagent that resolved to null was exposed to the model.");
+    }
+    return playScript(
+      request,
+      [
+        {
+          id: "dynamic-start",
+          name: "conditional-marker",
+          input: () => ({ message: "Return your marker." }),
+        },
+        { id: "dynamic-wait", name: "eve__task_wait" },
+      ],
+      (finished) => latestTaskResult(finished, "conditional-marker") ?? "No dynamic child result.",
+    );
+  },
+});
 
 const TOOL_FALSE_PROBE = "E2E_TOOL_FALSE_SUBAGENT";
 const DISABLED_TOOL_PROBE = "E2E_DISABLED_SUBAGENT";
@@ -141,6 +167,9 @@ export default defineAgent({
               : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
           ];
         });
+        if (messages.some((message) => message.includes(DYNAMIC_SUBAGENT_PROBE))) {
+          return { model: dynamicSubagentProbe, modelContextWindowTokens: 1_000_000 };
+        }
         if (
           messages.some(
             (message) =>

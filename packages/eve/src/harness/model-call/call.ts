@@ -17,7 +17,7 @@ import {
   moveToolResultFilesToUserMessages,
 } from "#harness/attachment-staging.js";
 import { emitStreamContent } from "#harness/emission.js";
-import { toEntryStep, toEntryStream } from "#harness/execute-call.js";
+import { historyCallNames, toEntryStep, toEntryStream } from "#harness/execute-call.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
@@ -62,6 +62,7 @@ import {
 } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
 import { runModelCallWithRetries } from "./retry.js";
+import { withUniqueCallIds } from "./unique-call-ids.js";
 import { modelCallErrorInfo } from "./failure.js";
 import { prepareModelTools } from "./tools.js";
 import {
@@ -366,10 +367,16 @@ export class ModelCaller {
     const settings = {
       headers: this.attributionHeaders,
       instructions,
-      model: withGatewayTraceContext(
-        model,
-        this.profile,
-        this.step.instrumentation?.gatewayTraceContextHeaders,
+      model: withUniqueCallIds(
+        withGatewayTraceContext(
+          model,
+          this.profile,
+          this.step.instrumentation?.gatewayTraceContextHeaders,
+        ),
+        [
+          ...Object.keys(step.view().projection.view.calls),
+          ...historyCallNames(callMessages).keys(),
+        ],
       ),
       onLanguageModelCallEnd: (event: LanguageModelCallEndEvent) => {
         if (generation.interrupted) return;
@@ -438,7 +445,7 @@ export class ModelCaller {
       ),
       {
         excludedActionToolNames,
-        held: workingTaskIds(step.session).length > 0,
+        held: step.finalReplyOnly && workingTaskIds(step.session).length > 0,
         tools: catalog,
         interruptSignal: generation.signal,
       },

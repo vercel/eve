@@ -1,4 +1,3 @@
-import { readHitlState } from "#harness/hitl/index.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
@@ -32,7 +31,7 @@ export type TurnPause =
 
 /** The turn waits on the sign-ins and the answers it asked a person for. */
 export function pausedOnPerson(session: HarnessSession, projection: SessionProjection): TurnPause {
-  const challenges = readHitlState(session.state).signIns;
+  const challenges = sessionView(projection, session.state).signIns;
   return {
     attemptIds: challenges.flatMap((challenge) =>
       challenge.attemptId === undefined ? [] : [challenge.attemptId],
