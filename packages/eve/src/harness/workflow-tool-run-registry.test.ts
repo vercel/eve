@@ -55,13 +55,4 @@ describe("workflow tool run registry", () => {
       registerWorkflowToolRun(session, { ...waiting("turn-a"), toolName: "deploy" }),
     ).toThrow("Replayed invocation changed its tool identity");
   });
-
-  it.each([
-    ["the task-only index", { "eve.tasks": { version: 2, tasks: [] } }],
-    ["the separate blocking-run store", { "eve.runtime.workflowToolRuns": [] }],
-    ["the v26 blocking-run registry", { "eve.workflowTool": { version: 4, runs: [] } }],
-    ["the v26 task table", { "eve.taskTable": { version: 1, tasks: [] } }],
-  ])("rejects %s", (_, state) => {
-    expect(() => getBlockingWorkflowToolRuns(state)).toThrow("Unsupported running-work state");
-  });
 });

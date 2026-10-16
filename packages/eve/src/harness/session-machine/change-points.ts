@@ -1,18 +1,10 @@
-import type { RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 // The change points today's participants name with their event keys. They are never published:
 // v27 facts mark the points, and participants map each fact to the key their authors wrote. A
 // dynamic resolver's handler receives the point's `fact`; `data` is what eve itself keys on.
-
-export type ChangePointEvent =
-  | SessionStartedPoint
-  | TurnStartedPoint
-  | StepStartedPoint
-  | TurnCompletedPoint
-  | CompactionRequestedPoint
-  | CompactionCompletedPoint;
 
 /** The session's first turn starts. */
 export interface SessionStartedPoint {

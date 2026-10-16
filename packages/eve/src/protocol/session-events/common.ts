@@ -48,7 +48,7 @@ type DeepReadonly<T> = T extends readonly (infer U)[]
  * sends, and types as the values known today, so a reader's switch keeps a default branch.
  */
 export function known<T extends string>(): z.ZodType<T> {
-  return z.string() as unknown as z.ZodType<T>;
+  return z.custom<T>((value) => typeof value === "string");
 }
 
 export const id = z.string().min(1);

@@ -12,7 +12,7 @@ export { toolCallsOf } from "#evals/tool-calls.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export type { RuntimeIdentity, TraceContext } from "#protocol/message.js";
+export type { RuntimeIdentity, TraceContext } from "#protocol/session-events/families/session.js";
 export type { Interaction } from "#protocol/session-reader.js";
 export type { CancelSessionResult } from "#client/types.js";
 

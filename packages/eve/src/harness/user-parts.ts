@@ -25,21 +25,6 @@ export function userPartsOf(message: MessageContent): readonly UserPart[] {
   return parts;
 }
 
-/** A message's text, with files shown as placeholders or left out. */
-export function textOf(
-  parts: readonly UserPart[],
-  options: { readonly files?: "placeholder" | "omit" } = {},
-): string {
-  const pieces: string[] = [];
-  for (const part of parts) {
-    if (part.kind === "text") pieces.push(part.text);
-    else if (part.kind === "file" && options.files !== "omit") {
-      pieces.push(`[file: ${part.filename ?? part.mediaType} (${part.mediaType})]`);
-    }
-  }
-  return pieces.join("\n");
-}
-
 function filePart(data: unknown, mediaType: string, filename: string | undefined): UserPart {
   if (isSandboxRefUrl(data)) {
     const ref = decodeSandboxRef(data);

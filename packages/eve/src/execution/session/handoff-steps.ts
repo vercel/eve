@@ -3,11 +3,6 @@ import { queuedInput, storedProjection } from "#harness/session-machine/view.js"
 import { openRequests, openSignIns } from "#protocol/session-reader.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { holdsHitlRequests } from "#harness/hitl/index.js";
-import {
-  EntityConflictError,
-  RunExpiredError,
-  WorkflowRunNotFoundError,
-} from "#compiled/@workflow/errors/index.js";
 import { deserializeContext, IncompatibleStateLayoutError } from "#context/serialize.js";
 import type { SessionCheckpointMigration } from "#execution/session/checkpoint-migrations.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
@@ -15,8 +10,8 @@ import {
   SESSION_CHECKPOINT_VERSION,
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
-import { createLogger, logError } from "#internal/logging.js";
-import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { createLogger } from "#internal/logging.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   EVE_SESSION_ATTRIBUTE,
@@ -25,7 +20,6 @@ import {
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
-import { walkCauseChain } from "#shared/errors.js";
 
 const log = createLogger("execution.handoff");
 
@@ -40,15 +34,6 @@ export function isSessionStateIdleForHandoff(input: {
   // These registries are deleted when work settles. Their ordinary readers
   // tolerate malformed values as absent; that must not authorize a handoff.
   if (holdsHitlRequests(state)) return false;
-  const pendingKeys = [
-    "eve.runtime.pendingInputBatch",
-    "eve.runtime.pendingCoordinationBatch",
-    "eve.runtime.deferredStepInput",
-    "eve.harness.pendingWorkflowInterrupt",
-  ];
-  if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
-  const batches = state?.["eve.runtime.pendingInputBatches"];
-  if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
   const projection = storedProjection(state);
   return (
     workflowToolRuns.length === 0 &&
@@ -136,37 +121,6 @@ export async function validateSessionCheckpointStep(input: {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
   }
   return { kind: "valid" };
-}
-
-/**
- * Stops idle subagent sessions an older owner kept resumable, after this owner
- * activates. Best effort: a child that cannot be stopped ends at its own timeout.
- */
-export async function stopUntrackedChildSessionsStep(input: {
-  readonly runIds: readonly string[];
-  readonly sessionId: string;
-}): Promise<void> {
-  "use step";
-  const world = await getWorld();
-  for (const runId of input.runIds) {
-    if (runId === input.sessionId) continue;
-    try {
-      await cancelRun(world, runId, { cancelReason: "Session upgraded" });
-    } catch (error) {
-      const settled = [...walkCauseChain(error)].some(
-        (cause) =>
-          EntityConflictError.is(cause) ||
-          RunExpiredError.is(cause) ||
-          WorkflowRunNotFoundError.is(cause),
-      );
-      if (!settled) {
-        logError(log, "could not stop a subagent session after handoff", error, {
-          childRunId: runId,
-          sessionId: input.sessionId,
-        });
-      }
-    }
-  }
 }
 
 /** Records why the owner kept a session it tried to move, so a stuck handoff is visible. */

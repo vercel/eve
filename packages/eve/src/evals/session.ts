@@ -13,7 +13,7 @@ import type {
   SendTurnPayload,
   StreamOptions,
 } from "#client/types.js";
-import type { TraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { failureOf, ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
 import type { Answer } from "#shared/input.js";

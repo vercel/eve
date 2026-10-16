@@ -1,6 +1,6 @@
 import { createLogger, formatError } from "#internal/logging.js";
 import { contextStorage } from "#context/container.js";
-import type { TraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type {
   InstrumentationSessionStartedEvent,
   InstrumentationTraceSeed,

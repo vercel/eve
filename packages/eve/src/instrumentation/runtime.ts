@@ -39,7 +39,7 @@ import {
   prepareTurnTraceContext,
   type PrepareTurnTraceContextInput,
 } from "#instrumentation/prepare-trace-context.js";
-import type { TraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";

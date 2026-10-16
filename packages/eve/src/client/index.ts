@@ -107,7 +107,10 @@ export type {
 // importing from the main package).
 // ---------------------------------------------------------------------------
 
-export type { TraceContext, SessionPredecessor } from "#protocol/message.js";
+export type {
+  TraceContext,
+  SessionPredecessor,
+} from "#protocol/session-events/families/session.js";
 export type {
   SessionEvent,
   SessionEventMeta,

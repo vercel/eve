@@ -26,7 +26,7 @@ import {
 } from "#internal/testing/session-inbox-workflow.js";
 import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
-import { type SessionPredecessor } from "#protocol/message.js";
+import { type SessionPredecessor } from "#protocol/session-events/families/session.js";
 import { transcriptOf, type TranscriptData } from "#client/transcript.js";
 import { sessions } from "#public/server/index.js";
 import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";

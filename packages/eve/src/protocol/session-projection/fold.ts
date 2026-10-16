@@ -77,11 +77,6 @@ export function emptyPreviews(): SessionPreviews {
   return { calls: {}, parts: {} };
 }
 
-/** A deep copy of a view, for a reader that keeps the state at one position. */
-export function cloneView(view: SessionView): SessionView {
-  return structuredClone(view);
-}
-
 type Writable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableTables = {
   -readonly [K in TableName]: Writable<SessionView[K]>;
@@ -220,12 +215,6 @@ export function foldReceivedEvent(
     foldFact(state, into, event, { at: event.meta?.at ?? "", position: line });
   else if (into !== undefined && isProgressType(event.type)) foldProgress(state, into, event);
   if (event.meta?.endOfLine !== false) state.position = line + 1;
-}
-
-/** Moves a view's position past lines a read skipped, as a position marker says. */
-export function skipTo(view: SessionView, next: number): void {
-  const state = view as MutableView;
-  if (next > state.position) state.position = next;
 }
 
 interface At {

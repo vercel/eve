@@ -1,4 +1,4 @@
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 
 /** The one stream version this client reads. Sessions don't cross a major version. */
 export type MessageStreamVersion = typeof EVE_MESSAGE_STREAM_VERSION;

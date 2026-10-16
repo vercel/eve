@@ -5,7 +5,7 @@ import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ClientAgentSession } from "#client/agent-session.js";
-import type { RuntimeIdentity, TraceContext } from "#protocol/message.js";
+import type { RuntimeIdentity, TraceContext } from "#protocol/session-events/families/session.js";
 import type {
   CancelSessionResult,
   ClientSessionState,

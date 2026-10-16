@@ -6,7 +6,7 @@ import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-} from "#protocol/message.js";
+} from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
 afterEach(() => vi.restoreAllMocks());

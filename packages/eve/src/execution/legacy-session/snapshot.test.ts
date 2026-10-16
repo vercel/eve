@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { importConversation, normalizeHistory } from "./snapshot.js";
 import type { LegacySession } from "./snapshot.js";
 import { nextStepIndex, storedProjection, turnPosition } from "#harness/session-machine/view.js";
+import { sessionUsage } from "#harness/session-usage.js";
 describe("conversation import", () => {
   it("preserves authored state, budget, emission coordinates and storage", () => {
     const session: LegacySession = {
@@ -29,11 +30,11 @@ describe("conversation import", () => {
       sessionId: "old",
       limits: session.limits,
       sandboxState: session.sandboxState,
-      state: {
-        "app.color": "blue",
-        "eve.harness.turnUsage": session.state!["eve.harness.turnUsage"],
-      },
+      state: { "app.color": "blue" },
     });
+    // What the driver counted the session spent is what its view records.
+    expect(sessionUsage(result.snapshot.session)).toMatchObject({ inputTokens: 42 });
+    expect(result.snapshot.session.state).not.toHaveProperty("eve.harness.turnUsage");
     expect(result.snapshot.session.state).not.toHaveProperty(
       "eve.runtime.pendingCoordinationBatch",
     );

@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   createEveSessionRoutePath,

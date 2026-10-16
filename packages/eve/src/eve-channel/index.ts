@@ -19,7 +19,7 @@ import {
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,

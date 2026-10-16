@@ -67,13 +67,12 @@ import { openSessionEventPublisher } from "#execution/publish-session-events.js"
 import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { FactOf } from "#protocol/session-events/facts.js";
+import { fact } from "#harness/facts.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
   createDurableSessionValues,
   readDurableSession,
@@ -137,10 +136,6 @@ async function runSessionStepBody(
   const runtimeResults = input.input?.runtimeResults;
 
   let durableSession = readDurableSession(input.sessionState);
-  // An `execute` run's delegated spend counts in the step that hands the model its result.
-  for (const usage of Object.values(runtimeResults?.delegatedUsage ?? {})) {
-    durableSession = countRunUsage(durableSession, usage);
-  }
   const ctx = await deserializeContext(input.serializedContext);
   enterSessionProjection(ctx, durableSession.state);
   const adapter = ctx.require(ChannelKey);
@@ -415,16 +410,16 @@ async function runSessionStepBody(
       if (!turnPosition(currentProjection(ctx)).sessionStarted) {
         const parent = ctx.get(ParentSessionKey);
         const predecessor = ctx.get(SessionPredecessorKey);
-        const data: {
-          -readonly [
-            K in keyof FactOf<"session.started">["data"]
-          ]: FactOf<"session.started">["data"][K];
-        } = { runtime };
-        if (parent !== undefined) {
-          data.parent = { callId: parent.callId, sessionId: parent.sessionId };
-        }
-        if (predecessor !== undefined) data.predecessor = predecessor;
-        facts.push({ data, type: "session.started" });
+        facts.push(
+          fact("session.started", {
+            parent:
+              parent === undefined
+                ? undefined
+                : { callId: parent.callId, sessionId: parent.sessionId },
+            predecessor,
+            runtime,
+          }),
+        );
       }
       // The admission commits before the step's framework context exists, and its hooks read
       // the session (`ctx.session`) like every other commit's. The session's start resolves

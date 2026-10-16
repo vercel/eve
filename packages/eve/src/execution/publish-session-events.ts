@@ -54,7 +54,7 @@ import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.j
 import { encodeLineBytes, type FactPosition } from "#protocol/session-events/envelope.js";
 import { type SessionProjection } from "#protocol/session-projection.js";
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
-import { sessionEndedFacts } from "#harness/session-machine/transitions.js";
+import { sessionEndedFacts } from "#harness/facts.js";
 import { createStreamChecker, type StreamChecker } from "#protocol/session-events/checker.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";

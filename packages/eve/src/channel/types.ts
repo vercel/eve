@@ -598,16 +598,6 @@ export interface DeliverInput {
 }
 
 /**
- * Terminal outcome of a runtime run.
- *
- * The durable event stream's `session.ended`
- * events report terminal state on the workflow runtime.
- */
-export type RunResult =
-  | { readonly status: "completed"; readonly output: string }
-  | { readonly status: "waiting" };
-
-/**
  * Handle returned by `runtime.createSession()` once the durable run is accepted,
  * before its command inbox or step loop necessarily starts.
  *

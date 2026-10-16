@@ -3,7 +3,7 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-} from "#protocol/message.js";
+} from "#protocol/session-http.js";
 
 export function proxyStreamHeaders(headers: Headers): Headers {
   const allowed = [

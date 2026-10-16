@@ -2,7 +2,7 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { ResponseSegment } from "#client/session-utils.js";
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   createEveSessionRoutePath,

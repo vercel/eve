@@ -3,7 +3,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import type { CreatedClientSession, CreatedIdleClientSession } from "#client/sessions.js";
 import type { SendTurnInput } from "#client/types.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeTestLine } from "#internal/testing/events.js";
 

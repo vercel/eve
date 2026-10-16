@@ -26,7 +26,6 @@ import {
   requireSignIn,
 } from "./approvals.js";
 import { checkSessionUsageLimit } from "./budget.js";
-import { writeHitlState } from "./requests.js";
 import { isEmptyInput } from "./delivery.js";
 
 // The session's human-in-the-loop rules, behind the few points where the rest of the harness
@@ -44,6 +43,8 @@ export {
   type HumanInputIntake,
 } from "./intake.js";
 export { openDeferredApprovals, queueInput } from "./approvals.js";
+export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
+export type { PendingResponder } from "./responders.js";
 export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
 
 /**
@@ -104,6 +105,7 @@ export async function enforceBudget(
     canAsk: step.emit !== undefined && step.config.capabilities?.requestInput === true,
     session: step.session,
     turnSequence: step.position().sequence,
+    usage: step.view().projection.view.usage.total,
   });
   if (limit.kind === "within") return undefined;
   if (limit.kind === "ask") {
@@ -168,11 +170,6 @@ function responsePolicyRequestIds(
 /** The caller whose turn parks a step. */
 function currentRequester(step: Step): SessionAuthContext | null {
   return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
-}
-
-/** The cancelled turn's responders stop: the cancel closed the answers their policies weighed. */
-export function retireCancelledCandidates<T extends HarnessSessionBase>(session: T): T {
-  return writeHitlState(session, { responders: { retire: "all" } });
 }
 
 /**

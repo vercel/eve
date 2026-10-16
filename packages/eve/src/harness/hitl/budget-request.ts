@@ -10,7 +10,7 @@ import { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#shared/input.js";
  */
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import type { ResponseValue } from "#protocol/session-events/families/response.js";
-import type { SessionUsageLimitViolation } from "#harness/turn-tag-state.js";
+import type { SessionUsageLimitViolation } from "#harness/session-usage.js";
 
 /** The budget prompt: whether to continue past the session's limit. */
 export interface LimitAsk {
