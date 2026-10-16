@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { describe, expect, it } from "vitest";
 
 import { instrumentationEventForTraceDecision } from "#instrumentation/content-policy.js";
@@ -7,13 +8,15 @@ const event: InstrumentationEvent = {
   idempotencyKey: "model:session-1:turn-1:0:0:0",
   input: { instructions: "private prompt", messages: [] },
   model: { modelId: "test", provider: "test" },
-  scope: {
-    attemptId: "session-1:turn-1:0:0",
-    attemptIndex: 0,
-    sessionId: "session-1",
-    stepIndex: 0,
-    turnId: "turn-1",
-  },
+  scope: instrumentationScope(
+    {
+      runId: "session-1:turn-1:0:0",
+      attempt: 0,
+      sessionId: "session-1",
+      turnId: "turn-1",
+    },
+    0,
+  ),
   type: "model.call.started",
 };
 
@@ -44,7 +47,7 @@ describe("instrumentationEventForTraceDecision", () => {
           request: { prompt: "Approve weather?" },
           interactionId: "request-1",
           scope: event.scope,
-          type: "input.requested",
+          type: "interaction.opened",
         },
         decision,
         contentContext("public"),
@@ -59,7 +62,7 @@ describe("instrumentationEventForTraceDecision", () => {
           interactionId: "request-1",
           answer: { optionId: "approve" },
           scope: event.scope,
-          type: "input.resolved",
+          type: "interaction.settled",
         },
         decision,
         contentContext("public"),

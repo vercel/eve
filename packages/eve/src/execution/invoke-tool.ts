@@ -109,50 +109,58 @@ export async function invokeTool(
   input: unknown,
   options: InvokeToolOptions,
 ): Promise<InvokeToolResult> {
-  const compiled = runtime.manifest.tools.find((tool) => tool.name === name);
-  const definition = runtime.tools.get(name);
-  if (compiled === undefined || definition === undefined) {
-    return failed(`The agent has no tool named "${name}".`);
-  }
-  const ineligible =
-    ineligibility(runtime.manifest, compiled) ??
-    (definition.execute === undefined ? "it has no server-side execute" : undefined);
-  if (ineligible !== undefined) {
-    return failed(`Tool "${name}" cannot be invoked outside a conversation: ${ineligible}.`);
-  }
-
-  const key = options.key;
-  const keyProblem = key === undefined ? undefined : validateToolSessionKey(key);
-  if (keyProblem !== undefined) return { message: keyProblem, status: "invalid-input" };
-  // `none()` gives every caller one principal, so a key would be a shared secret
-  // that opens the same sandbox to anyone who guesses it.
-  if (key !== undefined && isAnonymousPrincipal(options.auth)) {
-    return denied(
-      "Tool sessions need an authenticated caller: an anonymous caller cannot send a key. " +
-        "Call without a key for a one-off session.",
-    );
-  }
-
   const callId = `call_${createUlid()}`;
-  // Each call is its own run in traces. A tool session id is stable per caller
-  // and key, so it only finds the sandbox: as a run or conversation id it would
-  // join calls days apart and show which calls came from the same caller.
   const runSessionId = `call_session_${createUlid()}`;
-  const sessionId =
-    key === undefined
-      ? runSessionId
-      : deriveToolSessionId({ current: options.auth, forwardedBy: options.forwardedBy, key });
   return await withInvokeToolSpan(
     {
       agentName: runtime.agentName,
       auth: options.auth,
       callId,
+      input,
       origin: runtime.origin,
       sessionId: runSessionId,
       toolName: name,
     },
-    (observer) =>
-      runInvocation({ callId, definition, input, name, observer, options, runtime, sessionId }),
+    async (observer) => {
+      const compiled = runtime.manifest.tools.find((tool) => tool.name === name);
+      const definition = runtime.tools.get(name);
+      if (compiled === undefined || definition === undefined) {
+        return failed(`The agent has no tool named "${name}".`);
+      }
+      const ineligible =
+        ineligibility(runtime.manifest, compiled) ??
+        (definition.execute === undefined ? "it has no server-side execute" : undefined);
+      if (ineligible !== undefined) {
+        return failed(`Tool "${name}" cannot be invoked outside a conversation: ${ineligible}.`);
+      }
+
+      const key = options.key;
+      const keyProblem = key === undefined ? undefined : validateToolSessionKey(key);
+      if (keyProblem !== undefined) return { message: keyProblem, status: "invalid-input" };
+      // `none()` gives every caller one principal, so a key would be a shared secret
+      // that opens the same sandbox to anyone who guesses it.
+      if (key !== undefined && isAnonymousPrincipal(options.auth)) {
+        return denied(
+          "Tool sessions need an authenticated caller: an anonymous caller cannot send a key. " +
+            "Call without a key for a one-off session.",
+        );
+      }
+
+      const sessionId =
+        key === undefined
+          ? runSessionId
+          : deriveToolSessionId({ current: options.auth, forwardedBy: options.forwardedBy, key });
+      return await runInvocation({
+        callId,
+        definition,
+        input,
+        name,
+        observer,
+        options,
+        runtime,
+        sessionId,
+      });
+    },
   );
 }
 

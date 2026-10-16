@@ -1,3 +1,4 @@
+import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
@@ -35,7 +36,6 @@ import {
   withoutResponses,
 } from "./delivery.js";
 import { recheckApprovedCall } from "#harness/tools.js";
-import { activeTurnId } from "#harness/session-machine/view.js";
 
 /**
  * What a delivery leaves for its step once its answers are admitted. `stop` ends the step: a
@@ -260,31 +260,37 @@ async function runApproved(
     ),
   );
   if (calls.length === 0) return undefined;
-  const position = step.position();
-  const attempt = step.instrumentation?.prepareAttempt({
-    attemptIndex: 0,
-    isFrameworkTool: (name) => step.frameworkToolNames.has(name),
-    stepIndex: position.stepIndex,
-    turnId: activeTurnId(position),
-  });
   const executed = await Promise.all(
-    local.map(async ({ requests, tools }) =>
-      requests.length === 0
-        ? { settled: [], signIns: [] }
-        : await runApprovedCalls({
-            abortSignal: step.config.abortSignal,
-            approvedTools: grantedApprovalKeys(step.view(), (request) =>
-              tools.get(request.call.toolName)?.approvalKey?.(request.call.input),
-            ),
-            approvals: requests,
-            messages: step.projectHistory(step.session.history),
-            position: step.position(),
-            publish: step.publish,
-            responderOf: (approval) => responders.get(approval.interactionId),
-            telemetry: attempt?.telemetry,
-            tools,
-          }),
-    ),
+    local.map(async ({ requests, tools }) => {
+      if (requests.length === 0) return { settled: [], signIns: [] };
+      const view = step.view().projection.view;
+      const call = view.calls[requests[0]!.call.callId];
+      const runId = call === undefined ? undefined : callRun(view, call);
+      const run = runId === undefined ? undefined : view.runs[runId];
+      const attempt =
+        run?.attempt === undefined
+          ? undefined
+          : step.instrumentation?.prepareAttempt({
+              runId: run.runId,
+              attempt: run.attempt,
+              stepIndex: run.step,
+              turnId: runTurn(view, run.runId),
+              isFrameworkTool: (name) => step.frameworkToolNames.has(name),
+            });
+      return await runApprovedCalls({
+        abortSignal: step.config.abortSignal,
+        approvedTools: grantedApprovalKeys(step.view(), (request) =>
+          tools.get(request.call.toolName)?.approvalKey?.(request.call.input),
+        ),
+        approvals: requests,
+        messages: step.projectHistory(step.session.history),
+        position: step.position(),
+        publish: step.publish,
+        responderOf: (approval) => responders.get(approval.interactionId),
+        telemetry: attempt?.telemetry,
+        tools,
+      });
+    }),
   );
   await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
   // A cancellation ends the turn once the calls it cut short have their results.

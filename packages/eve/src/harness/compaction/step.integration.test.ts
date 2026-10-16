@@ -260,7 +260,7 @@ describe("memory recalled after a compaction", () => {
     const result = await contextStorage.run(ctx, async () => {
       let stepped = await createToolLoopHarness({
         compactOnly: options.compactOnly,
-        // What the session's memory participant does with the events these steps publish.
+        // The memory points the session's participants dispatch from these facts.
         handleEvent: foldingHandler(async (event, messages) => {
           const memory = { ctx, memories: [notes] };
           if (event.type === "turn.started") {

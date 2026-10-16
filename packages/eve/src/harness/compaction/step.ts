@@ -122,7 +122,8 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session: step.session,
-      telemetry: step.instrumentation?.telemetry(),
+      prepareTelemetry: (runId) =>
+        step.instrumentation?.prepareAttempt({ runId, attempt: 0 }).telemetry,
       traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
     });
     step.session = compacted.session;
@@ -252,6 +253,7 @@ async function compactOnce(input: {
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
+  readonly prepareTelemetry?: (runId: string) => TelemetryOptions | undefined;
   readonly traceContextHeaders?: () => Record<string, string> | undefined;
 }): Promise<{
   readonly compacted: boolean;
@@ -301,10 +303,16 @@ async function compactOnce(input: {
     providerOptions,
     telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
   };
+  let summaryTelemetry: TelemetryOptions | undefined;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const summarize = async (prompt: CompactionSummaryPrompt) => {
     const summary = await runModelCallWithRetries(
-      () => streamCompactionSummary({ ...call, ...prompt }),
+      () =>
+        streamCompactionSummary({
+          ...call,
+          telemetry: summaryTelemetry ?? call.telemetry,
+          ...prompt,
+        }),
       { sessionId: session.sessionId, turnId: emissionState.turnId },
       input.abortSignal,
     );
@@ -350,6 +358,8 @@ async function compactOnce(input: {
       }
     }
   }
+
+  if (needsSummary) summaryTelemetry = input.prepareTelemetry?.(change.summaryRunId);
 
   const canonical = canonicalizeMemoryRecords(messages);
   const ordinary = validateHarnessModelMessages(

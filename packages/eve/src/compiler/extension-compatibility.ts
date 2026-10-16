@@ -22,10 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 92,
+    current: 93,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 84,
-      85, 86, 87, 88, 89, 90, 91, 92,
+      85, 86, 87, 89, 90, 91, 92, 93,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -86,14 +86,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       75: "eve/ai evaluate was renamed to decide and AI SDK evaluation models became decision models; import decide from eve/ai",
       79: "Sandbox provider handle hooks were renamed to onSandboxStop and onSandboxDelete.",
       83: 'webSearch provider "openai" was replaced by "native" before it shipped in a release',
+      88: "toolResultFrom takes a settled call's row, such as ctx.view.calls[event.data.callId], instead of a v26 action result; rebuild the extension",
     },
   },
   dynamicTool: {
-    current: 86,
+    current: 87,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
       60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
-      85, 86,
+      85, 86, 87,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -134,12 +135,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 61,
-    supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 36, 37, 38, 39, 40, 41, 42,
-      43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61,
-    ],
+    current: 62,
+    supported: [62],
     dropped: {
+      61: "v27 replaces v26 session event payloads; rebuild the extension against eve/events facts",
       1: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       2: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       3: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
@@ -198,15 +197,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       56: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       57: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       58: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      59: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      60: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
     },
   },
   schedule: {
-    current: 33,
-    supported: [
-      1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-      29, 30, 31, 32, 33,
-    ],
+    current: 34,
+    supported: [34],
     dropped: {
+      33: "v27 replaces v26 session event payloads; rebuild the extension against eve/events facts",
       1: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       2: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       3: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
@@ -238,13 +237,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       29: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       30: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       31: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      32: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
     },
   },
   subagent: {
-    current: 38,
+    current: 39,
     supported: [
       3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
-      34, 35, 36, 37, 38,
+      34, 35, 36, 37, 38, 39,
     ],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -258,10 +258,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 50,
+    current: 51,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 32, 33, 34,
-      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49, 50,
+      35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49, 50, 51,
     ],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
@@ -277,9 +277,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   hook: {
-    current: 46,
-    supported: [20, 21, 22, 23, 25, 27, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46],
+    current: 47,
+    supported: [47],
     dropped: {
+      46: "v27 replaces v26 session event payloads; rebuild the extension against eve/events facts",
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       3: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -324,14 +325,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       42: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       43: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
       44: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
+      45: "v27 removes v26 conversation event keys, metadata and handler payloads; migrate handlers to eve/events facts and explicit lifecycle scopes, then rebuild the extension",
     },
   },
   skill: { current: 3, supported: [1, 2, 3], dropped: {} },
   dynamicSkill: {
-    current: 38,
+    current: 39,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25, 26, 27, 28, 29, 30,
-      31, 32, 33, 34, 35, 36, 37, 38,
+      31, 32, 33, 34, 35, 36, 37, 38, 39,
     ],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -342,10 +344,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 39,
+    current: 40,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 28, 29, 30,
-      31, 32, 33, 34, 35, 36, 37, 38, 39,
+      31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
     ],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",

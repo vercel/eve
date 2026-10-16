@@ -8,7 +8,7 @@ import type {
 } from "#compiled/@vercel/otel/index.js";
 
 import { PROVIDER, type InstrumentationProvider } from "#public/instrumentation/provider.js";
-import type { InstrumentationRuntimeContextInput } from "#public/instrumentation/index.js";
+import type { InstrumentationModelStartedInput } from "#public/instrumentation/index.js";
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
@@ -128,7 +128,7 @@ export interface OtelIntegrationOptions extends ManagedTraceOptions {
    * Keys beginning with `eve.` are reserved and dropped. Return `undefined`
    * to contribute nothing.
    */
-  readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
+  readonly runtimeContext?: (input: InstrumentationModelStartedInput) => JsonObject | undefined;
 }
 
 const OTEL_DECLARATION = Symbol.for("eve.instrumentation.otel");
@@ -147,7 +147,7 @@ export interface OtelDeclaration extends InstrumentationProvider {
 export interface OtelIntegration extends InstrumentationProvider {
   readonly [OTEL_INTEGRATION]: true;
   readonly metricReaders: readonly MetricReader[];
-  readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
+  readonly runtimeContext?: (input: InstrumentationModelStartedInput) => JsonObject | undefined;
   readonly spanProcessors: readonly SpanProcessorOrName[];
 }
 
@@ -258,7 +258,7 @@ export interface OtelHarnessSettings {
 
 /** @internal */
 export type RuntimeContextResolver = (
-  input: InstrumentationRuntimeContextInput,
+  input: InstrumentationModelStartedInput,
 ) => JsonObject | undefined;
 
 /** @internal */

@@ -92,14 +92,6 @@ import {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { waitsOnPerson } from "#execution/session/pending-turn-state.js";
 
-function channelDeliveryErrorCode(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { readonly code?: unknown }).code;
-    if (typeof code === "string" && code.length > 0) return code;
-  }
-  return "CHANNEL_DELIVERY_FAILED";
-}
-
 export type { TurnStepInput };
 
 interface PendingStepAttributes {
@@ -247,31 +239,9 @@ async function runSessionStepBody(
         sessionStarted: initialEmissionState.sessionStarted,
       }),
     );
-    await contextStorage.run(ctx, () =>
-      instrumentation?.instrumentChannelDelivery({
-        agentName: bundle.turnAgent.id,
-        ctx,
-        delivery: rawDelivery,
-        rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
-        sequence: initialEmissionState.sequence,
-        sessionId: initialSession.sessionId,
-        turnId: activeTurnId(initialEmissionState),
-      }),
-    );
+    instrumentation?.prepareDelivery(rawDelivery);
   }
 
-  const failChannelDeliveries = async (error: unknown): Promise<void> => {
-    await contextStorage.run(ctx, () =>
-      instrumentation?.instrumentChannelDelivery({
-        ctx,
-        error,
-        errorCode: channelDeliveryErrorCode(error),
-        includeTurn: false,
-        outcome: "failed",
-      }),
-    );
-    await instrumentation?.flush();
-  };
   const publisher = openSessionEventPublisher({
     ctx,
     origin: "own",
@@ -330,7 +300,7 @@ async function runSessionStepBody(
           delivered.push({ input: result ?? undefined, payload });
         }
       } catch (error) {
-        await failChannelDeliveries(error);
+        await instrumentation?.flush();
         throw error;
       }
       admission = admitDeliveries({
@@ -460,13 +430,6 @@ async function runSessionStepBody(
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
       await publishAdmission(buildRuntimeIdentity(effectiveNode));
-      await contextStorage.run(ctx, () =>
-        instrumentation?.instrumentChannelDelivery({
-          ctx,
-          includeTurn: false,
-          outcome: "completed",
-        }),
-      );
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -502,14 +465,14 @@ async function runSessionStepBody(
             },
       });
     } catch (error) {
-      await failChannelDeliveries(error);
+      await instrumentation?.flush();
       throw error;
     }
 
     try {
       await publishAdmission(runtimeIdentity);
     } catch (error) {
-      await failChannelDeliveries(error);
+      await instrumentation?.flush();
       throw error;
     }
 
@@ -615,7 +578,7 @@ async function runSessionStepBody(
       });
     } catch (error) {
       if (!isTurnCancellation(error) && !abortSignal.aborted) {
-        await failChannelDeliveries(error);
+        await instrumentation?.flush();
         throw error;
       }
       return createCancelledModelCallBatchResult({
