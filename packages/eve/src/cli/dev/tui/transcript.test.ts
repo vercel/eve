@@ -37,6 +37,47 @@ function project(events: readonly SessionEvent[]) {
 }
 
 describe("ConversationTranscript", () => {
+  it("shows one cancellation after the last piece of a turn split by a follow-up", () => {
+    const scope = { turnId: "turn_0", runId: "run_followup" };
+    const blocks = project([
+      ...testTurnFacts(0, "One.", ["d_0"]).slice(0, 6),
+      { type: "delivery.admitted", data: { deliveryId: "followup" } },
+      {
+        type: "delivery.consumed",
+        data: {
+          deliveryId: "followup",
+          turnId: "turn_0",
+          parts: [{ kind: "text", text: "continue" }],
+        },
+      },
+      {
+        type: "model.requested",
+        scope,
+        data: { runId: "run_followup", owner: { turnId: "turn_0" } },
+      },
+      {
+        type: "content.completed",
+        scope,
+        data: {
+          partId: "followup_part",
+          kind: "text",
+          phase: "reply",
+          runId: "run_followup",
+          value: "Two.",
+        },
+      },
+      { type: "model.settled", scope, data: { runId: "run_followup", outcome: "completed" } },
+      { type: "turn.settled", data: { turnId: "turn_0", outcome: "cancelled" } },
+    ]);
+    expect(blocks).toEqual([
+      "user: one.",
+      "assistant: One.",
+      "user: continue",
+      "assistant: Two.",
+      "notice: Cancelled.",
+    ]);
+  });
+
   it("shows a failed turn's error where the turn ended, before the next turn", () => {
     const failed = testTurnFacts(0, "One.", ["d_0"]).map((event) =>
       event.type === "turn.settled"

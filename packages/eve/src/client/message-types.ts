@@ -10,7 +10,11 @@ import type { ErrorInfo } from "#protocol/session-events/envelope.js";
  * client waits for eve to consume it, `"failed"` if sending failed, and `"complete"` once its turn
  * consumed it; the agent's message is `"streaming"` while its turn runs and `"complete"` after.
  * `optimistic` marks a message this client shows before eve consumed it. `turnId` names the turn,
- * and `result` holds the turn's structured result once it completed.
+ * and `result` holds the turn's structured result once it completed, on the turn's last message.
+ *
+ * A turn can show as several agent messages: a message a person sent while it worked splits it,
+ * so what the agent did before shows above the person's message and the rest below. Group by
+ * `metadata.turnId` to read a turn as one.
  */
 export interface EveMessage {
   readonly id: string;

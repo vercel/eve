@@ -12,7 +12,7 @@ import { stampDefinitionKey } from "#internal/authored-definition/source-identit
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
-import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import {
   collectDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
@@ -116,18 +116,10 @@ export interface InternalToolDefinitionWithExecuteFn<
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
  * way they render tool approvals.
  */
-export interface ToolQuestion {
-  /**
-   * Whether the user may answer with free text instead of one of the
-   * {@link options}.
-   */
-  readonly allowFreeform?: boolean;
-  /** Rendering hint: confirmation buttons, a selection list, or a text field. */
-  readonly display?: "confirmation" | "select" | "text";
-  /** Selectable answers. */
-  readonly options?: readonly InteractionOption[];
-  readonly prompt: string;
-}
+export type ToolQuestion = Pick<
+  InteractionRequest,
+  "prompt" | "title" | "options" | "allowFreeform" | "display"
+>;
 
 /**
  * The outcome of a {@link ToolQuestion}.

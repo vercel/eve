@@ -1,7 +1,9 @@
 import {
   failure,
   reply,
-  viewOfEvents,
+  emptySessionView,
+  emptyPreviews,
+  foldEvents,
   type CallRow,
   type PartRow,
   type RunRow,
@@ -28,7 +30,9 @@ import type {
 export function buildTraceTurnsFromTranscript(
   events: readonly TranscriptStreamEvent[],
 ): readonly TraceTurn[] {
-  const { view, previews } = viewOfEvents(events);
+  const view = emptySessionView();
+  const previews = emptyPreviews();
+  foldEvents(view, events, { previews });
   return Object.values(view.turns)
     .sort((a, b) => a.introducedAt - b.introducedAt)
     .map((turn) => traceTurn(view, previews, turn, events));

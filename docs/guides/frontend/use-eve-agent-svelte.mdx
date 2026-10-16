@@ -17,7 +17,7 @@ Call the binding once for a conversation and read its reactive getters directly.
 
   const agent = useEveAgent();
   let message = $state("");
-  let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isBusy = $derived(agent.status === "busy");
   let isInputDisabled = $derived(isBusy || agent.status === "resuming");
 
   async function handleSubmit() {
@@ -28,7 +28,7 @@ Call the binding once for a conversation and read its reactive getters directly.
   }
 </script>
 
-{#each agent.data.messages as item}
+{#each agent.messages as item}
   <p>{item.role}: {JSON.stringify(item.parts)}</p>
 {/each}
 
@@ -45,15 +45,15 @@ Call the binding once for a conversation and read its reactive getters directly.
 
 The state fields are reactive getters; the commands are ordinary methods:
 
-| Property                                                  | Svelte shape                      |
-| --------------------------------------------------------- | --------------------------------- |
-| `data`                                                    | `ConversationState`               |
-| `view`                                                    | `SessionView`                     |
-| `status`                                                  | `UseEveAgentStatus`               |
-| `error`                                                   | `Error \| undefined`              |
-| `events`                                                  | `readonly SessionStreamEvent[]`   |
-| `session`                                                 | `ClientSessionState \| undefined` |
-| `send`, `respond`, `prewarm`, `resume`, `cancel`, `reset` | Methods                           |
+| Property                                                  | Svelte shape                                       |
+| --------------------------------------------------------- | -------------------------------------------------- |
+| `messages`, `previews`, `agents`                          | Reactive getters for each projected snapshot field |
+| `view`                                                    | `SessionView`                                      |
+| `status`                                                  | `UseEveAgentStatus`                                |
+| `error`                                                   | `Error \| undefined`                               |
+| `events`                                                  | `readonly SessionStreamEvent[]`                    |
+| `session`                                                 | `ClientSessionState \| undefined`                  |
+| `send`, `respond`, `prewarm`, `resume`, `cancel`, `reset` | Methods                                            |
 
 Read the getters directly in templates, `$derived`, or `$effect`. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
 
@@ -63,37 +63,26 @@ Call `agent.send(text)` for text or pass content parts for attachments. The API 
 
 ## Human-in-the-loop prompts
 
-Open requests appear in the `agent.data.interactions` ledger. Read them with `openConversationInteractions()`, then answer through `agent.respond()`. An answered request leaves the list right away, so its buttons can't be pressed twice:
+Read requests from the shared `view` and answer them with `respond()`. Submission does not settle
+an interaction; its response rows and eventual settlement are authoritative.
 
 ```svelte
 <script lang="ts">
-  import { openConversationInteractions, useEveAgent } from "eve/svelte";
+  import { interaction, openInteractions } from "eve/events";
+  import { useEveAgent } from "eve/svelte";
 
   const agent = useEveAgent();
-  const pendingRequests = $derived(
-    openConversationInteractions(agent.data)
-      .map((interaction) => interaction.request)
-      // A sign-in is answered by signing in; render it from its interaction part.
-      .filter((request) => request.kind !== "sign-in"),
-  );
+  const pendingRequests = $derived(openInteractions(agent.view)
+    .flatMap((row) => interaction(agent.view, row.interactionId) ?? [])
+    .filter((item) => item.request.kind !== "sign-in" && item.answer === undefined));
 </script>
 
-{#each pendingRequests as request (request.interactionId)}
-  <fieldset>
-    <legend>
-      {request.kind === "approval"
-        ? "Approval required"
-        : request.kind === "question"
-          ? "Question"
-          : "Budget"}
-    </legend>
-    <p>{request.prompt}</p>
-    {#each request.options ?? [] as option (option.id)}
-      <button
-        type="button"
-        onclick={() =>
-          void agent.respond([{ interactionId: request.interactionId, optionId: option.id }])}
-      >
+{#each pendingRequests as item (item.interactionId)}
+  <fieldset disabled={agent.status === "resuming"}>
+    <legend>{item.request.prompt}</legend>
+    {#each item.request.options ?? [] as option (option.id)}
+      <button type="button" onclick={() =>
+        void agent.respond([{ interactionId: item.interactionId, optionId: option.id }])}>
         {option.label}
       </button>
     {/each}
@@ -110,7 +99,7 @@ to `false`, so the first send creates the session. The binding waits for create 
 retries while the inbox starts, and keeps the session stream open across turns. See [Prewarming and returned state](./overview#returned-state) for creation, failure, and
 connection behavior.
 
-Call `agent.cancel()` to stop the durable server-side turn while the binding remains attached through settlement. Destroying the component only disconnects its local stream; it does not cancel server execution. Call `agent.reset()` to clear local state and start a new session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `agent.status` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"ready"`, `"error"`, or `"streaming"`. Use `agent.resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
+Call `agent.cancel()` to stop the durable server-side turn while the binding remains attached through settlement. Destroying the component only disconnects its local stream; it does not cancel server execution. Call `agent.reset()` to clear local state and start a new session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `agent.status` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"idle"` or `"busy"`, and inspect the separate `error` field. Use `agent.resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
 
 ## Custom host and credentials
 
@@ -126,7 +115,7 @@ Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application
 
 ## Derive your own state
 
-`agent.data` is the conversation. Derive anything else from `agent.events`, the authoritative list of the session's stream events. See [Derive your own state](./overview#derive-your-own-state).
+Use `agent.view` and selectors from `eve/events` for lifecycle state, and `agent.messages` for rendering. See [Derive your own state](./overview#derive-your-own-state).
 
 ## What to read next
 

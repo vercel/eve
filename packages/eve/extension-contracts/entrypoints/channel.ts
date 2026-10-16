@@ -9,6 +9,7 @@ export {
   SessionStrandedError,
   WS,
   attachmentError,
+  answerFromText,
   createWebSocketUpgradeServer,
   defineChannel,
   disableRoute,

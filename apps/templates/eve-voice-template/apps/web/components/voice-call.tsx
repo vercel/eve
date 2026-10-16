@@ -1,5 +1,7 @@
 "use client";
 
+import { interaction } from "eve/events";
+
 import {
   createOpenAI,
   type Experimental_OpenAIRealtimeModelLiveOptions as OpenAIRealtimeModelLiveOptions,
@@ -60,7 +62,10 @@ export function VoiceCall() {
   const delegateRef = useRef<VoiceDelegate | null>(null);
 
   const agent = useEveAgent({
-    onError: () => delegateRef.current?.fail(),
+    onError: (cause) => {
+      setError(cause.message);
+      delegateRef.current?.fail();
+    },
     onEvent: (event) => delegateRef.current?.observe(event),
     onFinish: () => delegateRef.current?.settled(),
   });
@@ -174,23 +179,21 @@ export function VoiceCall() {
 
   const muted = rt.session?.isInputMuted ?? false;
   // Same input wiring as the Web Chat registry's agent-chat.
-  const canRespond = (requestId: string) => agent.data.inputs[requestId]?.status === "open";
+  const canRespond = (requestId: string) => agent.view.interactions[requestId]?.status === "open";
   const questionsFor = (callId: string) =>
-    Object.values(agent.data.inputs).filter(
-      (input) => input.request.kind === "question" && input.request.action.callId === callId,
-    );
+    Object.keys(agent.view.interactions)
+      .flatMap((id) => interaction(agent.view, id) ?? [])
+      .filter((input) => input.request.kind === "question" && input.call?.callId === callId);
 
   // eve's k-th user message is the k-th request sent. Its text duplicates the
   // transcript, and so does the spoken answer, so only tools and prompts show.
   const activity: EveMessage[][] = [];
-  for (const message of agent.data.messages) {
+  for (const message of agent.messages) {
     if (message.role === "user") activity.push([]);
     else
       activity.at(-1)?.push({
         ...message,
-        parts: message.parts.filter(
-          (part) => part.type === "dynamic-tool" || part.type === "authorization",
-        ),
+        parts: message.parts.filter((part) => part.type === "tool" || part.type === "interaction"),
       });
   }
   const activityAt = (index: number) =>
@@ -200,10 +203,12 @@ export function VoiceCall() {
       .map((message) => (
         <AgentMessage
           canRespond={canRespond}
-          isStreaming={false}
+          view={agent.view}
           key={message.id}
           message={message}
-          onInputResponses={(responses) => agent.respond(responses)}
+          onAnswers={async (responses) => {
+            await agent.respond(responses).catch(() => {});
+          }}
           questionsFor={questionsFor}
         />
       ));

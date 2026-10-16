@@ -444,6 +444,7 @@ cancellation path rather than a separate authorization completion event.
 const answer = await ctx.ask(
   {
     prompt: string,
+    title?: string,
     display?: "confirmation" | "select" | "text",
     options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
     allowFreeform?: boolean,

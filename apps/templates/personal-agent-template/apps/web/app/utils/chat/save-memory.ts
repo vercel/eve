@@ -1,10 +1,10 @@
 import { getToolName, isDynamicToolUIPart } from "ai";
 import type { UIMessage } from "ai";
-import type { EveDynamicToolPart } from "eve/vue";
+import type { EveToolUIPart } from "~/composables/chat/providers/eve/adapter";
 
 export type SaveMemoryDisplayPart = {
   kind: "save_memory";
-  parts: EveDynamicToolPart[];
+  parts: EveToolUIPart[];
 };
 
 export type MessageDisplayPart = {
@@ -16,7 +16,7 @@ export type DisplayPart = MessageDisplayPart | SaveMemoryDisplayPart;
 
 export function buildDisplayParts(parts: UIMessage["parts"]): DisplayPart[] {
   const display: DisplayPart[] = [];
-  let buffer: EveDynamicToolPart[] = [];
+  let buffer: EveToolUIPart[] = [];
 
   function flush() {
     if (!buffer.length) {
@@ -32,7 +32,7 @@ export function buildDisplayParts(parts: UIMessage["parts"]): DisplayPart[] {
 
   for (const part of parts) {
     if (isDynamicToolUIPart(part) && getToolName(part) === "save_memory") {
-      buffer.push(part as EveDynamicToolPart);
+      buffer.push(part as EveToolUIPart);
       continue;
     }
 
@@ -81,10 +81,6 @@ export function normalizeSaveMemoryInput(input: SaveMemoryInput | undefined) {
   };
 }
 
-export function isSaveMemoryPending(part: EveDynamicToolPart) {
-  return (
-    part.state === "approval-requested" &&
-    part.toolMetadata?.eve?.inputRequest &&
-    !part.toolMetadata?.eve?.inputResponse
-  );
+export function isSaveMemoryPending(part: EveToolUIPart) {
+  return part.interaction?.status === "open" && part.interaction.request.kind === "approval";
 }

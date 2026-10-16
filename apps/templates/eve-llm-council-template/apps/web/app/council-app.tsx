@@ -179,7 +179,7 @@ export function CouncilApp() {
   );
 
   const agent = useEveAgent({ onEvent: handleEvent });
-  const busy = agent.status === "submitted" || agent.status === "streaming";
+  const busy = agent.status === "busy";
   const error = resultError ?? agent.error?.message;
   const allMembersComplete = members.every(
     (member) => memberState[member.id].status === "complete",

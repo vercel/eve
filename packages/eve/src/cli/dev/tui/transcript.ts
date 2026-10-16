@@ -223,6 +223,7 @@ export class ConversationTranscript {
       if (
         turnId !== undefined &&
         !turnFailures.has(turnId) &&
+        lastOfTurn.get(turnId) === messageIndex &&
         conversation.view.turns[turnId]?.outcome === "cancelled"
       ) {
         blocks.push(

@@ -1,5 +1,7 @@
 "use client";
 
+import type { CallState, SessionView } from "eve/events";
+import { callState } from "eve/events";
 import type {
   Interaction,
   EveInteractionPart,
@@ -8,25 +10,21 @@ import type {
   EveToolPart,
 } from "eve/react";
 import { signInEnding } from "eve/events";
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import {
+  BotIcon,
+  BrainIcon,
   CheckCircleIcon,
   ExternalLinkIcon,
   FileIcon,
   ImageIcon,
   KeyRoundIcon,
+  TerminalIcon,
+  WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
-import {
-  BashToolContent,
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
+import { BashToolContent, ToolInput, ToolOutput } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
 import {
   Questionnaire,
@@ -40,6 +38,16 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@/components/ui/trace";
 import { cn } from "@/lib/utils";
 
 export type AgentAnswer = {
@@ -48,45 +56,33 @@ export type AgentAnswer = {
   readonly text?: string;
 };
 
+/** How a message answers what the agent asks. */
+interface Asks {
+  readonly canRespond: (interactionId: string) => boolean;
+  readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
+  /** Every question a call asked; its part holds only the latest. */
+  readonly questionsFor: (callId: string) => readonly Interaction[];
+}
+
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
+type Step = Extract<EveMessagePart, { type: "reasoning" | "tool" }>;
 
 export function AgentMessage({
-  canRespond,
-  isStreaming,
   message,
-  onAnswers,
-  questionsFor,
-}: {
-  readonly canRespond: (interactionId: string) => boolean;
-  readonly isStreaming: boolean;
-  readonly message: EveMessage;
-  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
-  readonly questionsFor: (callId: string) => readonly Interaction[];
-}) {
-  const lastTextIndex = message.parts.reduce(
-    (last, part, index) => (part.type === "text" ? index : last),
-    -1,
-  );
-  const hasAssistantText =
-    message.role === "assistant" &&
-    message.parts.some((part) => part.type === "text" && part.text.length > 0);
-
+  view,
+  ...asks
+}: Asks & { readonly message: EveMessage; readonly view: SessionView }) {
   return (
     <Message
       data-optimistic={message.metadata?.optimistic ? "true" : undefined}
       from={message.role}
     >
       <MessageContent>
-        {message.parts.map((part, index) =>
-          hasAssistantText && part.type === "reasoning" ? null : (
-            <AgentMessagePart
-              canRespond={canRespond}
-              key={partKey(part, index)}
-              onAnswers={onAnswers}
-              part={part}
-              questionsFor={questionsFor}
-              showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
-            />
+        {blocksOf(message.parts, asks).map((block, index) =>
+          Array.isArray(block) ? (
+            <Steps asks={asks} key={partKey(block[0]!, index)} steps={block} view={view} />
+          ) : (
+            <AgentMessagePart asks={asks} key={partKey(block, index)} part={block} />
           ),
         )}
       </MessageContent>
@@ -94,87 +90,233 @@ export function AgentMessage({
   );
 }
 
-function AgentMessagePart({
-  canRespond,
-  onAnswers,
-  part,
-  questionsFor,
-  showCaret,
-}: {
-  readonly canRespond: (interactionId: string) => boolean;
-  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
-  readonly part: EveMessagePart;
-  readonly questionsFor: (callId: string) => readonly Interaction[];
-  readonly showCaret: boolean;
-}) {
+/**
+ * A message's parts, with each run of steps (reasoning and calls) gathered into one list. A call
+ * that asks a question shows as that question instead, and the model waiting on or cancelling
+ * its own tasks isn't activity to show.
+ */
+function blocksOf(parts: readonly EveMessagePart[], asks: Asks): (EveMessagePart | Step[])[] {
+  const blocks: (EveMessagePart | Step[])[] = [];
+  for (const part of parts) {
+    if (part.type === "tool" && part.kind === "control") continue;
+    const isStep =
+      part.type === "reasoning" ||
+      (part.type === "tool" && asks.questionsFor(part.callId).length === 0);
+    const last = blocks.at(-1);
+    if (!isStep) blocks.push(part);
+    else if (Array.isArray(last)) last.push(part as Step);
+    else blocks.push([part as Step]);
+  }
+  return blocks;
+}
+
+function AgentMessagePart({ asks, part }: { readonly asks: Asks; readonly part: EveMessagePart }) {
   switch (part.type) {
     case "text":
       return (
-        <MessageResponse caret="block" isAnimating={showCaret}>
+        <MessageResponse caret="block" isAnimating={part.state === "streaming"}>
           {part.text}
         </MessageResponse>
-      );
-    case "reasoning":
-      return (
-        <Reasoning defaultOpen isStreaming={part.state === "streaming"}>
-          <ReasoningTrigger />
-          <ReasoningContent>{part.text}</ReasoningContent>
-        </Reasoning>
       );
     case "file":
       return <AttachmentPart part={part} />;
     case "interaction":
-      return <InteractionPrompt canRespond={canRespond} onAnswers={onAnswers} part={part} />;
-    case "tool": {
-      // The model waiting on or cancelling its own tasks isn't activity to show.
-      if (part.kind === "control") return null;
-      const questions = questionsFor(part.callId);
-      if (questions.length > 0) {
-        return (
-          <div className="space-y-4">
-            {questions.map(({ answer, ...request }) => (
-              <QuestionRequest
-                canRespond={canRespond(request.interactionId)}
-                interaction={request}
-                answer={answer}
-                key={request.interactionId}
-                onAnswers={onAnswers}
-              />
-            ))}
-          </div>
-        );
-      }
-
+      return <InteractionPrompt asks={asks} part={part} />;
+    case "tool":
       return (
-        <>
-          <Tool>
-            <ToolHeader
-              failed={part.state === "failed"}
-              status={toolStatus(part)}
-              title={part.label}
-              toolName={part.name}
+        <div className="space-y-4">
+          {asks.questionsFor(part.callId).map(({ answer, ...request }) => (
+            <QuestionRequest
+              answer={answer}
+              canRespond={asks.canRespond(request.interactionId)}
+              interaction={request}
+              key={request.interactionId}
+              onAnswers={asks.onAnswers}
             />
-            <ToolContent>
-              {part.name === "bash" ? (
-                <BashToolContent
-                  errorText={part.error?.message}
-                  input={part.input}
-                  output={part.output}
-                />
-              ) : (
-                <>
-                  <ToolInput input={part.input} />
-                  <ToolOutput errorText={part.error?.message} output={part.output} />
-                </>
-              )}
-            </ToolContent>
-          </Tool>
-          {/* Kept outside the collapsed card so a pending approval is always visible. */}
-          <ApprovalActions canRespond={canRespond} part={part} onAnswers={onAnswers} />
-        </>
+          ))}
+        </div>
       );
-    }
+    default:
+      return null;
   }
+}
+
+/**
+ * A run of steps. Several fold into one line that opens while they work; an approval waits
+ * below them, so it stays in view when the list is closed.
+ */
+function Steps({
+  asks,
+  steps,
+  view,
+}: {
+  readonly asks: Asks;
+  readonly steps: readonly Step[];
+  readonly view: SessionView;
+}) {
+  const [open, setOpen] = useState<boolean>();
+  const states = steps.map((step) => stepState(step, view));
+  const working = states.some((state) => state === "working");
+  const waiting = states.some((state) => state === "waiting");
+  const failed = states.filter((state) => state === "failed").length;
+  const lines = (
+    <Trace>
+      {steps.map((step, index) =>
+        step.type === "reasoning" ? (
+          <ReasoningLine key={partKey(step, index)} part={step} />
+        ) : (
+          <ToolLine key={step.callId} part={step} state={callState(view, step.callId)} />
+        ),
+      )}
+    </Trace>
+  );
+  const approvals = steps.flatMap((step) =>
+    step.type === "tool" &&
+    step.interaction?.request.kind === "approval" &&
+    step.interaction.status !== "settled"
+      ? [step.interaction]
+      : [],
+  );
+
+  return (
+    <>
+      {steps.length === 1 ? (
+        lines
+      ) : (
+        <TraceCollapsible onOpenChange={setOpen} open={open ?? (working || waiting)}>
+          <TraceCollapsibleTrigger>
+            <TraceLine status={working ? "running" : failed > 0 ? "error" : undefined}>
+              <TraceTitle>
+                {working
+                  ? "Working"
+                  : waiting
+                    ? "Waiting for you"
+                    : `Worked${duration(steps, view) ?? ""}`}
+              </TraceTitle>
+              <TraceDescription>
+                {failed > 0 ? `${failed} of ${steps.length} failed` : `${steps.length} steps`}
+              </TraceDescription>
+            </TraceLine>
+          </TraceCollapsibleTrigger>
+          <TraceCollapsibleContent>{lines}</TraceCollapsibleContent>
+        </TraceCollapsible>
+      )}
+      {approvals.map((interaction) => (
+        <InteractionActions
+          answer={interaction.answer}
+          asks={asks}
+          interaction={interaction}
+          key={interaction.interactionId}
+        />
+      ))}
+    </>
+  );
+}
+
+function stepState(step: Step, view: SessionView): "working" | "waiting" | "failed" | "done" {
+  if (step.type === "reasoning") return step.state === "streaming" ? "working" : "done";
+  const state = callState(view, step.callId);
+  if (state === "approval" || state === "blocked") return "waiting";
+  const status = state === undefined ? "running" : CALL_LINES[state].status;
+  return status === "error" ? "failed" : status === undefined ? "done" : "working";
+}
+
+/** " for 12s": from the first step's start to the last one's end, when the rows say. */
+function duration(steps: readonly Step[], view: SessionView): string | undefined {
+  const times = steps.flatMap((step) => {
+    const row = step.type === "tool" ? view.calls[step.callId] : view.parts[step.id ?? ""];
+    if (row === undefined) return [];
+    const end = "endedAt" in row ? row.endedAt : undefined;
+    return [Date.parse(row.startedAt), Date.parse(end ?? row.startedAt)];
+  });
+  if (times.length === 0) return undefined;
+  const seconds = Math.round((Math.max(...times) - Math.min(...times)) / 1000);
+  if (seconds < 1) return undefined;
+  return seconds < 60 ? ` for ${seconds}s` : ` for ${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/** How a call's line reads in each state: its status, and a word on why. */
+const CALL_LINES: Record<
+  CallState,
+  { readonly status?: "running" | "error" | "pending"; readonly note?: string }
+> = {
+  approval: { note: "Needs approval", status: "pending" },
+  blocked: { note: "Waiting for you", status: "running" },
+  cancelled: { note: "Stopped" },
+  completed: {},
+  failed: { note: "Failed", status: "error" },
+  rejected: { note: "Denied" },
+  requested: { status: "pending" },
+  running: { status: "running" },
+};
+
+function ToolLine({
+  part,
+  state,
+}: {
+  readonly part: EveToolPart;
+  readonly state: CallState | undefined;
+}) {
+  // A call the model is still writing has no row yet.
+  const { note, status } = state === undefined ? { status: "running" as const } : CALL_LINES[state];
+  // An answer waits on its approval until every approval asked with it is decided.
+  const answered =
+    state === "approval" && part.interaction?.answer !== undefined
+      ? "Response submitted"
+      : undefined;
+  const Icon = part.name === "bash" ? TerminalIcon : part.kind === "agent" ? BotIcon : WrenchIcon;
+  const line = (
+    <TraceLine status={status}>
+      <TraceIcon>
+        <Icon />
+      </TraceIcon>
+      <TraceTitle>{part.label}</TraceTitle>
+      {(answered ?? note) ? <TraceDescription>{answered ?? note}</TraceDescription> : null}
+    </TraceLine>
+  );
+  if (part.input === undefined && part.output === undefined && part.error === undefined)
+    return line;
+
+  return (
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="space-y-2 text-foreground">
+        {part.name === "bash" ? (
+          <BashToolContent
+            errorText={part.error?.message}
+            input={part.input}
+            output={part.output}
+          />
+        ) : (
+          <>
+            {part.input === undefined ? null : <ToolInput input={part.input} />}
+            <ToolOutput errorText={part.error?.message} output={part.output} />
+          </>
+        )}
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+}
+
+function ReasoningLine({ part }: { readonly part: Extract<Step, { type: "reasoning" }> }) {
+  const [open, setOpen] = useState<boolean>();
+  const running = part.state === "streaming";
+  const line = (
+    <TraceLine status={running ? "running" : undefined}>
+      <TraceIcon>
+        <BrainIcon />
+      </TraceIcon>
+      <TraceTitle>{running ? "Thinking" : "Thought"}</TraceTitle>
+    </TraceLine>
+  );
+  if (part.text.length === 0) return line;
+
+  return (
+    <TraceCollapsible onOpenChange={setOpen} open={open ?? running}>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="whitespace-pre-wrap">{part.text}</TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
 }
 
 function QuestionRequest({
@@ -291,12 +433,10 @@ function AttachmentPart({ part }: { readonly part: EveFilePart }) {
 
 /** An interaction no call carries: a sign-in, the budget prompt, or a question of its own. */
 function InteractionPrompt({
-  canRespond,
-  onAnswers,
+  asks,
   part,
 }: {
-  readonly canRespond: (interactionId: string) => boolean;
-  readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly asks: Asks;
   readonly part: EveInteractionPart;
 }) {
   const { request } = part;
@@ -305,20 +445,13 @@ function InteractionPrompt({
     return (
       <QuestionRequest
         answer={part.answer}
-        canRespond={canRespond(part.interactionId)}
+        canRespond={asks.canRespond(part.interactionId)}
         interaction={part}
-        onAnswers={onAnswers}
+        onAnswers={asks.onAnswers}
       />
     );
   }
-  return (
-    <InteractionActions
-      answer={part.answer}
-      canRespond={canRespond}
-      interaction={part}
-      onAnswers={onAnswers}
-    />
-  );
+  return <InteractionActions answer={part.answer} asks={asks} interaction={part} />;
 }
 
 function SignInPrompt({ part }: { readonly part: EveInteractionPart }) {
@@ -407,96 +540,35 @@ function formatBytes(size: number | undefined): string | undefined {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ApprovalActions({
-  canRespond,
-  onAnswers,
-  part,
-}: {
-  readonly canRespond: (interactionId: string) => boolean;
-  readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
-  readonly part: EveToolPart;
-}) {
-  const interaction = part.interaction;
-  if (interaction?.request.kind !== "approval") {
-    return null;
-  }
-  // An approval can settle without an answer, such as when its turn is cancelled.
-  const decision =
-    interaction.status !== "settled"
-      ? undefined
-      : interaction.outcome === "accepted"
-        ? "Approved"
-        : interaction.outcome === "declined"
-          ? "Denied"
-          : "Cancelled";
-  return (
-    <InteractionActions
-      answer={interaction.answer}
-      canRespond={canRespond}
-      decision={decision}
-      interaction={interaction}
-      onAnswers={onAnswers}
-    />
-  );
-}
-
-/** How a call reads in its header, from its row; nothing once it completed. */
-function toolStatus(part: EveToolPart): string | undefined {
-  switch (part.state) {
-    case "streaming":
-      return "Pending";
-    case "approval":
-      return "Awaiting Approval";
-    case "blocked":
-      return "Awaiting Input";
-    case "requested":
-    case "running":
-      return "Running";
-    case "completed":
-      return undefined;
-    case "rejected":
-      return "Denied";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Error";
-  }
-}
-
 /** An interaction's prompt with a button for each option, or how it was answered. */
 function InteractionActions({
   answer,
-  canRespond,
-  decision,
+  asks,
   interaction,
-  onAnswers,
 }: {
   readonly answer?: AgentAnswer;
-  readonly canRespond: (interactionId: string) => boolean;
-  readonly decision?: string;
+  readonly asks: Asks;
   readonly interaction: Interaction;
-  readonly onAnswers: (answers: readonly AgentAnswer[]) => void | Promise<void>;
 }) {
   const selectedOption = interaction.request.options?.find(
     (option) => option.id === answer?.optionId,
   );
-  const settledApproval = decision;
 
   return (
     <div className="space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
       <p className="text-muted-foreground text-sm">{interaction.request.prompt}</p>
-      {answer || settledApproval ? (
+      {answer ? (
         <p className="font-medium text-sm">
-          Responded: {selectedOption?.label ?? answer?.text ?? answer?.optionId ?? settledApproval}
+          Responded: {selectedOption?.label ?? answer.text ?? answer.optionId}
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {interaction.request.options?.map((option) => (
+          {interaction.request.options?.map((option, index) => (
             <Button
-              disabled={!canRespond(interaction.interactionId)}
+              disabled={!asks.canRespond(interaction.interactionId)}
               key={option.id}
               onClick={() => {
-                void onAnswers([
+                void asks.onAnswers([
                   {
                     optionId: option.id,
                     interactionId: interaction.interactionId,
@@ -505,7 +577,9 @@ function InteractionActions({
               }}
               size="sm"
               type="button"
-              variant={option.style === "danger" ? "destructive" : "default"}
+              variant={
+                option.style === "danger" ? "destructive" : index === 0 ? "default" : "outline"
+              }
             >
               {option.label}
             </Button>

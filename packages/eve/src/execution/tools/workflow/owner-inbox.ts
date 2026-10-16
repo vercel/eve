@@ -81,6 +81,7 @@ export function workflowAskPayload(
   };
   if (authored.allowFreeform !== undefined) request.allowFreeform = authored.allowFreeform;
   if (authored.display !== undefined) request.display = authored.display;
+  if (authored.title !== undefined) request.title = authored.title;
   if (authored.options !== undefined) request.options = [...authored.options];
   return {
     callId: from.callId,

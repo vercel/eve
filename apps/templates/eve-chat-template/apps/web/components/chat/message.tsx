@@ -21,19 +21,13 @@ export type AgentAnswer = {
 
 export function AgentMessage({
   canRespond,
-  isStreaming,
   message,
   onAnswers,
 }: {
   readonly canRespond: boolean;
-  readonly isStreaming: boolean;
   readonly message: EveMessage;
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
 }) {
-  const lastTextIndex = message.parts.reduce(
-    (last, part, index) => (part.type === "text" ? index : last),
-    -1,
-  );
   const isUser = message.role === "user";
 
   return (
@@ -55,11 +49,9 @@ export function AgentMessage({
         <AgentMessageParts
           canRespond={canRespond}
           isUser={isUser}
-          lastTextIndex={lastTextIndex}
           messageId={message.id}
           onAnswers={onAnswers}
           parts={message.parts}
-          showCaret={isStreaming && message.role === "assistant"}
         />
       </div>
     </article>
@@ -69,24 +61,20 @@ export function AgentMessage({
 function AgentMessageParts({
   canRespond,
   isUser,
-  lastTextIndex,
   messageId,
   onAnswers,
   parts,
-  showCaret,
 }: {
   readonly canRespond: boolean;
   readonly isUser: boolean;
-  readonly lastTextIndex: number;
   readonly messageId: string;
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly parts: readonly EveMessagePart[];
-  readonly showCaret: boolean;
 }) {
   const elements: ReactNode[] = [];
   let pendingTools: EveToolPart[] = [];
 
-  const flushTools = (isSettled: boolean) => {
+  const flushTools = () => {
     if (pendingTools.length === 0) {
       return;
     }
@@ -96,7 +84,6 @@ function AgentMessageParts({
     elements.push(
       <ToolGroup
         canRespond={canRespond}
-        isSettled={isSettled}
         key={`tools:${partsForGroup.map((part) => part.callId).join(":")}`}
         onAnswers={onAnswers}
         parts={partsForGroup}
@@ -111,40 +98,26 @@ function AgentMessageParts({
       return;
     }
 
-    flushTools(true);
+    flushTools();
     const key = partKey(part, index);
 
     elements.push(
-      <AgentMessagePart
-        canRespond={canRespond}
-        isUser={isUser}
-        key={key}
-        onAnswers={onAnswers}
-        part={part}
-        showCaret={showCaret && index === lastTextIndex}
-        streamKey={`${messageId}:${key}`}
-      />,
+      <AgentMessagePart isUser={isUser} key={key} part={part} streamKey={`${messageId}:${key}`} />,
     );
   });
 
-  flushTools(!showCaret);
+  flushTools();
 
   return elements;
 }
 
 function AgentMessagePart({
-  canRespond,
   isUser,
-  onAnswers,
   part,
-  showCaret,
   streamKey,
 }: {
-  readonly canRespond: boolean;
   readonly isUser: boolean;
-  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly part: EveMessagePart;
-  readonly showCaret: boolean;
   readonly streamKey: string;
 }) {
   switch (part.type) {
@@ -152,7 +125,11 @@ function AgentMessagePart({
       return isUser ? (
         <UserTextPart text={part.text} />
       ) : (
-        <AssistantTextPart showCaret={showCaret} streamKey={streamKey} text={part.text} />
+        <AssistantTextPart
+          showCaret={part.state === "streaming"}
+          streamKey={streamKey}
+          text={part.text}
+        />
       );
     case "reasoning":
       return <ReasoningPart isStreaming={part.state === "streaming"} text={part.text} />;
@@ -348,18 +325,16 @@ function ReasoningPart({
 
 function ToolGroup({
   canRespond,
-  isSettled,
   onAnswers,
   parts,
 }: {
   readonly canRespond: boolean;
-  readonly isSettled: boolean;
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly parts: readonly EveToolPart[];
 }) {
   const shouldOpen = parts.some(needsAnswer);
   const [open, setOpen] = useState(shouldOpen);
-  const status = getSettledToolStatus(getToolGroupStatus(parts), isSettled && !shouldOpen);
+  const status = getToolGroupStatus(parts);
   const label = summarizeToolGroup(parts);
   const canExpand = parts.length > 1 ? parts.some(hasToolDetails) : hasToolDetails(parts[0]!);
 
@@ -402,7 +377,6 @@ function ToolGroup({
             parts.map((part) => (
               <ToolCallItem
                 canRespond={canRespond}
-                isSettled={isSettled}
                 key={part.callId}
                 onAnswers={onAnswers}
                 part={part}
@@ -417,18 +391,16 @@ function ToolGroup({
 
 function ToolCallItem({
   canRespond,
-  isSettled,
   onAnswers,
   part,
 }: {
   readonly canRespond: boolean;
-  readonly isSettled: boolean;
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly part: EveToolPart;
 }) {
   const shouldOpen = needsAnswer(part);
   const [open, setOpen] = useState(shouldOpen);
-  const status = getSettledToolStatus(getToolStatus(part), isSettled && !shouldOpen);
+  const status = getToolStatus(part);
   const canExpand = hasToolDetails(part);
 
   useEffect(() => {
@@ -447,7 +419,7 @@ function ToolCallItem({
     >
       <ToolStatusIcon status={status} />
       <ToolNameLabel part={part} />
-      <span className="truncate text-foreground/80">{describeToolAction(part)}</span>
+      <span className="truncate text-foreground/80">{part.label}</span>
       {canExpand ? (
         <ChevronRightIcon
           className={cn(
@@ -482,13 +454,15 @@ function ToolDetails({
   readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly part: EveToolPart;
 }) {
-  const failed = part.status === "settled" && part.outcome !== "completed";
+  const failed =
+    ["completed", "failed", "rejected", "cancelled"].includes(part.state) &&
+    part.state !== "completed";
 
   return (
     <div className="space-y-1.5">
       <InteractionActions canRespond={canRespond} onAnswers={onAnswers} part={part} />
       <ToolPayload label="input" value={part.input} />
-      {part.status === "settled" ? (
+      {["completed", "failed", "rejected", "cancelled"].includes(part.state) ? (
         <ToolPayload
           label={failed ? "error" : "result"}
           tone={failed ? "destructive" : "default"}
@@ -528,7 +502,7 @@ function ToolStatusIcon({ status }: { readonly status: ToolStatus }) {
 function ToolNameLabel({ part }: { readonly part: EveToolPart }) {
   return (
     <span className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-      {formatToolName(resolveToolName(part))}
+      {formatToolName(part.name)}
     </span>
   );
 }
@@ -571,14 +545,14 @@ function InteractionActions({
   readonly part: EveToolPart;
 }) {
   const [freeformText, setFreeformText] = useState("");
-  const interaction = part.interaction?.request;
+  const interaction = part.interaction;
 
   if (!interaction) {
     return null;
   }
 
-  const answer = part.interaction?.answer;
-  const selectedOption = interaction.options?.find((option) => option.id === answer?.optionId);
+  const { request, answer } = interaction;
+  const selectedOption = request.options?.find((option) => option.id === answer?.optionId);
 
   if (answer) {
     return (
@@ -602,10 +576,10 @@ function InteractionActions({
 
   return (
     <div className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-      <p className="text-sm text-muted-foreground">{interaction.prompt}</p>
-      {interaction.options?.length ? (
+      <p className="text-sm text-muted-foreground">{request.prompt}</p>
+      {request.options?.length ? (
         <div className="flex flex-wrap gap-2">
-          {interaction.options.map((option) => (
+          {request.options.map((option) => (
             <Button
               disabled={!canRespond}
               key={option.id}
@@ -626,7 +600,7 @@ function InteractionActions({
           ))}
         </div>
       ) : null}
-      {interaction.allowFreeform || interaction.display === "text" ? (
+      {request.allowFreeform || request.display === "text" ? (
         <div className="flex gap-2">
           <Input
             disabled={!canRespond}
@@ -668,19 +642,17 @@ function hasToolDetails(part: EveToolPart) {
 }
 
 function getToolStatus(part: EveToolPart): ToolStatus {
-  if (part.status !== "settled") return "running";
-  switch (part.outcome) {
+  switch (part.state) {
     case "completed":
       return "completed";
     case "rejected":
       return "denied";
-    default:
+    case "failed":
+    case "cancelled":
       return "error";
+    default:
+      return "running";
   }
-}
-
-function getSettledToolStatus(status: ToolStatus, isSettled: boolean): ToolStatus {
-  return isSettled && status === "running" ? "completed" : status;
 }
 
 function getToolGroupStatus(parts: readonly EveToolPart[]): ToolStatus {
@@ -716,13 +688,13 @@ function toolStatusLabel(status: ToolStatus) {
 
 function summarizeToolGroup(parts: readonly EveToolPart[]) {
   if (parts.length === 1) {
-    return describeToolAction(parts[0]!);
+    return parts[0]!.label;
   }
 
   const counts = new Map<string, number>();
 
   for (const part of parts) {
-    const category = toolCategory(resolveToolName(part));
+    const category = toolCategory(part.name);
     counts.set(category, (counts.get(category) ?? 0) + 1);
   }
 
@@ -763,100 +735,12 @@ function toolCategory(name: string) {
   return "ran";
 }
 
-function describeToolAction(part: EveToolPart) {
-  const label = toolLabel(part);
-  if (label) {
-    return label;
-  }
-
-  const name = resolveToolName(part);
-  const normalized = normalizeToolName(name);
-  const input = asRecord(part.input);
-  const query = readString(input, ["query", "q", "search", "pattern", "prompt", "text"]);
-  const path = readString(input, ["path", "filePath", "filename"]);
-  const command = readString(input, ["command", "cmd"]);
-  const url = readString(input, ["url", "href"]);
-
-  if (normalized.includes("search") || normalized.includes("grep")) {
-    return query ? `Searched ${truncateInline(query, 72)}` : `Searched ${formatToolName(name)}`;
-  }
-
-  if (normalized.includes("read")) {
-    return path ? `Read ${shortenPath(path)}` : `Read ${formatToolName(name)}`;
-  }
-
-  if (normalized.includes("write") || normalized.includes("edit")) {
-    return path ? `Changed ${shortenPath(path)}` : `Changed ${formatToolName(name)}`;
-  }
-
-  if (normalized.includes("fetch")) {
-    return url ? `Fetched ${truncateInline(url, 72)}` : `Fetched ${formatToolName(name)}`;
-  }
-
-  if (command) {
-    return truncateInline(command, 72);
-  }
-
-  if (path) {
-    return shortenPath(path);
-  }
-
-  if (query) {
-    return truncateInline(query, 72);
-  }
-
-  return `Used ${formatToolName(name)}`;
-}
-
-/** How the call reads to people, as eve's channels show it. */
-function toolLabel(part: EveToolPart): string | undefined {
-  return part.label;
-}
-
-function resolveToolName(part: EveToolPart) {
-  return part.name;
-}
-
 function formatToolName(name: string) {
   return normalizeToolName(name).replace(/\s+/g, " ").trim();
 }
 
 function normalizeToolName(name: string) {
   return name.replace(/__/g, " ").replace(/[_-]/g, " ").trim().toLowerCase();
-}
-
-function shortenPath(filepath: string) {
-  const parts = filepath.split("/").filter(Boolean);
-
-  if (parts.length <= 2) {
-    return filepath;
-  }
-
-  return `.../${parts.slice(-2).join("/")}`;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function readString(source: Record<string, unknown> | null, keys: readonly string[]) {
-  if (!source) {
-    return null;
-  }
-
-  for (const key of keys) {
-    const value = source[key];
-
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return null;
 }
 
 function formatPayload(value: unknown): string {
@@ -871,16 +755,6 @@ function formatPayload(value: unknown): string {
   }
 }
 
-function truncateInline(text: string, maxLength: number) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength - 1)}...`;
-}
-
 function truncateText(text: string, maxLength: number) {
   if (text.length <= maxLength) {
     return text;
@@ -893,6 +767,9 @@ function partKey(part: EveMessagePart, index: number): string {
   switch (part.type) {
     case "tool":
       return part.callId;
+    case "text":
+    case "reasoning":
+      return part.id ?? `${part.type}:${index}`;
     default:
       return `${part.type}:${index}`;
   }
