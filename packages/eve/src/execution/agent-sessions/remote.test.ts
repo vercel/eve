@@ -172,19 +172,17 @@ describe("startRemoteAgentSession", () => {
     const { agentDelegation } = await import("#tracing/eve/delegation.js");
     const manager = new AsyncLocalStorageContextManager().enable();
     context.setGlobalContextManager(manager);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json(
-          {
-            ok: true,
-            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
-            sessionId: "remote-session",
-            status: "accepted",
-          },
-          { status: 202 },
-        ),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          ok: true,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+          sessionId: "remote-session",
+          status: "accepted",
+        },
+        { status: 202 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     try {
       await agentDelegation.resume(
@@ -234,14 +232,14 @@ describe("startRemoteAgentSession", () => {
     vi.unstubAllEnvs();
   });
 
-  it("carries a replay-stable operation id so the receiver can create once", async () => {
+  it("carries a replay-stable operation id and accepts the receiver's delivery receipt", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json(
         {
           ok: true,
           protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
-          status: "accepted",
+          deliveryId: "delivery:operation-1",
         },
         { status: 202 },
       ),

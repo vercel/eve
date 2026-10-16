@@ -45,6 +45,13 @@ describe("workflow hook cancellation", () => {
           expect(question).toBeDefined();
           await resumeSessionInbox(sessionCommandHookToken(run.runId), {
             kind: "send",
+            auth: {
+              attributes: {},
+              authenticator: "test",
+              principalId: "alice",
+              principalType: "user",
+              issuer: "test",
+            },
             delivery: { channelKind: "http", channelName: "test", deliveryId: "answer-delivery" },
             payload:
               mode === "button"
