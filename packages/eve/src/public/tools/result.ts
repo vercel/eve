@@ -54,10 +54,7 @@ export interface ToolResultFromFn {
     tool: ToolDefinition<TInput, TOutput>,
   ): MatchedToolResult<TOutput> | undefined;
 
-  (
-    result: ToolResultSource,
-    connection: ConnectionDefinition,
-  ): MatchedConnectionResult | undefined;
+  (result: ToolResultSource, connection: ConnectionDefinition): MatchedConnectionResult | undefined;
 }
 
 /**

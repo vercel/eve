@@ -92,11 +92,11 @@ export default git({});
 
 Configure `github` to broker GitHub access through Connect instead. The extension then adds the authenticated `git__gh` tool, tells the agent to use it for every authenticated GitHub operation, and switches `git__pr` to `gh-signed-commit` for repositories that require verified signatures.
 
-| Option             | Required      | Effect                                                                                     |
-| ------------------ | ------------- | ------------------------------------------------------------------------------------------ |
-| `github.connector` | With `github` | Connector that mints a GitHub token                                                        |
-| `github.org`       | With `github` | Organization whose repositories the `gh` tool can access                                   |
-| `github.broker`    | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
+| Option             | Required      | Effect                                                                                            |
+| ------------------ | ------------- | ------------------------------------------------------------------------------------------------- |
+| `github.connector` | With `github` | Connector that mints a GitHub token                                                               |
+| `github.org`       | With `github` | Organization whose repositories the `gh` tool can access                                          |
+| `github.broker`    | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules        |
 | `github.authorize` | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
 
 The `gh` tool requests a token scoped to exactly one repository in `github.org` for each invocation. The sandbox process receives a placeholder `GH_TOKEN`, and the firewall exchanges it on matching GitHub requests. Your `github.broker` callback receives the header-transform rules for the command, then `null` to remove the lease. The callback must preserve your other network rules. GitHub authentication has no command-delivery option.

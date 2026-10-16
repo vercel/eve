@@ -12,6 +12,7 @@ import type { Answer } from "#protocol/session-events/families/response.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   answeredInteractionIds,
+  forwardedInteractionIds,
   callRun,
   callTurn,
   interactionOwner,
@@ -210,9 +211,14 @@ export function promptQueueHead(
   view: SessionView,
   answered: (interactionId: string) => boolean = () => false,
 ): InteractionRow | undefined {
+  // An answer admitted, or forwarded to the session that asked, stands for now.
   const admitted = answeredInteractionIds(view);
+  const forwarded = forwardedInteractionIds(view);
   const open = openRequests(view).filter(
-    (row) => !answered(row.interactionId) && !admitted.has(row.interactionId),
+    (row) =>
+      !answered(row.interactionId) &&
+      !admitted.has(row.interactionId) &&
+      !forwarded.has(row.interactionId),
   );
   return open.find((row) => row.request.kind === "budget") ?? open[0];
 }

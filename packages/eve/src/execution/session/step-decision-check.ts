@@ -15,7 +15,7 @@ export type TablesSay = "person" | "work" | "session" | "no-turn";
 
 export function tablesSay(view: SessionView): TablesSay {
   const turnId = activeTurn(view)?.turnId;
-  return turnId === undefined ? "no-turn" : (waiting(view, turnId)?.on ?? "session");
+  return turnId === undefined ? "no-turn" : (waiting(view, turnId)?.on ?? "no-turn");
 }
 
 /**

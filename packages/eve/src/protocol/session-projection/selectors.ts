@@ -192,44 +192,52 @@ export function idle(view: SessionView): boolean {
   return !Object.keys(view.tasks).some((taskId) => isWorking(view, taskId));
 }
 
-/** What an open turn waits on, when the session can do nothing more for it by itself. */
+/**
+ * What an open turn needs before the session writes for it again:
+ *
+ * - `session`: nothing. The session has work of its own for the turn, and writes again by itself;
+ * - `person`: an answer to one of `interactions`, the open interactions under the turn that no
+ *   answer stands for: its own, or ones its calls' runs or its tasks relayed;
+ * - `work`: `calls` still in flight elsewhere, served by `tasks`, a workflow run, or a child
+ *   session, or an `eve__task_wait` parked on the tasks.
+ */
 export type Waiting =
+  | { readonly on: "session" }
   | { readonly on: "person"; readonly interactions: readonly InteractionRow[] }
-  | { readonly on: "work"; readonly calls: readonly CallRow[] };
+  | {
+      readonly on: "work";
+      readonly calls: readonly CallRow[];
+      readonly tasks: readonly TaskRow[];
+    };
 
 /**
- * What an open turn waits on, read from the tables; `undefined` while the session works on it.
- * For a task or a call, the person its work waits on: a task's relayed questions and sign-ins,
- * or a call's own approval, else its task's; `undefined` while it works, or once it has ended.
+ * What an open turn needs before the session writes for it again; `undefined` when no open turn
+ * has the id.
+ *
+ * `session` is never a false alarm: the session writes another line for the turn without
+ * anything arriving. `person` and `work` are exact once a step ends: until an answer, a callback,
+ * a call's result, a task's end, a steering message, or a cancel arrives, the session writes
+ * nothing more for the turn. Inside a step, a line can read as a wait the step goes on from, so a
+ * reader that stops on a wait waits for `turn.paused`, which only a step's end writes.
+ *
+ * Who the turn waits on isn't always what wakes it: while one task asks someone, another task
+ * ending can move the turn on too, so a wait on a person isn't a promise that only an answer
+ * will.
  *
  * The session works on a turn while it has a model run open, a context change running, an
- * answer it hasn't weighed, or a delivery the turn consumed after it last requested a run or
- * asked someone. Otherwise the
- * turn waits on a person while any unanswered interaction under it is open, and on work while
- * calls it made run, such as a workflow tool's run or a task it waits for. With neither, the
- * session has something to do: start or ask about requested calls, call the model, or end the
- * turn. So `undefined` is exactly "the session can make progress on this turn by itself".
- *
- * Rules of the stream make this exact at every line: anything that needs a person is an
- * interaction; the line that makes a model call necessary requests the run; and every call
- * another run serves names its task when it starts.
+ * answer it hasn't weighed, a delivery the turn consumed after it last requested a run or asked
+ * someone, a call it runs itself, or a call it has yet to start or ask about. Otherwise the turn
+ * waits on a person while an interaction under it awaits an answer, and on work while calls it
+ * made run elsewhere. With neither, the session has its next step to take: call the model, or
+ * end the turn.
  */
-export function waiting(view: SessionView, turnId: string): Waiting | undefined;
-export function waiting(
-  view: SessionView,
-  of: { readonly taskId: string } | { readonly callId: string },
-): Extract<Waiting, { readonly on: "person" }> | undefined;
-export function waiting(
-  view: SessionView,
-  of: string | { readonly taskId: string } | { readonly callId: string },
-): Waiting | undefined {
-  if (typeof of !== "string") return heldBy(view, of);
-  const turnId = of;
+export function waiting(view: SessionView, turnId: string): Waiting | undefined {
   const row = view.turns[turnId];
   if (row === undefined || row.status === "settled") return undefined;
+  const session = { on: "session" } as const;
   const open = openWork(view, { turnId });
-  if (open.runs.length > 0 || open.changes.length > 0) return undefined;
-  if (weighsAnswers(open)) return undefined;
+  if (open.runs.length > 0 || open.changes.length > 0) return session;
+  if (weighsAnswers(view, open)) return session;
   // Input consumed after the session last requested a model, asked someone, or weighed an
   // answer is still its work. A forwarded answer admitted by its asker has already been read.
   const decided = Math.max(
@@ -256,7 +264,7 @@ export function waiting(
       delivery.turnId === turnId &&
       (delivery.consumedAt ?? -1) > decided,
   );
-  if (unread) return undefined;
+  if (unread) return session;
   const interactions = Object.values(view.interactions);
   const about = (outcome: (row: InteractionRow) => boolean) =>
     new Set(
@@ -292,26 +300,33 @@ export function waiting(
         entry.capability.name !== TASK_WAIT_TOOL,
     )
   )
-    return undefined;
+    return session;
   const pending = turnCalls.filter(
     (entry) => entry.status === "requested" && !asked.has(entry.callId),
   );
-  if (pending.some((entry) => approved.has(entry.callId))) return undefined;
-  if (pending.length > 0 && calls.length === 0) return undefined;
-  // An interaction already answered, such as one of a batch still waiting for the rest or one
-  // forwarded to the child that asked it, doesn't wait on a person. A request relayed from a
-  // task this turn's call started belongs to the task, but the turn still waits on its person.
-  const answered = new Set([...answeredInteractionIds(view), ...forwarded(open)]);
-  // A question about a call that already ended, such as a cancelled stretch's before its run
-  // withdraws it, holds nothing.
-  const people = openInteractions(view).filter(
+  if (pending.some((entry) => approved.has(entry.callId))) return session;
+  if (pending.length > 0 && calls.length === 0) return session;
+  // A request relayed from a task this turn's call started belongs to the task, but the turn
+  // still waits on its person. A question about a call that already ended, such as a cancelled
+  // stretch's before its run withdraws it, holds nothing.
+  const people = unanswered(view).filter(
     (entry) =>
-      !answered.has(entry.interactionId) &&
       !("callId" in entry.subject && view.calls[entry.subject.callId]?.status === "settled") &&
       (interactionOwner(view, entry).turnId === turnId || subjectTurn(view, entry) === turnId),
   );
   if (people.length > 0) return { interactions: people, on: "person" };
-  return calls.length > 0 ? { calls, on: "work" } : undefined;
+  if (calls.length === 0) return session;
+  const taskIds = new Set(
+    calls.flatMap((entry) => (entry.taskId === undefined ? [] : [entry.taskId])),
+  );
+  // A parked `eve__task_wait` waits on every working task, whichever turn started it.
+  if (calls.some((entry) => entry.capability.name === TASK_WAIT_TOOL))
+    for (const task of tasks(view, { status: "working" })) taskIds.add(task.taskId);
+  const working = [...taskIds].flatMap((taskId) => {
+    const task = view.tasks[taskId];
+    return task === undefined ? [] : [task];
+  });
+  return { calls, on: "work", tasks: working };
 }
 
 /**
@@ -319,16 +334,16 @@ export function waiting(
  * responder must sign in first or the session forwarded it.
  */
 export function unweighedAnswers(view: SessionView, turnId: string): boolean {
-  return weighsAnswers(openWork(view, { turnId }));
+  return weighsAnswers(view, openWork(view, { turnId }));
 }
 
-function weighsAnswers(open: OpenWork): boolean {
+function weighsAnswers(view: SessionView, open: OpenWork): boolean {
   const signingIn = new Set(
     open.interactions.flatMap((row) =>
       "responseId" in row.subject ? [row.subject.responseId] : [],
     ),
   );
-  const sent = new Set(forwarded(open));
+  const sent = forwardedInteractionIds(view);
   return open.responses.some(
     (response) =>
       response.status === "submitted" &&
@@ -338,47 +353,57 @@ function weighsAnswers(open: OpenWork): boolean {
 }
 
 /**
- * Relayed requests with an answer the session forwarded to their asker, which hasn't admitted it
- * yet. The session forwards an answer in the step that records it, so the asker weighs it.
+ * Relayed interactions whose answer the session forwarded to the session or run that asked,
+ * which hasn't taken it yet. The session forwards an answer in the commit that records it, so
+ * the asker weighs it: until the asker's `response.admitted` or `response.settled` comes back,
+ * nobody else is asked. An answer the asker refuses leaves the interaction asking again.
  */
-function forwarded(open: OpenWork): readonly string[] {
-  const relayed = new Set(
-    open.interactions.flatMap((row) => (row.origin === undefined ? [] : [row.interactionId])),
-  );
-  return open.responses.flatMap((response) =>
-    response.status === "submitted" && relayed.has(response.interactionId)
-      ? [response.interactionId]
-      : [],
+export function forwardedInteractionIds(view: SessionView): ReadonlySet<string> {
+  return new Set(
+    Object.values(view.responses).flatMap((response) =>
+      response.status === "submitted" &&
+      view.interactions[response.interactionId]?.status === "open" &&
+      view.interactions[response.interactionId]?.origin !== undefined
+        ? [response.interactionId]
+        : [],
+    ),
   );
 }
 
-/** The unanswered interactions a task's or call's work waits on. */
-function heldBy(
+/**
+ * The open interactions a call's or a task's work waits on, oldest first; none once it ended. For
+ * a call, its own approval, the questions its run relayed, or else its task's; for a task, the
+ * requests it relayed.
+ */
+export function blockedBy(
   view: SessionView,
   of: { readonly taskId: string } | { readonly callId: string },
-): Extract<Waiting, { readonly on: "person" }> | undefined {
+): readonly InteractionRow[] {
   let taskId: string;
   if ("callId" in of) {
     const call = view.calls[of.callId];
-    if (call === undefined || call.status === "settled") return undefined;
+    if (call === undefined || call.status === "settled") return [];
     const approval = ownApproval(view, of.callId);
-    if (approval?.status === "open" && call.taskId === undefined)
-      return { interactions: [approval], on: "person" };
-    if (call.taskId === undefined) {
+    if (approval?.status === "open" && call.taskId === undefined) return [approval];
+    if (call.taskId === undefined)
       // A blocking call's run asks through the call: its questions name it as their origin.
-      const relayed = unanswered(view).filter((row) => row.origin?.call?.callId === of.callId);
-      return relayed.length === 0 ? undefined : { interactions: relayed, on: "person" };
-    }
+      return unanswered(view).filter((row) => row.origin?.call?.callId === of.callId);
     taskId = call.taskId;
   } else taskId = of.taskId;
-  if (view.tasks[taskId]?.status === "ended") return undefined;
-  const asked = unanswered(view).filter((row) => interactionOwner(view, row).taskId === taskId);
-  return asked.length === 0 ? undefined : { interactions: asked, on: "person" };
+  if (view.tasks[taskId]?.status === "ended") return [];
+  return unanswered(view).filter((row) => interactionOwner(view, row).taskId === taskId);
 }
 
-function unanswered(view: SessionView): readonly InteractionRow[] {
+/**
+ * Open interactions no answer stands for, oldest first: none is admitted, waiting for the rest of
+ * its batch, and none was forwarded to the session that asked.
+ */
+export function unanswered(view: SessionView): readonly InteractionRow[] {
   const answered = answeredInteractionIds(view);
-  return openInteractions(view).filter((row) => !answered.has(row.interactionId));
+  const forwarded = forwardedInteractionIds(view);
+  return openInteractions(view).filter(
+    (row) => !answered.has(row.interactionId) && !forwarded.has(row.interactionId),
+  );
 }
 
 /** The approval this session asked about a call itself, not one relayed from elsewhere. */
@@ -429,11 +454,9 @@ export function callState(view: SessionView, callId: string): CallState | undefi
         return "failed";
     }
   }
-  const waits = heldBy(view, { callId });
-  if (waits !== undefined) {
-    const own = ownApproval(view, callId);
-    return waits.interactions.some((entry) => entry === own) ? "approval" : "blocked";
-  }
+  const blockers = blockedBy(view, { callId });
+  if (blockers.length > 0)
+    return blockers.includes(ownApproval(view, callId)!) ? "approval" : "blocked";
   return row.status === "requested" ? "requested" : "running";
 }
 
@@ -478,17 +501,10 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   const waits = waiting(view, row.turnId);
   if (waits?.on === "person")
     return { interactions: waits.interactions, kind: "waiting-on-person" };
-  if (waits?.on === "work") {
-    const working = waits.calls.flatMap((entry) => {
-      const taskRow = entry.taskId === undefined ? undefined : view.tasks[entry.taskId];
-      return taskRow === undefined ? [] : [taskRow];
-    });
-    if (working.length > 0) return { kind: "waiting-on-tasks", tasks: working };
-    return {
-      kind: "calling",
-      names: waits.calls.map((entry) => callLabel(entry)),
-    };
-  }
+  if (waits?.on === "work")
+    return waits.tasks.length > 0
+      ? { kind: "waiting-on-tasks", tasks: waits.tasks }
+      : { kind: "calling", names: waits.calls.map((entry) => callLabel(entry)) };
   // A run stays open while the calls it made run in its step: a started call no task serves is
   // the turn's activity. A call only requested, such as an agent call before its task starts or
   // one a dropped response streamed, isn't running yet.

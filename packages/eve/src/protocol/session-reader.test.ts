@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
-import { activeTurn, activity } from "#protocol/session-projection/selectors.js";
+import { activeTurn, activity, blockedBy } from "#protocol/session-projection/selectors.js";
 import {
   callLabel,
   callState,
@@ -10,7 +10,7 @@ import {
   unweighedAnswers,
   waiting,
 } from "#protocol/session-projection/selectors.js";
-import { callPlace, interaction, runPlace } from "#protocol/session-reader.js";
+import { callPlace, interaction, promptQueueHead, runPlace } from "#protocol/session-reader.js";
 
 const at = "2026-10-10T00:00:00.000Z";
 
@@ -97,17 +97,21 @@ describe("turns and steps", () => {
         runSettled("run_0", "turn_0"),
       ]);
     expect(waiting(running("eve__task_wait"), "turn_0")?.on).toBe("work");
-    expect(waiting(running("lookup"), "turn_0")).toBeUndefined();
+    expect(waiting(running("lookup"), "turn_0")).toEqual({ on: "session" });
   });
 
-  it("waits on the asker's work once it forwards an answer, with nothing to weigh", () => {
-    const view = viewOf(
-      started,
+  it("hands a relayed request to its asker once it forwards the answer, and asks again if refused", () => {
+    // A child's approval, relayed through the task that serves the parent's call.
+    const asked = [
       [
         turn("turn_0"),
         run("run_0", "turn_0"),
         call("c_0", "run_0"),
-        { data: { callId: "c_0" }, scope: { turnId: "turn_0" }, type: "call.started" },
+        {
+          data: { kind: "agent", name: "helper", startedBy: { callId: "c_0" }, taskId: "t_0" },
+          type: "task.started",
+        },
+        { data: { callId: "c_0", taskId: "t_0" }, type: "call.started" },
         runSettled("run_0", "turn_0"),
       ],
       [
@@ -121,16 +125,48 @@ describe("turns and steps", () => {
           type: "interaction.opened",
         },
       ],
-      [
-        { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
-        {
-          data: { deliveryId: "d_1", interactionId: "i_0", responseId: "r_0" },
-          type: "response.submitted",
-        },
-      ],
-    );
-    expect(unweighedAnswers(view, "turn_0")).toBe(false);
-    expect(waiting(view, "turn_0")?.on).toBe("work");
+    ];
+    const forwarded = [
+      { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
+      {
+        data: { deliveryId: "d_1", interactionId: "i_0", responseId: "r_0" },
+        type: "response.submitted",
+      },
+    ];
+    const read = (view: ReturnType<typeof viewOf>) => ({
+      blockedBy: blockedBy(view, { callId: "c_0" }).map((row) => row.interactionId),
+      callState: callState(view, "c_0"),
+      prompt: promptQueueHead(view)?.interactionId,
+      unweighed: unweighedAnswers(view, "turn_0"),
+      waiting: waiting(view, "turn_0")?.on,
+    });
+
+    expect(read(viewOf(started, ...asked))).toEqual({
+      blockedBy: ["i_0"],
+      callState: "blocked",
+      prompt: "i_0",
+      unweighed: false,
+      waiting: "person",
+    });
+    const sent = viewOf(started, ...asked, forwarded);
+    expect(read(sent)).toEqual({
+      blockedBy: [],
+      callState: "running",
+      prompt: undefined,
+      unweighed: false,
+      waiting: "work",
+    });
+    expect(waiting(sent, "turn_0")).toMatchObject({ tasks: [{ taskId: "t_0" }] });
+    const refused = viewOf(started, ...asked, forwarded, [
+      { data: { outcome: "refused", responseId: "r_0" }, type: "response.settled" },
+    ]);
+    expect(read(refused)).toEqual({
+      blockedBy: ["i_0"],
+      callState: "blocked",
+      prompt: "i_0",
+      unweighed: false,
+      waiting: "person",
+    });
   });
 
   it("places each run at its step within its turn, and each call at its run's", () => {
@@ -154,17 +190,14 @@ describe("where a call stands", () => {
   it("waits on its own approval until it settles, then starts and ends", () => {
     const open = viewOf(started, [...asked, runSettled("run_0", "turn_0"), approval("i_0", "c_0")]);
     expect(callState(open, "c_0")).toBe("approval");
-    expect(waiting(open, { callId: "c_0" })).toMatchObject({
-      interactions: [{ interactionId: "i_0" }],
-      on: "person",
-    });
+    expect(blockedBy(open, { callId: "c_0" })).toMatchObject([{ interactionId: "i_0" }]);
     const declined = viewOf(
       started,
       [...asked, runSettled("run_0", "turn_0"), approval("i_0", "c_0")],
       [{ data: { interactionId: "i_0", outcome: "declined" }, type: "interaction.settled" }],
     );
     expect(callState(declined, "c_0")).toBe("requested");
-    expect(waiting(declined, { callId: "c_0" })).toBeUndefined();
+    expect(blockedBy(declined, { callId: "c_0" })).toEqual([]);
     const ended = (outcome: string) =>
       callState(
         viewOf(started, [
@@ -201,8 +234,8 @@ describe("where a call stands", () => {
     };
     const blocked = viewOf(started, [...task, question]);
     expect(callState(blocked, "c_0")).toBe("blocked");
-    expect(waiting(blocked, { taskId: "t_0" })).toEqual(waiting(blocked, { callId: "c_0" }));
-    expect(waiting(blocked, { taskId: "t_0" })?.on).toBe("person");
+    expect(blockedBy(blocked, { taskId: "t_0" })).toEqual(blockedBy(blocked, { callId: "c_0" }));
+    expect(blockedBy(blocked, { taskId: "t_0" })).toMatchObject([{ interactionId: "i_1" }]);
     const answered = viewOf(started, [
       ...task,
       question,

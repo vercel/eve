@@ -217,6 +217,7 @@ export {
 export {
   activeTurn,
   activity,
+  blockedBy,
   callLabel,
   callState,
   type CallState,

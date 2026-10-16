@@ -2,7 +2,7 @@
 // task controls and calls a tool makes on the model's behalf left out; a renderer reads each
 // call's row with the same selectors every reader uses (`callState`, `callLabel`, `waiting`).
 
-import { callTurn, waiting } from "#protocol/session-projection/selectors.js";
+import { blockedBy, callTurn } from "#protocol/session-projection/selectors.js";
 import type { CallRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
@@ -62,7 +62,7 @@ export function taskCards(
     const shown = bounded(calls.filter((row) => cardOf(row) === index));
     const tasks = shown.filter((row) => row.taskId !== undefined && row.status !== "settled");
     const latest = index === starts.length - 1;
-    const state = tasks.some((row) => waiting(view, { callId: row.callId }) !== undefined)
+    const state = tasks.some((row) => blockedBy(view, { callId: row.callId }).length > 0)
       ? "blocked"
       : tasks.length > 0 || (latest && turnWorks)
         ? "working"
