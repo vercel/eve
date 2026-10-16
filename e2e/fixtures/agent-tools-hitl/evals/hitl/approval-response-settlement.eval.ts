@@ -12,7 +12,7 @@ const TOOL = "authorized-change";
 type Store = EveAgentStore;
 
 function toolPart(store: Store, callId: string): EveToolPart {
-  const parts = store.snapshot.data.messages.flatMap((message) => message.parts);
+  const parts = store.snapshot.messages.flatMap((message) => message.parts);
   const matches = parts.filter(
     (part): part is EveToolPart => part.type === "tool" && part.callId === callId,
   );
@@ -41,12 +41,12 @@ async function expectAnswerable(
   interactionId: string,
 ) {
   // The approval holds its turn open, and the store keeps following it live.
-  await t.require(store.snapshot.status, equals("streaming"));
+  await t.require(store.snapshot.status, equals("idle"));
   await t.require(store.snapshot.error, equals(undefined));
   const part = toolPart(store, callId);
-  await t.require(part.status, equals("requested"));
+  await t.require(part.state, equals("approval"));
   await t.require(part.interaction?.status, equals("open"));
-  await t.require(part.interaction?.request.interactionId, equals(interactionId));
+  await t.require(part.interaction?.interactionId, equals(interactionId));
   await t.require(part.interaction?.answer, equals(undefined));
 }
 

@@ -5,8 +5,6 @@ export {
   type WebSearchProvider,
   type WebSearchToolDefinition,
   type WebSearchToolInput,
-  defaultWebSearch,
-  isWebSearchToolDefinition,
   webSearch,
 } from "#tools/provided/web-search.js";
 

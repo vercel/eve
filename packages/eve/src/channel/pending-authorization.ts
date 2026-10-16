@@ -9,11 +9,11 @@ const PENDING_AUTHORIZATION_WINDOW = 500;
 
 /** The latest matching sign-in still open in the recent durable stream. */
 export async function findPendingAuthorization(
-  session: Pick<Session, "getEventStream">,
+  session: Pick<Session, "stream">,
   matches: (signIn: SignIn) => boolean,
 ): Promise<SignIn | undefined> {
   const view = emptySessionView();
-  for await (const event of await session.getEventStream({
+  for await (const event of session.stream({
     follow: false,
     startIndex: -PENDING_AUTHORIZATION_WINDOW,
   })) {

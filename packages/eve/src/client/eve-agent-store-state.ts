@@ -61,7 +61,7 @@ export interface EveAgentStoreInit {
    * Follow each agent tool's session into `agents` while the store streams its session or a
    * framework binding has it mounted.
    */
-  readonly followSubagents?: boolean;
+  readonly followAgents?: boolean;
   /**
    * Keep the session stream open while the session is idle, so the store sees events that arrive
    * between turns from schedules, channels, or other clients. When false, the store closes the

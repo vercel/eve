@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "channel",
   "epoch": 62,
-  "sha256": "ad9b7dcee70febdf295325b8cf54e2b9666f5240c16fea83600a6263f505d66b",
+  "sha256": "7ba8f04b8b2ca2cfe6b86a67bf1d77d68814e0c7bdbba0662787821a423b5267",
   "exports": [
     "DELETE",
     "GET",
@@ -11,6 +11,7 @@
     "PATCH",
     "POST",
     "PUT",
+    "SessionNotActiveError",
     "SessionStrandedError",
     "WS",
     "answerFromText",

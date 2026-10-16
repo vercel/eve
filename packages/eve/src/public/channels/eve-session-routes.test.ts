@@ -4,7 +4,7 @@ import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import type { Session } from "#channel/session.js";
+import type { InternalSession as Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
@@ -41,7 +41,6 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     compact: vi.fn().mockResolvedValue(receipt),
     clear: vi.fn().mockResolvedValue(receipt),
     reset: vi.fn().mockResolvedValue(receipt),
-    getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     ...overrides,

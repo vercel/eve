@@ -21,7 +21,7 @@ export default defineEval({
     await t.require(
       accepted,
       satisfies(
-        (value: typeof accepted) => value.status === "accepted",
+        (value: typeof accepted) => typeof value.deliveryId === "string",
         "the approval turn cancellation is accepted",
       ),
     );

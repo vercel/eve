@@ -1,5 +1,4 @@
 [
-  "LINEAR_CHANNEL_DEFAULT_ROUTE",
   "LinearAccessToken",
   "LinearAgentActivityContent",
   "LinearAgentActivityCreateInput",
@@ -38,18 +37,8 @@
   "LinearWebhookVerifier",
   "callLinearGraphQL",
   "createLinearAgentActivity",
-  "createLinearAgentSessionOnComment",
-  "createLinearAgentSessionOnIssue",
   "defaultLinearAuth",
   "defaultOnAgentSession",
-  "formatLinearContextBlock",
   "linearChannel",
-  "linearContinuationToken",
-  "linearInteractionSignal",
-  "listLinearAgentSessionActivities",
-  "messageFromLinearAgentSessionEvent",
-  "parseLinearWebhookEvent",
-  "renderLinearInteractions",
-  "signLinearWebhookBody",
-  "updateLinearAgentSession"
+  "linearContinuationToken"
 ]

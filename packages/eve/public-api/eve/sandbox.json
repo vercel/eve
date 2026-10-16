@@ -2,7 +2,6 @@
   "DefaultSandbox",
   "DefaultSandboxEnvironmentOptions",
   "RuntimeSandboxSession",
-  "RuntimeSandboxSessionFor",
   "SandboxCommandResult",
   "SandboxEnvironment",
   "SandboxNetworkOptions",

@@ -1,74 +1,67 @@
-import type { Experimental_SandboxSession as AiSdkSandbox } from "ai";
-
 import type { SandboxDeleteOptions } from "#shared/sandbox-provider.js";
 
-/**
- * Options for running one command in a sandbox. Shape mirrors the AI
- * SDK {@link AiSdkSandbox} `run` argument so authored code that targets
- * either surface uses the same call shape.
- */
-export type SandboxRunOptions = Parameters<AiSdkSandbox["run"]>[0];
+/** Options for running a command in the sandbox's working directory. */
+export interface SandboxRunOptions {
+  command: string;
+  workingDirectory?: string;
+  /** Per-command environment overrides; avoids embedding credentials in command strings. */
+  env?: Record<string, string>;
+  abortSignal?: AbortSignal;
+}
 
-/**
- * Serializable result returned after running one sandbox command.
- */
-export type SandboxCommandResult = Awaited<ReturnType<AiSdkSandbox["run"]>>;
+/** Result of a completed sandbox command. */
+export interface SandboxCommandResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
 
-/**
- * Options for spawning one long-running process in a sandbox. Shape
- * mirrors the AI SDK {@link AiSdkSandbox} `spawn` argument.
- */
-export type SandboxSpawnOptions = Parameters<AiSdkSandbox["spawn"]>[0];
+/** Options for starting a process without waiting for it to exit. */
+export interface SandboxSpawnOptions extends SandboxRunOptions {}
 
-/**
- * Handle to a long-running process spawned via {@link SandboxSession.spawn}.
- * Mirrors the AI SDK `Experimental_SandboxProcess` type.
- */
-export type SandboxProcess = Awaited<ReturnType<AiSdkSandbox["spawn"]>>;
+/** A running process with byte streams and explicit lifecycle operations. */
+export interface SandboxProcess {
+  readonly pid?: number;
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  wait(): PromiseLike<{ exitCode: number }>;
+  kill(): PromiseLike<void>;
+}
 
-/**
- * Options for reading one file as a stream of bytes.
- */
-export type SandboxReadFileOptions = Parameters<AiSdkSandbox["readFile"]>[0];
+/** Options for reading a file; relative paths resolve from `/workspace`. */
+export interface SandboxReadFileOptions {
+  path: string;
+  abortSignal?: AbortSignal;
+}
 
-/**
- * Options for reading one file as raw bytes.
- */
-export type SandboxReadBinaryFileOptions = Parameters<AiSdkSandbox["readBinaryFile"]>[0];
+/** Options for reading all bytes of a file. */
+export interface SandboxReadBinaryFileOptions extends SandboxReadFileOptions {}
 
-/**
- * Options for reading one text file from a sandbox.
- *
- * `encoding`, `startLine`, and `endLine` are passed through to the
- * public-surface decoder. `"utf-8"` decodes with `TextDecoder` in fatal
- * mode; other encodings fall back to Node's `Buffer.toString(encoding)`.
- * Line ranges are 1-based and inclusive; `endLine` past the file's line
- * count returns through EOF without error.
- */
-export type SandboxReadTextFileOptions = Parameters<AiSdkSandbox["readTextFile"]>[0];
+/** Text decoding and 1-based inclusive line selection. Missing files return `null`. */
+export interface SandboxReadTextFileOptions extends SandboxReadFileOptions {
+  encoding?: string;
+  startLine?: number;
+  endLine?: number;
+}
 
-/**
- * Options for writing one file from a stream of bytes.
- */
-export type SandboxWriteFileOptions = Parameters<AiSdkSandbox["writeFile"]>[0];
+interface WriteOptions<T> {
+  path: string;
+  content: T;
+  abortSignal?: AbortSignal;
+}
 
-/**
- * Options for writing one file from raw bytes.
- */
-export type SandboxWriteBinaryFileOptions = Parameters<AiSdkSandbox["writeBinaryFile"]>[0];
+/** Writes a byte stream, creating parent directories and overwriting existing content. */
+export interface SandboxWriteFileOptions extends WriteOptions<ReadableStream<Uint8Array>> {}
 
-/**
- * Options for writing one text file to a sandbox.
- */
-export type SandboxWriteTextFileOptions = Parameters<AiSdkSandbox["writeTextFile"]>[0];
+/** Writes a complete byte buffer. */
+export interface SandboxWriteBinaryFileOptions extends WriteOptions<Uint8Array> {}
 
-/**
- * Options for removing a path from a sandbox.
- *
- * Relative paths resolve from `/workspace`; absolute paths pass through.
- * `force` ignores missing paths. `recursive` permits removing non-empty
- * directories.
- */
+/** Writes text with the requested encoding (UTF-8 by default). */
+export interface SandboxWriteTextFileOptions extends WriteOptions<string> {
+  encoding?: string;
+}
+
+/** Removes a path; relative paths resolve from `/workspace`. */
 export interface SandboxRemovePathOptions {
   readonly abortSignal?: AbortSignal;
   readonly force?: boolean;
@@ -76,80 +69,34 @@ export interface SandboxRemovePathOptions {
   readonly recursive?: boolean;
 }
 
-/**
- * Public eve-owned sandbox session exposed to authored lifecycle hooks.
- *
- * The eight I/O methods (`run`, `spawn`, `readFile`, `readBinaryFile`,
- * `readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile`) are
- * pulled directly from the AI SDK {@link AiSdkSandbox} type, so authored
- * code that targets either surface uses identical signatures. `resolvePath`
- * is an eve-specific extension for `/workspace` path anchoring.
- *
- * Relative paths resolve from `/workspace`, the live working directory
- * for every provider. Absolute paths pass through unchanged.
- *
- */
-export interface SandboxSession extends Pick<
-  AiSdkSandbox,
-  | "run"
-  | "spawn"
-  | "readFile"
-  | "readBinaryFile"
-  | "readTextFile"
-  | "writeFile"
-  | "writeBinaryFile"
-  | "writeTextFile"
-> {
-  /**
-   * Anchors a sandbox-relative path to `/workspace` and returns the
-   * resulting absolute path.
-   *
-   * Relative paths resolve from `/workspace`; absolute paths pass through.
-   * The read and write methods already apply this internally.
-   */
+/** eve-owned sandbox I/O and workspace-relative path handling. */
+export interface SandboxSession {
+  readonly run: (options: SandboxRunOptions) => PromiseLike<SandboxCommandResult>;
+  readonly spawn: (options: SandboxSpawnOptions) => PromiseLike<SandboxProcess>;
+  readonly readFile: (
+    options: SandboxReadFileOptions,
+  ) => PromiseLike<ReadableStream<Uint8Array> | null>;
+  readonly readBinaryFile: (
+    options: SandboxReadBinaryFileOptions,
+  ) => PromiseLike<Uint8Array | null>;
+  readonly readTextFile: (options: SandboxReadTextFileOptions) => PromiseLike<string | null>;
+  readonly writeFile: (options: SandboxWriteFileOptions) => PromiseLike<void>;
+  readonly writeBinaryFile: (options: SandboxWriteBinaryFileOptions) => PromiseLike<void>;
+  readonly writeTextFile: (options: SandboxWriteTextFileOptions) => PromiseLike<void>;
   resolvePath(path: string): string;
-  /**
-   * Removes one file or directory from the sandbox filesystem.
-   *
-   * Relative paths resolve from `/workspace`; absolute paths pass through.
-   */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
 }
 
-export interface RuntimeSandboxSession extends SandboxSession {
-  /** Permanently deletes this sandbox and its disposable provider state. */
+/** A provider session plus the runtime's disposable-resource lifecycle. */
+export type RuntimeSandboxSession<Session extends SandboxSession = SandboxSession> = Session & {
+  /** Permanently deletes the sandbox and its disposable provider state. */
   delete(options?: SandboxDeleteOptions): Promise<void>;
-  /**
-   * Stops the backing sandbox compute while preserving the durable session.
-   * A later runtime callback reopens the session through its configured
-   * provider. Providers may also support resuming the same handle.
-   */
+  /** Stops compute while retaining the durable session for a later reopen. */
   stop(): Promise<void>;
-}
+};
 
-export type RuntimeSandboxSessionFor<Session extends SandboxSession> = Session &
-  Pick<RuntimeSandboxSession, "delete" | "stop">;
-
-/**
- * Internal sandbox session, used to construct the public {@link SandboxSession}.
- *
- * Provider implementations only need to provide byte-oriented file I/O and
- * a `spawn` primitive; the public surface (binary and text variants,
- * line-range slicing, encoding handling, the `run` wrapper) is built on
- * top of these primitives by `buildSandboxSession`.
- *
- * Each method's signature mirrors its public counterpart (and the AI
- * SDK {@link AiSdkSandbox} surface) so providers look symmetric with
- * what authored code sees. The `path` field on `readFile`/`writeFile`
- * here is the **already-resolved** path: the public-surface builder
- * calls `resolvePath` before delegating.
- */
+/** Provider primitives; the shared builder implements binary, text, and run conveniences. */
 export interface InternalSandboxSession extends Pick<
-  AiSdkSandbox,
-  "spawn" | "readFile" | "writeFile"
-> {
-  /** Removes an already-resolved path from the provider filesystem. */
-  removePath(options: SandboxRemovePathOptions): Promise<void>;
-  /** Translates a user-facing path to the provider's native path. */
-  resolvePath(path: string): string;
-}
+  SandboxSession,
+  "spawn" | "readFile" | "writeFile" | "removePath" | "resolvePath"
+> {}

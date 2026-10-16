@@ -6,13 +6,13 @@ const TOOL_NAME = "wait-for-cancellation";
 interface AcceptedResponse {
   readonly ok?: boolean;
   readonly sessionId?: string;
-  readonly status?: string;
+  readonly deliveryId?: string;
 }
 
 interface ResetResponse {
   readonly ok?: boolean;
-  readonly previousSessionId?: string;
-  readonly status?: string;
+  readonly sessionId?: string;
+  readonly deliveryId?: string;
 }
 
 async function postJson<T>(
@@ -52,7 +52,9 @@ export default defineEval({
       created,
       satisfies(
         (value: AcceptedResponse) =>
-          value.ok === true && value.status === "accepted" && typeof value.sessionId === "string",
+          value.ok === true &&
+          typeof value.deliveryId === "string" &&
+          typeof value.sessionId === "string",
         "the HTTP session route creates a session without a continuation token",
       ),
     );
@@ -75,7 +77,8 @@ export default defineEval({
     await t.require(
       sent,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "the message route sends to the exact session ID",
       ),
     );
@@ -92,7 +95,8 @@ export default defineEval({
     await t.require(
       cancelled,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "cancel targets the exact session ID",
       ),
     );
@@ -118,7 +122,8 @@ export default defineEval({
     await t.require(
       compacted,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "compact targets the exact session ID",
       ),
     );
@@ -141,7 +146,8 @@ export default defineEval({
     await t.require(
       cleared,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "clear targets the exact session ID",
       ),
     );
@@ -167,7 +173,8 @@ export default defineEval({
     await t.require(
       followUpResponse,
       satisfies(
-        (value: AcceptedResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: AcceptedResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "the same session accepts a message after compact and clear",
       ),
     );
@@ -180,12 +187,13 @@ export default defineEval({
       t.target,
       `/eve/v1/session/${sessionId}/reset`,
       { reason: "Verify immutable HTTP session identity" },
-      200,
+      202,
     );
     await t.require(
       reset,
       satisfies(
-        (value: ResetResponse) => value.status === "reset" && value.previousSessionId === sessionId,
+        (value: ResetResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "reset terminally retires the exact session ID",
       ),
     );
@@ -215,7 +223,7 @@ export default defineEval({
       replacement,
       satisfies(
         (value: AcceptedResponse) =>
-          value.status === "accepted" &&
+          typeof value.deliveryId === "string" &&
           typeof value.sessionId === "string" &&
           value.sessionId !== sessionId,
         "a replacement session requires explicit creation",

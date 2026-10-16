@@ -32,7 +32,7 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
 }
 
 describe("self-modification setup", () => {
-  it("recognizes default local configurations", () => {
+  it("recognizes the current local mount without migrating retired configuration", () => {
     expect(renderSelfModificationConfig()).toContain(
       'import selfModification from "eve/self-modification/local";',
     );
@@ -45,12 +45,12 @@ describe("self-modification setup", () => {
           '"eve/self-modification"',
         ),
       ),
-    ).toBe("local");
+    ).toBe("authored");
     expect(
       classifySelfModificationConfig(
         'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n',
       ),
-    ).toBe("local");
+    ).toBe("authored");
   });
 
   it("renders a generated Connect-backed deployed configuration", () => {

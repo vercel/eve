@@ -1,5 +1,6 @@
 import type { Principal } from "#protocol/session-events/envelope.js";
-import type { ModelMessage, ToolExecutionOptions } from "ai";
+import type { ToolExecutionOptions } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,

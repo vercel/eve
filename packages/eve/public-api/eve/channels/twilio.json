@@ -33,19 +33,6 @@
   "TwilioVoiceResultOrPromise",
   "TwilioVoiceTranscription",
   "TwilioWebhookUrl",
-  "buildTwilioSignatureBase",
-  "callTwilioApi",
-  "emptyTwilioResponse",
-  "escapeXml",
-  "gatherSpeechTwilioResponse",
-  "resolveTwilioAccountSid",
-  "resolveTwilioAuthToken",
-  "sayTwilioResponse",
-  "sendTwilioMessage",
-  "signTwilioRequest",
   "twilioChannel",
-  "twilioContinuationToken",
-  "twimlResponse",
-  "updateTwilioCall",
-  "verifyTwilioRequest"
+  "twilioContinuationToken"
 ]

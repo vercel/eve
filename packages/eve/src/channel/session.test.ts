@@ -58,7 +58,8 @@ describe("createSession#cancel", () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
 
-    await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_1", status: "accepted" });
+    const receipt = await session.cancel();
+    expect(receipt).toMatchObject({ sessionId: "sess_1", deliveryId: expect.any(String) });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_1",
@@ -81,7 +82,8 @@ describe("createSession#cancel", () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime)("sess_2");
 
-    await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_2", status: "accepted" });
+    const receipt = await session.cancel();
+    expect(receipt).toMatchObject({ sessionId: "sess_2", deliveryId: expect.any(String) });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { deliveryId: expect.any(String), kind: "cancel" },
       sessionId: "sess_2",
@@ -102,6 +104,7 @@ describe("fixed session operations", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         kind: "send",
         payload: expect.objectContaining({
           context: ["durable"],
@@ -109,6 +112,7 @@ describe("fixed session operations", () => {
         }),
         requestId: undefined,
         turnPolicy: "steer",
+        title: undefined,
       },
       sessionId: "sess_1",
     });
@@ -153,16 +157,19 @@ describe("fixed session operations", () => {
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(1, {
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         kind: "send",
         payload: { message: "hello" },
         requestId: "req_1",
         turnPolicy: "steer",
+        title: undefined,
       },
       sessionId: "sess_1",
     });
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(2, {
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         kind: "send",
         payload: { answers: [{ optionId: "approve", interactionId: "request_1" }] },
         requestId: "req_1",
@@ -183,7 +190,7 @@ describe("fixed session operations", () => {
     });
   });
 
-  it("maps the public callback abstraction onto internal turn routing", async () => {
+  it("maps internal callback metadata onto turn routing", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
     const callback = {
@@ -193,7 +200,8 @@ describe("fixed session operations", () => {
       url: "https://caller.example.com/eve/v1/callback/callback-token",
     };
 
-    await session.send("continue", { auth: null, callback });
+    const options = { auth: null, callback };
+    await session.send("continue", options);
     const invalidSend = async () => {
       // @ts-expect-error runtime TurnCaller routing is not public session input.
       await session.send("continue", { auth: null, caller: {} });
@@ -203,6 +211,7 @@ describe("fixed session operations", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: {
         auth: null,
+        delivery: expect.objectContaining({ deliveryId: expect.any(String) }),
         caller: {
           callId: "call_1",
           replyTo: { kind: "callback", token: callback.token, url: callback.url },
@@ -213,6 +222,7 @@ describe("fixed session operations", () => {
         payload: { message: "continue" },
         requestId: undefined,
         turnPolicy: "steer",
+        title: undefined,
       },
       sessionId: "sess_1",
     });

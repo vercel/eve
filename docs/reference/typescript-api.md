@@ -157,7 +157,11 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, response errors                                                      |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                             |
 
-Exported types ship from the same entrypoint as the helper they describe (for example `ToolDefinition` and `ToolContext` from `eve/tools`). The `exports` field in `packages/eve/package.json` lists every public entrypoint.
+Exported types ship from the entry point that owns them (for example `ToolDefinition` and `ToolContext` from `eve/tools`). Import fact and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return.
+
+`HistoryMessage` and the sandbox session, process, result, and method-option types are eve-owned. Their declarations do not change with your app's AI SDK peer version. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
+
+The `exports` field in `packages/eve/package.json` lists every package entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. The CLI setup wizard is not a public authoring API; Agent Builder's scaffold integration lives at `eve/internal/scaffold`.
 
 ## Direct provider models
 

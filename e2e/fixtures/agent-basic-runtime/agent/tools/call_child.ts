@@ -1,4 +1,5 @@
 import { Client } from "eve/client";
+import type { RequestStatus } from "eve/events";
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
@@ -45,7 +46,8 @@ export default defineDynamic({
           });
           const result = await response.result();
           signal.throwIfAborted();
-          return { data: result.data, status: result.status, sessionId: result.sessionId };
+          const status: RequestStatus = result.status;
+          return { data: result.data, status, sessionId: result.sessionId };
         },
       });
     },

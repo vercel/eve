@@ -27,7 +27,7 @@ export default defineChannel({
         auth: body.actor === null ? null : { ...AUTH, principalId: body.actor ?? AUTH.principalId },
         turnPolicy: body.turnPolicy,
       });
-      return Response.json({ ok: true, sessionId: session.id });
+      return Response.json({ ok: true, sessionId: session.sessionId });
     }),
     POST("/threads/:threadId/stop", async (_request, { from, params }) => {
       const result = await from(params.threadId ?? "").cancel();

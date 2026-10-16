@@ -9,7 +9,7 @@ eve add eve/self-modification
 The command creates `agent/extensions/self-modification/extension.ts`:
 
 ```ts
-import selfModification from "eve/self-modification";
+import selfModification from "eve/self-modification/local";
 
 export default selfModification({
   // model: "provider/model",
@@ -29,6 +29,6 @@ Run the registry command to install the packaged extension:
 eve add eve/self-modification
 ```
 
-When setup detects a retired scaffold, it offers to remove the entire legacy directory and selects **Yes** by default. Decline the prompt if you need to inspect those files before removing them.
+Setup rejects the retired layout without deleting it. Preserve any authored changes, remove `agent/subagents/self-modification/`, then run the registry command to install the local extension mount.
 
-The legacy `eve/self-modification/agent`, `eve/self-modification/sandbox`, and `eve/self-modification/config` entrypoints remain available so the standard scaffold can build during migration. Do not use the retired agent or sandbox helpers for new installations.
+The bare `eve/self-modification` import and `/config` entry are removed. The agent and sandbox integration helpers live under `eve/internal/self-modification/`; they have no compatibility promise and are not authoring APIs.

@@ -3,12 +3,8 @@ import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
 
 import { createEmulator, type Emulator } from "emulate";
-import {
-  Client,
-  type InteractionOpened,
-  type InteractionSettled,
-  type SessionStreamEvent,
-} from "eve/client";
+import { Client, type SessionStreamEvent } from "eve/client";
+import { type InteractionOpened, type InteractionSettled } from "eve/events";
 
 import { startMcpStubServer } from "./lib/mcp-stub-server.ts";
 import { runEnvironment } from "./lib/run.ts";

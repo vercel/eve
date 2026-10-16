@@ -7,9 +7,9 @@
 export interface ChannelCorsOptions {
   /**
    * Allowed request origins. Omit or pass `"*"` for all origins, pass
-   * `"null"` for the literal `null` origin, or pass an array of exact origins.
+   * `"null"` for the literal `null` origin, or pass one exact origin or an array of exact origins.
    */
-  readonly origin?: "*" | "null" | readonly string[];
+  readonly origin?: string | readonly string[];
   /** Methods emitted on preflight responses. Omit or pass `"*"` for all methods. */
   readonly methods?: "*" | readonly string[];
   /**
@@ -97,8 +97,11 @@ function normalizeOrigin(origin: ChannelCorsOptions["origin"]): "*" | "null" | r
     return origin;
   }
 
+  if (typeof origin === "string" && origin.length > 0) return [origin];
   if (!Array.isArray(origin)) {
-    throw new Error('Expected channel cors.origin to be "*", "null", or an array of origins.');
+    throw new Error(
+      "Expected channel cors.origin to be a non-empty origin string or an array of origins.",
+    );
   }
 
   return origin.map((entry) => {

@@ -1,5 +1,4 @@
 [
-  "GITHUB_DEFAULT_EXCLUDED_DIFF_FILES",
   "GitHubApiError",
   "GitHubApiMethod",
   "GitHubApiOptions",

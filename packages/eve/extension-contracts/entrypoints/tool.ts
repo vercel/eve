@@ -15,11 +15,7 @@ export {
   type AgentRouterInput,
   type AgentRouterTool,
 } from "../../src/public/tools/agent-router.ts";
-export {
-  defaultWebSearch,
-  isWebSearchToolDefinition,
-  webSearch,
-} from "../../src/public/tools/web-search.ts";
+export { webSearch } from "../../src/public/tools/web-search.ts";
 export {
   workflow,
   type WorkflowTool,

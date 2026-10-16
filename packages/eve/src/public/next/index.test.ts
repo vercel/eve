@@ -45,12 +45,9 @@ vi.mock("#internal/nitro/host/workspace-extensions.js", () => ({
 
 const { buildWorkspaceExtensions } = await import("#internal/nitro/host/workspace-extensions.js");
 
-import {
-  EVE_NEXT_SERVICE_PREFIX,
-  withEve,
-  type EveNextConfig,
-  type EveNextRewriteSections,
-} from "./index.js";
+import { withEve, type EveNextConfig, type EveNextRewriteSections } from "./index.js";
+
+const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
 interface TestConfig extends EveNextConfig {
   readonly basePath?: string;

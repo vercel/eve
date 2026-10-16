@@ -1,5 +1,7 @@
-import type { SessionStreamEvent, ToolStub } from "eve/client";
-import { defineEval, toolCallsOf } from "eve/evals";
+import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
+import type { SessionStreamEvent } from "eve/client";
+import type { ToolStub } from "eve/evals";
+import { defineEval } from "eve/evals";
 
 import { FANOUT_TOOL_NAME } from "../agent/lib/fanout";
 
@@ -49,7 +51,12 @@ export default defineEval({
 });
 
 function outputs(events: readonly SessionStreamEvent[]): unknown[] {
-  return toolCallsOf(events).flatMap((call) =>
-    call.name === FANOUT_TOOL_NAME && call.status === "completed" ? [call.output] : [],
+  const view = emptySessionView();
+  foldEvents(view, events);
+
+  return Object.values(view.calls).flatMap((call) =>
+    call.capability.name === FANOUT_TOOL_NAME && call.outcome === "completed"
+      ? [callOutputSource(view, call.callId)?.output]
+      : [],
   );
 }

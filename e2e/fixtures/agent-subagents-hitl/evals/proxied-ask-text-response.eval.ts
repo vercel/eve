@@ -1,4 +1,9 @@
-import { defineEval, type EveEvalContext, type EveEvalSession } from "eve/evals";
+import {
+  defineEval,
+  type EveEvalContext,
+  type EveEvalLiveTurn,
+  type EveEvalSession,
+} from "eve/evals";
 
 /** A human text answer resolves the child's proxied request at the parent by request ID. */
 export default defineEval({
@@ -57,7 +62,7 @@ async function waitForInput(t: EveEvalContext, initial: EveEvalSession): Promise
 }
 
 async function waitForObservedEvent<TType extends "interaction.settled">(
-  turn: ReturnType<EveEvalContext["target"]["watchTurn"]>,
+  turn: EveEvalLiveTurn,
   type: TType,
 ) {
   for (let attempt = 0; attempt < 1_500; attempt += 1) {

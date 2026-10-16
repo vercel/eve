@@ -1,7 +1,5 @@
 [
   "EveChannel",
-  "EveChannelCors",
-  "EveChannelCorsOptions",
   "EveChannelEvents",
   "EveChannelInput",
   "EveEventContext",

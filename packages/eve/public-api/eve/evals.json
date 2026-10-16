@@ -4,7 +4,6 @@
   "AssertionHandle",
   "AssertionResult",
   "AssertionSeverity",
-  "CancelSessionResult",
   "EveEval",
   "EveEvalActionStatus",
   "EveEvalAgentSession",
@@ -44,7 +43,6 @@
   "EveEvalVerdict",
   "EveEvalWaitForEventOptions",
   "EveEvalWatchOptions",
-  "Interaction",
   "JudgeBatch",
   "JudgeContext",
   "JudgeInput",
@@ -59,13 +57,10 @@
   "MockModelToolCall",
   "MockModelToolResult",
   "MockModelUsage",
-  "RuntimeIdentity",
   "ScoreInput",
   "ToolStub",
   "ToolStubOutcome",
-  "TraceContext",
   "defineEval",
   "defineEvalConfig",
-  "mockModel",
-  "toolCallsOf"
+  "mockModel"
 ]

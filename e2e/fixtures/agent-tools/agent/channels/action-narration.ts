@@ -71,7 +71,7 @@ export default defineChannel({
         auth: null,
         state: initialState(),
       });
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
   ],
 

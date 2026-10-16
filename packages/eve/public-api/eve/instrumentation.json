@@ -1,5 +1,4 @@
 [
-  "DISABLED",
   "EvaluationRef",
   "Handler",
   "InstrumentationDisabled",
@@ -16,7 +15,6 @@
   "InstrumentationTurn",
   "InstrumentationUsage",
   "JsonValue",
-  "PROVIDER",
   "ProviderContext",
   "ProviderDefinition",
   "ProviderEvents",

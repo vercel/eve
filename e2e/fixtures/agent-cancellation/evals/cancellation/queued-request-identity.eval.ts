@@ -1,4 +1,5 @@
-import { defineEval, toolCallsOf } from "eve/evals";
+import { callOutputSource } from "eve/events";
+import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
 export default defineEval({
@@ -55,8 +56,10 @@ export default defineEval({
       const turn = await live.result();
       turn.expectOk();
       turn.calledTool("record-request", { count: markers.length, status: "completed" });
-      const outputs = toolCallsOf(turn.events).flatMap((call) =>
-        call.name === "record-request" && call.status === "completed" ? [call.output] : [],
+      const outputs = Object.values(turn.view.calls).flatMap((call) =>
+        call.capability.name === "record-request" && call.outcome === "completed"
+          ? [callOutputSource(turn.view, call.callId)?.output]
+          : [],
       );
       t.check(
         outputs,

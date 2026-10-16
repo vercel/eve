@@ -20,7 +20,6 @@ export type {
   ConversationAgentSession,
   ConversationState,
 } from "#client/conversation-state.js";
-export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export type {
   MessageContent,
   MessageFilePart,
@@ -67,9 +66,6 @@ export type {
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,
-  CancelSessionResult,
-  ClearResult,
-  CompactResult,
   ClientAuth,
   ClientOptions,
   ClientRedirectPolicy,
@@ -78,8 +74,6 @@ export type {
   HealthResult,
   DeliveryResult,
   RespondTurnOptions,
-  ResetResult,
-  ResolvedStreamReconnectPolicy,
   SendTurnInput,
   SendTurnOptions,
   SessionSnapshot,
@@ -98,27 +92,12 @@ export type {
   EveToolPart,
 } from "#client/message-types.js";
 
-// ---------------------------------------------------------------------------
-// Stream event types (re-exported so consumers can type-narrow without
-// importing from the main package).
-// ---------------------------------------------------------------------------
-
-export type {
-  TraceContext,
-  SessionPredecessor,
-} from "#protocol/session-events/families/session.js";
 export type {
   SessionEvent,
   SessionEventMeta,
   SessionStreamEvent,
 } from "#protocol/session-event.js";
-export type * from "#protocol/session-events/index.js";
 export { endsTurn, failureOf } from "#client/session-utils.js";
 
-export type { SessionView, SessionPreviews } from "#protocol/session-projection/tables.js";
-export type { Answer } from "#shared/input.js";
-export type { Interaction, AskedCall } from "#protocol/session-reader.js";
-export { signInEnding } from "#protocol/session-reader.js";
+export type { AskedCall } from "#protocol/session-reader.js";
 export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";
-
-export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";

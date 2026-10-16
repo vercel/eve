@@ -1,3 +1,4 @@
+import { internalSession } from "#channel/session.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
 import type { MessageContent, MessageFilePart, MessageTextPart } from "#shared/message-content.js";
 
@@ -309,20 +310,21 @@ export async function createSessionStreamResponse(
     // alongside it to save a round trip; a tail-relative cursor needs the tail to become one.
     const early =
       startIndex === undefined || startIndex >= 0
-        ? session.getLineStream({ follow, startIndex: startIndex ?? 0 })
+        ? internalSession(session).getLineStream({ follow, startIndex: startIndex ?? 0 })
         : undefined;
     // Handled below; this keeps an early rejection from being reported as unhandled.
     early?.catch(() => {});
     let tailIndex: number;
     try {
-      tailIndex = await session.getStreamTailIndex();
+      tailIndex = await internalSession(session).getStreamTailIndex();
     } catch (error) {
       void early?.then((lines) => lines.cancel()).catch(() => {});
       throw error;
     }
     const from =
       early === undefined ? Math.max(0, tailIndex + 1 + (startIndex ?? 0)) : (startIndex ?? 0);
-    const lines = await (early ?? session.getLineStream({ follow, startIndex: from }));
+    const lines = await (early ??
+      internalSession(session).getLineStream({ follow, startIndex: from }));
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,

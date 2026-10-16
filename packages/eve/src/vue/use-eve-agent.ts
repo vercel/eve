@@ -133,7 +133,7 @@ export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
    */
   readonly optimistic?: boolean;
   /** Follow each subagent call's session into `data.agents` while mounted. @default false */
-  readonly followSubagents?: boolean;
+  readonly followAgents?: boolean;
   /**
    * Keep the session stream open between turns to show events that arrive from schedules,
    * channels, or other clients. Set to false to close it once the session is idle and reopen it
@@ -173,7 +173,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     optimistic: options.optimistic,
-    followSubagents: options.followSubagents,
+    followAgents: options.followAgents,
     followIdle: options.followIdle,
     prewarm: options.prewarm,
     session: options.session,

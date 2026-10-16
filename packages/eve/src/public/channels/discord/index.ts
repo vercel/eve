@@ -1,12 +1,4 @@
 /**
- * AI SDK conversation-message shape that the harness uses as the unit of
- * session history and turn input. Re-exported from the `ai` package so
- * authors wiring up the Discord channel can type their own message arrays
- * without taking a direct `ai` dependency.
- */
-export type { ModelMessage } from "ai";
-
-/**
  * Instrumentation metadata the channel's `metadata` callback reports for
  * Discord sessions, used for tracing and observability.
  */
@@ -37,18 +29,7 @@ export {
 } from "#public/channels/discord/discordChannel.js";
 
 export {
-  callDiscordApi,
-  createDiscordFollowupMessage,
   discordContinuationToken,
-  DISCORD_MESSAGE_CONTENT_MAX_LENGTH,
-  DISCORD_NO_MENTIONS,
-  editDiscordOriginalResponse,
-  resolveDiscordApplicationId,
-  resolveDiscordBotToken,
-  resolveDiscordPublicKey,
-  sendDiscordChannelMessage,
-  splitDiscordMessageContent,
-  triggerDiscordTypingIndicator,
   type DiscordApiOptions,
   type DiscordApiResponse,
   type DiscordApplicationId,
@@ -60,12 +41,6 @@ export {
 } from "#public/channels/discord/api.js";
 
 export {
-  DISCORD_EPHEMERAL_MESSAGE_FLAG,
-  DISCORD_INTERACTION_RESPONSE_TYPE,
-  DISCORD_INTERACTION_TYPE,
-  commandInteractionMessage,
-  formatDiscordContextBlock,
-  parseDiscordInteraction,
   type DiscordCommandInteraction,
   type DiscordCommandOption,
   type DiscordComponentInteraction,
@@ -77,23 +52,9 @@ export {
   type DiscordUser,
 } from "#public/channels/discord/inbound.js";
 
-export {
-  DISCORD_COMPONENT_TYPE,
-  DISCORD_HITL_CUSTOM_ID_PREFIX,
-  DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX,
-  DISCORD_HITL_FREEFORM_TEXT_INPUT_ID,
-  buildFreeformModalResponse,
-  deriveComponentAnswers,
-  deriveModalAnswers,
-  isDiscordFreeformComponent,
-  renderInteractionComponents,
-} from "#public/channels/discord/hitl.js";
-
 export { defaultDiscordAuth } from "#public/channels/discord/defaults.js";
 
 export {
-  verifyDiscordRequest,
-  verifyDiscordSignature,
   type DiscordPublicKey,
   type DiscordVerifyOptions,
   type DiscordWebhookVerifier,

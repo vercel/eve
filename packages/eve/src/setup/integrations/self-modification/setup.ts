@@ -1,4 +1,5 @@
-import { relative } from "node:path";
+import { access } from "node:fs/promises";
+import { join } from "node:path";
 
 import { confirm, select, text } from "#setup/ask.js";
 import {
@@ -14,11 +15,6 @@ import {
   type SelfModificationSetupOperations,
   type SelfModificationSetupValues,
 } from "#self-modification/setup.js";
-import {
-  detectLegacySelfModificationScaffold,
-  removeLegacySelfModificationScaffold,
-  type LegacySelfModificationScaffold,
-} from "#self-modification/migration.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { ensurePackageDependencies } from "#setup/scaffold/index.js";
 import {
@@ -49,7 +45,7 @@ const SELF_MODIFICATION_PRODUCTION_DEPENDENCIES = {
   microsandbox: DEFAULT_MICROSANDBOX_PACKAGE_VERSION,
 };
 
-type SelfModificationSetupPlan = (
+type SelfModificationSetupPlan =
   | { readonly kind: "authored" }
   | { readonly kind: "local" }
   | {
@@ -57,35 +53,22 @@ type SelfModificationSetupPlan = (
       readonly connectorName: string;
       readonly project: VercelProjectReference;
       readonly values: SelfModificationSetupValues;
-    }
-) & { readonly legacyScaffold?: LegacySelfModificationScaffold };
+    };
+
+async function assertCurrentLayout(appRoot: string): Promise<void> {
+  try {
+    await access(join(appRoot, "agent/subagents/self-modification"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(
+    "The legacy agent/subagents/self-modification layout is no longer supported. Preserve any authored changes, remove that directory, and mount eve/self-modification/local at agent/extensions/self-modification/extension.ts instead.",
+  );
+}
 
 function validationResult(error: string | undefined): string | null {
   return error ?? null;
-}
-
-async function prepareLegacyScaffoldCleanup(
-  context: SetupPrepareContext,
-): Promise<LegacySelfModificationScaffold | undefined> {
-  const scaffold = await detectLegacySelfModificationScaffold(context.appRoot);
-  if (scaffold === undefined) return undefined;
-
-  const approved = await context.asker.ask(
-    confirm({
-      key: "self-modification-cleanup",
-      message: `A legacy self-modification scaffold was found at ${relative(context.appRoot, scaffold.root)}. This scaffold format is no longer supported. Do you want to remove it?`,
-      recommended: true,
-      required: true,
-    }),
-  );
-  return approved ? scaffold : undefined;
-}
-
-function withLegacyScaffold(
-  plan: SelfModificationSetupPlan,
-  legacyScaffold: LegacySelfModificationScaffold | undefined,
-): SelfModificationSetupPlan {
-  return legacyScaffold === undefined ? plan : { ...plan, legacyScaffold };
 }
 
 export async function prepareSelfModificationSetup(
@@ -96,7 +79,7 @@ export async function prepareSelfModificationSetup(
     context.projectRoot,
   ),
 ): Promise<SelfModificationSetupPlan> {
-  const legacyScaffold = await prepareLegacyScaffoldCleanup(context);
+  await assertCurrentLayout(context.appRoot);
   const existing = await operations.readConfig();
   if (classifySelfModificationConfig(existing) === "authored") {
     context.presenter.note(
@@ -104,7 +87,7 @@ export async function prepareSelfModificationSetup(
       "Manual update required",
       { tone: "warning" },
     );
-    return withLegacyScaffold({ kind: "authored" }, legacyScaffold);
+    return { kind: "authored" };
   }
 
   const mode = await context.asker.ask(
@@ -129,7 +112,7 @@ export async function prepareSelfModificationSetup(
       required: true,
     }),
   );
-  if (mode === "local") return withLegacyScaffold({ kind: "local" }, legacyScaffold);
+  if (mode === "local") return { kind: "local" };
 
   const [project, detected, channelNames] = await Promise.all([
     context.resolveVercelProject("self-modification"),
@@ -197,10 +180,7 @@ export async function prepareSelfModificationSetup(
       required: true,
     }),
   );
-  return withLegacyScaffold(
-    confirmed ? { kind: "deployed", connectorName: name, project, values } : { kind: "local" },
-    legacyScaffold,
-  );
+  return confirmed ? { kind: "deployed", connectorName: name, project, values } : { kind: "local" };
 }
 
 export async function applySelfModificationSetup(
@@ -213,10 +193,6 @@ export async function applySelfModificationSetup(
   ),
   deps: SelfModificationApplyDependencies = defaultApplyDependencies,
 ) {
-  if (plan.legacyScaffold !== undefined) {
-    await removeLegacySelfModificationScaffold(context.appRoot, plan.legacyScaffold);
-    context.presenter.log.success("Removed the retired self-modification scaffold.");
-  }
   if (plan.kind === "authored") {
     return {
       facts: [{ label: "Self-modification", value: "manual configuration update required" }],
@@ -265,7 +241,7 @@ export async function prepareLocalSelfModificationSetup(
     context.projectRoot,
   ),
 ): Promise<SelfModificationSetupPlan> {
-  const legacyScaffold = await prepareLegacyScaffoldCleanup(context);
+  await assertCurrentLayout(context.appRoot);
   const existing = await operations.readLocalConfig();
   if (classifySelfModificationConfig(existing) === "authored") {
     context.presenter.note(
@@ -273,9 +249,9 @@ export async function prepareLocalSelfModificationSetup(
       "Manual update required",
       { tone: "warning" },
     );
-    return withLegacyScaffold({ kind: "authored" }, legacyScaffold);
+    return { kind: "authored" };
   }
-  return withLegacyScaffold({ kind: "local" }, legacyScaffold);
+  return { kind: "local" };
 }
 
 function describeEnvironment(environment: SetupPrepareContext["environment"]): string {
