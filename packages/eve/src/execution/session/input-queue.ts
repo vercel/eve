@@ -54,12 +54,40 @@ export type SessionInputSelection =
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private nextSequence = 0;
+  private readonly admittedDeliveryIds = new Set<string>();
 
   get pendingCount(): number {
     return this.entries.length;
   }
 
-  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission {
+  /** Seeds input carried by the owner boot rather than admitted through the inbox. */
+  markAdmitted(ids: readonly string[]): void {
+    for (const id of ids) this.admittedDeliveryIds.add(id);
+  }
+
+  hasUnadmitted(delivery: DeliverHookPayload): boolean {
+    return delivery.payloads.some((_, index) => {
+      const id = deliveryMetadataAt(delivery, index)?.deliveryId;
+      return id === undefined || !this.admittedDeliveryIds.has(id);
+    });
+  }
+
+  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
+    const payloads: DeliverPayload[] = [];
+    const deliveryMetadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][] = [];
+    for (const [index, payload] of delivery.payloads.entries()) {
+      const metadata = deliveryMetadataAt(delivery, index);
+      const id = metadata?.deliveryId;
+      if (id !== undefined && this.admittedDeliveryIds.has(id)) continue;
+      if (id !== undefined) this.admittedDeliveryIds.add(id);
+      if (metadata !== undefined)
+        deliveryMetadata.push({ ...metadata, payloadIndex: payloads.length });
+      payloads.push(payload);
+    }
+    if (payloads.length === 0) return undefined;
+    if (payloads.length !== delivery.payloads.length) {
+      delivery = { ...delivery, payloads, deliveryMetadata };
+    }
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
     return admission;
@@ -251,4 +279,8 @@ function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
 function authorizationAttemptId(payload: DeliverPayload): string | undefined {
   const callback = payload["authorizationCallback"] as { readonly attemptId?: unknown } | undefined;
   return typeof callback?.attemptId === "string" ? callback.attemptId : undefined;
+}
+
+function deliveryMetadataAt(delivery: DeliverHookPayload, index: number) {
+  return delivery.deliveryMetadata?.find((entry) => entry.payloadIndex === index);
 }

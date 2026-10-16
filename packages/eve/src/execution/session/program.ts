@@ -207,6 +207,7 @@ async function runSessionLoop(
 ): Promise<SessionLoopOutcome> {
   const { cursor, handoff, inbox, progress } = deps;
   const queue = new SessionInputQueue();
+  queue.markAdmitted(boot.initialInput?.deliveryMetadata?.map((entry) => entry.deliveryId) ?? []);
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     initialTurnControllers: boot.initialTurnControllers,

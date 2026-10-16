@@ -528,6 +528,7 @@ class ActiveTurn {
     }
     if (
       delivery.kind === "deliver" &&
+      this.input.queue.hasUnadmitted(delivery) &&
       isSteeringMessage(delivery, this.identity) &&
       !this.input.cursor.optionalSessionState?.hasProxyInputRequests
     )

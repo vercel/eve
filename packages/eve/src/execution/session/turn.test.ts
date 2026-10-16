@@ -1,3 +1,4 @@
+import { GenerationSteering } from "#harness/generation-steering.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -310,6 +311,68 @@ describe("SessionExecution checkpoints", () => {
     await createExecution({ inbox, sessionState: state("") }).runTurn(undefined);
     expect(turnStep).toHaveBeenCalledTimes(3);
   });
+  it("does not abort generation for a re-sent active delivery before the first token", async () => {
+    let notify: (payload: SessionInboxPayload) => void = () => {};
+    const pending: SessionInboxPayload[] = [];
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => pending.splice(0),
+      hasPending: () => pending.length > 0,
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(),
+      restore: vi.fn(),
+      onInterrupt: () => () => {},
+      onDelivery: (handler) => {
+        notify = handler;
+        return () => {};
+      },
+    };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "hello" }],
+      deliveryMetadata: [
+        { deliveryId: "D", payloadIndex: 0, channelKind: "http", channelName: "test" },
+      ],
+    };
+    const queue = new SessionInputQueue();
+    queue.enqueueDelivery(delivery);
+    queue.takeNext();
+    const generate = vi.fn(async (signal: AbortSignal) => {
+      // The re-send arrives while generation has begun but before any output.
+      pending.push(delivery);
+      notify(delivery);
+      expect(signal.aborted).toBe(false);
+      return "Hello";
+    });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(
+        turnStepWork(async (input) => {
+          const steering = new GenerationSteering(input);
+          try {
+            steering.begin();
+            const output = await generate(steering.signal);
+            return {
+              action: "done",
+              output,
+              serializedContext: input.serializedContext,
+              sessionState: input.sessionState,
+            };
+          } finally {
+            steering.dispose();
+          }
+        }),
+      );
+    const execution = createExecution({ inbox, queue, sessionState: state("") });
+    await expect(execution.runTurn({ delivery })).resolves.toMatchObject({
+      kind: "done",
+      output: "Hello",
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
   it("signals generation steering, coalesces corrections in order, and continues without cancellation", async () => {
     let notify: (payload: SessionInboxPayload) => void = () => {};
     const pending: SessionInboxPayload[] = [];
