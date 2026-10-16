@@ -1,0 +1,8 @@
+[
+  "WRITE_FILE_INPUT_SCHEMA",
+  "WRITE_FILE_OUTPUT_SCHEMA",
+  "WriteFileToolInput",
+  "WriteFileToolOutput",
+  "default",
+  "writeFile"
+]

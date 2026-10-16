@@ -1,0 +1,13 @@
+[
+  "EVE_NEXT_SERVICE_PREFIX",
+  "EveNextConfig",
+  "EveNextConfigFunction",
+  "EveNextConfigInput",
+  "EveNextRewriteRule",
+  "EveNextRewriteSections",
+  "EveNextRewrites",
+  "WithEveAgentOptions",
+  "WithEveAgentsConfig",
+  "WithEveOptions",
+  "withEve"
+]

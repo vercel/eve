@@ -1,0 +1,8 @@
+[
+  "READ_FILE_INPUT_SCHEMA",
+  "READ_FILE_OUTPUT_SCHEMA",
+  "ReadFileToolInput",
+  "ReadFileToolOutput",
+  "default",
+  "readFile"
+]

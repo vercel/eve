@@ -1,0 +1,8 @@
+[
+  "WEB_FETCH_INPUT_SCHEMA",
+  "WEB_FETCH_OUTPUT_SCHEMA",
+  "WebFetchToolInput",
+  "WebFetchToolOutput",
+  "default",
+  "webFetch"
+]

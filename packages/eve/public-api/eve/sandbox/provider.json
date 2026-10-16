@@ -1,0 +1,17 @@
+[
+  "SandboxDeleteOptions",
+  "SandboxPreparedArtifact",
+  "SandboxProvider",
+  "SandboxProviderDefinition",
+  "SandboxProviderFiles",
+  "SandboxProviderHandle",
+  "SandboxProviderImplementation",
+  "SandboxProviderPrepareContext",
+  "SandboxProviderResourceFile",
+  "SandboxProviderResourceSource",
+  "SandboxProviderResourceTree",
+  "SandboxProviderResources",
+  "SandboxProviderSessionContext",
+  "SandboxProviderTargetFile",
+  "defineSandboxProvider"
+]

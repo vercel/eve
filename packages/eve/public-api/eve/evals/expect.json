@@ -1,0 +1,11 @@
+[
+  "Assertion",
+  "AssertionEvaluation",
+  "AssertionHandle",
+  "AssertionSeverity",
+  "equals",
+  "includes",
+  "matches",
+  "satisfies",
+  "similarity"
+]

@@ -1,0 +1,23 @@
+[
+  "ManagedTraceOptions",
+  "OtelDeclaration",
+  "OtelIntegration",
+  "OtelIntegrationOptions",
+  "OtelOptions",
+  "SpanAttributeDecision",
+  "SpanExportAttributeValue",
+  "SpanExportContext",
+  "SpanExportDecision",
+  "SpanExportPolicy",
+  "SpanExporter",
+  "SpanProcessor",
+  "TraceCaptureContext",
+  "TraceCapturePolicy",
+  "TracePolicyDecision",
+  "agentRuns",
+  "isOtelDeclaration",
+  "isOtelIntegration",
+  "localTraces",
+  "otel",
+  "otelIntegration"
+]
