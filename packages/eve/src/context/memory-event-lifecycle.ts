@@ -11,8 +11,18 @@ import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import type { MemoryInstrumentation } from "#instrumentation/memory.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("memory");
+
+/** A memory provider handler threw: the turn fails and the session waits, so the next message can retry. */
+export class MemoryLifecycleError extends Error {
+  override readonly name = "MemoryLifecycleError";
+
+  constructor(error: unknown) {
+    super(toErrorMessage(error), { cause: error });
+  }
+}
 
 export async function dispatchMemoryLifecycleEvent(input: {
   readonly abortSignal?: AbortSignal;
@@ -24,9 +34,20 @@ export async function dispatchMemoryLifecycleEvent(input: {
   readonly nodeId: string;
   readonly instrumentation?: MemoryInstrumentation;
 }): Promise<readonly ModelMessage[]> {
-  let messages = input.messages ?? [];
+  const messages = input.messages ?? [];
   if (input.memories.length === 0) return messages;
 
+  try {
+    return await dispatchHandlers(input, messages);
+  } catch (error) {
+    throw new MemoryLifecycleError(error);
+  }
+}
+
+async function dispatchHandlers(
+  input: Parameters<typeof dispatchMemoryLifecycleEvent>[0],
+  messages: readonly ModelMessage[],
+): Promise<readonly ModelMessage[]> {
   if (input.event.type === "turn.started") {
     return await dispatchMemoryTurnStarted({
       abortSignal: input.abortSignal,
@@ -50,7 +71,7 @@ export async function dispatchMemoryLifecycleEvent(input: {
       nodeId: input.nodeId,
     });
   } else if (input.event.type === "compaction.completed") {
-    messages = await dispatchMemoryCompactionCompleted({
+    return await dispatchMemoryCompactionCompleted({
       abortSignal: input.abortSignal,
       ctx: input.ctx,
       event: input.event,

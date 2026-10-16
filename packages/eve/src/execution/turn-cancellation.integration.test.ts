@@ -482,8 +482,7 @@ describe("turn cancellation integration", () => {
     60_000,
   );
 
-  it("keeps an abort-shaped memory recall error terminal while the turn signal is active", async () => {
-    const output = captureConsoleOutput();
+  it("fails the turn on an abort-shaped memory recall error while the turn signal is active", async () => {
     const fixture = await createAbortRecallRuntime("turn-active-memory-abort", {
       waitForAbort: false,
     });
@@ -501,24 +500,20 @@ describe("turn cancellation integration", () => {
         },
       ]);
       const stream = captureTurnEvents(run);
-      let failed = false;
 
       try {
         await fixture.recallStarted;
         const failedTurn = await stream.nextTurn();
-        expect(failedTurn.at(-1)?.type).toBe("session.failed");
+        expect(failedTurn.slice(-2).map((event) => event.type)).toEqual([
+          "turn.failed",
+          "session.waiting",
+        ]);
         expect(filterEventsByType(failedTurn, "turn.cancelled")).toHaveLength(0);
-        await expect(run.returnValue).rejects.toThrow("Agent workflow failed.");
-        failed = true;
       } finally {
         stream.dispose();
-        // A failed run is terminal and rejects cancellation.
-        if (!failed) await run.cancel();
+        await run.cancel();
       }
     });
-    expect(output.lines).toContain(
-      "[eve:execution.workflow-entry] workflow loop threw — emitting terminal session.failed",
-    );
   });
 
   it.each([
