@@ -650,6 +650,40 @@ describe("approval responses without a response policy", () => {
     expect(getApprovalAuditState(result.session.state).settlements).toHaveLength(1);
   });
 
+  it("settles nothing for an unauthenticated answer to a requester's call", async () => {
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedFor(alice),
+      stepInput: {
+        attributedInputResponses: [
+          { auth: null, response: { optionId: "approve", requestId: request.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    expect(result.feedback).toEqual(["Authentication is required to respond to this approval."]);
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
+    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(parkedSteps(result.session)).toHaveLength(1);
+  });
+
+  it("keeps the requester's Cancel decisive after an unauthenticated answer", async () => {
+    const afterAnonymous = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedFor(alice),
+      stepInput: {
+        attributedInputResponses: [
+          { auth: null, response: { optionId: "approve", requestId: request.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    const result = await respond(afterAnonymous.session, alice, "cancel");
+    expect(getApprovalAuditState(result.session.state).settlements).toEqual([
+      expect.objectContaining({ outcome: "cancelled" }),
+    ]);
+  });
+
   it("records an unauthenticated answer as the anonymous principal", async () => {
     const result = await coordinateApprovalDelivery({
       now: 100,

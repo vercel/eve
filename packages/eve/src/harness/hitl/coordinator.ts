@@ -146,12 +146,17 @@ export async function coordinateApprovalDelivery(input: {
         suspendedSteps(session.state).find((step) =>
           step.requests.some((request) => request.requestId === response.requestId),
         )?.requester ?? null;
+      if (requester !== null && responder === null) {
+        feedback.push(UNAUTHENTICATED_APPROVAL_FEEDBACK);
+        continue;
+      }
       if (requester !== null && responder !== null && !sameResponder(requester, responder)) {
         feedback.push(REQUESTER_ONLY_APPROVAL_FEEDBACK);
         continue;
       }
       // A direct settlement needs no authorizer pass; the settlements below carry it. An
-      // unauthenticated responder settles as the anonymous principal `none()` gives such callers.
+      // unauthenticated responder, allowed only when the call has no requester, settles as the
+      // anonymous principal `none()` gives such callers.
       const settled = settleDirectApprovalResponse({
         actor: responder ?? ANONYMOUS_SESSION_AUTH_CONTEXT,
         outcome: decision === "approve" ? "allowed" : "cancelled",
