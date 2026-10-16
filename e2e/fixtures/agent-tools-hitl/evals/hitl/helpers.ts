@@ -112,6 +112,9 @@ const MODEL_OUTPUT_EVENTS = new Set<string>([
   "action.input.appended",
   "message.appended",
   "message.completed",
+  "reasoning.appended",
+  "reasoning.completed",
+  "step.completed",
 ]);
 
 /** The latest authorization `turn` asked for: its attempt and its fixture callback URL. */
