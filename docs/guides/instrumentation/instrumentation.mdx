@@ -99,8 +99,9 @@ trace. It includes input and output content in these cases:
 
 Return `{ emit: false }` to not sample the trace for this file. Return
 `{ emit: true, recordInputs, recordOutputs }` to choose the two content
-directions explicitly. Inputs include model prompts, tool arguments, channel
-input, and user responses. Outputs include model responses, tool results,
+directions explicitly. Inputs include model prompts, tool arguments, call labels,
+channel input, and user responses. Labels follow the input policy because they can contain
+input-derived text. Outputs include model responses, tool results,
 requests for user input, model provider metadata, and error details. Omitted
 content fields are unavailable to the handler.
 

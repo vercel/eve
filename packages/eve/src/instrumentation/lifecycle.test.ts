@@ -824,19 +824,21 @@ describe("trace policies", () => {
 
   it("lets an explicit provider policy authorize private content", async () => {
     const observed = vi.fn();
+    const metadata = vi.fn();
     const hooks = createInstrumentationHooks([
       {
         events: { "call.requested": observed },
         name: "private-audit",
         tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
       },
+      { name: "metadata-only", events: { "call.requested": metadata } },
     ]).forTrace!(traceContext("weather", "private"));
 
     await hooks.publish({
       callId: "call-1",
       idempotencyKey: actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1"),
       input: { secret: "private" },
-      capability: { kind: "tool", name: "weather" },
+      capability: { kind: "tool", name: "weather", label: "Read Alice's private report" },
       frameworkTool: false,
       toolName: "weather",
       scope,
@@ -844,6 +846,11 @@ describe("trace policies", () => {
     });
 
     expect(observed.mock.calls[0]?.[0].input).toEqual({ secret: "private" });
+    expect(observed.mock.calls[0]?.[0].capability.label).toBe("Read Alice's private report");
+    expect(metadata.mock.calls[0]?.[0]).toMatchObject({
+      input: undefined,
+      capability: { kind: "tool", name: "weather", label: undefined },
+    });
   });
 
   it("projects input and output content independently per provider", async () => {

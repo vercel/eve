@@ -18,8 +18,15 @@ export function withInstrumentationDecision(
   switch (event.type) {
     case "session.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, title: undefined });
-    case "delivery.consumed":
     case "call.requested":
+      return decision.recordInputs
+        ? event
+        : Object.freeze({
+            ...event,
+            input: undefined,
+            capability: Object.freeze({ ...event.capability, label: undefined }),
+          });
+    case "delivery.consumed":
     case "model.call.started":
       return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "interaction.opened":
