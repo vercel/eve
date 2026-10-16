@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  workflowAskPayload,
   workflowToolRunFailureOutput,
   workflowToolRunOutcomeToToolResult,
 } from "#execution/tools/workflow/owner-inbox.js";
@@ -14,6 +15,35 @@ const from = {
   toolName: "research",
   turnId: "turn-1",
 };
+
+it("keeps the authored question heading in the relayed interaction", () => {
+  const payload = workflowAskPayload({
+    from,
+    replyTo: "question-1",
+    request: {
+      kind: "ask",
+      control: "run-control",
+      request: {
+        title: "Deployment review",
+        prompt: "Which environment should Alice use?",
+        options: [{ id: "staging", label: "Staging" }],
+      },
+    },
+  });
+  expect(payload.events).toMatchObject([
+    {
+      type: "interaction.opened",
+      data: {
+        interactionId: "question-1",
+        request: {
+          kind: "question",
+          title: "Deployment review",
+          prompt: "Which environment should Alice use?",
+        },
+      },
+    },
+  ]);
+});
 
 describe("workflow-tool task outcomes", () => {
   it("keeps a structured workflow failure as task failure data", () => {

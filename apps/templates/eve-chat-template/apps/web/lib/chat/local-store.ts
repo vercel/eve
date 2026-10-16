@@ -107,35 +107,11 @@ export function saveLocalChatSnapshot({
 }) {
   updateChat(chatId, (chat) => ({
     ...chat,
-    events,
+    events: [...events, ...chat.events.slice(events.length)],
     pendingUserMessage: null,
     session,
     updatedAt: new Date().toISOString(),
   }));
-}
-
-export function skipLocalChatAuthorization({
-  chatId,
-  events,
-  session,
-}: {
-  readonly chatId: string;
-  readonly events: readonly SessionStreamEvent[];
-  readonly session: ClientSessionState | undefined;
-}) {
-  const chat = updateChat(chatId, (current) => ({
-    ...current,
-    events: [...current.events, ...events],
-    pendingUserMessage: null,
-    session,
-    updatedAt: new Date().toISOString(),
-  }));
-
-  return {
-    chat: toListItem(chat),
-    eventCount: events.length,
-    eventIndex: chat.events.length - events.length,
-  };
 }
 
 function updateChat(chatId: string, update: (chat: StoredChat) => StoredChat) {

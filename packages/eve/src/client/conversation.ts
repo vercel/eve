@@ -3,7 +3,7 @@ import type {
   ConversationAgentSession,
   ConversationState,
 } from "#client/conversation-state.js";
-import { assistantMessages, userMessage } from "#client/messages.js";
+import { assistantMessages, type PlacedMessage, userMessage } from "#client/messages.js";
 import type { EveMessage } from "#client/message-types.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { isFactType } from "#protocol/session-events/catalog.js";
@@ -57,7 +57,7 @@ export class Conversation {
   readonly #pendingAnswers = new Map<string, { readonly answer: Answer; deliveryId?: string }>();
   #submissions: readonly LocalSubmission[] = [];
   readonly #agents = new Map<string, FollowedAgent>();
-  #messages = new Map<string, EveMessage>();
+  #messages = new Map<string, readonly PlacedMessage[]>();
   readonly #users = new Map<string, EveMessage>();
   readonly #submissionIds = new Map<string, string>();
   #changed: Set<string> | "all" = "all";
@@ -168,9 +168,9 @@ export class Conversation {
           ]);
     const derived = assistantMessages({ interactions, previews, view }, changed);
     if (changed === undefined) this.#messages = new Map();
-    for (const [turnId, message] of derived) {
-      if (message === undefined) this.#messages.delete(turnId);
-      else this.#messages.set(turnId, message);
+    for (const [turnId, messages] of derived) {
+      if (messages.length === 0) this.#messages.delete(turnId);
+      else this.#messages.set(turnId, messages);
     }
     this.#changed = new Set();
 
@@ -215,12 +215,12 @@ export class Conversation {
   }
 
   /**
-   * Each turn's messages in turn order: what people sent it, in the order it consumed them, then
-   * what this client sent it that eve hasn't consumed, then the agent's message. Messages this
-   * client sent for no known turn come last.
+   * Each turn's messages in turn order, as the stream placed them: what people sent it where it
+   * consumed them, between the agent's messages, then what this client sent it that eve hasn't
+   * consumed. Messages this client sent for no known turn come last.
    */
   #orderedMessages(): readonly EveMessage[] {
-    const sent = new Map<string, EveMessage[]>();
+    const sent = new Map<string, PlacedMessage[]>();
     for (const row of Object.values(this.view.deliveries)) {
       if (row.consumedAt === undefined || row.turnId === undefined) continue;
       let message = this.#users.get(row.deliveryId);
@@ -234,9 +234,10 @@ export class Conversation {
         submissionId === undefined
           ? message
           : { ...message, id: `optimistic:${submissionId}:user` };
+      const placed = { at: row.consumedAt, message: shown };
       const messages = sent.get(row.turnId);
-      if (messages === undefined) sent.set(row.turnId, [shown]);
-      else messages.push(shown);
+      if (messages === undefined) sent.set(row.turnId, [placed]);
+      else messages.push(placed);
     }
     const local = new Map<string | undefined, EveMessage[]>();
     for (const submission of this.#submissions) {
@@ -259,9 +260,12 @@ export class Conversation {
     }
     const messages: EveMessage[] = [];
     for (const turnId of Object.keys(this.view.turns)) {
-      messages.push(...(sent.get(turnId) ?? []), ...(local.get(turnId) ?? []));
-      const assistant = this.#messages.get(turnId);
-      if (assistant !== undefined) messages.push(assistant);
+      // A person's message sorts before the agent's that starts on the same line.
+      const placed = [
+        ...(sent.get(turnId) ?? []).map((entry) => ({ ...entry, rank: 0 })),
+        ...(this.#messages.get(turnId) ?? []).map((entry) => ({ ...entry, rank: 1 })),
+      ].sort((a, b) => a.at - b.at || a.rank - b.rank);
+      messages.push(...placed.map((entry) => entry.message), ...(local.get(turnId) ?? []));
     }
     messages.push(...(local.get(undefined) ?? []));
     return messages;

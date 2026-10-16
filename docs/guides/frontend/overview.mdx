@@ -158,10 +158,11 @@ retry a failed prewarm on unrelated renders while the option remains `true`; cal
 change the option from `false` to `true` again, reset, or send a message to recover.
 
 The hook keeps consuming one session stream across turns and idle periods. Replies,
-authorization updates, and turns started elsewhere all update the same projection. Separately
-delivered participant messages remain separate bubbles before that turn's assistant response, even
-when they arrive after the response begins. A single event that coalesces multiple deliveries
-remains one bubble. A turn settling does not close the connection. The transport reconnects from
+authorization updates, and turns started elsewhere all update the same projection. Each message a
+person sends is its own bubble, placed where its turn took it in: a message that arrives while the
+turn works splits the agent's response, so what the agent did before the message shows above it
+and the rest below. The pieces share `metadata.turnId`. A single event that coalesces multiple
+deliveries remains one bubble. A turn settling does not close the connection. The transport reconnects from
 its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
 Unmounting or resetting closes the local stream without cancelling the old durable session.
@@ -366,7 +367,7 @@ const agent = useEveAgent({
 });
 ```
 
-The `optimistic` option (default `true`) shows submitted user messages in `messages` before eve confirms them with a `delivery.consumed` fact. Steered follow-ups appear before the active turn's assistant response once the turn is known; if the send fails, the failed placeholder stays in place, with `metadata.status` `"failed"`. They show in `messages` only; `events` stays the authoritative eve stream. The hook reconciles each placeholder with the server's delivery ID, including the first message. Its message ID stays unchanged when confirmed, so an unrelated or identical message cannot consume it. While POST acknowledgements are pending, stream-driven snapshot publication waits for their identities; `onEvent` still receives the stream events.
+The `optimistic` option (default `true`) shows submitted user messages in `messages` before eve confirms them with a `delivery.consumed` fact. A follow-up sent while a turn works shows at the end of the conversation and stays there once the turn takes it in; if the send fails, the failed placeholder stays in place, with `metadata.status` `"failed"`. They show in `messages` only; `events` stays the authoritative eve stream. The hook reconciles each placeholder with the server's delivery ID, including the first message. Its message ID stays unchanged when confirmed, so an unrelated or identical message cannot consume it. While POST acknowledgements are pending, stream-driven snapshot publication waits for their identities; `onEvent` still receives the stream events.
 
 ## Derive your own state
 

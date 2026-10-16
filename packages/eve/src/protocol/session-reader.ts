@@ -6,6 +6,7 @@
 import type {
   InteractionOutcome,
   InteractionRequest,
+  SignInChallenge,
 } from "#protocol/session-events/families/interaction.js";
 import type { Answer } from "#protocol/session-events/families/response.js";
 import type { JsonValue } from "#shared/json.js";
@@ -118,7 +119,9 @@ export function interactionPlace(view: SessionView, row: InteractionRow): Intera
 /** An interaction as a conversation reader shows it: what it asks, where, and how it stands. */
 export interface Interaction extends InteractionPlace {
   readonly interactionId: string;
-  readonly request: InteractionRequest;
+  readonly request: Omit<InteractionRequest, "signIn"> & {
+    readonly signIn?: Omit<SignInChallenge, "callbackUrl">;
+  };
   readonly call?: AskedCall;
   readonly status: "open" | "settled";
   readonly outcome?: InteractionOutcome;
@@ -130,10 +133,15 @@ export interface Interaction extends InteractionPlace {
 export function interaction(view: SessionView, interactionId: string): Interaction | undefined {
   const row = view.interactions[interactionId];
   if (row === undefined) return undefined;
+  let request: Interaction["request"] = row.request;
+  if (row.request.signIn !== undefined) {
+    const { callbackUrl: _callbackUrl, ...signIn } = row.request.signIn;
+    request = { ...row.request, signIn };
+  }
   const shown: Mutable<Interaction> = {
     ...interactionPlace(view, row),
     interactionId,
-    request: row.request,
+    request,
     status: row.status,
   };
   const call = askedCall(view, row);

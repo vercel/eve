@@ -3,8 +3,8 @@
 import { interaction } from "eve/events";
 
 import type { MessagePart } from "eve/client";
+import { activity, failure, type Activity } from "eve/events";
 import { useEveAgent } from "eve/react";
-import { failure } from "eve/events";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import {
@@ -22,8 +22,8 @@ import {
   PromptInputTextarea,
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
-import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
+import { Trace, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
 import { WEB_CHAT_AGENT } from "@/app/eve-agent";
@@ -76,9 +76,18 @@ export function AgentChat({
   const lastMessage = agent.messages.at(-1);
   const isPendingAssistantShell =
     lastMessage?.role === "assistant" && lastMessage.parts.length === 0;
+  const now = activity(agent.view);
+  // Show what the agent is doing until its message has something to show, unless it waits on you.
   const showPendingThinking =
-    isBusy && (lastMessage?.role !== "assistant" || isPendingAssistantShell);
-  const turnFailure = isBusy || isResuming ? undefined : getLatestTurnFailure(agent.view);
+    isBusy &&
+    now.kind !== "waiting-on-person" &&
+    (lastMessage?.role !== "assistant" || isPendingAssistantShell);
+  const failed =
+    isBusy || isResuming ? undefined : failure(agent.view, agent.view.session.latestTurnId);
+  const turnFailure =
+    failed?.code === "MODEL_CALL_FAILED"
+      ? "The model is temporarily unavailable. Please try again."
+      : failed?.message;
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
   const showConversationLayout = isResuming || hasConversationContent;
@@ -165,24 +174,28 @@ export function AgentChat({
         >
           <ConversationTopFade className="top-14" />
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
-            {agent.messages.map((message, index) =>
+            {agent.messages.map((message) =>
               showPendingThinking &&
               isPendingAssistantShell &&
               message.id === lastMessage.id ? null : (
                 <AgentMessage
                   canRespond={canRespond}
-                  isStreaming={agent.status === "busy" && index === agent.messages.length - 1}
                   key={message.id}
                   message={message}
                   questionsFor={questionsFor}
-                  onAnswers={(answers) => {
+                  view={agent.view}
+                  onAnswers={async (answers) => {
                     setCancellationError(undefined);
-                    return agent.respond(answers);
+                    await agent.respond(answers).catch((cause: unknown) => {
+                      setCancellationError(
+                        cause instanceof Error ? cause.message : "Unable to submit the answer.",
+                      );
+                    });
                   }}
                 />
               ),
             )}
-            {showPendingThinking ? <PendingThinking /> : null}
+            {showPendingThinking ? <PendingActivity activity={now} /> : null}
             {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
           </ConversationContent>
           <ConversationScrollButton />
@@ -280,27 +293,36 @@ function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) 
   );
 }
 
-function PendingThinking() {
+function PendingActivity({ activity }: { readonly activity: Activity }) {
   return (
     <Message aria-live="polite" from="assistant">
       <MessageContent>
-        <div className="mb-4 flex w-full items-center gap-2 text-muted-foreground text-sm">
-          <BrainIcon className="size-4" />
-          <Shimmer duration={1}>Thinking</Shimmer>
-        </div>
+        <Trace>
+          <TraceLine status="running">
+            <TraceIcon>
+              <BrainIcon />
+            </TraceIcon>
+            <TraceTitle>{activityLabel(activity)}</TraceTitle>
+          </TraceLine>
+        </Trace>
       </MessageContent>
     </Message>
   );
 }
 
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unable to cancel the response.";
+function activityLabel(activity: Activity): string {
+  switch (activity.kind) {
+    case "calling":
+      return activity.names.join(", ");
+    case "waiting-on-tasks":
+      return `Waiting on ${activity.tasks.map((task) => task.name).join(", ")}`;
+    case "compacting":
+      return "Compacting the conversation";
+    default:
+      return "Thinking";
+  }
 }
 
-function getLatestTurnFailure(view: ReturnType<typeof useEveAgent>["view"]): string | undefined {
-  const error = failure(view, view.session.latestTurnId);
-  if (view.session.outcome === "failed") return error?.message;
-  return error?.code === "MODEL_CALL_FAILED"
-    ? "The model is temporarily unavailable. Please try again."
-    : error?.message;
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unable to cancel the response.";
 }

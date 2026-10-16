@@ -16,18 +16,18 @@ function ToolBlock({
 
   return (
     <div className="tool">
-      <strong>{part.label}</strong> <em>{part.outcome ?? part.status}</em>
+      <strong>{part.label}</strong> <em>{part.state}</em>
       <pre>{JSON.stringify(part.input, null, 2)}</pre>
       {part.output !== undefined ? <pre>{JSON.stringify(part.output, null, 2)}</pre> : null}
       {part.error ? <p className="error">{part.error.message}</p> : null}
-      {awaitingResponse && inputRequest !== undefined ? (
+      {awaitingResponse && interaction !== undefined && inputRequest !== undefined ? (
         <div>
           <p>{inputRequest.prompt}</p>
           {(inputRequest.options ?? []).map((option) => (
             <button
               disabled={!canRespond}
               key={option.id}
-              onClick={() => onRespond(inputRequest.interactionId, option.id)}
+              onClick={() => onRespond(interaction.interactionId, option.id)}
               type="button"
             >
               {option.label}
@@ -63,7 +63,7 @@ function PartView({
 export function EveAgentConsole() {
   const [draft, setDraft] = useState("");
   const agent = useEveAgent({ prewarm: draft.trim().length > 0 });
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isBusy = agent.status === "busy";
   const isInputDisabled = isBusy || agent.status === "resuming";
 
   function submit() {
@@ -82,11 +82,11 @@ export function EveAgentConsole() {
 
       {agent.error ? <p className="error">{agent.error.message}</p> : null}
 
-      {agent.data.messages.length === 0 ? (
+      {agent.messages.length === 0 ? (
         <p>Ask for the weather in Vienna, or tell the agent to explain the tools it called.</p>
       ) : (
         <div className="messages">
-          {agent.data.messages.map((message) => (
+          {agent.messages.map((message) => (
             <div className="message" data-role={message.role} key={message.id}>
               {message.parts.map((part, index) => (
                 <PartView

@@ -23,8 +23,8 @@
     interaction?.kind === "approval" && part.interaction?.status !== "settled",
   );
   let errorText = $derived(
-    part.status === "settled" && part.outcome !== "completed"
-      ? (part.error?.message ?? part.outcome)
+    (part.state === "failed" || part.state === "rejected" || part.state === "cancelled")
+      ? (part.error?.message ?? part.state)
       : undefined,
   );
 
@@ -33,20 +33,24 @@
 
   let title = $derived(part.label);
   let stateLabel = $derived.by(() => {
-    if (part.status === "streaming") return "Pending";
+    if (part.state === "streaming") return "Pending";
     if (awaitingApproval) return "Awaiting Approval";
-    if (part.status !== "settled") return "Running";
+
     const labels: Record<string, string> = {
+      requested: "Pending",
+      running: "Running",
+      approval: "Awaiting Approval",
+      blocked: "Awaiting Input",
       completed: "Completed",
       failed: "Error",
       rejected: "Denied",
-      interrupted: "Cancelled",
+      cancelled: "Cancelled",
     };
-    return labels[part.outcome ?? ""] ?? part.outcome ?? "Settled";
+    return labels[part.state] ?? part.state;
   });
   let stateColor = $derived.by(() => {
-    if (part.outcome === "completed") return "text-emerald-600";
-    if (part.status === "settled") return "text-destructive";
+    if (part.state === "completed") return "text-emerald-600";
+    if (part.state === "failed" || part.state === "rejected" || part.state === "cancelled") return "text-destructive";
     if (awaitingApproval) return "text-yellow-600";
     return "text-muted-foreground";
   });
@@ -130,7 +134,7 @@
                   'danger'
                     ? 'bg-destructive text-white hover:bg-destructive/90'
                     : 'bg-primary text-primary-foreground hover:bg-primary/90'}"
-                  onclick={() => respondWithOption(option.id, interaction.interactionId)}
+                  onclick={() => respondWithOption(option.id, part.interaction!.interactionId)}
                 >
                   {option.label}
                 </button>

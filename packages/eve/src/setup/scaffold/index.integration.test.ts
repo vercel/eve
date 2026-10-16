@@ -280,7 +280,9 @@ describe("ensureChannel", () => {
     expect(agentChatSource).toContain(
       '!isResuming && agent.data.interactions[interactionId]?.status === "open"',
     );
-    expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
+    await expect(readFile(join(projectRoot, "components/ui/trace.tsx"), "utf8")).resolves.toMatch(
+      /export\s*\{[^}]*\bTraceLine\b/s,
+    );
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
       'viewBox="0 0 102 102"',

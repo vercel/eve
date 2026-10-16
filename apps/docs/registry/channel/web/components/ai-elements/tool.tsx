@@ -1,8 +1,6 @@
 "use client";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { ChevronRightIcon, TerminalIcon, WrenchIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
 
@@ -10,68 +8,6 @@ import { CodeBlock } from "./code-block";
 
 const compactCodeBlockClassName =
   "rounded-none border-0 bg-transparent [&_pre]:!bg-transparent [&_pre]:px-3 [&_pre]:pt-2 [&_pre]:pb-3 [&_pre]:text-xs [&_code]:text-xs";
-
-export type ToolProps = ComponentProps<typeof Collapsible>;
-
-export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn("group not-prose w-full", className)} {...props} />
-);
-
-export type ToolHeaderProps = {
-  title?: string;
-  className?: string;
-  toolName: string;
-  /** How the call stands, such as "Running"; absent once it completed. */
-  status?: string;
-  failed?: boolean;
-};
-
-export const getStatusIndicator = (status: string | undefined, failed?: boolean) =>
-  status === undefined ? null : (
-    <span className={cn("text-sm", failed && "text-destructive")}>{status}</span>
-  );
-
-export const ToolHeader = ({
-  className,
-  title,
-  status,
-  failed,
-  toolName,
-  ...props
-}: ToolHeaderProps) => {
-  const displayName = title ?? toolName;
-
-  return (
-    <CollapsibleTrigger
-      className={cn(
-        "flex w-full items-center gap-2 py-0.5 text-left text-muted-foreground transition-colors hover:text-foreground",
-        className,
-      )}
-      {...props}
-    >
-      {displayName === "bash" ? (
-        <TerminalIcon className="size-4 shrink-0" />
-      ) : (
-        <WrenchIcon className="size-4 shrink-0" />
-      )}
-      <span className="text-sm">{displayName}</span>
-      {getStatusIndicator(status, failed)}
-      <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
-    </CollapsibleTrigger>
-  );
-};
-
-export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
-
-export const ToolContent = ({ className, ...props }: ToolContentProps) => (
-  <CollapsibleContent
-    className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 py-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className,
-    )}
-    {...props}
-  />
-);
 
 export type BashToolContentProps = ComponentProps<"div"> & {
   input: unknown;

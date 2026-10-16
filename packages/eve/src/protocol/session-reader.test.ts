@@ -170,6 +170,34 @@ describe("where a call stands", () => {
 });
 
 describe("interaction", () => {
+  it("keeps a sign-in callback out of the display projection without changing its wire row", () => {
+    const view = viewOf(started, [
+      turn("turn_0"),
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "sign-in",
+          subject: { turnId: "turn_0" },
+          request: {
+            kind: "sign-in",
+            prompt: "Connect the calendar",
+            signIn: {
+              name: "calendar",
+              url: "https://calendar.example/authorize",
+              callbackUrl: "https://agent.example/callback",
+            },
+          },
+        },
+      },
+    ]);
+    expect(interaction(view, "sign-in")?.request.signIn).toEqual({
+      name: "calendar",
+      url: "https://calendar.example/authorize",
+    });
+    expect(view.interactions["sign-in"]?.request.signIn?.callbackUrl).toBe(
+      "https://agent.example/callback",
+    );
+  });
   it("shows the latest unsettled answer without closing the prompt, then the deciding answer", () => {
     const view = viewOf(started, [
       turn("turn_0"),

@@ -22,8 +22,10 @@ const awaitingApproval = computed(
   () => interaction.value?.kind === "approval" && props.part.interaction?.status !== "settled",
 );
 const errorText = computed(() =>
-  props.part.status === "settled" && props.part.outcome !== "completed"
-    ? (props.part.error?.message ?? props.part.outcome)
+  props.part.state === "failed" ||
+  props.part.state === "rejected" ||
+  props.part.state === "cancelled"
+    ? (props.part.error?.message ?? props.part.state)
     : undefined,
 );
 
@@ -32,21 +34,30 @@ const isOpen = ref(props.part.interaction !== undefined);
 const title = computed(() => props.part.label);
 
 const stateLabel = computed(() => {
-  if (props.part.status === "streaming") return "Pending";
+  if (props.part.state === "streaming") return "Pending";
   if (awaitingApproval.value) return "Awaiting Approval";
-  if (props.part.status !== "settled") return "Running";
+
   const labels: Record<string, string> = {
+    requested: "Pending",
+    running: "Running",
+    approval: "Awaiting Approval",
+    blocked: "Awaiting Input",
     completed: "Completed",
     failed: "Error",
     rejected: "Denied",
-    interrupted: "Cancelled",
+    cancelled: "Cancelled",
   };
-  return labels[props.part.outcome ?? ""] ?? props.part.outcome ?? "Settled";
+  return labels[props.part.state] ?? props.part.state;
 });
 
 const stateColor = computed(() => {
-  if (props.part.outcome === "completed") return "text-emerald-600";
-  if (props.part.status === "settled") return "text-destructive";
+  if (props.part.state === "completed") return "text-emerald-600";
+  if (
+    props.part.state === "failed" ||
+    props.part.state === "rejected" ||
+    props.part.state === "cancelled"
+  )
+    return "text-destructive";
   if (awaitingApproval.value) return "text-yellow-600";
   return "text-muted-foreground";
 });
@@ -129,7 +140,9 @@ const formattedOutput = computed(() => {
                 : 'bg-primary text-primary-foreground hover:bg-primary/90'
             "
             @click="
-              emit('answers', [{ optionId: option.id, interactionId: interaction!.interactionId }])
+              emit('answers', [
+                { optionId: option.id, interactionId: part.interaction!.interactionId },
+              ])
             "
           >
             {{ option.label }}

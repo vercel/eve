@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { EveMessagePart, EveToolPart } from "eve/vue";
 
-const { cancel, data, status, error, prewarm, respond, send } = useEveAgent();
+const { cancel, messages, status, error, prewarm, respond, send } = useEveAgent();
 
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
-const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isBusy = computed(() => status.value === "busy");
 const isResuming = computed(() => status.value === "resuming");
 const isInputDisabled = computed(() => isBusy.value || isResuming.value);
-const isEmpty = computed(() => data.value.messages.length === 0);
+const isEmpty = computed(() => messages.value.length === 0);
 const cancellationError = ref<string>();
 const errorMessage = computed(() => cancellationError.value ?? error.value?.message);
 
@@ -24,7 +24,7 @@ function onMessagesScroll() {
 }
 
 watch(
-  () => data.value.messages,
+  () => messages.value,
   () => {
     if (!isNearBottom.value) return;
     messagesEl.value?.scrollTo({
@@ -114,7 +114,7 @@ function formatBytes(size: number | undefined): string | undefined {
           <span class="text-muted-foreground">/</span>
           <span class="text-muted-foreground">agent</span>
         </div>
-        <StatusDot :status="status" />
+        <StatusDot :status="status" :error="!!errorMessage" />
       </div>
     </header>
 
@@ -149,7 +149,7 @@ function formatBytes(size: number | undefined): string | undefined {
       >
         <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6">
           <div
-            v-for="message in data.messages"
+            v-for="message in messages"
             :key="message.id"
             class="flex w-full gap-2"
             :class="message.role === 'user' ? 'ml-auto justify-end' : 'justify-start'"

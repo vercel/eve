@@ -78,6 +78,35 @@ function tool(conversation: Conversation): EveToolPart | undefined {
 }
 
 describe("the conversation", () => {
+  it("retains a structured result when a trailing person message has no assistant content", () => {
+    const conversation = observe([
+      ...started,
+      text("p_0", "Done."),
+      {
+        type: "content.completed",
+        data: {
+          kind: "result",
+          phase: "reply",
+          partId: "result_0",
+          runId,
+          value: { deployed: true },
+        },
+      },
+      { type: "delivery.admitted", data: { deliveryId: "d_1" } },
+      {
+        type: "delivery.consumed",
+        data: { deliveryId: "d_1", turnId, parts: [{ kind: "text", text: "Thanks." }] },
+      },
+      { type: "model.settled", data: { runId, outcome: "completed" } },
+      { type: "turn.settled", data: { turnId, outcome: "completed" } },
+    ]);
+    const assistants = conversation.state.messages.filter(
+      (message) => message.role === "assistant",
+    );
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]?.metadata?.result).toEqual({ deployed: true });
+  });
+
   it("exposes a committed line together, retaining the preceding snapshot", () => {
     const conversation = observe(started);
     const before = conversation.state;
@@ -286,6 +315,30 @@ describe("the conversation", () => {
     });
   });
 
+  it("shows an admitted answer from another client while its prompt stays open", () => {
+    // Another tab, or this one before a reload, approved; the batch still waits on the rest.
+    const conversation = observe([
+      ...started,
+      requested,
+      approval("approval_0"),
+      {
+        data: {
+          deliveryId: "d_1",
+          interactionId: "approval_0",
+          responseId: "response_0",
+          value: { optionId: "approve" },
+        },
+        type: "response.submitted",
+      },
+      { data: { responseId: "response_0" }, type: "response.admitted" },
+    ]);
+    expect(tool(conversation)?.interaction).toMatchObject({
+      answer: { interactionId: "approval_0", optionId: "approve" },
+      status: "open",
+    });
+    expect(tool(conversation)?.interaction?.status).toBe("open");
+  });
+
   it("keeps a settled turn's message while a later turn streams", () => {
     const conversation = observe([
       ...started,
@@ -319,6 +372,71 @@ describe("the conversation", () => {
       status: "streaming",
       turnId: "turn_1",
     });
+  });
+
+  it("shows a message sent while the turn works where the turn took it in", () => {
+    const conversation = observe([
+      ...started,
+      requested,
+      { data: { callId: "call_0", outcome: "completed" }, scope, type: "call.settled" },
+    ]);
+    const before = conversation.state.messages[1];
+    // Until eve consumes it, the message shows where it was sent: after what the turn has done.
+    conversation.setSubmissions([{ id: "s_0", message: "Use staging.", turnId }]);
+    const echoId = conversation.state.messages.at(-1)?.id;
+    const shown = () =>
+      conversation.state.messages.map(
+        (message) =>
+          `${message.role}: ${message.parts
+            .map((part) =>
+              part.type === "text" ? part.text : part.type === "tool" ? part.callId : part.type,
+            )
+            .join(", ")}`,
+      );
+    expect(shown()).toEqual(["user: Deploy it.", "assistant: call_0", "user: Use staging."]);
+
+    conversation.confirmSubmission("s_0", "d_1");
+    conversation.setSubmissions([]);
+    observe(
+      [
+        { data: { outcome: "completed", runId }, scope, type: "model.settled" },
+        { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
+        {
+          data: { deliveryId: "d_1", parts: [{ kind: "text", text: "Use staging." }], turnId },
+          scope: { turnId },
+          type: "delivery.consumed",
+        },
+        { data: { owner: { turnId }, runId: "run_1" }, scope, type: "model.requested" },
+      ],
+      conversation,
+    );
+    // The turn goes on below the message, and what it did before keeps its place and identity.
+    expect(shown()).toEqual([
+      "user: Deploy it.",
+      "assistant: call_0",
+      "user: Use staging.",
+      "assistant: ",
+    ]);
+    expect(conversation.state.messages[1]?.id).toBe(before?.id);
+    expect(conversation.state.messages[2]?.id).toBe(echoId);
+    expect(conversation.state.messages.at(-1)?.metadata?.status).toBe("streaming");
+
+    observe(
+      [
+        {
+          data: { kind: "text", partId: "p_1", phase: "reply", runId: "run_1", value: "Done." },
+          scope: { runId: "run_1", turnId },
+          type: "content.completed",
+        },
+      ],
+      conversation,
+    );
+    expect(shown()).toEqual([
+      "user: Deploy it.",
+      "assistant: call_0",
+      "user: Use staging.",
+      "assistant: Done.",
+    ]);
   });
 
   it("reads a complete stream at once", () => {

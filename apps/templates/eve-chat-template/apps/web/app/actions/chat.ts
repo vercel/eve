@@ -10,7 +10,6 @@ import {
   markChatPendingMessage,
   saveChatSnapshot,
   saveChatSessionState,
-  skipChatAuthorization,
 } from "@/lib/db/queries";
 import { assertChatMessageLength } from "@/lib/chat/limits";
 import { RateLimitError, enforceRateLimit } from "@/lib/rate-limit";
@@ -109,21 +108,6 @@ export async function clearChatPendingMessageAction(chatId: string) {
   });
 
   return { ok: true };
-}
-
-export async function skipChatAuthorizationAction(input: {
-  readonly chatId: string;
-  readonly events: readonly SessionStreamEvent[];
-  readonly session: ClientSessionState | undefined;
-}) {
-  const viewer = await requireViewer();
-
-  return skipChatAuthorization({
-    chatId: input.chatId,
-    events: input.events,
-    session: input.session,
-    userId: viewer.id,
-  });
 }
 
 export async function appendChatEventAction(input: {

@@ -299,7 +299,12 @@ Channels turn requests into native UI: the Slack adapter renders approvals as bu
 
 From your own frontend, scan all messages for pending requests and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `answers` shape.
 
-You can answer while a turn is running, such as the second approval of a batch while the first answer is still settling. The default message reducer waits for server confirmation before marking any input request answered. A submitted answer marks its request `responded` in `data.inputs` until its `interaction.settled` arrives, and a refused answer reopens it; submitting a response alone does not resolve an approval, question, or session-limit prompt. Answering a request that is no longer open rejects without a server request. The `client.input.responded` event remains a submission notification for custom reducers, not confirmation that the server accepted the answer.
+You can answer while other work runs, including while a batch waits for another approval. The
+frontend projects your answer during the POST round trip, then reads the corresponding response
+rows from `view`. An interaction stays `open` until its `interaction.settled` arrives: submitting
+an answer alone does not approve a call. A refused answer leaves the prompt answerable, and a
+failed POST retracts only its own optimistic answer. There is no separate `responded` status or
+custom reducer submission event.
 
 ## What to read next
 

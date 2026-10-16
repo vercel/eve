@@ -30,15 +30,23 @@ interface Placed {
   readonly part: EveMessagePart;
 }
 
+/** A message and the stream position it sorts at among its turn's messages. */
+export interface PlacedMessage {
+  readonly at: number;
+  readonly message: EveMessage;
+}
+
 /**
- * The agent's message for each of `turnIds` (every turn when absent): what its runs wrote and
- * called, and what it asked that no call carries, in the order the stream introduced them. A turn
+ * The agent's messages for each of `turnIds` (every turn when absent): what its runs wrote and
+ * called, and what it asked that no call carries, in the order the stream introduced them. A
+ * message a person sent while the turn worked splits it, so what the agent did before it reads
+ * above it and the rest below; each piece sorts at its first part, the last at the end. A turn
  * that has requested no run and shows nothing has no message.
  */
 export function assistantMessages(
   sources: MessageSources,
   turnIds?: ReadonlySet<string>,
-): ReadonlyMap<string, EveMessage | undefined> {
+): ReadonlyMap<string, readonly PlacedMessage[]> {
   const { interactions, previews, view } = sources;
   const shows = (turnId: string | undefined): turnId is string =>
     turnId !== undefined && (turnIds === undefined || turnIds.has(turnId));
@@ -139,27 +147,66 @@ export function assistantMessages(
     });
   }
 
-  const messages = new Map<string, EveMessage | undefined>();
+  // Where each turn took in a message a person sent: those after it showed something split it.
+  const received = new Map<string, { readonly deliveryId: string; readonly at: number }[]>();
+  for (const row of Object.values(view.deliveries)) {
+    if (!shows(row.turnId) || row.consumedAt === undefined || !sendsMessage(row)) continue;
+    const entry = { at: row.consumedAt, deliveryId: row.deliveryId };
+    const entries = received.get(row.turnId);
+    if (entries === undefined) received.set(row.turnId, [entry]);
+    else entries.push(entry);
+  }
+
+  const messages = new Map<string, readonly PlacedMessage[]>();
   for (const turn of Object.values(view.turns)) {
     if (!shows(turn.turnId)) continue;
     const entries = placed.get(turn.turnId) ?? [];
     if (entries.length === 0 && (turn.runs ?? 0) === 0) {
-      messages.set(turn.turnId, undefined);
+      messages.set(turn.turnId, []);
       continue;
     }
     // Content commits as it completes, so the line that introduced a row is its place.
     entries.sort((a, b) => a.at - b.at || a.rank - b.rank);
-    const metadata: Mutable<NonNullable<EveMessage["metadata"]>> = {
-      status: turn.status === "settled" ? "complete" : "streaming",
-      turnId: turn.turnId,
-    };
-    if (results.has(turn.turnId)) metadata.result = results.get(turn.turnId);
-    messages.set(turn.turnId, {
-      id: `${turn.turnId}:assistant`,
-      metadata,
-      parts: entries.map((entry) => entry.part),
-      role: "assistant",
+    const first = entries[0]?.at ?? Infinity;
+    const openers = (received.get(turn.turnId) ?? [])
+      .filter((entry) => entry.at > first)
+      .sort((a, b) => a.at - b.at);
+    // One piece before the first opener, then one after each.
+    const pieces: Placed[][] = [[], ...openers.map((): Placed[] => [])];
+    for (const entry of entries) {
+      pieces[openers.filter((opener) => opener.at < entry.at).length]?.push(entry);
+    }
+    const running = turn.status !== "settled";
+    const last = running
+      ? pieces.length - 1
+      : Math.max(
+          0,
+          pieces.findLastIndex((parts) => parts.length > 0),
+        );
+    const shown: PlacedMessage[] = [];
+    pieces.forEach((parts, index) => {
+      // The last piece stands while the turn works on, so what comes next has somewhere to go.
+      if (parts.length === 0 && !(index === last && (running || last === 0))) return;
+      const metadata: Mutable<NonNullable<EveMessage["metadata"]>> = {
+        status: index === last && running ? "streaming" : "complete",
+        turnId: turn.turnId,
+      };
+      if (index === last && results.has(turn.turnId)) metadata.result = results.get(turn.turnId);
+      const opener = index === 0 ? undefined : openers[index - 1]?.deliveryId;
+      shown.push({
+        at: parts[0]?.at ?? Infinity,
+        message: {
+          id:
+            opener === undefined
+              ? `${turn.turnId}:assistant`
+              : `${turn.turnId}:${opener}:assistant`,
+          metadata,
+          parts: parts.map((entry) => entry.part),
+          role: "assistant",
+        },
+      });
     });
+    messages.set(turn.turnId, shown);
   }
   return messages;
 }
@@ -201,10 +248,16 @@ function toolPart(
   return part;
 }
 
+/** Whether a delivery carries something a person sent, not only answers or context. */
+function sendsMessage(
+  row: DeliveryRow,
+): row is DeliveryRow & { readonly parts: readonly UserPart[] } {
+  return row.parts !== undefined && row.parts.length > 0;
+}
+
 /** What a person sent, as the turn that consumed it received it. An answer sends no message. */
 export function userMessage(row: DeliveryRow): EveMessage | undefined {
-  if (row.turnId === undefined || row.parts === undefined || row.parts.length === 0)
-    return undefined;
+  if (row.turnId === undefined || !sendsMessage(row)) return undefined;
   return {
     id: `${row.deliveryId}:user`,
     metadata: { status: "complete", turnId: row.turnId },

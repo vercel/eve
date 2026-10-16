@@ -92,10 +92,10 @@ export function App() {
   });
 
   const turns = useMemo(
-    () => traceTurns(agent.events, agent.data.messages),
-    [agent.events, agent.data.messages],
+    () => traceTurns(agent.events, agent.messages),
+    [agent.events, agent.messages],
   );
-  const isComposeInProgress = agent.status === "submitted" || agent.status === "streaming";
+  const isComposeInProgress = agent.status === "busy";
   const hasComposerText = composerInput.trim().length > 0;
   const hasConversation = turns.length > 0 || isComposeInProgress;
   const conversationActivityKey = [
@@ -189,10 +189,7 @@ export function App() {
         <section className="conversation-stage" ref={conversationStageRef}>
           {hasConversation ? (
             <div className="conversation-scroll">
-              <ConversationSection
-                isSending={agent.status === "submitted" || agent.status === "streaming"}
-                turns={turns}
-              />
+              <ConversationSection isSending={agent.status === "busy"} turns={turns} />
             </div>
           ) : (
             <div className="empty-state">
