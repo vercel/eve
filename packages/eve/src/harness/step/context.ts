@@ -8,7 +8,7 @@ import {
 import { isDynamicConnectionResolutionError } from "#context/dynamic-connection-lifecycle.js";
 import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { ParentSessionKey, SessionCallbackKey, SessionPredecessorKey } from "#context/keys.js";
-import { MemoryRecallError } from "#context/memory-event-lifecycle.js";
+import { MemoryLifecycleError } from "#context/memory-event-lifecycle.js";
 import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
@@ -168,13 +168,13 @@ export async function openTurn(
 
 /**
  * A lifecycle event failed to publish: a dynamic model selection failure ends the session, and a
- * dynamic connection resolver or memory recall failure parks it. Anything else throws.
+ * dynamic connection resolver or memory provider handler failure parks it. Anything else throws.
  */
 export async function failBoundaryEvent(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
   if (isTurnCancellation(error)) throw error;
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
-  if (isDynamicConnectionResolutionError(error) || error instanceof MemoryRecallError) {
+  if (isDynamicConnectionResolutionError(error) || error instanceof MemoryLifecycleError) {
     return parkFailedTurn(step, error);
   }
   throw error;
