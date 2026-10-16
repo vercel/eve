@@ -238,8 +238,8 @@ export function waiting(
     )
   )
     return undefined;
-  // Input the turn consumed after the session last decided anything for it, by requesting a
-  // model run or asking someone, is the session's to act on.
+  // Input consumed after the session last requested a model, asked someone, or weighed an
+  // answer is still its work. A forwarded answer admitted by its asker has already been read.
   const decided = Math.max(
     -1,
     ...Object.values(view.runs)
@@ -250,6 +250,13 @@ export function waiting(
         (row) => interactionOwner(view, row).turnId === turnId || subjectTurn(view, row) === turnId,
       )
       .map((row) => row.introducedAt),
+    ...Object.values(view.responses)
+      .filter(
+        (response) =>
+          response.status !== "submitted" &&
+          view.deliveries[response.deliveryId]?.turnId === turnId,
+      )
+      .map((response) => response.introducedAt),
   );
   const unread = Object.values(view.deliveries).some(
     (delivery) =>
