@@ -92,8 +92,7 @@ async function routeProxiedDeliver(
   // A message that answers a question is still the person's turn in the
   // conversation, so the stream records it with its delivery ids.
   const answerDeliveryIds: string[] = [];
-  // A delivery that carried only relayed answers is this session's to record: it took effect
-  // once forwarded, or, as a message, joins the turn that asked.
+  // Relayed answers belong to the asking turn's resumed work, even without message text.
   const tables = storedProjection(durableSession.state).view;
   const routedDeliveries: Parameters<typeof routeAnswer>[1]["deliveries"][number][] = [];
   const answers: ResponseSubmittedData[] = [];
@@ -113,16 +112,27 @@ async function routeProxiedDeliver(
     const answeredBy = payloadMetadata[0]?.deliveryId;
     if (routed.forChildren.length > 0 && answeredBy !== undefined) {
       const message = routed.forChildren.find((forChild) => forChild.message !== undefined);
-      const askedIn = message?.payload.answers
+      const askedIn = routed.forChildren
+        .flatMap((child) => child.payload.answers)
         .map((response) => tables.interactions[response.interactionId])
-        .find((row) => row !== undefined);
+        .find((row) => {
+          if (row === undefined) return false;
+          const turnId = interactionOwner(tables, row).turnId;
+          return turnId !== undefined && tables.turns[turnId]?.status === "running";
+        });
       const turnId = askedIn === undefined ? undefined : interactionOwner(tables, askedIn).turnId;
+      if (routed.forSelf === undefined && turnId !== undefined) {
+        answerDeliveryIds.push(...payloadMetadata.map((metadata) => metadata.deliveryId));
+      }
       for (const metadata of payloadMetadata) {
         // Input left for this session goes on to its turn, which admits nothing twice.
         routedDeliveries.push({
           consumed:
-            routed.forSelf === undefined && message?.message !== undefined && turnId !== undefined
-              ? { parts: userPartsOf(message.message), turnId }
+            routed.forSelf === undefined && turnId !== undefined
+              ? {
+                  parts: message?.message === undefined ? [] : userPartsOf(message.message),
+                  turnId,
+                }
               : undefined,
           continues: routed.forSelf === undefined ? undefined : true,
           deliveryId: metadata.deliveryId,
@@ -152,13 +162,6 @@ async function routeProxiedDeliver(
       if (forChild.workflowAsk !== undefined || forChild.message !== undefined) {
         for (const { interactionId } of forChild.payload.answers)
           resolvedRequests.add(interactionId);
-      }
-      if (forChild.message !== undefined) {
-        answerDeliveryIds.push(
-          ...(sourceDelivery.deliveryMetadata ?? [])
-            .filter((metadata) => metadata.payloadIndex === sourcePayloadIndex)
-            .map((metadata) => metadata.deliveryId),
-        );
       }
       const key = JSON.stringify([
         forChild.childContinuationToken,
@@ -190,8 +193,7 @@ async function routeProxiedDeliver(
     }
   }
 
-  // Like a steering message, an answering message joins the open turn, so the turn's later events
-  // carry its delivery ids too.
+  // Answers that resume a turn own its later events, whether they came from text or buttons.
   const published: PublishedSessionEvents = {
     serializedContext: joinTurnDeliveryIds(serializedContext, answerDeliveryIds),
     sessionState: input.sessionState,

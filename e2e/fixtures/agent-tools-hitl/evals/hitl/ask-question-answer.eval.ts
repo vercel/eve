@@ -23,11 +23,9 @@ export default defineEval({
     const production = choice.request.options?.find((option) => /production/i.test(option.label));
     if (production === undefined) throw new Error("ask_question did not offer Production.");
 
-    const choiceApplied = await session.respond([
+    const chosen = await session.respond([
       { optionId: production.id, interactionId: choice.interactionId },
     ]);
-    choiceApplied.expectOk();
-    const chosen = await session.nextTurn();
     chosen.expectOk();
     chosen.calledTool("ask_question", {
       count: 1,
@@ -42,11 +40,9 @@ export default defineEval({
       prompt: (prompt) => /Bob ship first/i.test(prompt),
       toolName: "ask_question",
     });
-    const textApplied = await session.respond([
+    const answered = await session.respond([
       { interactionId: typed.interactionId, text: "Canary pool in us-east" },
     ]);
-    textApplied.expectOk();
-    const answered = await session.nextTurn();
     answered.expectOk();
     answered.calledTool("ask_question", {
       output: { answer: "Canary pool in us-east", status: "answered" },

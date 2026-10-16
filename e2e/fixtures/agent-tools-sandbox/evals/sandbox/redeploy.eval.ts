@@ -90,7 +90,7 @@ export default defineEval({
       const dynamicSession = dynamicParked.session;
       dynamicSession.requireInteraction({
         display: "confirmation",
-        optionIds: ["approve", "deny"],
+        optionIds: ["approve", "cancel"],
         toolName: "dynamic-turn-replay-gate",
       });
       dynamicParked.calledTool("dynamic-turn-replay-gate", { status: "pending", count: 1 });
@@ -112,8 +112,7 @@ export default defineEval({
       await deployToAlias(t, alias, "instructions");
       await waitForAliasToServe(t, INSTRUCTIONS_MARKER);
 
-      await dynamicSession.respondAll("approve");
-      const dynamicResumed = await dynamicSession.nextTurn();
+      const dynamicResumed = await dynamicSession.respondAll("approve");
       dynamicResumed.expectOk();
       dynamicResumed.calledTool("dynamic_turn_replay_probe", {
         count: 1,

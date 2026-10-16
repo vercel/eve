@@ -30,16 +30,14 @@ export default defineEval({
     parked.notEvent("turn.settled");
     const request = parked.session.requireInteraction({ toolName: "approve_rollout" });
 
-    const applied = await parked.session.respond([
+    const answered = await parked.session.respond([
       { optionId: "approve", interactionId: request.interactionId },
     ]);
-    applied.expectOk();
-    applied.event("interaction.settled", {
+    answered.expectOk();
+    answered.event("interaction.settled", {
       count: 1,
       data: { interactionId: request.interactionId, outcome: "accepted" },
     });
-    const answered = await parked.session.nextTurn();
-    answered.expectOk();
     answered.event("call.settled", {
       count: 1,
       data: { callId: "rollout", outcome: "completed", output: { approved: true, service: "api" } },
