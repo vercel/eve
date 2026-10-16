@@ -39,6 +39,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
+const INVALID_APPROVAL_FEEDBACK = "Respond to this approval with Approve or Cancel.";
 const REQUESTER_ONLY_APPROVAL_FEEDBACK =
   "Only the person who requested this action can respond to this approval.";
 const UNAVAILABLE_TOOL_APPROVAL_REASON =
@@ -101,6 +102,9 @@ export async function coordinateApprovalDelivery(input: {
     const view = sessionView(storedProjection(session.state), session.state);
     session = saveTransition(session, matchSignIns(view, { attemptIds: [...expiredChallengeIds] }));
   }
+  const settledRequestIds = new Set(
+    getApprovalAuditState(session.state).settlements.map((settlement) => settlement.requestId),
+  );
   const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);
   const pendingRequestIds = new Set(
     batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
@@ -127,10 +131,15 @@ export async function coordinateApprovalDelivery(input: {
     const request = requests.get(response.requestId);
     if (request === undefined || !isApprovalRequest(request)) continue;
     // First answer wins: every answer to a pending approval is consumed here, and only the
-    // request's recorded settlement reaches `answer`. A later answer can't replace a settlement.
+    // request's recorded settlement reaches `answer`. An answer to a request that settled before
+    // this delivery is discarded unchecked; the settlement already decided it.
     consumed.add(response.requestId);
+    if (settledRequestIds.has(response.requestId)) continue;
     const decision = toCandidateDecision(response.optionId);
-    if (decision === undefined) continue;
+    if (decision === undefined) {
+      feedback.push(INVALID_APPROVAL_FEEDBACK);
+      continue;
+    }
 
     if (!authorizationRequiredRequestIds.has(response.requestId)) {
       const context = contextStorage.getStore();
