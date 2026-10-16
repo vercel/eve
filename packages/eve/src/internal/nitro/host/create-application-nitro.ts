@@ -617,6 +617,8 @@ function createApplicationNitroBundlerConfiguration(
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {
+    // Keep dependency filtering out of Rolldown's JS callback bridge.
+    output: { sourcemapIgnoreList: /node_modules/ },
     tsconfig: resolveAuthoredTsConfigPath(preparedHost.appRoot),
   };
   // Nitro inherits rollupConfig in its Rolldown builder, concatenating plugin arrays.
