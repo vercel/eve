@@ -6,7 +6,6 @@ import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-author
 import { completeSignIn, settle } from "#harness/session-machine/transitions.js";
 import type { SuspendedStep } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/session-usage.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
@@ -90,7 +89,7 @@ export async function admitHumanInput(
   }
   if (weighed.challenges.length > 0) {
     await step.apply(requireSignIn(step.view(), { challenges: weighed.challenges, queued: input }));
-    return { kind: "stop", result: await park(step) };
+    return { kind: "stop", result: { session: step.session } };
   }
   const delivered = deliver(step.view(), input, options);
   if (delivered.takeQueued && step.view().turn.queued !== undefined) {
@@ -118,7 +117,7 @@ export async function admitHumanInput(
     // The answers are recorded before any policy runs: the next step weighs them, with the rest
     // of the delivery.
     await step.apply(queueInput(step.view(), compactInput(withoutResponses(answered))));
-    return { kind: "stop", result: { again: true, session: step.session } };
+    return { kind: "stop", result: { session: step.session } };
   }
   const consumedMessage = answered?.messageConsumed === true;
   return {
@@ -309,7 +308,7 @@ async function runApproved(
     }),
     step.session.history,
   );
-  return park(step);
+  return { session: step.session };
 }
 
 // A step's catalog is built once per suspended step. Restoring a step's tools runs its

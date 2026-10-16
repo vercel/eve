@@ -8,7 +8,6 @@ import { validateHarnessModelMessages } from "#harness/messages.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
 import type {
   HarnessSessionBase,
   HarnessToolLookup,
@@ -90,7 +89,7 @@ export async function stopForToolSignIn(
     }),
     step.session.history,
   );
-  return park(step);
+  return { session: step.session };
 }
 
 /**
@@ -115,7 +114,7 @@ export async function enforceBudget(
     if (openLimit(step.view())?.row.interactionId !== limit.ask.interactionId)
       await step.apply(requestLimit(step.view(), limit.ask), step.session.history);
     // The turn waits on the prompt; the answer resumes it or cancels it.
-    return park(step);
+    return { session: step.session };
   }
   await step.apply(
     fail(step.view(), {

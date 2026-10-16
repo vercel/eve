@@ -195,7 +195,10 @@ export class ModelCaller {
     if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
   }
 
-  /** Steering interrupted the call: the step ends with what it committed, and runs again. */
+  /**
+   * Steering interrupted the call: the step ends with what it committed, and the history goes
+   * back to the call's input, which the model reads again with the steering message.
+   */
   async steered(): Promise<StepResult> {
     const { step } = this;
     throwIfTurnAborted(step.config.abortSignal);
@@ -213,8 +216,7 @@ export class ModelCaller {
         }),
       );
     }
-    // The steering message is the model's next input.
-    return { again: true, session: { ...step.session, history: [...this.request.history] } };
+    return { session: { ...step.session, history: [...this.request.history] } };
   }
 
   /** The step's result counted its usage, so an interrupted call's usage no longer applies. */

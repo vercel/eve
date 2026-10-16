@@ -28,7 +28,7 @@ import {
   isToolResultError,
 } from "#harness/action-result-helpers.js";
 import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
-import { hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { hasQueuedTurnInput } from "#harness/step/park.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -161,7 +161,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
         history: step.session.history,
       });
     }
-    return park(step);
+    return { session: step.session };
   }
 
   // --- Park on authorization request ------------------------------------------
@@ -201,10 +201,9 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasQueuedTurnInput(step.view()));
-  if (continueLoop) return { again: true, session: step.session };
-  // The turn rule: no turn ends while its tasks work. The turn stays open, and the session waits
-  // for one to settle, then calls the model again in the same turn.
-  if (workingTasks.length > 0) return { session: step.session };
+  // The model reads what it hasn't yet. The turn rule: no turn ends while its tasks work, so the
+  // turn stays open, and the session waits for one to settle, then calls the model again.
+  if (continueLoop || workingTasks.length > 0) return { session: step.session };
 
   return settleTurn(step, {
     history: promptMessages,

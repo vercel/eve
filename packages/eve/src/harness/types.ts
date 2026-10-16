@@ -207,18 +207,12 @@ export interface SettledTurn {
 }
 
 /**
- * What one harness step did. A step reports what only it knows; the session decides what
- * happens next from its state (`decideStep`): whether the turn waits on a person, on calls, or on
- * tasks, whether the session parks, and whether it ended.
+ * What one harness step did. The session decides what happens next from the state the step
+ * left (`decideStep`): whether the turn runs again, waits on a person, on calls, or on tasks,
+ * whether the session parks, and whether it ended.
  */
 export interface StepResult {
   readonly session: HarnessSession;
-  /**
-   * The turn runs another step at once: the model has input it hasn't read, such as tool
-   * results, a steering message, or queued input, or answers wait for the next step to weigh
-   * them. None of that is in the session's state yet, so only the step can say it.
-   */
-  readonly again?: true;
   /**
    * Present when a conversation turn settled with a user-facing answer; carried
    * across the park boundary so a delegated parent can be notified.

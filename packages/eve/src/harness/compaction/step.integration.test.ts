@@ -23,6 +23,7 @@ import { foldingHandler } from "#internal/testing/session-machine.js";
 import { defineMemory } from "#public/memory/index.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import { projectMemoryHistoryFromSessionState } from "#shared/memory-state.js";
+import { awaitsModel } from "#execution/session/step-decision.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -318,7 +319,7 @@ describe("memory recalled after a compaction", () => {
         ]),
       });
       let stepped = await runStep(session, options.input);
-      while (stepped.again === true) stepped = await runStep(stepped.session);
+      while (awaitsModel(stepped.session.history)) stepped = await runStep(stepped.session);
       return stepped;
     });
     const history = result.session.history.flatMap((message) =>

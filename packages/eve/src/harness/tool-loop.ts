@@ -22,7 +22,7 @@ import {
   turnInputOnly,
   withoutTurnInput,
 } from "#harness/hitl/index.js";
-import { blocked, park } from "#harness/step/park.js";
+import { blocked } from "#harness/step/park.js";
 import {
   clear,
   controlDeliveryFor,
@@ -146,7 +146,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if ("ended" in turn) return turn.ended;
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
-    if (blocked(step.view(), step.session.state)) return park(step);
+    if (blocked(step.view(), step.session.state)) return { session: step.session };
     return runModelStep(step, {
       onResponse: (response) => handleStepResult(step, response),
       generation,
@@ -193,7 +193,7 @@ async function answers(
   }
   if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
     await step.apply(queueInput(step.view(), compactInput(input)));
-    return { ended: await park(step) } as Ended;
+    return { ended: { session: step.session } } as Ended;
   }
   return { decided, input, intake, message };
 }

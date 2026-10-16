@@ -13,7 +13,6 @@ describe("model call batching and steering", () => {
       compaction: { threshold: 100000, recentWindowSize: 10 },
     };
     const completed: StepResult = {
-      again: true,
       session: {
         ...session,
         history: [

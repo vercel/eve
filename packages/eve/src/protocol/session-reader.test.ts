@@ -77,6 +77,28 @@ describe("turns and steps", () => {
     expect(activeTurn(view)?.turnId).toBe("turn_1");
   });
 
+  it("reads a parked task wait as waiting on work, and a call the session runs as its own", () => {
+    const running = (name: string) =>
+      viewOf(started, [
+        turn("turn_0"),
+        run("run_0", "turn_0"),
+        {
+          data: {
+            callId: "c_0",
+            capability: { kind: "tool", name },
+            input: {},
+            owner: { runId: "run_0" },
+          },
+          scope: { runId: "run_0" },
+          type: "call.requested",
+        },
+        { data: { callId: "c_0" }, scope: { turnId: "turn_0" }, type: "call.started" },
+        runSettled("run_0", "turn_0"),
+      ]);
+    expect(waiting(running("eve__task_wait"), "turn_0")?.on).toBe("work");
+    expect(waiting(running("lookup"), "turn_0")).toBeUndefined();
+  });
+
   it("places each run at its step within its turn, and each call at its run's", () => {
     const view = viewOf(started, [
       turn("turn_0"),

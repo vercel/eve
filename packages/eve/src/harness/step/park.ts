@@ -1,11 +1,10 @@
 import { runtimeWait, type SessionView, ownOpenRequestIds } from "#harness/session-machine/view.js";
-import type { HarnessStepInput, StepResult } from "#harness/types.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { Step } from "./context.js";
 
-// Where a step stops when nothing it holds can run. Every rule a step runs only changes the
-// session; none decides that the turn waits. This does, once, from what is still open: a person
-// to answer or sign in, or calls the runtime runs. A turn waiting on a person says so.
+// What stops a step. Every rule a step runs only changes the session; none decides what follows.
+// `decideStep` does, from the state the step leaves.
 
 /**
  * Interaction kinds a message can't steer past: it waits, unreceived, until the person answers.
@@ -45,15 +44,4 @@ export function hasQueuedTurnInput(view: SessionView): boolean {
 /** Whether anything open stops the turn from calling the model. */
 export function blocked(view: SessionView, state: Step["session"]["state"]): boolean {
   return resumesOnPerson(view) || runtimeWait(state) !== undefined;
-}
-
-/**
- * Nothing the step holds can run. Input the turn holds runs next step, past whatever it steers;
- * otherwise the turn stops, and the session reads what it waits on from its state.
- */
-export function park(step: Step): StepResult {
-  const view = step.view();
-  if (hasQueuedTurnInput(view) && !holdsMessages(view))
-    return { again: true, session: step.session };
-  return { session: step.session };
 }

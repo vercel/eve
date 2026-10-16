@@ -65,12 +65,7 @@ import type {
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { announcesWaiting, decideStep, readStepState } from "#execution/session/step-decision.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
-import {
-  checksSessionEvents,
-  openSessionEventPublisher,
-} from "#execution/publish-session-events.js";
-import { stepDisagreement } from "#execution/session/step-decision-check.js";
-import { createLogger } from "#internal/logging.js";
+import { openSessionEventPublisher } from "#execution/publish-session-events.js";
 import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -99,8 +94,6 @@ import {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 
 export type { TurnStepInput };
-
-const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
@@ -482,7 +475,7 @@ async function runSessionStepBody(
       return resolveSessionStepResult({ session: aliased }, () => ({
         serializedContext: nextSerializedContext,
         ...nextValues,
-      })).result;
+      }));
     }
 
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
@@ -605,7 +598,7 @@ async function runSessionStepBody(
                 : undefined;
             const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
             // The session's state says whether the turn stopped to wait; the tables say on whom.
-            const decision = decideStep(readStepState(harnessResult.session, harnessResult));
+            const decision = decideStep(readStepState(harnessResult.session));
             await publisher.finish({ announce: announcesWaiting(decision) });
             return harnessResult;
           });
@@ -645,17 +638,10 @@ async function runSessionStepBody(
     const nextSerializedContext = serializeContext(ctx);
     stepResult = { ...stepResult, session: aliased };
 
-    const { decision, result: durableResult } = resolveSessionStepResult(stepResult, (session) => ({
+    const durableResult = resolveSessionStepResult(stepResult, (session) => ({
       serializedContext: nextSerializedContext,
       ...createDurableSessionValues(session),
     }));
-    if (checksSessionEvents()) {
-      if (decision.kind === "park" && decision.turnOpen === true)
-        log.warn("a turn step left its turn open with nothing to wake it");
-      const disagreement = stepDisagreement(durableResult, currentProjection(ctx).view);
-      if (disagreement !== undefined && disagreement !== "dispatch-deferred")
-        log.warn("a turn step's decision disagrees with the session's tables", { disagreement });
-    }
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {

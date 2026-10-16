@@ -27,6 +27,9 @@ import type {
   TurnRow,
 } from "./tables.js";
 
+/** The model's tool for waiting on its tasks. The `eve` namespace is reserved for eve's tools. */
+const TASK_WAIT_TOOL = "eve__task_wait";
+
 /** The turn that is running or paused, if any. */
 export function activeTurn(view: SessionView): TurnRow | undefined {
   const latest = view.session.latestTurnId;
@@ -226,18 +229,7 @@ export function waiting(
   if (row === undefined || row.status === "settled") return undefined;
   const open = openWork(view, { turnId });
   if (open.runs.length > 0 || open.changes.length > 0) return undefined;
-  // An answer the session hasn't weighed is its work, unless its responder must sign in first.
-  const signingIn = new Set(
-    open.interactions.flatMap((row) =>
-      "responseId" in row.subject ? [row.subject.responseId] : [],
-    ),
-  );
-  if (
-    open.responses.some(
-      (response) => response.status === "submitted" && !signingIn.has(response.responseId),
-    )
-  )
-    return undefined;
+  if (weighsAnswers(open)) return undefined;
   // Input consumed after the session last requested a model, asked someone, or weighed an
   // answer is still its work. A forwarded answer admitted by its asker has already been read.
   const decided = Math.max(
@@ -290,8 +282,16 @@ export function waiting(
   // question is; only a requested call can wait on its approval.
   const calls = turnCalls.filter((entry) => entry.status === "running");
   // A running call no task serves runs in the session itself, which commits again once it ends,
-  // unless it asked someone: then it waits on that person, as a blocking run's question does.
-  if (calls.some((entry) => entry.taskId === undefined && !asked.has(entry.callId)))
+  // unless it asked someone: then it waits on that person, as a blocking run's question does. A
+  // parked `eve__task_wait` runs nowhere: it waits on the tasks.
+  if (
+    calls.some(
+      (entry) =>
+        entry.taskId === undefined &&
+        !asked.has(entry.callId) &&
+        entry.capability.name !== TASK_WAIT_TOOL,
+    )
+  )
     return undefined;
   const pending = turnCalls.filter(
     (entry) => entry.status === "requested" && !asked.has(entry.callId),
@@ -312,6 +312,25 @@ export function waiting(
   );
   if (people.length > 0) return { interactions: people, on: "person" };
   return calls.length > 0 ? { calls, on: "work" } : undefined;
+}
+
+/**
+ * Whether the turn has an answer the session hasn't weighed, which is its work, unless its
+ * responder must sign in first.
+ */
+export function unweighedAnswers(view: SessionView, turnId: string): boolean {
+  return weighsAnswers(openWork(view, { turnId }));
+}
+
+function weighsAnswers(open: OpenWork): boolean {
+  const signingIn = new Set(
+    open.interactions.flatMap((row) =>
+      "responseId" in row.subject ? [row.subject.responseId] : [],
+    ),
+  );
+  return open.responses.some(
+    (response) => response.status === "submitted" && !signingIn.has(response.responseId),
+  );
 }
 
 /** The unanswered interactions a task's or call's work waits on. */

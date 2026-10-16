@@ -13,10 +13,8 @@ import type { HarnessSession, StepResult } from "#harness/types.js";
 export function resolveSessionStepResult(
   stepResult: StepResult,
   fields: (session: HarnessSession) => DurableStepResultFields,
-): { readonly decision: StepDecision; readonly result: DurableStepResult } {
-  const { session } = stepResult;
-  const decision = decideStep(readStepState(session, stepResult));
-  return { decision, result: durableResult(stepResult, decision, fields) };
+): DurableStepResult {
+  return durableResult(stepResult, decideStep(readStepState(stepResult.session)), fields);
 }
 
 function durableResult(
