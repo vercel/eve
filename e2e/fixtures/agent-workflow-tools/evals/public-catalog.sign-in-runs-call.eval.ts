@@ -4,18 +4,12 @@ import { fixtureAuthorizationCallback } from "../agent/lib/fake-service.ts";
 
 const PROTECTED_TOOL = "public-catalog__list_orders";
 
-/** Why this eval is skipped: it fails until a session-path sign-in runs its call itself. */
-const KNOWN_RED =
-  "Fails today: after sign-in the session path drops the waiting call and asks the model again. Remove this skip with the change that runs the call itself.";
-
 export default defineEval({
   description:
     "After the user signs in for a protected MCP tool, the call that was waiting runs without asking the model again: no model call between authorization.completed and the call's result, and the call is not requested twice.",
   timeoutMs: 90_000,
 
   async test(t) {
-    t.skip(KNOWN_RED);
-
     // A fresh principal per run: the fixture provider remembers each user's token.
     const alice = { "x-eve-forwarded-principal-id": `sign-in-alice-${crypto.randomUUID()}` };
     const started = await t.send(

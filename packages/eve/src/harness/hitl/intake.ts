@@ -30,7 +30,7 @@ import { getApprovalAuditState, responderOfRequest, retireActiveCandidates } fro
 import { coordinateApprovalDelivery } from "./coordinator.js";
 import { deliver, resolveTypedApproval, turnInputOnly, withoutTurnInput } from "./delivery.js";
 import { recheckApprovedCall } from "#harness/tools.js";
-import type { InputRequest } from "#shared/input.js";
+import type { ApprovedCall } from "#harness/session-machine/state.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 
@@ -236,7 +236,7 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
   const denied: ApprovedCallResult[] = [];
   for (const parked of step.view().turn.suspended) {
     const tools = work.toolsOf(parked);
-    const requests: InputRequest[] = [];
+    const requests: ApprovedCall[] = [];
     for (const request of parked.approved ?? []) {
       const tool = tools.get(request.action.toolName);
       if (tool?.workflowId === undefined) continue;
@@ -341,13 +341,12 @@ export async function runApprovedLocalCalls(
   // A cancellation ends the turn once the calls it cut short have their results.
   throwIfTurnAborted(step.config.abortSignal);
   const signIn = resolveInlineAuthorizationInterrupt({
-    messages: [],
     toolResults: executed.flatMap((run) => run.toolResults),
   });
   if (signIn === undefined) return undefined;
   await step.apply(
     requireSignIn(step.view(), {
-      callIdsByName: signIn.callIdsByName,
+      calls: signIn.calls,
       challenges: signIn.challenges,
     }),
     step.session.history,

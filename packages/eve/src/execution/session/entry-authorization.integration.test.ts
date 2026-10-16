@@ -261,7 +261,7 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it.fails("reports a sign-in failed when completeAuthorization rejects its callback", async () => {
+  it("reports a sign-in failed when completeAuthorization rejects its callback", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-denied");
     const continuationToken = "http:workflow-entry-auth-denied";
 
@@ -305,7 +305,7 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it.fails("runs the call a sign-in was for without asking the model again", async () => {
+  it("runs the call a sign-in was for without asking the model again", async () => {
     const { executions, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-no-reask");
     const continuationToken = "http:workflow-entry-auth-no-reask";
 
@@ -436,7 +436,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("cancels a held sign-in when the same person steers the turn, ignoring its late callback", async () => {
-    const { completeCalls, runtime } = await createWeatherAuthRuntime(
+    const { completeCalls, executions, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-steered",
     );
     const continuationToken = "http:workflow-entry-auth-steered";
@@ -471,6 +471,11 @@ describe("workflowEntry integration", () => {
         expect(filterEventsByType(replacementAttempt, "authorization.completed")).toMatchObject([
           { data: { name: "weather", outcome: "declined" } },
         ]);
+        // The call that waited for the sign-in fails with why; it never ran.
+        expect(filterEventsByType(replacementAttempt, "action.result")).toMatchObject([
+          { data: { result: { isError: true, toolName: "get_weather" } } },
+        ]);
+        expect(executions()).toEqual([]);
         await stream.nextUntil("replacement hold", (event) => event.type === "turn.waiting");
 
         const stale = weatherCallback(authorizationAttemptId(firstAttempt), "stale-oauth-code");
@@ -496,6 +501,7 @@ describe("workflowEntry integration", () => {
           turnId: "turn_0",
         });
         expect(completeCalls()).toBe(1);
+        expect(executions()).toEqual([{ city: "Lisbon" }]);
       } finally {
         stream.dispose();
         await run.cancel();
@@ -504,7 +510,9 @@ describe("workflowEntry integration", () => {
   });
 
   it("cancelling a held turn drops its sign-in, so a late callback does nothing", async () => {
-    const { completeCalls, runtime } = await createWeatherAuthRuntime("workflow-entry-auth-cancel");
+    const { completeCalls, executions, runtime } = await createWeatherAuthRuntime(
+      "workflow-entry-auth-cancel",
+    );
     const continuationToken = "http:workflow-entry-auth-cancel";
 
     await runtime.run(async () => {
@@ -547,6 +555,8 @@ describe("workflowEntry integration", () => {
         );
         expect(filterEventsByType(followup, "authorization.completed")).toHaveLength(0);
         expect(completeCalls()).toBe(0);
+        // The cancelled call never runs, even after its sign-in's late callback.
+        expect(executions()).toEqual([]);
       } finally {
         stream.dispose();
         await run.cancel();

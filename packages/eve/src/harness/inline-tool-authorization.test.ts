@@ -1,4 +1,4 @@
-import type { ModelMessage, ToolSet, TypedToolResult } from "ai";
+import type { ToolSet, TypedToolResult } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { requestAuthorization } from "#harness/authorization.js";
@@ -22,83 +22,32 @@ function authorizationResult(toolCallId: string, attemptId: string) {
   } satisfies TypedToolResult<ToolSet>;
 }
 
-const interruptedCall = {
-  input: { action: "authorize" },
-  toolCallId: "call-auth",
-  toolName: "protected_action",
-  type: "tool-call" as const,
-};
-
-const siblingCall = {
-  input: { action: "complete" },
-  toolCallId: "call-sibling",
-  toolName: "protected_action",
-  type: "tool-call" as const,
-};
-
-const siblingResult = {
-  input: siblingCall.input,
-  output: { type: "text" as const, value: "completed" },
-  toolCallId: siblingCall.toolCallId,
-  toolName: siblingCall.toolName,
-  type: "tool-result" as const,
-};
-
-function modelResult(result: ReturnType<typeof authorizationResult>) {
-  return {
-    input: result.input,
-    output: { type: "text" as const, value: "Authorization required." },
-    toolCallId: result.toolCallId,
-    toolName: result.toolName,
-    type: "tool-result" as const,
-  };
-}
-
 describe("resolveInlineAuthorizationInterrupt", () => {
-  it("removes an interrupted call, its result, and its orphaned assistant text", () => {
-    const messages: ModelMessage[] = [
-      {
-        content: [{ text: "I'll authorize this action.", type: "text" }, interruptedCall],
-        role: "assistant",
-      },
-      {
-        content: [modelResult(authorizationResult(interruptedCall.toolCallId, "attempt-1"))],
-        role: "tool",
-      },
-    ];
+  it("names the calls each sign-in stopped, and ignores calls that ran", () => {
+    const authorization = authorizationResult("call-auth", "attempt-1");
+    const sibling = {
+      input: { action: "complete" },
+      output: { type: "text" as const, value: "completed" },
+      toolCallId: "call-sibling",
+      toolName: "protected_action",
+      type: "tool-result" as const,
+    };
 
-    expect(
-      resolveInlineAuthorizationInterrupt({
-        messages,
-        toolResults: [authorizationResult(interruptedCall.toolCallId, "attempt-1")],
-      }),
-    ).toMatchObject({
-      challenges: [{ attemptId: "attempt-1" }],
-      history: [],
+    const interrupt = resolveInlineAuthorizationInterrupt({
+      toolResults: [authorization, sibling],
     });
-  });
 
-  it("preserves protocol-complete sibling calls and results", () => {
-    const authorization = authorizationResult(interruptedCall.toolCallId, "attempt-1");
-    const messages: ModelMessage[] = [
+    expect(interrupt?.challenges).toMatchObject([{ attemptId: "attempt-1" }]);
+    expect(interrupt?.calls).toEqual([
       {
-        content: [interruptedCall, siblingCall],
-        role: "assistant",
+        action: {
+          callId: "call-auth",
+          input: { action: "authorize" },
+          kind: "tool-call",
+          toolName: "protected_action",
+        },
+        connections: ["protected_action"],
       },
-      {
-        content: [modelResult(authorization), siblingResult],
-        role: "tool",
-      },
-    ];
-
-    expect(
-      resolveInlineAuthorizationInterrupt({
-        messages,
-        toolResults: [authorization, siblingResult],
-      })?.history,
-    ).toEqual([
-      { content: [siblingCall], role: "assistant" },
-      { content: [siblingResult], role: "tool" },
     ]);
   });
 
@@ -107,10 +56,7 @@ describe("resolveInlineAuthorizationInterrupt", () => {
     const latest = authorizationResult("call-latest", "attempt-2");
 
     expect(
-      resolveInlineAuthorizationInterrupt({
-        messages: [],
-        toolResults: [first, latest],
-      })?.challenges,
+      resolveInlineAuthorizationInterrupt({ toolResults: [first, latest] })?.challenges,
     ).toMatchObject([{ attemptId: "attempt-2" }]);
   });
 });
