@@ -14,9 +14,11 @@ export default defineEval({
     if (request.request.kind !== "question")
       throw new Error("Child input request is not a question.");
 
-    const resumed = await session.respond([
+    const answered = await session.respond([
       { interactionId: request.interactionId, text: "GENERATED-HITL-MARKER" },
     ]);
+    answered.expectOk();
+    const resumed = await session.nextTurn();
     resumed.expectOk();
 
     t.succeeded();

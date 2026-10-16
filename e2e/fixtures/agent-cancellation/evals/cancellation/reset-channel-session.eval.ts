@@ -8,8 +8,8 @@ interface Delivery {
 
 interface ResetResponse {
   readonly acknowledgement?: string;
-  readonly previousSessionId?: string;
-  readonly status?: "no_active_session" | "reset";
+  readonly sessionId?: string;
+  readonly deliveryId?: string;
 }
 
 interface OwnerResponse {
@@ -65,8 +65,8 @@ export default defineEval({
       reset,
       satisfies(
         (value: ResetResponse) =>
-          value.status === "reset" &&
-          value.previousSessionId === previousSessionId &&
+          typeof value.deliveryId === "string" &&
+          value.sessionId === previousSessionId &&
           value.acknowledgement === "Started a new conversation.",
         "the route retires the observed session and returns its fixed acknowledgement",
       ),

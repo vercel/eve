@@ -21,7 +21,7 @@ export default defineEval({
 
     // When the user grants another budget window.
     const live = await session.startRespond([
-      { interactionId: budget.interactionId, optionId: "continue" },
+      { interactionId: budget.interactionId, optionId: "approve" },
     ]);
 
     // Then the read executes and a new budget request appears; A stays unexecuted.
@@ -32,6 +32,6 @@ export default defineEval({
     next.calledTool("read-draft", { status: "completed", count: 1 });
     next.notEvent("content.completed", { data: { kind: "text", phase: "reply" } });
     expectChangeStillUnexecuted(session);
-    await session.respond([{ interactionId: nextBudget.interactionId, optionId: "stop" }]);
+    await session.respond([{ interactionId: nextBudget.interactionId, optionId: "deny" }]);
   },
 });

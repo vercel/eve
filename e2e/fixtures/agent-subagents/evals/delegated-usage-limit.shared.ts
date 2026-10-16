@@ -17,7 +17,7 @@ export async function expectSurveyCountedAgainstParent(t: EveEvalContext, messag
   const { session } = await t.send(message);
   const request = session.requireInteraction({
     display: "confirmation",
-    optionIds: ["continue", "stop"],
+    optionIds: ["approve", "deny"],
     kind: "budget",
   });
   const parentLimitId = new RegExp(`^${session.id ?? ""}:\\d+:limit:input:(\\d+)$`, "u");
@@ -31,7 +31,7 @@ export async function expectSurveyCountedAgainstParent(t: EveEvalContext, messag
   );
 
   const resumed = await session.respond([
-    { optionId: "continue", interactionId: request.interactionId },
+    { optionId: "approve", interactionId: request.interactionId },
   ]);
   resumed.expectOk();
   resumed.messageIncludes("SURVEY-REPLY Alice's tide survey has 12 stations.");

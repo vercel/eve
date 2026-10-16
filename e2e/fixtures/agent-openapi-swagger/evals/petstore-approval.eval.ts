@@ -16,7 +16,7 @@ export default defineEval({
 
     session.requireInteraction({
       display: "confirmation",
-      optionIds: ["approve", "cancel"],
+      optionIds: ["approve", "deny"],
       toolName: INVENTORY_TOOL,
     });
     parked.calledTool(INVENTORY_TOOL, { count: 1, status: "pending" });

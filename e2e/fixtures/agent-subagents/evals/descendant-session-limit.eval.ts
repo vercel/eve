@@ -25,7 +25,7 @@ export default defineEval({
     const continueSession = await waitForInput(t, session);
     const continueRequest = continueSession.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
+      optionIds: ["approve", "deny"],
       kind: "budget",
     });
     const rootSessionId = session.id;
@@ -43,7 +43,7 @@ export default defineEval({
 
     const resumed = await continueSession.respond([
       {
-        optionId: "continue",
+        optionId: "approve",
         interactionId: continueRequest.interactionId,
       },
     ]);
@@ -60,13 +60,13 @@ export default defineEval({
     const blockedStopSession = await waitForInput(t, stopSession);
     const stopRequest = blockedStopSession.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
+      optionIds: ["approve", "deny"],
       kind: "budget",
     });
 
     const stopped = await blockedStopSession.respond([
       {
-        optionId: "stop",
+        optionId: "deny",
         interactionId: stopRequest.interactionId,
       },
     ]);

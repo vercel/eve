@@ -12,7 +12,7 @@ export default defineEval({
     const parked = await t.send("DEFERRED-DEPLOY Alice asks to deploy the billing service.");
     const session = parked.session;
     parked.expectOk();
-    session.requireInteraction({ optionIds: ["approve", "cancel"], toolName: "deploy_service" });
+    session.requireInteraction({ optionIds: ["approve", "deny"], toolName: "deploy_service" });
     parked.calledTool("deploy_service", { count: 1, status: "pending" });
     // notCalledTool rejects CALL_TOOL because no call is reported under it, so check the raw calls.
     parked.notEvent("call.requested", { data: { capability: { name: CALL_TOOL } } });

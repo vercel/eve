@@ -25,7 +25,7 @@ export default defineEval({
     added.notEvent("model.requested");
     added.notEvent("content.completed");
 
-    const resumed = (await session.respond(answers("continue", request), asAlice)).expectOk();
+    const resumed = (await session.respond(answers("approve", request), asAlice)).expectOk();
     resumed.event("delivery.consumed", {
       count: 1,
       data: { parts: [{ kind: "text", text: SAY.deadline }] },

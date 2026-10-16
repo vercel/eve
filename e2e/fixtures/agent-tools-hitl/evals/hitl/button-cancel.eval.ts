@@ -12,7 +12,7 @@ export default defineEval({
       toolName: "guarded-echo",
     });
     const cancelled = await session.respond([
-      { optionId: "cancel", interactionId: approval.interactionId },
+      { optionId: "deny", interactionId: approval.interactionId },
     ]);
     cancelled.expectOk();
     t.succeeded();

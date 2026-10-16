@@ -13,10 +13,12 @@ export default defineEval({
     const staging = question.request.options?.find((option) => option.label === "Staging");
     if (staging === undefined) throw new Error("ask_question did not offer Staging.");
 
-    const resumed = await parked.session.respond([
+    const answered = await parked.session.respond([
       { optionId: staging.id, interactionId: question.interactionId },
     ]);
 
+    answered.expectOk();
+    const resumed = await parked.session.nextTurn();
     resumed.expectOk();
     resumed.calledTool("ask_question", {
       count: 1,

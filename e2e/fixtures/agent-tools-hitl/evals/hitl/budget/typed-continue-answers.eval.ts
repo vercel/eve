@@ -13,7 +13,7 @@ export default defineEval({
     const typed = (await session.send("continue", asAlice)).expectOk();
     expectResolved(typed, request, "accepted");
     typed.event("interaction.settled", {
-      data: { interactionId: request.interactionId, response: { optionId: "continue" } },
+      data: { interactionId: request.interactionId, response: { optionId: "approve" } },
     });
     typed.notEvent("turn.started");
     typed.event("content.completed", { data: { phase: "reply", value: REPLY.statusNote } });

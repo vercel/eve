@@ -29,7 +29,7 @@ export default defineEval({
         method: "POST",
         signal: t.signal,
       });
-      await t.require(reset.status, equals(200));
+      await t.require(reset.status, equals(202));
       await reset.body?.cancel();
       if (!metadataOnly) {
         const retained = await readHistory();

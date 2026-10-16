@@ -41,7 +41,7 @@ async function expectAnswerable(
   interactionId: string,
 ) {
   // The approval holds its turn open, and the store keeps following it live.
-  await t.require(store.snapshot.status, equals("idle"));
+  await t.require(store.snapshot.status, equals("busy"));
   await t.require(store.snapshot.error, equals(undefined));
   const part = toolPart(store, callId);
   await t.require(part.state, equals("approval"));
@@ -96,7 +96,7 @@ async function refuse(t: EveEvalContext, store: Store, callId: string, interacti
 
 export default defineEval({
   description:
-    "A refused approval returns the frontend to an answerable idle state, including after reload (#3757).",
+    "A refused approval returns the frontend to an answerable state, including after reload (#3757).",
   tags: ["hitl", "regression", "authorization", "client"],
   timeoutMs: 120_000,
   async test(t) {
@@ -176,8 +176,8 @@ export default defineEval({
             signal: t.signal,
           }),
         );
-        await waitForStore(reload, (snapshot) => snapshot.status === "idle", t.signal);
-        await t.require(reload.snapshot.status, equals("idle"));
+        await waitForStore(reload, (snapshot) => snapshot.status === "busy", t.signal);
+        await t.require(reload.snapshot.status, equals("busy"));
         await t.require(reload.snapshot.error, equals(undefined));
         const finished = (
           await t.target.attach(session.id, { startIndex }).watch().result()

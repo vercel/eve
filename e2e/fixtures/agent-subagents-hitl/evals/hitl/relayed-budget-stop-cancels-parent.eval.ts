@@ -19,14 +19,14 @@ export default defineEval({
     }
 
     const stopped = await session.respond([
-      { optionId: "stop", interactionId: request.interactionId },
+      { optionId: "deny", interactionId: request.interactionId },
     ]);
     stopped.event("interaction.settled", {
       count: 1,
       data: {
         interactionId: request.interactionId,
         outcome: "declined",
-        response: { optionId: "stop" },
+        response: { optionId: "deny" },
       },
     });
     stopped.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });

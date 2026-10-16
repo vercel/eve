@@ -8,7 +8,7 @@ export default defineEval({
     const session = parked.session;
     session.requireInteraction({
       display: "confirmation",
-      optionIds: ["approve", "cancel"],
+      optionIds: ["approve", "deny"],
       toolName: "confirm_deploy",
     });
     parked.calledTool("confirm_deploy", { status: "pending", count: 1 });
@@ -18,7 +18,8 @@ export default defineEval({
       data: { callId, output: "awaiting approval" },
     });
 
-    const approved = await session.respondAll("approve");
+    await session.respondAll("approve");
+    const approved = await session.nextTurn();
     approved.expectOk();
     approved.calledTool("confirm_deploy", {
       count: 1,

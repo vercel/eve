@@ -13,12 +13,13 @@ export default defineEval({
     const session = parked.session;
     session.requireInteraction({
       display: "confirmation",
-      optionIds: ["approve", "cancel"],
+      optionIds: ["approve", "deny"],
       toolName: "escalate_deploy",
     });
     parked.calledTool("escalate_deploy", { status: "pending", count: 1 });
 
-    const answered = await session.respondAll("approve");
+    await session.respondAll("approve");
+    const answered = await session.nextTurn();
     answered.expectOk();
     answered.calledTool("escalate_deploy", { output: /"decided":"approved"/u });
     answered.messageIncludes("WORKFLOW-ESCALATE-RESULT");
