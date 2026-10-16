@@ -57,6 +57,35 @@ function watch(events: readonly SessionEvent[]) {
 }
 
 describe("EveEvalLiveTurn", () => {
+  it("keeps a queued delivery open past another turn's pause and settlement", async () => {
+    const old = testTurnFacts(0, "Earlier.", ["old"]);
+    const own = testTurnFacts(1, "Queued reply.", ["d_1"]);
+    const events: SessionEvent[] = [
+      ...old.slice(0, 3),
+      own[0]!,
+      {
+        type: "turn.paused",
+        data: { turnId: "turn_0", awaiting: [] },
+        scope: { turnId: "turn_0" },
+      },
+      ...old.filter((event) => event.type === "turn.settled"),
+      ...own.slice(1),
+    ];
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ ok: true, sessionId: "session_1", deliveryId: "d_1" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(events.map(encodeTestLine).join(""), {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
+      );
+    const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
+    const turn = await manager.attach("session_1").send("Queued message.");
+    expect(turn.reply).toBe("Queued reply.");
+    expect(turn.status).toBe("completed");
+  });
+
   it("attaches without I/O and advances the same session cursor across nextTurn and watch", async () => {
     const first = testTurnFacts(0, "First.", ["first"]);
     const second = testTurnFacts(1, "Second.", ["second"]);

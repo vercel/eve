@@ -538,7 +538,9 @@ class EvalLiveTurn implements EveEvalLiveTurn {
         if (endsWith?.(event) === true) matched = true;
         const endsSegment =
           endsWith === undefined
-            ? (delivery?.observe(event) ?? false) || endsTurn
+            ? delivery === undefined
+              ? endsTurn
+              : delivery.observe(event)
             : matched && event.meta.endOfLine !== false;
         observe(event);
         this.#resolveWaiters(event);

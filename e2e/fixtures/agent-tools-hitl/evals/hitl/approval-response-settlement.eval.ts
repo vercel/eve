@@ -112,7 +112,7 @@ export default defineEval({
     };
 
     try {
-      for (const decision of ["approve", "cancel"] as const) {
+      for (const decision of ["approve", "deny"] as const) {
         t.log(
           `Alice prepares a change; after a refused answer and reload, finish with ${decision}.`,
         );
@@ -142,7 +142,7 @@ export default defineEval({
         // Retrying on the same page must reach the policy again, not reuse the refused candidate.
         const retryCandidate = await refuse(t, page, callId, interactionId);
         await t.require(retryCandidate !== firstCandidate, equals(true));
-        page.reset();
+        page.newSession();
 
         const reload = new EveAgentStore({
           host,
@@ -176,8 +176,14 @@ export default defineEval({
             signal: t.signal,
           }),
         );
-        await waitForStore(reload, (snapshot) => snapshot.status === "busy", t.signal);
-        await t.require(reload.snapshot.status, equals("busy"));
+        await waitForStore(
+          reload,
+          (snapshot) =>
+            snapshot.status === "idle" &&
+            snapshot.view.interactions[interactionId]?.status === "settled",
+          t.signal,
+        );
+        await t.require(reload.snapshot.status, equals("idle"));
         await t.require(reload.snapshot.error, equals(undefined));
         const finished = (
           await t.target.attach(session.id, { startIndex }).watch().result()
@@ -196,7 +202,7 @@ export default defineEval({
           finished.calledTool(TOOL, { status: "completed", count: 0 });
         }
         await t.require(toolPart(reload, callId).interaction?.status, equals("settled"));
-        reload.reset();
+        reload.newSession();
       }
     } finally {
       for (const store of stores) store.newSession();
