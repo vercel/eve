@@ -949,7 +949,7 @@ describe("chatSdkChannel", () => {
     }
 
     // Telegram rejects an edit that changes nothing ("message is not modified").
-    it.fails("does not repeat an edit the streamed reply already shows", async () => {
+    it("does not repeat an edit the streamed reply already shows", async () => {
       const adapter = testAdapter();
       const { channelAdapter, ctx } = streamedReply(adapter);
 
@@ -962,7 +962,7 @@ describe("chatSdkChannel", () => {
       ]);
     });
 
-    it.fails("does not repeat that edit after channel state is restored from JSON", async () => {
+    it("does not repeat that edit after channel state is restored from JSON", async () => {
       const adapter = testAdapter();
       const { channelAdapter, ctx, open, state } = streamedReply(adapter);
       await callEvent(channelAdapter, appended("Hel", 0), ctx);
@@ -975,7 +975,7 @@ describe("chatSdkChannel", () => {
       expect(adapter.edited).toHaveLength(1);
     });
 
-    it.fails("reports a failed final edit once, without reposting, and tells the model next turn", async () => {
+    it("reports a failed final edit once, without reposting, and tells the model next turn", async () => {
       const logs = captureLogRecords();
       const adapter = testAdapter();
       const { channelAdapter, ctx, state } = streamedReply(adapter);
@@ -1017,7 +1017,7 @@ describe("chatSdkChannel", () => {
       expect(after?.context).toBeUndefined();
     });
 
-    it.fails("reports a posted reply whose final edit is not implemented, without reposting", async () => {
+    it("reports a posted reply whose final edit is not implemented, without reposting", async () => {
       const logs = captureLogRecords();
       const adapter = testAdapter();
       const { channelAdapter, ctx, state } = streamedReply(adapter, 60_000);
@@ -1034,7 +1034,7 @@ describe("chatSdkChannel", () => {
       expect(state.editSupported).toBe(false);
     });
 
-    it.fails("reports a posted reply whose streamed edit is not implemented, without reposting", async () => {
+    it("reports a posted reply whose streamed edit is not implemented, without reposting", async () => {
       const logs = captureLogRecords();
       const adapter = testAdapter();
       const { channelAdapter, ctx, state } = streamedReply(adapter);
@@ -1050,41 +1050,6 @@ describe("chatSdkChannel", () => {
       ]);
       expect(state.editSupported).toBe(false);
     });
-  });
-
-  it("falls back to a fresh post when streaming edits are not implemented", async () => {
-    const adapter = testAdapter();
-    adapter.editError = new NotImplementedError("editMessage");
-    const bridge = chatSdkChannel({
-      adapters: { test: adapter },
-      state: memoryState(),
-      userName: "bot",
-    });
-    const state: ChatSdkChannelState = {
-      anchorMessageId: "posted-1",
-      editSupported: true,
-      streamStepIndex: 0,
-      thread: serializedThread(),
-    };
-    const channelAdapter = withState(getAdapter(bridge.channel), state);
-    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
-
-    await callEvent(
-      channelAdapter,
-      makeEvent("message.completed", {
-        finishReason: "stop",
-        message: "final answer",
-        sequence: 2,
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-      ctx,
-    );
-
-    expect(adapter.posted).toEqual([
-      { message: { markdown: "final answer" }, threadId: THREAD_ID },
-    ]);
-    expect(state.editSupported).toBe(false);
   });
 
   it("finalizes the streamed anchor when a step completes with tool-calls", async () => {
