@@ -300,8 +300,9 @@ async function buildRouteArgs(
       ),
       { agentName: bundle.agentName },
     ),
-    async (input) =>
-      await bundle.runtime.createSession({
+    async (input) => {
+      const delivery = createChannelDeliveryMetadata(deliverySource);
+      const handle = await bundle.runtime.createSession({
         ...input,
         adapter,
         channelName,
@@ -309,9 +310,11 @@ async function buildRouteArgs(
           input.continuationToken === undefined
             ? undefined
             : `${channelName}:${input.continuationToken}`,
-        delivery: createChannelDeliveryMetadata(deliverySource),
+        delivery,
         requestId,
-      }),
+      });
+      return { ...handle, deliveryId: delivery.deliveryId };
+    },
   );
   attachSkillFileSource(args, agent.skillFiles);
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {

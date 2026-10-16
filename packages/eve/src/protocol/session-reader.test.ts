@@ -2,15 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
-import { activeTurn } from "#protocol/session-projection/selectors.js";
-import { callLabel, callState, waiting } from "#protocol/session-projection/selectors.js";
+import { activeTurn, activity } from "#protocol/session-projection/selectors.js";
 import {
-  callPlace,
-  interaction,
-  readerTasks,
-  readerTurns,
-  runPlace,
-} from "#protocol/session-reader.js";
+  callLabel,
+  callState,
+  callOutputSource,
+  waiting,
+} from "#protocol/session-projection/selectors.js";
+import { callPlace, interaction, runPlace } from "#protocol/session-reader.js";
 
 const at = "2026-10-10T00:00:00.000Z";
 
@@ -72,10 +71,9 @@ describe("turns and steps", () => {
         runSettled("run_1", "turn_1"),
       ],
     );
-    expect(readerTurns(view)).toEqual({
-      turn_0: { status: "failed", turnId: "turn_0" },
-      turn_1: { status: "active", turnId: "turn_1", waiting: true },
-    });
+    expect(view.turns.turn_0).toMatchObject({ status: "settled", outcome: "failed" });
+    expect(view.turns.turn_1?.status).toBe("running");
+    expect(waiting(view, "turn_1")?.on).toBe("work");
     expect(activeTurn(view)?.turnId).toBe("turn_1");
   });
 
@@ -258,26 +256,34 @@ describe("tasks and sign-ins", () => {
         type: "call.settled",
       },
     ]);
-    expect(readerTasks(view).t_0).toEqual({
-      calls: {
-        c_0: {
-          callId: "c_0",
-          outcome: "completed",
-          output: "done",
-          status: "settled",
-          turnId: "turn_0",
-        },
-        c_1: {
-          callId: "c_1",
-          outcome: "completed",
-          output: "done",
-          status: "settled",
-          turnId: "turn_0",
-        },
-      },
-      kind: "agent",
-      name: "helper",
-      taskId: "t_0",
-    });
+    expect(view.tasks.t_0).toMatchObject({ kind: "agent", name: "helper", taskId: "t_0" });
+    expect(callOutputSource(view, "c_0")?.output).toBe("done");
+    expect(callOutputSource(view, "c_1")?.output).toBe("done");
+  });
+});
+
+describe("activity", () => {
+  it("reads a requested call as thinking, a started one as calling, and an approval as waiting", () => {
+    const requested = viewOf(started, [
+      turn("turn_0"),
+      run("run_0", "turn_0"),
+      call("c_1", "run_0"),
+    ]);
+    expect(activity(requested)).toEqual({ kind: "thinking" });
+
+    // The run stays open while the call it made runs in its step.
+    const running = viewOf(
+      started,
+      [turn("turn_0"), run("run_0", "turn_0"), call("c_1", "run_0")],
+      [{ data: { callId: "c_1" }, scope: { runId: "run_0" }, type: "call.started" }],
+    );
+    expect(activity(running)).toEqual({ kind: "calling", names: ["Tool c 1"] });
+
+    const asked = viewOf(
+      started,
+      [turn("turn_0"), run("run_0", "turn_0"), call("c_1", "run_0"), runSettled("run_0", "turn_0")],
+      [approval("i_1", "c_1")],
+    );
+    expect(activity(asked)).toMatchObject({ kind: "waiting-on-person" });
   });
 });

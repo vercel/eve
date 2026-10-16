@@ -111,11 +111,11 @@ The interaction vocabulary replaces input requests and responses everywhere:
 | `send({ inputResponses })`, `respond(inputResponses)`                   | `send({ answers })`, `respond(answers)`                                                                                  |
 | `parseInputResponse`, `parseInputResponses`, `isInputResponse`          | `parseAnswer`, `parseAnswers`, `isAnswer`                                                                                |
 | A response's `inputRequests` and `authorizations`                       | `interactions`, sign-ins included                                                                                        |
-| `ConversationState.inputs`, `ConversationInput`                         | `ConversationState.interactions`, `ConversationInteraction`                                                              |
-| `openConversationInputs(state)`                                         | `openConversationInteractions(state)`                                                                                    |
+| `ConversationState.inputs`, `ConversationInput`                         | `view.interactions`, `Interaction`                                                                                       |
+| `openConversationInputs(state)`                                         | `openInteractions(view)` from `eve/events`                                                                               |
 | `EveAuthorizationPart`, `EveMessageInputRequest`                        | `EveInteractionPart` (`type: "interaction"`)                                                                             |
 | `dynamic-tool` part, `toolMetadata.eve.inputRequest` / `inputResponse`  | `tool` part (`EveToolPart`), `part.interaction` with its `answer`                                                        |
-| `conversationReducer`, `defaultMessageReducer`, `EveAgentReducer`       | Removed: `data` is the conversation; derive other state from `events`, or `conversationOf(events)`                       |
+| `conversationReducer`, `defaultMessageReducer`, `EveAgentReducer`       | Removed: read `view`, `previews`, `messages`, and `agents` directly                                                      |
 | `transcriptReducer(options)`                                            | `transcriptOf(events, options)`                                                                                          |
 | `toolCallState(conversation, callId)`                                   | The call's `tool` part                                                                                                   |
 | Evals: `inputRequests`, `pendingInputRequests`, `requireInputRequest()` | `interactions`, `pendingInteractions`, `requireInteraction()`                                                            |
@@ -233,6 +233,17 @@ The OpenTelemetry trace schema remains version 4, with the same span names and a
 
 ## Clients and frontends
 
+- **Frontend commands resolve on acceptance.** `EveAgentStore.send()` and the frontend hooks'
+  `send()`/`respond()` return `{ sessionId, deliveryId }` without waiting for a reply or question.
+  Observe `view` and lifecycle callbacks for execution. `resume()` resolves after bounded catch-up,
+  without waiting for an active turn to end. The lower-level `MessageResponse.result()` still reads
+  its response through completion.
+- **Read the native tables.** Frontend snapshots expose `view` (also `data.view`) and
+  `data.previews`. Replace `data.activeTurnId` with `activeTurn(view)?.turnId`,
+  `data.turns[turnId].waiting` with `waiting(view, turnId)`, and `data.tasks[taskId].calls`
+  with calls in `view.calls` whose `taskId` matches. Turns have `status: "running" | "settled"`
+  and a separate `outcome`, just like the event fold. The reduced `ConversationTurn`,
+  `ConversationTask`, and `ConversationTaskCall` types are removed.
 - **Read v27 lines.** The client accepts stream version 27 only. Each stored line is a commit
   (`{at, facts}`) or a progress record (`{progress}`); the client materializes each as an event.
 - **Cursors are line positions.** `streamIndex` and `startIndex` count stored lines, not events.
@@ -242,27 +253,20 @@ The OpenTelemetry trace schema remains version 4, with the same span names and a
   arrives, finishing that line. `result().status` keeps its meaning: `"waiting"` while the session
   stays open, `"completed"` once it ended, `"failed"` on failure.
 - **Interactions.** Every interaction a person is asked, sign-ins included, is in one list:
-  `ConversationState.interactions`, a response's `interactions`, `openInteractions(view)`. Filter
+  `view.interactions`, a response's `interactions`, `openInteractions(view)`. Filter
   by `request.kind`. An approval or a question about a call shows on its call's tool part
   (`part.interaction`); every other interaction, such as a sign-in or the budget prompt, is an
   `EveInteractionPart` of its own.
-- **Tool parts are call rows.** A message's `dynamic-tool` part, with its seven AI SDK states, is
-  now a `tool` part (`EveToolPart`) that reads its call's row: `callId`, `name`, `kind` (`tool`,
-  `agent`, `skill`), `label`, `status` (`streaming` while the model writes the input, then
-  `requested`, `running`, `settled`), `outcome` once settled (`completed`, `failed`, `rejected`,
-  `interrupted`), `input` (`inputText` while it streams), `output`, `error`, `taskId`, and the
-  latest approval or question about it as `interaction`. Replace `part.state` checks:
-  `approval-requested` is `part.interaction?.status === "open"`, `output-available` is
-  `outcome === "completed"`, `output-error` is `"failed"` or `"interrupted"`, and `output-denied`
-  is `"rejected"`. `toolName`, `toolCallId`, and `toolMetadata` are `name`, `callId`, and the
-  part's own fields. Messages have no `step-start` parts; each part carries `stepIndex`. When your
-  stream stopped, decide yourself what an open call shows. `toolResultFrom` takes a settled call
-  row, such as `ctx.view.calls[callId]`.
-- **No custom reducers.** `useEveAgent({ reducer })`, `EveAgentReducer`, and the client reducer
-  events are gone, and with them the snapshot's separate `conversation`: `data` is the
-  conversation. Derive other state from `events`, for example with `useMemo`, or fold them
-  with `foldEvents` from `eve/events`; `conversationOf(events)` reads saved events as a
-  conversation. `transcriptReducer(options)` is `transcriptOf(events, options)`.
+- **Tool parts share call state.** `EveToolPart.state` is `"streaming"` with partial `inputText`,
+  then the shared `CallState`: `requested`, `approval`, `running`, `blocked`, `completed`, `failed`,
+  `rejected`, or `cancelled`. `kind` and `stepIndex` are required. Read raw outcomes, reasons,
+  and task identities from `view.calls[part.callId]`; duplicated part fields are removed.
+- **Flat snapshots.** The hook and store expose `view`, `previews`, `messages`, `agents`,
+  `events`, `session`, `status`, and `error`, without a `data` wrapper. Status is `idle`, `busy`,
+  or `resuming`; errors are separate. All callbacks stay. Save `events` and `session` as they
+  change, not only in `onFinish`, so pauses survive reloads.
+- **No local interaction lifecycle.** Optimistic answers last only through the POST round trip;
+  response rows then own them. An interaction remains `open` until settlement, not `responded`.
 - **Use the shared fold.** `eve/events` exports the catalog, the fold that turns facts into tables,
   and selectors such as `activeTurn`, `reply`, `openInteractions`, `waiting`, and `idle`, so a
   client doesn't need its own reducer for session state. `callState(view, callId)` says where a

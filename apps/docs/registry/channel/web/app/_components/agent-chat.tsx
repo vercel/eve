@@ -1,7 +1,10 @@
 "use client";
 
+import { interaction } from "eve/events";
+
 import type { MessagePart } from "eve/client";
 import { useEveAgent } from "eve/react";
+import { failure } from "eve/events";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import {
@@ -67,28 +70,27 @@ export function AgentChat({
     },
   });
 
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isBusy = agent.status === "busy";
   const isResuming = agent.status === "resuming";
-  const isEmpty = agent.data.messages.length === 0;
-  const lastMessage = agent.data.messages.at(-1);
+  const isEmpty = agent.messages.length === 0;
+  const lastMessage = agent.messages.at(-1);
   const isPendingAssistantShell =
     lastMessage?.role === "assistant" && lastMessage.parts.length === 0;
   const showPendingThinking =
-    isBusy &&
-    (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
-  const turnFailure = isBusy || isResuming ? undefined : getLatestTurnFailure(agent.events);
+    isBusy && (lastMessage?.role !== "assistant" || isPendingAssistantShell);
+  const turnFailure = isBusy || isResuming ? undefined : getLatestTurnFailure(agent.view);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
   const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
   // Answers are accepted while work runs; the server's settlement closes each request.
   const canRespond = (interactionId: string) =>
-    !isResuming && agent.data.interactions[interactionId]?.status === "open";
+    !isResuming && agent.view.interactions[interactionId]?.status === "open";
   // A tool call can ask several questions at once, and its message part holds only the latest.
   const questionsFor = (callId: string) =>
-    Object.values(agent.data.interactions).filter(
-      (input) => input.request.kind === "question" && input.request.call?.callId === callId,
-    );
+    Object.keys(agent.view.interactions)
+      .flatMap((id) => interaction(agent.view, id) ?? [])
+      .filter((input) => input.request.kind === "question" && input.call?.callId === callId);
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -163,15 +165,13 @@ export function AgentChat({
         >
           <ConversationTopFade className="top-14" />
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
-            {agent.data.messages.map((message, index) =>
+            {agent.messages.map((message, index) =>
               showPendingThinking &&
               isPendingAssistantShell &&
               message.id === lastMessage.id ? null : (
                 <AgentMessage
                   canRespond={canRespond}
-                  isStreaming={
-                    agent.status === "streaming" && index === agent.data.messages.length - 1
-                  }
+                  isStreaming={agent.status === "busy" && index === agent.messages.length - 1}
                   key={message.id}
                   message={message}
                   questionsFor={questionsFor}
@@ -297,29 +297,10 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unable to cancel the response.";
 }
 
-function getLatestTurnFailure(
-  events: ReturnType<typeof useEveAgent>["events"],
-): string | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-
-    // A session that fails ends its open turn cancelled; the error is the session's.
-    if (event.type === "session.ended") {
-      if (event.data.outcome !== "failed") return undefined;
-      return event.data.error?.message ?? "The session failed.";
-    }
-
-    if (event.type === "turn.settled") {
-      if (event.data.outcome !== "failed") return undefined;
-      return event.data.error?.code === "MODEL_CALL_FAILED"
-        ? "The model is temporarily unavailable. Please try again."
-        : (event.data.error?.message ?? "The turn failed.");
-    }
-
-    if (event.type === "delivery.consumed") {
-      return undefined;
-    }
-  }
-
-  return undefined;
+function getLatestTurnFailure(view: ReturnType<typeof useEveAgent>["view"]): string | undefined {
+  const error = failure(view, view.session.latestTurnId);
+  if (view.session.outcome === "failed") return error?.message;
+  return error?.code === "MODEL_CALL_FAILED"
+    ? "The model is temporarily unavailable. Please try again."
+    : error?.message;
 }

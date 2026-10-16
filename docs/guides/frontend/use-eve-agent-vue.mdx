@@ -46,10 +46,11 @@ The state fields are computed refs; the commands are ordinary methods:
 
 | Property                                                  | Vue shape                                      |
 | --------------------------------------------------------- | ---------------------------------------------- |
-| `data`                                                    | `ComputedRef<TData>`                           |
+| `data`                                                    | `ComputedRef<ConversationState>`               |
+| `view`                                                    | `ComputedRef<SessionView>`                     |
 | `status`                                                  | `ComputedRef<UseEveAgentStatus>`               |
 | `error`                                                   | `ComputedRef<Error \| undefined>`              |
-| `events`                                                  | `ComputedRef<readonly MessageStreamEvent[]>`   |
+| `events`                                                  | `ComputedRef<readonly SessionStreamEvent[]>`   |
 | `session`                                                 | `ComputedRef<ClientSessionState \| undefined>` |
 | `send`, `respond`, `prewarm`, `resume`, `cancel`, `reset` | Methods                                        |
 
@@ -57,7 +58,7 @@ Destructuring preserves reactivity because each state value remains a ref. Read 
 
 ## Send a message
 
-Call `send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Vue.
+Call `send(text)` for text or pass content parts for attachments. The API and transport behavior match the [shared sending guide](./overview#sending-and-streaming); only reactive access differs in Vue. `send()` and `respond()` resolve with `{ sessionId, deliveryId }` when accepted, without waiting for execution to finish.
 
 ## Human-in-the-loop prompts
 

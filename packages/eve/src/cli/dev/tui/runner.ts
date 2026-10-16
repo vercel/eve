@@ -1,9 +1,7 @@
+import { openInteractions } from "#protocol/session-projection/selectors.js";
+import { interaction, type Interaction } from "#protocol/session-reader.js";
 import { optionStyle } from "#channel/interaction-prompts.js";
-import {
-  openConversationInteractions,
-  type ConversationInteraction,
-  type ConversationState,
-} from "#client/conversation-state.js";
+import { type ConversationState } from "#client/conversation-state.js";
 import {
   attachEveAgentStore,
   detachEveAgentStore,
@@ -12,7 +10,6 @@ import {
 import { isAbortError } from "#client/eve-agent-store-helpers.js";
 import { formatStrandedSessionNotice } from "./stranded-session.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
-import { userText } from "./transcript-parts.js";
 import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
@@ -38,10 +35,11 @@ import {
   isWorking,
   tuiSessionData,
   type AgentTUIConversationView,
+  type TuiFailure,
 } from "./conversation-view.js";
+import { failure } from "#protocol/session-projection/selectors.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
-import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import {
   formatFailureDetail,
   formatFailureMessage,
@@ -445,7 +443,7 @@ export class EveTUIRunner {
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
   /** The message this TUI last sent, until its turn settles. */
-  #sentMessage?: string;
+  #sentMessage?: { readonly text: string; deliveryId?: string };
   /** Whether this TUI asked to cancel the turn of {@link #sentMessage}. */
   #cancelRequested = false;
   /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
@@ -843,17 +841,24 @@ export class EveTUIRunner {
   #submitMessage(message: string): void {
     const snapshot = this.#store.snapshot;
     const steering = isWorking(snapshot.status);
-    this.#sentMessage = message;
+    const sent: { text: string; deliveryId?: string } = { text: message };
+    this.#sentMessage = sent;
     if (!steering) this.#cancelRequested = false;
     const input: SendTurnPayload = steering
       ? { message, turnPolicy: "steer" }
       : snapshot.session === undefined
         ? { message }
         : { message, turnPolicy: "queue" };
-    void this.#store.send(input).catch((error: unknown) => {
-      if (this.#disposed || isAbortError(error)) return;
-      this.#renderSendError(steering ? "Steering failed" : "Error", error);
-    });
+    void this.#store
+      .send(input)
+      .then(({ deliveryId }) => {
+        sent.deliveryId = deliveryId;
+        if (!this.#disposed) this.#restoreCancelledMessage(this.#store.snapshot);
+      })
+      .catch((error: unknown) => {
+        if (this.#disposed || isAbortError(error)) return;
+        this.#renderSendError(steering ? "Steering failed" : "Error", error);
+      });
   }
 
   /** Refreshes local dev artifacts so a new turn runs the latest authored code. */
@@ -873,16 +878,16 @@ export class EveTUIRunner {
 
   #renderSnapshot(): void {
     const snapshot = this.#store.snapshot;
-    const data = tuiSessionData(snapshot.data);
+    const data = tuiSessionData(snapshot);
     this.#renderer.renderConversation?.(
       conversationView(snapshot, data, this.#appRoot === undefined ? undefined : localFailureHint),
     );
     this.#reportSessionError(snapshot.error, data.sessionFailed);
     this.#recordFailures(data.failures);
-    this.#recordAgentToolFailures(snapshot.data);
-    this.#reportFirstResponse(snapshot.data);
-    this.#queueRegistryHandoffs(snapshot.data);
-    this.#restoreCancelledMessage(snapshot.data);
+    this.#recordAgentToolFailures(snapshot);
+    this.#reportFirstResponse(snapshot);
+    this.#queueRegistryHandoffs(snapshot);
+    this.#restoreCancelledMessage(snapshot);
     if (
       data.sessionFailed ||
       this.#answerableInputs().length > 0 ||
@@ -893,20 +898,26 @@ export class EveTUIRunner {
   }
 
   #sessionFailed(): boolean {
-    return tuiSessionData(this.#store.snapshot.data).sessionFailed;
+    return tuiSessionData(this.#store.snapshot).sessionFailed;
   }
 
   /** A turn cancelled from outside this prompt hands its message back instead of losing it. */
   #restoreCancelledMessage(conversation: ConversationState): void {
     const sent = this.#sentMessage;
-    if (sent === undefined) return;
-    const message = conversation.messages.findLast((candidate) => candidate.role === "user");
-    const turnId = message?.metadata?.turnId;
-    if (message === undefined || turnId === undefined || userText(message) !== sent) return;
-    const status = conversation.turns[turnId]?.status;
-    if (status === undefined || status === "active") return;
+    if (sent?.deliveryId === undefined) return;
+    const turnId = conversation.view.deliveries[sent.deliveryId]?.turnId;
+    if (turnId === undefined) return;
+    const turn = conversation.view.turns[turnId];
+    if (turn === undefined || turn.status === "running") return;
+    const status = turn.outcome;
     this.#sentMessage = undefined;
-    if (status === "cancelled" && !this.#cancelRequested) this.#renderer.restoreDraft?.(sent);
+    // A failure cancels its turn too; the failure shows, and the message isn't handed back.
+    if (
+      status === "cancelled" &&
+      !this.#cancelRequested &&
+      failure(conversation.view, turnId) === undefined
+    )
+      this.#renderer.restoreDraft?.(sent.text);
   }
 
   /** Session failures render from the conversation; other errors get one block each. */
@@ -954,12 +965,14 @@ export class EveTUIRunner {
   }
 
   /** Open requests the user can answer now, including while other work runs. */
-  #answerableInputs(): readonly ConversationInteraction[] {
+  #answerableInputs(): readonly Interaction[] {
     // A sign-in completes by its callback, not an answer typed here.
-    return openConversationInteractions(this.#store.snapshot.data).filter(
-      (input) =>
-        input.request.kind !== "sign-in" && !this.#dismissedInputs.has(input.interactionId),
-    );
+    return openInteractions(this.#store.snapshot.view)
+      .flatMap((row) => interaction(this.#store.snapshot.view, row.interactionId) ?? [])
+      .filter(
+        (input) =>
+          input.request.kind !== "sign-in" && !this.#dismissedInputs.has(input.interactionId),
+      );
   }
 
   /**
@@ -987,7 +1000,7 @@ export class EveTUIRunner {
   }
 
   async #readAnswer(
-    request: ConversationInteraction,
+    request: Interaction,
     context: AgentTUIInputContext | undefined,
     title: string,
   ): Promise<Answer | undefined> {
@@ -1562,7 +1575,7 @@ export class EveTUIRunner {
       if (agent.observation.status === "not-followed") continue;
       for (const message of agent.observation.conversation?.messages ?? []) {
         for (const part of message.parts) {
-          if (part.type !== "tool" || part.outcome !== "failed") continue;
+          if (part.type !== "tool" || part.state !== "failed") continue;
           if (this.#recordedAgentToolFailures.has(part.callId)) continue;
           this.#recordedAgentToolFailures.add(part.callId);
           diagnostics.append({
@@ -1585,7 +1598,7 @@ export class EveTUIRunner {
           diagnostics.recordToolCall(event.data.capability.name);
         break;
       case "call.settled": {
-        const call = this.#store.snapshot.data.messages
+        const call = this.#store.snapshot.messages
           .flatMap((message) => message.parts)
           .find((part) => part.type === "tool" && part.callId === event.data.callId);
         const name = call?.type === "tool" ? call.name : event.data.callId;
@@ -1609,7 +1622,7 @@ export class EveTUIRunner {
         if (event.data.outcome === "failed") {
           diagnostics.append({
             source: "tool",
-            summary: `${this.#store.snapshot.data.tasks[event.data.taskId]?.name ?? "A task"} ended with an error`,
+            summary: `${this.#store.snapshot.view.tasks[event.data.taskId]?.name ?? "A task"} ended with an error`,
             detail: event.data.error?.message ?? "Task failed.",
           });
         }
@@ -1625,9 +1638,9 @@ export class EveTUIRunner {
   }
 
   /** Logs each failure the session shows once, as it appears. A reset session starts over. */
-  #recordFailures(failures: readonly ErrorInfo[]): void {
+  #recordFailures(failures: readonly TuiFailure[]): void {
     if (failures.length < this.#recordedFailures) this.#recordedFailures = 0;
-    for (const error of failures.slice(this.#recordedFailures)) {
+    for (const { error } of failures.slice(this.#recordedFailures)) {
       const message = formatFailureMessage(error);
       const entry = {
         detail: formatFailureDetail(error) ?? message,
@@ -1687,7 +1700,7 @@ function registryHandoffs(
   const collect = (state: ConversationState, subagentName: string | undefined) => {
     for (const message of state.messages) {
       for (const part of message.parts) {
-        if (!isTerminalToolCallPart(part) || part.outcome !== "completed") continue;
+        if (!isTerminalToolCallPart(part) || part.state !== "completed") continue;
         const address = registryHandoffAddress(subagentName, part.name, part.output);
         if (address !== undefined) handoffs.push({ callId: part.callId, address });
       }
@@ -1721,7 +1734,7 @@ export function registryHandoffAddress(
 }
 
 function inputContext(
-  input: ConversationInteraction,
+  input: Interaction,
   index: number,
   total: number,
 ): AgentTUIInputContext | undefined {
@@ -1732,7 +1745,7 @@ function inputContext(
 }
 
 function toAgentTUIToolApprovalRequest(
-  request: ConversationInteraction,
+  request: Interaction,
   context: AgentTUIInputContext | undefined,
 ): AgentTUIToolApprovalRequest {
   const approval: AgentTUIToolApprovalRequest = {
@@ -1747,7 +1760,7 @@ function toAgentTUIToolApprovalRequest(
 }
 
 function toAgentTUIInputQuestion(
-  request: ConversationInteraction,
+  request: Interaction,
   context: AgentTUIInputContext | undefined,
 ): AgentTUIInputQuestion {
   const display: "select" | "text" =

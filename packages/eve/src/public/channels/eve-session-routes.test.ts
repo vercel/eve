@@ -115,10 +115,11 @@ describe("eve ID-addressed session routes", () => {
     expect(createSession).not.toHaveBeenCalled();
   });
 
-  it("creates a session without a continuation token", async () => {
+  it("creates a session without a continuation token and identifies its first delivery", async () => {
     const createSession = vi.fn().mockResolvedValue({
       events: new ReadableStream(),
       sessionId: "wrun_A",
+      deliveryId: "delivery_first",
     });
     const args = attachRouteSessionCreator(createArgs(), createSession);
 
@@ -139,6 +140,7 @@ describe("eve ID-addressed session routes", () => {
       ok: true,
       sessionId: "wrun_A",
       status: "accepted",
+      deliveryId: "delivery_first",
     });
     expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({

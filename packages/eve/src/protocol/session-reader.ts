@@ -11,45 +11,18 @@ import type { Answer } from "#protocol/session-events/families/response.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   answeredInteractionIds,
-  callOutputSource,
   callRun,
   callTurn,
   interactionOwner,
   openInteractions,
-  waiting,
 } from "#protocol/session-projection/selectors.js";
-import type { CallRow, InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 // ---------------------------------------------------------------------------
 // Turns and steps
 // ---------------------------------------------------------------------------
-
-export interface ReaderTurn {
-  readonly turnId: string;
-  readonly status: "active" | "completed" | "cancelled" | "failed";
-  /** The open turn is parked, holding on its tasks or on a person. */
-  readonly waiting?: boolean;
-}
-
-/** Each turn as a reader shows it. */
-export function readerTurns(view: SessionView): Readonly<Record<string, ReaderTurn>> {
-  const turns: Record<string, ReaderTurn> = {};
-  for (const [turnId, row] of Object.entries(view.turns)) {
-    if (row.status === "running") {
-      turns[turnId] =
-        waiting(view, turnId) === undefined
-          ? { status: "active", turnId }
-          : { status: "active", turnId, waiting: true };
-      continue;
-    }
-    const status =
-      row.outcome === "completed" ? "completed" : row.outcome === "failed" ? "failed" : "cancelled";
-    turns[turnId] = { status, turnId };
-  }
-  return turns;
-}
 
 /** Where a model run's output goes: its turn, and its step, the run's place among its turn's. */
 export interface RunPlace {
@@ -92,68 +65,6 @@ export function callPlace(view: SessionView, callId: string): RunPlace | undefin
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
-
-/** One call that started or reached a task, settled by its `call.settled`. */
-export interface ConversationTaskCall {
-  readonly callId: string;
-  readonly turnId: string;
-  /** As the call's row stands: open while its task works on it, then settled. */
-  readonly status: CallRow["status"];
-  readonly outcome?: CallRow["outcome"];
-  /** The call's result, once it completed. */
-  readonly output?: JsonValue;
-  /** Why the call failed. */
-  readonly error?: { readonly message: string };
-}
-
-export interface ConversationTask {
-  readonly taskId: string;
-  /** The tool whose call started the task. */
-  readonly name: string;
-  /**
-   * `"agent"` when a subagent's tool, local or remote, started the task; `"tool"` for an authored
-   * tool, including one that opens sessions with `ctx.agent`.
-   */
-  readonly kind: "agent" | "tool";
-  /** Calls in the order they reached the task. */
-  readonly calls: Readonly<Record<string, ConversationTaskCall>>;
-}
-
-function taskCallOf(view: SessionView, row: CallRow): ConversationTaskCall {
-  const call: Mutable<ConversationTaskCall> = {
-    callId: row.callId,
-    status: row.status,
-    turnId: callTurn(view, row) ?? "",
-  };
-  if (row.outcome !== undefined) call.outcome = row.outcome;
-  const output =
-    row.outcome === "completed" ? callOutputSource(view, row.callId)?.output : undefined;
-  if (output !== undefined) call.output = output;
-  if (row.outcome !== "completed" && row.error !== undefined)
-    call.error = { message: row.error.message };
-  return call;
-}
-
-/** Each task with the calls that reached it. */
-export function readerTasks(view: SessionView): Readonly<Record<string, ConversationTask>> {
-  const calls = new Map<string, Record<string, ConversationTaskCall>>();
-  for (const row of Object.values(view.calls)) {
-    if (row.taskId === undefined) continue;
-    const entries = calls.get(row.taskId) ?? {};
-    entries[row.callId] = taskCallOf(view, row);
-    calls.set(row.taskId, entries);
-  }
-  const tasks: Record<string, ConversationTask> = {};
-  for (const row of Object.values(view.tasks)) {
-    tasks[row.taskId] = {
-      calls: calls.get(row.taskId) ?? {},
-      kind: row.kind === "agent" ? "agent" : "tool",
-      name: row.name,
-      taskId: row.taskId,
-    };
-  }
-  return tasks;
-}
 
 // ---------------------------------------------------------------------------
 // Requests

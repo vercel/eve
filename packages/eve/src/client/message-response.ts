@@ -7,15 +7,10 @@ import type { CancelSessionResult, MessageResult } from "#client/types.js";
  */
 interface MessageResponseInput {
   readonly cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
-  readonly createStream: (
-    source?: AsyncIterable<SessionStreamEvent>,
-  ) => AsyncGenerator<SessionStreamEvent>;
+  readonly createStream: () => AsyncGenerator<SessionStreamEvent>;
   readonly deliveryId?: string;
   readonly sessionId: string;
 }
-
-const consumeResponse = Symbol("consumeMessageResponse");
-const acceptedDeliveryId = Symbol("acceptedDeliveryId");
 
 /**
  * The response from {@link ClientSession.send}.
@@ -29,7 +24,8 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Session
    * Session ID assigned by the server.
    */
   readonly sessionId: string;
-  readonly [acceptedDeliveryId]: string | undefined;
+  /** The accepted delivery, available before reading any events. */
+  readonly deliveryId: string | undefined;
 
   readonly #cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
   #cancellation: Promise<CancelSessionResult> | undefined;
@@ -42,7 +38,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Session
   constructor(input: MessageResponseInput) {
     this.#cancelTurn = input.cancelTurn;
     this.sessionId = input.sessionId;
-    this[acceptedDeliveryId] = input.deliveryId;
+    this.deliveryId = input.deliveryId;
     this.#createStream = input.createStream;
   }
 
@@ -94,26 +90,22 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Session
    * Each response can only be consumed once.
    */
   [Symbol.asyncIterator](): AsyncIterator<SessionStreamEvent> {
-    return this[consumeResponse]();
+    return this.#consume();
   }
 
-  [consumeResponse](
-    source?: AsyncIterable<SessionStreamEvent>,
-  ): AsyncGenerator<SessionStreamEvent> {
+  #consume(): AsyncGenerator<SessionStreamEvent> {
     if (this.#consumed) {
       throw new Error("MessageResponse has already been consumed.");
     }
     this.#consumed = true;
 
-    return this.#observeStream(source);
+    return this.#observeStream();
   }
 
-  async *#observeStream(
-    source?: AsyncIterable<SessionStreamEvent>,
-  ): AsyncGenerator<SessionStreamEvent> {
+  async *#observeStream(): AsyncGenerator<SessionStreamEvent> {
     try {
-      const deliveryId = this[acceptedDeliveryId];
-      for await (const event of this.#createStream(source)) {
+      const deliveryId = this.deliveryId;
+      for await (const event of this.#createStream()) {
         // The turn that consumed the message, whether it started it or joined it; answers are
         // no turn's input, so they name the turn of what they answer.
         if (
@@ -142,17 +134,4 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Session
       this.#turnId.resolve(undefined);
     }
   }
-}
-
-/** @internal Returns the accepted message identity without consuming its response stream. */
-export function getMessageResponseDeliveryId(response: MessageResponse): string | undefined {
-  return response[acceptedDeliveryId];
-}
-
-/** @internal Observe a turn through the frontend's existing session stream. */
-export function consumeMessageResponse(
-  response: MessageResponse,
-  source: AsyncIterable<SessionStreamEvent>,
-): AsyncIterable<SessionStreamEvent> {
-  return response[consumeResponse](source);
 }

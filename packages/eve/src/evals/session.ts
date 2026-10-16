@@ -1,4 +1,3 @@
-import { getMessageResponseDeliveryId } from "#client/message-response.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
@@ -254,7 +253,7 @@ export class EvalSessionDriver implements EveEvalSession {
         ? await this.#session.send(message!, options)
         : await this.#session.respond(answers, options);
     // A message's response ends when its delivery settles; an answer's at its first turn boundary.
-    const deliveryId = message === undefined ? undefined : getMessageResponseDeliveryId(response);
+    const deliveryId = message === undefined ? undefined : response.deliveryId;
     return this.consume(response, message, { deliveryId });
   }
 

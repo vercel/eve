@@ -444,6 +444,18 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
       names: waits.calls.map((entry) => callLabel(entry)),
     };
   }
+  // A run stays open while the calls it made run in its step: a started call no task serves is
+  // the turn's activity. A call only requested, such as an agent call before its task starts or
+  // one a dropped response streamed, isn't running yet.
+  const running = Object.values(view.calls).filter(
+    (entry) =>
+      entry.status === "running" &&
+      entry.capability.kind !== "control" &&
+      callTask(view, entry) === undefined &&
+      callTurn(view, entry) === row.turnId,
+  );
+  if (running.length > 0)
+    return { kind: "calling", names: running.map((entry) => callLabel(entry)) };
   return { kind: "thinking" };
 }
 

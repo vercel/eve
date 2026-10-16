@@ -1,12 +1,9 @@
+import { interactionOwner } from "#protocol/session-projection/selectors.js";
 /** Pure pieces of the transcript projection: tool rows, task lines, and agent steps. */
 
 import { agentToolSession } from "#client/conversation-state.js";
 import type { TaskEntry } from "./task-activity.js";
-import type {
-  ConversationState,
-  ConversationTaskCall,
-  ConversationTask,
-} from "#client/conversation-state.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import type {
   EveInteractionPart,
   EveToolPart,
@@ -27,6 +24,7 @@ import {
   type ToolPresentationContext,
 } from "./tool-presentation.js";
 import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
+import type { SessionView, CallRow, TaskRow } from "#protocol/session-projection/tables.js";
 
 export type ToolState = {
   readonly status: ToolStatus;
@@ -65,14 +63,11 @@ export interface AgentActivity {
   pending: boolean;
 }
 
-export function taskNeedsApproval(
-  conversation: ConversationState,
-  task: ConversationTask,
-): boolean {
+export function taskNeedsApproval(conversation: ConversationState, task: TaskRow): boolean {
   if (
-    Object.values(conversation.interactions).some(
+    Object.values(conversation.view.interactions).some(
       (input) =>
-        input.taskId === task.taskId &&
+        interactionOwner(conversation.view, input).taskId === task.taskId &&
         input.status === "open" &&
         input.request.kind === "approval",
     )
@@ -83,7 +78,7 @@ export function taskNeedsApproval(
     agent?.observation.status === "not-followed" ? undefined : agent?.observation.conversation;
   return (
     child !== undefined &&
-    Object.values(child.interactions).some(
+    Object.values(child.view.interactions).some(
       (input) => input.status === "open" && input.request.kind === "approval",
     )
   );
@@ -131,7 +126,7 @@ export function followUpLine(
 export function nestedTaskRecord(
   callId: string,
   part: EveToolPart,
-  task: ConversationTask,
+  task: TaskRow,
   block: Block,
 ): TaskRecord {
   const name =
@@ -142,7 +137,7 @@ export function nestedTaskRecord(
     callId,
     taskId: task.taskId,
     callIds: [part.callId],
-    kind: task.kind,
+    kind: task.kind === "agent" ? "agent" : "tool",
     name,
     toolName: part.name,
     input: part.input,
@@ -157,32 +152,22 @@ export function nestedTaskRecord(
 }
 
 /** The call's row, in the transcript's vocabulary. */
-export function toolState(part: EveToolPart, working: boolean): ToolState {
+export function toolState(part: EveToolPart, view: SessionView): ToolState {
   const errorText = part.error?.message;
-  if (part.status !== "settled") {
-    // An approval waits until the stream settles it, an answer this client sent included.
-    const asked = part.interaction;
-    if (
-      part.taskId === undefined &&
-      asked?.request.kind === "approval" &&
-      asked.status !== "settled"
-    )
-      return { status: "approval" };
-    // A call still open when the stream stopped never settled here; a task's call outlives it.
-    if (!working && part.taskId === undefined) return { status: "error", errorText: "interrupted" };
-    return part.output === undefined
-      ? { status: "running" }
-      : { status: "running", output: part.output };
-  }
-  switch (part.outcome) {
+  switch (part.state) {
     case "completed":
       return { status: "done", output: part.output };
     case "rejected":
-      if (part.taskId === undefined)
-        return { status: "denied", errorText: errorText ?? "Denied by user." };
+      return view.calls[part.callId]?.taskId === undefined
+        ? { status: "denied", errorText: errorText ?? "Denied by user." }
+        : { status: "error", errorText };
+    case "cancelled":
+    case "failed":
       return { status: "error", errorText };
+    case "approval":
+      return { status: "approval" };
     default:
-      return { status: "error", errorText };
+      return { status: "running", output: part.output };
   }
 }
 
@@ -197,7 +182,7 @@ export function toolBlock(
 ): Omit<Block, "kind"> {
   const { name: toolName, input } = part;
   const presentation =
-    part.status === "streaming"
+    part.state === "streaming"
       ? presentPreparingTool(toolName, context)
       : presentTool(toolName, input, context);
   const block: Omit<Block, "kind"> = {
@@ -227,7 +212,7 @@ export function toolBlock(
 /** A task's end line: how long it took and what it did, or why it failed, or that it stopped. */
 export function endLine(
   record: TaskRecord,
-  call: Pick<ConversationTaskCall, "status" | "outcome" | "output" | "error">,
+  call: Pick<CallRow, "status" | "outcome" | "output" | "error">,
   childTools: readonly Block[] | undefined,
   /** The theme's `·`, which separates the line's facts. */
   separator: string,
@@ -343,31 +328,19 @@ export function subagentSteps(messages: readonly EveMessage[]): SubagentStep[] {
     .filter((step) => step.reasoning.length > 0 || step.message.length > 0);
 }
 
-export function childToolCallIds(conversation: ConversationState): Set<string> {
-  const ids = new Set<string>();
-  for (const agent of Object.values(conversation.agents)) {
-    if (agent.observation.status === "not-followed") continue;
-    for (const message of agent.observation.conversation?.messages ?? []) {
-      for (const part of message.parts) {
-        if (part.type === "tool") ids.add(part.callId);
-      }
-    }
-  }
-  return ids;
-}
-
 /** A tool call, including one whose input is still streaming and so has no kind yet. */
 export function isToolCallRow(part: EveMessagePart): part is EveToolPart {
-  return part.type === "tool" && (part.status === "streaming" || isTerminalToolCallPart(part));
+  return part.type === "tool" && (part.state === "streaming" || isTerminalToolCallPart(part));
 }
 
 /** Every call that started or reached a task, by call ID. */
 export function taskCallsById(
   conversation: ConversationState,
-): Map<string, { task: ConversationTask; call: ConversationTaskCall }> {
-  const calls = new Map<string, { task: ConversationTask; call: ConversationTaskCall }>();
-  for (const task of Object.values(conversation.tasks)) {
-    for (const call of Object.values(task.calls)) calls.set(call.callId, { task, call });
+): Map<string, { task: TaskRow; call: CallRow }> {
+  const calls = new Map<string, { task: TaskRow; call: CallRow }>();
+  for (const call of Object.values(conversation.view.calls)) {
+    const task = call.taskId === undefined ? undefined : conversation.view.tasks[call.taskId];
+    if (task !== undefined) calls.set(call.callId, { task, call });
   }
   return calls;
 }

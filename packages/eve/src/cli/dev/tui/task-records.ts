@@ -1,4 +1,4 @@
-import type { ConversationTask } from "#client/conversation-state.js";
+import type { TaskRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { EveToolPart } from "#client/message-types.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { agentDisplayName, presentTool } from "./tool-presentation.js";
@@ -32,12 +32,13 @@ export class TaskRecords {
   /** The record a task call belongs to, joining its task's working record or starting one. */
   record(
     part: EveToolPart,
-    task: ConversationTask,
+    task: TaskRow,
     label: string | undefined,
     now: number,
+    view: SessionView,
   ): TaskRecord {
     const callId = part.callId;
-    const known = this.#byCall.get(callId) ?? this.#join(callId, task);
+    const known = this.#byCall.get(callId) ?? this.#join(callId, task, view);
     if (known !== undefined) return known;
     let summary = agentTaskSummary(part.input);
     let baseName = agentDisplayName(stripTerminalControls(part.name));
@@ -50,7 +51,7 @@ export class TaskRecords {
       callId,
       taskId: task.taskId,
       callIds: [callId],
-      kind: task.kind,
+      kind: task.kind === "agent" ? "agent" : "tool",
       name: this.#uniqueName(baseName),
       toolName: part.name,
       input: part.input,
@@ -64,10 +65,15 @@ export class TaskRecords {
     return record;
   }
 
-  #join(callId: string, task: ConversationTask): TaskRecord | undefined {
+  #join(callId: string, task: TaskRow, view: SessionView): TaskRecord | undefined {
     for (const record of this.#started.values()) {
       if (record.ended || record.taskId !== task.taskId) continue;
-      if (!record.callIds.some((id) => isOpen(task.calls[id]))) continue;
+      const started = view.calls[callId]?.introducedAt;
+      if (
+        started === undefined ||
+        !record.callIds.some((id) => (view.calls[id]?.closedAt ?? Infinity) >= started)
+      )
+        continue;
       record.callIds.push(callId);
       this.#byCall.set(callId, record);
       return record;
@@ -86,9 +92,4 @@ export class TaskRecords {
       if (!taken.has(candidate)) return candidate;
     }
   }
-}
-
-/** A task's call still working: reached the task, and not settled. */
-function isOpen(call: { readonly status: string } | undefined): boolean {
-  return call !== undefined && call.status !== "settled";
 }

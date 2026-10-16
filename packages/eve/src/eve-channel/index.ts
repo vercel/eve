@@ -103,13 +103,15 @@ const log = createLogger("eve.channel");
  * {@link defineChannel} directly only for a custom transport.
  */
 /** A delegating caller checks that this deployment serves its remote agent protocol. */
-function createdSessionBody(sessionId: string, body: ParsedCreateBody) {
+function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryId?: string) {
   const created: {
     ok: true;
     protocolVersion?: number;
     sessionId: string;
     status: "accepted";
+    deliveryId?: string;
   } = { ok: true, sessionId, status: "accepted" };
+  if (deliveryId !== undefined) created.deliveryId = deliveryId;
   if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
   return created;
 }
@@ -392,7 +394,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return Response.json(createdSessionBody(handle.sessionId, body), {
+        return Response.json(createdSessionBody(handle.sessionId, body, handle.deliveryId), {
           headers: {
             "cache-control": "no-store",
             [EVE_SESSION_ID_HEADER]: handle.sessionId,
