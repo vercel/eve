@@ -211,10 +211,10 @@ describe("tool-loop structured compaction accounting", () => {
 
     const result = await runStep(
       createTestSession({
-        compaction: { recentWindowSize: 0, threshold: 100 },
+        compaction: { recentWindowSize: 0, threshold: 3000 },
         history: [
           ...validateHarnessModelMessages(recalled.history),
-          { content: `ordinary ${"conversation ".repeat(100)}`, kind: "user", role: "user" },
+          { content: `ordinary ${"conversation ".repeat(2000)}`, kind: "user", role: "user" },
         ],
         state: recalled.state,
       }),
@@ -372,10 +372,10 @@ describe("tool-loop structured compaction accounting", () => {
     const session = withParkedStep(
       createTestSession({
         compaction: {
-          lastKnownInputTokens: 100,
+          lastKnownInputTokens: 1000,
           lastKnownPromptMessageCount: 1,
           recentWindowSize: 10,
-          threshold: 101,
+          threshold: 1001,
         },
         history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
       }),
