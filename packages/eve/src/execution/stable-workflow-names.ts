@@ -11,6 +11,7 @@ export const CONNECTION_EVENT_WORKFLOW_NAME = "connectionEventWorkflow";
 export const CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME = "connectionEventDeliveryWorkflow";
 
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
+  "executeProgramWorkflow",
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,

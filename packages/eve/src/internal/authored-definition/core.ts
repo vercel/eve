@@ -58,6 +58,7 @@ export function normalizeAgentDefinition(
       "build",
       "compaction",
       "defaultTools",
+      "codeMode",
       "description",
       "experimental",
       "limits",
@@ -88,6 +89,18 @@ export function normalizeAgentDefinition(
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
+  }
+
+  if (record.codeMode !== undefined) {
+    if (record.codeMode === true) definition.codeMode = true;
+    else {
+      const codeMode = expectObjectRecord(record.codeMode, message);
+      expectOnlyKnownKeys(codeMode, ["language"], message);
+      if (codeMode.language !== "js" && codeMode.language !== "py") {
+        throw new Error(`${message} codeMode.language must be "js" or "py".`);
+      }
+      definition.codeMode = { language: codeMode.language };
+    }
   }
 
   if (record.defaultTools !== undefined) {

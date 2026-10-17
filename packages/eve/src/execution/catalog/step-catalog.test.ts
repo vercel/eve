@@ -66,6 +66,27 @@ describe("buildStepCatalog", () => {
     expect(names(catalog.deferred)).toEqual(["refund_invoice"]);
   });
 
+  it("advertises execute and catalog tools only when code mode is enabled", () => {
+    for (const codeMode of [true, { language: "js" }, { language: "py" }] as const) {
+      const ctx = new ContextContainer();
+      const bundle = catalogBundle();
+      ctx.set(BundleKey, {
+        ...bundle,
+        resolvedAgent: {
+          ...bundle.resolvedAgent,
+          config: { ...bundle.resolvedAgent.config!, codeMode },
+        },
+      });
+      const catalog = buildStepCatalog({ ctx, agentTools: toolMap(), endsTurn: true, session: {} });
+      expect(names(catalog.advertised)).toEqual([SEARCH_TOOL_NAME, CALL_TOOL_NAME, "eve__execute"]);
+      expect(catalog.advertised.get("eve__execute")?.execute).toBeUndefined();
+      expect(catalog.advertised.get("eve__execute")?.workflowId).toContain(
+        "executeProgramWorkflow",
+      );
+    }
+    expect(names(catalogContext().catalog.advertised)).not.toContain("eve__execute");
+  });
+
   describe("which catalog tools the agent gets", () => {
     it("counts only the deferred tools the session sees, so a delegated session doesn't search for root-only ones", () => {
       const tools = [inlineTool("archive", { availableInSubagents: false, deferred: true })];

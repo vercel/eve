@@ -45,7 +45,7 @@ export {
   type HumanInputIntake,
 } from "./intake.js";
 export { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
-export { hasRunnableQueue } from "./approvals.js";
+export { grantedApprovalKeys, hasRunnableQueue } from "./approvals.js";
 export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
 
 /**

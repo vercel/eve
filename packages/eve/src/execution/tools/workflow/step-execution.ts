@@ -1,3 +1,4 @@
+import { inheritDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
@@ -26,6 +27,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     const { args, context: input } = invocation;
     getStepMetadata();
     const context = new ContextContainer();
+    inheritDevelopmentWorkflowGeneration(context);
     context.set(AuthKey, input.session.auth.current);
     context.set(InitiatorAuthKey, input.session.auth.initiator);
     context.set(SessionIdKey, input.session.id);

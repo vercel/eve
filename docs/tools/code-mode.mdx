@@ -1,0 +1,51 @@
+---
+title: "Code Mode"
+description: "Let an agent coordinate tool calls in an isolated JavaScript program."
+url: /tools/code-mode
+---
+
+Code mode adds `eve__execute` alongside `eve__search` and `eve__tool`. It is **off by default** and does not replace authored workflow tools.
+
+## Enable code mode
+
+```ts
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "openai/gpt-5.5",
+  codeMode: true,
+});
+```
+
+`codeMode: true` selects JavaScript. You can also write `codeMode: { language: "js" }`. The configuration accepts `"py"` for Python runtimes; selecting an unregistered language returns a clear “not available” error.
+
+## Execute a program
+
+The model supplies `source`, an async JavaScript function body with top-level `await` and `return`:
+
+```js
+const projects = await tools.list_projects({});
+const details = await Promise.all(
+  projects.map((project) => tools.project_details({ id: project.id })),
+);
+console.log("Fetched", details.length, "projects");
+return details;
+```
+
+Use exact tool names discovered through `eve__search`. The sandbox exposes a frozen `tools` object; it has no host filesystem or network access. Tool calls leave the interpreter and resolve through the session's catalog, input validation, and normal approval policies. A required approval suspends execution until the person responds. Calls issued together run concurrently, and every call has its own durable record.
+
+The v1 dispatcher supports ordinary authored and connection tools. Workflow-backed tools must currently be called directly rather than from a program.
+
+## Limits and results
+
+A program may issue at most **32 concurrent calls** and **256 total calls**. The default whole-program deadline is **five minutes**, including approval waits. The model may supply `timeoutMs` to request a shorter deadline. The interpreter's memory limit is **64 MiB**.
+
+A successful tool result contains `status: "completed"`, the returned JSON `output`, and captured console `logs`. A failed result contains `status: "failed"`, `error`, `errorClass`, and `logs`. Every final result also includes `interpreter: { startupMs, runMs }`, cumulative interpreter startup and active guest execution time in milliseconds across all starts/resumes. Live-cache resumes have zero startup time; tool and approval waits between interpreter calls are excluded. Runtimes without timing support fall back to the duration of each interpreter step call, with zero startup time. Logs are bounded to 16 KiB and 256 entries. Timeout and out-of-memory failures include `logsMayBeTruncated: true`: only logs captured up to the last parking boundary may survive abrupt interpreter termination.
+
+## Replay and unknown outcomes
+
+While the worker stays alive, parked JavaScript programs retain their interpreter and resume without re-executing the prefix. These cached interpreters expire at the program deadline. After a worker restart, the program replays completed calls from their recorded results, not by dispatching them again. Replayed tool names and inputs must match the recorded calls; generating tool inputs from randomness or wall-clock time can cause recovery to fail safely.
+
+Before dispatch, the driver durably records that the call started. If the worker crashes after a call starts but before its result is recorded, recovery reports an **unknown outcome** and does not repeat the call. The program receives an error explaining that the side effect **may or may not have happened**.
+
+Do not automatically retry an unknown write. Inspect the external system or reconcile using a stable operation identifier before deciding whether another write is safe.

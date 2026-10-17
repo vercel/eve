@@ -23,3 +23,9 @@ export async function withDevelopmentWorkflowGeneration<T>(
   ctx.setVirtualContext(DevelopmentGenerationKey, context);
   return await contextStorage.run(ctx, operation);
 }
+
+/** Preserve the trusted delivery's generation when a step creates a child context. */
+export function inheritDevelopmentWorkflowGeneration(context: ContextContainer): void {
+  const generation = getDevelopmentWorkflowGeneration();
+  if (generation !== undefined) context.setVirtualContext(DevelopmentGenerationKey, generation);
+}

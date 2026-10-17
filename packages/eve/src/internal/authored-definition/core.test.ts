@@ -10,6 +10,21 @@ import { defineDynamic } from "#dynamic/definition.js";
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it("keeps code mode opt-in and validates interpreter language", () => {
+    expect(
+      normalizeAgentDefinition({ model: "openai/gpt-5.5" }, FAILURE_MESSAGE).codeMode,
+    ).toBeUndefined();
+    for (const codeMode of [true, { language: "js" }, { language: "py" }]) {
+      expect(
+        normalizeAgentDefinition({ model: "openai/gpt-5.5", codeMode }, FAILURE_MESSAGE).codeMode,
+      ).toEqual(codeMode);
+    }
+    for (const codeMode of [false, { language: "ruby" }, {}]) {
+      expect(() =>
+        normalizeAgentDefinition({ model: "openai/gpt-5.5", codeMode }, FAILURE_MESSAGE),
+      ).toThrow();
+    }
+  });
   it("normalizes agent tool visibility", () => {
     expect(
       normalizeAgentDefinition({ model: "openai/gpt-5.5", tool: false }, FAILURE_MESSAGE).tool,

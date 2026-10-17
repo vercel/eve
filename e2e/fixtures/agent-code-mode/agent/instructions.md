@@ -1,0 +1,1 @@
+Use eve__execute for code-execution requests. Supply JavaScript statements in source. Await every tool call before returning, one at a time unless told otherwise. Return its output exactly as JSON. Tools count and gated accept {}.

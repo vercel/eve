@@ -16,10 +16,6 @@ const UNREPORTED_TOOL_NAMES = new Map([
     SKILL_TOOL_NAME,
     `Calls through ${SKILL_TOOL_NAME} are reported as skill loads; use t.loadedSkill(name).`,
   ],
-  [
-    "eve__execute",
-    "eve__execute isn't a tool eve registers (it's reserved for code mode); assert on the tool or agent a call reaches, or use t.loadedSkill(name).",
-  ],
 ]);
 
 /** Framework tool names eve no longer uses, with what to assert instead. */

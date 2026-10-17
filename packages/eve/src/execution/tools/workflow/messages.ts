@@ -29,6 +29,7 @@ export interface WorkflowToolAuthorizationRequest {
 
 /** A question authored with `ask()` from `eve/workflow`, before owner normalization. */
 export interface WorkflowToolAskRequest {
+  readonly approval?: InputRequest["action"];
   /** The run's control hook, where the session sends its decision on the question. */
   readonly control: string;
   readonly kind: "ask";

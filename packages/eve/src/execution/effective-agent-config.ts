@@ -6,6 +6,7 @@ import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 interface EffectiveAgentRuntime {
+  readonly codeMode?: import("#shared/agent-definition.js").AgentCodeModeDefinition;
   readonly limits?: AgentLimitsDefinition;
   readonly thresholdPercent?: number;
   readonly turnAgent: RuntimeTurnAgent;
@@ -27,6 +28,7 @@ export function resolveEffectiveAgentRuntimeFromConfig(
       throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
     }
     return {
+      codeMode: bundle.resolvedAgent.config?.codeMode,
       limits: bundle.resolvedAgent.config?.limits,
       thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
       turnAgent: bundle.turnAgent,
@@ -41,6 +43,7 @@ export function resolveEffectiveAgentRuntimeFromConfig(
     ...turnAgent
   } = bundle.turnAgent;
   return {
+    codeMode: config.codeMode,
     limits: config.limits,
     thresholdPercent: config.compaction?.thresholdPercent,
     turnAgent: {

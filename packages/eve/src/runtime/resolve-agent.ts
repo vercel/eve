@@ -180,6 +180,7 @@ function createResolvedAgentConfig(
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
+    codeMode?: NonNullable<ResolvedAgent["config"]>["codeMode"];
     defaultTools?: boolean;
     description?: string;
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
@@ -191,6 +192,8 @@ function createResolvedAgentConfig(
   } = {
     name: manifest.config.name,
   };
+
+  if (manifest.config.codeMode !== undefined) config.codeMode = manifest.config.codeMode;
 
   if (manifest.config.defaultTools !== undefined) {
     config.defaultTools = manifest.config.defaultTools;

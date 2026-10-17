@@ -11,6 +11,7 @@ import type { DynamicEvents, DynamicSentinel } from "#dynamic/definition.js";
 declare const DEFINED_AGENT: unique symbol;
 
 export type {
+  AgentCodeModeDefinition,
   AgentModelResolveContext,
   AgentModelOptionsDefinition,
   AgentModelResolver,

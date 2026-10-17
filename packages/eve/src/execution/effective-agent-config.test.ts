@@ -12,6 +12,7 @@ describe("resolveEffectiveAgentRuntime", () => {
         model: { id: "anthropic/claude-sonnet-4.5" },
         thresholdPercent: 0.75,
       },
+      codeMode: { language: "py" },
       description: "Perform deep research.",
       limits: { sessionTimeoutMs: 120_000 },
       model: { id: "anthropic/claude-opus-4.6" },
@@ -39,6 +40,7 @@ describe("resolveEffectiveAgentRuntime", () => {
     );
 
     expect(effective).toMatchObject({
+      codeMode: { language: "py" },
       limits: { sessionTimeoutMs: 120_000 },
       thresholdPercent: 0.75,
       turnAgent: {

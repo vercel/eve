@@ -631,6 +631,9 @@ const compiledAgentLimitsDefinitionSchema = z
 const compiledAgentConfigBaseFields = {
   build: compiledAgentBuildDefinitionSchema.optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
+  codeMode: z
+    .union([z.literal(true), z.object({ language: z.enum(["js", "py"]) }).strict()])
+    .optional(),
   defaultTools: z.boolean().optional(),
   description: z.string().optional(),
   experimental: z
@@ -1234,6 +1237,12 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
           : cloneCompiledRuntimeModelReference(config.compaction.model),
       thresholdPercent: config.compaction?.thresholdPercent,
     },
+    codeMode:
+      config.codeMode === true
+        ? (true as const)
+        : config.codeMode === undefined
+          ? undefined
+          : { ...config.codeMode },
     defaultTools: config.defaultTools,
     description: config.description,
     experimental:

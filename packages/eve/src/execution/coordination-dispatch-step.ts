@@ -1,3 +1,4 @@
+import { parseJsonValue, type JsonObject } from "#shared/json.js";
 /** Starts workflow-tool runs for pending coordination. */
 
 import {
@@ -77,7 +78,19 @@ async function dispatchCoordination(
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,
       session,
-      task,
+      task:
+        task.toolName !== "eve__execute"
+          ? task
+          : {
+              ...task,
+              executeInput: {
+                ...((task.executeInput ?? task.input) as JsonObject),
+                context: parseJsonValue({
+                  serializedContext: prepared.serializedContext,
+                  sessionState: createDurableSessionState({ session }),
+                }),
+              },
+            },
     })),
     readTaskTable(session.state),
   );

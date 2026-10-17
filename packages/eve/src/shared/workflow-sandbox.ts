@@ -30,18 +30,24 @@ export function installWorkflowSandboxModule(module: WorkflowSandboxModule): voi
 
 export async function createWorkflowSandboxTool(input: {
   readonly bridgeRequestLimit: number;
+  readonly executionPolicy?: CodeModeModule.CodeModeExecutionPolicy;
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly hostTools: ToolSet;
 }): Promise<ToolSet[string]> {
   const { createCodeModeTool } = await loadWorkflowSandboxModule();
   return createCodeModeTool(
     input.hostTools,
-    createWorkflowSandboxOptions(input.bridgeRequestLimit, input.continuationSecurity),
+    createWorkflowSandboxOptions(
+      input.bridgeRequestLimit,
+      input.continuationSecurity,
+      input.executionPolicy,
+    ),
   ) as ToolSet[string];
 }
 
 export async function continueWorkflowSandboxInterrupt(input: {
   readonly bridgeRequestLimit: number;
+  readonly executionPolicy?: CodeModeModule.CodeModeExecutionPolicy;
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly interrupt: WorkflowSandboxInterrupt;
   readonly resolution: unknown;
@@ -50,7 +56,11 @@ export async function continueWorkflowSandboxInterrupt(input: {
   const { continueCodeModeInterrupt } = await loadWorkflowSandboxModule();
   return continueCodeModeInterrupt({
     interrupt: input.interrupt,
-    options: createWorkflowSandboxOptions(input.bridgeRequestLimit, input.continuationSecurity),
+    options: createWorkflowSandboxOptions(
+      input.bridgeRequestLimit,
+      input.continuationSecurity,
+      input.executionPolicy,
+    ),
     resolution: input.resolution,
     tools: input.tools,
   } as never);
@@ -136,12 +146,14 @@ export function getWorkflowSandboxPendingInterrupts(
 function createWorkflowSandboxOptions(
   bridgeRequestLimit: number,
   continuationSecurity: WorkflowSandboxContinuationSecurity,
+  executionPolicy?: CodeModeModule.CodeModeExecutionPolicy,
 ): CodeModeModule.CodeModeOptions {
   return {
     continuationSecurity,
     executionPolicy: {
       maxBridgeRequests: bridgeRequestLimit,
       maxInFlightBridgeRequests: bridgeRequestLimit,
+      ...executionPolicy,
     },
   };
 }

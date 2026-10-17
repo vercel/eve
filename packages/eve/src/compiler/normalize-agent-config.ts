@@ -87,6 +87,7 @@ export async function compileAgentConfig(
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
     };
+    codeMode?: CompiledAgentDefinition["codeMode"];
     defaultTools?: boolean;
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
@@ -100,6 +101,8 @@ export async function compileAgentConfig(
     name: manifest.agentId,
     source: { ...configModule },
   };
+
+  if (definition.codeMode !== undefined) compiledConfig.codeMode = definition.codeMode;
 
   if (definition.defaultTools !== undefined) {
     compiledConfig.defaultTools = definition.defaultTools;

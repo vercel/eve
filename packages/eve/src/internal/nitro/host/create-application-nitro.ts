@@ -99,7 +99,14 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
 /** Whether any agent exposes a generated-program tool that needs the workflow sandbox runtime. */
 function manifestHasWorkflowProgram(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some((node) => node.tools.some((tool) => tool.workflowProgram !== undefined));
+  return (
+    manifest.config.codeMode !== undefined ||
+    manifest.subagents.some(
+      (subagent) =>
+        subagent.configResolver !== undefined || subagent.agent.config.codeMode !== undefined,
+    ) ||
+    nodes.some((node) => node.tools.some((tool) => tool.workflowProgram !== undefined))
+  );
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {

@@ -98,7 +98,11 @@ export async function applyWorkflowTransform(
 
   return transformWorkflowDirectives({
     // The test harness authors workflow tools inside eve's own package.
-    authorizeSteps: isPackageTestFixtureModule(absoluteFilename),
+    authorizeSteps:
+      isPackageTestFixtureModule(absoluteFilename) ||
+      /\/src\/execution\/code-mode\/program-step\.[cm]?[jt]s$/.test(
+        absoluteFilename.replace(/\\/g, "/"),
+      ),
     filename,
     mode,
     moduleSpecifier,

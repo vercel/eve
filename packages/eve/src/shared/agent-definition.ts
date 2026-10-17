@@ -344,7 +344,10 @@ export type AgentToolExposure = boolean | "deferred";
  * Compiled-side agent definition. Carries a `name` because the compiler
  * stamps the path-derived `agentId` onto every compiled agent node.
  */
+export type AgentCodeModeDefinition = true | { readonly language: "js" | "py" };
+
 export type InternalAgentDefinition = {
+  codeMode?: AgentCodeModeDefinition;
   name: string;
   description?: string;
   build?: AgentBuildDefinition;
@@ -366,6 +369,8 @@ export type InternalAgentDefinition = {
  * a `name` field.
  */
 type PublicAgentDefinitionBase = {
+  /** Offer isolated program execution through eve__execute. Off when omitted. */
+  readonly codeMode?: AgentCodeModeDefinition;
   /**
    * Human-readable description of the agent's purpose. Required for
    * subagents (authored under `subagents/<id>/agent.ts`): surfaced to

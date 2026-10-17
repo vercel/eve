@@ -11,6 +11,7 @@ import {
 } from "#shared/agent-definition.js";
 
 export interface DynamicSubagentAgentConfig {
+  readonly codeMode?: import("#shared/agent-definition.js").AgentCodeModeDefinition;
   readonly compaction?: {
     readonly model?: DynamicSubagentModelReference;
     readonly thresholdPercent?: number;
@@ -51,6 +52,7 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
 
   const config: {
     compaction?: DynamicSubagentAgentConfig["compaction"];
+    codeMode?: DynamicSubagentAgentConfig["codeMode"];
     description: string;
     limits?: AgentLimitsDefinition;
     model: DynamicSubagentModelReference;
@@ -68,6 +70,8 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
       state: input.state,
     }),
   };
+
+  if (definition.codeMode !== undefined) config.codeMode = definition.codeMode;
 
   if (definition.compaction !== undefined) {
     const compaction: {

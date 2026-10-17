@@ -113,7 +113,10 @@ function normalizeInputRequest(
     case "authorization-request":
       throw new TypeError("A workflow authorization event cannot be normalized as human input.");
     case "ask":
-      return normalizeAskRequest(request.request, from, requestId);
+      const normalized = normalizeAskRequest(request.request, from, requestId);
+      return request.approval === undefined
+        ? normalized
+        : { ...normalized, action: request.approval, kind: "tool-approval" };
     default:
       return request;
   }

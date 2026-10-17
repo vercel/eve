@@ -1,3 +1,4 @@
+import { createExecuteTool } from "#execution/code-mode/tool.js";
 /**
  * The step's catalog: one table of every entry a model step can reach. Direct
  * entries go into the model's tool list next to the catalog tools the session
@@ -12,7 +13,11 @@ import { connectionToolName } from "#connections/ownership.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import type { ContextAccessor, ContextReader } from "#context/key.js";
-import { OfferedCatalogToolsKey, type OfferedCatalogTools } from "#context/keys.js";
+import {
+  DynamicSubagentAgentConfigKey,
+  OfferedCatalogToolsKey,
+  type OfferedCatalogTools,
+} from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
 import { withTaskTools } from "#execution/tasks/model-step.js";
@@ -79,6 +84,7 @@ interface CatalogTools extends OfferedCatalogTools {
  * nothing for them.
  */
 function catalogToolsFor(input: {
+  readonly codeMode?: boolean;
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly deferred: ReadonlyMap<string, HarnessToolDefinition>;
   readonly offered: OfferedCatalogTools | undefined;
@@ -89,7 +95,8 @@ function catalogToolsFor(input: {
   const connections = offered?.connections === true || input.connections.length > 0;
   const searchableSkills =
     offered?.searchableSkills === true || skills.some((skill) => skill.deferred);
-  const tools = offered?.tools === true || connections || input.deferred.size > 0;
+  const tools =
+    input.codeMode === true || offered?.tools === true || connections || input.deferred.size > 0;
   return {
     connections,
     search: tools || searchableSkills,
@@ -161,8 +168,12 @@ export function buildStepCatalog(input: {
   const skills = sessionSkills(input.ctx);
   // Entries hold only what this session sees, so a delegated session of the
   // same agent doesn't search for root-only entries it can't reach.
+  const selectedAgent = input.ctx?.get(DynamicSubagentAgentConfigKey);
+  const codeMode =
+    selectedAgent === undefined ? bundle?.resolvedAgent?.config?.codeMode : selectedAgent.codeMode;
   const catalogTools = catalogToolsFor({
     connections,
+    codeMode: codeMode !== undefined,
     deferred,
     offered: input.ctx?.get(OfferedCatalogToolsKey),
     skills,
@@ -225,6 +236,10 @@ export function buildStepCatalog(input: {
   }
   if (catalogTools.skills) {
     advertised.set(SKILL_TOOL_NAME, createSkillTool(catalog, toolEntry, catalogTools));
+  }
+  if (codeMode !== undefined) {
+    const execute = createExecuteTool(codeMode);
+    advertised.set(execute.name, execute);
   }
   return catalog;
 }
