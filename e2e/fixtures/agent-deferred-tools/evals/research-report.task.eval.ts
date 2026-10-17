@@ -11,7 +11,7 @@ export default defineEval({
     const turn = await t.send("DEFERRED-RESEARCH Alice asks for research on refunds.");
 
     turn.expectOk();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.calledTool("research_report", { count: 1, output: "RESEARCH-FINDINGS:refunds" });
     turn.event("task.started", { count: 1 });
     turn.event("call.settled", { count: 1, data: { output: "RESEARCH-FINDINGS:refunds" } });

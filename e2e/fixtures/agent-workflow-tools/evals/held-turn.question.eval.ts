@@ -15,7 +15,7 @@ export default defineEval({
     "A task's question during a held turn parks the turn, which completes once answered.",
   async test(t) {
     const parked = await t.send("WORKFLOW-ROLLOUT-HOLD");
-    t.check(parked.status, equals("waiting")).label("send() stops at the pending question");
+    t.check(parked.status, equals("awaiting-input")).label("send() stops at the pending question");
     // The hold may pause the turn before or after the task asks; the question's
     // pause, which settles the message as awaiting input, is what ends `send()`.
     parked.eventsSatisfy("the task's question parks the open turn", (events) => {
@@ -44,13 +44,13 @@ export default defineEval({
     });
     answered.notEvent("turn.started");
     answered.event("turn.settled", { count: 1, data: { outcome: "completed" } });
-    t.check(answered.message, includes(/^WORKFLOW-ROLLOUT-RESULT \{"approved":true/u)).label(
+    t.check(answered.reply, includes(/^WORKFLOW-ROLLOUT-RESULT \{"approved":true/u)).label(
       "the answered turn's result is the final reply",
     );
 
     t.event("turn.started", { count: 1 });
     t.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     t.eventsSatisfy("the parked turn resumes under its own id", staysInOneTurn);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

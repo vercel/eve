@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
+import { createSession } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 
 function createRuntime(): Runtime {
   return {
     createSession: vi.fn(),
     dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
-    dispatchSession: vi.fn(),
+    dispatchSession: vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
     getEventStream: vi.fn(),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
@@ -27,7 +28,7 @@ describe("createChannelAddress", () => {
     ).toThrow("reserved session namespace");
   });
 
-  it("sends directly through the address and returns a fixed session handle", async () => {
+  it("sends through the address and attaches a fixed handle separately from its receipt", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({
       adapter: { kind: "slack" },
@@ -37,11 +38,16 @@ describe("createChannelAddress", () => {
     });
 
     const session = await address.send("hello", { auth: null });
-    await session.clear();
+    await createSession(session.sessionId, runtime).clear();
 
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: {
         auth: null,
+        delivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: expect.any(String),
+        },
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,

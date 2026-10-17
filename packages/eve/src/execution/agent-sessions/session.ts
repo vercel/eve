@@ -270,10 +270,10 @@ function unwrapTurnEnd(end: AgentTurnEnd): AgentMessageResult<unknown> {
   return end.result;
 }
 
-const NO_REPLY = { data: undefined, message: undefined } as const;
+const NO_REPLY = { data: undefined, reply: undefined } as const;
 
-function failedTurn(error: unknown): AgentMessageResult<unknown> {
-  return { ...NO_REPLY, error: { message: toErrorMessage(error) }, status: "failed" };
+function failedTurn(error: unknown, sessionEnded = false): AgentMessageResult<unknown> {
+  return { ...NO_REPLY, sessionEnded, error: { message: toErrorMessage(error) }, status: "failed" };
 }
 
 function toAgentMessageResult(
@@ -284,14 +284,14 @@ function toAgentMessageResult(
   const { outcome } = result;
   switch (outcome.result.kind) {
     case "failed":
-      return failedTurn(outcome.result.error);
+      return failedTurn(outcome.result.error, outcome.kind === "terminal");
     case "cancelled":
-      return { ...NO_REPLY, status: "waiting" };
+      return { ...NO_REPLY, sessionEnded: outcome.kind === "terminal", status: "cancelled" };
     case "succeeded": {
       const { output } = outcome.result;
-      const status = outcome.kind === "terminal" ? "completed" : "waiting";
-      if (expectsData) return { data: output, message: undefined, status };
-      return { data: undefined, message: typeof output === "string" ? output : undefined, status };
+      const common = { status: "completed" as const, sessionEnded: outcome.kind === "terminal" };
+      if (expectsData) return { data: output, reply: undefined, ...common };
+      return { data: undefined, reply: typeof output === "string" ? output : undefined, ...common };
     }
   }
 }

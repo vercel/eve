@@ -13,7 +13,9 @@ export default defineEval({
     const request = parked.session.requireInteraction({ toolName: "lapsing_offer" });
     const startIndex = parked.session.state.streamIndex;
 
-    const lapsed = (await t.target.watchTurn(parked.sessionId, { startIndex }).result()).expectOk();
+    const lapsed = (
+      await t.target.attach(parked.sessionId, { startIndex }).watch().result()
+    ).expectOk();
     lapsed.event("interaction.settled", {
       count: 1,
       data: { interactionId: request.interactionId, outcome: "withdrawn" },

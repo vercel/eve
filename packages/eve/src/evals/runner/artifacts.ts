@@ -87,7 +87,9 @@ function buildResultLine(result: EveEvalResult): Record<string, unknown> {
     id: result.id,
     verdict: result.verdict,
     status: result.result.status,
-    output: result.result.output,
+    data: result.result.data,
+    reply: result.result.reply,
+    sessionEnded: result.result.sessionEnded,
     assertions: result.assertions,
     error: result.error,
     skipReason: result.skipReason,
@@ -99,8 +101,9 @@ function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
   return {
     id: result.id,
     result: {
-      output: result.result.output,
-      finalMessage: result.result.finalMessage,
+      data: result.result.data,
+      reply: result.result.reply,
+      sessionEnded: result.result.sessionEnded,
       sessionId: result.result.sessionId,
       status: result.result.status,
       logs: result.result.logs,

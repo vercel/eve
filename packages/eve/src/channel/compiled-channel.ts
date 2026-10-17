@@ -4,7 +4,7 @@ import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { Session } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -53,7 +53,7 @@ export interface CompiledChannel<
       readonly auth: SessionAuthContext | null;
     },
     ctx: ChannelReceiveContext<TState>,
-  ) => Promise<Session>;
+  ) => Promise<Delivery>;
   readonly turnPolicy?: TurnPolicy;
 }
 

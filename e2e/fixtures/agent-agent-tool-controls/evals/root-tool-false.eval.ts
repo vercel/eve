@@ -11,6 +11,6 @@ export default defineEval({
     turn.calledTool("invoke-self", { count: 1 });
     turn.event("child.opened", { count: 1, data: { name: "agent" } });
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -48,7 +48,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool(TOOL_NAME);
-    t.noFailedActions();
+    t.noFailedCalls();
     turn.eventsSatisfy(
       "each provider web-search request is emitted once before its result",
       (events) => providerRequestsPrecedeResults(events),

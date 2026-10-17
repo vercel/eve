@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelOperations, type ChannelSource } from "#channel/channel-operations.js";
 import type { Runtime } from "#channel/types.js";
+import { createSession } from "#channel/session.js";
 import { type Answer, parseAnswers } from "#shared/input.js";
 
 function authoredChannelRespondTypeChecks(source: ChannelSource): void {
@@ -34,7 +35,7 @@ function createRuntime(): Runtime {
       sessionId: "sess_1",
       status: "accepted",
     }),
-    dispatchSession: vi.fn(),
+    dispatchSession: vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
     getEventStream: vi.fn(),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
@@ -55,11 +56,16 @@ describe("createChannelOperations", () => {
       auth: null,
       title: "Support thread",
     });
-    await session.clear();
+    await createSession(session.sessionId, runtime).clear();
 
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: {
         auth: null,
+        delivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: expect.any(String),
+        },
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,
@@ -92,6 +98,11 @@ describe("createChannelOperations", () => {
       command: {
         auth: null,
         kind: "send",
+        delivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: expect.any(String),
+        },
         payload: { message: "hello", state: { responder: "U_AUTHOR" } },
         requestId: undefined,
         turnPolicy: "steer",
@@ -105,6 +116,11 @@ describe("createChannelOperations", () => {
       command: {
         auth: null,
         kind: "send",
+        delivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: expect.any(String),
+        },
         payload: {
           answers: [{ optionId: "approve", interactionId: "approval-1" }],
           state: { responder: "U_APPROVER" },

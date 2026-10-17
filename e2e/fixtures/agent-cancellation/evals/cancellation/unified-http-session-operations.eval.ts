@@ -58,14 +58,14 @@ export default defineEval({
     );
     const sessionId = created.sessionId!;
 
-    const initial = await t.target.watchTurn(sessionId).result();
+    const initial = await t.target.attach(sessionId).watch().result();
     initial.notEvent("turn.settled", { data: { outcome: "failed" } });
     initial.notEvent("session.ended", { data: { outcome: "failed" } });
     initial.messageIncludes(/HTTP-SESSION-INITIAL-OK/i);
 
-    const liveCancellation = t.target.watchTurn(sessionId, {
-      startIndex: initial.session.state!.streamIndex,
-    });
+    const liveCancellation = t.target
+      .attach(sessionId, { startIndex: initial.session.state!.streamIndex })
+      .watch();
     const sent = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}`,
@@ -106,10 +106,9 @@ export default defineEval({
     // Each read starts at the line after the last one read. A context change between turns
     // ends no turn, so its read ends with its settlement.
     const settlesContext = (event: { readonly type: string }) => event.type === "context.settled";
-    const liveCompaction = t.target.watchTurn(sessionId, {
-      startIndex: cancelledTurn.session.state!.streamIndex,
-      until: settlesContext,
-    });
+    const liveCompaction = t.target
+      .attach(sessionId, { startIndex: cancelledTurn.session.state!.streamIndex })
+      .watch({ until: settlesContext });
     const compacted = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/compact`,
@@ -130,10 +129,9 @@ export default defineEval({
     ]);
     compactedEvents.notEvent("turn.started");
 
-    const liveClear = t.target.watchTurn(sessionId, {
-      startIndex: compactedEvents.session.state!.streamIndex,
-      until: settlesContext,
-    });
+    const liveClear = t.target
+      .attach(sessionId, { startIndex: compactedEvents.session.state!.streamIndex })
+      .watch({ until: settlesContext });
     const cleared = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}/clear`,
@@ -157,9 +155,9 @@ export default defineEval({
     ]);
     clearedEvents.notEvent("turn.started");
 
-    const liveFollowUp = t.target.watchTurn(sessionId, {
-      startIndex: clearedEvents.session.state!.streamIndex,
-    });
+    const liveFollowUp = t.target
+      .attach(sessionId, { startIndex: clearedEvents.session.state!.streamIndex })
+      .watch();
     const followUpResponse = await postJson<AcceptedResponse>(
       t.target,
       `/eve/v1/session/${sessionId}`,
@@ -224,7 +222,7 @@ export default defineEval({
       ),
     );
 
-    const replacementTurn = await t.target.watchTurn(replacement.sessionId!).result();
+    const replacementTurn = await t.target.attach(replacement.sessionId!).watch().result();
     replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
     replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     replacementTurn.messageIncludes(/HTTP-SESSION-REPLACEMENT-OK/i);

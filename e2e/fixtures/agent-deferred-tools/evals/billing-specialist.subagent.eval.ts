@@ -11,8 +11,8 @@ export default defineEval({
     const turn = await t.send("DEFERRED-SPECIALIST Alice asks the specialist about Bob's dispute.");
 
     turn.expectOk();
-    turn.noFailedActions();
-    t.calledSubagent("billing_specialist", {
+    turn.noFailedCalls();
+    t.calledAgent("billing_specialist", {
       callId: "specialist",
       count: 1,
       output: "SPECIALIST-REVIEW: refund DSP-17",

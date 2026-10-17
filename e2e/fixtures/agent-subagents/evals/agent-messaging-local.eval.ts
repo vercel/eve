@@ -44,6 +44,6 @@ export default defineEval({
       );
     });
     t.event("child.opened", { data: { name: "agent" }, count: 1 });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

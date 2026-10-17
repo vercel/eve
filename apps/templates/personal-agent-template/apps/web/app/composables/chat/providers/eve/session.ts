@@ -62,7 +62,7 @@ export function createEveChatSession(
   }
 
   function reset() {
-    agent.value.reset();
+    agent.value.newSession();
   }
 
   async function retry() {

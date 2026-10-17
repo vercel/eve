@@ -5,10 +5,10 @@ export default defineEval({
   description: "A prewarmed workflow initializes only when its first message arrives.",
   async test(t) {
     const session = await t.session();
-    const sessionId = session.sessionId;
+    const sessionId = session.id;
     const message = `Alice opened this chat while the session warmed up. Greet her briefly and include reference ${crypto.randomUUID()}.`;
     const live = await session.start(message);
-    const observed = t.target.watchTurn(live.sessionId, { startIndex: 0 });
+    const observed = t.target.attach(live.sessionId, { startIndex: 0 }).watch();
     const [result, streamed] = await Promise.all([live.result(), observed.result()]);
 
     result.expectOk();

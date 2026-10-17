@@ -119,7 +119,7 @@ The resolver runs before the replacement's first model call, and its result ente
 
 The read and the prompt are yours to bound:
 
-- `startIndex: -2000` reads only the newest 2,000 events, and `signal` limits how long the read may take. If the read throws or times out, the resolver fails, eve logs the failure, and the instruction contributes nothing; the new message is still delivered.
+- `startIndex: -2000` reads only the newest 2,000 stored lines (each can hold several events), and `signal` limits how long the read may take. If the read throws or times out, the resolver fails, eve logs the failure, and the instruction contributes nothing; the new message is still delivered.
 - Keep the instruction's role `"user"` and label the text as historical data. Text the earlier user wrote should not reach the model as system instructions.
 - `sessions` reads any session ID, including a session that set `experimental.workflow.retention: 0`, until its data is deleted. Skip such sessions if your agent sets zero retention. Pass only the ID eve provides in `ctx.session.predecessor`, never one taken from a request or a model.
 

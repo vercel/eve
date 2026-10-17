@@ -53,10 +53,35 @@ function watch(events: readonly SessionEvent[]) {
     }),
   );
   const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
-  return manager.watchTurn("session_1", { startIndex: 0 });
+  return manager.attach("session_1", { startIndex: 0 }).watch();
 }
 
 describe("EveEvalLiveTurn", () => {
+  it("attaches without I/O and advances the same session cursor across nextTurn and watch", async () => {
+    const first = testTurnFacts(0, "First.", ["first"]);
+    const second = testTurnFacts(1, "Second.", ["second"]);
+    const response = (events: readonly SessionEvent[]) =>
+      new Response(events.map(encodeTestLine).join(""), {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      });
+    const afterTurn = first.findIndex((event) => event.type === "turn.settled") + 1;
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response(first))
+      .mockResolvedValueOnce(response([...first.slice(afterTurn), ...second]));
+    const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
+    const session = manager.attach("session_1");
+    expect(session.id).toBe("session_1");
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await session.nextTurn()).reply).toBe("First.");
+    const cursor = session.state.streamIndex;
+    expect(cursor).toBeGreaterThan(0);
+    expect((await session.watch().result()).reply).toBe("Second.");
+    expect(String(fetch.mock.calls[1]?.[0])).toContain(`startIndex=${cursor}`);
+    expect(session.state.streamIndex).toBeGreaterThan(cursor);
+    expect(Object.keys(session.view.turns)).toEqual(["turn_0", "turn_1"]);
+  });
+
   it("waits for a settled call to a tool, by default with any outcome", async () => {
     const live = watch(lookupTurn());
 

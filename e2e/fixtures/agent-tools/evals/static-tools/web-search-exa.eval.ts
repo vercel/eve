@@ -38,7 +38,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool(TOOL_NAME, { count: (count) => count >= SEARCH_COUNT });
-    t.noFailedActions();
+    t.noFailedCalls();
     turn.eventsSatisfy(
       "eight distinct web_search calls complete",
       (events) => completedDistinctCalls(events) >= SEARCH_COUNT,

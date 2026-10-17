@@ -51,7 +51,6 @@ export type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
-  GetEventStreamOptions,
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,

@@ -1,11 +1,5 @@
-import type { InteractionOutcome } from "eve/client";
-import type {
-  EveEvalAssertions,
-  EveEvalContext,
-  EveEvalSession,
-  EveEvalTurn,
-  AskedInteraction,
-} from "eve/evals";
+import type { Interaction, InteractionOutcome } from "eve/events";
+import type { EveEvalAssertions, EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
 
 import { SAY } from "../../agent/lib/hitl/respond.ts";
 
@@ -40,9 +34,9 @@ export const asBob = as(BOB);
 export const asReleaseManager = as(RELEASE_MANAGER);
 
 /** The one approval request `turn` raised for `toolName`. */
-export function approvalFor(turn: EveEvalTurn, toolName: string): AskedInteraction {
+export function approvalFor(turn: EveEvalTurn, toolName: string): Interaction {
   const matches = turn.interactions.filter(
-    (request) => (request.call?.name ?? request.kind) === toolName,
+    (request) => (request.call?.name ?? request.request.kind) === toolName,
   );
   if (matches.length !== 1) {
     throw new Error(`Expected one ${toolName} request; found ${matches.length}.`);
@@ -51,7 +45,7 @@ export function approvalFor(turn: EveEvalTurn, toolName: string): AskedInteracti
 }
 
 /** `respond` answers for the given requests, all with one option. */
-export function answers(optionId: string, ...requests: readonly AskedInteraction[]) {
+export function answers(optionId: string, ...requests: readonly Interaction[]) {
   return requests.map(({ interactionId }) => ({ optionId, interactionId }));
 }
 
@@ -120,7 +114,7 @@ export async function completeAuthorization(t: EveEvalContext, url: URL) {
 
 /** Everything the session streams from `startIndex` to the next turn boundary. */
 export function follow(t: EveEvalContext, session: EveEvalSession, startIndex: number) {
-  return t.target.watchTurn(session.sessionId, { startIndex }).result();
+  return t.target.attach(session.id, { startIndex }).watch().result();
 }
 
 /**
@@ -146,7 +140,7 @@ export function expectHeld(turn: EveEvalTurn) {
 /** `request` settled exactly once in `on`, with `outcome`. */
 export function expectResolved(
   on: EveEvalAssertions,
-  request: AskedInteraction,
+  request: Interaction,
   outcome: InteractionOutcome,
 ) {
   on.event("interaction.settled", {

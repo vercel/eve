@@ -19,7 +19,7 @@ import {
   invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openRequests, openSignIns, interaction } from "#protocol/session-reader.js";
 import {
@@ -85,7 +85,7 @@ export class WorkflowAgentInvocationExecution {
     if (current === undefined) return { type: "not_found" };
     const { invocation, stream, token } = current;
     const pendingBatch = stream?.pending;
-    if (invocation.status !== "input_required" || pendingBatch === undefined) {
+    if (invocation.status !== "awaiting-input" || pendingBatch === undefined) {
       // A retry after a lost response is the common case here: the answer
       // already landed, so acknowledge it instead of demanding a new one.
       if (stream !== undefined && replaysSettledBatch(stream, input.responses)) {
@@ -126,10 +126,12 @@ export class WorkflowAgentInvocationExecution {
     readonly auth: SessionAuthContext | null;
     readonly invocationId: string;
   }): Promise<AgentInvocation | undefined> {
-    const current = await this.read(input);
-    if (current === undefined || isTerminal(current.status)) return current;
+    const current = await this.#readCurrent(input);
+    if (current === undefined) return undefined;
+    if (isTerminal(current.invocation.status)) return current.invocation;
+    if (current.token === undefined) return undefined;
     try {
-      await getRun(input.invocationId).cancel();
+      await this.#from(current.token).cancel({ auth: input.auth });
     } catch (error) {
       if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
       throw error;
@@ -155,7 +157,8 @@ export class WorkflowAgentInvocationExecution {
       expiresAt: run.expiredAt?.toISOString(),
       invocationId: run.runId,
     };
-    if (run.status === "cancelled") return { invocation: { ...base, status: "cancelled" } };
+    if (run.status === "cancelled")
+      return { invocation: { ...base, sessionEnded: true, status: "cancelled" } };
     const stream = await readInvocationStream(input.invocationId);
     return {
       invocation: projectInvocation(base, run.status, stream),
@@ -243,7 +246,9 @@ function howItSettled(view: SessionView): InvocationStream["settled"] {
   if (ended !== undefined) return { error: ended, terminal: true };
   const turn = session.latestTurnId === undefined ? undefined : view.turns[session.latestTurnId];
   const closedAt = turn?.closedAt ?? Infinity;
-  const resumed = Object.values(view.interactions).some((row) => (row.closedAt ?? -1) > closedAt);
+  const resumed =
+    session.status !== "ended" &&
+    Object.values(view.interactions).some((row) => (row.closedAt ?? -1) > closedAt);
   if (turn?.status === "settled" && !resumed) {
     const error = turn.outcome === "failed" ? failure(view, turn.turnId) : undefined;
     if (error !== undefined) return { error, terminal: false };
@@ -298,31 +303,36 @@ function projectInvocation(
   stream: InvocationStream,
 ): AgentInvocation {
   const { result, settled } = stream;
+  const info = {
+    ...base,
+    sessionEnded:
+      stream.view.session.status === "ended" || runStatus === "completed" || runStatus === "failed",
+  };
   const failure = typeof settled === "object" ? settled : undefined;
   const failed = (): AgentInvocation => ({
-    ...base,
+    ...info,
     error: publicInvocationFailure(base.invocationId, failure?.error),
     status: "failed",
   });
   // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
   if (runStatus === "failed" || failure?.terminal === true) return failed();
-  if (runStatus === "completed") return { ...base, result, status: "completed" };
-  if (stream.signIns.length > 0) {
-    const interactions = invocationInteractions(
-      stream.signIns.map(
+  if (info.sessionEnded) {
+    if (failure !== undefined) return failed();
+    return { ...info, result, status: settled === "cancelled" ? "cancelled" : "completed" };
+  }
+  if (stream.pending !== undefined || stream.signIns.length > 0) {
+    const interactions = invocationInteractions([
+      ...(stream.pending ?? []),
+      ...stream.signIns.map(
         (row) => [row.interactionId, interaction(stream.view, row.interactionId)] as const,
       ),
-    );
-    return { ...base, interactions, pollAfterMs: 1_000, result, status: "authorization_required" };
-  }
-  if (stream.pending !== undefined) {
-    const interactions = invocationInteractions(stream.pending);
-    return { ...base, interactions, result, status: "input_required" };
+    ]);
+    return { ...info, interactions, pollAfterMs: 1_000, result, status: "awaiting-input" };
   }
   if (failure !== undefined) return failed();
-  if (settled === "cancelled") return { ...base, status: "cancelled" };
-  if (settled === "completed") return { ...base, result, status: "completed" };
-  return { ...base, pollAfterMs: 1_000, result, status: "working" };
+  if (settled === "cancelled") return { ...info, status: "cancelled" };
+  if (settled === "completed") return { ...info, result, status: "completed" };
+  return { ...info, pollAfterMs: 1_000, result, status: "working" };
 }
 
 function workingInvocation(
@@ -330,7 +340,14 @@ function workingInvocation(
   createdAt: string,
   expiresAt: string | undefined,
 ): AgentInvocation {
-  return { createdAt, expiresAt, invocationId, pollAfterMs: 1_000, status: "working" };
+  return {
+    createdAt,
+    expiresAt,
+    invocationId,
+    sessionEnded: false,
+    pollAfterMs: 1_000,
+    status: "working",
+  };
 }
 
 function publicInvocationFailure(

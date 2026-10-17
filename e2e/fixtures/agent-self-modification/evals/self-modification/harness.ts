@@ -188,7 +188,7 @@ export class SelfModificationHarness {
       started.data.sessionId,
       typeof message === "string" ? message : undefined,
     );
-    this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
+    this.#t.calledAgent(SELF_MODIFICATION_AGENT);
     return { child, parent, session: liveParent.session };
   }
 
@@ -331,7 +331,7 @@ export class SelfModificationHarness {
         .streamIndex ?? 0;
     for (let turns = 0; turns < 16; turns++) {
       this.#t.signal.throwIfAborted();
-      const live = this.#t.target.watchTurn(sessionId, { startIndex });
+      const live = this.#t.target.attach(sessionId, { startIndex }).watch();
       this.#turns.add(live);
       const turn = await live.result();
       turn.expectOk();
@@ -346,7 +346,7 @@ export class SelfModificationHarness {
         )
       )
         return turn;
-      if (turn.status !== "waiting") break;
+      if (turn.sessionEnded) break;
       startIndex = live.session.state.streamIndex;
     }
     throw new Error("Self-modification child did not receive the delegated message.");

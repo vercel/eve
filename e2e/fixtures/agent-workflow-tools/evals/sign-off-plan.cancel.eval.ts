@@ -17,7 +17,7 @@ export default defineEval({
   timeoutMs: 90_000,
   async test(t) {
     const parked = await t.send("WORKFLOW-SIGNOFF-HOLD");
-    t.check(parked.status, equals("waiting")).label("send() stops at the pending question");
+    t.check(parked.status, equals("awaiting-input")).label("send() stops at the pending question");
     const request = parked.session.requireInteraction({ toolName: "sign_off_plan" });
     const afterQuestion = parked.session.state.streamIndex;
 
@@ -31,7 +31,8 @@ export default defineEval({
 
     // Follow the stream as a channel does: the question closes once, with the stretch it asked in.
     const followed = await t.target
-      .watchTurn(parked.sessionId, { startIndex: afterQuestion })
+      .attach(parked.sessionId, { startIndex: afterQuestion })
+      .watch()
       .result();
     followed.event("interaction.settled", {
       count: 1,
@@ -68,6 +69,6 @@ export default defineEval({
         taskIds.size === 1
       );
     });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -10,7 +10,7 @@ export default defineEval({
       prompt: (prompt) => /Which environment/iu.test(prompt),
       toolName: "ask_question",
     });
-    const staging = question.options?.find((option) => option.label === "Staging");
+    const staging = question.request.options?.find((option) => option.label === "Staging");
     if (staging === undefined) throw new Error("ask_question did not offer Staging.");
 
     const resumed = await parked.session.respond([
@@ -26,6 +26,6 @@ export default defineEval({
     resumed.messageIncludes("Question answered");
     resumed.notEvent("model.settled", { data: { outcome: "failed" } });
     resumed.notEvent("turn.settled", { data: { outcome: "failed" } });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -252,7 +252,7 @@ turn.expectOk();
 turn.calledTool("list_tasks", { status: "failed", count: 1 });
 ```
 
-The eval can pass when the agent handles the failure correctly. `noFailedActions()` still rejects the failed call, so use explicit assertions for expected failures. Stub infrastructure and response-processing failures still fail verification.
+The eval can pass when the agent handles the failure correctly. `noFailedCalls()` still rejects the failed call, so use explicit assertions for expected failures. Stub infrastructure and response-processing failures still fail verification.
 
 This works for ordinary tools, workflow tools, whole-agent replacements, and qualified connection operations. An exception in a persistent workflow tool ends that task; retry with a new call, rather than its failed task ID. Normal approvals apply before an outcome is consumed.
 

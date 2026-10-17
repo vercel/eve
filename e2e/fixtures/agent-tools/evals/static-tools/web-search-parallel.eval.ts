@@ -40,7 +40,7 @@ export default defineEval({
       "at least eight completed web_search calls",
       (events) => completedToolResultCount(events, TOOL_NAME) >= MIN_COMPLETED_SEARCHES,
     );
-    t.noFailedActions();
+    t.noFailedCalls();
     for (const winner of EXPECTED_WINNERS) {
       turn.messageIncludes(winner);
     }

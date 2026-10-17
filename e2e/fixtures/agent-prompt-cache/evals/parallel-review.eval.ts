@@ -42,7 +42,7 @@ export default ["first", "later"].map((launchTurn) =>
 
 function expectFiveReviewers(started: EveEvalTurn) {
   expectHealthyTurn(started);
-  started.calledSubagent("reviewer", { status: "completed", count: 5 });
+  started.calledAgent("reviewer", { status: "completed", count: 5 });
   const launchSteps = started.events.flatMap((event) =>
     event.type === "call.requested" &&
     event.data.capability.kind === "agent" &&
@@ -56,7 +56,7 @@ function expectFiveReviewers(started: EveEvalTurn) {
 }
 
 function expectReviewSummary(turn: EveEvalTurn) {
-  assert(turn.message?.trim(), "parent reports the completed reviews");
+  assert(turn.reply?.trim(), "parent reports the completed reviews");
   // The task prompt lets the parent tell the person the reviews have started before the summary.
   turn.event("model.settled", {
     data: { finishReason: "stop" },
@@ -72,7 +72,7 @@ async function expectParallelReviews(t: EveEvalContext, turn: EveEvalTurn) {
   const childIds = sessions.map(({ data }) => data.sessionId);
   assert.equal(childIds.length, 5, "no repeated delegation");
   assert.equal(new Set(childIds).size, 5, "five distinct child sessions");
-  const children = await Promise.all(childIds.map((id) => t.target.watchTurn(id).result()));
+  const children = await Promise.all(childIds.map((id) => t.target.attach(id).watch().result()));
   const reviews = children.map((child) => {
     expectHealthyTurn(child);
     return reviewSchema.parse(child.requireToolCall("review_sheet").output);

@@ -42,7 +42,7 @@ export default defineEval({
     ).label("the report task completes");
     const reportIds = settled.flatMap((settlement) => reportIdOf(settlement) ?? []);
     t.check(
-      turn.message,
+      turn.reply,
       satisfies(
         (reply: string | undefined) =>
           reportIds.length === 1 && reply?.includes(reportIds[0]!) === true,
@@ -57,6 +57,6 @@ export default defineEval({
         "Alice's unrelated question gets an answer",
       ),
     );
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

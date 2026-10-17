@@ -2,7 +2,8 @@ import { type ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { Session, SessionHandle } from "#channel/session.js";
+import type { SessionHandle } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
@@ -96,7 +97,7 @@ export interface GenericChannelDefinition<
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
 
   readonly events?: TEvents;
 

@@ -29,14 +29,14 @@ export default defineEval({
     // The denial returns to the model as context; real models paraphrase it,
     // so judge the acknowledgment instead of matching literal wording.
     t.judge("The reply acknowledges that the guarded-echo tool call was denied and did not run.", {
-      on: denied.message,
+      on: denied.reply,
     }).atLeast(0.5);
 
     await session.send('Call the guarded-echo tool once more with note "retry-call".');
     // Denial does not grant: the follow-up call must re-park.
     session.requireInteraction({ toolName: "guarded-echo" });
 
-    t.parked();
+    t.awaitingInput();
     t.calledTool("guarded-echo", { status: "rejected", count: 1 });
     t.calledTool("guarded-echo", { status: "pending", count: 1 });
   },

@@ -27,12 +27,11 @@ export default defineEval({
     const session = shown.session;
 
     // A compaction between turns runs no turn, so the read ends when the compaction settles.
-    const liveCompaction = t.target.watchTurn(session.sessionId, {
-      startIndex: session.state!.streamIndex,
-      until: (event) => event.type === "context.settled",
-    });
+    const liveCompaction = t.target
+      .attach(session.id, { startIndex: session.state!.streamIndex })
+      .watch({ until: (event) => event.type === "context.settled" });
     const response = await t.target.fetch(
-      `/eve/v1/session/${encodeURIComponent(session.sessionId)}/compact`,
+      `/eve/v1/session/${encodeURIComponent(session.id)}/compact`,
       { body: "{}", headers: { "content-type": "application/json" }, method: "POST" },
     );
     if (!response.ok) {
@@ -54,7 +53,7 @@ export default defineEval({
         "left to right, comma-separated.",
     );
     reopened.expectOk();
-    reopened.noFailedActions();
+    reopened.noFailedCalls();
     reopened.calledTool("read_file", { count: 1 });
     reopened.notCalledTool(TOOL_NAME);
     t.eventsSatisfy("the reopened image answers the follow-up", (events) => {

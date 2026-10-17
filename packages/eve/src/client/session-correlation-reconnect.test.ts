@@ -48,7 +48,7 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
         streamReconnectPolicy: {},
       })
     ).result();
-    expect(result.message).toBe("NEW");
+    expect(result.reply).toBe("NEW");
     expect(resumed.state.streamIndex).toBe(old.length + current.length);
     expect(String(fetch.mock.calls[2]?.[0])).toContain(`startIndex=${old.length}`);
     expect(resolveHeaders).toHaveBeenCalledTimes(3);
@@ -94,8 +94,8 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
     const resumed = session();
     const first = await resumed.send("first");
     const second = await resumed.send("second");
-    expect((await second.result()).message).toBe("SECOND");
-    expect((await first.result()).message).toBe("FIRST");
+    expect((await second.result()).reply).toBe("SECOND");
+    expect((await first.result()).reply).toBe("FIRST");
     expect(resumed.state.streamIndex).toBe(events.length);
   });
 

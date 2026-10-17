@@ -3,7 +3,9 @@ import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
-import { createSession, type Session } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { commandDelivery } from "#channel/delivery.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
@@ -50,7 +52,7 @@ export interface ScheduleDispatchInput {
 }
 /** Sessions started by dispatch and background work registered by the handler. */
 export interface ScheduleDispatchResult {
-  readonly sessions: readonly Session[];
+  readonly sessions: readonly Delivery[];
   readonly waitUntilTasks: readonly Promise<unknown>[];
 }
 export interface ScheduleCollectionDispatchInput {
@@ -185,10 +187,10 @@ export class ScheduleDispatcher {
 
   private createHandlerContext(runtime = this.runtime): {
     args: ScheduleHandlerArgs;
-    sessions: Session[];
+    sessions: Delivery[];
     waitUntilTasks: Promise<unknown>[];
   } {
-    const sessions: Session[] = [];
+    const sessions: Delivery[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
     const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels));
     return {
@@ -213,13 +215,22 @@ export class ScheduleDispatcher {
     };
   }
 
-  private async runMarkdown(markdown: string): Promise<Session> {
+  private async runMarkdown(markdown: string): Promise<Delivery> {
+    const delivery = createChannelDeliveryMetadata({
+      channelKind: "schedule",
+      channelName: "schedule",
+    });
     const handle = await this.runtime.createSession({
+      delivery,
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
     });
-    return createSession(handle.sessionId, this.runtime);
+    return commandDelivery(
+      this.runtime,
+      { status: "accepted", sessionId: handle.sessionId },
+      delivery.deliveryId,
+    );
   }
 }
 

@@ -25,6 +25,6 @@ export default defineEval({
       turn.event("call.settled", { count: 1, data: { callId, outcome: "completed" } });
     }
     turn.messageIncludes(`WORKFLOW-NOTES-RESULT 1 ${JSON.stringify(NOTES)}`);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -6,9 +6,9 @@ export default defineEval({
   async test(t) {
     const selected = await t.send("E2E_DYNAMIC_SUBAGENT_CATALOG");
     selected.expectOk();
-    selected.calledSubagent("conditional-marker", { count: 1 });
+    selected.calledAgent("conditional-marker", { count: 1 });
     selected.messageIncludes("DYNAMIC_SUBAGENT_ENABLED");
     selected.notEvent("child.opened", { data: { name: "omitted-marker" } });
-    selected.noFailedActions();
+    selected.noFailedCalls();
   },
 });

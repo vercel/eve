@@ -1,3 +1,4 @@
+import type { Delivery } from "#shared/delivery.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
@@ -5,7 +6,6 @@ import {
   attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
-  type AcceptedDelivery,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
@@ -15,7 +15,6 @@ import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { ClientSession } from "#client/session.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type {
-  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -47,23 +46,26 @@ export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
  */
 export interface UseEveAgentHelpers extends UseEveAgentSnapshot {
   /** Requests durable cancellation of the active turn while continuing to receive its events. */
-  readonly cancel: () => Promise<CancelSessionResult>;
+  readonly cancel: () => Promise<Delivery>;
   /** Resolves at the durable tail; the session stream keeps following afterward. */
   readonly resume: () => Promise<void>;
   /** Creates the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
   /** Resets the session: detaches any local stream and clears events and projected data. */
-  readonly reset: () => void;
+  readonly newSession: () => void;
+  readonly reset: () => Promise<Delivery>;
+  readonly clear: () => Promise<Delivery>;
+  readonly compact: () => Promise<Delivery>;
   /** Resolves on acceptance. Use `turnPolicy` to steer or queue during a running turn. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ) => Promise<AcceptedDelivery>;
+  ) => Promise<Delivery<TOutput>>;
   /** Submits answers to open interactions and resolves on acceptance, not execution. */
   readonly respond: <TOutput = unknown>(
     answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ) => Promise<AcceptedDelivery>;
+  ) => Promise<Delivery<TOutput>>;
 }
 
 /**
@@ -231,8 +233,11 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelper
   }, [store]);
 
   const cancel = useCallback(() => store.cancel(), [store]);
-  const reset = useCallback(() => {
-    store.reset();
+  const reset = useCallback(() => store.reset(), [store]);
+  const clear = useCallback(() => store.clear(), [store]);
+  const compact = useCallback(() => store.compact(), [store]);
+  const newSession = useCallback(() => {
+    store.newSession();
     setPrewarmResetGeneration((generation) => generation + 1);
   }, [store]);
   const prewarm = useCallback(() => store.prewarm(), [store]);
@@ -259,12 +264,15 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelper
     () => ({
       ...visibleSnapshot,
       cancel,
+      clear,
+      compact,
+      newSession,
       prewarm,
       reset,
       respond,
       resume,
       send,
     }),
-    [cancel, prewarm, reset, respond, resume, send, visibleSnapshot],
+    [cancel, clear, compact, newSession, prewarm, reset, respond, resume, send, visibleSnapshot],
   );
 }

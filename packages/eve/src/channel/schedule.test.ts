@@ -215,7 +215,7 @@ describe("ScheduleDispatcher", () => {
       );
       expect(SCHEDULE_ADAPTER.kind).toBe(SCHEDULE_ADAPTER_KIND);
       expect(result.sessions).toHaveLength(1);
-      expect(result.sessions[0]!.id).toBe("mock-session-id");
+      expect(result.sessions[0]!.sessionId).toBe("mock-session-id");
       expect(result.waitUntilTasks).toHaveLength(0);
     });
     it("propagates runtime.createSession failures", async () => {

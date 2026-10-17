@@ -8,7 +8,6 @@ import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
 import type { TurnPolicy } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
-import type { Interaction } from "#protocol/session-reader.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 export type { HealthResult } from "#client/health-schema.js";
@@ -144,7 +143,7 @@ export interface SendTurnOptions<TOutput = unknown> {
    *
    * The client lowers Standard Schema implementations (Zod, Valibot,
    * ArkType, etc.) to JSON Schema before sending the request. The server is
-   * authoritative for validation; {@link MessageResult.data} is typed to this
+   * authoritative for validation; {@link DeliveryResult.data} is typed to this
    * schema's output type and is not revalidated client-side.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, TOutput> | JsonObject;
@@ -168,7 +167,7 @@ export interface SendTurnOptions<TOutput = unknown> {
 }
 
 /** Options for answering pending HITL input requests on a client session. */
-export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
+export type RespondTurnOptions<TOutput = unknown> = Omit<SendTurnOptions<TOutput>, "turnPolicy">;
 
 /** @internal Transport envelope used by stores and command adapters. */
 export type SendTurnPayload<TOutput = unknown> =
@@ -178,6 +177,7 @@ export type SendTurnPayload<TOutput = unknown> =
     })
   | (RespondTurnOptions<TOutput> & {
       readonly answers: readonly Answer[];
+      readonly turnPolicy?: never;
       readonly message?: never;
     });
 
@@ -209,35 +209,7 @@ export interface ResolvedStreamReconnectPolicy {
 /** Automatic stream reconnection configuration. */
 export type StreamReconnectPolicy = ResolvedStreamReconnectPolicy | { readonly reconnect: false };
 
-/**
- * Options for {@link ClientSession.stream}.
- */
-export interface StreamOptions {
-  /**
-   * Reconnection policy for the event stream. Omit to use the default policy,
-   * or pass `{ reconnect: false }` when the caller owns cursor recovery.
-   */
-  readonly streamReconnectPolicy?: StreamReconnectPolicy;
-
-  /**
-   * Position of the line to start from. Negative values read relative to the
-   * current tail (`-1` starts at the latest line).
-   */
-  readonly startIndex?: number;
-
-  /**
-   * Follow the live stream after the durable tail (default). Pass `false`
-   * for a bounded catch-up read: yields events until the cursor passes the
-   * tail observed when the stream opened, then returns instead of
-   * following. Requires a nonnegative start cursor.
-   */
-  readonly follow?: boolean;
-
-  /**
-   * Abort signal for cancelling the stream.
-   */
-  readonly signal?: AbortSignal;
-}
+export type { SessionStreamOptions } from "#shared/session.js";
 
 /** Result of requesting cancellation for a client session's active turn. */
 export type CancelSessionResult = CancelTurnResult;
@@ -278,50 +250,7 @@ export type ResetResult =
       readonly status: Extract<ResetStatus, "no_active_session">;
     };
 
-/**
- * Aggregated result of one message turn, returned by
- * {@link MessageResponse.result}.
- */
-export interface MessageResult<TOutput = unknown> {
-  /**
-   * Final structured result emitted by the harness, when this turn requested
-   * an output schema and the server fulfilled it.
-   */
-  readonly data: TOutput | undefined;
-
-  /**
-   * The reply's text: the text parts the turn's `turn.settled` lists as its reply, or `undefined`
-   * when the response ended without one.
-   */
-  readonly message: string | undefined;
-
-  /**
-   * All events received during this turn.
-   */
-  readonly events: SessionStreamEvent[];
-
-  /**
-   * HITL input requests emitted in this response and still open at its boundary.
-   * Earlier requests may remain open in the same session.
-   */
-  readonly interactions: readonly Interaction[];
-
-  /**
-   * The session ID for this turn. Always populated; the post-turn handler
-   * rejects responses that do not assign a session id.
-   */
-  readonly sessionId: string;
-
-  /**
-   * How the response ended.
-   *
-   * - `"waiting"`: the session stays open, for the next message or for a person's answer
-   *   (`interactions`).
-   * - `"completed"`: the session ended (`session.ended`).
-   * - `"failed"`: its turn or the session failed.
-   */
-  readonly status: "completed" | "failed" | "waiting";
-}
+export type { Delivery, DeliveryResult } from "#shared/delivery.js";
 
 /**
  * Response from the health endpoint.

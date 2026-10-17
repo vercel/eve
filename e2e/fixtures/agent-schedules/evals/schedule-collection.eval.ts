@@ -76,7 +76,8 @@ export default defineEval({
         : undefined;
     if (typeof sessionId !== "string")
       throw new Error("Dynamic invocation did not return its dispatched session.");
-    const scheduled = await t.target.attachSession(sessionId);
+    const scheduled = t.target.attach(sessionId);
+    await scheduled.nextTurn();
     scheduled.succeeded();
     scheduled.calledTool("record-email", {
       input: { to: "alice@example.test", subject: "Updated note" },

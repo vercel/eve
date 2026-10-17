@@ -209,9 +209,10 @@ function runtimeWith(
 describe("invokeTool", () => {
   it.each([
     ["missing", {}, "failed", undefined],
-    ["echo", { text: 7 }, "rejected", "invalid-input"],
+    ["echo", { text: 7 }, "failed", undefined],
     ["approve", {}, "rejected", "approval-required"],
-    ["sign-in", {}, "rejected", "authorization-required"],
+    ["sign-in", {}, "rejected", "sign-in-required"],
+    ["denied", {}, "rejected", "Release blocked."],
     ["echo", { text: "Alice's report" }, "completed", undefined],
   ] as const)(
     "publishes the caller's actual outcome for %s",
@@ -240,6 +241,9 @@ describe("invokeTool", () => {
       const runtime = runtimeWith([
         tool("echo", (value) => value),
         tool("approve", () => "not executed", { approval: () => "user-approval" }),
+        tool("denied", () => "not executed", {
+          approval: () => ({ type: "denied", reason: "Release blocked." }),
+        }),
         tool("sign-in", () =>
           requestAuthorization([
             {
@@ -258,6 +262,7 @@ describe("invokeTool", () => {
         reason,
         idempotencyKey: events[0]!.idempotencyKey,
       });
+      if (name === "denied") expect(events[1]).toHaveProperty("cause", { policy: "approval" });
       expect(events[0]).toMatchObject({
         type: "call.requested",
         capability: { kind: "tool", name },
@@ -286,19 +291,19 @@ describe("invokeTool", () => {
 
   it("evaluates the approval policy and never asks anyone", async () => {
     const policies: Array<[ApprovalPolicy, object, boolean]> = [
-      [() => "user-approval", { status: "approval-required" }, false],
+      [() => "user-approval", { outcome: "rejected", reason: "approval-required" }, false],
       [
         () => ({ reason: "Read-only mode.", type: "denied" }),
-        { reason: "Read-only mode.", status: "denied" },
+        { reason: "Read-only mode.", outcome: "rejected" },
         false,
       ],
-      [() => "not-applicable", { output: "ran", status: "completed" }, true],
-      [() => true, { status: "approval-required" }, false],
-      [() => false, { output: "ran", status: "completed" }, true],
+      [() => "not-applicable", { output: "ran", outcome: "completed" }, true],
+      [() => true, { outcome: "rejected", reason: "approval-required" }, false],
+      [() => false, { output: "ran", outcome: "completed" }, true],
       [
         () => ({ type: "approved", reason: "Within the team's policy." }),
         {
-          status: "completed",
+          outcome: "completed",
           output: "ran",
           modelOutput: { type: "text", value: "ran" },
         },
@@ -319,15 +324,16 @@ describe("invokeTool", () => {
       web_fetch: "framework",
     });
     expect(await invokeTool(runtime, "missing", {}, { auth: alice })).toMatchObject({
-      message: 'The agent has no tool named "missing".',
-      status: "failed",
+      error: { message: 'The agent has no tool named "missing".' },
+      outcome: "failed",
     });
     expect(await invokeTool(runtime, "web_fetch", {}, { auth: alice })).toMatchObject({
-      message: expect.stringContaining("framework tool"),
-      status: "failed",
+      error: { message: expect.stringContaining("framework tool") },
+      outcome: "failed",
     });
     expect(await invokeTool(runtime, "note", { text: 7 }, { auth: alice })).toMatchObject({
-      status: "invalid-input",
+      outcome: "failed",
+      error: { code: "INVALID_INPUT" },
     });
     expect(execute).not.toHaveBeenCalled();
   });
@@ -337,15 +343,18 @@ describe("invokeTool", () => {
     const runtime = runtimeWith([tool("note", execute)]);
     for (const input of [[1], "plain", 7, true]) {
       expect(await invokeTool(runtime, "note", input, { auth: alice })).toMatchObject({
-        message: expect.stringContaining('Invalid input for tool "note"'),
-        status: "invalid-input",
+        error: {
+          code: "INVALID_INPUT",
+          message: expect.stringContaining('Invalid input for tool "note"'),
+        },
+        outcome: "failed",
       });
     }
     expect(execute).not.toHaveBeenCalled();
     for (const input of [undefined, null, ""]) {
       expect(await invokeTool(runtime, "note", input, { auth: alice })).toMatchObject({
         output: {},
-        status: "completed",
+        outcome: "completed",
       });
     }
   });
@@ -362,7 +371,7 @@ describe("invokeTool", () => {
 
     expect(await invokeTool(runtime, "write", { text: "a" }, { auth: alice })).toMatchObject({
       output: "alice",
-      status: "completed",
+      outcome: "completed",
     });
     await invokeTool(runtime, "write", { text: "b" }, { auth: alice });
     await invokeTool(runtime, "plain", {}, { auth: alice });
@@ -399,7 +408,7 @@ describe("invokeTool", () => {
     // Let a start that outlived the call settle before checking what it left behind.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(await result).toMatchObject({ status: "failed" });
+    expect(await result).toMatchObject({ outcome: "failed" });
     expect(deleted).toHaveBeenCalledTimes(1);
     await shutdownActiveSandboxHandles();
     expect(shutdown).not.toHaveBeenCalled();
@@ -413,7 +422,7 @@ describe("invokeTool", () => {
 
     // Concurrent first calls converge on one sandbox; later calls reuse it.
     const first = await Promise.all([note("a", alice, "desk"), note("b", alice, "desk")]);
-    expect(first.map((result) => result.status)).toEqual(["completed", "completed"]);
+    expect(first.map((result) => result.outcome)).toEqual(["completed", "completed"]);
     expect(starts).toHaveLength(1);
     expect(await note("c", alice, "desk")).toMatchObject({
       output: expect.stringMatching(/^[ab]{1,2}c$/u),
@@ -472,11 +481,11 @@ describe("invokeTool", () => {
     await vi.waitFor(() => expect(handles).toHaveLength(1));
     // An overlapping call reopens the same sandbox through its own handle and
     // releases only that one when it ends; the first call's handle stays open.
-    expect(await note("b")).toMatchObject({ status: "completed" });
+    expect(await note("b")).toMatchObject({ outcome: "completed" });
     expect(handles).toHaveLength(2);
     expect(released).toEqual([handles[1]]);
     openGate();
-    expect(await holding).toMatchObject({ status: "completed" });
+    expect(await holding).toMatchObject({ outcome: "completed" });
     expect(released).toEqual([handles[1], handles[0]]);
     // The sandbox itself is neither stopped nor tracked for shutdown any more.
     expect(stopped).not.toHaveBeenCalled();
@@ -494,7 +503,7 @@ describe("invokeTool", () => {
         {},
         { auth: alice, key: "desk" },
       ),
-    ).toMatchObject({ status: "failed" });
+    ).toMatchObject({ outcome: "failed" });
     expect(handles).toHaveLength(3);
     expect(released).toHaveLength(3);
   });
@@ -512,7 +521,7 @@ describe("invokeTool", () => {
         {},
         { auth: alice, key: "desk" },
       ),
-    ).toMatchObject({ status: "failed" });
+    ).toMatchObject({ outcome: "failed" });
     expect(released).toEqual(handles);
     expect(handles).toHaveLength(1);
   });
@@ -530,26 +539,29 @@ describe("invokeTool", () => {
 
     expect(await invokeTool(runtime, "note", {}, { auth: anonymous, key: "desk" })).toEqual({
       reason: expect.stringContaining("anonymous caller cannot send a key"),
-      status: "denied",
+      outcome: "rejected",
     });
     expect(execute).not.toHaveBeenCalled();
     expect(starts).toHaveLength(0);
     // Without a key the anonymous caller still gets a one-off call.
     expect(await invokeTool(runtime, "note", {}, { auth: anonymous })).toMatchObject({
       output: "ran",
-      status: "completed",
+      outcome: "completed",
     });
   });
 
   it("refuses a keyed sandbox on a provider that cannot keep it, and an empty key", async () => {
     const runtime = runtimeWith([noteTool()], sandboxes().registry);
     expect(await invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "desk" })).toEqual({
-      message: expect.stringContaining('Sandbox provider "memory" cannot keep a sandbox'),
-      status: "failed",
+      error: {
+        code: "TOOL_FAILED",
+        message: expect.stringContaining('Sandbox provider "memory" cannot keep a sandbox'),
+      },
+      outcome: "failed",
     });
     expect(await invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "" })).toEqual({
-      message: "The tool session key must not be empty.",
-      status: "invalid-input",
+      error: { code: "INVALID_INPUT", message: "The tool session key must not be empty." },
+      outcome: "failed",
     });
   });
 
@@ -568,9 +580,9 @@ describe("invokeTool", () => {
     failSelector = true;
     expect(
       await invokeTool(runtime, "note", { text: "b" }, { auth: alice, key: "desk" }),
-    ).toMatchObject({ status: "failed" });
+    ).toMatchObject({ outcome: "failed" });
     openGate();
-    expect(await holding).toMatchObject({ output: "a", status: "completed" });
+    expect(await holding).toMatchObject({ output: "a", outcome: "completed" });
     expect(deleted).not.toHaveBeenCalled();
   });
 });

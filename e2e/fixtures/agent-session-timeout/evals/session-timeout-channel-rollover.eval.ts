@@ -1,7 +1,7 @@
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
-interface MessageResponse {
+interface Delivery {
   readonly sessionId?: string;
 }
 
@@ -28,25 +28,26 @@ export default defineEval({
 
   async test(t) {
     const threadId = crypto.randomUUID();
-    const initial = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const initial = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "SLOW-TURN",
     });
     await t.require(
       initial,
       satisfies(
-        (value: MessageResponse) => typeof value.sessionId === "string",
+        (value: Delivery) => typeof value.sessionId === "string",
         "the channel starts the initial session",
       ),
     );
     const expiredSessionId = initial.sessionId!;
 
-    const activeTurn = await t.target.watchTurn(expiredSessionId).result();
+    const activeTurn = await t.target.attach(expiredSessionId).watch().result();
     activeTurn.expectOk();
     activeTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
-    await t.require(activeTurn.message, equals("timeout-ack:SLOW-TURN"));
+    await t.require(activeTurn.reply, equals("timeout-ack:SLOW-TURN"));
 
     const terminal = await t.target
-      .watchTurn(expiredSessionId, { startIndex: activeTurn.session.state!.streamIndex })
+      .attach(expiredSessionId, { startIndex: activeTurn.session.state!.streamIndex })
+      .watch()
       .result();
     await t.require(terminal.status, equals("completed"));
     terminal.event("session.ended", { data: { outcome: "completed" } });
@@ -62,22 +63,22 @@ export default defineEval({
     }
     await t.require(owner.sessionId, equals(null));
 
-    const replacement = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const replacement = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "REPLACEMENT-TURN",
     });
     await t.require(
       replacement,
       satisfies(
-        (value: MessageResponse) =>
+        (value: Delivery) =>
           typeof value.sessionId === "string" && value.sessionId !== expiredSessionId,
         "the expired channel thread starts a fresh session",
       ),
     );
 
-    const replacementTurn = await t.target.watchTurn(replacement.sessionId!).result();
+    const replacementTurn = await t.target.attach(replacement.sessionId!).watch().result();
     replacementTurn.expectOk();
     replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
     replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
-    await t.require(replacementTurn.message, equals("timeout-ack:REPLACEMENT-TURN"));
+    await t.require(replacementTurn.reply, equals("timeout-ack:REPLACEMENT-TURN"));
   },
 });

@@ -3,40 +3,38 @@ title: "Streaming"
 description: "Consume eve client stream events live, reconnect by line position, and aggregate turn results."
 ---
 
-Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
+`ClientSession.send()` posts a message and returns a `Delivery` when the server accepts it. The receipt has its own `sessionId` and `deliveryId`; it does not wait for a reply. Call `result()` to aggregate its stream, or iterate it live.
 
-Once `send()` is accepted, `response.cancel()` requests cooperative cancellation of that exact turn. Start consuming the response first; cancellation waits for the stream to identify the turn, guards the request with its ID, and never targets a later turn. The result status is `accepted` when the live session durably queues the command. A response that settles before a turn starts returns `no_active_turn`:
+Session controls return deliveries too. `session.cancel({ turnId })` targets an observed turn, so a late cancellation cannot stop unrelated later work. Omitting `turnId` cancels the current work. For example, cancel as soon as this message reaches a turn:
 
 ```ts
-const { response } = await client.sessions.create({ message: "Run the long operation." });
+const { session, response } = await client.sessions.create({ message: "Run the long operation." });
 
-const resultPromise = response.result();
-const cancellation = await response.cancel();
-if (cancellation.status === "accepted") {
-  console.log(cancellation.sessionId);
+for await (const event of response) {
+  if (
+    event.type === "delivery.consumed" &&
+    event.data.deliveryId === response.deliveryId &&
+    event.data.turnId !== undefined
+  ) {
+    const cancellation = await session.cancel({ turnId: event.data.turnId });
+    await cancellation.result();
+  }
 }
-
-const result = await resultPromise;
 ```
 
-The cancellation result is discriminated by `status`: only `accepted` includes
-`sessionId`; `no_active_turn` has no session identity field.
+The cancellation delivery settles when the command is applied, including a no-op for a turn that already ended. Continue reading the original message's delivery to observe its outcome and advance its cursor. A live idle session also accepts cancellation; it does not return a separate `no_active_turn` result.
 
-Cancellation does not replace stream consumption. Continue reading the response to observe its `turn.settled` with `outcome: "cancelled"` and its delivery's settlement and to advance the client session cursor normally. Use `session.cancel({ turnId })` instead when you have only a fixed session handle and an observed turn ID.
-
-Between turns, `session.compact()` queues context compaction without sending model input. An accepted request reports the session id; consume the durable stream through its `context.settled` before sending the next turn. A `context.settled` with `outcome: "completed"` confirms that summarization succeeded; otherwise eve preserves the previous history, including when the model returns an empty summary. A never-started session returns `no_active_session` as a successful no-op.
+Between turns, `session.compact()` queues context compaction without sending model input. `session.clear()` removes model-message history while retaining the session and its durable resources. Await their deliveries before sending another turn:
 
 ```ts
 const compaction = await session.compact();
-console.log(compaction.status);
-```
+const compacted = await compaction.result();
 
-Use `session.clear()` to remove model-message history while retaining the session and its durable resources. Consume its `context.settled` (`kind: "clear"`) before sending the next turn.
-
-```ts
 const cleared = await session.clear();
-console.log(cleared.status);
+await cleared.result();
 ```
+
+Inspect `context.settled` in `compacted.events` to check whether summarization succeeded. A failed or empty summary preserves the previous history. `session.reset()` instead retires the session; its delivery settles after retirement and address release.
 
 ## Aggregate a turn
 
@@ -47,26 +45,27 @@ const response = await session.send("Summarize the latest forecast.");
 const result = await response.result();
 
 console.log(result.status);
-console.log(result.message);
+console.log(result.reply);
 console.log(result.events.length);
 ```
 
 This consumes the stream until the message's delivery settles (`delivery.settled` for its
 `deliveryId`), finishing that line, or until the session ends first. A delivery settles when the
 turn that consumed it settles (`handled`), or when the turn pauses on a person
-(`awaiting-input`), such as for an approval or question. A sign-in pauses the turn too, but the
-response stays attached through it; see [authorization pauses](#authorization-pauses).
+(`awaiting-input`), such as for an approval, question, or sign-in. See
+[authorization pauses](#authorization-pauses).
 
 A turn that waits on its [tasks](/docs/tools/workflows#run-calls-as-tasks-task) stays open:
 `result()` keeps reading to its final reply. The text the model wrote before the wait is
 narration, not the reply. When a call the turn runs asks a question, such as a workflow tool's
-`ctx.ask()`, `result()` returns `status: "waiting"` with the question in `interactions`. Answer it
+`ctx.ask()`, `result()` returns `status: "awaiting-input"` with the question in `interactions`. Answer it
 with `respond()`, which keeps reading the same turn. A question stays pending until its
 `interaction.settled`, which the session you answer on also emits for a subagent's or workflow
 tool's question.
 
-`result().status` is `"waiting"` while the session stays open for the next message or an answer,
-`"completed"` once the session ended, and `"failed"` when the turn or session failed.
+`result().status` describes this request: `working`, `awaiting-input`, `completed`, `failed`, or
+`cancelled`. A completed request can leave its session open. Read `result().sessionEnded` to
+check whether the session itself ended.
 
 `result()` closes that HTTP stream, including when fetch instrumentation clones
 the response for tracing. The durable session remains available for follow-up
@@ -153,11 +152,11 @@ File parts in `delivery.consumed.data.parts` never include raw bytes or internal
 
 A sign-in is an `interaction.opened` whose `request.kind` is `"sign-in"`. It means a connection needs OAuth or another authorization challenge before the paused turn can continue. Chat UIs should render the sign-in prompt from `request.signIn`, disable ordinary text input for that session, and persist the event with the rest of the chat history.
 
-The sign-in holds the turn open, and the stream emits `turn.paused` awaiting it while the callback is pending. An active `send()` or `respond()` response stays attached across it until the sign-in settles and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
+The sign-in holds the turn open, and the stream emits `turn.paused` awaiting it while the callback is pending. The current delivery settles with `status: "awaiting-input"`. Follow the session with `session.stream()` to observe the callback and the resumed work. If you support refresh while authorization is pending, save the session cursor and events, then rehydrate them on load. The callback or a structured decline resumes the same eve session.
 
 ## Reconnection
 
-HTTP connections can end before a run does. The client reconnects from the next line it hasn't read, so long turns continue without replaying events. By default, a turn response keeps reconnecting until its delivery settles or it is aborted, including while the turn is paused for a sign-in. A stream ends for good on `{"$eve":"stream.ended"}`, which the server sends once the session has ended.
+HTTP connections can end before a run does. The client reconnects from the next line it hasn't read, so long turns continue without replaying events. By default, a delivery keeps reconnecting until it settles or is aborted. Use a session stream to follow work beyond that delivery's settlement. A stream ends for good on `{"$eve":"stream.ended"}`, which the server sends once the session has ended.
 
 Browser network failures use the same reconnect policy, both when opening a stream (`TypeError: Failed to fetch`, `TypeError: Load failed`, or `TypeError: NetworkError when attempting to fetch resource.`) and while reading a response body (any `TypeError`, such as `TypeError: network error`). Invalid stream events still fail the read.
 
@@ -295,7 +294,7 @@ for await (const event of response) {
 clearTimeout(timeout);
 ```
 
-Once a response is aborted, create a new send for the next turn. Don't reuse the same `MessageResponse`.
+Once a response is aborted, create a new send for the next turn. Don't reuse the same `Delivery`.
 
 ## What to read next
 

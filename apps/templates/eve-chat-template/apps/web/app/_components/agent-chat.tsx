@@ -270,7 +270,7 @@ export function AgentChatSession({
   const toastError = displayError && dismissedError !== displayError ? displayError : null;
 
   const resetSession = useCallback(() => {
-    agent.reset();
+    agent.newSession();
     setActiveChatId(null);
     activeChatIdRef.current = null;
     eventIndexRef.current = 0;

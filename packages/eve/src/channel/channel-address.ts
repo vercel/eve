@@ -1,4 +1,7 @@
 import type { MessageContent } from "#shared/message-content.js";
+import type { Delivery } from "#shared/delivery.js";
+import { commandDelivery } from "#channel/delivery.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import {
@@ -9,10 +12,6 @@ import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  ResetSessionResult,
   RunInput,
   Runtime,
   SessionAuthContext,
@@ -45,18 +44,16 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
  */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
-  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
-  send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
+  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
+  send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
   respond(
     answers: SendPayload["answers"],
     options: ChannelAddressDeliveryOptions<TState>,
-  ): Promise<Session>;
-  cancel(options?: { readonly turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
-  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
-  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
-  reset(
-    options?: { readonly reason?: string } & SessionControlOptions,
-  ): Promise<ResetSessionResult>;
+  ): Promise<Delivery>;
+  cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
+  compact(options?: SessionControlOptions): Promise<Delivery>;
+  clear(options?: SessionControlOptions): Promise<Delivery>;
+  reset(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
   resolveSession(): Promise<Session | undefined>;
 }
 
@@ -81,10 +78,11 @@ export function createChannelAddress<TState = undefined>(input: {
   return {
     continuationToken: input.continuationToken,
     async deliver(sendInput, options) {
-      const delivery =
-        metadata.channelKind !== undefined && metadata.channelName !== undefined
-          ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
-          : undefined;
+      const delivery = createChannelDeliveryMetadata({
+        channelKind: `channel:${input.channelName}`,
+        channelName: input.channelName,
+        ...metadata,
+      });
       const payload = normalizeSendInput(sendInput);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
@@ -130,21 +128,23 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       };
-      const toSession = (sessionId: string) =>
-        createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
-
       const result = await input.runtime.dispatchContinuation({
         command,
         continuationToken: namespacedToken,
         successor: runInput,
       });
-      if (result.status === "accepted") return toSession(result.sessionId);
+      if (result.status === "accepted")
+        return commandDelivery(input.runtime, result, delivery.deliveryId);
+      if (result.retryable === true) throw new SessionNotActiveError({ retryable: true });
       if (payload.answers && payload.answers.length > 0) {
-        throw new Error(
-          "Cannot deliver answers — the target session was not found via continuation token.",
-        );
+        throw new SessionNotActiveError();
       }
-      return toSession((await input.runtime.createSession(runInput)).sessionId);
+      const started = await input.runtime.createSession(runInput);
+      return commandDelivery(
+        input.runtime,
+        { status: "accepted", sessionId: started.sessionId },
+        delivery.deliveryId,
+      );
     },
     async send(message, options) {
       return await this.deliver({ message }, options);
@@ -156,28 +156,36 @@ export function createChannelAddress<TState = undefined>(input: {
       return await this.deliver({ answers }, options);
     },
     async cancel(options) {
-      return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "cancel", turnId: options?.turnId }, options),
+      const command = controlCommand({ kind: "cancel" as const, turnId: options?.turnId }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId);
     },
     async compact(options) {
-      return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "compact" }, options),
+      const command = controlCommand({ kind: "compact" as const }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId);
     },
     async clear(options) {
-      return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "clear" }, options),
+      const command = controlCommand({ kind: "clear" as const }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId);
     },
     async reset(options) {
-      return await input.runtime.dispatchContinuation({
-        command: controlCommand({ kind: "reset", reason: options?.reason }, options),
+      const command = controlCommand({ kind: "reset" as const, reason: options?.reason }, options);
+      const result = await input.runtime.dispatchContinuation({
+        command,
         continuationToken: namespacedToken,
       });
+      return commandDelivery(input.runtime, result, command.deliveryId, { follow: false });
     },
     async resolveSession() {
       const owner = await input.runtime.resolveContinuation(namespacedToken);

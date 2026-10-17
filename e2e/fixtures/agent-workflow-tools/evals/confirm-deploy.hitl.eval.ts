@@ -38,6 +38,6 @@ export default defineEval({
       return progress >= 0 && result > progress;
     });
     approved.messageIncludes("WORKFLOW-CONFIRM-RESULT");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

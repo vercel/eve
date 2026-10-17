@@ -33,13 +33,9 @@ function agent(onPost?: (deliveryId: string, path: string) => Promise<void> | vo
   const posts: string[] = [];
   const cancellations: unknown[] = [];
   let sequence = 0;
-  let activeTurnId: string | undefined;
+  let controlSequence = 0;
   const encoder = new TextEncoder();
   const append = (events: readonly SessionEvent[], together = false) => {
-    for (const event of events) {
-      if (event.type === "turn.started") activeTurnId = event.data.turnId;
-      if (event.type === "turn.settled" || event.type === "session.ended") activeTurnId = undefined;
-    }
     const groups = together ? [events] : events.map((event) => [event]);
     const lines = groups
       .flatMap((group) => linesOf(group, "2026-10-10T00:00:00.000Z"))
@@ -52,16 +48,25 @@ function agent(onPost?: (deliveryId: string, path: string) => Promise<void> | vo
     if ((init?.method ?? "GET") === "POST") {
       posts.push(path.pathname);
       if (path.pathname.endsWith("/cancel")) {
-        const body = JSON.parse(String(init?.body)) as { turnId?: string };
+        const body = JSON.parse(String(init?.body)) as { turnId?: string | null };
         cancellations.push(body);
-        return Response.json(
-          activeTurnId !== undefined && (body.turnId === undefined || body.turnId === activeTurnId)
-            ? { ok: true, sessionId: "session_1", status: "accepted" }
-            : { ok: true, status: "no_active_turn" },
-        );
+        const deliveryId = `cancel_${controlSequence++}`;
+        if (body.turnId === null)
+          append(
+            [
+              { type: "delivery.admitted", data: { deliveryId, source: { control: "cancel" } } },
+              { type: "delivery.settled", data: { deliveryId, outcome: "applied" } },
+            ],
+            true,
+          );
+        return Response.json({ ok: true, sessionId: "session_1", deliveryId });
       }
       if (/\/(clear|compact|reset)$/.test(path.pathname))
-        return Response.json({ status: "accepted" });
+        return Response.json({
+          ok: true,
+          sessionId: "session_1",
+          deliveryId: `control_${controlSequence++}`,
+        });
       const deliveryId = `d_${sequence++}`;
       await onPost?.(deliveryId, path.pathname);
       return Response.json(
@@ -121,6 +126,11 @@ describe("EveAgentStore acceptance and observation", () => {
     expect(texts(current)).toEqual(["user: sunny.", "assistant: Sunny."]);
     expect(current.snapshot.messages[0]!.id).toBe(echoId);
     expect(finished).toHaveBeenCalledOnce();
+    await expect((await sent).result()).resolves.toMatchObject({
+      status: "completed",
+      reply: "Sunny.",
+      sessionEnded: false,
+    });
     expect(server.reads).toHaveLength(1);
   });
 
@@ -211,7 +221,7 @@ describe("EveAgentStore acceptance and observation", () => {
     const current = store();
     const sent = current.send({ message: "sunny." });
     const rejected = expect(sent).rejects.toMatchObject({ name: "AbortError" });
-    current.reset();
+    current.newSession();
     created.resolve();
     await rejected;
     expect(current.snapshot.session).toBeUndefined();
@@ -258,7 +268,10 @@ describe("EveAgentStore Stop during submission", () => {
       await sent;
       expect(server.cancellations).toEqual([]);
       server.append(testTurnFacts(0, "Later.", ["d_0"]).slice(0, 4));
-      await expect(stopped).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+      await expect(stopped).resolves.toMatchObject({
+        sessionId: "session_1",
+        deliveryId: expect.any(String),
+      });
       expect(server.cancellations).toEqual([{ turnId: "turn_0" }]);
       expect(server.reads).toHaveLength(1);
     },
@@ -273,8 +286,14 @@ describe("EveAgentStore Stop during submission", () => {
     await vi.waitFor(() => expect(current.snapshot.view.deliveries.d_0?.status).toBe("admitted"));
     const stopped = current.cancel();
     server.append(facts.slice(1, 4));
-    await expect(stopped).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
-    await expect(current.cancel()).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+    await expect(stopped).resolves.toMatchObject({
+      sessionId: "session_1",
+      deliveryId: expect.any(String),
+    });
+    await expect(current.cancel()).resolves.toMatchObject({
+      sessionId: "session_1",
+      deliveryId: expect.any(String),
+    });
     expect(server.cancellations).toEqual([{ turnId: "turn_0" }, { turnId: "turn_0" }]);
   });
 
@@ -288,7 +307,10 @@ describe("EveAgentStore Stop during submission", () => {
     try {
       await one;
       server.append(testTurnFacts(0, "Later.", ["d_0"]).slice(0, 4));
-      await expect(stopped).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+      await expect(stopped).resolves.toMatchObject({
+        sessionId: "session_1",
+        deliveryId: expect.any(String),
+      });
       expect(server.cancellations).toEqual([{ turnId: "turn_0" }]);
     } finally {
       receipt.resolve();
@@ -315,7 +337,10 @@ describe("EveAgentStore Stop during submission", () => {
     expect(server.cancellations).toEqual([]);
     server.append(testTurnFacts(0, "Other.", ["other"]).slice(4));
     server.append(testTurnFacts(1, "Later.", ["d_0"]).slice(0, 4));
-    await expect(stopped).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+    await expect(stopped).resolves.toMatchObject({
+      sessionId: "session_1",
+      deliveryId: expect.any(String),
+    });
     expect(server.cancellations).toEqual([{ turnId: "turn_1" }]);
   });
 
@@ -339,8 +364,11 @@ describe("EveAgentStore Stop during submission", () => {
             ],
         true,
       );
-      await expect(stopped).resolves.toEqual({ status: "no_active_turn" });
-      expect(server.cancellations).toEqual([]);
+      await expect(stopped).resolves.toMatchObject({
+        sessionId: "session_1",
+        deliveryId: expect.any(String),
+      });
+      expect(server.cancellations).toEqual([{ turnId: null }]);
     },
   );
 
@@ -350,7 +378,7 @@ describe("EveAgentStore Stop during submission", () => {
     await current.send({ message: "sunny." });
     const stopped = current.cancel();
     const aborted = expect(stopped).rejects.toMatchObject({ name: "AbortError" });
-    current.reset();
+    current.newSession();
     await aborted;
     await current.send({ message: "again." });
     server.append(testTurnFacts(0, "Again.", ["d_1"]));
@@ -377,7 +405,9 @@ describe("EveAgentStore Stop during submission", () => {
   it("does not arm an idle Stop for a future submission", async () => {
     const server = agent();
     const current = store({ initialSession });
-    await expect(current.cancel()).resolves.toEqual({ status: "no_active_turn" });
+    const stop = await current.cancel();
+    await expect(stop.result()).resolves.toMatchObject({ status: "completed" });
+    expect(server.cancellations).toEqual([{ turnId: null }]);
     const before = [...server.cancellations];
     await current.send({ message: "sunny." });
     server.append(testTurnFacts(0, "Sunny.", ["d_0"]));

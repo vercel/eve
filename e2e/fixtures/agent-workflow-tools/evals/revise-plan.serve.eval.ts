@@ -58,6 +58,6 @@ export default defineEval({
         started.length === 1 && reached.length === 3 && reached.every((id) => id === started[0])
       );
     });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -17,7 +17,7 @@ export default defineEval({
       data: { name: "sleeper" },
     });
 
-    const child = t.target.watchTurn(started.data.sessionId);
+    const child = t.target.attach(started.data.sessionId).watch();
     await child.waitForEvent("call.requested", {
       data: { capability: { name: "wait-for-cancellation" } },
     });

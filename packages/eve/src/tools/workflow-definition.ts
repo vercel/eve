@@ -4,7 +4,7 @@ import type {
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 import type { Approval } from "#approval/definition.js";
-import type { MessageResult, SendTurnOptions } from "#client/types.js";
+import type { DeliveryResult, SendTurnOptions } from "#client/types.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   stampToolDefinition,
@@ -41,15 +41,12 @@ export interface AgentSendOptions<TOutput = unknown> {
 }
 
 /**
- * How one agent turn ended, as the client's `MessageResult` reports it:
- * `"waiting"` when the session waits for its next message, including after a
- * cancelled turn, which carries neither `data` nor `message`; `"completed"`
- * when the session ended with the turn; and `"failed"` when the turn failed,
- * with the reason in `error`.
+ * How one delegated turn ended. Questions relay to the parent while this result waits for the
+ * final reply; session termination is separate from request completion.
  */
 export type AgentMessageResult<TOutput = unknown> = Pick<
-  MessageResult<TOutput>,
-  "data" | "message" | "status"
+  DeliveryResult<TOutput>,
+  "data" | "reply" | "status" | "sessionEnded"
 > & {
   /** Why the turn failed, present only when `status` is `"failed"`. */
   readonly error?: { readonly message: string };

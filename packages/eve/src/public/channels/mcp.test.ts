@@ -153,15 +153,10 @@ describe("mcpChannel", () => {
             properties: expect.objectContaining({
               interactions: expect.any(Object),
               status: { const: "input_required", type: "string" },
+              sessionEnded: { type: "boolean" },
+              pollAfterMs: expect.any(Object),
             }),
-            required: expect.arrayContaining(["interactions"]),
-          }),
-          expect.objectContaining({
-            properties: expect.objectContaining({
-              interactions: expect.any(Object),
-              status: { const: "authorization_required", type: "string" },
-            }),
-            required: expect.arrayContaining(["interactions"]),
+            required: expect.arrayContaining(["interactions", "sessionEnded"]),
           }),
           expect.objectContaining({
             properties: expect.objectContaining({
@@ -535,8 +530,11 @@ describe("mcpChannel tools", () => {
   }
 
   it("lists the agent's tools after agent_*, and only them with agent: false", async () => {
-    const names = async (rpc: ReturnType<typeof serve>) =>
-      (await rpc("tools/list")).result!.tools.map((tool: { name: string }) => tool.name);
+    const names = async (rpc: ReturnType<typeof serve>) => {
+      const response = await rpc("tools/list");
+      expect(response.error).toBeUndefined();
+      return response.result!.tools.map((tool: { name: string }) => tool.name);
+    };
     const both = serve({ tools: true });
     expect(await names(both)).toEqual([
       "agent_start",
@@ -620,7 +618,7 @@ describe("mcpChannel tools", () => {
     const invokeTool = vi.fn<InvokeToolFn>(async () => ({
       modelOutput: { type: "json", value: 42 },
       output: 42,
-      status: "completed",
+      outcome: "completed",
     }));
     const rpc = serve({ agent: false, tools: true }, invokeTool, [count]);
     const called = (await rpc("tools/call", { arguments: {}, name: "count" })).result!;
@@ -634,7 +632,7 @@ describe("mcpChannel tools", () => {
       modelOutput:
         text === undefined ? { type: "json", value: output } : { type: "text", value: text },
       output,
-      status: "completed",
+      outcome: "completed",
     });
     const rows: Array<[string, InvokeToolResult, object]> = [
       [
@@ -646,26 +644,38 @@ describe("mcpChannel tools", () => {
         },
       ],
       ["note", completed("saved", "Saved."), { content: [{ text: "Saved.", type: "text" }] }],
-      ["note", { message: "Bad id.", status: "invalid-input" }, { code: "invalid_input" }],
+      [
+        "note",
+        { outcome: "failed", error: { code: "INVALID_INPUT", message: "Bad id." } },
+        { code: "invalid_input" },
+      ],
       // The reason reaches the client verbatim, so an anonymous caller denied a
       // tool session key learns why from `invokeTool`'s own message.
       [
         "note",
-        { reason: "Not today.", status: "denied" },
+        { outcome: "rejected", reason: "Not today.", cause: { policy: "approval" } },
         { code: "denied", message: "Not today." },
       ],
       [
         "note",
-        { status: "denied" },
+        {
+          outcome: "rejected",
+          reason: 'The tool "note" was denied by its approval policy.',
+          cause: { policy: "approval" },
+        },
         { code: "denied", message: expect.stringContaining("approval") },
       ],
-      ["note", { status: "approval-required" }, { code: "approval_required" }],
+      ["note", { outcome: "rejected", reason: "approval-required" }, { code: "approval_required" }],
       [
         "note",
-        { connections: ["linear"], status: "authorization-required" },
+        { connections: ["linear"], outcome: "rejected", reason: "sign-in-required" },
         { code: "authorization_required", message: expect.stringContaining("linear") },
       ],
-      ["note", { message: "Boom.", status: "failed" }, { code: "internal", message: "Boom." }],
+      [
+        "note",
+        { outcome: "failed", error: { code: "TOOL_FAILED", message: "Boom." } },
+        { code: "internal", message: "Boom." },
+      ],
     ];
     for (const [name, result, expected] of rows) {
       const invokeTool = vi.fn<InvokeToolFn>(async () => result);
@@ -673,12 +683,12 @@ describe("mcpChannel tools", () => {
       const args = name === "lookup" ? { id: "7" } : {};
       const called = (await rpc("tools/call", { arguments: args, name })).result!;
       if ("code" in expected) {
-        expect(called, result.status).toMatchObject({
+        expect(called, result.outcome).toMatchObject({
           isError: true,
           structuredContent: { error: expected },
         });
       } else {
-        expect(called, result.status).toMatchObject(expected);
+        expect(called, result.outcome).toMatchObject(expected);
       }
       expect(invokeTool).toHaveBeenCalledWith(name, args, {
         auth: principal,
@@ -765,7 +775,7 @@ describe("mcpChannel tools", () => {
       const invokeTool = vi.fn<InvokeToolFn>(async () => ({
         modelOutput: { type: "text", value: "ok" },
         output: "ok",
-        status: "completed",
+        outcome: "completed",
       }));
       const response = await post(options!, header, "note", { invokeTool });
       if (typeof expected === "number") {
@@ -799,7 +809,7 @@ describe("mcpChannel tools", () => {
     const invokeTool = vi.fn<InvokeToolFn>(async () => ({
       modelOutput: { type: "text", value: "Saved." },
       output: "saved",
-      status: "completed",
+      outcome: "completed",
     }));
     const files: SkillFileSource = {
       listDirectories: async () => [],
@@ -891,7 +901,7 @@ describe("mcpChannel tools", () => {
     const invokeTool = vi.fn<InvokeToolFn>(async () => ({
       modelOutput: { type: "text", value: "ok" },
       output: "ok",
-      status: "completed",
+      outcome: "completed",
     }));
     const args = routeArgs(vi.fn(), {
       describe: async () => ({ name: "compiled-agent", skills: [], tools: [note] }),

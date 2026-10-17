@@ -43,7 +43,7 @@ export default defineEval({
     const aliceTurn = await t.send(CREATE_CHILD_MESSAGE);
     const aliceParent = await waitForRemoteChild(t, aliceTurn.session, aliceTurn);
     const { childSessionId, taskId } = aliceParent;
-    const aliceChild = await t.target.watchTurn(childSessionId).result();
+    const aliceChild = await t.target.attach(childSessionId).watch().result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
     // Each read starts at the line after the last one read.
     let childNextLine = aliceChild.session.state!.streamIndex;
@@ -60,7 +60,8 @@ export default defineEval({
       BOB_AUTHORIZATION,
     );
     const bobChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childNextLine })
+      .attach(childSessionId, { startIndex: childNextLine })
+      .watch()
       .result();
     await expectWorkspaceReads(t, bobChild, BOB_WORKSPACE_LABEL);
     childNextLine = bobChild.session.state!.streamIndex;
@@ -78,7 +79,8 @@ export default defineEval({
       OBSERVER_AUTHORIZATION,
     );
     const observerChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childNextLine })
+      .attach(childSessionId, { startIndex: childNextLine })
+      .watch()
       .result();
     observerChild.expectOk();
     observerChild.calledTool("read-workspace-label", { status: "failed" });
@@ -123,7 +125,7 @@ async function expectWorkspaceReads(
   );
 }
 
-type SessionCursor = Pick<EveEvalSession, "respond" | "send" | "sessionId" | "state">;
+type SessionCursor = Pick<EveEvalSession, "respond" | "send" | "id" | "state">;
 
 /** The remote-loopback agent task and the remote session every call to it reaches. */
 interface RemoteChild {
@@ -141,17 +143,17 @@ async function waitForRemoteChild(
   let session = initial;
   let turn = initialTurn;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.sessionId === undefined || session.state === undefined) {
+    if (session.id === undefined || session.state === undefined) {
       throw new Error("Remote child wait has no parent session cursor.");
     }
     turn.expectOk();
     const child = findRemoteChild(turn, expected);
     if (child !== undefined) return { ...child, session };
-    turn.noFailedActions();
+    turn.noFailedCalls();
     if (attempt === 4) break;
     if (turn.interactions.length > 0) {
       const responses = turn.interactions.map((request) => {
-        if (request.kind !== "question" || request.allowFreeform === false) {
+        if (request.request.kind !== "question" || request.request.allowFreeform === false) {
           throw new Error("The remote child continuation requires unsupported input.");
         }
         return { interactionId: request.interactionId, text: CLARIFICATION };
@@ -160,9 +162,7 @@ async function waitForRemoteChild(
         headers: authorization === undefined ? undefined : { authorization },
       });
     } else {
-      const live = t.target.watchTurn(session.sessionId, {
-        startIndex: session.state.streamIndex,
-      });
+      const live = t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
       turn = await live.result();
       session = live.session;
     }

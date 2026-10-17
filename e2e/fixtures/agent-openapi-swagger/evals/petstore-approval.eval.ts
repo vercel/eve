@@ -26,7 +26,7 @@ export default defineEval({
     const approved = await session.respondAll("approve");
 
     approved.expectOk();
-    approved.noFailedActions();
+    approved.noFailedCalls();
     approved.calledTool(INVENTORY_TOOL, { count: 1, status: "completed" });
     t.messageIncludes("inventory received");
   },

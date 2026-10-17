@@ -346,7 +346,7 @@ Invokes an existing agent without opening the terminal UI. It emits JSON after t
 | `--resume`              | flag   | off      | Read a previous resumable result from stdin     |
 | `--scope <team>`        | string | current  | Vercel team that owns the URL target            |
 
-`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or an open question. An `input-required` result lists every open interaction in `interactions`, sign-ins included; when only sign-ins are open, complete them, then resume without text. Pass headers and scope again when resuming. Paused invocations exit `3`; failures exit `1`. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
+`--resume` reads a complete previous result from stdin, including its delivery ID. Results use `working`, `awaiting-input`, `completed`, `failed`, or `cancelled`; `sessionEnded` separately reports whether the session has ended. Supply text for a follow-up after a settled request while its session remains open, or to answer a question. An `awaiting-input` result lists open `interactions`, sign-ins included; when only sign-ins are open, complete them, then resume without text. Pass headers and scope again when resuming. Awaiting-input invocations exit `3`; failed or cancelled requests exit `1`. Deployment authentication failures are CLI errors, not request statuses. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `working` result before exiting.
 
 ### `eve remote info`
 

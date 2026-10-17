@@ -60,8 +60,9 @@ function createDeferred<T>(): Deferred<T> {
 function createTaskResult(label: string): TaskOutcome {
   return {
     result: {
-      output: label,
-      finalMessage: label,
+      sessionEnded: false,
+      data: label,
+      reply: label,
       status: "completed",
       events: [],
       derived: createEmptyDerivedFacts(),

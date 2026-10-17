@@ -13,6 +13,6 @@ export default defineEval({
   timeoutMs: 120_000,
   async test(t) {
     await continueKeeperAcrossTurns(t, "remote-loopback");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

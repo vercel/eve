@@ -2,12 +2,13 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { Client } from "#client/client.js";
 import type {
-  AcceptedDelivery,
   EveAgentStoreCallbacks,
   EveAgentStoreInit,
   EveAgentStoreSnapshot,
 } from "#client/eve-agent-store-state.js";
-import type { MessageResponse } from "#client/message-response.js";
+import { StreamDelivery, type Delivery } from "#client/delivery.js";
+import { deliveryEvents } from "#client/delivery-events.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type {
   SessionEventStream,
   SessionEventStreamOptions,
@@ -24,16 +25,9 @@ import {
 import { activeTurn, failure, idle } from "#protocol/session-projection/selectors.js";
 import { openSignIns } from "#protocol/session-reader.js";
 import { toError } from "#shared/errors.js";
-import type {
-  CancelSessionResult,
-  ClearResult,
-  CompactResult,
-  ResetResult,
-  SendTurnPayload,
-} from "#client/types.js";
+import type { SendTurnPayload } from "#client/types.js";
 
 export type {
-  AcceptedDelivery,
   EveAgentStoreCallbacks,
   EveAgentStoreInit,
   EveAgentStoreSnapshot,
@@ -60,7 +54,7 @@ export class EveAgentStore {
   #attached = false;
   #callbacks: EveAgentStoreCallbacks = {};
   #controller = new AbortController();
-  #creation: Promise<MessageResponse | undefined> | undefined;
+  #creation: Promise<Delivery | undefined> | undefined;
   #resumePromise: Promise<void> | undefined;
   #session: ClientSession | undefined;
   #error: Error | undefined;
@@ -130,7 +124,7 @@ export class EveAgentStore {
   }
 
   /** Accepts a message or answers. Observe the stream for its durable result. */
-  async send<TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<AcceptedDelivery> {
+  async send<TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<Delivery<TOutput>> {
     if (this.#resumePromise !== undefined) throw new Error("eve session is resuming.");
     assertExclusiveTurnInput(input);
     assertAnswerable(input, this.#conversationClient.conversation);
@@ -178,7 +172,7 @@ export class EveAgentStore {
       }
       this.#reconcile();
       accepted.resolve(deliveryId);
-      return { deliveryId, sessionId: response.sessionId };
+      return this.#storedDelivery<TOutput>(response, signal);
     } catch (error) {
       if (lifetime === this.#controller) {
         retract?.();
@@ -228,15 +222,13 @@ export class EveAgentStore {
   }
 
   /** Cancels the current turn, waiting for a pending submission's turn when necessary. */
-  async cancel(): Promise<CancelSessionResult> {
+  async cancel(): Promise<Delivery> {
     const lifetime = this.#controller;
     const turnId =
       activeTurn(this.#conversationClient.view)?.turnId ??
       (await this.#submittedTurn(lifetime.signal));
     throwIfAborted(lifetime.signal);
-    return turnId === undefined || this.#session === undefined
-      ? { status: "no_active_turn" }
-      : await this.#session.cancel({ turnId });
+    return this.#control((session) => session.cancel({ turnId: turnId ?? null }));
   }
 
   async #submittedTurn(signal: AbortSignal): Promise<string | undefined> {
@@ -272,22 +264,62 @@ export class EveAgentStore {
     }
   }
 
-  async compact(): Promise<CompactResult> {
-    return (await this.#session?.compact()) ?? { status: "no_active_session" };
+  compact(): Promise<Delivery> {
+    return this.#control((session) => session.compact());
+  }
+  clear(): Promise<Delivery> {
+    return this.#control((session) => session.clear());
+  }
+  reset(): Promise<Delivery> {
+    return this.#control((session) => session.reset());
   }
 
-  async clear(): Promise<ClearResult> {
-    return (await this.#session?.clear()) ?? { status: "no_active_session" };
+  async #control(dispatch: (session: ClientSession) => Promise<Delivery>): Promise<Delivery> {
+    const session = this.#session;
+    if (session === undefined) throw new SessionNotActiveError();
+    const lifetime = this.#controller;
+    this.#posting += 1;
+    this.#ensureStream();
+    try {
+      const receipt = await dispatch(session);
+      throwIfAborted(lifetime.signal);
+      this.#accepted.add(receipt.deliveryId);
+      this.#reconcile();
+      return this.#storedDelivery(receipt, lifetime.signal);
+    } finally {
+      if (lifetime === this.#controller) {
+        this.#posting -= 1;
+        this.#publish();
+        this.#closeStreamWhenIdle();
+      }
+    }
   }
 
-  async retire(): Promise<ResetResult> {
-    if (this.#externalSession)
-      throw new Error(
-        "retire() needs a store-owned session. Reset the supplied session explicitly.",
-      );
-    const result = (await this.#session?.reset()) ?? { status: "no_active_session" };
-    this.reset();
-    return result;
+  #storedDelivery<TOutput = unknown>(
+    receipt: Pick<Delivery, "sessionId" | "deliveryId">,
+    signal: AbortSignal,
+  ): Delivery<TOutput> {
+    return new StreamDelivery<TOutput>({
+      sessionId: receipt.sessionId,
+      deliveryId: receipt.deliveryId,
+      createStream: () => deliveryEvents(this.#storedEvents(signal), receipt.deliveryId, signal),
+    });
+  }
+
+  async *#storedEvents(signal: AbortSignal): AsyncIterable<SessionStreamEvent> {
+    let cursor = 0;
+    for (;;) {
+      throwIfAborted(signal);
+      while (cursor < this.#events.length) yield this.#events[cursor++]!;
+      if (this.#error !== undefined) throw this.#error;
+      const updated = Promise.withResolvers<void>();
+      const unsubscribe = this.subscribe(() => updated.resolve());
+      try {
+        if (cursor === this.#events.length) await waitWithSignal(updated.promise, signal);
+      } finally {
+        unsubscribe();
+      }
+    }
   }
 
   [attachStore](): void {
@@ -301,7 +333,7 @@ export class EveAgentStore {
     this.#stop();
   }
 
-  reset(): void {
+  newSession(): void {
     this.#stop();
     if (!this.#externalSession) this.#session = undefined;
     this.#accepted.clear();
@@ -327,7 +359,7 @@ export class EveAgentStore {
     this.#inLine = false;
   }
 
-  #create(input?: SendTurnPayload): Promise<MessageResponse | undefined> {
+  #create(input?: SendTurnPayload): Promise<Delivery | undefined> {
     if (this.#creation !== undefined) return this.#creation;
     const client = this.#client;
     if (client === undefined)
@@ -336,7 +368,7 @@ export class EveAgentStore {
     const signal = input?.signal ?? lifetime.signal;
     const promise = (async () => {
       let session: ClientSession;
-      let response: MessageResponse | undefined;
+      let response: Delivery | undefined;
       if (input?.message === undefined) ({ session } = await client.sessions.create({ signal }));
       else
         ({ session, response } = await client.sessions.create({
@@ -360,7 +392,7 @@ export class EveAgentStore {
     return promise;
   }
 
-  async #dispatch(input: SendTurnPayload): Promise<MessageResponse> {
+  async #dispatch(input: SendTurnPayload): Promise<Delivery> {
     if (this.#creation !== undefined) {
       // Speculative prewarm failure must not prevent a message creating its session.
       await waitWithSignal(

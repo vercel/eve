@@ -41,7 +41,7 @@ export default defineEval({
 
     t.log(formatCurlFanoutTrace(turn.events));
     turn.calledTool(BASH_TOOL);
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.eventsSatisfy("at least ten Bash curls reach the concurrency barrier", (events) =>
       curlCallsReachBarrier({
         barrierSize: MINIMUM_CURL_CALLS,

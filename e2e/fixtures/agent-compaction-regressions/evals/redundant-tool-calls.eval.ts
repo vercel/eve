@@ -30,7 +30,7 @@ export default defineEval({
     });
     t.messageIncludes(REVIEW_REFERENCE);
     t.messageIncludes(HANDOFF_REFERENCE);
-    t.noFailedActions();
+    t.noFailedCalls();
 
     t.calledTool("inspect-repository", { count: 1 }).soft().label("no repeated inspection");
     t.calledTool("prepare-handoff", { count: 1 }).soft().label("no repeated handoff");

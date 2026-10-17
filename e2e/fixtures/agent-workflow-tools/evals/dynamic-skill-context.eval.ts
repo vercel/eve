@@ -62,7 +62,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
       const followUp =
         "Bob reviews Alice's completed report and the resolver context. SUBAGENT-HOOKS:AUDIT DYNAMIC-SKILL-CONTEXT";
       const started = await send(t.target, threadId, "alice", firstMessage);
-      const initial = await t.target.watchTurn(started.sessionId).result();
+      const initial = await t.target.attach(started.sessionId).watch().result();
       initial.expectOk();
       const marker = mode === "direct" ? "Alice's hook audit" : "hook-audit:blocking";
       const childOutput = readChildOutput(initial, mode);
@@ -77,7 +77,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
       t.check(resumed.sessionId, equals(started.sessionId)).label(
         "same parent session after delegation",
       );
-      const audit = await t.target.watchTurn(resumed.sessionId, { startIndex }).result();
+      const audit = await t.target.attach(resumed.sessionId, { startIndex }).watch().result();
       audit.expectOk();
       audit.calledTool("read_dynamic_skill_context", { count: 1, status: "completed" });
       const output = audit.toolCalls.find(
@@ -153,7 +153,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
         }
       }
       t.notEvent("session.ended", { data: { outcome: "failed" } });
-      t.noFailedActions();
+      t.noFailedCalls();
       t.succeeded();
     },
   }),

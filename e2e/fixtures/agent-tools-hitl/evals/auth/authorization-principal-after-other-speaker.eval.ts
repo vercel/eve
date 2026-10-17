@@ -31,9 +31,7 @@ export default defineEval({
     if (required?.type !== "interaction.opened" || url === undefined)
       throw new Error("Expected Alice's sign-in challenge URL.");
 
-    const resumed = t.target.watchTurn(session.sessionId, {
-      startIndex: session.state?.streamIndex,
-    });
+    const resumed = t.target.attach(session.id, { startIndex: session.state?.streamIndex }).watch();
     const bob = await session.start(
       "Do not call any tools. Reply with exactly BOB-STATUS-OK.",
       as(BOB),

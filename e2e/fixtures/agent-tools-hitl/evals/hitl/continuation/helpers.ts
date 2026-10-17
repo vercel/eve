@@ -1,19 +1,19 @@
+import type { Interaction } from "eve/events";
 import type {
   EveEvalContext,
   EveEvalEventMatch,
   EveEvalLiveTurn,
   EveEvalSession,
   EveEvalTurn,
-  AskedInteraction,
 } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 export const scriptedSession = { headers: { "x-eve-fixture-model": "continuation" } };
 
-export function requestFrom(turn: EveEvalTurn, toolName: string): AskedInteraction {
+export function requestFrom(turn: EveEvalTurn, toolName: string): Interaction {
   turn.expectOk();
   const matches = turn.interactions.filter(
-    (request) => (request.call?.name ?? request.kind) === toolName,
+    (request) => (request.call?.name ?? request.request.kind) === toolName,
   );
   if (matches.length !== 1)
     throw new Error(`Expected one ${toolName} request; found ${matches.length}.`);
@@ -110,7 +110,7 @@ function completionMatch(turnId: string): EveEvalEventMatch {
  * A message steered the turn held on this approval, which cancels it: the
  * request is withdrawn and its call never runs.
  */
-export function expectApprovalCancelled(session: EveEvalSession, request: AskedInteraction) {
+export function expectApprovalCancelled(session: EveEvalSession, request: Interaction) {
   session.event("interaction.settled", {
     data: { interactionId: request.interactionId, outcome: "withdrawn" },
     count: 1,
@@ -142,7 +142,7 @@ export function expectChangeStillUnexecuted(session: EveEvalSession, toolName = 
 export async function submitPartialApproval(
   t: EveEvalContext,
   session: EveEvalSession,
-  request: AskedInteraction,
+  request: Interaction,
 ) {
   const held = await session.respond([
     { interactionId: request.interactionId, optionId: "approve" },
@@ -156,7 +156,7 @@ export async function submitPartialApproval(
 export async function approveSavedChange(
   t: EveEvalContext,
   session: EveEvalSession,
-  request: AskedInteraction,
+  request: Interaction,
 ) {
   const live = await session.startRespond([
     { interactionId: request.interactionId, optionId: "approve" },

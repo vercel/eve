@@ -57,7 +57,7 @@ export default defineTool({
         signal: AbortSignal.timeout(40_000),
       });
       const result = await response.result();
-      expect(result.message).toContain("child-result");
+      expect(result.reply).toContain("child-result");
       expect(result.status).toBe("waiting");
     } catch (error) {
       throw new Error(`${String(error)}\n${server.stdout()}\n${server.stderr()}`, { cause: error });

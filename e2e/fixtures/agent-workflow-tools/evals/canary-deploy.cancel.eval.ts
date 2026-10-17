@@ -27,12 +27,10 @@ export default defineEval({
       /WORKFLOW-CANARY-RESULT Stopped canary_deploy-\w{6}; it won't report back\./u,
     );
     const ended = await t.target
-      .watchTurn(turn.session.sessionId, {
-        startIndex: 0,
-        until: (event) => event.type === "task.ended",
-      })
+      .attach(turn.session.id, { startIndex: 0 })
+      .watch({ until: (event) => event.type === "task.ended" })
       .result();
     ended.event("task.ended", { count: 1, data: { outcome: "cancelled" } });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

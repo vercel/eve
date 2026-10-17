@@ -128,10 +128,11 @@ function buildTaskResult(input: {
   readonly turn: EveEvalTurn | undefined;
 }): EveEvalTaskResult {
   const events = input.sessions.flatMap((session) => session.events);
-  const finalMessage = input.turn?.message ?? null;
   return {
-    output: input.turn?.data === undefined ? finalMessage : input.turn.data,
-    finalMessage,
+    data: input.turn?.data,
+    reply: input.turn?.reply,
+    view: input.turn?.view,
+    sessionEnded: input.turn?.sessionEnded ?? false,
     sessionId: selectPrimarySessionId(input.sessions),
     status: input.turn?.status ?? "completed",
     events,

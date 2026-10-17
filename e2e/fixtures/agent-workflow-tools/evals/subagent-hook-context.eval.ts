@@ -53,7 +53,7 @@ export default (["direct", "background"] as const).map((mode) =>
       audit.expectOk();
       // The parent's dynamic skill stays loadable after delegation.
       for (const turn of [initial, audit]) {
-        turn.loadedSkill("delegation-policy", { count: 1, output: /DELEGATION-POLICY:/u });
+        turn.calledSkill("delegation-policy", { count: 1, output: /DELEGATION-POLICY:/u });
       }
       audit.calledTool("read_subagent_hooks", { count: 1, status: "completed" });
       const records = readHookAudit(audit);
@@ -71,8 +71,12 @@ export default (["direct", "background"] as const).map((mode) =>
           if (completion?.type !== "call.settled") return false;
           const output = completion.data.output;
           if (typeof output !== "string" || !output.startsWith("WORKFLOW-CHILD:")) return false;
-          if (!initial.message?.includes(output)) return false;
-          const countOf = (subscriber: string, type: string, extra = (_: unknown) => true) =>
+          if (!initial.reply?.includes(output)) return false;
+          const countOf = (
+            subscriber: string,
+            type: string,
+            extra: (record: unknown) => boolean = () => true,
+          ) =>
             records.filter(
               (record) => record.subscriber === subscriber && record.type === type && extra(record),
             ).length;
@@ -112,7 +116,7 @@ export default (["direct", "background"] as const).map((mode) =>
       t.event("task.ended", { data: { outcome: "completed" }, count: scenario.ends ? 1 : 0 });
       t.notEvent("session.ended", { data: { outcome: "failed" } });
       t.notEvent("turn.settled", { data: { outcome: "failed" } });
-      t.noFailedActions();
+      t.noFailedCalls();
       t.succeeded();
     },
   }),

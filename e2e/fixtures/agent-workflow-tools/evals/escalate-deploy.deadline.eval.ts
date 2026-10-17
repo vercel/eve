@@ -22,6 +22,6 @@ export default defineEval({
     answered.expectOk();
     answered.calledTool("escalate_deploy", { output: /"decided":"approved"/u });
     answered.messageIncludes("WORKFLOW-ESCALATE-RESULT");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

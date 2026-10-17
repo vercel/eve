@@ -7,6 +7,7 @@ export {
   POST,
   PUT,
   SessionStrandedError,
+  SessionNotActiveError,
   WS,
   attachmentError,
   answerFromText,

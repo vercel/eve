@@ -32,9 +32,9 @@ export default defineEval({
     held.event("interaction.opened", { data: { request: { kind: "sign-in" } }, count: 1 });
     held.notEvent("interaction.settled", { data: { interactionId: approval.interactionId } });
     held.notEvent("turn.settled");
-    const resumedTurn = t.target.watchTurn(held.sessionId, {
-      startIndex: held.session.state.streamIndex,
-    });
+    const resumedTurn = t.target
+      .attach(held.sessionId, { startIndex: held.session.state.streamIndex })
+      .watch();
     const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok) {
       throw new Error(

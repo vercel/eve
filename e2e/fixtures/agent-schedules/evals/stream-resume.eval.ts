@@ -39,7 +39,8 @@ export default defineEval({
 
     // Reconnect at startIndex=cutoff through the authenticated client and
     // assert the replayed tail matches the full log from that line on.
-    const resumed = await t.target.attachSession(sessionId, { startIndex: cutoff });
+    const resumed = t.target.attach(sessionId, { startIndex: cutoff });
+    await resumed.nextTurn();
     const replayed = resumed.events;
     const expected = fullLog.filter((event) => event.meta.position.line >= cutoff);
 

@@ -59,6 +59,6 @@ export default defineEval({
     stopSession.notEvent("session.ended", { data: { outcome: "failed" } });
     stopSession.notEvent("session.ended", { data: { outcome: "completed" } });
     stopSession.event("turn.settled", { data: { outcome: "cancelled" } });
-    t.check(stopped.status, equals("waiting"));
+    t.check(stopped.status, equals("cancelled"));
   },
 });

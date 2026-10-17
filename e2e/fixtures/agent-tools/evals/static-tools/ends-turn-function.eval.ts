@@ -12,7 +12,7 @@ export default defineEval({
     posted.expectOk();
     posted.requireToolCall("react_to_note");
     t.check(
-      posted.message,
+      posted.reply,
       satisfies((message) => message === undefined, "a posted reaction sends no reply"),
     );
 
@@ -22,7 +22,7 @@ export default defineEval({
     refused.expectOk();
     refused.requireToolCall("react_to_note");
     t.check(
-      refused.message,
+      refused.reply,
       satisfies(
         (message) => typeof message === "string" && message.trim().length > 0,
         "a reaction that doesn't post gets a reply",

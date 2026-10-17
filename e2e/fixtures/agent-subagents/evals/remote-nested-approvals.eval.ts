@@ -21,7 +21,7 @@ export default defineEval({
       if (pending.length > 0) {
         for (const request of pending) {
           const ids = seen.get(request.call!.name);
-          if (ids === undefined || ids.size >= 2 || request.kind !== "approval") {
+          if (ids === undefined || ids.size >= 2 || request.request.kind !== "approval") {
             throw new Error(`Unexpected nested approval for ${request.call!.name}.`);
           }
           ids.add(request.interactionId);
@@ -30,24 +30,22 @@ export default defineEval({
           pending.map((request) => ({ interactionId: request.interactionId, optionId: "approve" })),
         );
         answered.expectOk();
-        if (answered.message?.includes("PARENT-NESTED-COMPLETE: CHILD-NESTED-APPROVALS-COMPLETE")) {
+        if (answered.reply?.includes("PARENT-NESTED-COMPLETE: CHILD-NESTED-APPROVALS-COMPLETE")) {
           if ([...seen.values()].some((ids) => ids.size !== 2))
             throw new Error("Both workers did not pass both gates.");
-          t.noFailedActions();
+          t.noFailedCalls();
           return;
         }
         session = answered.session;
         continue;
       }
-      const live = t.target.watchTurn(session.sessionId!, {
-        startIndex: session.state!.streamIndex,
-      });
+      const live = t.target.attach(session.id!, { startIndex: session.state!.streamIndex }).watch();
       const turn = await live.result();
-      turn.noFailedActions();
-      if (turn.message?.includes("PARENT-NESTED-COMPLETE: CHILD-NESTED-APPROVALS-COMPLETE")) {
+      turn.noFailedCalls();
+      if (turn.reply?.includes("PARENT-NESTED-COMPLETE: CHILD-NESTED-APPROVALS-COMPLETE")) {
         if ([...seen.values()].some((ids) => ids.size !== 2))
           throw new Error("Both workers did not pass both gates.");
-        t.noFailedActions();
+        t.noFailedCalls();
         return;
       }
       session = live.session;

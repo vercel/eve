@@ -8,7 +8,7 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
-import { strandedSessionResponse } from "#eve-channel/support.js";
+import { sessionCommandErrorResponse } from "#eve-channel/support.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import {
@@ -196,7 +196,7 @@ export function parseSessionMessageBody(
 }
 
 interface ParsedCancelTurnBody {
-  turnId?: string;
+  turnId?: string | null;
 }
 
 export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody | Response> {
@@ -206,13 +206,17 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   if (tokenRejection !== null) return tokenRejection;
 
   const turnId = payload.turnId;
-  if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
+  if (
+    turnId !== undefined &&
+    turnId !== null &&
+    (typeof turnId !== "string" || turnId.length === 0)
+  ) {
     return Response.json(
-      { error: "Expected 'turnId' to be a non-empty string.", ok: false },
+      { error: "Expected 'turnId' to be a non-empty string or null.", ok: false },
       { status: 400 },
     );
   }
-  return typeof turnId === "string" ? { turnId } : {};
+  return turnId === null || typeof turnId === "string" ? { turnId } : {};
 }
 
 export async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
@@ -339,7 +343,7 @@ export async function createSessionStreamResponse(
       { headers },
     );
   } catch (error) {
-    const stranded = strandedSessionResponse(error);
+    const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;
     if (isExpiredWorkflowRunError(error)) {
       return Response.json(

@@ -1,6 +1,7 @@
 import { EvalSessionManager } from "#evals/session-manager.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
+import { outputOf } from "#evals/output.js";
 import { buildJudgeContext } from "#evals/judge.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 import type {
@@ -30,7 +31,7 @@ export function createEvalContext(deps: {
   const collector = deps.collector;
   const judge = buildJudgeContext({
     collector,
-    getReply: () => deps.manager.lastTurnSession()?.lastTurn?.message ?? null,
+    getReply: () => deps.manager.lastTurnSession()?.lastTurn?.reply ?? null,
     getInput: () => deps.manager.lastTurnSession()?.lastInput ?? "",
     judge: deps.judge,
     signal: deps.signal,
@@ -46,7 +47,10 @@ export function createEvalContext(deps: {
     target: deps.target,
     log: deps.log,
     sleep: (ms) => sleep(ms, deps.signal),
-    ...createScopedAssertions(collector, { timing: "final", select: (result) => result }),
+    ...createScopedAssertions(collector, {
+      timing: "final",
+      select: (result) => ({ ...result, output: outputOf(result) }),
+    }),
 
     // Value-level assertion over an explicit value.
     check: (value, assertion) => recordCheck(collector, value, assertion),

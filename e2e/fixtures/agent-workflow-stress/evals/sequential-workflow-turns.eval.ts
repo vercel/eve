@@ -29,8 +29,8 @@ export default defineEval({
 
       const turn = result.expectOk();
 
-      await t.require(turn.sessionId, equals(session.sessionId));
-      await t.require(turn.message, equals(`stress-ack:${turnNumber}:${marker}`));
+      await t.require(turn.sessionId, equals(session.id));
+      await t.require(turn.reply, equals(`stress-ack:${turnNumber}:${marker}`));
     }
 
     t.log(
@@ -38,7 +38,7 @@ export default defineEval({
         fixture: "agent-workflow-stress",
         scenario: "sequential",
         schemaVersion: 1,
-        sessionId: session?.sessionId,
+        sessionId: session?.id,
         samples,
         unit: "milliseconds",
       })}`,

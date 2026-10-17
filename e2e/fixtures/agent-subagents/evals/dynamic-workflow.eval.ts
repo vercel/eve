@@ -29,14 +29,14 @@ export default defineEval({
     const firstStarted = await parent.waitForEvent("child.opened", {
       data: { name: "echo-marker" },
     });
-    const firstChild = t.target.watchTurn(firstStarted.data.sessionId).result();
+    const firstChild = t.target.attach(firstStarted.data.sessionId).watch().result();
     const secondStarted = await parent.waitForEvent("child.opened", {
       data: {
         name: "echo-marker",
         sessionId: (sessionId) => sessionId !== firstStarted.data.sessionId,
       },
     });
-    const secondChild = t.target.watchTurn(secondStarted.data.sessionId).result();
+    const secondChild = t.target.attach(secondStarted.data.sessionId).watch().result();
     const [turn, firstChildTurn, secondChildTurn] = await Promise.all([
       parent.result(),
       firstChild,
@@ -80,6 +80,6 @@ export default defineEval({
     firstChildTurn.messageIncludes(SUBAGENT_TOKEN);
     secondChildTurn.messageIncludes(SUBAGENT_TOKEN);
     t.messageIncludes(DOUBLE_SUBAGENT_TOKEN);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

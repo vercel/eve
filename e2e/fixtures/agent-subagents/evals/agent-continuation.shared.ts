@@ -15,7 +15,7 @@ export async function continueKeeperAcrossTurns(t: EveEvalContext, tool: string)
   remembered.expectOk();
   remembered.messageIncludes("NOTEBOOK-REPLY NOTEBOOK-SAVED");
   const childSessionId = requireChildSession(remembered, tool);
-  const firstChildTurn = await t.target.watchTurn(childSessionId).result();
+  const firstChildTurn = await t.target.attach(childSessionId).watch().result();
 
   const reviewed = await remembered.session.send(
     `NOTEBOOK-REVIEW ${tool} Alice asks for a review, then changes her mind.`,
@@ -27,7 +27,8 @@ export async function continueKeeperAcrossTurns(t: EveEvalContext, tool: string)
     data: { callId: "notebook-review", outcome: "interrupted" },
   });
   const cancelledChildTurn = await t.target
-    .watchTurn(childSessionId, { startIndex: firstChildTurn.session.state.streamIndex })
+    .attach(childSessionId, { startIndex: firstChildTurn.session.state.streamIndex })
+    .watch()
     .result();
   cancelledChildTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
 

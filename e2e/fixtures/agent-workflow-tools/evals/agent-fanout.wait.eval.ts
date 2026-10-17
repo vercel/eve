@@ -72,6 +72,6 @@ export default defineEval({
       "both hook subscriptions record each opened session in parent state and sandbox",
       (events) => recordsEveryAgentStart(records, events, turn.sessionId),
     );
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

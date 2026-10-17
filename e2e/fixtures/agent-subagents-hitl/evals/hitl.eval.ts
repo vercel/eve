@@ -7,7 +7,7 @@ const GOOG_PRICE = "178.92";
 
 type SessionCursor = Pick<
   EveEvalSession,
-  "pendingInteractions" | "requireInteraction" | "respondAll" | "sessionId" | "state"
+  "pendingInteractions" | "requireInteraction" | "respondAll" | "id" | "state"
 >;
 
 /**
@@ -28,8 +28,8 @@ export default defineEval({
     const blocked = await waitForInput(t, started.session, "get_stock_price");
     const resumed = await blocked.respondAll("approve");
     t.check(resumed.interactions, equals([]));
-    resumed.noFailedActions();
-    const completed = resumed.message?.includes(GOOG_PRICE)
+    resumed.noFailedCalls();
+    const completed = resumed.reply?.includes(GOOG_PRICE)
       ? resumed
       : await waitForMessage(t, blocked, GOOG_PRICE);
     completed.messageIncludes(GOOG_PRICE);
@@ -67,8 +67,8 @@ export default defineEval({
     );
 
     t.succeeded();
-    t.calledSubagent("stock-price", { status: "completed", count: 1 });
-    t.noFailedActions();
+    t.calledAgent("stock-price", { status: "completed", count: 1 });
+    t.noFailedCalls();
   },
 });
 
@@ -85,7 +85,7 @@ async function waitForInput(
     }
     const live = watchNextTurn(t, session, "subagent input wait");
     const turn = await live.result();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     session = live.session;
   }
   throw new Error(`Subagent did not surface input for tool "${toolName}" after five turns.`);
@@ -100,16 +100,16 @@ async function waitForMessage(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const live = watchNextTurn(t, session, "subagent completion wait");
     const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker) === true) return turn;
+    turn.noFailedCalls();
+    if (turn.reply?.includes(marker) === true) return turn;
     session = live.session;
   }
   throw new Error(`Subagent result did not reach the parent after five turns.`);
 }
 
 function watchNextTurn(t: EveEvalContext, session: SessionCursor, operation: string) {
-  if (session.sessionId === undefined || session.state === undefined) {
+  if (session.id === undefined || session.state === undefined) {
     throw new Error(`${operation} has no parent session cursor.`);
   }
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
 }

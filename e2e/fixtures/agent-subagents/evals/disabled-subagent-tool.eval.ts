@@ -11,6 +11,6 @@ export default defineEval({
     turn.calledTool("invoke-hidden", { count: 1 });
     turn.event("child.opened", { count: 1, data: { name: "disabled-hidden" } });
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

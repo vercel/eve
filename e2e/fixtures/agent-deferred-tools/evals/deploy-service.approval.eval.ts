@@ -20,7 +20,7 @@ export default defineEval({
     const approved = await session.respondAll("approve");
 
     approved.expectOk();
-    approved.noFailedActions();
+    approved.noFailedCalls();
     // The run sees the entry's name as its tool name, not eve__tool.
     approved.calledTool("deploy_service", {
       count: 1,

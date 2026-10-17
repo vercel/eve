@@ -1,11 +1,11 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { followClientSession, type ClientSession } from "#client/session.js";
-import type { StreamOptions } from "#client/types.js";
+import type { SessionStreamOptions } from "#client/types.js";
 
 export interface SessionEventStreamOptions {
   readonly startIndex?: number;
   readonly headers?: Readonly<Record<string, string>>;
-  readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
+  readonly streamReconnectPolicy?: SessionStreamOptions["streamReconnectPolicy"];
   readonly onEvent: (event: SessionStreamEvent) => void;
   readonly onError: (error: unknown) => void;
 }
@@ -17,7 +17,7 @@ export class SessionEventStream {
   readonly caughtUp = this.#caughtUp.promise;
   #ended = false;
   #headers: SessionEventStreamOptions["headers"];
-  #reconnectPolicy: StreamOptions["streamReconnectPolicy"];
+  #reconnectPolicy: SessionStreamOptions["streamReconnectPolicy"];
 
   constructor(session: ClientSession, options: SessionEventStreamOptions) {
     this.setOptions(options);

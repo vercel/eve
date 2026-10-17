@@ -18,7 +18,7 @@ export default defineEval({
     };
 
     const { sessionId } = await post("Please wait for cancellation.", "alice");
-    const active = t.target.watchTurn(sessionId);
+    const active = t.target.attach(sessionId).watch();
     await active.waitForEvent("call.requested", {
       data: { capability: { name: "wait-for-cancellation" } },
     });
@@ -51,7 +51,7 @@ export default defineEval({
     const turnIds = new Set<string>();
     const deliveryIds = new Set<string>();
     for (const { actor, markers } of groups) {
-      const live = t.target.watchTurn(sessionId, { startIndex: cursor });
+      const live = t.target.attach(sessionId, { startIndex: cursor }).watch();
       const turn = await live.result();
       turn.expectOk();
       turn.calledTool("record-request", { count: markers.length, status: "completed" });

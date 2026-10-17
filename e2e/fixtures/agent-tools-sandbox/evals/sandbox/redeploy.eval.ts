@@ -150,7 +150,7 @@ export default defineEval({
         `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
       );
       skill.expectOk();
-      skill.loadedSkill(SKILL_NAME);
+      skill.calledSkill(SKILL_NAME);
       skill.messageIncludes(SKILL_TOKEN);
     } finally {
       await writeFile(INSTRUCTIONS_PATH, originalInstructions);

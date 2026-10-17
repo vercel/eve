@@ -48,7 +48,7 @@ export default defineEval({
       throw new Error("Expected the sign-in to be for the responder's answer.");
     }
     const callbackUrl = new URL(url);
-    const callbackTurn = t.target.watchTurn(held.sessionId, { startIndex: resumeIndex });
+    const callbackTurn = t.target.attach(held.sessionId, { startIndex: resumeIndex }).watch();
     const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok)
       throw new Error(`Fixture OAuth callback failed (${String(callback.status)}).`);

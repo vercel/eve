@@ -1,7 +1,8 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { SessionReader } from "#shared/session.js";
 import { followStreamIterable, type FollowedEvent } from "#client/open-stream.js";
 import type { ClientSessionContext } from "#client/session.js";
-import type { StreamOptions } from "#client/types.js";
+import type { SessionStreamOptions } from "#client/types.js";
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
 
 /**
@@ -12,11 +13,11 @@ import type { ChildOpened } from "#protocol/session-events/families/child.js";
  * remote child, which the parent deployment authenticates to the remote agent
  * after checking that it recorded the child.
  */
-export class ClientAgentSession {
+export class ClientAgentSession implements SessionReader {
   /** The agent's name, as `child.opened` reports it. */
   readonly name: string;
   /** The child session's id. */
-  readonly sessionId: string;
+  readonly id: string;
   /** The task whose run opened the session; absent when an `execute` call opened it. */
   readonly taskId: string | undefined;
   readonly #context: ClientSessionContext;
@@ -27,7 +28,7 @@ export class ClientAgentSession {
     this.#context = context;
     this.#streamPath = opened.data.stream;
     this.name = opened.data.name;
-    this.sessionId = opened.data.sessionId;
+    this.id = opened.data.sessionId;
     this.taskId =
       opened.scope?.taskId ??
       ("taskId" in opened.data.owner ? opened.data.owner.taskId : undefined);
@@ -38,12 +39,12 @@ export class ClientAgentSession {
    * parent session's cursor. The child cursor starts at `0`; pass `startIndex`
    * to resume. Stop at a child turn boundary with `isCurrentTurnBoundaryEvent`.
    */
-  async *stream(options?: StreamOptions): AsyncGenerator<SessionStreamEvent> {
+  async *stream(options?: SessionStreamOptions): AsyncGenerator<SessionStreamEvent> {
     for await (const { event } of this.follow(options)) yield event;
   }
 
   /** @internal The child's events with the cursor to resume from after each. */
-  follow(options?: StreamOptions): AsyncIterable<FollowedEvent> {
+  follow(options?: SessionStreamOptions): AsyncIterable<FollowedEvent> {
     const startIndex = options?.startIndex ?? 0;
     return followStreamIterable({
       follow: options?.follow,

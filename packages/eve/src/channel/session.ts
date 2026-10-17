@@ -1,3 +1,6 @@
+import type { SessionOperations } from "#shared/session.js";
+export type { SessionOperations } from "#shared/session.js";
+import { commandDelivery } from "#channel/delivery.js";
 import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
@@ -7,20 +10,14 @@ import {
 } from "#channel/delivery-metadata.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  GetEventStreamOptions,
-  ResetSessionResult,
+  SessionStreamOptions,
   Runtime,
   SessionAuthContext,
   SessionCallback,
-  SessionSendCommandResult,
   TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
 import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
-import type { SessionControlOptions } from "#channel/types.js";
 import { serializeFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import {
@@ -30,41 +27,22 @@ import {
   InitiatorAuthKey,
   SessionIdKey,
 } from "#context/keys.js";
-import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
+import { type Answer, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 /** Immutable-ID handle for one exact durable session. */
-export interface Session {
-  readonly id: string;
-  /**
-   * Sends a message to this exact session ID without creating or following a
-   * replacement. Throws `SessionStrandedError` when the session's owner cannot
-   * execute here; nothing is delivered. Call {@link reset} to end it.
-   */
-  send(message: MessageContent, options: SessionSendOptions): Promise<SessionSendCommandResult>;
-  /** Answers pending input requests on this exact session ID. Throws `SessionStrandedError` like {@link send}. */
-  respond<const TResponses extends readonly Answer[]>(
-    answers: StrictAnswers<TResponses>,
-    options: SessionRespondOptions,
-  ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn. */
-  cancel(options?: { turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
-  /** Queues compaction on this exact session ID. */
-  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
-  /** Queues a context clear on this exact session ID. */
-  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
-  /** Terminally retires this exact session ID. */
-  reset(options?: { reason?: string } & SessionControlOptions): Promise<ResetSessionResult>;
+export interface Session extends SessionOperations {
   /**
    * Opens the recorded stream. Following it throws `SessionStrandedError`
    * while its owner is stranded; `follow: false` reads recorded history up to
    * the current tail without inspecting or changing the session.
    */
-  getEventStream(options?: GetEventStreamOptions): Promise<ReadableStream<SessionStreamEvent>>;
+  stream(options?: SessionStreamOptions): AsyncIterable<SessionStreamEvent>;
+  getEventStream(options?: SessionStreamOptions): Promise<ReadableStream<SessionStreamEvent>>;
   /** The session's stored lines from `startIndex`: one parsed record per line. Follows like `getEventStream`. */
-  getLineStream(options?: GetEventStreamOptions): Promise<ReadableStream<unknown>>;
+  getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   /** Where a remote child of this session runs; read only by the parent's stream proxy. */
   getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
   getStreamTailIndex(): Promise<number>;
@@ -131,10 +109,11 @@ export function createSession(
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
         title: options.title,
       };
-      return await runtime.dispatchSession({
+      const result = await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
       });
+      return commandDelivery(runtime, result, delivery.deliveryId);
     },
     async respond(answers, options) {
       if (answers.length === 0) {
@@ -157,41 +136,39 @@ export function createSession(
         payload,
         requestId: metadata.requestId,
       };
-      return await runtime.dispatchSession({
+      const result = await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
       });
+      return commandDelivery(runtime, result, delivery.deliveryId);
     },
     async cancel(options) {
-      const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
-      if (options?.turnId !== undefined) command.turnId = options.turnId;
-      return await runtime.dispatchSession({
-        command: controlCommand(command, options),
-        sessionId: id,
-      });
+      const command = controlCommand({ kind: "cancel" as const, turnId: options?.turnId }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId);
     },
     async compact(options) {
-      return await runtime.dispatchSession({
-        command: controlCommand({ kind: "compact" }, options),
-        sessionId: id,
-      });
+      const command = controlCommand({ kind: "compact" as const }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId);
     },
     async clear(options) {
-      return await runtime.dispatchSession({
-        command: controlCommand({ kind: "clear" }, options),
-        sessionId: id,
-      });
+      const command = controlCommand({ kind: "clear" as const }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId);
     },
     async reset(options) {
-      return await runtime.dispatchSession({
-        command: controlCommand({ kind: "reset", reason: options?.reason }, options),
-        sessionId: id,
-      });
+      const command = controlCommand({ kind: "reset" as const, reason: options?.reason }, options);
+      const result = await runtime.dispatchSession({ command, sessionId: id });
+      return commandDelivery(runtime, result, command.deliveryId, { follow: false });
     },
-    async getEventStream(options?: GetEventStreamOptions) {
+    async *stream(options?: SessionStreamOptions) {
+      yield* await runtime.getEventStream(id, options);
+    },
+    async getEventStream(options?: SessionStreamOptions) {
       return runtime.getEventStream(id, options);
     },
-    async getLineStream(options?: GetEventStreamOptions) {
+    async getLineStream(options?: SessionStreamOptions) {
       return runtime.getLineStream(id, options);
     },
     async getStreamTailIndex() {
@@ -211,12 +188,8 @@ export function createAttachSessionFn(
   return (sessionId) => createSession(sessionId, runtime, metadata);
 }
 
-function createDelivery(
-  metadata: Partial<ChannelDeliverySource>,
-): ReturnType<typeof createChannelDeliveryMetadata> | undefined {
-  return metadata.channelKind !== undefined && metadata.channelName !== undefined
-    ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
-    : undefined;
+function createDelivery(metadata: Partial<ChannelDeliverySource>) {
+  return createChannelDeliveryMetadata({ channelKind: "http", channelName: "http", ...metadata });
 }
 
 /**

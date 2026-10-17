@@ -692,6 +692,10 @@ describe("calls in flight", () => {
           await session.next("Bob's report");
         },
       );
+      expect(ofType(events, "delivery.admitted")).toHaveLength(3);
+      expect(ofType(events, "delivery.admitted").map((event) => event.data.deliveryId)).toContain(
+        "control_0",
+      );
       expect(
         ofType(events, "delivery.settled").find((event) => event.data.deliveryId === "control_0")
           ?.data.outcome,
@@ -1435,21 +1439,5 @@ describe("controls between turns", () => {
     ]);
     // The cancelled turn's message stays in history once, as it would if its model had started.
     expect(prompts.at(-1)?.filter((content) => content.includes("Never mind."))).toHaveLength(1);
-  });
-
-  it("records nothing for a cancel with no turn running, and the next turn runs", async () => {
-    const { events } = await withSession(
-      "edge-idle-cancel",
-      { message: "Hi.", model: scriptedModel(() => "Hello."), tools: [] },
-      async (session) => {
-        await session.next("first");
-        await session.control("cancel");
-        await session.send("Still there?");
-        await session.next("second");
-      },
-    );
-
-    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
-    expect(ofType(events, "delivery.admitted")).toHaveLength(2);
   });
 });

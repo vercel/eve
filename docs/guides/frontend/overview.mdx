@@ -70,25 +70,27 @@ export function Chat() {
 
 `useEveAgent()` returns the current UI state plus commands:
 
-| Field             | What it is                                                                            |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| `view`            | Committed lifecycle tables: turns, calls, tasks, interactions, deliveries, and usage. |
-| `previews`        | In-progress text and tool-input previews.                                             |
-| `messages`        | Rendered messages, including local optimistic submissions and answers.                |
-| `agents`          | Followed child sessions and their independent observations.                           |
-| `status`          | `"idle"`, `"busy"`, or `"resuming"`. Errors are separate.                             |
-| `error`           | The latest session creation, stream, resume, or turn failure.                         |
-| `events`          | Raw eve stream events for this session.                                               |
-| `session`         | Serializable fixed session cursor (`sessionId`, `streamIndex`).                       |
-| `prewarm`         | Create the durable session without starting a turn.                                   |
-| `send`, `respond` | Submit a message or answers; resolve with `{ sessionId, deliveryId }` when accepted.  |
-| `resume`          | Replay through the current durable tail, then keep following independently.           |
-| `cancel`          | Request durable cancellation of the active turn.                                      |
-| `reset`           | Clear local state and the local session cursor.                                       |
+| Field              | What it is                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `view`             | Committed lifecycle tables: turns, calls, tasks, interactions, deliveries, and usage. |
+| `previews`         | In-progress text and tool-input previews.                                             |
+| `messages`         | Rendered messages, including local optimistic submissions and answers.                |
+| `agents`           | Followed child sessions and their independent observations.                           |
+| `status`           | `"idle"`, `"busy"`, or `"resuming"`. Errors are separate.                             |
+| `error`            | The latest session creation, stream, resume, or turn failure.                         |
+| `events`           | Raw eve stream events for this session.                                               |
+| `session`          | Serializable fixed session cursor (`sessionId`, `streamIndex`).                       |
+| `prewarm`          | Create the durable session without starting a turn.                                   |
+| `send`, `respond`  | Submit a message or answers; resolve with a `Delivery` receipt when accepted.         |
+| `resume`           | Replay through the current durable tail, then keep following independently.           |
+| `cancel`           | Request durable cancellation of the active turn.                                      |
+| `clear`, `compact` | Queue a context change and return its delivery.                                       |
+| `reset`            | Retire the server-side session and return its delivery.                               |
+| `newSession`       | Clear local state and the local session cursor.                                       |
 
 Most chat UIs only need `messages` and `status`. Use `view` with selectors from `eve/events` for lifecycle state, or `events` when you need the wire log for persistence or audit. Snapshots publish after every fact in a committed line has folded.
 
-Pass `prewarm: true` to start a workflow when the chat mounts and after each reset:
+Pass `prewarm: true` to start a workflow when the chat mounts and after each `newSession()` call:
 
 ```tsx
 import { useEveAgent } from "eve/react";
@@ -96,7 +98,7 @@ import { useEveAgent } from "eve/react";
 export function Chat() {
   const agent = useEveAgent({ prewarm: true });
 
-  return <button onClick={agent.reset}>New chat</button>;
+  return <button onClick={agent.newSession}>New chat</button>;
 }
 ```
 
@@ -117,7 +119,7 @@ export function Chat() {
       <button
         onClick={() => {
           setMessage("");
-          agent.reset();
+          agent.newSession();
         }}
         type="button"
       >
@@ -155,7 +157,7 @@ fall back to creating a session with its message. After creation succeeds, initi
 failures arrive on the stream during the first turn. The configured session timeout starts
 at creation, so an unused prewarmed session can expire before its first message. React does not
 retry a failed prewarm on unrelated renders while the option remains `true`; call `prewarm()`,
-change the option from `false` to `true` again, reset, or send a message to recover.
+change the option from `false` to `true` again, call `newSession()`, or send a message to recover.
 
 The hook keeps consuming one session stream across turns and idle periods. Replies,
 authorization updates, and turns started elsewhere all update the same projection. Each message a
@@ -176,9 +178,9 @@ the stream from the session cursor, so events that arrived in between are applie
 `followIdle` on when other sources, such as schedules, channels, or another tab, can start turns
 in the session while your UI is idle.
 
-`reset()` reuses the hook instance and clears the conversation. When `prewarm` is true after
+`newSession()` reuses the hook instance and clears the local conversation. `reset()` instead retires the server-side session and returns its delivery. When `prewarm` is true after
 the reset, it prepares the next owned session; otherwise, the next send creates it. An explicitly
-supplied `session` remains externally owned and is never replaced by prewarming or reset. Use
+supplied `session` remains externally owned and is never replaced by prewarming or `newSession()`. Use
 `initialSession` with `resume: true` to restore a saved chat.
 
 `messages` are eve-owned `EveMessage[]`. Assistant text and reasoning parts have a stable `id` from the event that created the part. Appends and completion retain that ID. Use `part.id` to key streamed assistant content, including successive text parts within one step. Older events without an ID get a best-effort fallback. User text parts may not have an ID.
@@ -357,7 +359,7 @@ The hook accepts these lifecycle callbacks:
 - `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires when session creation, streaming, resume, or a turn fails. A failed prewarm reports here when no send is waiting to retry creation.
 - `onFinish(snapshot)`: fires when a live turn settles, after its whole committed line is visible. An explicit `resume()` does not replay historical finish callbacks.
-- `onSessionChange(session)`: fires when a session is created, its cursor advances, or reset clears it. Persist the session state to resume across reloads.
+- `onSessionChange(session)`: fires when a session is created, its cursor advances, or `newSession()` clears it. Persist the session state to resume across reloads.
 
 ```tsx
 const agent = useEveAgent({
@@ -381,7 +383,7 @@ const currentActivity = activity(agent.view);
 const blocked = turn === undefined ? undefined : waiting(agent.view, turn.turnId);
 ```
 
-For event-level queries, use `events`, the authoritative, deduplicated list of the session's stream events, which a reset empties:
+For event-level queries, use `events`, the authoritative, deduplicated list of the session's stream events, which `newSession()` empties:
 
 ```tsx
 import { useMemo } from "react";

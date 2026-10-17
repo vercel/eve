@@ -232,6 +232,7 @@ export {
   type Activity,
   type Waiting,
 } from "#protocol/session-projection/selectors.js";
+export { requestStatus, type RequestStatus } from "#protocol/session-projection/request-status.js";
 
 export type {
   Introduced,

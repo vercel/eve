@@ -65,6 +65,7 @@ async function requireRemoteSession(t: EveEvalContext, turn: EveEvalTurn): Promi
     if (event.type === "child.opened" && event.data.name === "remote-loopback") return event;
   }
   return await t.target
-    .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
+    .attach(turn.sessionId, { startIndex: turn.session.state.streamIndex })
+    .watch()
     .waitForEvent("child.opened", { data: { name: "remote-loopback" } });
 }

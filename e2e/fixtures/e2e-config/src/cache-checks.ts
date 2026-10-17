@@ -5,7 +5,7 @@ import { satisfies } from "eve/evals/expect";
 /** Asserts a turn ran on the matrix model without failures. */
 export function expectHealthyTurn(turn: EveEvalTurn) {
   turn.expectOk();
-  turn.noFailedActions();
+  turn.noFailedCalls();
   turn.notEvent("model.settled", { data: { outcome: "failed" } });
   turn.notEvent("model.settled", { data: { finishReason: "content-filter" } });
   const runs = turn.events.filter((event) => event.type === "model.started");

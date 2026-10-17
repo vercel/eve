@@ -8,7 +8,7 @@ import {
   type CompiledChannel,
 } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
-import type { Session } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import type { Runtime, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
@@ -22,7 +22,7 @@ interface CrossChannelSendOptions {
 
 /** Message delivery bound to one channel-specific proactive target. */
 export interface CrossChannelTargetHandle {
-  send(message: MessageContent, options: CrossChannelSendOptions): Promise<Session>;
+  send(message: MessageContent, options: CrossChannelSendOptions): Promise<Delivery>;
 }
 
 /** Selects another authored channel and one of its proactive targets. */
@@ -116,7 +116,7 @@ interface InvokeChannelReceiveInput {
 /**
  * Shared authored `receive(input, ctx)` invocation used by route and schedule delivery.
  */
-async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
+async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Delivery> {
   if (!args.target.receive) {
     throw new Error(args.describeMissingReceive());
   }

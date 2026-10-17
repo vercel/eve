@@ -18,7 +18,7 @@ export default defineEval({
 
     const started = turn.events.find((event) => event.type === "child.opened");
     if (started?.type !== "child.opened") throw new Error("The sleeper agent never started.");
-    const cancelledTurn = await t.target.watchTurn(started.data.sessionId).result();
+    const cancelledTurn = await t.target.attach(started.data.sessionId).watch().result();
     cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
 
     t.event("child.opened", { count: 1, data: { name: "sleeper" } });

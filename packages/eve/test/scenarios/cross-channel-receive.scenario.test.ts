@@ -158,7 +158,7 @@ describe("cross-channel receive end-to-end", () => {
         { auth },
       );
 
-      expect(session.id).toBe("sess_scenario");
+      expect(session.sessionId).toBe("sess_scenario");
       expect(captured).toHaveLength(1);
       // Target's raw token "target:scenario-123" is namespaced by the
       // target channel name → "target:target:scenario-123".

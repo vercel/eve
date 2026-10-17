@@ -37,10 +37,6 @@ import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
-import type { ClearResponse } from "#protocol/clear-session.js";
-import type { CompactResponse } from "#protocol/compact-session.js";
-import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent, readAgentDispatchTraceContext } from "#protocol/traceparent.js";
 import {
   readForwardedAudienceBaggage,
@@ -85,7 +81,8 @@ import {
   type RemoteAgentBinding,
   normalizeEveCors,
   resolveOnMessage,
-  strandedSessionResponse,
+  sessionCommandErrorResponse,
+  deliveryResponse,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
 
@@ -253,10 +250,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 auth: forwarded.auth,
                 operationId: body.operationId,
               });
+        const initialDeliveryId =
+          operationToken === undefined ? undefined : `delivery:${operationToken}`;
         if (operationToken !== undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            return Response.json(createdSessionBody(owner.id, body), {
+            return Response.json(createdSessionBody(owner.id, body, initialDeliveryId), {
               headers: {
                 "cache-control": "no-store",
                 [EVE_SESSION_ID_HEADER]: owner.id,
@@ -348,6 +347,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             },
             ({ conversationId, parentTraceContext: inheritedTrace }) => {
               return createSession({
+                deliveryId: initialDeliveryId,
                 audienceAuth: auth,
                 toolStubs:
                   body.stubs === undefined
@@ -394,13 +394,16 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return Response.json(createdSessionBody(handle.sessionId, body, handle.deliveryId), {
-          headers: {
-            "cache-control": "no-store",
-            [EVE_SESSION_ID_HEADER]: handle.sessionId,
+        return Response.json(
+          createdSessionBody(handle.sessionId, body, initialDeliveryId ?? handle.deliveryId),
+          {
+            headers: {
+              "cache-control": "no-store",
+              [EVE_SESSION_ID_HEADER]: handle.sessionId,
+            },
+            status: 202,
           },
-          status: 202,
-        });
+        );
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -459,7 +462,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               ? await session.send(body.message!, options)
               : await session.respond(body.answers, options);
         } catch (error) {
-          const stranded = strandedSessionResponse(error);
+          const stranded = sessionCommandErrorResponse(error);
           if (stranded !== undefined) return stranded;
           const errorId = logError(log, "session-message request failed", error, { sessionId });
           return Response.json(
@@ -467,35 +470,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { status: 500 },
           );
         }
-        if (result.status !== "accepted") {
-          return Response.json(
-            {
-              code: result.retryable ? "session_not_ready" : "session_not_active",
-              error:
-                result.retryable === true
-                  ? "The session is not ready to accept messages yet."
-                  : "The session is no longer active.",
-              ok: false,
-            },
-            { headers: { "cache-control": "no-store" }, status: 409 },
-          );
-        }
-
-        return Response.json(
-          {
-            ok: true,
-            sessionId: result.sessionId,
-            status: "accepted",
-            deliveryId: result.deliveryId,
-          },
-          {
-            headers: {
-              "cache-control": "no-store",
-              [EVE_SESSION_ID_HEADER]: result.sessionId,
-            },
-            status: 202,
-          },
-        );
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_CANCEL_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -512,25 +487,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             turnId: body.turnId,
           });
         } catch (error) {
+          const commandError = sessionCommandErrorResponse(error);
+          if (commandError !== undefined) return commandError;
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to cancel the turn.", errorId, ok: false },
             { status: 500 },
           );
         }
-        return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies CancelTurnResponse)
-            : ({ ok: true, status: "no_active_turn" } satisfies CancelTurnResponse),
-          {
-            headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
-          },
-        );
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_COMPACT_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -546,25 +511,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             auth: sessionAuthFromResult(authResult),
           });
         } catch (error) {
+          const commandError = sessionCommandErrorResponse(error);
+          if (commandError !== undefined) return commandError;
           const errorId = logError(log, "session-compaction request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to compact the session.", errorId, ok: false },
             { status: 500 },
           );
         }
-        return Response.json(
-          result.status === "accepted"
-            ? ({
-                ok: true,
-                sessionId: result.sessionId,
-                status: "accepted",
-              } satisfies CompactResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies CompactResponse),
-          {
-            headers: { "cache-control": "no-store" },
-            status: result.status === "accepted" ? 202 : 200,
-          },
-        );
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_CLEAR_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -580,7 +535,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             auth: sessionAuthFromResult(authResult),
           });
         } catch (error) {
-          const stranded = strandedSessionResponse(error);
+          const stranded = sessionCommandErrorResponse(error);
           if (stranded !== undefined) return stranded;
           const errorId = logError(log, "session-clear request failed", error, { sessionId });
           return Response.json(
@@ -588,10 +543,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { status: 500 },
           );
         }
-        return Response.json({ ok: true, ...result } satisfies ClearResponse, {
-          headers: { "cache-control": "no-store" },
-          status: result.status === "accepted" ? 202 : 200,
-        });
+        return deliveryResponse(result);
       }),
 
       POST(EVE_SESSION_RESET_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -608,22 +560,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             reason: body.reason,
           });
         } catch (error) {
+          const commandError = sessionCommandErrorResponse(error);
+          if (commandError !== undefined) return commandError;
           const errorId = logError(log, "session-reset request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to reset the session.", errorId, ok: false },
             { status: 500 },
           );
         }
-        return Response.json(
-          result.status === "reset"
-            ? ({
-                ok: true,
-                previousSessionId: result.previousSessionId,
-                status: "reset",
-              } satisfies ResetResponse)
-            : ({ ok: true, status: "no_active_session" } satisfies ResetResponse),
-          { headers: { "cache-control": "no-store" } },
-        );
+        return deliveryResponse(result);
       }),
 
       GET(EVE_SESSION_STUBS_ROUTE_PATTERN, async (req, { params }) => {

@@ -36,9 +36,9 @@ export default defineEval({
         },
       },
     });
-    const resumed = t.target.watchTurn(live.session.sessionId, {
-      startIndex: live.session.state?.streamIndex,
-    });
+    const resumed = t.target
+      .attach(live.session.id, { startIndex: live.session.state?.streamIndex })
+      .watch();
     const callback = new URL(callbackUrl);
     callback.searchParams.set("code", "direct-release-code");
     const response = await t.target.fetch(`${callback.pathname}${callback.search}`);
@@ -65,6 +65,6 @@ export default defineEval({
       );
       return requested.length === 1 && settled.length === 1;
     });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

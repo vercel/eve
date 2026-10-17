@@ -36,9 +36,9 @@ export default defineEval({
         },
       },
     });
-    const resumed = t.target.watchTurn(live.session.sessionId, {
-      startIndex: live.session.state?.streamIndex,
-    });
+    const resumed = t.target
+      .attach(live.session.id, { startIndex: live.session.state?.streamIndex })
+      .watch();
     const callback = new URL(callbackUrl);
     callback.searchParams.set("code", AUTHORIZATION_CODE);
     const response = await t.target.fetch(`${callback.pathname}${callback.search}`);
@@ -50,9 +50,9 @@ export default defineEval({
     turn.event("interaction.settled", {
       data: { interactionId: required.data.interactionId, outcome: "accepted" },
     });
-    if (!turn.message?.includes("PARENT-NESTED-COMPLETE: CHILD-NESTED-AUTHORIZATION-COMPLETE")) {
+    if (!turn.reply?.includes("PARENT-NESTED-COMPLETE: CHILD-NESTED-AUTHORIZATION-COMPLETE")) {
       throw new Error("Nested authorization result did not reach the parent.");
     }
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

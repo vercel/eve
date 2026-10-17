@@ -21,7 +21,7 @@ export default defineEval({
     );
     if (started?.type !== "child.opened") throw new Error("workflow-stager never started.");
 
-    const child = await t.target.watchTurn(started.data.sessionId).result();
+    const child = await t.target.attach(started.data.sessionId).watch().result();
     child.expectOk();
     child.event("content.completed", {
       count: 1,
@@ -39,6 +39,6 @@ export default defineEval({
       data: { callId: "delegate", outcome: "completed", output: CHILD_REPLY },
     });
     parent.messageIncludes("WORKFLOW-DELEGATE-RESULT WORKFLOW-CHILD-STAGED");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -137,11 +137,11 @@ export async function invokeTool(
 
       const key = options.key;
       const keyProblem = key === undefined ? undefined : validateToolSessionKey(key);
-      if (keyProblem !== undefined) return { message: keyProblem, status: "invalid-input" };
+      if (keyProblem !== undefined) return failed(keyProblem, "INVALID_INPUT");
       // `none()` gives every caller one principal, so a key would be a shared secret
       // that opens the same sandbox to anyone who guesses it.
       if (key !== undefined && isAnonymousPrincipal(options.auth)) {
-        return denied(
+        return rejected(
           "Tool sessions need an authenticated caller: an anonymous caller cannot send a key. " +
             "Call without a key for a one-off session.",
         );
@@ -181,7 +181,7 @@ async function runInvocation(input: {
     observer.failedWith(validated.error);
     return failedFromError(validated.error, name, "input validation failed");
   }
-  if (validated.kind === "invalid") return { message: validated.message, status: "invalid-input" };
+  if (validated.kind === "invalid") return failed(validated.message, "INVALID_INPUT");
 
   const sandbox =
     options.key === undefined
@@ -332,8 +332,14 @@ async function runCall(input: {
       observer.failedWith(error);
       return failedFromError(error, definition.name, "approval policy failed");
     }
-    if (approval.denied) return denied(approval.reason);
-    if (approval.awaitsPerson === true) return { status: "approval-required" };
+    if (approval.denied)
+      return {
+        outcome: "rejected",
+        reason:
+          approval.reason ?? `The tool "${definition.name}" was denied by its approval policy.`,
+        cause: { policy: "approval" },
+      };
+    if (approval.awaitsPerson === true) return { outcome: "rejected", reason: "approval-required" };
   }
 
   const executeOptions: ToolExecuteOptions = {
@@ -385,7 +391,8 @@ async function runCall(input: {
     });
     return {
       connections: output.challenges.map((challenge) => challenge.name),
-      status: "authorization-required",
+      outcome: "rejected",
+      reason: "sign-in-required",
     };
   }
   await observer.executed({ durationMs, output: json, type: "result" });
@@ -394,7 +401,7 @@ async function runCall(input: {
     return {
       modelOutput: (await toolCallModelOutput(definition, json, callId)) as ToolModelOutput,
       output: json,
-      status: "completed",
+      outcome: "completed",
     };
   } catch (error) {
     observer.failedWith(error);
@@ -408,12 +415,12 @@ async function lastIterated(iterable: AsyncIterable<unknown>): Promise<unknown> 
   return last;
 }
 
-function denied(reason: string | undefined): InvokeToolResult {
-  return reason === undefined ? { status: "denied" } : { reason, status: "denied" };
+function rejected(reason: string): InvokeToolResult {
+  return { reason, outcome: "rejected" };
 }
 
-function failed(message: string): InvokeToolResult {
-  return { message, status: "failed" };
+function failed(message: string, code = "TOOL_FAILED"): InvokeToolResult {
+  return { outcome: "failed", error: { code, message } };
 }
 
 /**
@@ -426,8 +433,11 @@ function failedFromError(error: unknown, toolName: string, what: string): Invoke
     logError(log, `invokeTool ${what}`, error, { toolName }),
   );
   return {
-    errorId,
-    message: `Tool "${toolName}" failed: ${what}. The error is logged with id ${errorId}.`,
-    status: "failed",
+    outcome: "failed",
+    error: {
+      code: "TOOL_FAILED",
+      id: errorId,
+      message: `Tool "${toolName}" failed: ${what}. The error is logged with id ${errorId}.`,
+    },
   };
 }

@@ -108,10 +108,11 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
       },
     ],
     result: {
+      sessionEnded: false,
       derived: createEmptyDerivedFacts(),
       events: [],
-      finalMessage: "done",
-      output: "done",
+      reply: "done",
+      data: "done",
       status: "completed",
       traceContexts: [],
     },

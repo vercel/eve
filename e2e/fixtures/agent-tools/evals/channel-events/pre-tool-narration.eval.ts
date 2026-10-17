@@ -106,7 +106,8 @@ export default defineEval({
         `Then call it exactly once with label "${token}". After it returns, reply with the label verbatim.`,
       token,
     });
-    const session = await t.target.attachSession(started.sessionId);
+    const session = t.target.attach(started.sessionId);
+    await session.nextTurn();
     await t.require(
       preToolNarration(session.events) ?? "",
       satisfies((value: string) => value.length > 0, "pre-tool narration is non-empty"),

@@ -12,7 +12,10 @@ interface HomeRouteMetadata {
  * established here is visible to `resolveSession` on the same channel.
  */
 export type RouteSessionCreator = (
-  input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
+  input: Omit<RunInput, "adapter" | "channelName" | "requestId"> & {
+    /** Stable initial receipt for an idempotent HTTP creation operation. */
+    readonly deliveryId?: string;
+  },
 ) => Promise<RunHandle & { readonly deliveryId?: string }>;
 
 export type RemoteAgentStreamHeadersResolver = (input: {

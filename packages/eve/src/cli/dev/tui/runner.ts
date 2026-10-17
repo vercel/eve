@@ -1,5 +1,6 @@
 import { openInteractions } from "#protocol/session-projection/selectors.js";
 import { interaction, type Interaction } from "#protocol/session-reader.js";
+import type { Delivery } from "#shared/delivery.js";
 import { optionStyle } from "#channel/interaction-prompts.js";
 import { type ConversationState } from "#client/conversation-state.js";
 import {
@@ -1078,18 +1079,15 @@ export class EveTUIRunner {
     readonly absent: string;
     readonly accepted: string;
     readonly failed: string;
-    readonly invoke: () => Promise<{ status: string }>;
+    readonly invoke: () => Promise<Delivery>;
   }): Promise<void> {
     if (this.#store.snapshot.session === undefined) {
       this.#finishCommand({ kind: "result", summary: input.absent });
       return;
     }
     try {
-      const result = await input.invoke();
-      if (result.status !== "accepted") {
-        this.#finishCommand({ kind: "result", summary: input.absent });
-        return;
-      }
+      const result = await (await input.invoke()).result();
+      if (result.status !== "completed") throw new Error(`The command settled ${result.status}.`);
       this.#finishCommand({ kind: "result", summary: input.accepted });
     } catch (error) {
       this.#finishCommand({
@@ -1103,7 +1101,8 @@ export class EveTUIRunner {
   /** Retires the durable session before clearing the local conversation view. */
   async #resetSession(): Promise<void> {
     try {
-      await this.#store.retire();
+      if (this.#store.snapshot.session !== undefined) await (await this.#store.reset()).result();
+      this.#store.newSession();
     } catch (error) {
       this.#finishCommand({
         kind: "result",

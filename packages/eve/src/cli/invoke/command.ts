@@ -168,13 +168,7 @@ async function readJsonFromStdin(): Promise<unknown> {
 }
 
 function invokeExitCode(result: InvokeResult): number {
-  if (
-    result.status === "failed" ||
-    result.status === "authentication-required" ||
-    (result.status === "ready" && result.outcome.status === "failed")
-  ) {
-    return 1;
-  }
-  if (result.status === "input-required") return 3;
+  if (result.status === "failed" || result.status === "cancelled") return 1;
+  if (result.status === "awaiting-input") return 3;
   return 0;
 }

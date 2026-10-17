@@ -85,7 +85,7 @@ async function callProgramAgent(
     );
   }
   if (outputSchema !== undefined) return result.data ?? null;
-  return result.message ?? null;
+  return result.reply ?? null;
 }
 
 export { MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS };

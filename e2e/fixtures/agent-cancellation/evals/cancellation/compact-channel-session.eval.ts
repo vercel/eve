@@ -1,7 +1,7 @@
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-interface MessageResponse {
+interface Delivery {
   readonly ok: boolean;
   readonly sessionId?: string;
 }
@@ -57,27 +57,26 @@ export default defineEval({
     );
 
     const threadId = crypto.randomUUID();
-    const started = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const started = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly COMPACT-INITIAL-OK.",
     });
     await t.require(
       started,
       satisfies(
-        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+        (value: Delivery) => value.ok === true && typeof value.sessionId === "string",
         "the initial message starts a session",
       ),
     );
     const sessionId = started.sessionId!;
 
-    const initial = await t.target.watchTurn(sessionId).result();
+    const initial = await t.target.attach(sessionId).watch().result();
     initial.notEvent("turn.settled", { data: { outcome: "failed" } });
     initial.notEvent("session.ended", { data: { outcome: "failed" } });
 
     // A context change between turns ends no turn: the read ends with its settlement.
-    const liveCompaction = t.target.watchTurn(sessionId, {
-      startIndex: nextLine(initial.events),
-      until: (event) => event.type === "context.settled",
-    });
+    const liveCompaction = t.target
+      .attach(sessionId, { startIndex: nextLine(initial.events) })
+      .watch({ until: (event) => event.type === "context.settled" });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const compactedResponse = await postJson<CompactResponse>(
       t.target,
@@ -106,17 +105,17 @@ export default defineEval({
     compacted.notEvent("turn.settled", { data: { outcome: "failed" } });
     compacted.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    const followUpTurn = t.target.watchTurn(sessionId, {
-      startIndex: nextLine(compacted.events),
-    });
+    const followUpTurn = t.target
+      .attach(sessionId, { startIndex: nextLine(compacted.events) })
+      .watch();
     await new Promise((resolve) => setTimeout(resolve, 250));
-    const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const resumed = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly COMPACT-FOLLOW-UP-OK.",
     });
     await t.require(
       resumed,
       satisfies(
-        (value: MessageResponse) => value.sessionId === sessionId,
+        (value: Delivery) => value.sessionId === sessionId,
         "the thread resumes the same session after compaction",
       ),
     );

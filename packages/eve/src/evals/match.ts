@@ -6,7 +6,7 @@ import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
 /**
  * One matcher accepted by the assertion options (`t.calledTool`,
- * `t.calledSubagent`):
+ * `t.calledAgent`):
  *
  * - a **literal** is compared structurally; objects partial-deep-match (every
  *   key in the matcher must match the observed value, recursively, and nested
@@ -49,14 +49,14 @@ export interface EveEvalToolCallMatchOptions {
 }
 
 /**
- * Constraints applied to a skill load by `t.loadedSkill`. Identical to
+ * Constraints applied to a skill load by `t.calledSkill`. Identical to
  * {@link EveEvalToolCallMatchOptions} without `input`, since the skill name is
  * the whole input.
  */
 export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "input">;
 
 /**
- * Constraints applied to subagent calls by `t.calledSubagent`.
+ * Constraints applied to subagent calls by `t.calledAgent`.
  */
 export interface EveEvalSubagentCallMatchOptions {
   /** Matcher over the agent tool call id. */

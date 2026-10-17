@@ -346,7 +346,7 @@ for await (const event of events) {
 }
 ```
 
-`stream()` accepts `startIndex` (negative values count back from the tail), `follow`, and `signal`. Key stored events on [`meta.position`](#positions), which stays stable across reads. With `follow: false`, the read ends at the durable tail observed when it opens; otherwise it keeps following new events until the stream closes or the signal aborts.
+`stream()` takes `SessionStreamOptions` from `eve/client`: `startIndex` (a durable line position, with negative values counting back from the tail), `follow`, and `signal`. Client readers also accept `streamReconnectPolicy`. Key stored events on [`meta.position`](#positions), which stays stable across reads. With `follow: false`, the read ends at the durable tail observed when it opens; otherwise it keeps following new events until the stream closes or the signal aborts.
 
 A read reflects events that are already durable. A hook runs after its line is written, so a bounded read there includes the event that triggered it. `sessions` reads any session ID without channel auth, so check that a caller may read a session before passing an ID from a request. It is available only in code that runs inside the eve server.
 

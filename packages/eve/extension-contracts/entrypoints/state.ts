@@ -1,5 +1,5 @@
 export {
-  type Session,
+  type SessionInfo,
   type SessionAuth,
   type SessionAuthContext,
   type SessionContext,

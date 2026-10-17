@@ -56,8 +56,8 @@ export default defineEval({
         Math.max(triageCalled, reviewCalled) < reproduceCalled
       );
     });
-    await t.require(parseJsonMessage(turn.message), equals(expected));
-    t.noFailedActions();
+    await t.require(parseJsonMessage(turn.reply), equals(expected));
+    t.noFailedCalls();
   },
 });
 

@@ -14,7 +14,7 @@ export default defineEval({
   async test(t) {
     const started = await t.send("RELAY-budget-child Alice records the release step.");
     const { request, session } = await waitForRelayed(t, started.session, "budget");
-    if (request.interactionId.startsWith(`${session.sessionId}:`)) {
+    if (request.interactionId.startsWith(`${session.id}:`)) {
       throw new Error("Expected the child's budget question, not the parent's.");
     }
 

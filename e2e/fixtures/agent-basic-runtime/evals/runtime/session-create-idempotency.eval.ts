@@ -46,8 +46,8 @@ export default defineEval({
     );
 
     const [firstTurn, issuerTurn] = await Promise.all([
-      t.target.watchTurn(replay.sessionId).result(),
-      t.target.watchTurn(otherIssuer.sessionId).result(),
+      t.target.attach(replay.sessionId).watch().result(),
+      t.target.attach(otherIssuer.sessionId).watch().result(),
     ]);
     // A real model may take extra tool steps on the opaque marker message, so
     // duplicate execution is detected by a repeated turn, not a model run count.
@@ -59,9 +59,11 @@ export default defineEval({
     issuerTurn.event("turn.started", { count: 1 });
 
     const probe = `CREATE-ONCE-PROBE-${crypto.randomUUID()}`;
-    const liveProbe = t.target.watchTurn(firstTurn.sessionId, {
-      startIndex: (firstTurn.events.at(-1)?.meta.position.line ?? -1) + 1,
-    });
+    const liveProbe = t.target
+      .attach(firstTurn.sessionId, {
+        startIndex: (firstTurn.events.at(-1)?.meta.position.line ?? -1) + 1,
+      })
+      .watch();
     await continueSession(t.target, PRINCIPAL_A, firstTurn.sessionId, probe);
     const probeTurn = await liveProbe.result();
     probeTurn.expectOk();

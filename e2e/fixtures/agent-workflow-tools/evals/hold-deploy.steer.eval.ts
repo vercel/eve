@@ -24,6 +24,6 @@ export default defineEval({
     turn.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     turn.notEvent("turn.settled", { data: { outcome: "cancelled" } });
     turn.messageIncludes('WORKFLOW-HOLD-RESULT {"interrupted":true}');
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

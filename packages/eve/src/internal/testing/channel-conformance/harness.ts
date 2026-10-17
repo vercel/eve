@@ -1,4 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { Delivery } from "#shared/delivery.js";
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { endsTurn } from "#client/session-utils.js";
 import { viewOfEvents } from "#protocol/session-projection/fold.js";
 import { classifyRecord } from "#protocol/session-events/envelope.js";
@@ -798,9 +800,9 @@ async function converse(
     const sessions = new Map<string, Session>();
     const background: Promise<unknown>[] = [];
 
-    function track(session: Session): Session {
-      sessions.set(session.id, session);
-      return session;
+    function track(delivery: Delivery): Delivery {
+      sessions.set(delivery.sessionId, attachSession(delivery.sessionId));
+      return delivery;
     }
 
     const dispatch: Dispatch = async (request) => {
@@ -831,8 +833,17 @@ async function converse(
           waitUntil: (task) => void pending.push(task),
         },
         async (input) => {
+          const generated = createChannelDeliveryMetadata({
+            channelKind: `channel:${channelName}`,
+            channelName,
+          });
+          const delivery =
+            input.deliveryId === undefined
+              ? generated
+              : { ...generated, deliveryId: input.deliveryId };
           const handle = await workflowRuntime.createSession({
             ...input,
+            delivery,
             adapter,
             channelName,
             continuationToken:
@@ -840,8 +851,8 @@ async function converse(
                 ? undefined
                 : `${channelName}:${input.continuationToken}`,
           });
-          track(attachSession(handle.sessionId));
-          return handle;
+          sessions.set(handle.sessionId, attachSession(handle.sessionId));
+          return { ...handle, deliveryId: delivery.deliveryId };
         },
       );
       const response = await route.handler(request, args);

@@ -49,3 +49,6 @@ export interface SessionContext {
     environment: SandboxEnvironment<object | undefined, Session>,
   ): Promise<RuntimeSandboxSessionFor<Session>>;
 }
+
+/** Active session metadata observed by authored callbacks as `ctx.session`. */
+export type SessionInfo = SessionContext["session"];

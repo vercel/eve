@@ -3,7 +3,7 @@ import { satisfies } from "eve/evals/expect";
 
 const TOOL_NAME = "wait-for-cancellation";
 
-interface MessageResponse {
+interface Delivery {
   readonly ok: boolean;
   readonly sessionId?: string;
 }
@@ -55,19 +55,19 @@ export default defineEval({
       ),
     );
 
-    const started = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const started = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Please wait for cancellation.",
     });
     await t.require(
       started,
       satisfies(
-        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+        (value: Delivery) => value.ok === true && typeof value.sessionId === "string",
         "the message route returns a session id",
       ),
     );
     const sessionId = started.sessionId!;
 
-    const live = t.target.watchTurn(sessionId);
+    const live = t.target.attach(sessionId).watch();
     await live.waitForEvent("call.requested", { data: { capability: { name: TOOL_NAME } } });
     t.log(`Tool call observed mid-turn; stopping thread ${threadId}.`);
 
@@ -87,19 +87,20 @@ export default defineEval({
     cancelledTurn.notEvent("model.settled", { data: { outcome: "failed" } });
     cancelledTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    const resumed = await postJson<MessageResponse>(t.target, `/threads/${threadId}/messages`, {
+    const resumed = await postJson<Delivery>(t.target, `/threads/${threadId}/messages`, {
       message: "Reply with exactly CHANNEL-CANCEL-FOLLOW-UP-OK.",
     });
     await t.require(
       resumed,
       satisfies(
-        (value: MessageResponse) => value.sessionId === sessionId,
+        (value: Delivery) => value.sessionId === sessionId,
         "the thread resumes the same session",
       ),
     );
 
     const followUp = await t.target
-      .watchTurn(sessionId, { startIndex: cancelledTurn.session.state!.streamIndex })
+      .attach(sessionId, { startIndex: cancelledTurn.session.state!.streamIndex })
+      .watch()
       .result();
     followUp.notEvent("turn.settled", { data: { outcome: "cancelled" } });
     followUp.notEvent("turn.settled", { data: { outcome: "failed" } });

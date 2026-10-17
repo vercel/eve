@@ -7,7 +7,7 @@ export {
   type UseEveAgentStatus,
 } from "#vue/use-eve-agent.js";
 
-export type { AcceptedDelivery } from "#client/eve-agent-store-state.js";
+export type { Delivery, DeliveryResult } from "#shared/delivery.js";
 export { signInEnding, type AskedCall, type Interaction } from "#protocol/session-reader.js";
 export type {
   AgentObservation,

@@ -16,8 +16,8 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool("bash", { count: 1 });
-    t.check(result.message, includes(DOCKERFILE_MARKER));
-    t.check(result.message, includes(WORKSPACE_MARKER));
-    t.check(result.message, includes(SKILL_MARKER));
+    t.check(result.reply, includes(DOCKERFILE_MARKER));
+    t.check(result.reply, includes(WORKSPACE_MARKER));
+    t.check(result.reply, includes(SKILL_MARKER));
   },
 });

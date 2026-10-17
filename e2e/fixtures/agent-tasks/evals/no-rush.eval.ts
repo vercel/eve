@@ -46,8 +46,8 @@ export default defineEval({
       const reportId = settlementsOf(events, callIds).flatMap(
         (settled) => reportIdOf(settled) ?? [],
       )[0];
-      return reportId !== undefined && (turn.message ?? "").includes(reportId);
+      return reportId !== undefined && (turn.reply ?? "").includes(reportId);
     });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

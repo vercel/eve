@@ -17,10 +17,10 @@ export default defineEval({
       prompt: (prompt) => /Alice ship first/i.test(prompt),
       toolName: "ask_question",
     });
-    if (choice.kind !== "question" || choice.allowFreeform !== true) {
+    if (choice.request.kind !== "question" || choice.request.allowFreeform !== true) {
       throw new Error("ask_question must ask a question that accepts free text.");
     }
-    const production = choice.options?.find((option) => /production/i.test(option.label));
+    const production = choice.request.options?.find((option) => /production/i.test(option.label));
     if (production === undefined) throw new Error("ask_question did not offer Production.");
 
     const chosen = await session.respond([
@@ -49,6 +49,6 @@ export default defineEval({
       status: "completed",
     });
 
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

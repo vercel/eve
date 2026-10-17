@@ -24,7 +24,8 @@ export default defineEval({
     moved.messageIncludes('WORKFLOW-OFFER-RESULT {"offer":"withdrawn","service":"api"}');
 
     const followed = await t.target
-      .watchTurn(parked.sessionId, { startIndex: afterQuestion })
+      .attach(parked.sessionId, { startIndex: afterQuestion })
+      .watch()
       .result();
     followed.event("interaction.settled", {
       count: 1,
@@ -35,6 +36,6 @@ export default defineEval({
       { data: { interactionId: request.interactionId }, type: "interaction.settled" },
       { data: { callId: offerCallId }, type: "call.settled" },
     ]);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

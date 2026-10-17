@@ -31,6 +31,6 @@ export default defineEval({
       );
     });
     followUp.messageIncludes(/Q2/u);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

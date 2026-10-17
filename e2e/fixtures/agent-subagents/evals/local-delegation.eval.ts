@@ -26,6 +26,6 @@ export default defineEval({
     );
 
     t.succeeded();
-    t.calledSubagent("echo-marker", { status: "completed" });
+    t.calledAgent("echo-marker", { status: "completed" });
   },
 });

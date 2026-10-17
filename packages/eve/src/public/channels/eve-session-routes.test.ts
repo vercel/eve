@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { StreamDelivery } from "#client/delivery.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
@@ -25,14 +27,20 @@ function route(
 }
 
 function createFixedSession(overrides: Partial<Session> = {}): Session {
+  const receipt = new StreamDelivery({
+    sessionId: "wrun_A",
+    deliveryId: "delivery_A",
+    createStream: async function* () {},
+  });
   return {
     id: "wrun_A",
-    send: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
-    respond: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
-    cancel: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
-    compact: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
-    clear: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
-    reset: vi.fn().mockResolvedValue({ previousSessionId: "wrun_A", status: "reset" }),
+    stream: async function* () {},
+    send: vi.fn().mockResolvedValue(receipt),
+    respond: vi.fn().mockResolvedValue(receipt),
+    cancel: vi.fn().mockResolvedValue(receipt),
+    compact: vi.fn().mockResolvedValue(receipt),
+    clear: vi.fn().mockResolvedValue(receipt),
+    reset: vi.fn().mockResolvedValue(receipt),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
@@ -511,7 +519,7 @@ describe("eve ID-addressed session routes", () => {
 
   it("returns conflict instead of creating when an exact session is inactive", async () => {
     const session = createFixedSession({
-      send: vi.fn().mockResolvedValue({ status: "session_not_active" }),
+      send: vi.fn().mockRejectedValue(new SessionNotActiveError()),
     });
     const response = await route("POST", "/eve/v1/session/:sessionId")(
       new Request("https://eve.test/eve/v1/session/wrun_A", {
@@ -570,39 +578,42 @@ describe("eve ID-addressed session routes", () => {
     expect(session[operation]).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards the turn guard and the caller without changing the response", async () => {
-    const session = createFixedSession();
-    const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
-      new Request("https://eve.test/eve/v1/session/wrun_A/cancel", {
-        body: JSON.stringify({ turnId: "turn_1" }),
-        method: "POST",
-      }),
-      createArgs(session),
-    );
+  it.each(["turn_1", null])(
+    "forwards turn guard %s and the caller without changing the receipt",
+    async (turnId) => {
+      const session = createFixedSession();
+      const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
+        new Request("https://eve.test/eve/v1/session/wrun_A/cancel", {
+          body: JSON.stringify({ turnId }),
+          method: "POST",
+        }),
+        createArgs(session),
+      );
 
-    expect(session.cancel).toHaveBeenCalledWith({
-      auth: expect.objectContaining({ principalId: "anonymous", principalType: "anonymous" }),
-      turnId: "turn_1",
-    });
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      sessionId: "wrun_A",
-      status: "accepted",
-    });
-  });
+      expect(session.cancel).toHaveBeenCalledWith({
+        auth: expect.objectContaining({ principalId: "anonymous", principalType: "anonymous" }),
+        turnId,
+      });
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        sessionId: "wrun_A",
+        deliveryId: "delivery_A",
+      });
+    },
+  );
 
-  it("returns a synchronous inactive cancellation result without a session id", async () => {
+  it("returns a conflict when a session cannot accept cancellation", async () => {
     const session = createFixedSession({
-      cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
+      cancel: vi.fn().mockRejectedValue(new SessionNotActiveError()),
     });
     const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
       new Request("https://eve.test/eve/v1/session/wrun_A/cancel", { method: "POST" }),
       createArgs(session),
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, status: "no_active_turn" });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, code: "session_not_active" });
   });
 
   it.each([

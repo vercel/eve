@@ -108,7 +108,7 @@ export function VoiceCall() {
     setError(null);
     setStarting(true);
     // One call is one eve session.
-    agent.reset();
+    agent.newSession();
     setTurns((turnsRef.current = []));
     setAnchors([]);
     delegatedTurnsRef.current = 0;

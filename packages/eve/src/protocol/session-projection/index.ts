@@ -2,6 +2,7 @@
 // plain records, so a row is `view.calls[callId]`; selectors answer what takes more than a lookup.
 
 export * from "./fold.js";
+export { requestStatus, type RequestStatus } from "./request-status.js";
 export {
   activeTurn,
   activity,

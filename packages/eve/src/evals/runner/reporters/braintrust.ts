@@ -1,3 +1,4 @@
+import { outputOf } from "#evals/output.js";
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import {
   composeAssertionScoreMetadata,
@@ -153,7 +154,8 @@ class BraintrustReporter implements EvalReporter {
       eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
       eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
       eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
-      eveParked: result.result.derived.parked,
+      eveAwaitingInput: result.result.status === "awaiting-input",
+      eveSessionEnded: result.result.sessionEnded,
       eveAssertionScores: composeAssertionScoreMetadata(result.assertions),
     };
 
@@ -182,7 +184,7 @@ class BraintrustReporter implements EvalReporter {
     this.#experiment.log({
       id: result.id,
       input: evaluation?.description ?? "",
-      output: result.result.output ?? "",
+      output: outputOf(result.result) ?? "",
       error: result.error ?? undefined,
       scores,
       metadata,

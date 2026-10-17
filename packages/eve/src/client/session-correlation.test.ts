@@ -40,7 +40,7 @@ describe("accepted message correlation", () => {
         .mockResolvedValueOnce(stream(events));
       const resumed = session();
       const result = await (await resumed.send("new report", { turnPolicy })).result();
-      expect(result.message).toBe("NEW REPORT");
+      expect(result.reply).toBe("NEW REPORT");
       expect(result.events).toHaveLength(current.length);
       expect(resumed.state.streamIndex).toBe(events.length);
     },
@@ -50,7 +50,7 @@ describe("accepted message correlation", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(accepted())
       .mockResolvedValueOnce(stream(turn(2, "COALESCED REPORT", ["other", "new-delivery"])));
-    expect((await (await session().send("new report")).result()).message).toBe("COALESCED REPORT");
+    expect((await (await session().send("new report")).result()).reply).toBe("COALESCED REPORT");
   });
 
   it("reads past another delivery's settlement to its own", async () => {
@@ -66,7 +66,7 @@ describe("accepted message correlation", () => {
         stream([...current.slice(0, settled), ...other, ...current.slice(settled)]),
       );
     const result = await (await session().send("new report")).result();
-    expect(result.message).toBe("NEW REPORT");
+    expect(result.reply).toBe("NEW REPORT");
     expect(result.events).toHaveLength(current.length + other.length);
   });
 
@@ -111,7 +111,7 @@ describe("accepted message correlation", () => {
         ]),
       );
     await expect((await session().send("new report")).result()).rejects.toThrow(
-      "before it admitted the accepted message",
+      "before admitting the accepted delivery",
     );
   });
 });

@@ -207,7 +207,7 @@ describe("stranded sessions", () => {
           "Alice asks for the weekly summary after the upgrade.",
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
         await expect(waiting).resolves.toMatchObject({
           done: false,
@@ -221,20 +221,23 @@ describe("stranded sessions", () => {
           },
         });
         await expect(reader.read()).resolves.toMatchObject({ done: true });
-        expect(fresh.id).not.toBe(anchor.runId);
+        expect(fresh.sessionId).not.toBe(anchor.runId);
         // The runtime started the successor itself; the channel started nothing.
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(owner.status).resolves.toBe("cancelled");
         await expect(anchor.status).resolves.toBe("cancelled");
-        await waitForHook({ runId: fresh.id }, { token: sessionInboxHookToken(continuationToken) });
+        await waitForHook(
+          { runId: fresh.sessionId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: fresh.id,
+          sessionId: fresh.sessionId,
         });
         await expect(
-          waitForReceivedMessages(fresh.id, ["Alice asks for the weekly summary"]),
+          waitForReceivedMessages(fresh.sessionId, ["Alice asks for the weekly summary"]),
         ).resolves.toEqual([]);
         // The successor names the session it replaced.
-        const started = await readSessionStarted(fresh.id);
+        const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
         // A remote job can finish after replacement. Its fixed parent inbox
         // must not route the result into the new conversation.
@@ -266,7 +269,7 @@ describe("stranded sessions", () => {
         );
         expect(callback.status).toBe(404);
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: fresh.id,
+          sessionId: fresh.sessionId,
         });
 
         const resets = logs.records.filter((record) => record.message === "Reset stranded session");
@@ -302,11 +305,11 @@ describe("stranded sessions", () => {
           { context: ["Alice moved the standup to Thursday."] },
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
-        expect(fresh.id).not.toBe(stranded.runId);
+        expect(fresh.sessionId).not.toBe(stranded.runId);
         await expect(stranded.status).resolves.toBe("cancelled");
-        await expect(waitForAliasOwner(runtime, continuationToken)).resolves.toBe(fresh.id);
+        await expect(waitForAliasOwner(runtime, continuationToken)).resolves.toBe(fresh.sessionId);
       } finally {
         await cancelIfActive(stranded);
         await resetSession(runtime, freshSessionId);
@@ -329,7 +332,7 @@ describe("stranded sessions", () => {
         ]);
         freshSessionId = await waitForAliasOwner(runtime, continuationToken);
 
-        expect(candidates.map((session) => session.id)).toContain(freshSessionId);
+        expect(candidates.map((session) => session.sessionId)).toContain(freshSessionId);
         expect(freshSessionId).not.toBe(stranded.runId);
         await expect(stranded.status).resolves.toBe("cancelled");
         await expect(
@@ -476,7 +479,7 @@ describe("stranded sessions", () => {
           { auth: null },
         );
 
-        expect(session.id).toBe(owner.runId);
+        expect(session.sessionId).toBe(owner.runId);
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(owner.status).resolves.toBe("running");
       } finally {
@@ -525,7 +528,7 @@ describe("stranded sessions", () => {
           "Alice asks to move the offsite to Friday.",
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
         await expect(reads.wait()).resolves.toEqual([
           {

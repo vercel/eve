@@ -15,11 +15,11 @@ export default defineEval({
       throw new Error("Typed sandbox turn did not call the deny-all subagent.");
     }
 
-    const childTurn = await t.target.watchTurn(started.data.sessionId).result();
+    const childTurn = await t.target.attach(started.data.sessionId).watch().result();
     childTurn.expectOk();
 
     t.succeeded();
-    t.calledSubagent("deny-all", { count: 1, status: "completed" });
+    t.calledAgent("deny-all", { count: 1, status: "completed" });
     childTurn.calledTool("verify-typed-sandbox", { output: { blocked: true } });
   },
 });

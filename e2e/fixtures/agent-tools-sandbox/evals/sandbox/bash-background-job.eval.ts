@@ -29,7 +29,7 @@ export default defineEval({
     turn.expectOk();
 
     t.log(JSON.stringify(bashOutputs(turn.events)));
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.eventsSatisfy("the slow command yields, keeps running, then stops with kill", (events) =>
       jobWasObservedAndStopped(bashOutputs(events)),
     );

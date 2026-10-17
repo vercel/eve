@@ -49,8 +49,9 @@ export function readSessionRecords(
 export function readSessionEventStream(
   sessionId: string,
   startIndex?: number,
+  signal?: AbortSignal,
 ): ReadableStream<SessionStreamEvent> {
-  const lines = streamSessionLines(sessionId, { startIndex });
+  const lines = streamSessionLines(sessionId, { startIndex, signal });
   const reader = createEventReader();
   return new ReadableStream<SessionStreamEvent>({
     async pull(controller) {
@@ -82,8 +83,9 @@ export function readSessionEventStream(
 export function readSessionEventHistory(
   sessionId: string,
   startIndex?: number,
+  signal?: AbortSignal,
 ): ReadableStream<SessionStreamEvent> {
-  const events = streamSessionEvents(sessionId, { follow: false, startIndex });
+  const events = streamSessionEvents(sessionId, { follow: false, startIndex, signal });
   return new ReadableStream<SessionStreamEvent>({
     async pull(controller) {
       const next = await events.next();

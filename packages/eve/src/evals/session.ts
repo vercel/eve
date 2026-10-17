@@ -1,3 +1,7 @@
+import type { Delivery } from "#shared/delivery.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import { copyView, foldReceivedEvent, viewOfEvents } from "#protocol/session-projection/fold.js";
+import type { RequestStatus } from "#protocol/session-projection/request-status.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
@@ -5,12 +9,12 @@ import { basename } from "node:path";
 import { createTextWithFileContent } from "#client/file-parts.js";
 import type { ClientSession } from "#client/session.js";
 import type {
-  CancelSessionResult,
   ClientSessionState,
   SendTurnInput,
   SendTurnOptions,
+  RespondTurnOptions,
   SendTurnPayload,
-  StreamOptions,
+  SessionStreamOptions,
 } from "#client/types.js";
 import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
@@ -21,6 +25,7 @@ import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
 import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
+import { outputOf } from "#evals/output.js";
 import { EvalRequirementFailed } from "#evals/control-flow.js";
 import { interactionMatches, matchesValue, toolCallMatches } from "#evals/match.js";
 import type {
@@ -124,6 +129,10 @@ export class EvalSessionDriver implements EveEvalSession {
     return this.#events;
   }
 
+  get view(): SessionView {
+    return viewOfEvents([...this.#history, ...this.#events]).view;
+  }
+
   get transcript(): string {
     return formatEvalTranscript(this.#events);
   }
@@ -140,7 +149,7 @@ export class EvalSessionDriver implements EveEvalSession {
     return this.#pendingInteractions;
   }
 
-  get sessionId(): string {
+  get id(): string {
     return this.#session.state.sessionId;
   }
 
@@ -148,19 +157,13 @@ export class EvalSessionDriver implements EveEvalSession {
     return this.#session.state;
   }
 
-  async cancel(): Promise<CancelSessionResult> {
+  async cancel(): Promise<Delivery> {
     return await this.#session.cancel();
   }
 
   async compact(): Promise<EveEvalTurn> {
-    const result = await this.#session.compact();
-    if (result.status !== "accepted") {
-      throw new Error(`compact() found no active session for "${this.sessionId}".`);
-    }
-    // A compaction between turns settles a context change and ends no turn.
-    return await this.consume(this.#session.stream({ signal: this.#signal }), undefined, {
-      endsWith: (event) => event.type === "context.settled",
-    }).result();
+    const delivery = await this.#session.compact();
+    return this.consume(delivery, undefined, { deliveryId: delivery.deliveryId }).result();
   }
 
   agent(opened: ChildOpened): EveEvalAgentSession {
@@ -168,8 +171,8 @@ export class EvalSessionDriver implements EveEvalSession {
     const signal = this.#signal;
     return {
       name: child.name,
-      sessionId: child.sessionId,
-      stream: (options: StreamOptions = {}) =>
+      id: child.id,
+      stream: (options: SessionStreamOptions = {}) =>
         child.stream({ ...options, signal: options.signal ?? signal }),
       taskId: child.taskId,
     };
@@ -202,7 +205,10 @@ export class EvalSessionDriver implements EveEvalSession {
     return matching[0]!;
   }
 
-  async respond(responses: readonly Answer[], options: SendTurnOptions = {}): Promise<EveEvalTurn> {
+  async respond(
+    responses: readonly Answer[],
+    options: RespondTurnOptions = {},
+  ): Promise<EveEvalTurn> {
     if (responses.length === 0) {
       throw new Error("respond() requires at least one answer.");
     }
@@ -212,7 +218,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
   async startRespond(
     responses: readonly Answer[],
-    options: SendTurnOptions = {},
+    options: RespondTurnOptions = {},
   ): Promise<EveEvalLiveTurn> {
     if (responses.length === 0) throw new Error("startRespond() requires input responses.");
     return await this.#start({ ...options, answers: responses });
@@ -252,8 +258,7 @@ export class EvalSessionDriver implements EveEvalSession {
       answers === undefined
         ? await this.#session.send(message!, options)
         : await this.#session.respond(answers, options);
-    // A message's response ends when its delivery settles; an answer's at its first turn boundary.
-    const deliveryId = message === undefined ? undefined : response.deliveryId;
+    const deliveryId = response.deliveryId;
     return this.consume(response, message, { deliveryId });
   }
 
@@ -266,11 +271,12 @@ export class EvalSessionDriver implements EveEvalSession {
       readonly endsWith?: (event: SessionStreamEvent) => boolean;
     } = {},
   ): EveEvalLiveTurn {
-    const sessionId = this.sessionId;
+    const sessionId = this.id;
     return new EvalLiveTurn({
       ...ending,
       events,
       observe: (event) => this.#observeEvent(sessionId, event),
+      initialView: this.view,
       record: (observed) => {
         if (message !== undefined) {
           this.#lastInput =
@@ -281,7 +287,7 @@ export class EvalSessionDriver implements EveEvalSession {
                   .map((part) => part.text)
                   .join("\n");
         }
-        return this.#recordObservedTurn(sessionId, observed);
+        return this.#recordObservedTurn(sessionId, observed, ending.deliveryId);
       },
       session: this,
       sessionId,
@@ -299,11 +305,11 @@ export class EvalSessionDriver implements EveEvalSession {
     return await this.send(message);
   }
 
-  async readTurn(options?: { readonly startIndex?: number }): Promise<EveEvalTurn> {
-    return await this.watchTurn(options).result();
+  async nextTurn(options?: EveEvalWatchOptions): Promise<EveEvalTurn> {
+    return await this.watch(options).result();
   }
 
-  watchTurn(options?: EveEvalWatchOptions): EveEvalLiveTurn {
+  watch(options?: EveEvalWatchOptions): EveEvalLiveTurn {
     return this.consume(
       this.#session.stream({ signal: this.#signal, startIndex: options?.startIndex }),
       undefined,
@@ -312,8 +318,9 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   snapshot(): EveEvalSessionResult {
-    const sessionId = this.sessionId;
+    const sessionId = this.id;
     return {
+      view: this.view,
       derived: deriveRunFacts(this.#events, { sessionId }),
       events: [...this.#events],
       primary: this.#primary,
@@ -349,10 +356,11 @@ export class EvalSessionDriver implements EveEvalSession {
     readonly interactions: readonly Interaction[];
     readonly message: string | undefined;
     readonly sessionId: string;
-    readonly status: "completed" | "failed" | "waiting";
+    readonly sessionEnded: boolean;
+    readonly status: RequestStatus;
   }): EveEvalTurn {
     this.#events.push(...input.events);
-    this.#pendingInteractions = input.status === "waiting" ? input.interactions : [];
+    this.#pendingInteractions = input.status === "awaiting-input" ? input.interactions : [];
 
     const derived = deriveRunFacts(input.events, {
       sessionId: input.sessionId,
@@ -361,6 +369,8 @@ export class EvalSessionDriver implements EveEvalSession {
     const turn = new EvalTurn({
       collector: this.#collector,
       data: input.data,
+      view: this.view,
+      sessionEnded: input.sessionEnded,
       derived,
       events: input.events,
       interactions: input.interactions,
@@ -375,20 +385,25 @@ export class EvalSessionDriver implements EveEvalSession {
     return turn;
   }
 
-  #recordObservedTurn(sessionId: string, events: readonly SessionStreamEvent[]): EveEvalTurn {
-    const summary = summarizeTurnEvents(events);
+  #recordObservedTurn(
+    sessionId: string,
+    events: readonly SessionStreamEvent[],
+    deliveryId?: string,
+  ): EveEvalTurn {
+    const summary = summarizeTurnEvents(events, deliveryId);
     return this.#recordTurn({
       data: summary.result,
       events,
       interactions: summary.interactions,
       message: summary.message,
+      sessionEnded: summary.sessionEnded,
       sessionId,
       status: summary.status,
     });
   }
 
   #assertionSubject() {
-    const sessionId = this.sessionId;
+    const sessionId = this.id;
     const derived = deriveRunFacts(this.#events, { sessionId });
     return {
       derived,
@@ -415,6 +430,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   readonly session: EveEvalSession;
   readonly sessionId: string;
   readonly #completion: Promise<EveEvalTurn>;
+  readonly #initialView: SessionView;
   readonly #events: SessionStreamEvent[] = [];
   readonly #waiters = new Set<LiveEventWaiter>();
   #waitError: Error | undefined;
@@ -425,6 +441,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     /** Ends the turn with the line holding a matching event instead of a turn boundary. */
     readonly endsWith?: (event: SessionStreamEvent) => boolean;
     readonly events: AsyncIterable<SessionStreamEvent>;
+    readonly initialView: SessionView;
     readonly observe: (event: SessionStreamEvent) => void;
     readonly record: (events: readonly SessionStreamEvent[]) => EveEvalTurn;
     readonly session: EveEvalSession;
@@ -432,6 +449,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   }) {
     this.session = input.session;
     this.sessionId = input.sessionId;
+    this.#initialView = input.initialView;
     this.#completion = this.#consume(input.events, input.observe, input.record, input);
     void this.#completion.catch(() => {});
   }
@@ -440,7 +458,13 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     return this.#events;
   }
 
-  async cancel(): Promise<CancelSessionResult> {
+  get view(): SessionView {
+    const view = copyView(this.#initialView);
+    for (const event of this.#events) foldReceivedEvent(view, event);
+    return view;
+  }
+
+  async cancel(): Promise<Delivery> {
     return await this.session.cancel();
   }
 
@@ -571,18 +595,22 @@ interface EvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 class EvalTurn implements EveEvalTurn {
   readonly data: unknown;
+  readonly view: SessionView;
+  readonly sessionEnded: boolean;
   readonly events: readonly SessionStreamEvent[];
   readonly interactions: readonly Interaction[];
-  readonly message: string | undefined;
+  readonly reply: string | undefined;
   readonly session: EveEvalSession;
   readonly sessionId: string;
-  readonly status: "completed" | "failed" | "waiting";
+  readonly status: RequestStatus;
   readonly toolCalls: readonly EveEvalToolCall[];
   readonly #collector: AssertionCollector;
   readonly #derived: EveEvalDerivedFacts;
 
   constructor(input: {
     readonly collector: AssertionCollector;
+    readonly view: SessionView;
+    readonly sessionEnded: boolean;
     readonly data: unknown;
     readonly derived: EveEvalDerivedFacts;
     readonly events: readonly SessionStreamEvent[];
@@ -590,13 +618,15 @@ class EvalTurn implements EveEvalTurn {
     readonly message: string | undefined;
     readonly session: EveEvalSession;
     readonly sessionId: string;
-    readonly status: "completed" | "failed" | "waiting";
+    readonly status: RequestStatus;
     readonly toolCalls: readonly EveEvalToolCall[];
   }) {
     this.data = input.data;
+    this.view = input.view;
+    this.sessionEnded = input.sessionEnded;
     this.events = input.events;
     this.interactions = input.interactions;
-    this.message = input.message;
+    this.reply = input.message;
     this.sessionId = input.sessionId;
     this.session = input.session;
     this.status = input.status;
@@ -666,11 +696,6 @@ function inputRequirementFailed(
 ): never {
   collector.recordOutcome({ name, outcome: { score: 0, message } });
   throw new EvalRequirementFailed();
-}
-
-function outputOf(turn: EveEvalTurn | undefined): unknown {
-  if (turn === undefined) return null;
-  return turn.data === undefined ? (turn.message ?? null) : turn.data;
 }
 
 function assertRequestHasOption(request: Interaction, optionId: string): void {

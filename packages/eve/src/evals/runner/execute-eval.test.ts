@@ -17,8 +17,9 @@ import { executeEval } from "#evals/runner/execute-eval.js";
 
 function createTaskResult(label: string): EveEvalTaskResult {
   return {
-    output: label,
-    finalMessage: label,
+    sessionEnded: false,
+    data: label,
+    reply: label,
     status: "completed",
     events: [],
     derived: createEmptyDerivedFacts(),

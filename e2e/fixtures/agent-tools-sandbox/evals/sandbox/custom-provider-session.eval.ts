@@ -12,7 +12,7 @@ export default defineEval({
     turn.expectOk();
 
     t.succeeded();
-    t.calledSubagent("custom-provider", { count: 1, status: "completed" });
-    t.check(turn.message, includes(TOKEN));
+    t.calledAgent("custom-provider", { count: 1, status: "completed" });
+    t.check(turn.reply, includes(TOKEN));
   },
 });

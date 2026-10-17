@@ -132,7 +132,7 @@ export default defineEval({
           (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
           t.signal,
         );
-        const parked = (await t.target.watchTurn(session.sessionId).result()).expectOk();
+        const parked = (await t.target.attach(session.id).watch().result()).expectOk();
         const approval = parked.session.requireInteraction({ toolName: TOOL });
         const { interactionId } = approval;
         const callId = approval.call!.callId;
@@ -147,7 +147,7 @@ export default defineEval({
         const reload = new EveAgentStore({
           host,
           headers: ALICE,
-          initialSession: { sessionId: session.sessionId, streamIndex: 0 },
+          initialSession: { sessionId: session.id, streamIndex: 0 },
         });
         stores.push(reload);
         await settles("Reload resume", reload.resume());
@@ -176,11 +176,11 @@ export default defineEval({
             signal: t.signal,
           }),
         );
-        await waitForStore(reload, (snapshot) => snapshot.status === "ready", t.signal);
-        await t.require(reload.snapshot.status, equals("ready"));
+        await waitForStore(reload, (snapshot) => snapshot.status === "idle", t.signal);
+        await t.require(reload.snapshot.status, equals("idle"));
         await t.require(reload.snapshot.error, equals(undefined));
         const finished = (
-          await t.target.watchTurn(session.sessionId, { startIndex }).result()
+          await t.target.attach(session.id, { startIndex }).watch().result()
         ).expectOk();
         finished.event("interaction.settled", {
           data: {
@@ -199,7 +199,7 @@ export default defineEval({
         reload.reset();
       }
     } finally {
-      for (const store of stores) store.reset();
+      for (const store of stores) store.newSession();
       globalThis.fetch = originalFetch;
     }
   },

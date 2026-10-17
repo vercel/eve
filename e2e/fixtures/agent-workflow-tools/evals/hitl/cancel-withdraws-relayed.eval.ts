@@ -14,7 +14,7 @@ export default defineEval({
     const startIndex = parked.session.state.streamIndex;
 
     await parked.session.cancel();
-    const cancelled = await t.target.watchTurn(parked.sessionId, { startIndex }).result();
+    const cancelled = await t.target.attach(parked.sessionId, { startIndex }).watch().result();
     cancelled.event("interaction.settled", {
       count: 1,
       data: { interactionId: request.interactionId, outcome: "interrupted" },

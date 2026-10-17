@@ -47,7 +47,7 @@ export function removeEveAgent(chatId: string) {
 
 export function resetAllEveAgents() {
   for (const agent of agentsByChatId.values()) {
-    agent.reset();
+    agent.newSession();
   }
   agentsByChatId.clear();
 }

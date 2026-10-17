@@ -1,4 +1,5 @@
 import type { H3Event } from "nitro";
+import { sessionCommandErrorResponse } from "#eve-channel/support.js";
 import {
   context as otelContext,
   trace as otelTrace,
@@ -121,6 +122,11 @@ export async function dispatchChannelRequest(
         return await matchedChannel.fetch(event.req, ctx);
       });
     } catch (error) {
+      const commandError = sessionCommandErrorResponse(error);
+      if (commandError !== undefined) {
+        flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
+        return commandError;
+      }
       // Without this a handler throw is only Nitro's default 5xx, with no eve
       // log. logError records the exception against the active request span,
       // so traceChannelRequest must not record the returned 500 again.
@@ -301,9 +307,11 @@ async function buildRouteArgs(
       { agentName: bundle.agentName },
     ),
     async (input) => {
-      const delivery = createChannelDeliveryMetadata(deliverySource);
+      const { deliveryId, ...runInput } = input;
+      const generated = createChannelDeliveryMetadata(deliverySource);
+      const delivery = deliveryId === undefined ? generated : { ...generated, deliveryId };
       const handle = await bundle.runtime.createSession({
-        ...input,
+        ...runInput,
         adapter,
         channelName,
         continuationToken:

@@ -55,7 +55,7 @@ export default defineEval({
         t.signal,
       );
       await t.require(store.snapshot.error, equals(undefined));
-      const firstTurn = await t.target.watchTurn(session.sessionId).result();
+      const firstTurn = await t.target.attach(session.id).watch().result();
       firstTurn.expectOk();
 
       const second = await store.send({
@@ -75,7 +75,7 @@ export default defineEval({
       disconnectStream();
       await t.require(await reconnectAuthorization, equals("Bearer fresh"));
     } finally {
-      store.reset();
+      store.newSession();
       globalThis.fetch = originalFetch;
     }
   },

@@ -19,12 +19,6 @@ export type EveAgentStoreStatus = "idle" | "busy" | "resuming";
  */
 export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<SendTurnPayload>;
 
-/** Immutable projected state of an eve frontend session store. */
-export interface AcceptedDelivery {
-  readonly sessionId: string;
-  readonly deliveryId: string;
-}
-
 export interface EveAgentStoreSnapshot extends ConversationState {
   /** Authoritative lifecycle tables as of this committed snapshot. */
   readonly view: SessionView;

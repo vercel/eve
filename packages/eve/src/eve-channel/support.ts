@@ -1,6 +1,9 @@
 import type { MessageContent } from "#shared/message-content.js";
 
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
+import type { DeliveryReceipt } from "#protocol/delivery.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -26,7 +29,19 @@ export function healthResponse(): Response {
 }
 
 /** Clients display the error text directly; keep operator details in structured fields. */
-export function strandedSessionResponse(error: unknown): Response | undefined {
+export function sessionCommandErrorResponse(error: unknown): Response | undefined {
+  if (SessionNotActiveError.is(error)) {
+    return Response.json(
+      {
+        ok: false,
+        code: error.retryable ? "session_not_ready" : "session_not_active",
+        error: error.retryable
+          ? "The session is not ready to accept messages yet."
+          : "The session is no longer active.",
+      },
+      { headers: { "cache-control": "no-store" }, status: 409 },
+    );
+  }
   if (!SessionStrandedError.is(error)) return undefined;
   const body: Record<string, unknown> = {
     code: "session_stranded",
@@ -35,6 +50,16 @@ export function strandedSessionResponse(error: unknown): Response | undefined {
   };
   if (error.owner.eveVersion !== undefined) body.eveVersion = error.owner.eveVersion;
   return Response.json(body, { headers: { "cache-control": "no-store" }, status: 409 });
+}
+
+export function deliveryResponse(receipt: DeliveryReceipt): Response {
+  return Response.json(
+    { ok: true, sessionId: receipt.sessionId, deliveryId: receipt.deliveryId },
+    {
+      headers: { "cache-control": "no-store", [EVE_SESSION_ID_HEADER]: receipt.sessionId },
+      status: 202,
+    },
+  );
 }
 
 /** Where a remote child the parent session recorded runs, and its credential key. */

@@ -15,6 +15,6 @@ export default defineEval({
     turn.calledTool("eve__task_wait", { count: 1, status: "completed" });
     turn.event("child.opened", { count: 1, data: { name: "agent" } });
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

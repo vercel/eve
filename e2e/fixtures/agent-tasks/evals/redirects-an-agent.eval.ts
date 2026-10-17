@@ -41,6 +41,6 @@ export default defineEval({
       },
     );
     turn.messageIncludes(APAC_CHURN.findingId);
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

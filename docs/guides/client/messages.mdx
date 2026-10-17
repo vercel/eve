@@ -21,26 +21,29 @@ const { session, response } = await client.sessions.create({
 console.log(response.sessionId);
 
 const result = await response.result();
-console.log(result.status, result.message);
+console.log(result.status, result.reply);
 ```
 
-`response.result()` consumes the event stream and returns a `MessageResult`:
+`response.result()` consumes the event stream and returns a `DeliveryResult`:
 
-| Field       | Meaning                                                                               |
-| ----------- | ------------------------------------------------------------------------------------- |
-| `message`   | The turn's reply text, from the parts `turn.settled.reply` lists.                     |
-| `status`    | `"waiting"` while the session stays open, `"completed"` once it ended, or `"failed"`. |
-| `events`    | All stream events observed during the turn.                                           |
-| `sessionId` | Session ID for streaming and inspection.                                              |
-| `data`      | Structured output when the turn requested an [output schema](./output-schema).        |
+| Field          | Meaning                                                                              |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `reply`        | The request's reply text, from the parts `turn.settled.reply` lists.                 |
+| `status`       | `working`, `awaiting-input`, `completed`, `failed`, or `cancelled` for this request. |
+| `sessionEnded` | Whether the session ended in the delivery's final commit.                            |
+| `deliveryId`   | The accepted command's ID.                                                           |
+| `events`       | All stream events observed during the turn.                                          |
+| `sessionId`    | Session ID for streaming and inspection.                                             |
+| `data`         | Structured output when the turn requested an [output schema](./output-schema).       |
 
-When the turn or the session fails, the result has `status: "failed"` rather than throwing. Transport and route errors throw `ClientError`.
+When the turn or the session fails, the result has `status: "failed"` rather than throwing. HTTP failures throw rather than returning a request result.
 
 `session.send()` retries `409 session_not_ready` with bounded exponential backoff for up to 20
 seconds when a durable run has been accepted but its command inbox is still starting. The caller's
 abort signal cancels the wait. Other errors, `session.respond()`, control methods, and raw HTTP
 requests do not use this retry. An unknown
-or terminal session throws `ClientError` immediately with `session_not_active`. A
+or terminal session throws `SessionNotActiveError` immediately with `retryable: false`. A
+`session_not_ready` rejection has `retryable: true` if the bounded send retry expires. A
 [stranded](../../concepts/execution-model-and-durability#stranded-sessions) session throws
 `ClientSessionStrandedError`, a `ClientError` with `code: "session_stranded"` and the
 `eveVersion` that built the session when it recorded one. It is never retried automatically. Call
@@ -138,7 +141,7 @@ The reply's delivery records a `response.submitted` for each answer, and each re
 
 ## Single-use responses
 
-`MessageResponse` is single-use. Either aggregate it:
+`Delivery` is single-use. Either aggregate it:
 
 ```ts
 const result = await response.result();

@@ -1,3 +1,4 @@
+import type { RequestStatus } from "#protocol/session-projection/request-status.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { failureOf } from "#client/session-utils.js";
 import { replyTextOf } from "#public/channels/reply.js";
@@ -21,7 +22,7 @@ export interface EveEvalAssertionSubject {
   readonly derived: import("#evals/types.js").EveEvalDerivedFacts;
   readonly events: readonly SessionStreamEvent[];
   readonly output: unknown;
-  readonly status: "completed" | "failed" | "waiting";
+  readonly status: RequestStatus;
 }
 
 const PASS: AssertionOutcome = { score: 1 };
@@ -54,9 +55,9 @@ export function succeeded(): RunAssertion {
 /**
  * Asserts the run ended cleanly parked on HITL input.
  */
-export function parked(): RunAssertion {
+export function awaitingInput(): RunAssertion {
   return {
-    name: "parked",
+    name: "awaitingInput",
     evaluate(result) {
       const failure = runFailure(result);
       if (failure !== undefined) return failure;
@@ -121,13 +122,13 @@ export function calledTool(name: string, options: EveEvalToolCallMatchOptions = 
  * Asserts the skill `skill` was loaded. `output`/`status`/`count` constrain
  * the matching load exactly as for `calledTool`.
  */
-export function loadedSkill(
+export function calledSkill(
   skill: string,
   options: EveEvalSkillLoadMatchOptions = {},
 ): RunAssertion {
   validateCount(options.count);
   return {
-    name: `loadedSkill(${skill})`,
+    name: `calledSkill(${skill})`,
     evaluate(result) {
       const named = result.derived.skillLoads.filter((load) => load.skill === skill);
       const matching = named.filter((load) => toolCallMatches(load, options));
@@ -210,20 +211,20 @@ export function maxToolCalls(max: number): RunAssertion {
 }
 
 /**
- * Asserts no action result (tool, subagent, or skill) reported a failure.
+ * Asserts no call reported a failure.
  */
-export function noFailedActions(): RunAssertion {
+export function noFailedCalls(): RunAssertion {
   return {
-    name: "noFailedActions",
+    name: "noFailedCalls",
     evaluate(result) {
       const failed = result.events.filter(
         (evt): evt is Extract<SessionStreamEvent, { type: "call.settled" }> =>
           evt.type === "call.settled" && evt.data.outcome === "failed",
       );
       if (failed.length === 0) return PASS;
-      const details = failed.map(formatFailedActionResult);
-      return fail(`${failed.length} failed action(s): ${details.join("; ")}`, {
-        failedActions: failed.map((evt) => ({
+      const details = failed.map(formatFailedCallResult);
+      return fail(`${failed.length} failed call(s): ${details.join("; ")}`, {
+        failedCalls: failed.map((evt) => ({
           callId: evt.data.callId,
           error: evt.data.error,
           output: evt.data.output,
@@ -240,13 +241,13 @@ export function noFailedActions(): RunAssertion {
  * session and remote metadata from the task's `child.opened` once its
  * session opened.
  */
-export function calledSubagent(
+export function calledAgent(
   name: string,
   options: EveEvalSubagentCallMatchOptions = {},
 ): RunAssertion {
   validateCount(options.count);
   return {
-    name: `calledSubagent(${name})`,
+    name: `calledAgent(${name})`,
     evaluate(result) {
       const named = result.derived.subagentCalls.filter((call) => call.name === name);
       const matching = named.filter((call) => subagentCallMatches(call, options));
@@ -390,7 +391,7 @@ function failureDetail(prefix: string, code: string | undefined): string {
   return code === undefined ? prefix : `${prefix} (code: ${code})`;
 }
 
-function formatFailedActionResult(
+function formatFailedCallResult(
   event: Extract<SessionStreamEvent, { type: "call.settled" }>,
 ): string {
   const { callId, outcome, output, error } = event.data;

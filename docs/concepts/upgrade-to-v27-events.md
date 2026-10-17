@@ -261,15 +261,38 @@ in [Instrumentation](/docs/observability/instrumentation#lifecycle-events).
 
 The OpenTelemetry trace schema remains version 4, with the same span names and attributes.
 
+## Commands and session handles
+
+Sends, answers, and session controls return a `Delivery` directly. Its own `sessionId` and
+`deliveryId` are serializable without reading the stream. Iterate it or call `result()` to follow
+that exact command's settlement. Replace `MessageResponse` and `MessageResult` imports with
+`Delivery` and `DeliveryResult`. `ChannelSource.send()` returns a delivery too; use its `sessionId`
+to attach a session handle when you need one.
+
+A refused inactive-session command throws `SessionNotActiveError`; its `retryable` flag distinguishes
+an inbox still starting from a session that cannot accept more work. There are no separate
+`no_active_turn` or `no_active_session` control results. A cancellation delivery settles when
+applied; a reset delivery settles after retirement and address release.
+
+Session readers expose `id` and `stream()`. `sessions.attach(id)` from `eve/server` returns a
+`SessionReader` without I/O, not a `ServerSession`. Channel handles carry the existing commands
+through `SessionOperations`; a reader does not acquire command authority. The data type previously
+exported as `Session` from `eve/context` is now `SessionInfo`, exactly the metadata in `ctx.session`:
+`id`, `auth`, `turn`, optional `parent`, `schedule`, and `predecessor`.
+
+Every reader takes `SessionStreamOptions` from `eve/client`, replacing `StreamOptions` and
+`GetEventStreamOptions`. `startIndex` addresses durable lines, matching `meta.position.line`,
+not individual events. The shared options include `follow` and `signal`; only the client uses
+`streamReconnectPolicy`. Client handles (`ClientSession`, `ClientAgentSession`, `ClientSessions`)
+are type-only exports. Obtain them from `new Client()` and its methods instead of constructing them.
+
 ## Clients and frontends
 
 - **Frontend commands resolve on acceptance.** `EveAgentStore.send()` and the frontend hooks'
-  `send()`/`respond()` return `{ sessionId, deliveryId }` without waiting for a reply or question.
-  Observe `view` and lifecycle callbacks for execution. `resume()` resolves after bounded catch-up,
-  without waiting for an active turn to end. The lower-level `MessageResponse.result()` still reads
-  its response through completion.
-- **Read the native tables.** Frontend snapshots expose `view` (also `data.view`) and
-  `data.previews`. Replace `data.activeTurnId` with `activeTurn(view)?.turnId`,
+  `send()`/`respond()` return a `Delivery` without waiting for a reply or question. Observe `view`
+  and callbacks, or await `delivery.result()`, which reads the store's existing stream rather than
+  opening a second one. `resume()` resolves after bounded catch-up, without waiting for a turn to end.
+- **Read the native tables.** Frontend snapshots expose `view` and `previews`. Replace `data.activeTurnId` with `activeTurn(view)?.turnId`,
   `data.turns[turnId].waiting` with `waiting(view, turnId)`, and `data.tasks[taskId].calls`
   with calls in `view.calls` whose `taskId` matches. Turns have `status: "running" | "settled"`
   and a separate `outcome`, just like the event fold. The reduced `ConversationTurn`,
@@ -280,8 +303,11 @@ The OpenTelemetry trace schema remains version 4, with the same span names and a
   Saved cursors from v26 sessions don't apply to v27 sessions.
 - **Identity is `meta.position`.** `meta.id` is gone. Deduplicate on `(line, index)`.
 - **Responses end on their delivery.** A message's response ends when its `delivery.settled`
-  arrives, finishing that line. `result().status` keeps its meaning: `"waiting"` while the session
-  stays open, `"completed"` once it ended, `"failed"` on failure.
+  arrives, finishing that line. `result().status` now uses `RequestStatus`: `working`,
+  `awaiting-input`, `completed`, `failed`, or `cancelled`. **`completed` has changed meaning:**
+  it means the request completed, not that the session ended. Replace old `completed` checks for
+  session termination with `sessionEnded`; old `waiting` comparisons no longer typecheck. Read text
+  from `reply`, not `message`. `requestStatus(view, deliveryId)` from `eve/events` applies the same rule.
 - **Interactions.** Every interaction a person is asked, sign-ins included, is in one list:
   `view.interactions`, a response's `interactions`, `openInteractions(view)`. Filter
   by `request.kind`. An approval or a question about a call shows on its call's tool part
@@ -302,10 +328,19 @@ The OpenTelemetry trace schema remains version 4, with the same span names and a
   client doesn't need its own reducer for session state. `callState(view, callId)` says where a
   call stands for a display, `callLabel(row)` how to name it, and `waiting(view, { taskId })` or
   `waiting(view, { callId })` who a task's or call's work waits on.
+- **Distinguish local and server resets.** Call `newSession()` to clear local frontend state and
+  its cursor. `reset()` now retires the server-side session and returns its delivery.
 - **Follow children with `child.opened`.** `session.agent(opened)` takes a `child.opened` event.
 
 ## Evals
 
+- Rename `loadedSkill` to `calledSkill`, `calledSubagent` to `calledAgent`, `noFailedActions` to
+  `noFailedCalls`, and `parked()` to `awaitingInput()`. `calledTool` and call-count/order assertions stay.
+- Replace `await t.target.attachSession(id)` with `const session = t.target.attach(id)` followed by
+  `await session.nextTurn()`. Attachment is I/O-free. Replace `t.target.watchTurn(id, options)` with
+  `t.target.attach(id, { startIndex }).watch({ until })`, passing only the options you need. Reads
+  advance the handle's cursor. Eval session handles use `id`; accepted turns still expose `sessionId`.
+- Turn results expose `view`, `reply`, `data`, `sessionEnded`, and the shared request status.
 - Match v27 facts in `t.event(...)`, `eventOrder(...)`, and `waitForEvent(...)`. Event matchers can
   match a fact's `scope`.
 - `turn.waitForToolCall(name, options)` waits for a settled call to a tool, and `toolCallsOf(events)`
@@ -317,14 +352,20 @@ The OpenTelemetry trace schema remains version 4, with the same span names and a
 
 ## MCP and `eve invoke`
 
-- **MCP channel.** An `input_required` invocation lists its questions and approvals in
-  `interactions`, keyed by `interactionId`; answer every entry in one `agent_update` call with
-  `responses: [{ interactionId, optionId?, text? }]`. An `authorization_required` invocation lists
-  its sign-ins in the same `interactions` shape, each with its `signIn` challenge. An id names one
-  interaction for the session's life, so the ids of an earlier batch never answer a later one.
-- **`eve invoke`.** A run that needs a person ends with one `input-required` status whose
-  `interactions` include sign-ins; `authorization-required` is gone. A sign-in resumes once it
-  completes, without a prompt.
+- **MCP channel.** `input_required` remains the wire spelling for `awaiting-input`; sign-ins now
+  use it too, instead of `authorization_required`. Questions, approvals, and sign-ins share
+  `interactions`, keyed by `interactionId`. Answer all non-sign-in entries in one `agent_update`
+  call with `responses: [{ interactionId, optionId?, text? }]`. Complete sign-ins externally and
+  poll again. An id names one interaction for the session's life, so an earlier batch's ids never
+  answer a later one. `sessionEnded` separately reports session termination.
+- **`eve remote invoke`.** JSON results use the shared request statuses, `reply`, `data`, and
+  `sessionEnded`, without a nested `outcome`. Resume coordinates include the original `deliveryId`.
+  Deployment authentication failures are CLI errors, not session statuses. An `awaiting-input`
+  sign-in resumes without a prompt once completed.
+- **Direct tools.** `invokeTool` returns a call-shaped `outcome`: `completed` with `output` and
+  `modelOutput`, `failed` with `error: ErrorInfo`, or `rejected` with a `reason`, optional
+  `connections`, and optional policy `cause`. Invalid input is a failure with `error.code`;
+  approval and sign-in requirements are rejections, never conversational pauses.
 
 ## Sessions and remote agents
 

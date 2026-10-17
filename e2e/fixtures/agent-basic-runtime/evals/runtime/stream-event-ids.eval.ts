@@ -38,7 +38,7 @@ export default defineEval({
     );
 
     // Re-reading the durable stream is not a new emission.
-    const replay = await t.target.watchTurn(turn.sessionId, { startIndex: 0 }).result();
+    const replay = await t.target.attach(turn.sessionId, { startIndex: 0 }).watch().result();
 
     await t.require(
       replay.events.map((event) => event.meta.position),

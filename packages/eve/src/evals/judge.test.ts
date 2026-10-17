@@ -30,10 +30,11 @@ function result(answers: Record<string, unknown>) {
 }
 function emptyTaskResult(): EveEvalTaskResult {
   return {
+    sessionEnded: false,
     derived: createEmptyDerivedFacts(),
     events: [],
-    finalMessage: null,
-    output: null,
+    reply: undefined,
+    data: null,
     status: "completed",
     traceContexts: [],
   };

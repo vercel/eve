@@ -31,6 +31,6 @@ export default defineEval({
     ]);
     turn.messageIncludes("WORKFLOW-STAGE-RESULT");
     turn.messageIncludes('"plan":"deploy api"');
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

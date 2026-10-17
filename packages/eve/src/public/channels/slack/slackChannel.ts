@@ -13,7 +13,8 @@ import type {
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
-import type { Session, SessionHandle } from "#channel/session.js";
+import type { SessionHandle } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
@@ -368,7 +369,7 @@ export interface SlackEventRespondOptions {
 export type SlackEventSendFn = (
   message: MessageContent,
   options: SlackEventSendOptions,
-) => Promise<Session>;
+) => Promise<Delivery>;
 
 /** Answers pending input requests on one Slack thread. */
 export type SlackEventRespondFn = <const TResponses extends readonly Answer[]>(
@@ -977,7 +978,7 @@ async function receiveOnSlack(
     /** Slack user id seeded into session state, when the trigger carried one. */
     readonly triggeringUserId?: string;
   },
-): Promise<Session> {
+): Promise<Delivery> {
   const receiveTarget = input.target as Partial<SlackReceiveTarget>;
   const channelId = receiveTarget.channelId;
   if (!channelId || typeof channelId !== "string") {

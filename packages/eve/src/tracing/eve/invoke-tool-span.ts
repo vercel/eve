@@ -212,19 +212,19 @@ async function traced(
       () => events.run(run, spanState),
       host,
     );
-    span.setAttribute("eve.tool.outcome", result.status);
-    if (result.status === "completed" && recordOutputs) {
+    span.setAttribute("eve.tool.outcome", result.outcome);
+    if (result.outcome === "completed" && recordOutputs) {
       const output = contentAttribute(result.output);
       if (output !== undefined) span.setAttribute("gen_ai.tool.call.result", output);
     }
-    if (result.status === "invalid-input") {
+    if (result.outcome === "failed" && result.error.code === "INVALID_INPUT") {
       // A model-issued call with invalid input never runs, so it has no span to compare to.
-      span.fail(undefined, result.status);
-    } else if (result.status === "failed") {
+      span.fail(undefined, "invalid-input");
+    } else if (result.outcome === "failed") {
       // The conversation's rule: the error itself when outputs are recorded, else a generic one.
       span.fail(
         recordOutputs ? failure?.error : undefined,
-        failure === undefined ? result.status : undefined,
+        failure === undefined ? result.outcome : undefined,
       );
     }
     return result;
@@ -307,24 +307,17 @@ function toolCallEvents(
         });
         throw error;
       }
-      const outcome =
-        result.status === "completed"
-          ? "completed"
-          : result.status === "failed"
-            ? "failed"
-            : "rejected";
       await hooks.publish({
         durationMs,
         idempotencyKey,
-        outcome,
+        outcome: result.outcome,
         scope,
         type: "call.settled",
-        reason: outcome === "rejected" ? result.status : undefined,
+        reason: result.outcome === "rejected" ? result.reason : undefined,
+        cause: result.outcome === "rejected" ? result.cause : undefined,
         error:
-          capturesOutputs && result.status === "failed"
-            ? (failure ?? new Error(result.message))
-            : undefined,
-        output: capturesOutputs && result.status === "completed" ? result.output : undefined,
+          capturesOutputs && result.outcome === "failed" ? (failure ?? result.error) : undefined,
+        output: capturesOutputs && result.outcome === "completed" ? result.output : undefined,
       });
       return result;
     },

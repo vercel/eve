@@ -44,6 +44,6 @@ export default defineEval({
       );
     });
     t.event("child.opened", { data: { name: "remote-loopback" }, count: 1 });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

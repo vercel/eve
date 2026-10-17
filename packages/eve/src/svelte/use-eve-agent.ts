@@ -1,3 +1,4 @@
+import type { Delivery } from "#shared/delivery.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { onMount } from "svelte";
 import { createSubscriber } from "svelte/reactivity";
@@ -7,7 +8,6 @@ import {
   attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
-  type AcceptedDelivery,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
@@ -16,7 +16,6 @@ import {
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { ClientSession } from "#client/session.js";
 import type {
-  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -49,7 +48,7 @@ export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
  */
 export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
-  readonly cancel: () => Promise<CancelSessionResult>;
+  readonly cancel: () => Promise<Delivery>;
   /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
   readonly previews: EveAgentStoreSnapshot["previews"];
   readonly messages: EveAgentStoreSnapshot["messages"];
@@ -64,17 +63,20 @@ export interface UseEveAgentReturn {
   /** Create the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
   /** Clear all state and start a new session. */
-  readonly reset: () => void;
+  readonly newSession: () => void;
+  readonly reset: () => Promise<Delivery>;
+  readonly clear: () => Promise<Delivery>;
+  readonly compact: () => Promise<Delivery>;
   /** Submits a message and resolves on acceptance, not execution. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ) => Promise<AcceptedDelivery>;
+  ) => Promise<Delivery<TOutput>>;
   /** Submits answers and resolves on acceptance, not execution. */
   readonly respond: <TOutput = unknown>(
     answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ) => Promise<AcceptedDelivery>;
+  ) => Promise<Delivery<TOutput>>;
   /** Current session identity and stream cursor. */
   readonly session: ClientSessionState | undefined;
   /**
@@ -210,13 +212,16 @@ class SvelteEveAgent implements UseEveAgentReturn {
     return this.#snapshot.status;
   }
 
-  cancel = (): Promise<CancelSessionResult> => {
+  cancel = (): Promise<Delivery> => {
     return this.#store.cancel();
   };
 
-  reset = (): void => {
-    this.#store.reset();
+  newSession = (): void => {
+    this.#store.newSession();
   };
+  reset = (): Promise<Delivery> => this.#store.reset();
+  clear = (): Promise<Delivery> => this.#store.clear();
+  compact = (): Promise<Delivery> => this.#store.compact();
 
   prewarm = (): Promise<void> => {
     return this.#store.prewarm();
@@ -229,14 +234,14 @@ class SvelteEveAgent implements UseEveAgentReturn {
   respond = <TOutput = unknown>(
     answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ): Promise<AcceptedDelivery> => {
+  ): Promise<Delivery<TOutput>> => {
     return this.#store.send({ ...options, answers });
   };
 
   send = <TOutput = unknown>(
     message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ): Promise<AcceptedDelivery> => {
+  ): Promise<Delivery<TOutput>> => {
     return this.#store.send({ ...options, message });
   };
 }

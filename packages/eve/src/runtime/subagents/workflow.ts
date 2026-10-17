@@ -67,7 +67,7 @@ export async function agentToolServeWorkflow(
         next = following;
         continue;
       }
-      ctx.reply(event.result.message ?? "");
+      ctx.reply(event.result.reply ?? "");
     }
     turn = sendToAgent(agent, await next);
     next = receive();

@@ -144,7 +144,7 @@ Hooks subscribe the same way:
 +      if (event.data.status !== "completed") return;
 ```
 
-The eval assertion `t.calledSubagent(name, { status })` keeps its API and reads task events.
+The eval assertion `t.calledAgent(name, { status })` keeps its API and reads task events.
 
 ## Handle open turns in clients
 

@@ -8,7 +8,7 @@ export type ProbeCase = { readonly kind: "auth" | "hitl" };
 
 type SessionCursor = Pick<
   EveEvalSession,
-  "pendingInteractions" | "requireInteraction" | "respondAll" | "sessionId" | "state"
+  "pendingInteractions" | "requireInteraction" | "respondAll" | "id" | "state"
 >;
 
 export async function runProbe(t: EveEvalContext, probe: ProbeCase): Promise<void> {
@@ -33,7 +33,7 @@ export async function runProbe(t: EveEvalContext, probe: ProbeCase): Promise<voi
   }
 
   t.succeeded();
-  t.noFailedActions();
+  t.noFailedCalls();
 }
 
 async function waitForInput(
@@ -51,7 +51,7 @@ async function waitForInput(
 
     const live = watchNext(t, session);
     const turn = await live.result();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     session = live.session;
   }
 
@@ -64,7 +64,7 @@ async function waitForMarker(
   initialTurn: EveEvalTurn | undefined,
   marker: string,
 ): Promise<EveEvalTurn> {
-  if (initialTurn?.message?.includes(marker)) {
+  if (initialTurn?.reply?.includes(marker)) {
     return initialTurn;
   }
 
@@ -73,8 +73,8 @@ async function waitForMarker(
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const live = watchNext(t, session);
     const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker)) {
+    turn.noFailedCalls();
+    if (turn.reply?.includes(marker)) {
       return turn;
     }
 
@@ -127,16 +127,16 @@ function requireAuthorizationOutcome(
 }
 
 function requireMarker(turn: EveEvalTurn, marker: string): void {
-  if (!turn.message?.includes(marker)) {
+  if (!turn.reply?.includes(marker)) {
     throw new Error(`Probe did not produce ${marker}.`);
   }
 }
 
 function watchNext(t: EveEvalContext, session: SessionCursor) {
-  if (session.sessionId === undefined || session.state === undefined) {
+  if (session.id === undefined || session.state === undefined) {
     throw new Error("Probe session cursor is incomplete.");
   }
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
 }
 
 export async function runStepAuth(
@@ -148,7 +148,7 @@ export async function runStepAuth(
   );
   requireAuthorizationOutcome(signIn, "accepted");
   requireMarker(signIn.turn, "WORKFLOW-STEP-AUTH:authorized");
-  t.noFailedActions();
+  t.noFailedCalls();
 }
 
 export async function runRejectedStepAuth(t: EveEvalContext): Promise<void> {

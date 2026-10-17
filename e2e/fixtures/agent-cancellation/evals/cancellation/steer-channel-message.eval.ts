@@ -4,7 +4,7 @@ import { satisfies } from "eve/evals/expect";
 
 const TOOL_NAME = "complete-work";
 
-interface MessageResponse {
+interface Delivery {
   readonly ok: boolean;
   readonly sessionId?: string;
 }
@@ -14,7 +14,7 @@ async function postMessage(
   threadId: string,
   message: string,
   turnPolicy?: TurnPolicy,
-): Promise<MessageResponse> {
+): Promise<Delivery> {
   const path = `/threads/${threadId}/messages`;
   const response = await target.fetch(path, {
     body: JSON.stringify({ message, turnPolicy }),
@@ -25,7 +25,7 @@ async function postMessage(
   if (!response.ok) {
     throw new Error(`POST ${path} failed (${response.status}): ${text}`);
   }
-  return JSON.parse(text) as MessageResponse;
+  return JSON.parse(text) as Delivery;
 }
 
 /** Applies an accepted message at a safe boundary within the active turn. */
@@ -39,12 +39,12 @@ export default defineEval({
     await t.require(
       started,
       satisfies(
-        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+        (value: Delivery) => value.ok === true && typeof value.sessionId === "string",
         "the initial channel message starts a session",
       ),
     );
     const sessionId = started.sessionId!;
-    const activeTurn = t.target.watchTurn(sessionId);
+    const activeTurn = t.target.attach(sessionId).watch();
 
     await activeTurn.waitForEvent("call.requested", { data: { capability: { name: TOOL_NAME } } });
 
@@ -57,7 +57,7 @@ export default defineEval({
     await t.require(
       replacement,
       satisfies(
-        (value: MessageResponse) => value.sessionId === sessionId,
+        (value: Delivery) => value.sessionId === sessionId,
         "the replacement remains in the same durable session",
       ),
     );

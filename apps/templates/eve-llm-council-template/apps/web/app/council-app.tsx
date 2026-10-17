@@ -202,7 +202,7 @@ export function CouncilApp() {
     setResult(undefined);
     setResultError(undefined);
     setSummaryUsage({});
-    agent.reset();
+    agent.newSession();
     void agent.send(message, { outputSchema: councilResultSchema });
   };
 

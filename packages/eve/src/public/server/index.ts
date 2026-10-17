@@ -3,24 +3,9 @@
  * such as hooks, tools, schedules, and channel routes.
  */
 
-import type { SessionStreamEvent } from "#protocol/session-event.js";
-import {
-  type SessionEventStreamOptions,
-  streamSessionEvents,
-} from "#execution/session-event-stream.js";
-
-/** Options for {@link ServerSession.stream}. */
-export type ServerSessionStreamOptions = SessionEventStreamOptions;
-
-/** A handle to one session's durable event stream, read in process. */
-export interface ServerSession {
-  readonly sessionId: string;
-  /**
-   * Reads the session's events in stream order. With `follow: false`, the read
-   * ends at the durable tail observed when it opens.
-   */
-  stream(options?: ServerSessionStreamOptions): AsyncIterable<SessionStreamEvent>;
-}
+import { streamSessionEvents } from "#execution/session-event-stream.js";
+import type { SessionReader } from "#shared/session.js";
+export type { SessionReader } from "#shared/session.js";
 
 /**
  * Reads session streams in process, without calling the deployment's own
@@ -31,9 +16,9 @@ export interface ServerSession {
  * that the caller may read a session before passing an ID from a request.
  */
 export const sessions = {
-  attach(sessionId: string): ServerSession {
+  attach(sessionId: string): SessionReader {
     return {
-      sessionId,
+      id: sessionId,
       stream: (options) => streamSessionEvents(sessionId, options),
     };
   },

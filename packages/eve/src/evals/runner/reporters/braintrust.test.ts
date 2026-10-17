@@ -39,8 +39,9 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   return {
     id: "eval-1",
     result: {
-      output: "actual output",
-      finalMessage: "actual output",
+      sessionEnded: false,
+      data: "actual output",
+      reply: "actual output",
       status: "completed",
       events: [],
       derived: {
@@ -209,14 +210,14 @@ describe("Braintrust", () => {
     );
   });
 
-  it("logs an empty output for an eval that produced no agent output", async () => {
+  it("does not replace structured null with accompanying reply text", async () => {
     const reporter = Braintrust(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
     const result = makeEvalResult();
 
     reporter.onEvalComplete({
       ...result,
-      result: { ...result.result, finalMessage: null, output: null },
+      result: { ...result.result, reply: "Not the structured output.", data: null },
     });
 
     // Braintrust rejects a null or undefined output with "output must be specified".

@@ -1,3 +1,4 @@
+import type { Delivery } from "#shared/delivery.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
 import type { MessageContent } from "#shared/message-content.js";
@@ -6,7 +7,6 @@ import {
   attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
-  type AcceptedDelivery,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
@@ -15,7 +15,6 @@ import {
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { ClientSession } from "#client/session.js";
 import type {
-  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -46,7 +45,7 @@ export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
  */
 export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
-  readonly cancel: () => Promise<CancelSessionResult>;
+  readonly cancel: () => Promise<Delivery>;
   /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
   readonly previews: ComputedRef<EveAgentStoreSnapshot["previews"]>;
   readonly messages: ComputedRef<EveAgentStoreSnapshot["messages"]>;
@@ -61,17 +60,20 @@ export interface UseEveAgentReturn {
   /** Create the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
   /** Clear all state and start a new session. */
-  readonly reset: () => void;
+  readonly newSession: () => void;
+  readonly reset: () => Promise<Delivery>;
+  readonly clear: () => Promise<Delivery>;
+  readonly compact: () => Promise<Delivery>;
   /** Submits a message and resolves on acceptance, not execution. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ) => Promise<AcceptedDelivery>;
+  ) => Promise<Delivery<TOutput>>;
   /** Submits answers and resolves on acceptance, not execution. */
   readonly respond: <TOutput = unknown>(
     answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ) => Promise<AcceptedDelivery>;
+  ) => Promise<Delivery<TOutput>>;
   /** Current session identity and stream cursor. */
   readonly session: ComputedRef<ClientSessionState | undefined>;
   /**
@@ -210,6 +212,9 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     events: computed(() => snapshot.value.events),
     prewarm: () => store.prewarm(),
     reset: () => store.reset(),
+    newSession: () => store.newSession(),
+    clear: () => store.clear(),
+    compact: () => store.compact(),
     respond: <TOutput = unknown>(
       answers: Parameters<ClientSession["respond"]>[0],
       options?: RespondTurnOptions<TOutput>,

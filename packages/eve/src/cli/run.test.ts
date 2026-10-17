@@ -667,9 +667,12 @@ describe("eve dev --input", () => {
 describe("eve remote invoke", () => {
   it("runs a fresh remote task without starting the TUI", async () => {
     const runInvoke = vi.fn(async () => ({
-      status: "ready" as const,
-      outcome: { status: "completed" as const, message: "done" },
+      status: "completed" as const,
+      sessionEnded: false,
+      interactions: [],
+      reply: "done",
       resume: {
+        deliveryId: "delivery_1",
         session: { sessionId: "ses_1", streamIndex: 1 },
         target: { kind: "remote" as const, serverUrl: "https://example.com/" },
       },
@@ -693,23 +696,30 @@ describe("eve remote invoke", () => {
       vercelScope: "target-team",
     });
     expect(JSON.parse(output.at(-1)!)).toMatchObject({
-      status: "ready",
-      outcome: { status: "completed", message: "done" },
+      status: "completed",
+      sessionEnded: false,
+      reply: "done",
     });
   });
 
   it("accepts an explicitly supplied URL equivalent to the stored resume target", async () => {
     const runInvoke = vi.fn(async () => ({
-      status: "running" as const,
+      status: "working" as const,
+      sessionEnded: false,
+      interactions: [],
       resume: {
+        deliveryId: "delivery_2",
         session: { sessionId: "ses_1", streamIndex: 0 },
         target: { kind: "remote" as const, serverUrl: "https://example.com/" },
       },
     }));
     const resumeResult = JSON.stringify({
-      status: "ready",
-      outcome: { status: "completed", message: "done" },
+      status: "completed",
+      sessionEnded: false,
+      interactions: [],
+      reply: "done",
       resume: {
+        deliveryId: "delivery_1",
         session: { sessionId: "ses_1", streamIndex: 0 },
         target: { kind: "remote", serverUrl: "https://example.com/" },
       },

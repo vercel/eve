@@ -482,8 +482,8 @@ const MCP_SERVER_INSTRUCTIONS = [
   "Each invocation is one durable agent task.",
   "Call agent_start once per task and keep the returned invocationId.",
   "Poll agent_get, waiting at least pollAfterMs between calls, until status is completed, failed, or cancelled.",
-  "If status is input_required, answer every entry in interactions in one agent_update call, each by its key as interactionId; repeating accepted answers is safe.",
-  "If status is authorization_required, show the user each entry's signIn url or instructions and keep polling.",
+  "If status is input_required, answer all non-sign-in interactions in one agent_update by interactionId; repeating accepted answers is safe.",
+  "For sign-in interactions, follow signIn instructions outside agent_update and keep polling.",
   "isError on a tool result means your call was rejected; a failed status means the task failed.",
   "agent_start is not idempotent and a lost response leaves no invocationId, so ask the user before starting again.",
   "Work continues after your connection drops; agent_cancel stops it, then poll until any terminal status.",
@@ -538,8 +538,8 @@ function createInvocationTools(
         },
         description:
           "Reads complete durable invocation state. Wait at least pollAfterMs between calls. " +
-          "Terminal statuses are completed, failed, and cancelled. input_required needs agent_update; " +
-          `authorization_required needs the user to follow the returned authorization.${publicHandleDescription}`,
+          "Terminal statuses are completed, failed, and cancelled. input_required includes questions, approvals, and sign-ins. " +
+          `Answer questions and approvals with agent_update; follow sign-in instructions and poll for sign-ins.${publicHandleDescription}`,
         inputSchema: z.strictObject({ invocationId: z.string().min(1).max(MAX_ID_CHARS) }),
         name: "agent_get",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
@@ -645,7 +645,10 @@ function requiredMutation(result: AgentInvocationMutationResult): AgentInvocatio
 }
 
 function invocationResult(invocation: AgentInvocation): McpCallToolResult {
-  const structuredContent = parseJsonObject(invocation);
+  const structuredContent = parseJsonObject({
+    ...invocation,
+    status: invocation.status === "awaiting-input" ? "input_required" : invocation.status,
+  });
   return {
     content: [{ text: JSON.stringify(structuredContent), type: "text" }],
     structuredContent,
@@ -675,6 +678,7 @@ const MCP_INPUT_RESPONSE_SCHEMA = answerSchema.safeExtend({
 });
 
 const AGENT_INVOCATION_BASE_SCHEMA = z.strictObject({
+  sessionEnded: z.boolean(),
   createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime().optional(),
   invocationId: z.string(),
@@ -688,14 +692,9 @@ const AGENT_INVOCATION_OUTPUT_SCHEMA = z.discriminatedUnion("status", [
   }),
   AGENT_INVOCATION_BASE_SCHEMA.extend({
     interactions: z.record(z.string(), interactionJsonSchema),
+    pollAfterMs: z.number().int().nonnegative().optional(),
     result: z.json().optional(),
     status: z.literal("input_required"),
-  }),
-  AGENT_INVOCATION_BASE_SCHEMA.extend({
-    interactions: z.record(z.string(), interactionJsonSchema),
-    pollAfterMs: z.number().int().nonnegative(),
-    result: z.json().optional(),
-    status: z.literal("authorization_required"),
   }),
   AGENT_INVOCATION_BASE_SCHEMA.extend({
     result: z.json().optional(),

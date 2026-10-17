@@ -1,3 +1,4 @@
+import { outputOf } from "#evals/output.js";
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtime-trace-links.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
@@ -315,7 +316,7 @@ class DatadogReporter implements EvalReporter {
       spanInput.input = toOptionalDatadogJsonValue(resolveInput(result, evaluation));
     }
     if (this.#recording.recordOutputs) {
-      spanInput.output = toOptionalDatadogJsonValue(result.result.output);
+      spanInput.output = toOptionalDatadogJsonValue(outputOf(result.result));
     }
     if (this.#recording.recordExpectedOutputs) {
       spanInput.expectedOutput = toOptionalDatadogJsonValue(resolveExpectedOutput(evaluation));
@@ -476,7 +477,8 @@ function resolveResultMetadata(
     eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
     eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
     eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
-    eveParked: result.result.derived.parked,
+    eveAwaitingInput: result.result.status === "awaiting-input",
+    eveSessionEnded: result.result.sessionEnded,
   });
   const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
   if (runtimeTraceLinks.length > 0) {

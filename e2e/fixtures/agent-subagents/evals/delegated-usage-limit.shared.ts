@@ -20,7 +20,7 @@ export async function expectSurveyCountedAgainstParent(t: EveEvalContext, messag
     optionIds: ["continue", "stop"],
     kind: "budget",
   });
-  const parentLimitId = new RegExp(`^${session.sessionId ?? ""}:\\d+:limit:input:(\\d+)$`, "u");
+  const parentLimitId = new RegExp(`^${session.id ?? ""}:\\d+:limit:input:(\\d+)$`, "u");
   await t.require(
     request.interactionId,
     satisfies(

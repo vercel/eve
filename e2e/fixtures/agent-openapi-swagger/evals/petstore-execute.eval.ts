@@ -14,7 +14,7 @@ export default defineEval({
     const turn = await t.send("PETSTORE_EXECUTE_E2E");
 
     turn.expectOk();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     t.toolOrder([SEARCH_TOOL, INVENTORY_TOOL]);
     turn.calledTool(SEARCH_TOOL, {
       count: 1,

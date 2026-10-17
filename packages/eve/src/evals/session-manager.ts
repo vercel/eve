@@ -6,7 +6,7 @@ import type { Client } from "#client/client.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalSessionDriver, type EvalSessionStartedEvent } from "#evals/session.js";
 import { cleanupEvalSessions } from "#evals/session-cleanup.js";
-import type { EveEvalLiveTurn, EveEvalSessionResult, EveEvalWatchOptions } from "#evals/types.js";
+import type { EveEvalSessionResult } from "#evals/types.js";
 import { createEveSessionStubsRoutePath } from "#protocol/routes.js";
 
 const log = createLogger("eve.evals");
@@ -92,17 +92,8 @@ export class EvalSessionManager {
     return await driver.consume(response, message).result();
   }
 
-  async attachSession(
-    sessionId: string,
-    options?: { readonly startIndex?: number },
-  ): Promise<EvalSessionDriver> {
-    const session = this.#createAttachedSession(sessionId, options);
-    await session.readTurn(options);
-    return session;
-  }
-
-  watchTurn(sessionId: string, options?: EveEvalWatchOptions): EveEvalLiveTurn {
-    return this.#createAttachedSession(sessionId, options).watchTurn(options);
+  attach(sessionId: string, options?: { readonly startIndex?: number }): EvalSessionDriver {
+    return this.#createAttachedSession(sessionId, options);
   }
 
   snapshots(): readonly EveEvalSessionResult[] {
@@ -144,7 +135,7 @@ export class EvalSessionManager {
     const startIndex = options?.startIndex ?? 0;
     // What this eval already read of the session names the calls a later read settles.
     const history = this.#sessions
-      .filter((driver) => driver.sessionId === sessionId)
+      .filter((driver) => driver.id === sessionId)
       .flatMap((driver) => driver.events)
       .filter((event) => event.meta.position.line < startIndex);
     return this.#register(

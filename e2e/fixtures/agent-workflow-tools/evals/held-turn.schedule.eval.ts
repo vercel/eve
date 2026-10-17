@@ -20,7 +20,8 @@ export default defineEval({
     const sessionId = dispatch.sessionIds[0];
     if (sessionId === undefined) throw new Error("The schedule started no session.");
 
-    const session = await t.target.attachSession(sessionId);
+    const session = t.target.attach(sessionId);
+    await session.nextTurn();
     session.succeeded();
     session.event("content.completed", {
       count: 1,

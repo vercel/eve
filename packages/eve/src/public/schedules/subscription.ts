@@ -14,7 +14,7 @@ import type {
 import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReference } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
-import type { Session } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
@@ -199,7 +199,7 @@ export interface ScheduleClient<TPayload> {
 export type DynamicSchedulesToFn = <TChannel extends ChannelReference<unknown>>(
   channel: TChannel,
   target: InferReceiveTarget<TChannel>,
-) => { send(message: MessageContent): Promise<Session> };
+) => { send(message: MessageContent): Promise<Delivery> };
 
 type SchedulePayloadApproval<TPrepared> =
   | ((

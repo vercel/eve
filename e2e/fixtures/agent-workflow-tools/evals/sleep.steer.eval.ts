@@ -26,6 +26,6 @@ export default defineEval({
     turn.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     turn.notEvent("turn.settled", { data: { outcome: "cancelled" } });
     turn.messageIncludes("WORKFLOW-SLEEP-RESULT Stopped early because a new message arrived.");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

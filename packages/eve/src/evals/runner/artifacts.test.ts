@@ -104,10 +104,11 @@ function skippedSummary(): EveEvalRunSummary {
     id: "runtime/skipped",
     assertions: [],
     result: {
+      sessionEnded: false,
       derived: createEmptyDerivedFacts(),
       events: [],
-      finalMessage: null,
-      output: null,
+      reply: undefined,
+      data: null,
       status: "completed",
       traceContexts: [],
     },
@@ -150,10 +151,11 @@ function judgedSummary(): EveEvalRunSummary {
       },
     ],
     result: {
+      sessionEnded: false,
       derived: createEmptyDerivedFacts(),
       events: [],
-      finalMessage: "No source.",
-      output: "No source.",
+      reply: "No source.",
+      data: "No source.",
       status: "completed",
       traceContexts: [
         {
