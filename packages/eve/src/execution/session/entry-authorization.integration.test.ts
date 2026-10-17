@@ -547,6 +547,53 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("answers a message that steers a held sign-in, in the same turn, without asking to sign in again", async () => {
+    const { completeCalls, executions, runtime } = await createWeatherAuthRuntime(
+      "workflow-entry-auth-steer-answers",
+    );
+    const continuationToken = "http:workflow-entry-auth-steer-answers";
+
+    await runtime.run(async () => {
+      const run = await startWeatherRun(continuationToken);
+      const stream = captureEvents(run);
+
+      try {
+        await stream.nextUntil(
+          "first auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        await stream.nextUntil("first hold", (event) => event.type === "turn.waiting");
+
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: userAuth("user-1"),
+          kind: "send",
+          payload: { message: "Never mind that, just say hello." },
+        });
+        // A sign-in nobody completed does not stand between the user and an answer.
+        const answered = await stream.nextUntil(
+          "answer to the steering message",
+          (event) => event.type === "session.waiting",
+        );
+        expect(filterEventsByType(answered, "authorization.completed")).toMatchObject([
+          { data: { name: "weather", outcome: "declined" } },
+        ]);
+        expect(filterEventsByType(answered, "authorization.required")).toHaveLength(0);
+        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+        expect(filterEventsByType(answered, "message.completed")).toHaveLength(1);
+        expect(filterEventsByType(answered, "turn.completed")).toHaveLength(1);
+        expect(executions()).toEqual([]);
+        expect(completeCalls()).toBe(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("cancelling a held turn drops its sign-in, so a late callback does nothing", async () => {
     const { completeCalls, executions, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-cancel",
