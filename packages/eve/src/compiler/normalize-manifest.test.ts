@@ -743,8 +743,7 @@ describe("compileAgentManifest source graph", () => {
     expect(resolved.config?.model?.promptCache).toEqual({ anthropic: { ttl: "1h" } });
   });
 
-  // Issue #4965: both references point at the same agent config export.
-  it.fails("resolves a direct compaction model to its own instance", async () => {
+  it("resolves a direct compaction model to its own instance", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "");
     const directModel = (modelId: string) =>

@@ -158,6 +158,7 @@ export async function compileAgentConfig(
       contextWindowTokens: definition.compaction.modelContextWindowTokens,
       providerOptions: definition.modelOptions?.providerOptions,
       source: configModule,
+      sourceField: "compaction.model",
       sourcePath: configModulePath,
       value: definition.compaction.model,
     });
@@ -205,6 +206,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly promptCache?: AgentPromptCacheDefinition;
   readonly providerOptions?: Record<string, JsonObject>;
   readonly source?: ModuleSourceRef;
+  readonly sourceField?: CompiledRuntimeModelReference["sourceField"];
   readonly sourcePath?: string;
   readonly value: PublicAgentStaticModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
@@ -267,6 +269,7 @@ async function normalizeAuthoredModelReference(input: {
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
     routing,
   };
+  if (input.sourceField !== undefined) sourceBackedModel.sourceField = input.sourceField;
   if (input.promptCache !== undefined) sourceBackedModel.promptCache = input.promptCache;
 
   if (input.contextWindowTokens === undefined) {

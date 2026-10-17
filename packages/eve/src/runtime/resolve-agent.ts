@@ -225,6 +225,7 @@ function createResolvedAgentConfig(
                 logicalPath: manifest.config.compaction.model.source.logicalPath,
                 sourceId: manifest.config.compaction.model.source.sourceId,
               },
+              sourceField: manifest.config.compaction.model.sourceField,
             };
     }
 
