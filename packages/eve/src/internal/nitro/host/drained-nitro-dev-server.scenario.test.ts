@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -648,6 +648,40 @@ describe("drained Nitro dev server", () => {
     ).resolves.toBe("worker");
 
     await server.close();
+  });
+
+  // #5001: a busy parent can hand the next request to a pooled worker socket
+  // the worker already closed on its keep-alive timeout.
+  it.fails("forwards a request after the parent stalls past the worker keep-alive timeout", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-keep-alive-"));
+    const entry = join(appRoot, "worker.mjs");
+    await writeFile(entry, 'export default { fetch: () => new Response("worker") };\n', "utf8");
+    const server = new DrainedNitroDevServer(LOGGER);
+    const listener = await listen(server);
+    const url = new URL("/", listener.url);
+
+    try {
+      await server.replaceWorker(replacement(entry));
+      await expect(fetch(url).then(async (response) => await response.text())).resolves.toBe(
+        "worker",
+      );
+
+      // Block the parent event loop past the worker's keep-alive deadline
+      // (5s plus Node's 1s buffer) without yielding, as CPU starvation does.
+      server.setControlHandler(async () => {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 7_000);
+        return undefined;
+      });
+      const response = await fetch(url, { body: "{}", method: "POST" });
+
+      expect({ body: await response.text(), status: response.status }).toEqual({
+        body: "worker",
+        status: 200,
+      });
+    } finally {
+      await server.close();
+      await rm(appRoot, { force: true, recursive: true });
+    }
   });
 });
 
