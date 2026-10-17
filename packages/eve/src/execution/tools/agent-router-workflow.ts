@@ -33,7 +33,7 @@ async function chooseTarget(
   if (names.length === 1) return names[0]!;
 
   const result = await decide({
-    abortSignal,
+    signal: abortSignal,
     state: { message },
     questions: {
       route: {

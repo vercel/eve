@@ -50,7 +50,7 @@ describe("dynamic tool approval helpers", () => {
     await expect(auto()(context)).resolves.toBe(expected);
     expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
-        abortSignal: expect.any(AbortSignal),
+        signal: expect.any(AbortSignal),
         maxRetries: 0,
         model: "typesafe-ai/jev",
         state: { action: { input: context.toolInput, tool: "deploy" } },

@@ -158,7 +158,7 @@ export default defineTool({
           },
         },
       },
-      abortSignal: ctx.abortSignal,
+      signal: ctx.abortSignal,
     });
     return { team: result.answers.team.choice };
   },
@@ -166,11 +166,16 @@ export default defineTool({
 ```
 
 The choice above is typed as `"billing" | "support"`. Each question appears under
-its authored key in `result.answers`. Results also include token usage, warnings,
-provider metadata, and response metadata. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
+its authored key in `result.answers`. Results also include normalized token usage in `usage`.
+These are eve-owned contracts, independent of the AI SDK's experimental result metadata. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
 
-`decide` accepts AI SDK decision options, including `maxRetries`, `headers`,
-and `providerOptions`. Pass an `abortSignal` to cancel the request. Input and
+`decide` accepts `model`, `state`, `questions`, `maxRetries`, and `signal`.
+Pass `signal: ctx.abortSignal` to cancel the request. Import `DecisionModel`, `DecisionState`,
+`DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`,
+and `DecisionResult` from `eve/ai` to annotate reusable configs and handlers.
+Model instances must implement a decision model specification supported by the installed AI SDK;
+a matching `provider`, `modelId`, and `specificationVersion` alone is not an implementation.
+A newer specification can typecheck but still be rejected by an older SDK at runtime. Input and
 answer validation, retries, and provider errors follow AI SDK semantics.
 
 You can also call `decide` outside a tool; it does not require an active eve

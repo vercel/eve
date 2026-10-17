@@ -4,7 +4,7 @@ import type { RequestStatus } from "#protocol/session-projection/request-status.
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { Experimental_DecisionModel as DecisionModel } from "ai";
+import type { DecisionModel } from "#ai/decision-types.js";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ClientAgentSession } from "#client/agent-session.js";

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { type Experimental_DecisionModel as DecisionModel } from "ai";
+import type { DecisionModel } from "#ai/decision-types.js";
 
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
@@ -17,7 +17,8 @@ import type {
   PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 
-import { DEFAULT_DECISION_MODEL, decide } from "#ai/decide.js";
+import { decide } from "#ai/decide.js";
+import { DEFAULT_DECISION_MODEL } from "#ai/decision-adapter.js";
 
 type AutoModelSelection =
   | PublicAgentStaticModelDefinition
@@ -234,7 +235,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
                 criteria,
               },
             },
-            abortSignal: ctx.abortSignal,
+            signal: ctx.abortSignal,
           });
           ctx.abortSignal?.throwIfAborted();
 

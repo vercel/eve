@@ -1,4 +1,4 @@
-import type { Experimental_DecisionModel as DecisionModel } from "ai";
+import type { DecisionModel } from "#ai/decision-types.js";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { decide } from "#ai/decide.js";
@@ -54,7 +54,7 @@ async function autoApproval(
           },
         },
       },
-      abortSignal,
+      signal: abortSignal,
       maxRetries: 0,
     });
     return result.answers.permission.choice === "clear" ? "approved" : "user-approval";

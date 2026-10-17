@@ -620,7 +620,7 @@ async function chooseTarget(
   "use step";
 
   const result = await decide({
-    abortSignal,
+    signal: abortSignal,
     state: { task },
     questions: {
       route: {

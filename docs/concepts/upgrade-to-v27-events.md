@@ -286,6 +286,16 @@ not individual events. The shared options include `follow` and `signal`; only th
 `streamReconnectPolicy`. Client handles (`ClientSession`, `ClientAgentSession`, `ClientSessions`)
 are type-only exports. Obtain them from `new Client()` and its methods instead of constructing them.
 
+## Decision models
+
+`decide` from `eve/ai` now accepts eve-owned `DecisionOptions` and returns `DecisionResult`:
+`answers` and `usage` only. Replace the `abortSignal` request option with `signal`; SDK telemetry,
+callbacks, `_internal`, headers, provider options, and response metadata are not public options or
+results. Import question, state, answer, and model types from `eve/ai`, not AI SDK's experimental
+aliases. Both `auto()` helpers and eval judges use the same `DecisionModel` contract; installed
+provider instances still use the SDK's runtime model-version checks and authentication.
+Eval diagnostic metadata continues to include provider response details internally.
+
 ## Clients and frontends
 
 - **Frontend commands resolve on acceptance.** `EveAgentStore.send()` and the frontend hooks'
