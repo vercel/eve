@@ -389,30 +389,24 @@ async function authorizeCandidate(input: {
   } catch (error) {
     const authorization = await handleApprovalResponsePolicyError(error).catch(() => undefined);
     if (isAuthorizationSignal(authorization)) {
-      const providerExpiresAt = authorization.challenges
+      const challenges = authorization.challenges.map((challenge) => ({
+        ...challenge,
+        candidateId: input.candidateId,
+      }));
+      const providerExpiresAt = challenges
         .map((entry) => Date.parse(entry.challenge.expiresAt ?? ""))
         .filter(Number.isFinite)
         .sort((a, b) => a - b)[0];
       session = {
         ...session,
         state: markApprovalCandidateAuthorizationRequired({
-          authorizationChallenges: authorization.challenges.map((challenge) => ({
-            ...challenge,
-            candidateId: input.candidateId,
-          })),
+          authorizationChallenges: challenges,
           candidateId: input.candidateId,
           expiresAt: providerExpiresAt,
           state: session.state,
         }),
       };
-      return {
-        challenges: authorization.challenges.map((challenge) => ({
-          ...challenge,
-          candidateId: input.candidateId,
-        })),
-        didCommit: true,
-        session,
-      };
+      return { challenges, didCommit: true, session };
     }
     return failCandidate({ ...input, session });
   }
