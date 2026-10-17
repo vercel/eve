@@ -12,7 +12,7 @@ const TOOL = "authorized-change";
 type Store = EveAgentStore;
 
 function toolPart(store: Store, callId: string): EveToolPart {
-  const parts = store.snapshot.data.messages.flatMap((message) => message.parts);
+  const parts = store.snapshot.messages.flatMap((message) => message.parts);
   const matches = parts.filter(
     (part): part is EveToolPart => part.type === "tool" && part.callId === callId,
   );
@@ -41,12 +41,12 @@ async function expectAnswerable(
   interactionId: string,
 ) {
   // The approval holds its turn open, and the store keeps following it live.
-  await t.require(store.snapshot.status, equals("streaming"));
+  await t.require(store.snapshot.status, equals("busy"));
   await t.require(store.snapshot.error, equals(undefined));
   const part = toolPart(store, callId);
-  await t.require(part.status, equals("requested"));
+  await t.require(part.state, equals("approval"));
   await t.require(part.interaction?.status, equals("open"));
-  await t.require(part.interaction?.request.interactionId, equals(interactionId));
+  await t.require(part.interaction?.interactionId, equals(interactionId));
   await t.require(part.interaction?.answer, equals(undefined));
 }
 
@@ -96,7 +96,7 @@ async function refuse(t: EveEvalContext, store: Store, callId: string, interacti
 
 export default defineEval({
   description:
-    "A refused approval returns the frontend to an answerable idle state, including after reload (#3757).",
+    "A refused approval returns the frontend to an answerable state, including after reload (#3757).",
   tags: ["hitl", "regression", "authorization", "client"],
   timeoutMs: 120_000,
   async test(t) {
@@ -112,7 +112,7 @@ export default defineEval({
     };
 
     try {
-      for (const decision of ["approve", "cancel"] as const) {
+      for (const decision of ["approve", "deny"] as const) {
         t.log(
           `Alice prepares a change; after a refused answer and reload, finish with ${decision}.`,
         );
@@ -142,7 +142,7 @@ export default defineEval({
         // Retrying on the same page must reach the policy again, not reuse the refused candidate.
         const retryCandidate = await refuse(t, page, callId, interactionId);
         await t.require(retryCandidate !== firstCandidate, equals(true));
-        page.reset();
+        page.newSession();
 
         const reload = new EveAgentStore({
           host,
@@ -176,7 +176,13 @@ export default defineEval({
             signal: t.signal,
           }),
         );
-        await waitForStore(reload, (snapshot) => snapshot.status === "idle", t.signal);
+        await waitForStore(
+          reload,
+          (snapshot) =>
+            snapshot.status === "idle" &&
+            snapshot.view.interactions[interactionId]?.status === "settled",
+          t.signal,
+        );
         await t.require(reload.snapshot.status, equals("idle"));
         await t.require(reload.snapshot.error, equals(undefined));
         const finished = (
@@ -196,7 +202,7 @@ export default defineEval({
           finished.calledTool(TOOL, { status: "completed", count: 0 });
         }
         await t.require(toolPart(reload, callId).interaction?.status, equals("settled"));
-        reload.reset();
+        reload.newSession();
       }
     } finally {
       for (const store of stores) store.newSession();

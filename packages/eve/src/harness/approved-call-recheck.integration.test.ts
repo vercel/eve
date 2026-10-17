@@ -94,7 +94,7 @@ describe("approved call recheck (real AI SDK)", () => {
       name: "deploy",
       description: "Deploy Alice's release",
       inputSchema: jsonSchema({ type: "object" }),
-      approval: (context) => perEnvironment({ ...context }),
+      approval: (context) => perEnvironment(Object.freeze({ ...context })),
       execute,
     };
     const call = (toolName: string, environment: string, toolCallId: string) => ({

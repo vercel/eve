@@ -47,9 +47,6 @@ export {
   type GitHubProgressConfig,
   type GitHubReceiveTarget,
 } from "#public/channels/github/githubChannel.js";
-export {
-  GITHUB_DEFAULT_EXCLUDED_DIFF_FILES,
-  type GitHubPullRequestContextConfig,
-} from "#public/channels/github/pr-context.js";
+export { type GitHubPullRequestContextConfig } from "#public/channels/github/pr-context.js";
 export { type GitHubChannelState } from "#public/channels/github/state.js";
 export { type GitHubWebhookVerifier } from "#public/channels/github/verify.js";

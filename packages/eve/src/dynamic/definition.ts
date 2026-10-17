@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { SessionAuth, SessionPredecessor } from "#context/keys.js";
 import type {

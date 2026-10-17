@@ -1,5 +1,6 @@
+import { emptySessionView, foldEvents } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
-import { defineEval, toolCallsOf } from "eve/evals";
+import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
 const SEARCH_COUNT = 8;
@@ -15,9 +16,12 @@ const QUERIES = [
 ] as const;
 
 function completedDistinctCalls(events: readonly SessionStreamEvent[]): number {
+  const view = emptySessionView();
+  foldEvents(view, events);
+
   return new Set(
-    toolCallsOf(events)
-      .filter((call) => call.name === TOOL_NAME && call.status === "completed")
+    Object.values(view.calls)
+      .filter((call) => call.capability.name === TOOL_NAME && call.outcome === "completed")
       .map((call) => call.callId),
   ).size;
 }

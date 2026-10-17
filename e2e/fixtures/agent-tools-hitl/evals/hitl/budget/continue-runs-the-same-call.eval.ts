@@ -14,7 +14,7 @@ export default defineEval({
     const { held, request, session } = await budgetQuestion(t);
     const turnId = held.events.find((event) => event.type === "turn.started")?.data.turnId;
 
-    const resumed = (await session.respond(answers("continue", request), asAlice)).expectOk();
+    const resumed = (await session.respond(answers("approve", request), asAlice)).expectOk();
     expectResolved(resumed, request, "accepted");
     resumed.notEvent("turn.started");
     resumed.eventOrder([

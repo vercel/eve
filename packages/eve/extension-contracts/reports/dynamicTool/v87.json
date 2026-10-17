@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "dynamicTool",
   "epoch": 87,
-  "sha256": "c2f747118e9b5c6d3d11e14a4b80548ee4e248753e1ba42d4aa15c22e9d19fc8",
+  "sha256": "b49b94b2f891ea661733eb70a56d89dcbb55f81c625b25b2e23856f93675eca0",
   "exports": [
     "DynamicToolEntry",
     "DynamicToolEvents",

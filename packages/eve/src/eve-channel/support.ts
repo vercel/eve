@@ -7,11 +7,8 @@ import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { ChannelCors } from "#public/definitions/channel.js";
 import {
   defaultEveAuth,
-  type EveChannelCors,
-  type EveChannelCorsOptions,
   type EveChannelInput,
   type EveHandle,
   type EveMessageContext,
@@ -111,63 +108,6 @@ export async function findRemoteAgentBinding(
   if (recorded.resolverId !== undefined) binding.resolverId = recorded.resolverId;
   if (recorded.earlierProtocol !== undefined) binding.earlierProtocol = recorded.earlierProtocol;
   return binding;
-}
-
-export function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {
-  if (cors === undefined || cors === false) {
-    return false;
-  }
-  if (cors === true) {
-    return true;
-  }
-
-  const result: {
-    origin?: "*" | "null" | readonly string[];
-    methods?: "*" | readonly string[];
-    allowHeaders?: "*" | readonly string[];
-    exposeHeaders?: "*" | readonly string[];
-    credentials?: boolean;
-    maxAge?: number | false;
-    preflight?: {
-      statusCode?: number;
-    };
-  } = {};
-
-  if (cors.origin !== undefined) {
-    result.origin = normalizeEveCorsOrigin(cors.origin);
-  }
-  if (cors.methods !== undefined) {
-    result.methods = cors.methods;
-  }
-  if (cors.allowedHeaders !== undefined) {
-    result.allowHeaders = cors.allowedHeaders;
-  }
-  if (cors.exposedHeaders !== undefined) {
-    result.exposeHeaders = cors.exposedHeaders;
-  }
-  if (cors.credentials !== undefined) {
-    result.credentials = cors.credentials;
-  }
-  if (cors.maxAge !== undefined) {
-    result.maxAge = cors.maxAge;
-  }
-  if (cors.preflightStatus !== undefined) {
-    result.preflight = { statusCode: cors.preflightStatus };
-  }
-
-  return result;
-}
-
-function normalizeEveCorsOrigin(
-  origin: NonNullable<EveChannelCorsOptions["origin"]>,
-): "*" | "null" | readonly string[] {
-  if (origin === "*" || origin === "null") {
-    return origin;
-  }
-  if (typeof origin === "string") {
-    return [origin];
-  }
-  return origin;
 }
 
 interface OnMessageOutcome {

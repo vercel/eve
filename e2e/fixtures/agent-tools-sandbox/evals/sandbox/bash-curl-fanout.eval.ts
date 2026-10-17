@@ -1,5 +1,6 @@
+import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
-import { defineEval, toolCallsOf } from "eve/evals";
+import { defineEval } from "eve/evals";
 
 import { FANOUT_BARRIER_SERVER_URL } from "./shared";
 
@@ -87,10 +88,13 @@ function curlCallsReachBarrier(input: {
 }
 
 function curlBarrierResults(events: readonly SessionStreamEvent[]): readonly CurlBarrierResult[] {
-  return toolCallsOf(events).flatMap((call) => {
-    if (call.name !== BASH_TOOL || call.status !== "completed") return [];
+  const view = emptySessionView();
+  foldEvents(view, events);
 
-    return parseCurlBarrierResult(call.output);
+  return Object.values(view.calls).flatMap((call) => {
+    if (call.capability.name !== BASH_TOOL || call.outcome !== "completed") return [];
+
+    return parseCurlBarrierResult(callOutputSource(view, call.callId)?.output);
   });
 }
 

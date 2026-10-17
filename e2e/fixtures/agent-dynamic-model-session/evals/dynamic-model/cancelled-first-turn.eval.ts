@@ -25,7 +25,7 @@ export default defineEval({
       cancelled,
       satisfies(
         (value: typeof cancelled) =>
-          value.status === "accepted" && value.sessionId === live.sessionId,
+          typeof value.deliveryId === "string" && value.sessionId === live.sessionId,
         "the first-turn cancellation is accepted",
       ),
     );

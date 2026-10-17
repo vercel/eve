@@ -7,7 +7,7 @@ import type {
   SpanProcessorOrName,
 } from "#compiled/@vercel/otel/index.js";
 
-import { PROVIDER, type InstrumentationProvider } from "#public/instrumentation/provider.js";
+import { PROVIDER, type InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationModelStartedInput } from "#public/instrumentation/index.js";
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";

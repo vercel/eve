@@ -17,9 +17,15 @@ export default defineEval({
     const production = request.request.options?.find((option) => option.label === "Production");
     if (production === undefined) throw new Error("Expected a Production option.");
 
-    const answered = await session.respond([
+    const live = await session.startRespond([
       { optionId: production.id, interactionId: request.interactionId },
     ]);
+    let answered;
+    try {
+      answered = await live.result();
+    } finally {
+      t.log(JSON.stringify(live.events.slice(-16)));
+    }
     answered.event("interaction.settled", {
       count: 1,
       data: {

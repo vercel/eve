@@ -1,3 +1,7 @@
+import {
+  escapeAuthChallengeParameter,
+  readOAuthResourceOptions,
+} from "#channel/auth/definitions.js";
 import { interactionJsonSchema } from "#protocol/interaction-json.js";
 import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { parseJsonObject } from "#shared/json.js";
@@ -43,13 +47,7 @@ import {
   createMcpResourceChallenge,
 } from "#internal/mcp/protected-resource.js";
 import { answerSchema } from "#shared/input.js";
-import {
-  escapeAuthChallengeParameter,
-  readOAuthResourceOptions,
-  routeAuth,
-  type AuthFn,
-  type OAuthResourceOptions,
-} from "#public/channels/auth.js";
+import { routeAuth, type AuthFn, type OAuthResourceOptions } from "#public/channels/auth.js";
 import {
   readAgentInfoRouteResponse,
   readRouteChannelName,

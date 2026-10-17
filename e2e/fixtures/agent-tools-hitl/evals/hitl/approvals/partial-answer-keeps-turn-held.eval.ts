@@ -32,7 +32,7 @@ export default defineEval({
     partial.notEvent("model.started");
     partial.notEvent("call.settled");
 
-    const finished = (await session.respond(answers("cancel", b), asAlice)).expectOk();
+    const finished = (await session.respond(answers("deny", b), asAlice)).expectOk();
     // Both approvals settle in the one commit, each with its own answer.
     finished.event("interaction.settled", { count: 2 });
     finished.event("interaction.settled", {

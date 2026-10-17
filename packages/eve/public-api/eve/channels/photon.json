@@ -1,0 +1,10 @@
+[
+  "PhotonIMessageChannel",
+  "PhotonIMessageChannelConfig",
+  "PhotonIMessageChannelCredentials",
+  "PhotonInboundMessageContext",
+  "PhotonInboundResult",
+  "PhotonInboundResultOrPromise",
+  "defaultPhotonAuth",
+  "photonIMessageChannel"
+]

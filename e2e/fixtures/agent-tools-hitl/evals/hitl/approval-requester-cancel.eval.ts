@@ -18,7 +18,7 @@ export default defineEval({
     const parked = await session.send("Prepare an authorized change.", { headers: ALICE });
     const { interactionId } = parked.session.requireInteraction({ toolName: TOOL });
 
-    const refused = await session.respond([{ optionId: "cancel", interactionId }], {
+    const refused = await session.respond([{ optionId: "deny", interactionId }], {
       headers: BOB,
     });
     refused.event("delivery.admitted", { count: 1, data: { principal: { id: "bob" } } });
@@ -29,7 +29,7 @@ export default defineEval({
     });
     refused.notEvent("interaction.settled");
 
-    const cancelled = await session.respond([{ optionId: "cancel", interactionId }], {
+    const cancelled = await session.respond([{ optionId: "deny", interactionId }], {
       headers: ALICE,
     });
     cancelled.event("delivery.admitted", { count: 1, data: { principal: { id: "alice" } } });

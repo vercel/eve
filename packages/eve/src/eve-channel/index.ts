@@ -5,7 +5,7 @@ import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceSeed } from "#channel/types.js";
-import type { Session } from "#channel/session.js";
+import { internalSession, type Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
@@ -79,7 +79,6 @@ import {
   findRemoteAgentBinding,
   healthResponse,
   type RemoteAgentBinding,
-  normalizeEveCors,
   resolveOnMessage,
   sessionCommandErrorResponse,
   deliveryResponse,
@@ -105,9 +104,8 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryI
     ok: true;
     protocolVersion?: number;
     sessionId: string;
-    status: "accepted";
     deliveryId?: string;
-  } = { ok: true, sessionId, status: "accepted" };
+  } = { ok: true, sessionId };
   if (deliveryId !== undefined) created.deliveryId = deliveryId;
   if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
   return created;
@@ -117,7 +115,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
 
   return defineChannel<undefined, EveEventContext>({
-    cors: normalizeEveCors(input.cors),
+    cors: input.cors,
     turnPolicy: input.turnPolicy,
     audience: (classifierInput) => {
       const audience = input.audience ?? defaultEveAudience;
@@ -642,7 +640,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             callId,
             childSessionId,
             childStreamPath,
-            parent,
+            parent: internalSession(parent),
           });
           if (found === undefined) {
             throw new Error("Remote subagent binding not found.");

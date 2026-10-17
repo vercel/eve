@@ -1,5 +1,6 @@
+import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
-import { defineEval, toolCallsOf } from "eve/evals";
+import { defineEval } from "eve/evals";
 
 const BASH_TOOL = "bash";
 const INDEX_COMMAND = "for i in $(seq 1 120); do echo indexed batch $i; sleep 1; done";
@@ -55,9 +56,12 @@ function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
 }
 
 function bashOutputs(events: readonly SessionStreamEvent[]): readonly BashOutput[] {
-  return toolCallsOf(events).flatMap((call) => {
-    if (call.name !== BASH_TOOL || call.status !== "completed") return [];
-    const output = call.output;
+  const view = emptySessionView();
+  foldEvents(view, events);
+
+  return Object.values(view.calls).flatMap((call) => {
+    if (call.capability.name !== BASH_TOOL || call.outcome !== "completed") return [];
+    const output = callOutputSource(view, call.callId)?.output;
     if (typeof output !== "object" || output === null || Array.isArray(output)) return [];
     return [output as BashOutput];
   });

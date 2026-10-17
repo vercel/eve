@@ -21,11 +21,7 @@ export {
 } from "#public/channels/twilio/twilioChannel.js";
 
 export {
-  callTwilioApi,
-  resolveTwilioAccountSid,
-  sendTwilioMessage,
   twilioContinuationToken,
-  updateTwilioCall,
   type TwilioAccountSid,
   type TwilioApiOptions,
   type TwilioApiResponse,
@@ -42,22 +38,10 @@ export type {
   TwilioVoiceTranscription,
 } from "#public/channels/twilio/inbound.js";
 
-export {
-  emptyTwilioResponse,
-  escapeXml,
-  gatherSpeechTwilioResponse,
-  sayTwilioResponse,
-  twimlResponse,
-  type TwilioGatherTwimlOptions,
-} from "#public/channels/twilio/twiml.js";
+export { type TwilioGatherTwimlOptions } from "#public/channels/twilio/twiml.js";
 
 export {
-  buildTwilioSignatureBase,
-  resolveTwilioAuthToken,
-  signTwilioRequest,
-  verifyTwilioRequest,
   type TwilioAuthToken,
   type TwilioVerifiedRequest,
-  type TwilioVerifyOptions,
   type TwilioWebhookUrl,
 } from "#public/channels/twilio/verify.js";

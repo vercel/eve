@@ -24,12 +24,12 @@ export default defineEval({
     await session.send('Reply with exactly the text "limit pong" and nothing else.');
     const request = session.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
+      optionIds: ["approve", "deny"],
       kind: "budget",
     });
 
     const resumed = await session.respond([
-      { optionId: "continue", interactionId: request.interactionId },
+      { optionId: "approve", interactionId: request.interactionId },
     ]);
     resumed.expectOk();
     t.succeeded();
@@ -44,13 +44,13 @@ export default defineEval({
     await stopSession.send('Reply with exactly the text "stop pong" and nothing else.');
     const stopRequest = stopSession.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
+      optionIds: ["approve", "deny"],
       kind: "budget",
     });
 
     const stopped = await stopSession.respond([
       {
-        optionId: "stop",
+        optionId: "deny",
         interactionId: stopRequest.interactionId,
       },
     ]);

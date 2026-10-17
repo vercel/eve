@@ -27,8 +27,8 @@ export default defineEval({
       cancelled,
       satisfies(
         (value: typeof cancelled) =>
-          value.status === "accepted" && value.sessionId === live.sessionId,
-        "cancel request is accepted with status 'accepted'",
+          typeof value.deliveryId === "string" && value.sessionId === live.sessionId,
+        "cancel request is accepted with a delivery receipt",
       ),
     );
 
@@ -50,7 +50,8 @@ export default defineEval({
     await t.require(
       late,
       satisfies(
-        (value: typeof late) => value.status === "accepted" && value.sessionId === live.sessionId,
+        (value: typeof late) =>
+          typeof value.deliveryId === "string" && value.sessionId === live.sessionId,
         "a live parked session accepts a late cancel as a no-op",
       ),
     );

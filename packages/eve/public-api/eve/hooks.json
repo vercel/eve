@@ -1,0 +1,11 @@
+[
+  "HookContext",
+  "HookDefinition",
+  "HookEvent",
+  "HookEventKey",
+  "HookEventMap",
+  "HookEventType",
+  "StreamEventHook",
+  "StreamEventHooks",
+  "defineHook"
+]

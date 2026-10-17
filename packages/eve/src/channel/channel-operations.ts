@@ -8,7 +8,6 @@ import type { Session } from "#channel/session.js";
 import type {
   Runtime,
   SessionAuthContext,
-  SessionCallback,
   TurnPolicy,
   SessionControlOptions,
 } from "#channel/types.js";
@@ -18,9 +17,7 @@ import { attachInputText, readInputText } from "#internal/input-text.js";
 
 interface BaseChannelSendOptions {
   readonly auth: SessionAuthContext | null;
-  readonly callback?: SessionCallback;
   readonly context?: readonly string[];
-  readonly initiatorAuth?: SessionAuthContext | null;
   /** JSON Schema for a structured final answer, as on `Session.send()`. */
   readonly outputSchema?: JsonObject;
   readonly title?: string;

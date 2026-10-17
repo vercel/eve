@@ -1,6 +1,6 @@
 import { defineChannel, POST } from "eve/channels";
 
-export default defineChannel({
+export default defineChannel<{ author: string }>({
   state: { author: "" },
   deliver(payload) {
     return { ...payload, message: `${payload.state?.author}: ${payload.message}` };
@@ -11,7 +11,7 @@ export default defineChannel({
         "Please acknowledge the meeting notes.",
         { auth: null, state: { author: "Alice" } },
       );
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
   ],
 });

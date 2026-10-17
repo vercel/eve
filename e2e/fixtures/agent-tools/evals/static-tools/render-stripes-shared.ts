@@ -1,5 +1,5 @@
+import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
-import { toolCallsOf } from "eve/evals";
 
 export const TOOL_NAME = "render-stripes";
 
@@ -16,9 +16,12 @@ export function isRenderStripesOutput(value: unknown): boolean {
 }
 
 export function renderedColors(events: readonly SessionStreamEvent[]): readonly string[] {
-  for (const call of toolCallsOf(events)) {
-    if (call.name !== TOOL_NAME || call.status !== "completed") continue;
-    const output = call.output as { readonly colors?: unknown };
+  const view = emptySessionView();
+  foldEvents(view, events);
+
+  for (const call of Object.values(view.calls)) {
+    if (call.capability.name !== TOOL_NAME || call.outcome !== "completed") continue;
+    const output = callOutputSource(view, call.callId)?.output as { readonly colors?: unknown };
     if (Array.isArray(output?.colors) && output.colors.every((c) => typeof c === "string")) {
       return output.colors as string[];
     }

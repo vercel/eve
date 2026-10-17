@@ -29,7 +29,7 @@ export default defineEval({
       cancel,
       satisfies(
         (value: typeof cancel) =>
-          value.status === "accepted" && value.sessionId === first.sessionId,
+          typeof value.deliveryId === "string" && value.sessionId === first.sessionId,
         "the parked session accepts cancellation through its stable address",
       ),
     );

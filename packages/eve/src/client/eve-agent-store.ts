@@ -66,7 +66,7 @@ export class EveAgentStore {
 
   constructor(init: EveAgentStoreInit) {
     this.#autoPrewarm = init.prewarm ?? false;
-    this.#followChildStreams = init.followSubagents ?? false;
+    this.#followChildStreams = init.followAgents ?? false;
     this.#followIdle = init.followIdle ?? true;
     this.#externalSession = init.session !== undefined;
     this.#client = this.#externalSession
@@ -324,7 +324,7 @@ export class EveAgentStore {
 
   [attachStore](): void {
     this.#attached = true;
-    this.#followSubagents();
+    this.#followAgents();
     if (this.#autoPrewarm && this.#session === undefined) void this.prewarm().catch(() => {});
   }
 
@@ -341,7 +341,7 @@ export class EveAgentStore {
     this.#conversationClient.reset();
     this.#messageSubmissions.reset();
     this.#error = undefined;
-    if (this.#attached) this.#followSubagents();
+    if (this.#attached) this.#followAgents();
     this.#callbacks.onSessionChange?.(this.#session?.state);
     this.#publish();
     if (this.#autoPrewarm && this.#attached) void this.prewarm().catch(() => {});
@@ -380,7 +380,7 @@ export class EveAgentStore {
       this.#session = session;
       this.#error = undefined;
       this.#callbacks.onSessionChange?.(session.state);
-      this.#followSubagents();
+      this.#followAgents();
       this.#publish();
       return response;
     })();
@@ -420,7 +420,7 @@ export class EveAgentStore {
   ): SessionEventStream {
     if (this.#session === undefined)
       throw new Error("A session is required before opening its stream.");
-    this.#followSubagents();
+    this.#followAgents();
     const lifetime = this.#controller;
     return this.#conversationClient.stream(this.#session, {
       ...options,
@@ -433,7 +433,7 @@ export class EveAgentStore {
     });
   }
 
-  #followSubagents(): void {
+  #followAgents(): void {
     if (this.#followChildStreams && this.#session && !this.#conversationClient.following)
       this.#conversationClient.follow(this.#session, this.#events);
   }

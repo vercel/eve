@@ -48,12 +48,42 @@ import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js
 import { writeConversationBaggage } from "#tracing/eve/conversation-context.js";
 import { agentDelegation } from "#tracing/eve/delegation.js";
 
-const CreateSessionResponseSchema = z.object({
+const DeliveryReceiptResponseSchema = z.object({
   ok: z.literal(true),
-  protocolVersion: z.number().optional(),
   sessionId: z.string().min(1),
-  status: z.literal("accepted"),
+  deliveryId: z.string().min(1),
 });
+
+const RemoteCancelResponseSchema = z.union([
+  DeliveryReceiptResponseSchema.transform(({ sessionId }) => ({
+    sessionId,
+    status: "accepted" as const,
+  })),
+  CancelTurnResponseSchema,
+]);
+
+const RemoteResetResponseSchema = z.union([
+  DeliveryReceiptResponseSchema.transform(({ sessionId }) => ({
+    ok: true as const,
+    previousSessionId: sessionId,
+    status: "reset" as const,
+  })),
+  ResetResponseSchema,
+]);
+
+const CreateSessionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    protocolVersion: z.number().optional(),
+    sessionId: z.string().min(1),
+  })
+  .and(
+    z.union([
+      z.object({ deliveryId: z.string().min(1) }),
+      // Earlier protocol peers acknowledge creation without naming the delivery.
+      z.object({ status: z.literal("accepted") }),
+    ]),
+  );
 
 const UNKNOWN_REMOTE_OUTCOME =
   "The request may have completed on the remote agent. Do not retry automatically; check the remote outcome before sending the request again.";
@@ -360,7 +390,7 @@ export async function cancelRemoteAgentTurn(input: {
     throw new Error(`Remote agent "${input.remote.name}" cancel-turn response was not valid JSON.`);
   }
 
-  const result = CancelTurnResponseSchema.safeParse(body);
+  const result = RemoteCancelResponseSchema.safeParse(body);
   if (
     !result.success ||
     (result.data.status === "accepted" && result.data.sessionId !== input.sessionId)
@@ -405,7 +435,7 @@ export async function resetRemoteAgentSession(input: {
       `Remote agent "${input.remote.name}" reset-session request failed with HTTP ${response.status}.`,
     );
   }
-  const result = ResetResponseSchema.safeParse(await response.json());
+  const result = RemoteResetResponseSchema.safeParse(await response.json());
   if (
     !result.success ||
     (result.data.status === "reset" && result.data.previousSessionId !== input.sessionId)

@@ -22,7 +22,7 @@ import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
  * Default private route namespace for legacy manually configured Vercel
  * services. {@link WithEveOptions.servicePrefix} defaults to this value.
  */
-export const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
+const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
 const EVE_NEXT_PRODUCTION_PORT_ENV = "EVE_NEXT_PRODUCTION_PORT";
@@ -143,8 +143,8 @@ export interface WithEveOptions {
   readonly eveBuildCommand?: string;
   /**
    * Private route namespace for legacy manually configured Vercel services and
-   * non-Vercel production proxying. Defaults to {@link EVE_NEXT_SERVICE_PREFIX}
-   * (`/_eve_internal/eve`). `withEve` normalizes the prefix (adds a leading
+   * non-Vercel production proxying. Defaults to `/_eve_internal/eve`.
+   * `withEve` normalizes the prefix (adds a leading
    * slash, strips trailing slashes) and rejects a prefix that resolves to the
    * root route.
    */

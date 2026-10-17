@@ -1,5 +1,3 @@
-export type { ModelMessage } from "ai";
-
 /**
  * Per-session instrumentation metadata for the Telegram channel, exposed to
  * observability tooling. The channel derives `chatId`, `chatType`, and
@@ -28,18 +26,7 @@ export {
 } from "#public/channels/telegram/telegramChannel.js";
 
 export {
-  callTelegramApi,
-  answerTelegramCallbackQuery,
-  downloadTelegramFile,
-  editTelegramMessageReplyMarkup,
-  editTelegramMessageText,
-  getTelegramFile,
-  resolveTelegramBotToken,
-  sendTelegramChatAction,
-  sendTelegramMessage,
-  splitTelegramMessageText,
   telegramContinuationToken,
-  TELEGRAM_MESSAGE_TEXT_MAX_LENGTH,
   type TelegramApiOptions,
   type TelegramApiResponse,
   type TelegramBotToken,
@@ -51,8 +38,6 @@ export {
 } from "#public/channels/telegram/api.js";
 
 export {
-  formatTelegramContextBlock,
-  parseTelegramUpdate,
   type TelegramAttachment,
   type TelegramCallbackQuery,
   type TelegramChat,
@@ -65,33 +50,13 @@ export {
 } from "#public/channels/telegram/inbound.js";
 
 export {
-  TELEGRAM_CALLBACK_RESPONSE_PREFIX,
-  TELEGRAM_HITL_CALLBACK_PREFIX,
-  TELEGRAM_REPLY_RESPONSE_PREFIX,
-  isTelegramSyntheticResponse,
-  registerTelegramFreeformPrompt,
-  renderTelegramInteraction,
-  resolveTelegramAnswers,
-  telegramCallbackAnswer,
-  telegramReplyAnswer,
   type TelegramHitlState,
   type TelegramInteractionMessage,
 } from "#public/channels/telegram/hitl.js";
 
-export {
-  TELEGRAM_FILE_URL_PROTOCOL,
-  buildTelegramTurnMessage,
-  collectTelegramFileParts,
-  createTelegramFetchFile,
-  createTelegramFileUrl,
-} from "#public/channels/telegram/attachments.js";
-
 export { defaultTelegramAuth } from "#public/channels/telegram/defaults.js";
 
 export {
-  resolveTelegramWebhookSecretToken,
-  verifyTelegramRequest,
-  type TelegramVerifyOptions,
   type TelegramWebhookSecretToken,
   type TelegramWebhookVerifier,
 } from "#public/channels/telegram/verify.js";

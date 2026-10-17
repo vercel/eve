@@ -1,3 +1,4 @@
+import type { ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
@@ -10,7 +11,6 @@ import type {
   Channel,
   ChannelContinuationOps,
   ChannelEvents,
-  ChannelMethod,
 } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
@@ -25,32 +25,6 @@ export type EveEventContext = ChannelContinuationOps;
 
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;
-
-export interface EveChannelCorsOptions {
-  /**
-   * Allowed request origin. Pass a single origin string, an exact-origin list,
-   * `"null"`, or `"*"`. Omit for `"*"`.
-   */
-  readonly origin?: "*" | "null" | string | readonly string[];
-  /** Methods emitted on preflight responses. Omit for `"*"`. */
-  readonly methods?: "*" | readonly ChannelMethod[];
-  /** Request headers emitted on preflight responses. Omit for `"*"`. */
-  readonly allowedHeaders?: "*" | readonly string[];
-  /** Response headers exposed to browser callers. Omit for `"*"`. */
-  readonly exposedHeaders?: "*" | readonly string[];
-  /** Whether to emit `access-control-allow-credentials: true`. */
-  readonly credentials?: boolean;
-  /** Max age, in seconds, emitted on preflight responses. */
-  readonly maxAge?: number | false;
-  /** Preflight response status code. Defaults to 204. */
-  readonly preflightStatus?: number;
-}
-
-/**
- * Higher-level CORS policy for the default eve HTTP channel. Pass `true` for
- * fully permissive browser access, or pass an options object to narrow it.
- */
-export type EveChannelCors = boolean | EveChannelCorsOptions;
 
 /** Low-level eve HTTP handle exposed to `eveChannel({ onMessage })`. */
 export interface EveHandle {
@@ -165,7 +139,7 @@ export interface EveChannelInput {
    * CORS untouched, pass `true` for fully permissive CORS, or pass an options
    * object to narrow the policy.
    */
-  readonly cors?: EveChannelCors;
+  readonly cors?: ChannelCors;
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
   /**

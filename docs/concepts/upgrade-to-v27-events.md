@@ -343,12 +343,41 @@ are type-only exports. Obtain them from `new Client()` and its methods instead o
 - Turn results expose `view`, `reply`, `data`, `sessionEnded`, and the shared request status.
 - Match v27 facts in `t.event(...)`, `eventOrder(...)`, and `waitForEvent(...)`. Event matchers can
   match a fact's `scope`.
-- `turn.waitForToolCall(name, options)` waits for a settled call to a tool, and `toolCallsOf(events)`
-  derives tool calls from events. Eval tool calls always carry their `callId`.
+- `turn.waitForToolCall(name, options)` waits for a settled call to a tool. Replace `toolCallsOf`
+  with `Object.values(turn.view.calls)`; names are `call.capability.name`, and settled results use
+  `call.outcome`. Use `callOutputSource(turn.view, call.callId)` from `eve/events` when a call shares
+  another call's output. Eval tool calls still carry their `callId`.
 - The subagent matcher's `remoteUrl` is removed, and a subagent call's `status` is `pending` until
   it settles, then its outcome (`completed`, `failed`, `rejected`, `interrupted`, `abandoned`).
 - Interactions are `interactions`, `pendingInteractions`, and `requireInteraction(filter)`, sign-ins
   included; match on `kind`.
+
+## Public imports and authoring types
+
+- Import fact and view types from `eve/events`, `SessionContext` and `HistoryMessage` from
+  `eve/context`, and assertion types and `ToolStub` from `eve/evals`. The client no longer
+  re-exports the event catalog's types. Named judge, mock-model, approval, and disabled-marker
+  types remain available.
+- Connection authorization uses `principalType: "app" | "user"`; omitted getToken-only
+  ownership defaults to `"app"`. Replace `credentialOwner` and use `AuthorizationDefinition`
+  instead of `ConnectionAuthProvider`.
+- All channels use `ChannelCors`. Use `allowHeaders`, `exposeHeaders`, and
+  `preflight: { statusCode }`; `origin` accepts a single string or an exact-origin list.
+- History and sandbox types are eve-owned. Replace `RuntimeSandboxSessionFor<S>` with
+  `RuntimeSandboxSession<S>`; the eight sandbox method option types remain exported.
+- Session handles read with `stream()`. `getEventStream`, `getLineStream`, and `getChildBinding`
+  are no longer public handle methods. Callback routing and forwarded initiator auth are
+  framework plumbing, not authored send options.
+- Platform entries keep channel factories, default auth, continuation-token helpers, and authoring
+  types. Raw platform calls, verification, rendering, and wire constants are internal, except for
+  the documented Slack, Linear, and Chat SDK helpers. Built-in tool schemas remain on the tool
+  definitions; separate schema constants are no longer exported.
+- `eve/setup` is no longer public. Scaffold integrations move to `eve/internal/scaffold`.
+  `eve/internal/*` and `eve/experimental/*` have no compatibility promise.
+- Mount `eve/self-modification/local` or `/remote` explicitly. The bare entry and `/config` are
+  removed. Preserve authored changes before removing the retired
+  `agent/subagents/self-modification/` layout; setup reports the replacement mount rather than
+  deleting those files.
 
 ## MCP and `eve invoke`
 

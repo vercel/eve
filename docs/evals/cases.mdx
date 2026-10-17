@@ -109,7 +109,7 @@ Every `t.session()` or `t.send()` creates a new independent conversation. Contin
 - `t.send(message, options?)` creates a new session with its first message in one request and waits for the turn to settle. The returned turn carries `.session`, `.message`, and `.expectOk()`.
 - `session.send(message, options?)` sends a follow-up on that session and waits for it to settle.
 - `session.start(message, options?)` starts a text turn and returns as soon as the server accepts it. The live turn exposes `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`.
-- `session.cancel()` requests cooperative cancellation of that session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
+- `session.cancel()` returns a delivery for cooperative cancellation. A live idle session also accepts a no-op cancellation; an inactive session throws `SessionNotActiveError`.
 - `session.compact()` compacts that session's history between turns and waits for it to finish. It resolves to the captured events of the compaction, a context change, so assertions such as `.event("context.settled", { data: { kind: "compaction", outcome: "completed" } })` work on the result. It throws when the session is no longer active.
 - `session.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
 - `session.agent(opened).stream(options?)` follows a delegated child's stream through the parent with the eval client's credentials. Pass a `child.opened` event from that session. It also reaches children on another deployment, which `t.target.attach(...).watch()` cannot address.

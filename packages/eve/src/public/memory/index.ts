@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { ModelMessage } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { SessionAuth } from "#context/keys.js";
 import type { Approval } from "#public/definitions/approval.js";

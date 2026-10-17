@@ -5,9 +5,7 @@
 export type {
   AuthorizationCallback,
   AuthorizationDefinition,
-  CredentialOwner,
   ConnectionAuthDefinition,
-  ConnectionAuthProvider,
   ConnectionAuthResolver,
   ConnectionPrincipal,
   HeadersDefinition,
@@ -17,7 +15,6 @@ export type {
   ToolFilterDefinition,
 } from "#shared/connection-types.js";
 export { defineInteractiveAuthorization } from "#shared/connection-types.js";
-export type { JsonValue } from "#public/types/json.js";
 export {
   defineDynamic,
   type DynamicConnectionDefinition,

@@ -6,15 +6,10 @@ export { defineEval } from "#evals/define-eval.js";
 export { defineEvalConfig } from "#evals/define-eval-config.js";
 export { EveEvalTurnFailedError } from "#evals/session.js";
 export { mockModel } from "#evals/mock-model.js";
-export { toolCallsOf } from "#evals/tool-calls.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type { RuntimeIdentity, TraceContext } from "#protocol/session-events/families/session.js";
-export type { Interaction } from "#protocol/session-reader.js";
-export type { CancelSessionResult } from "#client/types.js";
 
 export type {
   EveEvalCountMatcher,

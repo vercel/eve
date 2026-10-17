@@ -1,0 +1,10 @@
+[
+  "DynamicResolveContext",
+  "DynamicSentinel",
+  "NamedSkillDefinition",
+  "SkillDefinition",
+  "SkillFileContent",
+  "SkillPackageDefinition",
+  "defineDynamic",
+  "defineSkill"
+]

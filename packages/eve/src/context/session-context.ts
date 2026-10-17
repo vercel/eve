@@ -1,9 +1,5 @@
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
-import type {
-  RuntimeSandboxSession,
-  RuntimeSandboxSessionFor,
-  SandboxSession,
-} from "#shared/sandbox-session.js";
+import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import type { SessionAuth, SessionParent, SessionPredecessor, SessionTurn } from "#context/keys.js";
 
 import type { SessionSchedule } from "#context/session-schedule.js";
@@ -47,7 +43,7 @@ export interface SessionContext {
    */
   getSandbox<Session extends SandboxSession>(
     environment: SandboxEnvironment<object | undefined, Session>,
-  ): Promise<RuntimeSandboxSessionFor<Session>>;
+  ): Promise<RuntimeSandboxSession<Session>>;
 }
 
 /** Active session metadata observed by authored callbacks as `ctx.session`. */

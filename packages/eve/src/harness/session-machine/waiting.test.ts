@@ -128,25 +128,36 @@ describe("announceWaiting", () => {
   it("answers for now one answer of a batch still waiting for the rest", () => {
     const asked = [callRequested, approval, second, modelSettled];
     const paused = viewOf(started, asked, announceWaiting(viewOf(started), viewOf(started, asked)));
-    const answered = viewOf(
-      started,
-      asked,
-      announceWaiting(viewOf(started), viewOf(started, asked)),
-      [
-        { data: { deliveryId: "d_2" }, type: "delivery.admitted" },
-        {
-          data: {
-            deliveryId: "d_2",
-            interactionId: "i_1",
-            responseId: "r_1",
-            value: { optionId: "approve" },
-          },
-          type: "response.submitted",
+    const consumed: SessionEvent[] = [
+      { data: { deliveryId: "d_2" }, type: "delivery.admitted" },
+      {
+        data: { deliveryId: "d_2", parts: [{ kind: "text", text: "approve" }], turnId },
+        scope: { turnId },
+        type: "delivery.consumed",
+      },
+    ];
+    const submitted: SessionEvent[] = [
+      {
+        data: {
+          deliveryId: "d_2",
+          interactionId: "i_1",
+          responseId: "r_1",
+          value: { optionId: "approve" },
         },
-        { data: { responseId: "r_1" }, type: "response.admitted" },
-      ],
-    );
-    expect(announceWaiting(paused, answered)).toContainEqual({
+        type: "response.submitted",
+      },
+    ];
+    const announced = announceWaiting(viewOf(started), viewOf(started, asked));
+    const before = viewOf(started, asked, announced, consumed, submitted);
+    expect(announceWaiting(paused, before)).toEqual([]);
+    const answered = viewOf(started, asked, announced, consumed, submitted, [
+      { data: { responseId: "r_1" }, type: "response.admitted" },
+    ]);
+    expect(waiting(answered, turnId)).toMatchObject({
+      interactions: [{ interactionId: "i_2" }],
+      on: "person",
+    });
+    expect(announceWaiting(before, answered)).toContainEqual({
       data: { deliveryId: "d_2", outcome: "awaiting-input", turnId },
       type: "delivery.settled",
     });

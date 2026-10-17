@@ -1,7 +1,7 @@
+import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionOperations } from "#shared/session.js";
 export type { SessionOperations } from "#shared/session.js";
 import { commandDelivery } from "#channel/delivery.js";
-import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
@@ -40,18 +40,21 @@ export interface Session extends SessionOperations {
    * the current tail without inspecting or changing the session.
    */
   stream(options?: SessionStreamOptions): AsyncIterable<SessionStreamEvent>;
-  getEventStream(options?: SessionStreamOptions): Promise<ReadableStream<SessionStreamEvent>>;
-  /** The session's stored lines from `startIndex`: one parsed record per line. Follows like `getEventStream`. */
-  getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
-  /** Where a remote child of this session runs; read only by the parent's stream proxy. */
+}
+
+export interface InternalSession extends Session {
   getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
+  getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
+}
+
+/** HTTP framing and conformance readers operate on framework-created handles. */
+export function internalSession(session: Session): InternalSession {
+  return session as InternalSession;
 }
 
 interface SessionDeliveryOptions {
   readonly auth: SessionAuthContext | null;
-  /** Public callback destination for a delegated continuation turn. */
-  readonly callback?: SessionCallback;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
 }
@@ -65,6 +68,10 @@ export type SessionSendOptions = SessionDeliveryOptions & {
 
 /** Options for answering pending input requests through a fixed session handle. */
 export type SessionRespondOptions = SessionDeliveryOptions;
+
+interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
+  readonly callback?: SessionCallback;
+}
 
 /**
  * Live handle to the current session, exposed on `ctx.session` to
@@ -87,12 +94,14 @@ export function createSession(
   id: string,
   runtime: Runtime,
   metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
-): Session {
+): InternalSession {
   return {
     id,
     async send(message, options) {
       const delivery = createDelivery(metadata);
-      const caller = sessionCallbackToTurnCaller(options.callback);
+      const caller = sessionCallbackToTurnCaller(
+        (options as InternalSessionDeliveryOptions).callback,
+      );
       const payload = attachClientContext<{
         context?: readonly string[];
         message: MessageContent | undefined;
@@ -120,7 +129,9 @@ export function createSession(
         throw new Error("respond() requires at least one answer.");
       }
       const validatedAnswers = parseAnswers(answers);
-      const caller = sessionCallbackToTurnCaller(options.callback);
+      const caller = sessionCallbackToTurnCaller(
+        (options as InternalSessionDeliveryOptions).callback,
+      );
       const delivery = createDelivery(metadata);
       const payload = attachClientContext<{
         context?: readonly string[];
@@ -164,9 +175,6 @@ export function createSession(
     },
     async *stream(options?: SessionStreamOptions) {
       yield* await runtime.getEventStream(id, options);
-    },
-    async getEventStream(options?: SessionStreamOptions) {
-      return runtime.getEventStream(id, options);
     },
     async getLineStream(options?: SessionStreamOptions) {
       return runtime.getLineStream(id, options);

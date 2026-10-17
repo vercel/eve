@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import type { AlsContext } from "#context/container.js";

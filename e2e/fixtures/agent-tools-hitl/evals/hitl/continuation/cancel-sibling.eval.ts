@@ -23,7 +23,7 @@ export default defineEval({
 
     // When the user cancels B only.
     const live = await session.startRespond([
-      { interactionId: current.interactionId, optionId: "cancel" },
+      { interactionId: current.interactionId, optionId: "deny" },
     ]);
 
     // Then B does not execute and the read gets a completed reply; the message cancelled A, which never runs.

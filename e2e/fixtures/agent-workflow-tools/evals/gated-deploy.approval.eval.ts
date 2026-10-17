@@ -17,7 +17,7 @@ export default defineEval({
       status: "failed",
     });
 
-    for (const decision of ["approve", "cancel"] as const) {
+    for (const decision of ["approve", "deny"] as const) {
       const session = await t.session();
       const parked = await session.send(
         "WORKFLOW-APPROVAL-START Alice asks Bob to review the API release before deployment.",

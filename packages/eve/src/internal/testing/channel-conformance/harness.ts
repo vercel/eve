@@ -1,3 +1,4 @@
+import { internalSession } from "#channel/session.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { Delivery } from "#shared/delivery.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -1088,11 +1089,11 @@ async function cancelUntilResting(session: Session): Promise<void> {
  * not events, so a tail line that materializes no event (one a reader skips) still ends the read.
  */
 async function readThroughTail(session: Session, startIndex = 0): Promise<SessionStreamEvent[]> {
-  const tail = await session.getStreamTailIndex();
+  const tail = await internalSession(session).getStreamTailIndex();
   if (tail < startIndex) return [];
   const events: SessionStreamEvent[] = [];
   const eventsOf = createEventReader();
-  const reader = (await session.getLineStream({ startIndex })).getReader();
+  const reader = (await internalSession(session).getLineStream({ startIndex })).getReader();
   try {
     for (let position = startIndex; position <= tail; position += 1) {
       const { done, value } = await reader.read();
@@ -1154,7 +1155,7 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
     async () => {
       const states = await Promise.all(
         sessions.map(async (session) => {
-          const tail = await session.getStreamTailIndex();
+          const tail = await internalSession(session).getStreamTailIndex();
           const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
           const steps = await world.steps.list({ resolveData: "none", runId: session.id });
           const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));

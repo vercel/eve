@@ -535,9 +535,9 @@ function forwardedAnswer(
 
 /**
  * Answers to requests this session relays went on to their askers. Each delivery that carried
- * such answers is admitted here, with the answers it forwarded: a message that answered joins
- * the turn that asked, one that also carries input for this session goes on to its turn, and
- * any other took effect once forwarded. A question this session decides settles now; an
+ * such answers is admitted here, with the answers it forwarded. An answer joins the open turn
+ * that asked; a delivery that also carries input for this session goes on to its turn. Between
+ * turns, forwarding alone applies the delivery. A question this session decides settles now; an
  * approval stays open until its asker settles it.
  */
 export function routeAnswer(
@@ -547,7 +547,7 @@ export function routeAnswer(
       readonly deliveryId: string;
       readonly principal?: Principal;
       readonly source?: DeliverySource;
-      /** A message that answered: the turn that asked consumes it. */
+      /** The open asking turn consumes the answer, with any message parts it carried. */
       readonly consumed?: { readonly turnId: string; readonly parts: readonly UserPart[] };
       /** The delivery also carries input for this session, whose turn consumes and settles it. */
       readonly continues?: true;

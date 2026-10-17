@@ -4,7 +4,8 @@
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 
-import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
+import type { LanguageModel, SystemModelMessage } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type {
   ChannelDeliveryMetadata,

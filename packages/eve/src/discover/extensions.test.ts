@@ -23,7 +23,7 @@ describe("locateExtensionMountPackage", () => {
     const source = createMemoryProjectSource({
       files: {
         [`${agentRoot}/extensions/selfmod.ts`]:
-          'export { default } from "eve/self-modification";\n',
+          'export { default } from "eve/self-modification/local";\n',
         [`${packageRoot}/package.json`]: JSON.stringify({
           name: "eve",
           eve: {

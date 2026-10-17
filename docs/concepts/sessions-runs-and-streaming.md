@@ -267,13 +267,12 @@ POST to the session's cancel endpoint to stop the turn that is currently running
 
 ```bash
 curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
-# {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
+# {"ok":true,"sessionId":"<sessionId>","deliveryId":"delivery_cancel"}
 ```
 
-`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. The cancel arrives as a control delivery; confirm it on the stream as `turn.settled` with `outcome: "cancelled"` and `cause` naming that delivery. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. Cancelling also stops every working task, each reported as `task.ended` with `outcome: "cancelled"`, including while the session waits between turns. A live but already-parked session returns `"accepted"`; with no working tasks, cancellation is a no-op there. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+The HTTP route returns `202` with the command's `sessionId` and `deliveryId`. Cancellation completes asynchronously. The cancel arrives as a control delivery; confirm it on the stream as `turn.settled` with `outcome: "cancelled"` and `cause` naming that delivery. Each cancelled child reports its own boundary on its child-session stream. An unguarded cancellation also stops working tasks, including between turns, with `task.ended` facts.
 
-The HTTP route returns `202` for `"accepted"` and `200` for
-`"no_active_turn"`. Only the accepted result includes `sessionId`.
+A live idle session accepts a no-op cancellation. A guard for a different turn, including `turnId: null` for no observed turn, cannot cancel unrelated work. The cancellation delivery settles when applied or ignored. An unknown or terminal session returns `409 session_not_active`, not a separate `no_active_turn` result.
 
 Custom channel routes request the same cancellation through
 `from(address).cancel()` or `attachSession(sessionId).cancel()`. See
@@ -295,9 +294,9 @@ Compaction summarizes context without adding a user message. User-role instructi
 
 Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each settles its interaction. Requests relayed from tasks that keep running stay answerable. The clear is a context change with `kind: "clear"`.
 
-Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
+Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. All controls return delivery receipts when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
 
-A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. Reset still works: eve cancels the stranded workflow run and returns `"reset"`. Clear is refused with `409 session_stranded` (`SessionStrandedError` from a `Session` handle), because it would keep a session that cannot run. Compact returns `"no_active_session"` and cancel returns `"no_active_turn"`.
+A [stranded session](./execution-model-and-durability#stranded-sessions) cannot run commands. Reset still works: eve retires the stranded workflow run and returns its delivery. Its settlement follows retirement and address release. Clear and compact cannot repair a stranded owner; use reset instead.
 
 ## Reconnect and rewind
 

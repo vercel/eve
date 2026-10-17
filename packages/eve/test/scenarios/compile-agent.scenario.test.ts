@@ -630,7 +630,7 @@ describe("compileAgent", () => {
         ].join("\n"),
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/instrumentation/support.ts": [
-          'import { isChannel } from "eve/instrumentation";',
+          'import { isChannel } from "eve/channels";',
           'import { otelIntegration } from "eve/instrumentation/otel";',
           'import supportChannel from "../channels/support.js";',
           "",

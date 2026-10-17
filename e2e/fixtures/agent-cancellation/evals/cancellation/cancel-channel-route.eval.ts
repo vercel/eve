@@ -9,17 +9,23 @@ interface Delivery {
 }
 
 interface StopResponse {
-  readonly status?: "accepted" | "no_active_turn";
+  readonly deliveryId?: string;
+  readonly code?: string;
 }
 
-async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unknown): Promise<T> {
+async function postJson<T>(
+  target: EveEvalTargetHandle,
+  path: string,
+  body: unknown,
+  expectedStatus = 200,
+): Promise<T> {
   const response = await target.fetch(path, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
   const text = await response.text();
-  if (!response.ok) {
+  if (response.status !== expectedStatus) {
     throw new Error(`POST ${path} failed (${response.status}): ${text}`);
   }
   return JSON.parse(text) as T;
@@ -46,12 +52,13 @@ export default defineEval({
       t.target,
       `/threads/${crypto.randomUUID()}/stop`,
       {},
+      409,
     );
     await t.require(
       unknownThread,
       satisfies(
-        (value: StopResponse) => value.status === "no_active_turn",
-        "stopping an unknown thread reports no_active_turn",
+        (value: StopResponse) => value.code === "session_not_active",
+        "stopping an unknown thread reports session_not_active",
       ),
     );
 
@@ -75,7 +82,7 @@ export default defineEval({
     await t.require(
       stopped,
       satisfies(
-        (value: StopResponse) => value.status === "accepted",
+        (value: StopResponse) => typeof value.deliveryId === "string",
         "the stop request is accepted",
       ),
     );

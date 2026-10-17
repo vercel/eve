@@ -1,11 +1,3 @@
-/**
- * AI SDK conversation-message shape that the harness uses as the unit of
- * session history and turn input. Re-exported from the `ai` package so
- * authors wiring up the Slack channel can type their own message arrays
- * without taking a direct `ai` dependency.
- */
-export type { ModelMessage } from "ai";
-
 export {
   slackChannel,
   type SlackApiResponse,
@@ -74,14 +66,11 @@ export {
 export { type SlackFetch, type SlackTransportOptions } from "#public/channels/slack/transport.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
-export { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 
 export {
   postCompletedSlackReply,
   type SlackCompletedReply,
 } from "#public/channels/slack/reply-delivery.js";
-
-export { SLACK_MARKDOWN_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
 
 export {
   defineSlackRenderer,

@@ -265,7 +265,7 @@ describe("development generation artifacts", () => {
           "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
           "agent/instructions.md": "Use the available tools.",
           "agent/extensions/self-modification.mjs": [
-            'import selfModification from "eve/self-modification";',
+            'import selfModification from "eve/self-modification/local";',
             "export default selfModification({ local: { enabled: false } });",
             "",
           ].join("\n"),

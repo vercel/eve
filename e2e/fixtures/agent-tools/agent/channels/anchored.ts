@@ -63,7 +63,7 @@ export default defineChannel({
         ok: true,
         anchorToken,
         initialContinuationToken: `pending:${body.threadId}`,
-        sessionId: session.id,
+        sessionId: session.sessionId,
       });
     }),
 
@@ -75,7 +75,7 @@ export default defineChannel({
         state: initialState(anchorToken),
       });
 
-      return Response.json({ ok: true, anchorToken, sessionId: session.id });
+      return Response.json({ ok: true, anchorToken, sessionId: session.sessionId });
     }),
   ],
   events: {

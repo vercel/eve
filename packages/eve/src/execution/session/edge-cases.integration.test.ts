@@ -1185,9 +1185,17 @@ describe("work delegated to a child session", () => {
         tools: [{ approval: true, name: "deploy" }],
       },
       async (session) => {
-        await session.until("relayed", (event) => event.type === "interaction.opened");
+        await session.next("relayed approval pause");
         await session.answer(session.approvals()[0]!, "approve");
-        await session.until("done", (event) => event.type === "turn.settled");
+        const answered = await session.until(
+          "answer settlement",
+          (event) => event.type === "delivery.settled",
+        );
+        expect(ofType(answered, "delivery.settled").at(-1)?.data).toMatchObject({
+          outcome: "handled",
+          turnId: "turn_0",
+        });
+        expect(turnOutcomes(answered)).toEqual(["turn_0:completed"]);
       },
     );
 

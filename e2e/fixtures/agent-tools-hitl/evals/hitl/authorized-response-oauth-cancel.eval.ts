@@ -25,7 +25,7 @@ export default defineEval({
     const held = await approvalTurn.result();
 
     const cancelled = await held.session.respond([
-      { optionId: "cancel", interactionId: approval.interactionId },
+      { optionId: "deny", interactionId: approval.interactionId },
     ]);
     cancelled.event("interaction.settled", {
       count: 1,

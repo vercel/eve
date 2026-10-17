@@ -15,6 +15,81 @@ import {
 } from "#internal/testing/workflow-tool-run-harness.js";
 
 describe("workflow hook cancellation", () => {
+  it.each(["button", "text"] as const)(
+    "keeps the %s answer delivery open until the workflow's resumed turn settles",
+    async (mode) => {
+      const runtime = await createWorkflowToolRuntime({
+        agentName: `workflow-answer-delivery-${mode}`,
+        execute: confirmDeployWorkflow,
+        toolName: "confirm_deploy",
+      });
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: 'Run confirm_deploy with service "api"' },
+            serializedContext: buildWorkflowToolSerializedContext({
+              acceptedDeploymentId: "dpl_inline",
+              continuationToken: `http:workflow-answer-delivery-${mode}`,
+              requestInput: true,
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const asked = await stream.nextTurn();
+          const question = filterEventsByType(asked, "interaction.opened").find(
+            (event) => event.data.request.kind === "question",
+          );
+          expect(question).toBeDefined();
+          await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+            kind: "send",
+            auth: {
+              attributes: {},
+              authenticator: "test",
+              principalId: "alice",
+              principalType: "user",
+              issuer: "test",
+            },
+            delivery: { channelKind: "http", channelName: "test", deliveryId: "answer-delivery" },
+            payload:
+              mode === "button"
+                ? {
+                    answers: [{ interactionId: question!.data.interactionId, optionId: "approve" }],
+                  }
+                : { message: "Deploy" },
+          });
+          const answered = await stream.nextUntil(
+            (event) =>
+              event.type === "delivery.settled" && event.data.deliveryId === "answer-delivery",
+          );
+          expect(filterEventsByType(answered, "delivery.settled").at(-1)?.data).toMatchObject({
+            deliveryId: "answer-delivery",
+            outcome: "handled",
+            turnId: "turn_0",
+          });
+          expect(filterEventsByType(answered, "call.settled")).toContainEqual(
+            expect.objectContaining({
+              data: expect.objectContaining({
+                outcome: "completed",
+                output: { approved: true, service: "api" },
+              }),
+            }),
+          );
+          expect(filterEventsByType(answered, "turn.settled").at(-1)?.data.outcome).toBe(
+            "completed",
+          );
+          expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+        } finally {
+          stream.dispose();
+          await run.cancel().catch(() => {});
+        }
+      });
+    },
+    30_000,
+  );
+
   it("lets a delivery.consumed hook cancel a typed answer before it resolves ctx.ask", async () => {
     const hooksAfterCancel: string[] = [];
     const runtime = await createWorkflowToolRuntime({

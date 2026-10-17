@@ -19,7 +19,7 @@ interface Evaluation {
 }
 
 // Enumerable symbols survive policy context spreads without entering JSON or the public type.
-const evaluationKey = Symbol("eve.approval-evaluation");
+const evaluationKey = Symbol.for("eve.approval-evaluation");
 type EvaluatedContext = ApprovalContext & { readonly [evaluationKey]?: Evaluation };
 
 export function withApprovalGrants<T extends ApprovalContext>(
@@ -32,8 +32,11 @@ export function withApprovalGrants<T extends ApprovalContext>(
 }
 
 export function evaluateOnce(context: ApprovalContext, once: OnceApproval): boolean {
-  const evaluation = approvalEvaluation(context) ?? { grants: [] };
-  Object.assign(context, { [evaluationKey]: evaluation });
+  let evaluation = approvalEvaluation(context);
+  if (evaluation === undefined) {
+    evaluation = { grants: [] };
+    Object.assign(context, { [evaluationKey]: evaluation });
+  }
   evaluation.once = once;
   evaluation.grant = once.grantable
     ? evaluation.grants.find(
@@ -50,7 +53,9 @@ export function approvalEvaluation(context: ApprovalContext): Evaluation | undef
 export function markApprovalRecheck<T extends ApprovalContext>(context: T): T {
   const evaluation = approvalEvaluation(context) ?? { grants: [] };
   evaluation.recheck = true;
-  return Object.assign(context, { [evaluationKey]: evaluation });
+  if (approvalEvaluation(context) === undefined)
+    Object.assign(context, { [evaluationKey]: evaluation });
+  return context;
 }
 
 export function inheritApprovalContext<T extends ApprovalContext>(
@@ -58,9 +63,10 @@ export function inheritApprovalContext<T extends ApprovalContext>(
   context: T,
 ): T {
   const evaluation = approvalEvaluation(source);
-  return evaluation === undefined
-    ? context
-    : Object.assign(context, { [evaluationKey]: evaluation });
+  if (evaluation !== undefined && approvalEvaluation(context) !== evaluation) {
+    Object.assign(context, { [evaluationKey]: evaluation });
+  }
+  return context;
 }
 
 /** Whether `context` is the re-check of an approved call just before it runs. */

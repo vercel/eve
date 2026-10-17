@@ -1,5 +1,6 @@
-import { endsTurn, type ChildOpened, type SessionStreamEvent } from "eve/client";
-import { toolCallsOf } from "eve/evals";
+import { emptySessionView, foldEvents } from "eve/events";
+import { endsTurn, type SessionStreamEvent } from "eve/client";
+import { type ChildOpened } from "eve/events";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -37,13 +38,13 @@ export default defineEval({
 
     await t.require(
       childEvents,
-      satisfies(
-        (events: readonly SessionStreamEvent[]) =>
-          toolCallsOf(events).some(
-            (call) => call.name === "read-workspace-label" && call.status === "completed",
-          ),
-        "the proxied child stream carries the child's completed workspace lookup",
-      ),
+      satisfies((events: readonly SessionStreamEvent[]) => {
+        const view = emptySessionView();
+        foldEvents(view, events);
+        return Object.values(view.calls).some(
+          (call) => call.capability.name === "read-workspace-label" && call.outcome === "completed",
+        );
+      }, "the proxied child stream carries the child's completed workspace lookup"),
     );
     const parentTrace = turn.events.find((event) => event.type === "turn.started")?.data.trace;
     const childTrace = childEvents.find((event) => event.type === "turn.started")?.data.trace;

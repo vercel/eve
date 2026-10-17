@@ -21,7 +21,7 @@ export default defineEval({
     const session = first.session;
     const second = await session.send("Prepare change B, then acknowledge my decision.");
     const approvalB = requestFrom(second, "change-b");
-    const cancelB = [{ interactionId: approvalB.interactionId, optionId: "cancel" }];
+    const cancelB = [{ interactionId: approvalB.interactionId, optionId: "deny" }];
     await expectResponseReply(
       t,
       await session.startRespond(cancelB),

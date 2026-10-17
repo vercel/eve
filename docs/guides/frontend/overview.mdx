@@ -167,7 +167,7 @@ and the rest below. The pieces share `metadata.turnId`. A single event that coal
 deliveries remains one bubble. A turn settling does not close the connection. The transport reconnects from
 its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
-Unmounting or resetting closes the local stream without cancelling the old durable session.
+Unmounting or calling `newSession()` closes the local stream without cancelling the old durable session.
 
 An open stream reconnects for as long as the chat stays mounted, even when nothing happens. If
 your UI only shows replies to its own messages, such as a help sidebar that stays mounted across
@@ -178,8 +178,7 @@ the stream from the session cursor, so events that arrived in between are applie
 `followIdle` on when other sources, such as schedules, channels, or another tab, can start turns
 in the session while your UI is idle.
 
-`newSession()` reuses the hook instance and clears the local conversation. `reset()` instead retires the server-side session and returns its delivery. When `prewarm` is true after
-the reset, it prepares the next owned session; otherwise, the next send creates it. An explicitly
+`newSession()` reuses the hook instance and clears the local conversation. `reset()` instead retires the server-side session and returns its delivery. Call `newSession()` to clear the retired conversation and prepare a fresh one. If `prewarm` is true, that call prepares the next owned session; otherwise, the next send creates it. An explicitly
 supplied `session` remains externally owned and is never replaced by prewarming or `newSession()`. Use
 `initialSession` with `resume: true` to restore a saved chat.
 
@@ -205,7 +204,7 @@ A call your stream stopped following stays open; decide yourself what an open ca
 
 When the root agent delegates, its stream emits `task.started` for the task, `call.started` with the task's `taskId` for the call, `child.opened` with the child's `sessionId`, and `call.settled` with the call's result, failure, or cancellation. The subagent's tool part stays running until its `call.settled` arrives and then settles with the call's outcome; the start receipt never settles it. `view.calls[callId]` records each call's `taskId`, `status`, `outcome`, `output`, and `error`, and `agents[sessionId]` records each session a call opened, with its `taskId` and opening `callId`. These records come from the root stream alone.
 
-Detailed child progress lives on the child session's stream, not in the root `messages`. Pass `followSubagents: true` to follow the session each subagent call reaches while the component is mounted; following is off by default. Narrow `agents[sessionId].observation.status` before reading its `conversation`: `"not-followed"` has no child detail, `"following"` has live detail, and `"idle"` has everything the calls so far produced and resumes when another call reaches the task. `"unavailable"` means the stream failed, not that the child failed. Calls that continue a task with its `taskId` reach the same session, so one session's `conversation.messages` and its native `view` tables span all of them. Sessions that a custom task opens with `ctx.agent` are recorded but not followed.
+Detailed child progress lives on the child session's stream, not in the root `messages`. Pass `followAgents: true` to follow the session each subagent call reaches while the component is mounted; following is off by default. Narrow `agents[sessionId].observation.status` before reading its `conversation`: `"not-followed"` has no child detail, `"following"` has live detail, and `"idle"` has everything the calls so far produced and resumes when another call reaches the task. `"unavailable"` means the stream failed, not that the child failed. Calls that continue a task with its `taskId` reach the same session, so one session's `conversation.messages` and its native `view` tables span all of them. Sessions that a custom task opens with `ctx.agent` are recorded but not followed.
 
 If you manage your own session rather than using the hook, pass a `child.opened` event from `events` to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
@@ -249,9 +248,9 @@ Call `cancel()` to stop the durable turn without replacing it.
 
 `cancel()` targets the currently observed turn and keeps the event stream attached. If no turn is active, it waits for a submission pending when you called `cancel()` to identify its turn. This includes preparation, session creation, and POST acceptance. Cancellation always names the identified turn, so a delayed request cannot stop an unrelated later turn.
 
-This wait does not withdraw a queued message or prevent its turn from starting. If the pending deliveries settle without a running turn, cancellation returns `"no_active_turn"`. Calling `cancel()` while idle, with no pending submissions, does not arm cancellation for future messages. Resetting or unmounting aborts the wait.
+This wait does not withdraw a queued message or prevent its turn from starting. If the pending deliveries settle without a running turn, cancellation returns an accepted no-op delivery. Calling `cancel()` while idle, with no pending submissions, does not arm cancellation for future messages. Calling `newSession()` or unmounting aborts the wait.
 
-The promise resolves when eve accepts cancellation or reports no active turn. It rejects if submission, observation, or the cancellation request fails while waiting. An accepted cancellation settles cooperatively on the same stream with `outcome: "cancelled"`; a turn can finish before cancellation reaches the server.
+The promise resolves with the cancellation delivery when eve accepts it. It rejects if submission, observation, or the cancellation request fails while waiting. An accepted cancellation settles cooperatively on the same stream with `outcome: "cancelled"`; a turn can finish before cancellation reaches the server.
 
 ```tsx
 if (agent.status === "busy") {

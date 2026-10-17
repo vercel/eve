@@ -152,6 +152,9 @@
  *             `eve/events`; the client) never import a schema module by
  *             value: schemas serve tests and development only.
  *
+ *   rule 55 — Public named exports match checker-generated per-entry lists.
+ *             Additions and removals require an explicit, reviewable API diff.
+ *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
@@ -162,6 +165,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
+import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
@@ -1925,6 +1929,10 @@ async function main() {
   violations.push(...state.rule51);
   violations.push(...state.rule52);
   violations.push(...state.rule53);
+
+  for (const issue of await checkPublicExports()) {
+    violations.push({ rule: 55, ...issue });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

@@ -8,7 +8,8 @@ interface Delivery {
 
 interface ClearResponse {
   readonly sessionId?: string;
-  readonly status?: "accepted" | "no_active_session";
+  readonly deliveryId?: string;
+  readonly code?: string;
 }
 
 /** The line after the last event read: where the next read starts. */
@@ -18,14 +19,19 @@ function nextLine(
   return (events.at(-1)?.meta.position.line ?? -1) + 1;
 }
 
-async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unknown): Promise<T> {
+async function postJson<T>(
+  target: EveEvalTargetHandle,
+  path: string,
+  body: unknown,
+  expectedStatus = 200,
+): Promise<T> {
   const response = await target.fetch(path, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
   });
   const text = await response.text();
-  if (!response.ok) {
+  if (response.status !== expectedStatus) {
     throw new Error(`POST ${path} failed (${response.status}): ${text}`);
   }
   return JSON.parse(text) as T;
@@ -41,12 +47,13 @@ export default defineEval({
       t.target,
       `/threads/${crypto.randomUUID()}/clear`,
       {},
+      409,
     );
     await t.require(
       unknownThread,
       satisfies(
-        (value: ClearResponse) => value.status === "no_active_session",
-        "clearing an unknown thread reports no_active_session",
+        (value: ClearResponse) => value.code === "session_not_active",
+        "clearing an unknown thread reports session_not_active",
       ),
     );
 
@@ -80,7 +87,8 @@ export default defineEval({
     await t.require(
       clearedResponse,
       satisfies(
-        (value: ClearResponse) => value.status === "accepted" && value.sessionId === sessionId,
+        (value: ClearResponse) =>
+          typeof value.deliveryId === "string" && value.sessionId === sessionId,
         "the channel accepts a clear for the active session",
       ),
     );

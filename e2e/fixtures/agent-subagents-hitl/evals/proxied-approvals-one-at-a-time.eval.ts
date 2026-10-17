@@ -23,7 +23,13 @@ export default defineEval({
     // The reply answers only the first approval. The subagent admits it: the answer stands while
     // the rest of its batch waits, and the parent relays that admission before Alice replies
     // to the next prompt, so her next reply can't revise it.
-    const approved = await blocked.send("approve");
+    const liveApproval = await blocked.start("approve");
+    let approved;
+    try {
+      approved = await liveApproval.result();
+    } finally {
+      t.log(JSON.stringify(liveApproval.events.slice(-16)));
+    }
     approved.noFailedCalls();
     const admittedInTurn = approved.events.some((event) => event.type === "response.admitted");
     if (!admittedInTurn) {
@@ -38,7 +44,7 @@ export default defineEval({
       throw new Error(`The first reply resolved ${JSON.stringify(resolved)}.`);
     }
 
-    const cancelled = await approved.session.send("cancel");
+    const cancelled = await approved.session.send("deny");
     cancelled.noFailedCalls();
     const completed = cancelled.reply?.includes(MARKER)
       ? cancelled

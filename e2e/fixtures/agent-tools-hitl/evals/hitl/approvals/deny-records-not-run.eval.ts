@@ -19,7 +19,7 @@ export default defineEval({
     const session = await aliceSession(t);
     const request = approvalFor(await session.send(SAY.changeA, asAlice), "change-a");
 
-    const denied = (await session.respond(answers("cancel", request), asAlice)).expectOk();
+    const denied = (await session.respond(answers("deny", request), asAlice)).expectOk();
     expectResolved(denied, request, "declined");
     expectNotRun(denied, "change-a");
     denied.event("call.settled", {

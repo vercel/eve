@@ -108,7 +108,7 @@ Create a conversation session before its first message with a bodyless request:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A"}
 ```
 
 See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
@@ -124,7 +124,7 @@ Include an initial message to create the session and start its first turn in one
 curl -X POST https://<deployment>/eve/v1/session \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A","deliveryId":"delivery_A"}
 ```
 
 Authenticated callers that may retry a create request can pass their own `operationId` for
@@ -141,7 +141,7 @@ curl -X POST https://<deployment>/eve/v1/session \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?","operationId":"order-4213-research"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A","deliveryId":"delivery_A"}
 ```
 
 When the create request includes a message, a follow-up request accepts exactly one of
@@ -209,7 +209,7 @@ After a session ends, the World keeps its stream only for its retention period. 
 
 Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.settled` with `outcome: "cancelled"`.
 
-See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
+See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for delivery receipts, HTTP status codes, subagent cancellation, and race behavior.
 
 ### Clear context
 
@@ -255,7 +255,7 @@ export default eveChannel({
   cors: {
     origin: "https://app.example.com",
     methods: ["GET", "POST"],
-    allowedHeaders: ["authorization", "content-type"],
+    allowHeaders: ["authorization", "content-type"],
   },
 });
 ```
