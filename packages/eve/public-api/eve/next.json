@@ -1,12 +1,8 @@
 [
-  "EveNextConfig",
-  "EveNextConfigFunction",
-  "EveNextConfigInput",
-  "EveNextRewriteRule",
-  "EveNextRewriteSections",
-  "EveNextRewrites",
   "WithEveAgentOptions",
   "WithEveAgentsConfig",
+  "WithEveConfigFunction",
+  "WithEveConfigInput",
   "WithEveOptions",
   "withEve"
 ]

@@ -45,7 +45,12 @@ vi.mock("#internal/nitro/host/workspace-extensions.js", () => ({
 
 const { buildWorkspaceExtensions } = await import("#internal/nitro/host/workspace-extensions.js");
 
-import { withEve, type EveNextConfig, type EveNextRewriteSections } from "./index.js";
+import { withEve } from "./index.js";
+import type { NextConfig as EveNextConfig } from "next";
+type EveNextRewriteSections = Extract<
+  Awaited<ReturnType<NonNullable<EveNextConfig["rewrites"]>>>,
+  { beforeFiles?: unknown; afterFiles?: unknown; fallback?: unknown }
+>;
 
 const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 

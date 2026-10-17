@@ -35,18 +35,18 @@ type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
 /**
  * Next.js rewrite rule that {@link withEve} emits.
  */
-export type EveNextRewriteRule = ArrayElement<NextRewrites>;
+type EveNextRewriteRule = ArrayElement<NextRewrites>;
 
 /**
  * Resolved return type of a Next.js `rewrites` function: an array of rules, or
  * the sectioned `{ beforeFiles, afterFiles, fallback }` object.
  */
-export type EveNextRewrites = NextRewrites;
+type EveNextRewrites = NextRewrites;
 
 /**
  * Sectioned Next.js rewrite rules.
  */
-export type EveNextRewriteSections = Extract<
+type EveNextRewriteSections = Extract<
   NextRewrites,
   {
     readonly afterFiles?: EveNextRewriteRule[];
@@ -57,16 +57,16 @@ export type EveNextRewriteSections = Extract<
 
 /**
  * Alias of Next.js's `NextConfig`, the config object form {@link withEve}
- * accepts (the other being {@link EveNextConfigFunction}).
+ * accepts (the other being {@link WithEveConfigFunction}).
  */
-export type EveNextConfig = NextConfig;
+type EveNextConfig = NextConfig;
 
 /**
  * Structural shape of a Next.js config function: receives the build `phase` and
  * a `context` containing `defaultConfig`, and returns a config (or a promise of
  * one). This is the form {@link withEve} returns.
  */
-export type EveNextConfigFunction<TConfig extends EveNextConfig = EveNextConfig> = (
+export type WithEveConfigFunction<TConfig extends EveNextConfig = EveNextConfig> = (
   phase: string,
   context: {
     readonly defaultConfig: TConfig;
@@ -76,8 +76,8 @@ export type EveNextConfigFunction<TConfig extends EveNextConfig = EveNextConfig>
 /**
  * Next.js config input that {@link withEve} accepts.
  */
-export type EveNextConfigInput<TConfig extends EveNextConfig = EveNextConfig> =
-  | EveNextConfigFunction<TConfig>
+export type WithEveConfigInput<TConfig extends EveNextConfig = EveNextConfig> =
+  | WithEveConfigFunction<TConfig>
   | TConfig;
 
 /**
@@ -299,7 +299,7 @@ function isRewriteSections(rewrites: EveNextRewrites): rewrites is EveNextRewrit
 }
 
 async function resolveNextConfig<TConfig extends EveNextConfig>(
-  configOrFunction: EveNextConfigInput<TConfig>,
+  configOrFunction: WithEveConfigInput<TConfig>,
   phase: string,
   context: {
     readonly defaultConfig: TConfig;
@@ -431,9 +431,9 @@ async function buildAgentWorkspaceExtensions(
  * to the origin serving the eve service namespace.
  */
 export function withEve<TConfig extends EveNextConfig>(
-  configOrFunction: EveNextConfigInput<TConfig>,
+  configOrFunction: WithEveConfigInput<TConfig>,
   options: WithEveOptions = {},
-): EveNextConfigFunction<TConfig> {
+): WithEveConfigFunction<TConfig> {
   const nextRoot = process.cwd();
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NEXT_HOST);
   assertValidWithEveOptions(options);

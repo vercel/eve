@@ -1,11 +1,4 @@
-import type {
-  MetricReader,
-  PropagatorOrName,
-  SamplerOrName,
-  SpanExporter,
-  SpanProcessor,
-  SpanProcessorOrName,
-} from "#compiled/@vercel/otel/index.js";
+import type { MetricReader, SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
 
 import { PROVIDER, type InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationModelStartedInput } from "#public/instrumentation/index.js";
@@ -16,6 +9,25 @@ import { vercelRuntimeSpanProcessor } from "#tracing/eve/vercel-runtime-span-exp
 import type { OtelConfiguration } from "#tracing/eve/otel-configuration.js";
 import { createLogger, formatError } from "#internal/logging.js";
 const log = createLogger("tracing.export");
+type PropagatorSetting =
+  | { inject(...args: never[]): void; extract(...args: never[]): unknown; fields(): string[] }
+  | "auto"
+  | "none"
+  | "tracecontext"
+  | "baggage";
+
+/** A `Sampler`, or one of the names `@vercel/otel` resolves for you. */
+type SamplerSetting =
+  | { shouldSample(...args: never[]): unknown; toString(): string }
+  | "auto"
+  | "always_off"
+  | "always_on"
+  | "parentbased_always_off"
+  | "parentbased_always_on"
+  | "parentbased_traceidratio"
+  | "traceidratio";
+
+type SpanProcessorSetting = SpanProcessor | "auto";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 export type {
   TraceCaptureContext,
@@ -87,9 +99,9 @@ export interface OtelOptions {
    * along with your exporters. To thin one backend only, drop spans in a
    * processor.
    */
-  readonly sampler?: SamplerOrName;
+  readonly sampler?: SamplerSetting;
   /** Composed into one propagator. All inject; the first to extract wins. Defaults to `auto`. */
-  readonly propagators?: readonly PropagatorOrName[];
+  readonly propagators?: readonly PropagatorSetting[];
   /**
    * OpenTelemetry `Instrumentation` instances passed through to
    * `registerOTel` before the server entry loads. Disabled by default.
@@ -148,7 +160,7 @@ export interface OtelIntegration extends InstrumentationProvider {
   readonly [OTEL_INTEGRATION]: true;
   readonly metricReaders: readonly MetricReader[];
   readonly runtimeContext?: (input: InstrumentationModelStartedInput) => JsonObject | undefined;
-  readonly spanProcessors: readonly SpanProcessorOrName[];
+  readonly spanProcessors: readonly SpanProcessorSetting[];
 }
 
 /**
@@ -284,7 +296,7 @@ export interface CollectedOtel {
  * @internal
  */
 export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
-  const spanProcessors: SpanProcessorOrName[] = [];
+  const spanProcessors: SpanProcessorSetting[] = [];
   const metricReaders: MetricReader[] = [];
   const runtimeContextResolvers: RuntimeContextResolver[] = [];
   let declaration: OtelDeclaration | undefined;

@@ -105,8 +105,8 @@ export {
 } from "#public/channels/slack/hitl.js";
 
 /**
- * Card builders and element types re-exported from the vendored chat
- * SDK module. These are pure data factories. They return plain typed
+ * Card builders and eve-owned element types. The vendored factories remain an
+ * implementation detail. These are pure data factories. They return plain typed
  * objects that the channel passes to {@link cardToBlocks} at post time.
  * The chat SDK runtime (`Chat`, `Thread`, `Adapter`, etc.) is not
  * imported and not reachable through this entry point.
@@ -132,12 +132,10 @@ export {
   TextInput,
   cardChildToFallbackText,
   isCardElement,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";
 
 export type {
   ActionsElement,
-  AdapterPostableMessage,
-  Attachment,
   ButtonElement,
   ButtonOptions,
   ButtonProps,
@@ -188,4 +186,4 @@ export type {
   TextInputProps,
   TextProps,
   TextStyle,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";

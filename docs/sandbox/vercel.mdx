@@ -106,11 +106,12 @@ const sandboxName = sandbox.name;
 
 ## Mount a Drive
 
-A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` if you create drives in your app. Create or retrieve the Drive before calling `open()`, then pass its ID and mount mode under an absolute path:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
-import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
+import { Drive } from "@vercel/sandbox";
 
 const REGION = "iad1";
 
@@ -124,7 +125,7 @@ export default defineSandbox(async () => {
 
   return environment.open({
     mounts: {
-      "/data": drive,
+      "/data": { drive: drive.driveId, mode: "read-write" },
     },
   });
 });

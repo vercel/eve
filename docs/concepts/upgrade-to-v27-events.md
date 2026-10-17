@@ -296,6 +296,22 @@ aliases. Both `auto()` helpers and eval judges use the same `DecisionModel` cont
 provider instances still use the SDK's runtime model-version checks and authentication.
 Eval diagnostic metadata continues to include provider response details internally.
 
+## Owned platform types
+
+Slack card builders now return eve-owned plain-data types. The upstream-only
+`AdapterPostableMessage` and `Attachment` exports are removed; use Slack message options
+and `SlackAttachment` instead. Chat SDK adapters still use the app's own `chat` classes
+through `eve/channels/chat-sdk`.
+
+`eve/sandbox/vercel` no longer re-exports `Drive`. Apps that create drives import it from
+`@vercel/sandbox` and pass `{ drive: drive.driveId, mode: "read-write" }` or
+`drive.snapshot()` as a mount. Sandbox creation and firewall settings use eve-owned types.
+
+Next.js apps import `NextConfig` from `next`, not the removed `EveNext*` aliases.
+Reusable eve config callbacks can use `WithEveConfigFunction` and `WithEveConfigInput`.
+`eve/workflow-modules` now declares only the authored workflow helpers documented by eve,
+not the entire vendored Workflow SDK.
+
 ## Clients and frontends
 
 - **Frontend commands resolve on acceptance.** `EveAgentStore.send()` and the frontend hooks'

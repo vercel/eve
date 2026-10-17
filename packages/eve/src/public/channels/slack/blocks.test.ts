@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   Actions,
@@ -14,12 +14,15 @@ import {
   Field,
   Image,
   TextInput,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";
+import type { CardElement } from "#public/channels/slack/cards.js";
+import type { CardElement as SdkCardElement } from "#compiled/chat/index.js";
 
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 
 describe("cardToBlocks", () => {
   it("renders a text input as its label, like the Slack adapter", () => {
+    expectTypeOf<CardElement>().toEqualTypeOf<SdkCardElement>();
     const blocks = cardToBlocks(
       Card({ children: [Section([TextInput({ id: "reason", label: "Reason" })])] }),
     );

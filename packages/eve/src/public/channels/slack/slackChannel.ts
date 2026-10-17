@@ -18,7 +18,7 @@ import type { Delivery } from "#shared/delivery.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import type { CardElement } from "#compiled/chat/index.js";
+import type { CardElement } from "#public/channels/slack/cards.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 

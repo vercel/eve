@@ -1,9 +1,7 @@
-import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
-
 /**
  * Firewall network policy applied to a live sandbox session.
  *
- * eve-owned alias of the provider network-policy shape. Use it to restrict
+ * eve-owned firewall policy. Use it to restrict
  * egress (`"deny-all"`, an allow-list) or to broker credentials onto
  * outgoing requests. A per-domain `transform` injects headers at the
  * firewall so secrets never enter the sandbox process:
@@ -24,7 +22,64 @@ import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
  * `"deny-all"` policies. just-bash environments do not expose
  * `setNetworkPolicy` because their network policy is fixed at sandbox creation.
  */
-export type SandboxNetworkPolicy = Vercel.NetworkPolicy;
+
+type NetworkTransformer = {
+  headers?: Record<string, string>;
+};
+
+type NetworkPolicyMatcher =
+  | {
+      exact?: string;
+    }
+  | {
+      startsWith?: string;
+    }
+  | {
+      regex?: string;
+    };
+
+type NetworkPolicyKeyValueMatcher = {
+  key?: NetworkPolicyMatcher;
+
+  value?: NetworkPolicyMatcher;
+};
+
+type NetworkPolicyMatch = {
+  path?: NetworkPolicyMatcher;
+
+  method?: string[];
+
+  queryString?: NetworkPolicyKeyValueMatcher[];
+
+  headers?: NetworkPolicyKeyValueMatcher[];
+};
+
+type NetworkPolicyRule = {
+  match?: NetworkPolicyMatch;
+} & (
+  | {
+      transform: NetworkTransformer[];
+      forwardURL?: never;
+    }
+  | {
+      transform?: never;
+
+      forwardURL: string;
+    }
+);
+
+export type SandboxNetworkPolicy =
+  | "allow-all"
+  | "deny-all"
+  | {
+      allow?: string[] | Record<string, NetworkPolicyRule[]>;
+
+      subnets?: {
+        allow?: string[];
+
+        deny?: string[];
+      };
+    };
 
 /** Initial network configuration shared by network-capable sandbox providers. */
 export interface SandboxNetworkOptions {
