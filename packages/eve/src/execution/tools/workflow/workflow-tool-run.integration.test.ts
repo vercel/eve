@@ -476,7 +476,7 @@ describe("workflow tools", () => {
 
   // #4923: a typed answer is the person's next message, so its hooks and the
   // rest of the turn see the request that sent it, as a steering message does.
-  it.fails("runs a typed answer's turn under the auth of the request that sent it", async () => {
+  it("runs a typed answer's turn under the auth of the request that sent it", async () => {
     const asker = {
       attributes: { msg: "asking request" },
       authenticator: "test",

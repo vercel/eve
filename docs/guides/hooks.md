@@ -219,7 +219,7 @@ export default defineHook({
 
 The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
 
-A plain-text message that answers a pending question, such as one from `ask_question`, is recorded as `message.received` before eve delivers it. Calling `ctx.cancel()` from that event's hook cancels the turn instead: the question resolves as `cancelled`, and the waiting tool call never receives the text.
+A plain-text message that answers a pending question, such as one from `ask_question`, is recorded as `message.received` before eve delivers it. Like any follow-up message, it updates `ctx.session.auth.current` to the request that sent it, for that event's hooks and the rest of the turn. Calling `ctx.cancel()` from that event's hook cancels the turn instead: the question resolves as `cancelled`, and the waiting tool call never receives the text.
 
 The same goes for the `action.partial` a workflow tool reports while the turn waits on it: `ctx.cancel()` from its hook cancels the turn, and the run's result never reaches the model.
 

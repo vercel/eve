@@ -164,11 +164,15 @@ async function routeProxiedDeliver(
   };
   if (answerMessages.length > 0) {
     // Like a steering message, the answer joins the open turn, so the turn's
-    // later events carry its delivery ids too. Its hooks run before the answer
-    // goes down, so `ctx.cancel()` stops the turn instead of answering.
+    // later events carry its delivery ids and run as its caller. Its hooks run
+    // before the answer goes down, so `ctx.cancel()` stops the turn instead of
+    // answering.
     published = await publishSessionEvents(
       {
-        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
+        serializedContext: joinAnswerToTurn(published.serializedContext, {
+          auth: sourceDelivery.auth,
+          deliveryIds: answerDeliveryIds,
+        }),
         sessionState: published.sessionState,
         sessionWritable: input.sessionWritable,
       },
@@ -256,17 +260,18 @@ async function routeProxiedDeliver(
   return { ...context, kind: "continue", remainder };
 }
 
-function joinTurnDeliveryIds(
+function joinAnswerToTurn(
   serializedContext: Record<string, unknown>,
-  deliveryIds: readonly string[],
+  answer: { readonly auth: DeliverHookPayload["auth"]; readonly deliveryIds: readonly string[] },
 ): Record<string, unknown> {
-  if (deliveryIds.length === 0) return serializedContext;
-  const current =
-    (serializedContext[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
-  return {
-    ...serializedContext,
-    [TurnDeliveryIdsKey.name]: [...new Set([...current, ...deliveryIds])],
-  };
+  const joined = { ...serializedContext };
+  // A delivery without auth acts as the session's current identity.
+  if (answer.auth !== undefined) joined[AuthKey.name] = answer.auth;
+  if (answer.deliveryIds.length > 0) {
+    const current = (joined[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
+    joined[TurnDeliveryIdsKey.name] = [...new Set([...current, ...answer.deliveryIds])];
+  }
+  return joined;
 }
 
 /**
