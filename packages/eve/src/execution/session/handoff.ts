@@ -11,10 +11,8 @@ import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionHandoffStart, WorkflowEntryResult } from "#execution/session/entry-input.js";
 import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
-import {
-  isSessionIdleForHandoffStep,
-  reportSessionHandoffRetainedStep,
-} from "#execution/session/handoff-steps.js";
+import { reportSessionHandoffRetainedStep } from "#execution/session/handoff-steps.js";
+import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import { isObject } from "#shared/guards.js";
 
@@ -169,8 +167,7 @@ export class SessionHandoff {
     start: SessionHandoffStart,
   ): Promise<SessionTransferOutcome> {
     const { inbox } = this.input;
-    if (!(await isSessionIdleForHandoffStep({ sessionState: state.sessionState })))
-      return { kind: "retained", reason: "not-idle" };
+    if (!isSessionStateIdleForHandoff(state)) return { kind: "retained", reason: "not-idle" };
 
     const checkpoint: SessionCheckpoint = {
       ...this.input.checkpoint,
@@ -178,7 +175,10 @@ export class SessionHandoff {
       version: SESSION_CHECKPOINT_VERSION,
     };
     const tokens = sessionHookTokens(state);
-    await this.ensureAnchor();
+    const anchor =
+      this.input.isInitialOwner && this.anchor === undefined
+        ? createHook<WorkflowEntryResult>({ token: sessionAnchorToken(this.input.sessionId) })
+        : undefined;
 
     // Markers let ingress distinguish a session mid-handoff from an address
     // nobody owns, so a concurrent channel delivery retries instead of
@@ -186,7 +186,25 @@ export class SessionHandoff {
     const markers = tokens.map((token) =>
       createHook<never>({ token: sessionHandoffMarkerToken(token) }),
     );
-    await Promise.all(markers.map((marker) => claimHookOwnership(marker)));
+    const activation = createHook<SessionOwnerActivation>({
+      token: `${getWorkflowMetadata().workflowRunId}:handoff`,
+    });
+    const prepared: Hook<unknown>[] = [
+      ...(anchor === undefined ? [] : [anchor]),
+      ...markers,
+      activation,
+    ];
+    // Settle all claims before cleanup: a slower registration must not leak a
+    // hook after another claim fails. Retain the inbox until all claims succeed.
+    const claims = await Promise.allSettled(prepared.map((hook) => claimHookOwnership(hook)));
+    const failure = claims.find((claim) => claim.status === "rejected");
+    if (failure?.status === "rejected") {
+      await Promise.allSettled(
+        prepared.filter((_, index) => claims[index]?.status === "fulfilled").map(disposeHook),
+      );
+      throw failure.reason;
+    }
+    if (anchor !== undefined) this.anchor = anchor;
     let retained: {
       readonly error?: unknown;
       readonly reason: "activation-failed" | "checkpoint-incompatible";
@@ -199,14 +217,19 @@ export class SessionHandoff {
       }
       let acceptedByFailedCandidate: readonly SessionInboxPayload[] = [];
       try {
-        const activation = await this.startAndActivate(checkpoint, start, targetDeploymentId);
-        if (activation.kind === "active") return { kind: "transferred" };
-        acceptedByFailedCandidate = activation.payloads;
-        if (activation.kind === "incompatible") {
+        const activated = await this.startAndActivate(
+          checkpoint,
+          start,
+          targetDeploymentId,
+          activation,
+        );
+        if (activated.kind === "active") return { kind: "transferred" };
+        acceptedByFailedCandidate = activated.payloads;
+        if (activated.kind === "incompatible") {
           this.incompatibleTargetDeploymentIds.add(targetDeploymentId);
           retained = { reason: "checkpoint-incompatible" };
         } else {
-          retained = { error: activation.error, reason: "activation-failed" };
+          retained = { error: activated.error, reason: "activation-failed" };
         }
       } catch (error) {
         // The current owner remains authoritative until activation.
@@ -214,7 +237,7 @@ export class SessionHandoff {
       }
       await this.recover(tokens, acceptedByFailedCandidate);
     } finally {
-      await Promise.all(markers.map((marker) => disposeHook(marker)));
+      await Promise.all([...markers, activation].map(disposeHook));
     }
     await this.reportRetained(retained.reason, targetDeploymentId, retained.error);
     return { kind: "retained", reason: retained.reason };
@@ -242,23 +265,16 @@ export class SessionHandoff {
     checkpoint: SessionCheckpoint,
     start: SessionHandoffStart,
     targetDeploymentId: string,
+    activation: Hook<SessionOwnerActivation>,
   ): Promise<SessionOwnerActivation> {
-    const activation = createHook<SessionOwnerActivation>({
-      token: `${getWorkflowMetadata().workflowRunId}:handoff`,
+    await startSessionOwnerStep({
+      ...start,
+      activationToken: activation.token,
+      anchorRunId: this.input.sessionId,
+      checkpoint,
+      targetDeploymentId,
     });
-    await claimHookOwnership(activation);
-    try {
-      await startSessionOwnerStep({
-        ...start,
-        activationToken: activation.token,
-        anchorRunId: this.input.sessionId,
-        checkpoint,
-        targetDeploymentId,
-      });
-      return await activation;
-    } finally {
-      await disposeHook(activation);
-    }
+    return await activation;
   }
 
   /** Reclaims the exact hook set and replays payloads accepted while it was released. */
@@ -284,14 +300,5 @@ export class SessionHandoff {
       sourceDeploymentId: this.input.deploymentId,
       targetDeploymentId,
     });
-  }
-
-  private async ensureAnchor(): Promise<void> {
-    // Only the original run outlives successors; intermediate owners exit.
-    if (!this.input.isInitialOwner || this.anchor !== undefined) return;
-    this.anchor = createHook<WorkflowEntryResult>({
-      token: sessionAnchorToken(this.input.sessionId),
-    });
-    await claimHookOwnership(this.anchor);
   }
 }

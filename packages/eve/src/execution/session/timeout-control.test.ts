@@ -30,6 +30,7 @@ describe("createSessionTimeoutControl", () => {
     });
     await control.start();
     await control.start();
+    await expect(control.getDeadline()).resolves.toEqual(deadline);
 
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).toHaveBeenCalledWith({
@@ -39,8 +40,8 @@ describe("createSessionTimeoutControl", () => {
     });
   });
 
-  it("shares in-progress startup across concurrent start calls", async () => {
-    let resolveStartup!: (value: { runId: string }) => void;
+  it("shares in-progress startup across starts and recorded deadline reads", async () => {
+    let resolveStartup!: (value: { runId: string; deadline: Date }) => void;
     vi.mocked(startSessionTimeoutStep).mockReturnValue(
       new Promise((resolve) => {
         resolveStartup = resolve;
@@ -53,9 +54,12 @@ describe("createSessionTimeoutControl", () => {
 
     const first = control.start();
     const second = control.start();
+    const deadline = control.getDeadline();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
-    resolveStartup({ runId: "timer-run" });
+    const recordedDeadline = new Date("2026-01-31T23:59:59.999Z");
+    resolveStartup({ runId: "timer-run", deadline: recordedDeadline });
     await Promise.all([first, second]);
+    await expect(deadline).resolves.toEqual(recordedDeadline);
 
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
   });

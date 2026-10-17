@@ -206,4 +206,5 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
   };
 }
 
-export { readHitlState, holdsHitlRequests } from "./requests.js";
+export { readHitlState } from "./requests.js";
+export { holdsHitlRequests } from "./view.js";

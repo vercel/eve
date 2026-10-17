@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import {
   SESSION_CHECKPOINT_VERSION,
   SessionHandoff,
@@ -10,13 +10,11 @@ import {
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
-const isSessionIdleForHandoffStepMock = vi.fn(async (..._args: unknown[]) => true);
 const reportSessionHandoffRetainedStepMock = vi.fn();
 const startSessionOwnerStepMock = vi.fn();
 const createHookMock = vi.fn();
 
 vi.mock("#execution/session/handoff-steps.js", () => ({
-  isSessionIdleForHandoffStep: (...args: unknown[]) => isSessionIdleForHandoffStepMock(...args),
   reportSessionHandoffRetainedStep: (...args: unknown[]) =>
     reportSessionHandoffRetainedStepMock(...args),
 }));
@@ -30,7 +28,6 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 
 afterEach(() => {
   vi.resetAllMocks();
-  isSessionIdleForHandoffStepMock.mockResolvedValue(true);
 });
 
 const STABLE = "eve:session:session-1:inbox";
@@ -124,10 +121,15 @@ describe("SessionHandoff", () => {
 
   it("retains ownership when durable state still holds work", async () => {
     installActivation({ kind: "active" });
-    isSessionIdleForHandoffStepMock.mockResolvedValue(false);
     const inbox = createInbox();
     await expect(
-      createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
+      createHandoff(inbox).tryTransfer(selection("deployment-b"), {
+        ...state(),
+        sessionState: createTestSessionState(
+          { sessionId: "session-1" },
+          { sequence: 0, turnId: "turn_0" },
+        ),
+      }),
     ).resolves.toEqual({ kind: "retained", reason: "not-idle" });
     expect(inbox.release).not.toHaveBeenCalled();
   });
@@ -248,6 +250,42 @@ describe("SessionHandoff", () => {
     );
   });
 
+  it.each(["anchor", "marker", "activation"] as const)(
+    "retains the inbox and cleans up settled registrations when %s conflicts",
+    async (failedKind) => {
+      const inbox = createInbox();
+      const otherClaim = Promise.withResolvers<null>();
+      installActivation({ kind: "active" });
+      const create = createHookMock.getMockImplementation()!;
+      let slowHook: (typeof created)[number] | undefined;
+      createHookMock.mockImplementation((options: { token: string }) => {
+        const hook = create(options);
+        const matches =
+          failedKind === "anchor"
+            ? options.token.endsWith(":anchor")
+            : failedKind === "marker"
+              ? options.token.startsWith("eve:inbox:handoff:")
+              : options.token === "owner-1:handoff";
+        if (matches) {
+          hook.getConflict.mockResolvedValue({ runId: "another-owner" });
+        } else if (slowHook === undefined) {
+          slowHook = hook;
+          hook.getConflict.mockReturnValue(otherClaim.promise);
+        }
+        return hook;
+      });
+      const transfer = createHandoff(inbox).tryTransfer(selection("deployment-b"), state());
+      const result = expect(transfer).rejects.toMatchObject({ name: "HookConflictError" });
+      await Promise.resolve();
+      expect(inbox.release).not.toHaveBeenCalled();
+      otherClaim.resolve(null);
+      await result;
+      expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
+      expect(inbox.release).not.toHaveBeenCalled();
+      expect(createdHooks().every((hook) => hook.dispose.mock.calls.length > 0)).toBe(true);
+    },
+  );
+
   it("abandons transfer when input was accepted during release", async () => {
     installActivation({ kind: "active" });
     const accepted: SessionInboxPayload[] = [{ kind: "send", payload: { message: "late" } }];
@@ -258,6 +296,9 @@ describe("SessionHandoff", () => {
     ).resolves.toEqual({ kind: "retained", reason: "accepted-during-release" });
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
     expect(inbox.restore).toHaveBeenCalledWith(accepted);
+    for (const hook of createdHooks().filter((hook) => !hook.token.endsWith(":anchor"))) {
+      expect(hook.dispose).toHaveBeenCalled();
+    }
   });
 });
 
@@ -324,10 +365,10 @@ function state(
   return {
     history: [],
     serializedContext: input.serializedContext ?? {},
-    sessionState: {
+    sessionState: createTestSessionState({
       continuationToken: input.continuationToken ?? "",
       sessionId: "session-1",
-    } as DurableSessionState,
+    }),
   };
 }
 

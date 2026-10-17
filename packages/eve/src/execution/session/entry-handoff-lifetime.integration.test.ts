@@ -268,10 +268,23 @@ describe("workflowEntry integration", () => {
           return owner!;
         };
         let completed = false;
+        let restoreStartMetadata: (() => void) | undefined;
         try {
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
           await waitForParkedTurnStep(anchor.runId);
           const originalTimer = await readSessionTimer(anchor.runId);
+
+          const readRun = world.runs.get.bind(world.runs);
+          const metadata = vi.spyOn(world.runs, "get").mockImplementation(async (...args) => {
+            const run = await readRun(...args);
+            if (run.runId !== anchor.runId) return run;
+            // Startup metadata can settle after the timer's durable step records its input.
+            return {
+              ...run,
+              startedAt: new Date((run.startedAt ?? run.createdAt).getTime() + 1),
+            };
+          });
+          restoreStartMetadata = () => metadata.mockRestore();
 
           const successor = await compactTo(anchor.runId);
           expect((await readSessionTimer(successor.runId)).deadline).toEqual(
@@ -347,6 +360,7 @@ describe("workflowEntry integration", () => {
           await expect(anchor.returnValue).resolves.toEqual({ output: "" });
           completed = true;
         } finally {
+          restoreStartMetadata?.();
           stream.dispose();
           if (!completed) await anchor.cancel();
         }

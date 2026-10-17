@@ -271,11 +271,11 @@ async function runSessionLoop(
     serializedContext: cursor.serializedContext,
     sessionState: cursor.sessionState,
   });
-  const dueCompactionHandoff = (): CompactionHandoff | undefined =>
+  const dueCompactionHandoff = async (): Promise<CompactionHandoff | undefined> =>
     compactionHandoffDue &&
     progress.caller === undefined &&
     workingTasks(sessionTaskTable(cursor)).length === 0
-      ? { sessionTimeoutDeadline: boot.sessionTimeoutDeadline }
+      ? { sessionTimeoutDeadline: await sessionTimeout?.getDeadline() }
       : undefined;
   /**
    * Hands a session that compacted to a fresh run on this deployment while
@@ -283,7 +283,7 @@ async function runSessionLoop(
    * carries the handoff instead; see `runDeliveredTurn`.
    */
   const tryCompactionHandoff = async (): Promise<SessionLoopOutcome | undefined> => {
-    const compaction = dueCompactionHandoff();
+    const compaction = await dueCompactionHandoff();
     if (compaction === undefined || queue.pendingCount > 0 || inbox.hasPending()) return undefined;
     const transfer = await handoff.tryCompactionTransfer(transferState(), compaction);
     return transfer.kind === "transferred" ? transfer : undefined;
@@ -292,7 +292,7 @@ async function runSessionLoop(
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
     const transfer = await handoff.tryTransfer(next, transferState(), {
-      compaction: dueCompactionHandoff(),
+      compaction: await dueCompactionHandoff(),
     });
     if (transfer.kind === "transferred") return transfer;
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
