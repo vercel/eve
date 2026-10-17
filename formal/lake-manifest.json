@@ -1,8 +1,0 @@
-{
-  "version": "1.3.0",
-  "packagesDir": ".lake/packages",
-  "packages": [],
-  "name": "«eve-formal»",
-  "lakeDir": ".lake",
-  "fixedToolchain": false
-}

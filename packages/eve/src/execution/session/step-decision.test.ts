@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { ModelMessage } from "ai";
-import { STEP_DECISIONS } from "#execution/session/step-decision.lean-table.js";
 import {
   awaitsModel,
   decideStep,
@@ -70,23 +69,101 @@ function render(decision: StepDecision): string {
   }
 }
 
-describe("decideStep", () => {
-  // The table is the Lean model's decision for each state; `formal/` proves what it guarantees.
-  it("decides every state as the Lean model does", () => {
-    const model = new Map(
-      STEP_DECISIONS.map((row) => {
-        const [bits, decision] = row.split(" -> ");
-        return [bits, decision];
-      }),
+describe("decideStep, over every state it can tell apart", () => {
+  const states = everyState().map((parts) => ({
+    decision: decideStep(stepState(parts)),
+    parts,
+  }));
+  const person = (parts: Parts) => parts.requests || parts.signIns;
+  const input = (parts: Parts) => parts.queued || parts.unweighed || parts.unread;
+  const failing = (holds: (parts: Parts, decision: StepDecision) => boolean) =>
+    states.flatMap(({ decision, parts }) =>
+      holds(parts, decision)
+        ? []
+        : [`${PARTS.filter((part) => parts[part]).join(" ") || "nothing"} -> ${render(decision)}`],
     );
-    const states = everyState();
-    expect(model.size).toBe(states.length);
-    for (const parts of states) {
-      const bits = PARTS.map((part) => (parts[part] ? "1" : "0")).join(" ");
-      expect(`${bits} -> ${render(decideStep(stepState(parts)))}`).toBe(
-        `${bits} -> ${model.get(bits)}`,
-      );
-    }
+
+  it("waits only on something that can end the wait", () => {
+    expect(
+      failing((parts, decision) => {
+        if (decision.kind !== "wait") return true;
+        switch (decision.pause.on) {
+          case "person":
+            return person(parts);
+          case "calls":
+            return parts.calls && decision.pause.dispatch === parts.dispatch;
+          case "tasks":
+            return parts.tasks;
+        }
+      }),
+    ).toEqual([]);
+  });
+
+  it("ends exactly when the session ended, and runs or waits only in an open turn", () => {
+    expect(failing((parts, decision) => (decision.kind === "end") === parts.ended)).toEqual([]);
+    expect(
+      failing(
+        (parts, decision) =>
+          (decision.kind !== "run" && decision.kind !== "wait") || (parts.turnOpen && !parts.ended),
+      ),
+    ).toEqual([]);
+  });
+
+  it("runs only on input the next step takes: answers to weigh, or input past every wait", () => {
+    const takes = (parts: Parts) =>
+      parts.unweighed || (!person(parts) && !parts.calls && (parts.queued || parts.unread));
+    expect(
+      failing(
+        (parts, decision) =>
+          (decision.kind === "run") === (parts.turnOpen && !parts.ended && takes(parts)),
+      ),
+    ).toEqual([]);
+    expect(failing((parts, decision) => decision.kind !== "run" || input(parts))).toEqual([]);
+  });
+
+  // Input a turn holds arrived before what it waits on, and no step takes it until the wait
+  // ends: a run would take nothing, and the turn would spin.
+  it("keeps input the turn holds waiting behind a person or calls", () => {
+    expect(
+      failing(
+        (parts, decision) =>
+          !(parts.turnOpen && !parts.ended && !parts.unweighed && (person(parts) || parts.calls)) ||
+          decision.kind === "wait",
+      ),
+    ).toEqual([]);
+  });
+
+  it("parks a turn open only when nothing can wake it, which the check flags", () => {
+    expect(
+      failing(
+        (parts, decision) =>
+          (decision.kind === "park" && decision.turnOpen === true) ===
+          (parts.turnOpen &&
+            !parts.ended &&
+            !input(parts) &&
+            !person(parts) &&
+            !parts.calls &&
+            !parts.tasks),
+      ),
+    ).toEqual([]);
+  });
+
+  it("decides a wait from what it waits on, whatever lies below it", () => {
+    const below: Record<"person" | "calls" | "tasks", readonly (typeof PARTS)[number][]> = {
+      calls: ["unread", "queued", "tasks"],
+      person: ["calls", "dispatch", "unread", "queued", "tasks"],
+      tasks: [],
+    };
+    expect(
+      failing((parts, decision) => {
+        if (decision.kind !== "wait") return true;
+        return below[decision.pause.on].every((part) => {
+          const changed = { ...parts, [part]: !parts[part] };
+          if (!changed.calls && changed.dispatch) return true;
+          return render(decideStep(stepState(changed))) === render(decision);
+        });
+      }),
+    ).toEqual([]);
   });
 });
 
