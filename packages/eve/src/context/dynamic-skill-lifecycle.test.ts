@@ -1,7 +1,8 @@
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
+import { resolveDynamicSkills } from "#context/dynamic-skill-lifecycle.js";
 import {
   StaticModelReferenceKey,
   DynamicSkillManifestKey,
@@ -17,7 +18,6 @@ import {
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
@@ -100,8 +100,8 @@ function createResolver(
   };
 }
 
-function makeEvent(): UnstampedMessageStreamEvent {
-  return { type: "session.started", data: {} } as UnstampedMessageStreamEvent;
+function makeEvent(): DynamicSessionOrTurnEvent {
+  return { type: "session.started", data: {} } as DynamicSessionOrTurnEvent;
 }
 
 function makeSkill(
@@ -113,14 +113,14 @@ function makeSkill(
 }
 
 async function dispatch(ctx: ContextContainer, ...resolvers: ResolvedDynamicSkillResolver[]) {
-  await dispatchDynamicSkillEvent({ ctx, event: makeEvent(), messages: [], resolvers });
+  await resolveDynamicSkills({ ctx, event: makeEvent(), messages: [], resolvers });
 }
 
 function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
   return sandbox.writes.map((write) => write.path);
 }
 
-describe("dispatchDynamicSkillEvent", () => {
+describe("resolveDynamicSkills", () => {
   it("stores SKILL.md as authored, including frontmatter", async () => {
     const { ctx } = createCtx();
     await dispatch(

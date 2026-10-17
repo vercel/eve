@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, StaticModelReferenceKey } from "#context/keys.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import {
+  dispatchMemoryCompactionCompleted,
+  dispatchMemoryCompactionRequested,
+  dispatchMemoryTurnStarted,
+} from "#context/memory-lifecycle.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -251,15 +255,16 @@ describe("memory recalled after a compaction", () => {
     const result = await contextStorage.run(ctx, async () => {
       let stepped = await createToolLoopHarness({
         compactOnly: options.compactOnly,
+        // What the session's memory participant does with the events these steps publish.
         handleEvent: foldingHandler(async (event, messages) => {
-          await dispatchMemoryLifecycleEvent({
-            appRoot: "",
-            ctx,
-            event,
-            memories: [notes],
-            messages,
-            nodeId: "__root__",
-          });
+          const memory = { appRoot: "", ctx, memories: [notes], nodeId: "__root__" };
+          if (event.type === "turn.started") {
+            await dispatchMemoryTurnStarted({ ...memory, event });
+          } else if (event.type === "compaction.requested") {
+            await dispatchMemoryCompactionRequested({ ...memory, event, messages: messages ?? [] });
+          } else if (event.type === "compaction.completed") {
+            await dispatchMemoryCompactionCompleted({ ...memory, event, messages: messages ?? [] });
+          }
         }),
         historyProjector: projectMemoryHistoryFromSessionState,
         resolveModel: async () => model,

@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
-import { ALLOWED_DYNAMIC_SKILL_EVENTS } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-definition.js";
 import {
   type MaterializableSkillPackage,
@@ -10,7 +10,6 @@ import {
   skillPackageRevision,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
@@ -143,19 +142,16 @@ async function syncDynamicSkillFiles(input: {
 // ---------------------------------------------------------------------------
 
 /**
- * Dispatches a stream event to dynamic skill resolvers. On a matching
- * event: runs handlers, stores instructions in durable context, and syncs
- * changed supporting files to the sandbox.
+ * Runs the dynamic skill resolvers for a session or a turn: stores their instructions in durable
+ * context and syncs changed supporting files to the sandbox.
  */
-export async function dispatchDynamicSkillEvent(input: {
+export async function resolveDynamicSkills(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicSkillResolver[];
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
-  if (!ALLOWED_DYNAMIC_SKILL_EVENTS.has(event.type)) return;
-
   const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
   if (matching.length === 0) return;
 

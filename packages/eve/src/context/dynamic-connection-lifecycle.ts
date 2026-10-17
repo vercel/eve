@@ -4,10 +4,9 @@ import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { dynamicToolNames } from "#context/build-dynamic-tools.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { ALLOWED_DYNAMIC_CONNECTION_EVENTS } from "#dynamic/definition.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
 import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { DynamicConnectionResolveContext } from "#public/definitions/connections/dynamic.js";
@@ -73,9 +72,11 @@ function qualifyConnectionNames(
   });
 }
 
+/** The scopes a connection resolver answers. */
+
 async function resolveConnections(input: {
   readonly ctx: ContextContainer;
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly resolver: ResolvedDynamicConnectionResolver;
 }): Promise<readonly ResolvedConnectionDefinition[]> {
   const handler = input.resolver.events[input.event.type];
@@ -94,13 +95,12 @@ async function resolveConnections(input: {
   );
 }
 
-/** Resolves and replaces the dynamic connection set for one lifecycle scope. */
-export async function dispatchDynamicConnectionEvent(input: {
+/** Resolves and replaces the dynamic connection set for a session or a turn. */
+export async function resolveDynamicConnections(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicConnectionResolver[];
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicSessionOrTurnEvent;
 }): Promise<void> {
-  if (!ALLOWED_DYNAMIC_CONNECTION_EVENTS.has(input.event.type)) return;
   const matching = input.resolvers.filter((resolver) =>
     resolver.eventNames.includes(input.event.type),
   );

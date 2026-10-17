@@ -15,7 +15,7 @@ import {
 import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import {
-  ALLOWED_DYNAMIC_CONNECTION_EVENTS,
+  assertDynamicResolverEvents,
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
@@ -62,14 +62,7 @@ export async function compileConnectionDefinition(
   if (isDynamicSentinel(loaded)) {
     assertResolverOnlyDynamicSentinel(loaded, message);
     const eventNames = Object.keys(loaded.events);
-    const unsupportedEvent = eventNames.find(
-      (eventName) => !ALLOWED_DYNAMIC_CONNECTION_EVENTS.has(eventName),
-    );
-    if (unsupportedEvent !== undefined) {
-      throw new Error(
-        `${message} Dynamic connections support only "session.started" and "turn.started" handlers. Unsupported event: "${unsupportedEvent}".`,
-      );
-    }
+    assertDynamicResolverEvents("connection", eventNames, message);
     return {
       kind: "dynamic-connection",
       definition: {
