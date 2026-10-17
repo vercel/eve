@@ -9,7 +9,7 @@ import { z } from "zod";
  */
 export default defineDynamic({
   events: {
-    "step.started": (_event, ctx) =>
+    beforeModel: (_event, ctx) =>
       ctx.session.auth.current?.attributes?.flag === "retire"
         ? null
         : defineTool({

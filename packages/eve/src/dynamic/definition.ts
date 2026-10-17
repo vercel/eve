@@ -1,3 +1,4 @@
+import type { ChannelInfo } from "#shared/channel-info.js";
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { SessionAuth, SessionPredecessor } from "#context/keys.js";
@@ -10,7 +11,23 @@ import { stampDefinitionKey } from "#internal/authored-definition/source-identit
 import type { ConversationContext } from "#shared/conversation-context.js";
 
 /** The change points dynamic resolvers name: a session's first turn, a turn, and each model run. */
-export type DynamicToolEventName = "session.started" | "turn.started" | "step.started";
+export type DynamicToolEventName = "beforeSession" | "beforeTurn" | "beforeModel";
+
+/** The typed fact at each resolver change point, not a subscription name. */
+export type DynamicResolverEvent<K extends DynamicToolEventName> = {
+  beforeSession: SessionStartedPoint["fact"];
+  beforeTurn: TurnStartedPoint["fact"];
+  beforeModel: StepStartedPoint["fact"];
+}[K];
+
+/** Maps private machine points to the authored resolver key. */
+export function dynamicEventKey(type: DynamicScopeEvent["type"]): DynamicToolEventName {
+  return type === "session.started"
+    ? "beforeSession"
+    : type === "turn.started"
+      ? "beforeTurn"
+      : "beforeModel";
+}
 
 /**
  * What a dynamic resolver's handler receives at its change point: the point's name and where the
@@ -35,12 +52,12 @@ export type DynamicResolverKind =
  * subagents stay stable within a turn, so the model input doesn't change between its steps.
  */
 export const DYNAMIC_RESOLVER_EVENTS = {
-  connection: ["session.started", "turn.started"],
-  instructions: ["session.started", "turn.started"],
-  model: ["session.started", "turn.started", "step.started"],
-  skill: ["session.started", "turn.started"],
-  subagent: ["session.started", "turn.started"],
-  tool: ["session.started", "turn.started", "step.started"],
+  connection: ["beforeSession", "beforeTurn"],
+  instructions: ["beforeSession", "beforeTurn"],
+  model: ["beforeSession", "beforeTurn", "beforeModel"],
+  skill: ["beforeSession", "beforeTurn"],
+  subagent: ["beforeSession", "beforeTurn"],
+  tool: ["beforeSession", "beforeTurn", "beforeModel"],
 } as const satisfies Record<DynamicResolverKind, readonly DynamicToolEventName[]>;
 
 /** Fails the build when a resolver of `kind` handles an event it never receives. */
@@ -82,14 +99,7 @@ export interface DynamicResolveContext {
     readonly predecessor?: SessionPredecessor;
   };
   /** Channel metadata for the request that triggered this resolve. */
-  readonly channel: {
-    /** Channel type that produced the request (e.g. `"slack"`, `"http"`), when known. */
-    readonly kind?: string;
-    /** Channel-owned resume handle for the conversation, when the channel supplies one. */
-    readonly continuationToken?: string;
-    /** Free-form channel-specific metadata attached to the request. */
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: ChannelInfo;
   /**
    * Immutable classification and execution context for the active conversation.
    * Absent on sessions persisted before this context key existed.
@@ -105,13 +115,13 @@ export interface DynamicResolveContext {
  * the slot directory (tools/ vs skills/) determines the required return,
  * validated at runtime by the respective resolver.
  *
- * Each handler receives the session fact behind its key: `session.started` and `turn.started`
- * get those facts, and `step.started` gets the run's `model.requested`, whose `scope` names its
+ * Each handler receives a typed fact at its change point: `beforeSession` and `beforeTurn`
+ * receive the corresponding start facts, and `beforeModel` receives `model.requested`, whose `scope` names its
  * model run and the turn it serves, or the context change for a compaction's summary run.
  */
 export type DynamicEvents<TResult = unknown> = {
   readonly [K in DynamicToolEventName]?: (
-    event: unknown,
+    event: DynamicResolverEvent<K>,
     ctx: DynamicResolveContext,
   ) => TResult | Promise<TResult>;
 };
@@ -157,9 +167,9 @@ export type DynamicSentinel<TResult = unknown> = {
  * - `agent/subagents/<name>/agent.ts`: return `defineAgent(...)` to configure
  *   and expose the subagent, or `null` to omit it.
  *
- * Per-slot events: tool and model resolvers run at `session.started`,
- * `turn.started`, and `step.started`. Skill, instruction, connection, and
- * subagent resolvers run only at `session.started` and `turn.started`. A
+ * Per-slot keys: tool and model resolvers run at `beforeSession`,
+ * `beforeTurn`, and `beforeModel`. Skill, instruction, connection, and
+ * subagent resolvers run only at `beforeSession` and `beforeTurn`. A
  * handler keyed on any other event fails the build.
  *
  * ```ts
@@ -218,4 +228,20 @@ export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
     value !== null &&
     (value as { kind?: unknown }).kind === DYNAMIC_SENTINEL_KIND
   );
+}
+
+/** Calls the matching typed handler without discarding its discriminant. */
+export function invokeDynamicResolver<TResult>(
+  events: DynamicEvents<TResult>,
+  point: DynamicScopeEvent,
+  ctx: DynamicResolveContext,
+): TResult | Promise<TResult> | undefined {
+  switch (point.type) {
+    case "session.started":
+      return events.beforeSession?.(point.fact, ctx);
+    case "turn.started":
+      return events.beforeTurn?.(point.fact, ctx);
+    case "step.started":
+      return events.beforeModel?.(point.fact, ctx);
+  }
 }

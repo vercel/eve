@@ -7,18 +7,18 @@ describe("normalizeResolvedDynamicSubagentDefinition", () => {
     const handler = () => null;
     const resolved = normalizeResolvedDynamicSubagentDefinition(
       {
-        eventNames: ["session.started"],
+        eventNames: ["beforeSession"],
         logicalPath: "agent.ts",
         sourceId: "agent.ts",
         sourceKind: "module",
       },
       {
-        events: { "session.started": handler },
+        events: { beforeSession: handler },
         kind: "eve:dynamic",
       },
     );
 
-    expect(resolved.events["session.started"]).toBe(handler);
+    expect(resolved.events["beforeSession"]).toBe(handler);
     expect(resolved).not.toHaveProperty("build");
   });
 });

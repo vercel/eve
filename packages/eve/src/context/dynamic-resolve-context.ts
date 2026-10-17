@@ -1,3 +1,4 @@
+import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { DynamicResolveContext } from "#dynamic/definition.js";
@@ -45,9 +46,9 @@ export function buildResolveContext(
       predecessor: ctx.get(SessionPredecessorKey),
     },
     channel: {
-      kind: channelInstrumentation?.kind,
+      kind: normalizeInstrumentationChannelKind(channelInstrumentation?.kind),
       continuationToken,
-      metadata: channelInstrumentation?.metadata,
+      metadata: channelInstrumentation?.metadata ?? {},
     },
     ...(ctx.get(ConversationContextKey) === undefined
       ? undefined

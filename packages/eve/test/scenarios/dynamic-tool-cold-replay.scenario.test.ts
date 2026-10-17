@@ -77,26 +77,8 @@ export function createDurableMarkerTool(key: string) {
 }
 `;
 
-const DYNAMIC_TOOLS_SOURCE = `import { appendFileSync } from "node:fs";
-import { join } from "node:path";
-import { defineDynamic } from "eve/tools";
-import { createDurableMarkerTool } from "../lib/durable-factory.ts";
-
-const guardedMarker = createDurableMarkerTool("guarded");
-const companionMarker = createDurableMarkerTool("companion");
-
-export default defineDynamic({
-  events: {
-    "session.started": () => {
-      appendFileSync(join(process.cwd(), ".dynamic-resolver-runs"), process.pid + "\\n");
-      return {
-        guarded_marker: guardedMarker,
-        companion_marker: companionMarker,
-      };
-    },
-  },
-});
-`;
+const DYNAMIC_TOOLS_SOURCE =
+  'import { appendFileSync } from "node:fs";\nimport { join } from "node:path";\nimport { defineDynamic } from "eve/tools";\nimport { createDurableMarkerTool } from "../lib/durable-factory.ts";\n\nconst guardedMarker = createDurableMarkerTool("guarded");\nconst companionMarker = createDurableMarkerTool("companion");\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": () => {\n      appendFileSync(join(process.cwd(), ".dynamic-resolver-runs"), process.pid + "\\n");\n      return {\n        guarded_marker: guardedMarker,\n        companion_marker: companionMarker,\n      };\n    },\n  },\n});\n';
 
 const DYNAMIC_TOOL_COLD_REPLAY_DESCRIPTOR: ScenarioAppDescriptor = {
   ...TRANSACTIONAL_REBUILD_DESCRIPTOR,

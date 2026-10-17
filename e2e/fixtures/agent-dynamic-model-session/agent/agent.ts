@@ -17,7 +17,7 @@ export default defineAgent({
   experimental,
   model: defineDynamic({
     events: {
-      "session.started": (_event, ctx) => {
+      beforeSession: (_event, ctx) => {
         if (ctx.messages.length > 0) {
           throw new Error(
             "session.started dynamic model resolver ran after session history existed",

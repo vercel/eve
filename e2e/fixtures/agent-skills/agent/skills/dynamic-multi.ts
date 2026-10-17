@@ -5,7 +5,7 @@ export const DYNAMIC_MULTI_BETA_TOKEN = "dynamic-multi-beta-J5W1";
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       return {
         alpha: defineSkill({
           description:

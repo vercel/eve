@@ -10,21 +10,22 @@ import gh from "../../extension/tools/gh.ts";
 const context = {
   model: null,
   session: { id: "guidance-test", auth: { current: null, initiator: null } },
-  channel: {},
+  channel: { kind: "http" as const, metadata: {} },
   messages: [],
 };
 
 async function resolve() {
-  const instructionHandler = instructions.events["session.started"];
-  const skillHandler = pr.events["session.started"];
-  const toolHandler = gh.events["session.started"];
+  const instructionHandler = instructions.events["beforeSession"];
+  const skillHandler = pr.events["beforeSession"];
+  const toolHandler = gh.events["beforeSession"];
   assert.ok(instructionHandler && skillHandler && toolHandler);
-  const guidance = await instructionHandler({}, context);
+  const started = { type: "session.started" as const, data: {} };
+  const guidance = await instructionHandler(started, context);
   assert.ok(guidance && "content" in guidance);
   return {
     content: guidance.content ?? "",
-    skill: (await skillHandler({}, context)) as SkillDefinition,
-    tool: await toolHandler({}, context),
+    skill: (await skillHandler(started, context)) as SkillDefinition,
+    tool: await toolHandler(started, context),
   };
 }
 

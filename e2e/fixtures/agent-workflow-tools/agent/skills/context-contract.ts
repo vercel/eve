@@ -11,7 +11,7 @@ function resolve(event: "session.started" | "turn.started", ctx: DynamicResolveC
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) => resolve("session.started", ctx),
-    "turn.started": (_event, ctx) => resolve("turn.started", ctx),
+    beforeSession: (_event, ctx) => resolve("session.started", ctx),
+    beforeTurn: (_event, ctx) => resolve("turn.started", ctx),
   },
 });

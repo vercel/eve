@@ -563,7 +563,7 @@ async function transcriptReadingRuntime(name: string) {
         loadNamespace: async () => ({
           default: defineDynamic({
             events: {
-              "session.started": async (_event, ctx) => {
+              beforeSession: async (_event, ctx) => {
                 const predecessor = ctx.session.predecessor;
                 if (predecessor === undefined) return null;
                 const events = [];

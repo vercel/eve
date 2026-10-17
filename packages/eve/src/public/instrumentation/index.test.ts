@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { setChannelInstrumentationKind, type CompiledChannel } from "#channel/compiled-channel.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
-import { isChannel, type InstrumentationChannel } from "#public/channels/index.js";
+import { isChannel, type ChannelInfo } from "#public/channels/index.js";
 
 type SupportMetadata = {
   readonly priority: "high";
@@ -26,7 +26,7 @@ describe("isChannel", () => {
   it("compares instrumentation input to the compiler-stamped channel identity", () => {
     stampSupportChannel();
 
-    const input: InstrumentationChannel = {
+    const input: ChannelInfo = {
       kind: "channel:is-channel-test",
       metadata: {
         priority: "high",
@@ -61,7 +61,7 @@ describe("isChannel", () => {
     ).toBe(false);
   });
 
-  it("accepts the DynamicResolveContext.channel shape (optional kind)", () => {
+  it("accepts deliberately limited channel projections", () => {
     stampSupportChannel();
 
     const resolveCtxChannel: {
@@ -92,5 +92,9 @@ describe("isChannel", () => {
 
     const noKind: { readonly kind?: string } = {};
     expect(isChannel(noKind, supportChannel)).toBe(false);
+    if (isChannel(noKind, supportChannel)) {
+      // @ts-expect-error A kind-only projection cannot acquire metadata through a guard.
+      void noKind.metadata;
+    }
   });
 });

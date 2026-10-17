@@ -9,7 +9,7 @@ import { CATALOG_TOOLS, referenceOf } from "../lib/catalog";
  */
 export default defineDynamic({
   events: {
-    "session.started": () =>
+    beforeSession: () =>
       Object.fromEntries(
         CATALOG_TOOLS.map(({ description, inputs = {}, name, result }) => [
           name,

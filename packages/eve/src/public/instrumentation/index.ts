@@ -3,7 +3,7 @@
  */
 
 import type { SessionAuthContext, SessionParent } from "#channel/types.js";
-import type { InstrumentationChannel } from "#public/channels/index.js";
+import type { ChannelInfo } from "#public/channels/index.js";
 import type { JsonObject } from "#shared/json.js";
 
 export * from "#public/instrumentation/provider.js";
@@ -55,7 +55,7 @@ export interface InstrumentationRun {
  * the AI SDK model call.
  */
 export interface InstrumentationModelStartedInput {
-  readonly channel: InstrumentationChannel;
+  readonly channel: ChannelInfo;
   readonly modelInput: import("#instrumentation/lifecycle.js").InstrumentationModelInput;
   readonly session: InstrumentationSession;
   readonly run: InstrumentationRun;

@@ -167,7 +167,7 @@ async function withChainRun(
       definition: defineAgent({
         model: defineDynamic({
           events: {
-            "step.started": () => ({
+            beforeModel: () => ({
               model: options.model ?? scriptedModel,
               modelContextWindowTokens: 200_000,
             }),

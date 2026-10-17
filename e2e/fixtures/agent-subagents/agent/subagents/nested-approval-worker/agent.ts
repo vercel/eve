@@ -29,7 +29,7 @@ export default defineAgent({
   description: "Collects Alice's or Bob's release checklist approvals or authorization.",
   model: defineDynamic({
     events: {
-      "step.started": () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
+      beforeModel: () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
     },
   }),
 });

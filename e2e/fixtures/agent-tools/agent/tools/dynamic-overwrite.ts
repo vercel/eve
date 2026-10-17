@@ -5,7 +5,7 @@ const turnCount = defineState("dynamic-overwrite.turnCount", () => 0);
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       return {
         session_only: defineTool({
           description: "A tool only from session scope. Call when the user asks for session_only.",
@@ -23,7 +23,7 @@ export default defineDynamic({
         }),
       };
     },
-    "turn.started": async () => {
+    beforeTurn: async () => {
       const turn = turnCount.get() + 1;
       turnCount.update(() => turn);
 

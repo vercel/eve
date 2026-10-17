@@ -7,7 +7,7 @@ export const OVERRIDE_TOKEN = "dynamic-override-ok-K2P7";
 // must execute this version.
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       return {
         "override-target": defineTool({
           description:

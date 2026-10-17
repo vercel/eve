@@ -94,12 +94,18 @@ describe("schedule creation and invocation", () => {
       )!;
       const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!
         .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
-      const tools = (await dynamic.events["turn.started"]!(undefined, {
-        model: null,
-        session: { id: "alice", auth: { current: alice, initiator: null }, schedule },
-        channel: {},
-        messages: [],
-      })) as Record<string, DynamicToolEntry>;
+      const tools = (await dynamic.events["beforeTurn"]!(
+        {
+          type: "turn.started",
+          data: { turnId: "turn-test", cause: { deliveryId: "delivery-test" }, follows: null },
+        },
+        {
+          model: null,
+          session: { id: "alice", auth: { current: alice, initiator: null }, schedule },
+          channel: { kind: "unknown", metadata: {} },
+          messages: [],
+        },
+      )) as Record<string, DynamicToolEntry>;
       expect(Object.keys(tools).sort()).toEqual(
         ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
           (operation) => `schedule__requests__${operation}`,

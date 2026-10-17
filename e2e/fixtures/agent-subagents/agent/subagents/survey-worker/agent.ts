@@ -13,7 +13,7 @@ export default defineAgent({
   // models with eve's bootstrap mock, which would drop the worker's usage.
   model: defineDynamic({
     events: {
-      "step.started": () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
+      beforeModel: () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
     },
   }),
 });

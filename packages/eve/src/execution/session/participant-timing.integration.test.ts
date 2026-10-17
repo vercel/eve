@@ -119,7 +119,7 @@ describe("participant timing", () => {
         definition: defineAgent({
           model: defineDynamic({
             events: {
-              "step.started": () => {
+              beforeModel: () => {
                 log.push("model:step");
                 return { model, modelContextWindowTokens: 200_000 };
               },

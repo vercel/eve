@@ -5,7 +5,7 @@ const TOOL_NAMES = ["alpha", "beta"] as const;
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       const tools: Record<string, DynamicToolEntry> = {};
 
       for (let i = 0; i < TOOL_NAMES.length; i++) {

@@ -31,7 +31,7 @@ const PLAYBOOKS: Record<string, { title: string; markdown: string }> = {
 
 export default defineDynamic({
   events: {
-    "session.started": async (_event, ctx) => {
+    beforeSession: async (_event, ctx) => {
       const team = ctx.session.auth.current?.attributes.team;
       const key = Array.isArray(team) ? team[0] : team;
       const playbook = key ? PLAYBOOKS[key] : undefined;

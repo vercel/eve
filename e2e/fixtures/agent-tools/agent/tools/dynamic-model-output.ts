@@ -5,7 +5,7 @@ export const MODEL_OUTPUT_TOKEN = "projected-X9K3";
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       return {
         check_model_output: defineTool({
           description:

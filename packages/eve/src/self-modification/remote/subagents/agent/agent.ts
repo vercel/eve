@@ -65,8 +65,8 @@ const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
 const deployedSelfModificationAgent: DynamicSentinel<DynamicSubagentDefinition | null> =
   defineDynamic({
     events: {
-      "session.started": resolve,
-      "turn.started": resolve,
+      beforeSession: resolve,
+      beforeTurn: resolve,
     },
   });
 

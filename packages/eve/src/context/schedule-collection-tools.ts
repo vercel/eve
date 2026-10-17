@@ -90,7 +90,7 @@ export function createScheduleCollectionToolDynamicDefinition<TInput, TPrepared 
   return markDynamicCallbackRebind(
     defineDynamic({
       events: {
-        "turn.started": async () => {
+        beforeTurn: async () => {
           if (definition.tool === false) return null;
           const prefix = `${scheduleCollectionToolPrefix(identity.collection)}__`;
           const keyFor = (operation: "create" | "update", callId: string) =>

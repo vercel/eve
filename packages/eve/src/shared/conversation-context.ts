@@ -1,4 +1,4 @@
-import type { InstrumentationChannelKind } from "#public/channels/index.js";
+import type { ChannelKind } from "#public/channels/index.js";
 import { ContextKey } from "#context/key.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import { isNonEmptyString } from "#shared/guards.js";
@@ -9,7 +9,7 @@ export type ConversationEnvironment = "development" | "preview" | "production";
 
 export interface ConversationContext {
   readonly channel: {
-    readonly kind: InstrumentationChannelKind;
+    readonly kind: ChannelKind;
     readonly name?: string;
   };
   readonly audience: ChannelAudience;

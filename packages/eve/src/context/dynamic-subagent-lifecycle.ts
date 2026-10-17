@@ -1,3 +1,4 @@
+import { dynamicEventKey } from "#dynamic/definition.js";
 import type { ModelMessage } from "ai";
 
 import { assertNotConnectionOwned } from "#connections/ownership.js";
@@ -38,7 +39,7 @@ async function resolveSelections(input: {
 }): Promise<DynamicSubagentSelections> {
   const outcomes = await Promise.allSettled(
     input.resolvers.map(async (resolver) => {
-      const handler = resolver.events[input.event.type];
+      const handler = resolver.events[dynamicEventKey(input.event.type)];
       if (handler === undefined) {
         return [resolver.nodeId, null] as const;
       }
@@ -170,7 +171,7 @@ export async function resolveDynamicSubagents(input: {
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<void> {
   const matching = input.resolvers.filter((resolver) =>
-    resolver.eventNames.includes(input.event.type),
+    resolver.eventNames.includes(dynamicEventKey(input.event.type)),
   );
   const selections = await resolveSelections({ ...input, resolvers: matching });
 
@@ -193,7 +194,7 @@ export async function refreshDynamicSessionSubagentsForRuntimeRevision(input: {
   }
 
   const matching = input.resolvers.filter((resolver) =>
-    resolver.eventNames.includes("session.started"),
+    resolver.eventNames.includes("beforeSession"),
   );
   const selections = await resolveSelections({ ...input, resolvers: matching });
   input.ctx.set(SessionDynamicSubagentSelectionsKey, selections);

@@ -12,7 +12,7 @@ const agent: AgentDefinition = defineAgent({
   experimental,
   model: defineDynamic({
     events: {
-      "turn.started": (_event, ctx) => {
+      beforeTurn: (_event, ctx) => {
         const text = lastUserText(ctx.messages);
         if (text.length === 0) throw new Error("Turn resolver did not receive incoming input.");
         if (
@@ -27,7 +27,7 @@ const agent: AgentDefinition = defineAgent({
           modelContextWindowTokens: 1_000_000,
         };
       },
-      "step.started": (_event, ctx) => {
+      beforeModel: (_event, ctx) => {
         const text = lastUserText(ctx.messages);
 
         if (text.includes("[model: boom]")) {

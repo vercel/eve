@@ -17,7 +17,7 @@ export {
   type ToolModelOutput,
   type ToolModelOutputPart,
 } from "#tools/definition.js";
-export { defineDynamic } from "#dynamic/definition.js";
+export { defineDynamic } from "#public/definitions/dynamic-tools.js";
 export { defineDurableSchema } from "#tools/durable-schema.js";
 export { defineDurableCallback } from "#tools/durable-callbacks.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
@@ -55,3 +55,5 @@ export {
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
 export type { ToolQuestion, ToolAskOptions, ToolAnswer } from "#tools/definition.js";
+
+export type { DynamicResolverEvent } from "#dynamic/definition.js";

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export default defineDynamic({
   events: {
-    "session.started": () => ({
+    beforeSession: () => ({
       schema_validate: defineTool({
         description:
           "Returns the validated value. Call only when explicitly asked for schema_validate.",

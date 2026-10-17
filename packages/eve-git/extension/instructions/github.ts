@@ -5,7 +5,7 @@ import { githubInstructions } from "../lib/github-guidance.ts";
 
 export default defineDynamic({
   events: {
-    "session.started": () =>
+    beforeSession: () =>
       defineInstructions({ content: githubInstructions(extension.config.github !== undefined) }),
   },
 });

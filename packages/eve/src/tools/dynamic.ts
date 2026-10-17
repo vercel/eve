@@ -1,3 +1,4 @@
+import type { DynamicResolverEvent } from "#dynamic/definition.js";
 import type { Approval } from "#approval/definition.js";
 import type { DynamicResolveContext, DynamicToolEventName } from "#dynamic/definition.js";
 import type {
@@ -66,17 +67,12 @@ export type DynamicToolSet = Readonly<Record<string, DynamicToolEntry<any, any>>
 export type DynamicToolResult = DynamicToolEntry<any, any> | DynamicToolSet | null;
 
 /**
- * Strongly-typed tool-handler map: each key is a supported event name,
- * each value a resolver that takes the stream event and resolve context
- * and returns a {@link DynamicToolResult}. `defineDynamic` accepts the
- * wider {@link DynamicEvents} (handlers return `unknown`) because the
- * slot directory (tools/ vs skills/) decides the expected return at
- * runtime. Reference `DynamicToolEvents` to check the tool-specific
- * return type at authoring time.
+ * Slot-typed handler map used by `defineDynamic` from `eve/tools`.
+ * Each change point receives its typed fact and may return only tool entries.
  */
 export type DynamicToolEvents = {
   readonly [K in DynamicToolEventName]?: (
-    event: unknown,
+    event: DynamicResolverEvent<K>,
     ctx: DynamicResolveContext,
   ) => DynamicToolResult | Promise<DynamicToolResult>;
 };

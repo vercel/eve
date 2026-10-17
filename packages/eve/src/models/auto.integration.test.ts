@@ -42,7 +42,7 @@ function context(
 ): DynamicResolveContext {
   return {
     model: null,
-    channel: {},
+    channel: { kind: "unknown", metadata: {} },
     session: { id: "test", auth: { current: null, initiator: null } },
     messages: [{ role: "user", content: text }],
     abortSignal,
@@ -50,11 +50,13 @@ function context(
 }
 
 /** What a `step.started` handler receives: the turn's request for a model run. */
-function event(turnId = "turn_1") {
+function event(
+  turnId = "turn_1",
+): import("#dynamic/definition.js").DynamicResolverEvent<"beforeModel"> {
   return {
     data: { owner: { turnId }, runId: "run_0" },
     scope: { runId: "run_0", turnId },
-    type: "model.requested",
+    type: "model.requested" as const,
   };
 }
 
@@ -84,7 +86,7 @@ describe("auto", () => {
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
     Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { decisionModel: decisionModelFactory });
     try {
-      const handler = auto({ options }).events["step.started"]!;
+      const handler = auto({ options }).events["beforeModel"]!;
       await expect(handler(event(), context())).resolves.toBe("openai/small");
       expect(runtime.localDecisionModel).not.toHaveBeenCalled();
       expect(decisionModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
@@ -102,7 +104,7 @@ describe("auto", () => {
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
     Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { decisionModel: decisionModelFactory });
     try {
-      const handler = auto({ model: "internal-router", options }).events["step.started"]!;
+      const handler = auto({ model: "internal-router", options }).events["beforeModel"]!;
       await expect(handler(event(), context())).resolves.toBe("openai/small");
       expect(decisionModelFactory).toHaveBeenCalledWith("internal-router");
       expect(decider.doDecide).toHaveBeenCalledOnce();
@@ -118,7 +120,7 @@ describe("auto", () => {
     const decider = decisionModel();
     runtime.localDecisionModel.mockReturnValue(decider.model);
 
-    const handler = auto({ options }).events["step.started"]!;
+    const handler = auto({ options }).events["beforeModel"]!;
 
     await expect(handler(event(), context())).resolves.toBe("openai/small");
     expect(runtime.localDecisionModel).toHaveBeenCalledWith("typesafe-ai/jev");
@@ -138,7 +140,7 @@ describe("auto", () => {
           reasoning: "low",
         },
       },
-    }).events["step.started"]!;
+    }).events["beforeModel"]!;
 
     await expect(handler(event(), context())).resolves.toEqual({
       model: languageModel,
@@ -166,7 +168,7 @@ describe("auto", () => {
 
   it("decides once per turn and restores the selection from durable context", async () => {
     const decider = decisionModel();
-    const handler = auto({ model: decider.model, options }).events["step.started"]!;
+    const handler = auto({ model: decider.model, options }).events["beforeModel"]!;
 
     await handler(event(), context());
     runtime.state = await deserializeContext(serializeContext(runtime.state!));
@@ -181,11 +183,11 @@ describe("auto", () => {
 
   it("decides for a compaction's summary run by its context change", async () => {
     const decider = decisionModel();
-    const handler = auto({ model: decider.model, options }).events["step.started"]!;
+    const handler = auto({ model: decider.model, options }).events["beforeModel"]!;
     const summary = {
       data: { owner: { changeId: "change_1" }, runId: "run_1" },
       scope: { changeId: "change_1", runId: "run_1" },
-      type: "model.requested",
+      type: "model.requested" as const,
     };
 
     await handler(summary, context());
@@ -205,7 +207,7 @@ describe("auto", () => {
       model: failed,
       fallback: "anthropic/claude-sonnet-5",
       options,
-    }).events["step.started"]!;
+    }).events["beforeModel"]!;
 
     await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
     await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
@@ -231,7 +233,7 @@ describe("auto", () => {
       model: failed,
       fallback: { model: fallback, reasoning: "low" },
       options,
-    }).events["step.started"]!;
+    }).events["beforeModel"]!;
 
     await expect(handler(event(), context())).resolves.toEqual({
       model: fallback,
@@ -250,7 +252,7 @@ describe("auto", () => {
         throw providerError;
       },
     });
-    const failedHandler = auto({ model: failed, options }).events["step.started"]!;
+    const failedHandler = auto({ model: failed, options }).events["beforeModel"]!;
     await expect(failedHandler(event(), context())).rejects.toBe(providerError);
 
     runtime.state = new ContextContainer();
@@ -265,7 +267,7 @@ describe("auto", () => {
       model: pendingModel,
       fallback: "anthropic/claude-sonnet-5",
       options,
-    }).events["step.started"]!;
+    }).events["beforeModel"]!;
     const pending = pendingHandler(event(), context("Alice needs help.", controller.signal));
     const reason = new Error("cancelled");
     controller.abort(reason);
@@ -290,7 +292,7 @@ describe("auto", () => {
       } as never),
     ).toThrow();
 
-    const handler = auto({ model: decider, options }).events["step.started"]!;
+    const handler = auto({ model: decider, options }).events["beforeModel"]!;
     await expect(handler(event(), context(" "))).rejects.toThrow("requires user text");
   });
 });

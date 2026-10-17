@@ -2,7 +2,7 @@ import { defineDynamic, defineTool } from "eve/tools";
 
 export default defineDynamic({
   events: {
-    "step.started": (_event, ctx) => {
+    beforeModel: (_event, ctx) => {
       if (!JSON.stringify(ctx.messages).includes("[expand-envelope]")) return null;
       return {
         catalog_probe: defineTool({

@@ -41,7 +41,7 @@ import { defineDynamic, defineRemoteAgent } from "eve";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) =>
+    beforeSession: (_event, ctx) =>
       ctx.session.auth.current?.attributes.region === "us"
         ? defineRemoteAgent({
             description: "Answers weather questions for US customers.",

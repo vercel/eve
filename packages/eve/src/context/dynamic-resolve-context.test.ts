@@ -54,13 +54,13 @@ describe("buildResolveContext", () => {
     });
   });
 
-  it("sets metadata to undefined when ChannelInstrumentationKey is absent", () => {
+  it("provides an unknown channel with empty metadata when its projection is absent", () => {
     const ctx = createCtx();
     ctx.set(ChannelKey, { kind: "http" });
 
     const resolveCtx = buildResolveContext(ctx, []);
 
-    expect(resolveCtx.channel.metadata).toBeUndefined();
+    expect(resolveCtx.channel).toMatchObject({ kind: "unknown", metadata: {} });
   });
 
   it("omits continuation token for an ID-only session", () => {

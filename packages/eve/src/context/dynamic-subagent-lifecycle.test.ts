@@ -64,7 +64,7 @@ describe("dynamic subagent lifecycle", () => {
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": (_event, resolveCtx) =>
+        beforeSession: (_event, resolveCtx) =>
           handler((resolveCtx as { model: { id: string } }).model),
       },
     };
@@ -84,7 +84,7 @@ describe("dynamic subagent lifecycle", () => {
     const created = createResolver();
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
-      events: { "session.started": () => created.agentConfig },
+      events: { beforeSession: () => created.agentConfig },
     };
 
     await resolveDynamicSubagents({
@@ -109,7 +109,7 @@ describe("dynamic subagent lifecycle", () => {
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () =>
+        beforeSession: () =>
           defineAgent({
             description: "Route internally.",
             model: "openai/gpt-5.5",
@@ -135,7 +135,7 @@ describe("dynamic subagent lifecycle", () => {
     const created = createResolver();
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
-      events: { "session.started": () => created.agentConfig },
+      events: { beforeSession: () => created.agentConfig },
       tool: false,
     };
 
@@ -153,13 +153,13 @@ describe("dynamic subagent lifecycle", () => {
   it("lets a turn-scoped null hide a session-scoped selection", async () => {
     const ctx = createContext();
     const created = createResolver({
-      eventNames: ["session.started", "turn.started"],
+      eventNames: ["beforeSession", "beforeTurn"],
     });
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () => created.agentConfig,
-        "turn.started": () => null,
+        beforeSession: () => created.agentConfig,
+        beforeTurn: () => null,
       },
     };
 
@@ -183,17 +183,17 @@ describe("dynamic subagent lifecycle", () => {
 
   it("runs every dynamic local and remote selection as a workflow tool", async () => {
     const ctx = createContext();
-    const created = createResolver({ eventNames: ["session.started", "turn.started"] });
+    const created = createResolver({ eventNames: ["beforeSession", "beforeTurn"] });
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () =>
+        beforeSession: () =>
           defineAgent({
             description: "Research the request.",
             model: "openai/gpt-5.5",
             modelContextWindowTokens: 200_000,
           }),
-        "turn.started": () =>
+        beforeTurn: () =>
           defineRemoteAgent({
             description: "Review remotely.",
             url: "https://review.example.com",
@@ -228,7 +228,7 @@ describe("dynamic subagent lifecycle", () => {
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () =>
+        beforeSession: () =>
           defineAgent({
             description: "Research the request.",
             model: "openai/gpt-5.5",
@@ -252,18 +252,18 @@ describe("dynamic subagent lifecycle", () => {
   it("lets a turn-scoped agent config switch the subagent model", async () => {
     const ctx = createContext();
     const created = createResolver({
-      eventNames: ["session.started", "turn.started"],
+      eventNames: ["beforeSession", "beforeTurn"],
     });
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () =>
+        beforeSession: () =>
           defineAgent({
             description: "Research the request.",
             model: "anthropic/claude-sonnet-4.5",
             modelContextWindowTokens: 200_000,
           }),
-        "turn.started": () =>
+        beforeTurn: () =>
           defineAgent({
             description: "Research the request deeply.",
             model: "anthropic/claude-opus-4.6",
@@ -341,7 +341,7 @@ describe("dynamic subagent lifecycle", () => {
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () => remoteAgent,
+        beforeSession: () => remoteAgent,
       },
     };
 
@@ -451,7 +451,7 @@ describe("dynamic subagent lifecycle", () => {
     const handler = vi.fn(() => created.agentConfig);
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
-      events: { "session.started": handler },
+      events: { beforeSession: handler },
     };
 
     await refreshDynamicSessionSubagentsForRuntimeRevision({
@@ -494,7 +494,7 @@ describe("dynamic subagent names", () => {
     const resolver: ResolvedDynamicSubagentResolver = {
       ...created.resolver,
       events: {
-        "session.started": () =>
+        beforeSession: () =>
           defineAgent({
             description: "Research the request.",
             model: "openai/gpt-5.5",
@@ -592,7 +592,7 @@ function createResolver(
     model: "openai/gpt-5.5",
     modelContextWindowTokens: 200_000,
   });
-  const eventNames = input.eventNames ?? ["session.started"];
+  const eventNames = input.eventNames ?? ["beforeSession"];
   const handler = input.handler ?? (() => null);
 
   return {

@@ -1,4 +1,4 @@
-import type { InstrumentationChannel } from "#public/channels/index.js";
+import type { ChannelInfo } from "#public/channels/index.js";
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import type {
@@ -107,7 +107,7 @@ function buildInstrumentationModelStartedInput(
     channel: {
       kind: normalizeInstrumentationChannelKind(projection?.kind),
       metadata: snapshotForInstrumentation(projection?.metadata, "channel.metadata") ?? {},
-    } as InstrumentationChannel,
+    } as ChannelInfo,
     modelInput: input.capturesContent
       ? (snapshotForInstrumentation(input.modelInput, "modelInput") ?? {
           instructions: undefined,

@@ -5,7 +5,7 @@ import { z } from "zod";
 
 export default defineDynamic({
   events: {
-    "step.started": (_event, ctx) => {
+    beforeModel: (_event, ctx) => {
       // Other runtime evals require a single model step without tool calls.
       const requested = ctx.messages.some((message) => {
         if (message.role !== "user") return false;

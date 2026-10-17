@@ -15,7 +15,7 @@ import {
 } from "#runtime/agent/resolve-model.js";
 
 const DYNAMIC_MODEL_SOURCE = {
-  eventNames: ["session.started"],
+  eventNames: ["beforeSession"],
   logicalPath: "agent.ts",
   sourceId: "agent-config",
   sourceKind: "module" as const,
@@ -107,8 +107,9 @@ describe("dynamic runtime model resolution", () => {
       default: {
         model: defineDynamic({
           events: {
-            "session.started": (_event, ctx) => ({
-              model: ctx.channel.kind === "slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
+            beforeSession: (_event, ctx) => ({
+              model:
+                ctx.channel.kind === "channel:slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
               modelContextWindowTokens: 128_000,
               modelOptions: {
                 providerOptions: { gateway: { order: ["openai"] } },
@@ -123,11 +124,11 @@ describe("dynamic runtime model resolution", () => {
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       scope: { moduleMap, nodeId: undefined },
     });
-    const result = await definition.events["session.started"]?.(
-      { type: "session.started" },
+    const result = await definition.events["beforeSession"]?.(
+      { type: "session.started", data: {} },
       {
         model: { id: "openai/gpt-5.5" },
-        channel: { kind: "slack" },
+        channel: { kind: "channel:slack", metadata: {} },
         messages: [{ content: "Hi", role: "user" }],
         session: { auth: { current: null, initiator: null }, id: "session-1" },
       },

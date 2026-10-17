@@ -1,3 +1,4 @@
+import { dynamicEventKey } from "#dynamic/definition.js";
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
@@ -90,7 +91,7 @@ export async function resolveDynamicInstructions(input: {
     ctx.set(TurnDynamicInstructionsKey, {});
   }
 
-  const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
+  const matching = resolvers.filter((r) => r.eventNames.includes(dynamicEventKey(event.type)));
   if (matching.length === 0) return;
 
   const durableKey: ContextKey<SlugMessageMap> =
@@ -102,7 +103,7 @@ export async function resolveDynamicInstructions(input: {
 
   const outcomes = await Promise.allSettled(
     matching.map(async (resolver) => {
-      const handler = resolver.events[event.type];
+      const handler = resolver.events[dynamicEventKey(event.type)];
       if (handler === undefined) return null;
 
       const rawResult = await handler(event.fact, resolveCtx);

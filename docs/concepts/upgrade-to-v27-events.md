@@ -327,6 +327,27 @@ have one public home, `eve/events`.
 containment. The default output lists matching files; pass `outputMode: "content"` to retain
 line output. `limit` bounds returned rows (50 by default, maximum 200), not matches per file.
 
+## Channel and resolver vocabulary
+
+Full channel projections now use `ChannelInfo<TMetadata>` and `ChannelKind` from `eve/channels`.
+They always provide `kind` and `metadata`, defaulting to `"unknown"` and `{}` when unavailable.
+`isChannel` narrows a full projection's metadata. On a kind-only projection, such as dynamic
+connection context, it narrows only the kind and does not invent metadata.
+
+Dynamic handler keys are `beforeSession`, `beforeTurn`, and `beforeModel`, not event subscription
+names. Handlers receive the typed start/request fact at that change point. Skill, connection,
+instruction, and subagent resolvers cannot run at `beforeModel`. `defineDynamic` from `eve/tools`
+and `eve/skills` now constrains the returned definition to its slot; import `DynamicSkillEvents`
+from `eve/skills` for reusable maps.
+
+Instrumentation provider types use `InstrumentationDefinition`, `InstrumentationEvents`,
+`InstrumentationContext`, `InstrumentationState`, `InstrumentationSetupContext`, and event-keyed
+`InstrumentationHandler<K>`. The eval reference is an inline `{ runId }`. Conversation and setup
+contexts share the environment type. These type changes do not rename OpenTelemetry spans.
+
+Principal field unification is not enabled here: the connection principal migration must ship
+with a compatible Vercel Connect release, never as an eve-only runtime rename.
+
 ## Clients and frontends
 
 - **Frontend commands resolve on acceptance.** `EveAgentStore.send()` and the frontend hooks'

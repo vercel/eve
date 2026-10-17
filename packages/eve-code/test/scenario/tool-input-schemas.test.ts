@@ -27,12 +27,12 @@ test("every extension tool advertises an object-root input schema without root u
 
 type ToolModule =
   | { readonly inputSchema: Schema }
-  | { readonly events: { readonly "session.started"?: (...args: never[]) => unknown } };
+  | { readonly events: { readonly beforeSession?: (...args: never[]) => unknown } };
 
 async function resolveTool(definition: ToolModule): Promise<{ inputSchema: Schema }> {
   if ("inputSchema" in definition) return definition;
-  const handler = definition.events["session.started"] as (() => unknown) | undefined;
-  assert.ok(handler, "dynamic tool must resolve at session.started");
+  const handler = definition.events["beforeSession"] as (() => unknown) | undefined;
+  assert.ok(handler, "dynamic tool must resolve at beforeSession");
   const tool = (await handler()) as { inputSchema: Schema } | null;
   assert.ok(tool, "dynamic tool resolved to null with every capability configured");
   return tool;

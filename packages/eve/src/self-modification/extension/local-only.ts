@@ -16,7 +16,7 @@ export function resolveLocalOnly<T>(
 export function defineLocalOnlyDynamic<T>(definition: T) {
   return defineDynamic({
     events: {
-      "session.started": () =>
+      beforeSession: () =>
         resolveLocalOnly(resolveSelfModificationConfig(selfModification.config), definition),
     },
   });

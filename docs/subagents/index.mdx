@@ -124,7 +124,7 @@ import { defineAgent, defineDynamic } from "eve";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) =>
+    beforeSession: (_event, ctx) =>
       ctx.session.auth.current?.attributes.research === true
         ? defineAgent({
             description: "Investigate ambiguous questions before the parent responds.",
@@ -148,7 +148,7 @@ Packaging controls must be available before the resolver runs. Put them on
 export default defineDynamic({
   build: { externalDependencies: ["native-package"] },
   events: {
-    "session.started": () =>
+    beforeSession: () =>
       defineAgent({
         description: "Use a native package when handling delegated work.",
         model: "anthropic/claude-opus-5.5",

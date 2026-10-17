@@ -12,7 +12,7 @@ describe("resolveDynamicConnectionDefinition", () => {
   it("reattaches the authored event handlers", async () => {
     const handler = () => null;
     const definition: CompiledDynamicConnectionDefinition = {
-      eventNames: ["session.started"],
+      eventNames: ["beforeSession"],
       logicalPath: "connections/accounts.ts",
       slug: "accounts",
       sourceId: "connections/accounts",
@@ -23,7 +23,7 @@ describe("resolveDynamicConnectionDefinition", () => {
         [ROOT_COMPILED_AGENT_NODE_ID]: {
           modules: {
             [definition.sourceId]: {
-              default: defineDynamic({ events: { "session.started": handler } }),
+              default: defineDynamic({ events: { beforeSession: handler } }),
             },
           },
         },
@@ -33,7 +33,7 @@ describe("resolveDynamicConnectionDefinition", () => {
     await expect(
       resolveDynamicConnectionDefinition(definition, moduleMap, undefined),
     ).resolves.toMatchObject({
-      eventNames: ["session.started"],
+      eventNames: ["beforeSession"],
       events: { "session.started": handler },
       slug: "accounts",
     });

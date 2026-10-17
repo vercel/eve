@@ -1,3 +1,4 @@
+import type { ChannelInfo } from "#shared/channel-info.js";
 import type { AuthoringEventType } from "#protocol/session-events/authoring.js";
 import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
@@ -40,10 +41,7 @@ export interface HookContext extends SessionContext {
     readonly name: string;
     readonly nodeId?: string;
   };
-  readonly channel: {
-    readonly kind?: string;
-    readonly continuationToken?: string;
-  };
+  readonly channel: ChannelInfo;
   /**
    * Where the event sits on the session's stream: the position of its line, and its index in
    * that line. Positions never change, so a hook can record how far it has handled the stream.

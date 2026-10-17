@@ -79,8 +79,8 @@ export function defineSelfModificationAgent(
 
   return defineDynamic({
     events: {
-      "session.started": resolve,
-      "turn.started": resolve,
+      beforeSession: resolve,
+      beforeTurn: resolve,
     },
   });
 }

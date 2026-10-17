@@ -163,7 +163,7 @@ if (userAuthEnabled) {
 
 export default defineDynamic({
   events: {
-    "session.started": () => (userAuthEnabled ? defineMcpClientConnection(definition) : null),
+    beforeSession: () => (userAuthEnabled ? defineMcpClientConnection(definition) : null),
   },
 });
 

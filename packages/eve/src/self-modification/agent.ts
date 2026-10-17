@@ -32,7 +32,7 @@ export function defineSelfModificationAgent(
     return null;
   };
   return defineDynamic({
-    events: { "session.started": resolve, "turn.started": resolve },
+    events: { beforeSession: resolve, beforeTurn: resolve },
   });
 }
 

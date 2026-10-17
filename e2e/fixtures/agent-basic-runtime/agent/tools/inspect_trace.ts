@@ -4,7 +4,7 @@ import { inspectTrace } from "../lib/trace-audit";
 
 export default defineDynamic({
   events: {
-    "step.started": (_event, ctx) => {
+    beforeModel: (_event, ctx) => {
       const requested = ctx.messages.some(
         (message) =>
           message.role === "user" &&

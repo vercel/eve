@@ -8,7 +8,7 @@ import { LEDGER_REGIONS } from "../lib/ledger-regions";
  */
 export default defineDynamic({
   events: {
-    "session.started": () =>
+    beforeSession: () =>
       Object.fromEntries(
         LEDGER_REGIONS.map((region) => [
           `ledger__${region}`,

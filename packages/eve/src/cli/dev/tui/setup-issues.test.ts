@@ -106,7 +106,7 @@ describe("BOOT_DETECTIONS", () => {
       const info = infoWithRouting({
         kind: "dynamic",
         resolver: {
-          eventNames: ["step.started"],
+          eventNames: ["beforeModel"],
           slug: "model",
           logicalPath: "agent.ts",
           owner: { kind: "application" },

@@ -385,7 +385,7 @@ describe("normalizeToolDefinition", () => {
   it("returns a dynamic-tool entry for a defineDynamic({ events }) export with a map", () => {
     const dynamicTools = defineDynamic({
       events: {
-        "session.started": async () => ({
+        beforeSession: async () => ({
           echo: defineTool({
             description: "Echo tool",
             inputSchema: { type: "object" as const },
@@ -404,7 +404,7 @@ describe("normalizeToolDefinition", () => {
   it("returns a dynamic-tool entry for a defineDynamic({ events }) export with a single entry", () => {
     const dynamicTool = defineDynamic({
       events: {
-        "session.started": async () =>
+        beforeSession: async () =>
           defineTool({
             description: "Dynamic echo",
             inputSchema: { type: "object" as const },
@@ -423,7 +423,7 @@ describe("normalizeToolDefinition", () => {
     const dynamicTools = {
       ...defineDynamic({
         events: {
-          "session.started": async () => ({}),
+          beforeSession: async () => ({}),
         },
       }),
       fallback: "not-supported-here",
@@ -437,8 +437,8 @@ describe("normalizeToolDefinition", () => {
   it("handles defineDynamic with multiple events", () => {
     const dynamicTools = defineDynamic({
       events: {
-        "session.started": async () => ({}),
-        "step.started": async () => ({}),
+        beforeSession: async () => ({}),
+        beforeModel: async () => ({}),
       },
     });
 

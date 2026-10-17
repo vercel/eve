@@ -73,8 +73,8 @@ export function fixtureModel(respond: MockModelResponder) {
   });
   return defineDynamic({
     events: {
-      "step.started": async (event, ctx) => {
-        const selected = await model.events["step.started"]!(event, ctx);
+      beforeModel: async (event, ctx) => {
+        const selected = await model.events["beforeModel"]!(event, ctx);
         const selection =
           typeof selected === "object" && "model" in selected ? selected : { model: selected };
         routing.update((value) => ({
