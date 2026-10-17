@@ -645,6 +645,8 @@ The callback receives the `InputRequest` and current `SessionContext`, so it can
 
 When a tool approval resolves, eve retires the messages it posted for it. The card loses its buttons and shows the answer and who gave it, the separate tool-input post is deleted, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome. This also happens when the approval ends without a click, for example when the person replies in the thread instead, in which case the card reads `No longer needed`.
 
+A click on any request whose session is no longer active, for example because its run was cancelled outside eve, can never be answered. eve removes the card's buttons, marks it `No longer active`, and tells the person who clicked, in an ephemeral message, to send a new message.
+
 A renderer's `input.requested` handler can extend delivery and then hand the requests on to eve with `next()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
 
 ```ts title="agent/channels/slack.ts"

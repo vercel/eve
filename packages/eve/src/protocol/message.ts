@@ -104,6 +104,8 @@ export type ActionResultStatus = "completed" | "failed" | "rejected";
 export interface ActionResultError {
   readonly code: string;
   readonly message: string;
+  /** The `name` of the error a tool threw, such as `"QuotaError"`. */
+  readonly name?: string;
 }
 
 /**
@@ -1967,15 +1969,13 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
 }
 
 function buildActionResultError(result: RuntimeActionResult): ActionResultError {
-  const outputError = readActionResultOutputError(result.output);
-  if (outputError !== undefined) {
-    return outputError;
-  }
-
-  return {
+  const error = readActionResultOutputError(result.output) ?? {
     code: "ACTION_RESULT_FAILED",
     message: formatActionResultOutput(result.output),
   };
+  return result.kind === "tool-result" && result.errorName !== undefined
+    ? { ...error, name: result.errorName }
+    : error;
 }
 
 function readActionResultOutputError(output: unknown): ActionResultError | undefined {

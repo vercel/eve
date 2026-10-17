@@ -151,7 +151,7 @@ describe("self-modification integration setup", () => {
       projectId: "project",
     });
     expect(deps.ensurePackageDependencies).toHaveBeenCalledWith({
-      dependencies: { "@vercel/connect": "2.2.0", microsandbox: "0.5.5" },
+      dependencies: { "@vercel/connect": "2.5.2", microsandbox: "0.5.5" },
       projectRoot: "/project",
     });
     expect(deps.installScaffoldDependencies).toHaveBeenCalledWith(

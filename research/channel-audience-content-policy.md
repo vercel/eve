@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: implemented
-last_updated: "2026-09-17"
+last_updated: "2026-10-15"
 ---
 
 # Audience-aware trace content policy
@@ -212,6 +212,35 @@ directional content projection before invoking accepted handlers.
 There is no implicit content redaction after a custom trace policy admits an audience. Redaction occurs only when an export policy returns a redaction decision.
 
 Policies fail closed at their boundary: a throwing trace policy rejects the trace, a throwing span policy drops the span, a malformed or directionless redaction decision drops the span, and a throwing or malformed attribute policy drops the attribute. Missing, malformed, or conflicting audience evidence normalizes to `unknown`.
+
+## Workflow retention alignment
+
+At session creation, the resolved process-wide trace decision also determines
+the default Workflow retention preference. Full input and output capture leaves
+the World's default unchanged; dropped traces, metadata-only capture, and
+directional capture request `experimental_retention: 0`. Workflow cannot purge
+directions independently. The audience-aware default applies even without an
+installed OTel destination.
+
+An explicit `experimental.workflow.retention` overrides this derivation:
+`"default"` preserves completed-session reads independently of tracing, and `0`
+always requests deletion. The resolved value travels in session state and owner
+checkpoints, so handoff does not recompute it under a later deployment's policy.
+Subagents derive their own value from their resolved inherited trace decision
+unless they author an override. Destination export policies and lifecycle
+providers remain independent.
+
+This requests World-enforced deletion at the terminal run boundary, not
+redaction while running. It removes durable session payloads and streams, so
+completed transcripts can return `410 session_expired`. Records and attributes
+(including session titles), external telemetry, and tool-owned storage remain.
+Worlds older than spec version 4 reject `0`; version 4 Worlds without retention
+support keep the data.
+
+Before serving a session stream, eve checks the run's payload-free expiry
+metadata alongside its stream tail. A World can retain chunk records after
+purging their contents, so a nonempty tail alone cannot establish readability.
+Expired metadata produces `410 session_expired` before response headers are sent.
 
 ## Compatibility
 

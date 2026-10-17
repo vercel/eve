@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { context } from "@opentelemetry/api";
-import { createAgentDelegationTransport } from "@eve/tracing/delegation";
+import { createAgentDelegationTransport } from "@vercel/agent-runs/delegation";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
   BasicTracerProvider,
@@ -9,10 +9,10 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import {
   AgentSpanIdGenerator,
-  createAgentTracing,
+  createAgentRun,
   otelTelemetry,
   type TraceCheckpointer,
-} from "@eve/tracing";
+} from "@vercel/agent-runs";
 
 const identity = { conversationId: "conversation", runId: "run", turnId: "turn" };
 
@@ -35,7 +35,7 @@ function worker(checkpointer: TraceCheckpointer, exporter: InMemorySpanExporter)
     idGenerator,
     spanProcessors: [new SimpleSpanProcessor(exporter)],
   });
-  return createAgentTracing({
+  return createAgentRun({
     telemetry: otelTelemetry({ provider, idGenerator }),
     checkpointer,
   });
@@ -174,7 +174,7 @@ describe("durable agent tracing", () => {
     const { checkpointer } = memoryCheckpointer();
     const exporter = new InMemorySpanExporter();
     const idGenerator = new AgentSpanIdGenerator();
-    const tracing = createAgentTracing({
+    const tracing = createAgentRun({
       telemetry: otelTelemetry({
         provider: new BasicTracerProvider({
           idGenerator,
@@ -202,7 +202,7 @@ describe("durable agent tracing", () => {
     const exporter = new InMemorySpanExporter();
     const errors: string[] = [];
     const idGenerator = new AgentSpanIdGenerator();
-    const tracing = createAgentTracing({
+    const tracing = createAgentRun({
       telemetry: otelTelemetry({
         provider: new BasicTracerProvider({
           idGenerator,
@@ -225,7 +225,7 @@ describe("durable agent tracing", () => {
 
   it("requires stable span IDs", () => {
     expect(() =>
-      createAgentTracing({
+      createAgentRun({
         telemetry: otelTelemetry({ provider: new BasicTracerProvider() }),
         checkpointer: memoryCheckpointer().checkpointer,
       }),

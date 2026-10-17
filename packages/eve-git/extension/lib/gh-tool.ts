@@ -29,6 +29,7 @@ export function defineGhTool(
     }),
     execute(input, ctx) {
       return executeGitHubShell(input, github(), {
+        auth: ctx.session.auth.current,
         getSandbox: () => ctx.getSandbox(),
         sessionId: ctx.session.id,
       });

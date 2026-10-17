@@ -68,17 +68,18 @@ export async function findRemoteAgentBinding(
 
   const events = await input.parent.getEventStream({ startIndex: 0 });
   const reader = events.getReader();
-  let binding: RemoteAgentBinding | undefined;
   try {
     for (let index = 0; index <= tailIndex; index += 1) {
       const next = await reader.read();
       if (next.done) break;
-      binding = readRemoteAgentBinding(next.value, input) ?? binding;
+      // One child session has one binding, so stop reading the parent at the first match.
+      const binding = readRemoteAgentBinding(next.value, input);
+      if (binding !== undefined) return binding;
     }
   } finally {
     await reader.cancel().catch(() => {});
   }
-  return binding;
+  return undefined;
 }
 
 function readRemoteAgentBinding(

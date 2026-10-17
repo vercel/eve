@@ -284,15 +284,6 @@ describe("OpenApiConnectionClient", () => {
     expect(JSON.stringify(createItem?.inputSchema)).not.toContain("nullable");
   });
 
-  it("applies an operations allow filter", async () => {
-    const client = new OpenApiConnectionClient(
-      makeConnection({ tools: { allow: ["getProject"] } }),
-    );
-    const metadata = await client.getToolMetadata();
-
-    expect(metadata.map((m) => m.name)).toEqual(["getProject"]);
-  });
-
   it("substitutes path params, appends query, and attaches auth on execute", async () => {
     const fetchMock = vi.fn(
       async (_url: URL, _init: RequestInit) =>
@@ -324,6 +315,53 @@ describe("OpenApiConnectionClient", () => {
     expect(calledUrl.toString()).toBe("https://api.example.com/v1/projects/prj_1?teamId=team_9");
     expect(init.method).toBe("GET");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
+  });
+
+  it.each([".", ".."])(
+    "rejects dot segments in path parameter %j before sending a request",
+    async (id) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new OpenApiConnectionClient(makeConnection());
+
+      await expect(client.executeTool("getProject", { id }, EXECUTE_OPTIONS)).rejects.toThrow(
+        'Path parameter "id" for tool "getProject" in connection "test" must not be "." or "..".',
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("validates resolved application-provided path parameters", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OpenApiConnectionClient(
+      makeConnection({ toolCall: { providedArguments: { id: Promise.resolve("..") } } }),
+    );
+
+    await expect(
+      client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS),
+    ).rejects.toThrow('Path parameter "id"');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["release.v1/café 100%", "release.v1%2Fcaf%C3%A9%20100%25"],
+    ["folder/../item", "folder%2F..%2Fitem"],
+    ["folder/./item", "folder%2F.%2Fitem"],
+  ])("preserves application-provided path value %j and its encoding", async (id, encodedId) => {
+    const fetchMock = vi.fn(async (_url: URL) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        toolCall: { providedArguments: { id } },
+      }),
+    );
+
+    await client.executeTool("getProject", { id: "..", teamId: ".." }, EXECUTE_OPTIONS);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [calledUrl] = fetchMock.mock.calls[0]!;
+    expect(calledUrl.toString()).toBe(`https://api.example.com/v1/projects/${encodedId}?teamId=..`);
   });
 
   it("resolves auth and headers from the active caller", async () => {

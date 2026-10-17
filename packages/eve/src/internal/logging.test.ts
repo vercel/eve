@@ -6,7 +6,7 @@ import {
   trace,
   type Span,
 } from "#compiled/@opentelemetry/api/index.js";
-import { withErrorContent } from "#compiled/@eve/tracing/otel.js";
+import { withErrorContent } from "#compiled/@vercel/agent-runs/otel.js";
 
 import {
   createErrorId,

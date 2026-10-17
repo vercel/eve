@@ -151,12 +151,18 @@ async function callConnectionTool(
     return await auth.handleError(listing.error, listing.authorization);
   }
   // Validation may have run before a sign-in made the tools listable.
-  const checked = await checkCall(connection, listing.tools, toolName, rawInput);
+  const isEventAction = client.eventActions?.ownsName(toolName) === true;
+  const checked = await checkCall(connection, listing.tools, toolName, rawInput, !isEventAction);
   if ("issues" in checked) throw new Error(issuesMessage(checked.issues));
   const { input, tool } = checked;
 
   let raw: unknown;
   try {
+    if (isEventAction)
+      return await client.eventActions!.execute(tool.name, input, {
+        abortSignal: options.abortSignal,
+        callId: options.toolCallId,
+      });
     raw = await client.executeTool(tool.name, input, {
       abortSignal: options.abortSignal,
       callId: options.toolCallId,
@@ -177,18 +183,22 @@ async function checkInput(
   toolName: string,
   input: unknown,
 ): Promise<StandardSchemaV1.Result<unknown>> {
+  const client = registry.getClient(connection.connectionName);
   let tools: readonly ConnectionToolMetadata[];
   try {
-    tools = await listToolMetadata(
-      connection.connectionName,
-      registry.getClient(connection.connectionName),
-    );
+    tools = await listToolMetadata(connection, client);
   } catch (error) {
     // Only the call itself can start the sign-in that makes its tools listable.
     if (isConnectionAuthorizationRequiredError(error)) return { value: input };
     return { issues: [{ message: listingFailureMessage(connection.connectionName, error) }] };
   }
-  const checked = await checkCall(connection, tools, toolName, input);
+  const checked = await checkCall(
+    connection,
+    tools,
+    toolName,
+    input,
+    client.eventActions?.ownsName(toolName) !== true,
+  );
   return "issues" in checked ? { issues: checked.issues } : { value: checked.input };
 }
 
@@ -202,13 +212,14 @@ async function checkCall(
   tools: readonly ConnectionToolMetadata[],
   toolName: string,
   input: unknown,
+  remote = true,
 ): Promise<CallCheck> {
   const tool = tools.find((entry) => entry.name === toolName);
   if (tool === undefined) {
     return { issues: [{ message: unknownToolMessage(connection, toolName, tools) }] };
   }
   // Provided values replace these keys at execution, so a model value for one is dropped, not rejected.
-  const provided = connection.toolCall?.providedArguments ?? {};
+  const provided = remote ? (connection.toolCall?.providedArguments ?? {}) : {};
   const modelInput = Object.fromEntries(
     Object.entries(isObject(input) ? input : {}).filter(([key]) => !Object.hasOwn(provided, key)),
   );
@@ -308,10 +319,7 @@ async function toolAnnotations(
   toolName: string,
 ): Promise<ConnectionToolAnnotations | undefined> {
   try {
-    const tools = await listToolMetadata(
-      connection.connectionName,
-      registry.getClient(connection.connectionName),
-    );
+    const tools = await listToolMetadata(connection, registry.getClient(connection.connectionName));
     return tools.find((tool) => tool.name === toolName)?.annotations;
   } catch {
     // Input validation already reported a listing failure; a sign-in the call needs comes later.

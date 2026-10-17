@@ -16,7 +16,7 @@ import {
   toolCallIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import { structuralProviderMetadata } from "#instrumentation/content.js";
-import { modelContent, modelUsage } from "#compiled/@eve/tracing/ai-sdk.js";
+import { modelContent, modelUsage } from "#compiled/@vercel/agent-runs/ai-sdk.js";
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 

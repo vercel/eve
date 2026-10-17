@@ -88,17 +88,16 @@ export async function parkOnApprovals(
 }
 
 /**
- * A call the model step ran needs a sign-in: the calls that need it stop, and the model calls
- * them again once it completes.
+ * A call the model step ran needs a sign-in: the calls that need it stop and wait in their
+ * steps, and run once it completes.
  */
 export async function stopForToolSignIn(
   step: Step,
   interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
 ): Promise<StepResult> {
-  step.session = { ...step.session, history: validateHarnessModelMessages(interrupt.history) };
   await step.apply(
     requireSignIn(step.view(), {
-      callIdsByName: interrupt.callIdsByName,
+      calls: interrupt.calls,
       challenges: interrupt.challenges,
     }),
     step.session.history,

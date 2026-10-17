@@ -6,11 +6,13 @@ export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing
 export type TemplateIntegration =
   | "Contentful"
   | "Datadog"
+  | "dbt"
   | "GitHub"
   | "HTTP API"
   | "Linear"
   | "Linq"
   | "Mux"
+  | "MotherDuck"
   | "Notion"
   | "Postgres"
   | "Resend"
@@ -139,7 +141,6 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-slack-agent",
     title: "Slack Assistant",
-    featured: true,
     setupPrompt:
       "Set up the eve Slack agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
@@ -161,6 +162,35 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/instructions.md",
       "agent/skills/plan_a_trip.md",
       "agent/tools/get_weather.ts",
+    ],
+  },
+  {
+    slug: "eve-company-brain-template",
+    title: "Company Brain",
+    featured: true,
+    setupPrompt:
+      "Set up the eve company brain template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-company-brain-template as the source. Copy the project files, install its dependencies, and follow the README to build the sample data and configure Slack. Preserve the existing project if the workspace is not empty. Use local DuckDB for development and explain how to switch to MotherDuck when deployed, including separate writer and read-only credentials and Slack access allowlists.",
+    description:
+      "Answer employees' business questions in Slack using documented dbt models, with local DuckDB or deployed MotherDuck and a Jaffle Shop sample dataset.",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-company-brain-template",
+    category: "Collaboration",
+    model: "anthropic/claude-sonnet-5",
+    integrations: ["Slack", "dbt", "MotherDuck"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-company-brain-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/instructions.md",
+      "agent/tools/list_models.ts",
+      "agent/tools/get_model.ts",
+      "agent/tools/query_sql.ts",
+      "agent/lib/query.ts",
     ],
   },
   {

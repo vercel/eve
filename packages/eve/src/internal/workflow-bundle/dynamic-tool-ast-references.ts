@@ -230,6 +230,9 @@ export function collectPatternNames(pattern: AstNode | null, names: string[]): v
   if (pattern.type === "ArrayPattern") {
     for (const element of pattern.elements ?? []) collectPatternNames(element, names);
   }
+  if (pattern.type === "RestElement") {
+    collectPatternNames(pattern.argument as AstNode | null, names);
+  }
   if (pattern.type === "AssignmentPattern") {
     collectPatternNames(pattern.left as AstNode | null, names);
   }

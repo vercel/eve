@@ -1,4 +1,4 @@
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { jsonSchema, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";

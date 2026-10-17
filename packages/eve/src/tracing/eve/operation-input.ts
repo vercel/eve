@@ -3,11 +3,11 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import {
-  createAgentTracing,
+  createAgentRun,
   type AgentTelemetry,
-  type AgentTracing,
+  type AgentRun,
   type TraceCheckpointer,
-} from "#compiled/@eve/tracing/index.js";
+} from "#compiled/@vercel/agent-runs/index.js";
 
 export function traceSessionIdOf(scope: {
   readonly traceSessionId?: string;
@@ -53,11 +53,11 @@ export function eveCapture(reference: SpanContext | undefined) {
 export function createEveTracing(input: {
   readonly telemetry: AgentTelemetry;
   readonly stateStore: AgentTraceStateStore;
-}): AgentTracing {
+}): AgentRun {
   const checkpointer: TraceCheckpointer = {
     get: (key) => input.stateStore.get("checkpoint", key),
     set: (key, value) => input.stateStore.set("checkpoint", key, value),
     delete: (key) => input.stateStore.delete("checkpoint", key),
   };
-  return createAgentTracing({ telemetry: input.telemetry, checkpointer });
+  return createAgentRun({ telemetry: input.telemetry, checkpointer });
 }

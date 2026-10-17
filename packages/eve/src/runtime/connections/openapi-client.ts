@@ -1,6 +1,6 @@
 import { createLogger } from "#internal/logging.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import { passesToolFilter, resolveHeaders } from "#runtime/connections/mcp-client.js";
+import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 import {
   omitProvidedArgumentsFromSchema,
   resolveProvidedArguments,
@@ -145,17 +145,11 @@ export class OpenApiConnectionClient implements ConnectionClient {
     const baseUrl = this.#resolveBaseUrl(document);
     const operations = this.#extractOperations(document);
 
-    const filter = this.#connection.tools;
-    const selected =
-      filter !== undefined
-        ? operations.filter((op) => passesToolFilter(op.toolName, filter))
-        : operations;
-
     const metadata: ConnectionToolMetadata[] = [];
     const operationMap = new Map<string, OpenApiOperation>();
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
 
-    for (const operation of selected) {
+    for (const operation of operations) {
       let inputSchema: JsonObject;
       try {
         inputSchema = parseJsonObject(
@@ -427,7 +421,14 @@ export class OpenApiConnectionClient implements ConnectionClient {
         continue;
       }
       if (param.location === "path") {
-        path = path.replace(`{${param.name}}`, encodeURIComponent(String(value)));
+        const pathValue = String(value);
+        // URL parsing normalizes dot segments even after encodeURIComponent.
+        if (pathValue === "." || pathValue === "..") {
+          throw new Error(
+            `Path parameter "${param.name}" for tool "${operation.toolName}" in connection "${this.#connection.connectionName}" must not be "." or "..".`,
+          );
+        }
+        path = path.replace(`{${param.name}}`, encodeURIComponent(pathValue));
       } else if (param.location === "query") {
         appendQuery(query, param.name, value);
       } else if (param.location === "cookie") {

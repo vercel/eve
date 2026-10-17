@@ -145,6 +145,12 @@ const CHAT_SDK_BROKEN = {
     "questionPress",
     "questionText",
   ]),
+  "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active":
+    {
+      reason:
+        "a press carries only the card's message id, and the session that knew its prompt is gone, so the retired card shows only how it ended",
+      symptom: /the inactive prompt reads .* to contain/u,
+    },
 };
 
 const DISCORD_BROKEN = {

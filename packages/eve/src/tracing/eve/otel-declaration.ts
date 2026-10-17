@@ -69,6 +69,11 @@ export interface OtelOptions {
    * lifecycle providers. The policy may be invoked more than once
    * while a new session is being prepared, so it must be deterministic for
    * consistent results.
+   * Unless `experimental.workflow.retention` is explicit, the session's
+   * resolved decision also selects Workflow retention: both content directions
+   * use the World's default; dropped traces or either excluded direction
+   * request deletion on completion. This also removes completed transcripts,
+   * but does not delete exported traces.
    */
   readonly tracePolicy?: TraceCapturePolicy;
   /**

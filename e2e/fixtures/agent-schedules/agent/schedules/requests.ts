@@ -14,6 +14,9 @@ export default defineDynamicSchedules({
       destination: z.literal("creator-email"),
     })
     .strict(),
+  approval: {
+    disable: ({ session }) => (session.schedule === undefined ? "user-approval" : "not-applicable"),
+  },
   // The fixture identity is local and fixed; production apps must revalidate their account system.
   auth: async ({ principal }) => ({
     attributes: { "fixture.email": "alice@example.test" },
@@ -28,7 +31,7 @@ export default defineDynamicSchedules({
     if (payload.destination !== "creator-email" || typeof recipient !== "string")
       throw new Error("The creator has no authorized fixture email destination.");
     await to(outbox, { scheduleName: occurrence.name }).send(
-      `This scheduled occurrence is firing now. Perform the task using record-email for ${recipient}. Do not create another schedule.\n\nTask: ${payload.task}`,
+      `This scheduled occurrence is firing now. Schedule management name: ${occurrence.name}. Perform the task using record-email for ${recipient}. Do not create another schedule.\n\nTask: ${payload.task}`,
     );
   },
   events: {

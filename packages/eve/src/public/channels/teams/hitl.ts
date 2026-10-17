@@ -107,19 +107,43 @@ export function renderAnsweredInputRequestMessage(input: {
   readonly prompt: string;
 }): TeamsMessageBody {
   const text = input.label ? `Answered: ${input.label}` : "Answered";
-  const result: TeamsMessageBody = {
+  const result = renderSettledInputRequestMessage(input.prompt, { color: "good", text });
+  if (input.includeText !== false) return { ...result, text };
+  return result;
+}
+
+/**
+ * Renders the card that replaces a prompt no session can answer anymore: its
+ * prompt, then `label`, as the session would have resolved it.
+ */
+export function renderInactiveInputRequestMessage(
+  prompt: string | undefined,
+  label: string,
+): TeamsMessageBody {
+  return renderSettledInputRequestMessage(prompt, { text: label });
+}
+
+/** A card without its choices: `status` under the prompt, when the prompt is known. */
+function renderSettledInputRequestMessage(
+  prompt: string | undefined,
+  status: { readonly color?: string; readonly text: string },
+): TeamsMessageBody {
+  const promptBlocks =
+    prompt === undefined
+      ? []
+      : [
+          {
+            text: truncate(prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+            type: "TextBlock",
+            wrap: true,
+          },
+        ];
+  return {
     attachments: [
       {
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          body: [
-            {
-              text: truncate(input.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-              type: "TextBlock",
-              wrap: true,
-            },
-            { color: "good", text, type: "TextBlock", wrap: true },
-          ],
+          body: [...promptBlocks, { ...status, type: "TextBlock", wrap: true }],
           type: "AdaptiveCard",
           version: "1.5",
         }),
@@ -127,8 +151,6 @@ export function renderAnsweredInputRequestMessage(input: {
       },
     ],
   };
-  if (input.includeText !== false) return { ...result, text };
-  return result;
 }
 
 /** Returns true when a Teams activity carries an eve HITL submit payload. */
@@ -145,6 +167,11 @@ export function isTeamsToolApprovalResponseActivity(activity: TeamsActivity): bo
 
 /** Reads the original prompt from a tool-approval submit activity. */
 export function readTeamsToolApprovalPrompt(activity: TeamsActivity): string | undefined {
+  return isTeamsToolApprovalResponseActivity(activity) ? readTeamsInputPrompt(activity) : undefined;
+}
+
+/** Reads the prompt a submit activity answers, which every eve card carries in its submit data. */
+export function readTeamsInputPrompt(activity: TeamsActivity): string | undefined {
   const value = readActivityValue(activity);
   const payload = value && readHitlPayload(value);
   const prompt = payload?.[TEAMS_HITL_PROMPT_KEY];
@@ -247,11 +274,13 @@ function renderActions(
   replyToActivityId: string | undefined,
 ): readonly Record<string, unknown>[] {
   const payload = (optionId?: string): Record<string, unknown> => {
-    const value: Record<string, unknown> = { requestId: request.requestId };
-    if (request.kind === "tool-approval") {
-      value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
-      value[TEAMS_HITL_PROMPT_KEY] = request.prompt;
-    }
+    // The prompt the card shows rides along so a card can be retired without
+    // the session that posted it, such as when that session is gone.
+    const value: Record<string, unknown> = {
+      requestId: request.requestId,
+      [TEAMS_HITL_PROMPT_KEY]: truncate(request.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+    };
+    if (request.kind === "tool-approval") value[TEAMS_HITL_REQUEST_KIND_KEY] = "tool-approval";
     if (replyToActivityId !== undefined) value.replyToActivityId = replyToActivityId;
     if (optionId !== undefined) value.optionId = optionId;
     return value;

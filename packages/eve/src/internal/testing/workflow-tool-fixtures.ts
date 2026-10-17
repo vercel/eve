@@ -157,6 +157,17 @@ export async function answerWithResponderWorkflow(
   return JSON.stringify({ answer, runStartPrincipal: ctx.session.auth.current?.principalId });
 }
 
+/** Returns `ctx.ask()`'s answer as-is; a selected option carries `text: undefined`. */
+export async function returnAskAnswerWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+
+  return await ctx.ask({
+    display: "confirmation",
+    options: [{ id: "approve", label: "Approve" }],
+    prompt: "Apply this change?",
+  });
+}
+
 /** Asks two questions at once, so answering one leaves the other pending. */
 export async function confirmTwoStepsWorkflow(
   input: DeployInput,

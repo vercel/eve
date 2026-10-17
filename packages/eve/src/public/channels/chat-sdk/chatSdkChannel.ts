@@ -7,6 +7,10 @@ import type {
   ChannelSendOptions,
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+} from "#channel/inactive-prompt.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -34,7 +38,11 @@ import type {
 import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
 import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
 import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
-import { decodeInputAction, renderInputRequests } from "#public/channels/chat-sdk/input-actions.js";
+import {
+  decodeInputAction,
+  renderInputRequests,
+  renderRetiredInputRequest,
+} from "#public/channels/chat-sdk/input-actions.js";
 import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
@@ -293,15 +301,30 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   bot.onAction(async (event: ActionEvent) => {
     const response = decodeInputAction(event.actionId, inputActionPrefix, event.value);
     if (!response) return;
-    if (!event.thread) {
+    const { thread } = event;
+    if (!thread) {
       throw new Error(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
-    await bridgeRespond(bot, [response], {
-      auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-      thread: event.thread.toJSON(),
-    });
+    const auth = config.resolveInputAuth ? await config.resolveInputAuth(event) : null;
+    const answer = await respondOrRetireInactivePrompt(
+      () => bridgeRespond(bot, [response], { auth, thread: thread.toJSON() }),
+      {
+        retirePrompt: (label) => retireInputCard(thread, event.messageId, label),
+      },
+      log,
+    );
+    // Chat SDK stops its action handlers at a throw, as it did before inactive
+    // presses were told apart from other failures.
+    if (answer.outcome === "failed") throw answer.error;
+    if (answer.outcome === "delivered") return;
+    await Promise.all([
+      answer.retirement,
+      thread
+        .postEphemeral(event.user, { markdown: INACTIVE_REQUEST_NOTICE }, { fallbackToDM: true })
+        .catch((error: unknown) => log.error("inactive prompt notice failed", { error })),
+    ]);
   });
 
   const channel = defineChannel<
@@ -554,6 +577,23 @@ async function safeStartTyping(thread: Thread | null, status?: string): Promise<
  */
 async function editMessage(thread: Thread, messageId: string, markdown: string): Promise<void> {
   await thread.adapter.editMessage(thread.id, messageId, { markdown });
+}
+
+/**
+ * Replaces a pressed request card with only `label`. The session that held the
+ * request is gone and a press carries no prompt text, so the prompt can't be
+ * kept; what matters is that the buttons stop being offered.
+ */
+async function retireInputCard(
+  thread: Pick<Thread, "adapter" | "id">,
+  messageId: string,
+  label: string,
+): Promise<void> {
+  try {
+    await thread.adapter.editMessage(thread.id, messageId, renderRetiredInputRequest(label));
+  } catch (error) {
+    if (!isNotImplemented(error)) throw error;
+  }
 }
 
 /**

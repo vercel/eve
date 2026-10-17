@@ -42,6 +42,11 @@ export function renderInputRequests(
   };
 }
 
+/** Renders a request card whose prompt is unknown as only how it ended. */
+export function renderRetiredInputRequest(label: string) {
+  return { card: Card({ children: [CardText(label)] }), fallbackText: label };
+}
+
 // The SDK's card fallback drops buttons, so the options are numbered instead.
 function renderInputRequestText(request: InputRequest): string {
   const options = request.options ?? [];

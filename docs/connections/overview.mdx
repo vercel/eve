@@ -99,7 +99,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
+If the token has a known TTL, set `expiresAt` (milliseconds since epoch). Once it expires, eve calls `getToken` again before the next request, including requests on an existing MCP client.
 
 When `getToken` is the only auth, `credentialOwner` defaults to `"app"`: one shared credential keyed across all sessions. Set `credentialOwner: "user"` when each end-user carries their own token.
 

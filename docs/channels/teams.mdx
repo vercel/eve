@@ -85,7 +85,7 @@ A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. 
 
 By default, submissions use the Teams identity of the user who clicked the card. If you customize `onMessage` for an allowlist, configure the same policy in `onInputResponse`; eve otherwise rejects HITL submissions rather than bypassing the message gate.
 
-When a tool approval settles, eve replaces its Adaptive Card with the outcome and responder name. A response rejected by an approval policy leaves the shared card unchanged.
+When a tool approval settles, eve replaces its Adaptive Card with the outcome and responder name. A response rejected by an approval policy leaves the shared card unchanged. A submission to a card whose session is no longer active, for example because its run was cancelled outside eve, replaces the card with its prompt and `No longer active`, and the invoke response tells the person who submitted to send a new message.
 
 ### Connection sign-ins
 

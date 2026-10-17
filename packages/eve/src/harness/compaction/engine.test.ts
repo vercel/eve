@@ -399,6 +399,27 @@ function toolExchange(input: {
   ];
 }
 
+function toolResultExchange(
+  output: { type: "json"; value: { content: string } } | { type: "text"; value: string },
+): [ModelMessage, ModelMessage] {
+  return [
+    {
+      content: [{ input: {}, toolCallId: "call-0", toolName: "grep", type: "tool-call" }],
+      role: "assistant",
+    },
+    {
+      content: [{ output, toolCallId: "call-0", toolName: "grep", type: "tool-result" }],
+      role: "tool",
+    },
+  ];
+}
+
+function toolResultValue(message: ModelMessage | undefined): string {
+  const part = Array.isArray(message?.content) ? message.content[0] : undefined;
+  const output = part?.type === "tool-result" ? part.output : undefined;
+  return output?.type === "text" ? output.value : "";
+}
+
 function checkpointHead(text: string): ModelMessage[] {
   return [compactionMarker(CHECKPOINT_MARKER), assistant(text)];
 }
@@ -572,26 +593,75 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(shouldCompact(result, { recentWindowSize: 1, threshold: ROOMY })).toBe(false);
   });
 
-  it("does not split a UTF-16 surrogate pair when capping tool results", async () => {
-    // JSON.stringify of this output places 📥's high surrogate at index 1999
-    // of the 2000-unit TRANSCRIPT_PAYLOAD_LIMIT cut.
-    const content = `${"x".repeat(1964)}📥${"y".repeat(500)}`;
+  it("leaves an already-capped tool result unchanged on a later compaction", async () => {
+    const annotations = (message: ModelMessage | undefined) =>
+      JSON.stringify(message).split("Truncated by eve").length - 1;
+    const messages = [
+      user("investigate the bug"),
+      ...toolExchange({ callId: "call-0", payloadChars: 4_000 }),
+      user("keep going"),
+    ];
+    const { result: first } = await compact(messages, { recentWindowSize: 1 });
+    const capped = first[2];
+    expect(annotations(capped)).toBe(1);
+
+    const { result: second, summarizer } = await compact(
+      [
+        ...first,
+        ...toolExchange({ callId: "call-1", payloadChars: 4_000 }),
+        user("what did you find?"),
+      ],
+      { recentWindowSize: 1 },
+    );
+
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(annotations(second[2])).toBe(1);
+    expect(second[2]).toEqual(capped);
+  });
+
+  it("does not split a UTF-16 surrogate pair at either cut when capping tool results", async () => {
+    // Astral characters across the whole cut window: both the head and the
+    // tail cut fall inside surrogate pairs at one of the two offsets.
+    for (const offset of [0, 1]) {
+      const content = `${"x".repeat(offset)}${"📥".repeat(2_000)}`;
+      const { result } = await compact(
+        [
+          user("investigate"),
+          ...toolResultExchange({ type: "json", value: { content } }),
+          user("next"),
+        ],
+        { recentWindowSize: 1 },
+      );
+      const value = toolResultValue(result[2]);
+      expect(value.startsWith("[Truncated by eve")).toBe(true);
+      expect(value.length).toBeLessThanOrEqual(2_000);
+      expect(value).toBe(value.toWellFormed());
+      expect(value).toContain("chars omitted");
+      expect(value.endsWith('📥"}}')).toBe(true);
+    }
+  });
+
+  it("keeps the failure and exit code of a large bash result when capping", async () => {
+    const stdout = `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts\nTest Files  1 failed`;
     const call: ModelMessage = {
-      content: [{ input: {}, toolCallId: "call-0", toolName: "grep", type: "tool-call" }],
+      content: [{ input: {}, toolCallId: "call-0", toolName: "bash", type: "tool-call" }],
       role: "assistant",
     };
     const resultMsg: ModelMessage = {
       content: [
         {
-          output: { type: "json", value: { content } },
+          output: {
+            type: "json",
+            value: { stderr: "", stdout, truncated: false, exitCode: 1, status: "completed" },
+          },
           toolCallId: "call-0",
-          toolName: "grep",
+          toolName: "bash",
           type: "tool-result",
         },
       ],
       role: "tool",
     };
-    const messages = [user("investigate"), call, resultMsg, user("what did you find?")];
+    const messages = [user("run the tests"), call, resultMsg, user("what failed?")];
 
     const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
 
@@ -602,12 +672,67 @@ describe("compactMessages: tool-result cap heuristic", () => {
       typeof output === "object" && output !== null && "value" in output
         ? String(output.value)
         : "";
-    expect(value).toContain("Truncated by eve");
-    expect(value).toBe(value.toWellFormed());
-    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(value)).toBe(false);
-    expect(value).not.toContain("📥");
-    expect(value).toContain("x".repeat(1964));
+    expect(value.startsWith("[Truncated by eve")).toBe(true);
+    expect(value).toContain("✓ passing test");
+    expect(value).toContain("chars omitted");
+    expect(value).toContain(String.raw`FAIL src/auth.test.ts\nTest Files  1 failed`);
+    expect(value).toContain('"exitCode":1,"status":"completed"}');
   });
+
+  it.each([
+    ["plain JSON", { type: "json" as const, value: { content: "x".repeat(4_000) } }],
+    ["escape-heavy JSON", { type: "json" as const, value: { content: 'a"b\\c\n\t'.repeat(800) } }],
+    ["astral characters", { type: "json" as const, value: { content: "📥".repeat(2_000) } }],
+    ["text", { type: "text" as const, value: `line "one"\n${"y".repeat(4_000)}` }],
+  ])("returns a capped %s result unchanged on every later compaction", async (_name, output) => {
+    let history: ModelMessage[] = [
+      user("investigate"),
+      ...toolResultExchange(output),
+      user("next"),
+    ];
+    const { result: first } = await compact(history, { recentWindowSize: 1 });
+    const capped = first[2];
+    const cappedValue = toolResultValue(capped);
+    expect(cappedValue.startsWith("[Truncated by eve")).toBe(true);
+    expect(cappedValue.length).toBeLessThanOrEqual(2_000);
+
+    history = first;
+    for (let round = 0; round < 3; round += 1) {
+      const { result, summarizer } = await compact(history, { recentWindowSize: 1 });
+      expect(summarizer).not.toHaveBeenCalled();
+      expect(result[2]).toBe(capped);
+      history = result;
+    }
+  });
+
+  it.each([
+    ["plain JSON", { content: `KEPT-HEAD-7781${"z".repeat(4_000)}KEPT-TAIL-7781` }],
+    [
+      "escape-heavy JSON",
+      { content: `KEPT-HEAD-7781${"z".repeat(4_000)}${'q"\\'.repeat(300)}KEPT-TAIL-7781` },
+    ],
+  ])(
+    "keeps the whole capped %s content when a later compaction summarizes",
+    async (_name, value) => {
+      const history: ModelMessage[] = [
+        user("investigate"),
+        ...toolResultExchange({ type: "json", value }),
+        user("next"),
+      ];
+      const { result: first } = await compact(history, { recentWindowSize: 1 });
+      const cappedValue = toolResultValue(first[2]);
+      expect(cappedValue).toContain("KEPT-HEAD-7781");
+      expect(cappedValue.split("chars omitted").length - 1).toBe(1);
+      expect(cappedValue.endsWith('KEPT-TAIL-7781"}}')).toBe(true);
+
+      const summarize = summarizeWith("forced checkpoint");
+      await compactMessages(first, { recentWindowSize: 1, threshold: ROOMY }, summarize, true);
+
+      const transcript = String(summarize.mock.calls[0]?.[0]?.messages?.[0]?.content);
+      expect(transcript).toContain(cappedValue.replace(/\s+/g, " ").trim());
+      expect(transcript.split("Truncated by eve").length - 1).toBe(1);
+    },
+  );
 
   it("stubs content-output file parts instead of truncating into their payloads", async () => {
     const base64 = "iVBORw0KGgo".repeat(500);

@@ -32,8 +32,8 @@ import {
   createAgentOtelInstrumentation,
   type AgentOtelInstrumentationInput,
 } from "#tracing/eve/agent-otel-provider.js";
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
-import { otelTelemetry } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
+import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
@@ -52,10 +52,10 @@ import {
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { channelAudienceFromContext } from "#tracing/eve/channel-audience-context.js";
-import { activeTraceOperation } from "#compiled/@eve/tracing/otel.js";
+import { activeTraceOperation } from "#compiled/@vercel/agent-runs/otel.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
 import { parseLocalTraceSegment } from "#tracing/local/trace-reader.js";
-import { CONTENT_ATTRIBUTE_LIMIT } from "#compiled/@eve/tracing/otel.js";
+import { CONTENT_ATTRIBUTE_LIMIT } from "#compiled/@vercel/agent-runs/otel.js";
 import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
 import { resolveTracePolicyDecision } from "#shared/trace-policy.js";

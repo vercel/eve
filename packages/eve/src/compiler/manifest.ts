@@ -767,7 +767,7 @@ const compiledScheduleCollectionDefinitionSchema = z
     providerKind: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    tools: z.boolean().optional(),
+    tools: z.union([z.boolean(), z.literal("deferred")]).optional(),
   })
   .strict();
 
@@ -804,6 +804,7 @@ const compiledWorkspaceResourceRootSchema = z
 
 const compiledConnectionDefinitionSchema = z
   .object({
+    experimental_events: z.literal(true).optional(),
     connectionName: z.string(),
     description: z.string(),
     exportName: z.string().optional(),

@@ -1,11 +1,12 @@
 import type { ModelMessage } from "ai";
 
 import {
+  clipMiddleUtf16Safe,
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
-  sliceUtf16Safe,
+  serializeToolResultOutput,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
@@ -258,14 +259,19 @@ export async function compactMessages(
 
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
+const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
 
 /**
  * Caps oversized tool-result outputs in place, keeping message structure and
  * tool_use/tool_result pairing untouched. The cap matches the transcript
  * payload clip, so a later summarization sees the same content the model
  * kept — capping never destroys material the summarizer would need, unlike
- * dropping results outright. The annotation leads the value so it survives
- * prefix-capped renderings.
+ * dropping results outright. The cap keeps the head and tail of the output,
+ * where failures and exit codes usually are.
+ *
+ * Capping is idempotent: the capped value, annotation included, fits the
+ * same limit it was measured against, and a text output is measured by its
+ * value, so a later compaction leaves an already-capped part as it is.
  */
 function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
@@ -282,7 +288,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       // size check: serializing raw payloads into a prefix cap would keep
       // bytes the model cannot read while cutting the text it can.
       const output = stubContentOutputFileParts(part.output) as typeof part.output;
-      const serialized = JSON.stringify(output) ?? "";
+      const serialized = serializeToolResultOutput(output);
       if (serialized.length <= TRANSCRIPT_PAYLOAD_LIMIT) {
         if (output === part.output) {
           return part;
@@ -296,7 +302,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
         ...part,
         output: {
           type: "text" as const,
-          value: `${CAPPED_RESULT_ANNOTATION}\n\n${sliceUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT)}`,
+          value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,
         },
       };
     });

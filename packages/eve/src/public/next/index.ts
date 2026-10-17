@@ -11,7 +11,9 @@ import { resolveDevServerTimeout } from "#shared/framework-eve-server.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 import {
   EVE_NEXT_HOST,
+  ensureEveProductionServer,
   NEXT_PHASE_PRODUCTION_BUILD,
+  NEXT_PHASE_PRODUCTION_SERVER,
   resolveEveDestinationPrefix,
 } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
@@ -487,6 +489,18 @@ export function withEve<TConfig extends EveNextConfig>(
         productionDestination,
       };
     });
+    if (phase === NEXT_PHASE_PRODUCTION_SERVER) {
+      await Promise.all(
+        agentsWithDestinations.map(async ({ appRoot, productionDestination }) => {
+          if (productionDestination.localServerOrigin !== undefined) {
+            await ensureEveProductionServer({
+              appRoot,
+              origin: productionDestination.localServerOrigin,
+            });
+          }
+        }),
+      );
+    }
 
     return {
       ...nextConfig,
@@ -499,9 +513,7 @@ export function withEve<TConfig extends EveNextConfig>(
                 appRoot: agent.appRoot,
                 devServerTimeoutMs,
                 logLabel: agent.name,
-                phase,
                 productionDestinationPrefix: agent.productionDestination.destinationPrefix,
-                productionServerOrigin: agent.productionDestination.localServerOrigin,
                 workspaceAgentName: agent.workspaceMember === true ? agent.name : undefined,
               });
 

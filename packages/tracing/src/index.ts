@@ -1,11 +1,11 @@
 export {
-  createAgentTracing,
-  type AgentTracing,
-  type AgentTracingOptions,
+  createAgentRun,
+  type AgentRun,
+  type AgentRunOptions,
   type AgentMemoryTracing,
   type TurnInput,
   type ResumeInput,
-} from "./agent-tracing.js";
+} from "./agent-run.js";
 export { otelTelemetry, type OtelTelemetryOptions } from "./adapters/otel.js";
 export { AgentSpanIdGenerator } from "./adapters/otel-ids.js";
 export type {

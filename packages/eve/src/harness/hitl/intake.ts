@@ -7,9 +7,11 @@ import {
   approvedCalls,
   completeSignIn,
   hold,
+  runnableCalls,
   settle,
 } from "#harness/session-machine/transitions.js";
-import type { SuspendedStep } from "#harness/session-machine/view.js";
+import type { SessionView, SuspendedStep } from "#harness/session-machine/view.js";
+import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Step } from "#harness/step/context.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
@@ -30,7 +32,7 @@ import { getApprovalAuditState, responderOfRequest, retireActiveCandidates } fro
 import { coordinateApprovalDelivery } from "./coordinator.js";
 import { deliver, resolveTypedApproval, turnInputOnly, withoutTurnInput } from "./delivery.js";
 import { recheckApprovedCall } from "#harness/tools.js";
-import type { InputRequest } from "#shared/input.js";
+import type { ApprovedCall } from "#harness/session-machine/state.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 
@@ -180,8 +182,9 @@ export async function acceptHumanInput(
   }
   // Approved calls run with the tools of the step that asked, including calls approved by an
   // earlier delivery whose turn the budget stopped.
-  for (const parked of step.view().turn.suspended) {
-    if ((parked.approved?.length ?? 0) > 0) await restoreTools(parked);
+  const view = step.view();
+  for (const parked of view.turn.suspended) {
+    if (runnableCalls(view, parked).length > 0) await restoreTools(parked);
   }
   // What the answers resolved comes before the delivery's own input, as with the AI SDK: the model
   // reads the approved calls' results and the denials first, and the input waits a step. A
@@ -192,7 +195,7 @@ export async function acceptHumanInput(
       batch.inputs.every((entry) => entry.response !== undefined),
   );
   const deferred =
-    answeredApprovals || approvedCalls(step.view().turn).length > 0
+    answeredApprovals || approvedCalls(step.view()).length > 0
       ? turnInputOnly(decision.input)
       : undefined;
   if (deferred !== undefined) await step.apply(deferInput(step.view(), deferred));
@@ -223,7 +226,7 @@ export async function admitApprovedWork(step: Step, work: ApprovedWork): Promise
 
 /** Whether a suspended step holds approved calls that haven't run. */
 export function hasApprovedWork(step: Step): boolean {
-  return approvedCalls(step.view().turn).length > 0;
+  return approvedCalls(step.view()).length > 0;
 }
 
 /**
@@ -234,10 +237,11 @@ export function hasApprovedWork(step: Step): boolean {
 export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork): Promise<boolean> {
   const tasks: RuntimeWorkflowTaskRequest[] = [];
   const denied: ApprovedCallResult[] = [];
-  for (const parked of step.view().turn.suspended) {
+  const view = step.view();
+  for (const parked of view.turn.suspended) {
     const tools = work.toolsOf(parked);
-    const requests: InputRequest[] = [];
-    for (const request of parked.approved ?? []) {
+    const requests: ApprovedCall[] = [];
+    for (const request of runnableCalls(view, parked)) {
       const tool = tools.get(request.action.toolName);
       if (tool?.workflowId === undefined) continue;
       const recheck = await recheckApprovedCall(tool, {
@@ -283,6 +287,22 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
 }
 
 /**
+ * Calls a sign-in stopped can share it, and it reports once: with the first call to run it, unless
+ * a call that ran earlier reported it (the event log says it is no longer required). `claimed`
+ * holds the sign-ins the calls in this batch already took.
+ */
+function reportingOnce(view: SessionView, call: ApprovedCall, claimed: Set<string>): ApprovedCall {
+  const signIns = (call.signIns ?? []).filter((challenge) => {
+    const key = signInAttemptKey(challenge);
+    const required = view.projection.authorizations[challenge.attemptId ?? challenge.name]?.status;
+    if (claimed.has(key) || required !== "required") return false;
+    claimed.add(key);
+    return true;
+  });
+  return { ...call, signIns };
+}
+
+/**
  * Runs approved local calls once the step has started and its budget allows it, as the AI SDK ran
  * them before the model read their results: each with the tools of the step that asked, as
  * the turn's requester, and in the step's first attempt. A call that needs a sign-in holds the
@@ -293,11 +313,13 @@ export async function runApprovedLocalCalls(
   work: ApprovedWork,
   setAttemptScope: (scope: InstrumentationAttempt | undefined) => void,
 ): Promise<StepResult | undefined> {
-  const local = step.view().turn.suspended.map((parked) => {
+  const view = step.view();
+  const claimed = new Set<string>();
+  const local = view.turn.suspended.map((parked) => {
     const tools = work.toolsOf(parked);
-    const requests = (parked.approved ?? []).filter(
-      (request) => tools.get(request.action.toolName)?.workflowId === undefined,
-    );
+    const requests = runnableCalls(view, parked)
+      .filter((request) => tools.get(request.action.toolName)?.workflowId === undefined)
+      .map((request) => reportingOnce(view, request, claimed));
     return { requests, tools };
   });
   const approved = local.flatMap(({ requests }) => requests);
@@ -341,13 +363,12 @@ export async function runApprovedLocalCalls(
   // A cancellation ends the turn once the calls it cut short have their results.
   throwIfTurnAborted(step.config.abortSignal);
   const signIn = resolveInlineAuthorizationInterrupt({
-    messages: [],
     toolResults: executed.flatMap((run) => run.toolResults),
   });
   if (signIn === undefined) return undefined;
   await step.apply(
     requireSignIn(step.view(), {
-      callIdsByName: signIn.callIdsByName,
+      calls: signIn.calls,
       challenges: signIn.challenges,
     }),
     step.session.history,

@@ -17,6 +17,7 @@ import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Session } from "#channel/session.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
 
 /** A provider namespace scope, represented by one key or a hierarchical key path. */
@@ -289,8 +290,8 @@ export interface DynamicSchedulesDefinition<
     /** On a permanent provider failure or after its retry budget is exhausted. */
     readonly "occurrence.failed"?: ScheduleOccurrenceEventHandler<NoInfer<TPrepared>>;
   };
-  /** Expose operation tools directly (default true), or false for code-only scheduling. */
-  readonly tool?: boolean;
+  /** Expose operation tools directly (default true), defer them to the catalog, or disable them. */
+  readonly tool?: AgentToolExposure;
   /** Model-call policies keyed by operation. Create and update receive the prepared payload. */
   readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
 }
@@ -315,7 +316,10 @@ type DynamicSchedulesOptions<
   readonly provider?: ScheduleProvider;
 } & (
     | { readonly tool: false; readonly approval?: never }
-    | { readonly tool?: true; readonly approval?: ScheduleApprovals<NoInfer<TPrepared>> }
+    | {
+        readonly tool?: true | "deferred";
+        readonly approval?: ScheduleApprovals<NoInfer<TPrepared>>;
+      }
   );
 
 /**

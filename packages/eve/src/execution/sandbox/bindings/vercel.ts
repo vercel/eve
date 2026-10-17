@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
@@ -54,7 +56,10 @@ import {
 import { withToolSessionRetention } from "#execution/sandbox/bindings/vercel-tool-sessions.js";
 import { isToolSessionId } from "#execution/tool-session/id.js";
 import { withToolSessionSandboxes } from "#execution/tool-session/sandbox.js";
-import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
+import {
+  getNamedVercelSandbox,
+  isVercelSnapshotCreated,
+} from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
   deleteUnusableVercelSandbox,
   deleteVercelSandbox,
@@ -115,9 +120,9 @@ export function createVercelSandbox(
   const loadDeleteSandboxModule =
     input.loadDeleteSandboxModule ??
     (async () => await import("#compiled/@vercel/sandbox/index.js"));
-  const createOptions: VercelCreateOptions = {
-    timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
+  const createOptions: ResolvedVercelCreateOptions = {
     ...input.createOptions,
+    timeout: input.createOptions?.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS,
   };
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
 
@@ -218,10 +223,10 @@ export function createVercelSandbox(
             : undefined,
         resources: sandboxProviderResourceIdentity(context.resources),
         sourceRevision: context.sourceRevision,
-        version: 2,
+        version: 3,
       }).slice(0, 32)}`;
       try {
-        const outcome = await ensureTemplateWithUnavailableRetry({
+        const snapshotId = await ensureTemplate({
           createOptions,
           createSandbox,
           loadSandboxModule,
@@ -230,7 +235,7 @@ export function createVercelSandbox(
           seedFiles,
           templateKey,
         });
-        return { snapshotId: outcome.template.snapshotId };
+        return { snapshotId };
       } catch (error) {
         throw new Error(`Failed to prepare Vercel sandbox snapshot: ${errorMessage(error)}`, {
           cause: error,
@@ -264,12 +269,6 @@ export function createVercelSandbox(
   // `start` finds a session's sandbox by name, so keyed tool sessions can reuse it.
   // A handle is only an SDK client, so a call that ends has nothing to free.
   return withToolSessionSandboxes(implementation);
-}
-
-interface VercelSandboxTemplateRecord {
-  readonly sandboxName: string;
-  readonly snapshotId: string;
-  readonly templateKey: string;
 }
 
 function vercelSessionName(
@@ -317,126 +316,158 @@ function requirePreparedVercelTemplate(
   return artifact.snapshotId === undefined ? {} : { snapshotId: artifact.snapshotId };
 }
 
-interface EnsureTemplateOutcome {
-  readonly template: VercelSandboxTemplateRecord;
-}
-
 type VercelSeedFile = { readonly content: string | Uint8Array; readonly path: string };
+
+/** Create options with the default sandbox timeout applied once. */
+type ResolvedVercelCreateOptions = VercelCreateOptions & { readonly timeout: number };
 
 interface EnsureTemplateInput {
   readonly prepareSandbox?: (sandbox: SandboxSession) => void | Promise<void>;
-  readonly createOptions: VercelCreateOptions;
+  readonly createOptions: ResolvedVercelCreateOptions;
   readonly createSandbox: CreateVercelSandbox;
   readonly loadSandboxModule: () => Promise<VercelModule>;
   readonly log?: (message: string) => void;
   readonly seedFiles: ReadonlyArray<VercelSeedFile>;
-  readonly tags?: Record<string, string>;
   readonly templateKey: string;
 }
 
-async function ensureTemplateWithUnavailableRetry(
-  input: EnsureTemplateInput,
-): Promise<EnsureTemplateOutcome> {
-  try {
-    return await ensureTemplate(input);
-  } catch (error) {
-    if (!isVercelSnapshotUnavailableError(error) && !isVercelSandboxMissingError(error)) {
-      throw error;
-    }
-    input.log?.("cached template disappeared; rebuilding sandbox template");
-    return await ensureTemplate(input);
-  }
-}
-
 /**
- * Creates or refreshes one named Vercel sandbox template and returns the
- * resulting snapshot metadata along with whether an existing snapshot
- * was reused. This runs only from the provider's preparation phase.
+ * Returns the prepared snapshot for one template key. Builds of the same
+ * revision share it through a pointer: a stopped sandbox named by the key,
+ * created from a snapshot that finished preparing. Preparation itself runs
+ * in a private sandbox no other build can see, so nothing under the shared
+ * name ever holds unfinished work, and deleting a stale pointer can never
+ * remove another build's preparation.
  */
-async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplateOutcome> {
+async function ensureTemplate(input: EnsureTemplateInput): Promise<string> {
   const sandboxModule = await input.loadSandboxModule();
-  let sandbox = await getNamedVercelSandbox({
+  const pointer = await getNamedVercelSandbox({
     createOptions: input.createOptions,
     sandboxModule,
     sandboxName: input.templateKey,
   });
-  const tags = resolveVercelSandboxTags(input.createOptions.tags, input.tags);
-  const authorSnapshotId = extractAuthorSnapshotId(input.createOptions);
-
-  if (sandbox !== null && isUnprovisionedTerminalTemplateSandbox(sandbox, authorSnapshotId)) {
-    await sandbox.delete();
-    sandbox = null;
-  }
-
-  if (sandbox === null) {
-    sandbox = await input.createSandbox({
+  const publishedSnapshotId = pointer?.sourceSnapshotId;
+  if (
+    publishedSnapshotId !== undefined &&
+    (await isVercelSnapshotCreated({
+      createOptions: input.createOptions,
       sandboxModule,
-      createOptions: withBaseSetupNetworkPolicy({
-        ...input.createOptions,
-        name: input.templateKey,
-        persistent: true,
-        tags: tags,
-      }),
-    });
-  } else {
-    await ensureVercelSandboxTags(sandbox, tags);
+      snapshotId: publishedSnapshotId,
+    }))
+  ) {
+    input.log?.("reusing prepared sandbox template");
+    return publishedSnapshotId;
   }
 
+  const snapshotId = await prepareTemplateSnapshot(input, sandboxModule);
   /*
-   * A non-empty `currentSnapshotId` normally means "this template was
-   * prewarmed in a previous run — reuse it." But with an author-supplied
-   * `source: snapshot`, the SDK pre-populates `currentSnapshotId` with
-   * the *author's* snapshotId both on a fresh create and on every
-   * subsequent `getNamedSandbox` reuse until we run our own snapshot.
-   * So we ignore that exact value: it's the author's base layer, not a
-   * framework snapshot, and we still owe `ensureSandboxWorkingDirectory`,
-   * preparation, seed file writes, and `sandbox.snapshot()` on top.
+   * The pointer only saves later builds a preparation; this build's snapshot
+   * is already valid. So publishing never fails the build, including when a
+   * build replacing the same stale pointer deletes this one mid-publish.
    */
-  const frameworkSnapshotId =
-    typeof sandbox.currentSnapshotId === "string" &&
-    sandbox.currentSnapshotId.length > 0 &&
-    sandbox.currentSnapshotId !== authorSnapshotId
-      ? sandbox.currentSnapshotId
-      : null;
-
-  if (frameworkSnapshotId !== null) {
-    return {
-      template: {
-        sandboxName: sandbox.name,
-        snapshotId: frameworkSnapshotId,
-        templateKey: input.templateKey,
-      },
-    };
-  }
-
-  input.log?.("preparing base runtime inside sandbox");
-  await ensureVercelSandboxBaseRuntime(sandbox);
-  await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
-
-  const templateSession = buildSandboxSession(
-    createVercelInternalSandboxSession(sandbox, input.createOptions.env),
-    createVercelNetworkPolicySetter(sandbox),
-  );
-
-  await writeVercelSandboxSeedFiles({
-    sandbox,
-    seedFiles: input.seedFiles,
-    session: templateSession,
-  });
-
-  input.log?.("running sandbox preparation");
-  await input.prepareSandbox?.(
-    createLoggingSandboxSession({ log: input.log, session: templateSession }),
-  );
-
-  const snapshot = await sandbox.snapshot();
-  return {
-    template: {
-      sandboxName: sandbox.name,
-      snapshotId: snapshot.snapshotId,
-      templateKey: input.templateKey,
+  await publishTemplatePointer(input, sandboxModule, pointer, snapshotId).catch(
+    (error: unknown) => {
+      input.log?.(`could not publish sandbox template: ${errorMessage(error)}`);
     },
-  };
+  );
+  return snapshotId;
+}
+
+/** Prepares the template in a sandbox only this build knows, and returns its snapshot. */
+async function prepareTemplateSnapshot(
+  input: EnsureTemplateInput,
+  sandboxModule: VercelModule,
+): Promise<string> {
+  /*
+   * Not persistent: a sandbox this build abandons (killed, timed out) is
+   * discarded without an automatic snapshot, and its name is unique, so no
+   * other build ever finds it.
+   */
+  const sandbox = await input.createSandbox({
+    sandboxModule,
+    createOptions: withBaseSetupNetworkPolicy({
+      ...input.createOptions,
+      name: `${input.templateKey}-${randomBytes(4).toString("hex")}`,
+      persistent: false,
+    }),
+  });
+  try {
+    input.log?.("preparing base runtime inside sandbox");
+    await ensureVercelSandboxBaseRuntime(sandbox);
+    await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
+
+    const templateSession = buildSandboxSession(
+      createVercelInternalSandboxSession(sandbox, input.createOptions.env),
+      createVercelNetworkPolicySetter(sandbox),
+    );
+
+    await writeVercelSandboxSeedFiles({
+      sandbox,
+      seedFiles: input.seedFiles,
+      session: templateSession,
+    });
+
+    input.log?.("running sandbox preparation");
+    await input.prepareSandbox?.(
+      createLoggingSandboxSession({ log: input.log, session: templateSession }),
+    );
+
+    // The returned snapshot, not the handle's cached `currentSnapshotId`, which the SDK may not refresh.
+    return (await sandbox.snapshot()).snapshotId;
+  } finally {
+    /*
+     * A snapshot outlives its source sandbox, so the private sandbox is never
+     * needed again. Failing to delete it doesn't change this build's result:
+     * it's not persistent, and no other build looks it up.
+     */
+    await sandbox.delete().catch((error: unknown) => {
+      input.log?.(`could not delete sandbox ${sandbox.name}: ${errorMessage(error)}`);
+    });
+  }
+}
+
+/**
+ * Records a finished snapshot under the template key, replacing a stale
+ * pointer. When another build published first, its snapshot is as valid as
+ * this one, and this build keeps its own: there is nothing to read back.
+ */
+async function publishTemplatePointer(
+  input: EnsureTemplateInput,
+  sandboxModule: VercelModule,
+  stalePointer: VercelSandbox | null,
+  snapshotId: string,
+): Promise<void> {
+  if (stalePointer !== null) {
+    try {
+      await stalePointer.delete();
+    } catch (error) {
+      // Another build that saw the same stale pointer deleted it first.
+      if (!isVercelSandboxMissingError(error)) throw error;
+    }
+  }
+  // A snapshot source excludes `image`, `runtime`, and any authored source.
+  const {
+    image: _image,
+    runtime: _runtime,
+    source: _source,
+    ...createOptions
+  } = input.createOptions;
+  let pointer: VercelSandbox;
+  try {
+    pointer = await input.createSandbox({
+      sandboxModule,
+      createOptions: {
+        ...createOptions,
+        name: input.templateKey,
+        persistent: false,
+        source: { snapshotId, type: "snapshot" },
+      },
+    });
+  } catch (error) {
+    if (isVercelSandboxNameConflictError(error)) return;
+    throw error;
+  }
+  await stopVercelSandbox(pointer);
 }
 
 interface EnsureSessionInput {
@@ -678,38 +709,6 @@ async function resolveVercelWritePath(
     throw new Error(`Failed to resolve Vercel Sandbox write path: ${path}`);
   }
   return resolved;
-}
-
-function isUnprovisionedTerminalTemplateSandbox(
-  sandbox: VercelSandbox,
-  authorSnapshotId: string | undefined,
-): boolean {
-  const currentSnapshotId = sandbox.currentSnapshotId;
-  if (
-    typeof currentSnapshotId === "string" &&
-    currentSnapshotId.length > 0 &&
-    currentSnapshotId !== authorSnapshotId
-  ) {
-    return false;
-  }
-
-  return (
-    sandbox.status === "aborted" || sandbox.status === "failed" || sandbox.status === "stopped"
-  );
-}
-
-/**
- * Pulls the snapshotId out of an author-supplied `source: { type:
- * "snapshot", ... }`. Returns undefined for git/tarball sources or when
- * no source was supplied — those don't seed `currentSnapshotId` with a
- * pre-existing value the way snapshot sources do.
- */
-function extractAuthorSnapshotId(createOptions: VercelCreateOptions): string | undefined {
-  const source = createOptions.source;
-  if (source?.type === "snapshot" && typeof source.snapshotId === "string") {
-    return source.snapshotId;
-  }
-  return undefined;
 }
 
 /**

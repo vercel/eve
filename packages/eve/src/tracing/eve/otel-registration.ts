@@ -12,10 +12,10 @@ import {
 import { registerOTel } from "#compiled/@vercel/otel/index.js";
 import type { Configuration, SpanProcessor, SpanProcessorOrName } from "./otel-configuration.js";
 
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { OtelConfiguration } from "./otel-configuration.js";
-import { type Attributes } from "#compiled/@eve/tracing/index.js";
-import { invocationName } from "#compiled/@eve/tracing/otel.js";
+import { type Attributes } from "#compiled/@vercel/agent-runs/index.js";
+import { invocationName } from "#compiled/@vercel/agent-runs/otel.js";
 export type SamplingOperation = { readonly name: string; readonly attributes?: Attributes };
 
 import { conversationIdFromContext } from "#tracing/eve/conversation-context.js";

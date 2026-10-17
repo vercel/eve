@@ -22,6 +22,8 @@ import {
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
+import { isHookCancellableEvent } from "#execution/session/turn-event-handler.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   publishTransition,
   saveTransition,
@@ -92,24 +94,37 @@ export interface PublishedSessionEvents {
  * Publishes a session step's own events, such as a workflow tool's
  * `action.partial`, exactly as a turn publishes its events. Call from a step
  * and adopt the result: hooks run in the session's context and may change it.
+ * Set `canCancelTurn` only for events of a running turn. Cancellation is
+ * returned with the updated state after the hooks finish, not thrown across
+ * the durable step boundary.
  */
 export async function publishSessionEvents(
   target: SessionStepState,
   events: readonly UnstampedMessageStreamEvent[],
-): Promise<PublishedSessionEvents> {
-  return await publishEventsFromStep(target, "own", events);
+  options?: { readonly canCancelTurn?: boolean },
+): Promise<PublishedSessionEvents & { readonly cancelled: boolean }> {
+  const hookCancellation = new AbortController();
+  const published = await publishEventsFromStep(
+    target,
+    "own",
+    events,
+    options?.canCancelTurn ? () => hookCancellation.abort(new TurnCancelledError()) : undefined,
+  );
+  return { ...published, cancelled: hookCancellation.signal.aborted };
 }
 
 async function publishEventsFromStep(
   target: SessionStepState,
   origin: SessionEventOrigin,
   events: readonly UnstampedMessageStreamEvent[],
+  cancelTurn: (() => void) | undefined,
 ): Promise<PublishedSessionEvents> {
   if (events.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
   }
   const restored = await restoreSessionStep(target);
   const { published } = await publishFromSessionStep(restored, {
+    cancelTurn,
     origin,
     async publish(emit) {
       for (const event of events) await emit(event);
@@ -145,6 +160,8 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
  */
 export interface SessionStepPublication<T, R, S extends HarnessSessionBase = HarnessSessionBase> {
   readonly origin: SessionEventOrigin;
+  /** Stops the running turn the events belong to, for a hook's `ctx.cancel()`. */
+  readonly cancelTurn?: () => void;
   /** Where a relayed input batch came from; the channel adapter and its forwarding see it. */
   readonly inputSource?: string;
   /** Emits the step's events in the session's context scope. */
@@ -238,6 +255,7 @@ async function publishInSessionScope<T>(
       : undefined;
 
   const publisher = openSessionEventPublisher({
+    cancelTurn: publication.cancelTurn,
     ctx,
     inputSource: publication.inputSource,
     origin: publication.origin,
@@ -279,8 +297,8 @@ export interface SessionEventDispatcher {
   /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
   readonly adapterCtx: ChannelAdapterContext;
   /**
-   * Runs the stream-event hooks for a written event. Only a turn step passes
-   * `cancelTurn`; see `turn-event-handler.ts`.
+   * Runs the stream-event hooks for a written event. `cancelTurn` is passed
+   * only for an event of a running turn; see `turn-event-handler.ts`.
    */
   runHooks(event: MessageStreamEvent, cancelTurn?: () => void): Promise<void>;
 }
@@ -308,6 +326,7 @@ export interface SessionEventPublisher {
 }
 
 export function openSessionEventPublisher(input: {
+  readonly cancelTurn?: () => void;
   readonly ctx: ContextContainer;
   readonly origin: SessionEventOrigin;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -331,7 +350,11 @@ export function openSessionEventPublisher(input: {
     writer,
     emit,
     async publish(event) {
-      await dispatcher.runHooks(await emit(event));
+      const emitted = await emit(event);
+      await dispatcher.runHooks(
+        emitted,
+        isHookCancellableEvent(emitted.type) ? input.cancelTurn : undefined,
+      );
     },
   };
 }

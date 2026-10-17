@@ -1,5 +1,53 @@
 # eve
 
+## 0.80.1
+
+### Patch Changes
+
+- a3654ef: Compaction now keeps the start and end of an oversized tool result instead of only its start, so failures, errors, and the `bash` exit code at the end of the output survive.
+- 5666d2f: Hosted builds now fail with a clear error when the build output imports a `build.externalDependencies` package, or a subpath of one, that Node's ESM resolver does not resolve to a file inside the output. Previously the build succeeded and the deployed function crashed at boot with `ERR_MODULE_NOT_FOUND` (for example when only a workspace package installed the dependency) or `ERR_PACKAGE_PATH_NOT_EXPORTED` (when the copied version does not export the imported subpath). The error names the import and the app `package.json` to add the package to.
+- c1b079c: Publish framework-neutral tracing as `@vercel/agent-runs` with singular `createAgentRun` and `AgentRun` APIs; eve still bundles it without a new runtime dependency. Also fix a development-server build failure in npm-installed apps when generating source maps.
+- 0857ff4: Reject OpenAPI path parameter values equal to `.` or `..` before sending requests, so URL normalization cannot change the intended route. This validation also applies to application-provided arguments.
+
+## 0.80.0
+
+### Minor Changes
+
+- 4210766: `git({ github })` accepts an optional `authorize` callback that runs once per `gh` tool invocation with the caller, declared repository, and repository-scoped token; returning `false` blocks the command. It gates caller/repository access, not individual API requests or operations, and allowed commands use the app token's permissions rather than the caller's GitHub permissions.
+- 3fea287: Dropped traces and policies excluding either content direction now request Workflow data deletion when the run ends; set `experimental.workflow.retention: "default"` to retain completed transcripts independently of tracing. Expired session-history reads return `410 session_expired` before streaming, including when the World retains purged chunk records.
+
+### Patch Changes
+
+- a5e33ec: Root sessions now accept empty model responses with `finishReason: "stop"` without retrying them or reporting a model-call failure. Recovery for delegated sessions, incomplete streams, and empty non-`stop` responses is unchanged.
+- aa3d3fc: Scheduled sessions and their locally delegated tasks can now use dynamic scheduling tools and the schedule client to manage schedules, including conditional updates or disabling future occurrences. Collection scope authorization and tool approval policies still apply.
+- b1de5d3: eve now vendors chat 4.42.0 and requires the optional `chat` peer at `^4.42.0`. chat 4.41 broke Workflow DevKit workflows in host apps (vercel/chat#969).
+- 1f410e9: Dynamic schedule collections can defer their generated management tools to the catalog with `tool: "deferred"`, keeping them out of the model's initial tool list while still making them searchable and callable.
+- a475f2d: Dynamic tools now capture locals bound by an array rest element (`const [first, ...rest] = ...`) or a rest parameter (`(...args) =>`). Before, the hoisted callback threw `ReferenceError` and the resolver's tools were dropped.
+- 6d67e9a: Add experimental MCP connection event callback definitions and preserve the Connect runtime events bridge while keeping compiler metadata serializable.
+- 3aa7dc5: Add experimental Connect-managed event subscriptions and per-connection webhook receivers. Durable event handlers run independently of conversation sessions; only an explicit `attachSession(...).send(...)` enters a session. Each watch saves its binding before subscribing, and each delivery runs independently under that binding. Subscribe with `ttlMs` in milliseconds or `null` to watch until stopped; `expiresAt` is returned as the calculated deadline. Requires `@vercel/connect@2.5.2` or later.
+  
+  Return immediately from the durable sleep tool when steering has already interrupted its execution.
+- 6d67e9a: Keep a session's deadline stable across workflow replay and compaction handoffs.
+- 5243d1d: `web_fetch` now converts HTML pages served without a `Content-Type` header instead of returning truncated raw source.
+
+## 0.79.2
+
+### Patch Changes
+
+- 910705c: An agent or `serve` tool call with an empty `taskId` now starts a new task instead of failing with `UNKNOWN_TASK`. Some models send `""` for the optional `taskId` rather than omitting it.
+- 3ac1bd0: `eve start` no longer keeps the server's stdout and stderr in memory after startup. Output is still forwarded, and an unexpected exit no longer repeats the full log history in its error.
+- 4c8ffa6: Keep successful tool calls completed when their output includes `code` and `message` fields.
+- ee0c6c0: `ctx.cancel()` in a `message.received` hook now cancels the turn when the message is a plain-text answer to a pending `ask_question` or `ctx.ask()` question. The question resolves as `cancelled` and the tool call never receives the text. Before, eve logged a warning and delivered the answer. `ctx.cancel()` in an `action.partial` hook for a workflow tool's report now cancels the turn waiting on that tool too.
+- bc4edd9: Attachments no longer fail a step when the session's sandbox cannot be resumed, for example when a follow-up lands on another replica. Earlier attachments and tool-result files in history reach the model as a "FileNotFound" note, and new inbound attachments and tool-returned files become a "could not be stored" note. Tools that use the sandbox still report the resume error.
+- 2de4011: Fail fast with an actionable error when the project has an unsupported `microsandbox` version (such as 0.7), instead of every sandbox operation throwing `isInstalled is not a function`.
+- 394ed22: Start built, managed eve agents when a local production Next.js server loads its configuration, so `next start` can serve eve routes.
+- f6bf73e: Keep every property name in `eve__search` tool signatures that run past the length cap. A long signature now drops its property descriptions before any property name, so the model no longer misses fields a large MCP tool such as Linear's `save_issue` supports.
+- b382594: Compaction no longer re-caps a tool result it already capped. A capped result now fits the size limit it was measured against, so later compactions leave it as it is instead of nesting another truncation notice and keeping less of the original content. A summary written after a cap also sees the whole content the capped result kept.
+- a1c18f5: Teams group chats and channels no longer show connection sign-in links or confirmation codes in the shared thread. The card now has a **Sign in** button, and Teams shows the link only to the person who has to sign in, so another member can't connect their own account under the requester's identity.
+- 9f3a634: Snapshot retained tracing arguments and errors so later mutations cannot introduce private content into telemetry or checkpoints. Apply accepted delegation capture ceilings when re-entering durable turns, including through `resume()`.
+- ec2862e: When a tool throws, the error on its `tool.call.failed` instrumentation event now keeps the thrown error's `name`, such as `QuotaError`, instead of always reading `Error`. The `action.result` stream event reports the same name as `error.name`.
+- c1880f4: Parse a workflow tool's result as JSON when its run completes, the way a local tool's result already is. A tool that returns `ctx.ask()`'s answer directly, after the person picked an option, no longer fails the turn with `Cannot convert undefined or null to object`: undefined properties are omitted, a tool that returns nothing reports `null`, and the same applies to `ctx.reply()` in `serve` tools. A result JSON can't carry, such as a `Date` or `Map`, now fails the call with a serialization error instead of reaching the model as `{}`.
+
 ## 0.79.1
 
 ### Patch Changes

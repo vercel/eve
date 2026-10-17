@@ -676,9 +676,10 @@ describe("emitStreamContent action requests", () => {
     expect(events).toEqual([
       expect.objectContaining({
         data: expect.objectContaining({
-          error: { code: "ACTION_RESULT_FAILED", message },
+          error: { code: "ACTION_RESULT_FAILED", message, name: "TypeError" },
           result: {
             callId: "call-bad",
+            errorName: "TypeError",
             isError: true,
             kind: "tool-result",
             output: message,
@@ -735,9 +736,10 @@ describe("emitStreamContent action requests", () => {
     expect(events).toEqual([
       expect.objectContaining({
         data: expect.objectContaining({
-          error: { code: "ACTION_RESULT_FAILED", message },
+          error: { code: "ACTION_RESULT_FAILED", message, name: "TypeError" },
           result: {
             callId: "call-bad",
+            errorName: "TypeError",
             isError: true,
             kind: "tool-result",
             output: message,
