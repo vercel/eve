@@ -17,6 +17,7 @@ import {
   grantedApprovals,
   openLimit,
   queueInput,
+  refusedDeliveries,
   requireSignIn,
   settleApprovals,
   settleLimit,
@@ -113,16 +114,18 @@ export async function admitHumanInput(
   // refused.
   const check = checkResponders(step.view(), answered, Date.now());
   await step.apply(admitAnswers(step.view(), { check, delivery: answered }));
+  // A refused delivery is settled, so the turn doesn't carry it on, or settle it again.
+  const rest = withoutDeliveries(answered, refusedDeliveries(check, answered));
   if (Object.keys(check.weigh).length > 0) {
     // The answers are recorded before any policy runs: the next step weighs them, with the rest
     // of the delivery.
-    await step.apply(queueInput(step.view(), compactInput(withoutResponses(answered))));
+    await step.apply(queueInput(step.view(), compactInput(rest)));
     return { kind: "stop", result: { session: step.session } };
   }
   const consumedMessage = answered?.messageConsumed === true;
   return {
     consumedMessage,
-    input: withoutResponses(answered),
+    input: rest,
     kind: "run",
     message: consumedMessage ? undefined : (delivered.displayMessage ?? delivered.input?.message),
     opensTurn: hasTurnInput(delivered.input) || hasTurnInput(steered),
@@ -376,6 +379,17 @@ async function withdrawSteeredSignIns(
       `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead. Ask to sign in again only if the new message still needs it.`,
     ],
   };
+}
+
+function withoutDeliveries(
+  input: ResolvedStepInput | undefined,
+  settled: ReadonlySet<string>,
+): HarnessStepInput | undefined {
+  const rest = withoutResponses(input);
+  if (rest === undefined || settled.size === 0) return rest;
+  const deliveries = rest.deliveries?.filter(({ deliveryId }) => !settled.has(deliveryId));
+  const { deliveries: _all, ...other } = rest;
+  return deliveries === undefined || deliveries.length === 0 ? other : { ...other, deliveries };
 }
 
 /** Whether the input carries user-facing turn input. */

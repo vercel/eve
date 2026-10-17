@@ -1,6 +1,6 @@
 import { sessionView } from "#harness/session-machine/commit.js";
 import { ownOpenRequestIds, runtimeWait, storedProjection } from "#harness/session-machine/view.js";
-import { hasQueuedTurnInput, holdsMessages } from "#harness/step/park.js";
+import { hasQueuedTurnInput } from "#harness/step/park.js";
 import { readTaskTable, tasksWithResults, workingTasks } from "#execution/tasks/table.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -80,7 +80,7 @@ export function readStepState(session: Pick<HarnessSession, "history" | "state">
   const calls = runtimeWait(session.state);
   return {
     ended: tables.session.status === "ended",
-    queuedInput: hasQueuedTurnInput(machine) && !holdsMessages(machine),
+    queuedInput: hasQueuedTurnInput(machine),
     requestIds: [...ownOpenRequestIds(machine)],
     signIns: machine.signIns,
     turnOpen: turnId !== undefined,
@@ -123,8 +123,8 @@ export function awaitsModel(history: readonly HarnessModelMessage[]): boolean {
 export function decideStep(state: StepState): StepDecision {
   if (state.ended) return { kind: "end" };
   if (!state.turnOpen) return { kind: "park" };
-  // Input the turn holds steers past what it asks, and answers wait to be weighed.
-  if (state.queuedInput || state.unweighedAnswers) return { kind: "run" };
+  // Answers to what the turn asks wait to be weighed.
+  if (state.unweighedAnswers) return { kind: "run" };
   if (state.requestIds.length > 0 || state.signIns.length > 0) {
     const attemptIds = state.signIns.flatMap((signIn) =>
       signIn.attemptId === undefined ? [] : [signIn.attemptId],
@@ -135,7 +135,9 @@ export function decideStep(state: StepState): StepDecision {
     };
   }
   if (state.calls !== undefined) return { kind: "wait", pause: { on: "calls", ...state.calls } };
-  if (state.unreadInput) return { kind: "run" };
+  // Input the turn holds arrived before what it waits on, so it waits behind it: only a new
+  // message steers. Otherwise the step it runs couldn't take it, and the turn would spin.
+  if (state.queuedInput || state.unreadInput) return { kind: "run" };
   // The turn rule: no turn ends while its tasks work, so the turn waits for one to settle.
   if (state.workingTaskIds.length > 0) {
     return { kind: "wait", pause: { on: "tasks", taskIds: state.workingTaskIds } };

@@ -1,6 +1,7 @@
 import { EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-protocol.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import { settleCancelDeliveryStep } from "#execution/session/settle-cancel-delivery-step.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -221,6 +222,8 @@ export class SessionExecution {
         return await this.finishCancelledTurn(turn);
       }
 
+      // A cancel that arrived as the turn ended found nothing left to stop.
+      if (ending || settles) await this.settleLateCancel(turn);
       switch (result.action) {
         case "done":
           return {
@@ -387,6 +390,15 @@ export class SessionExecution {
    */
   async cancelTurnWork(): Promise<void> {
     await cancelWorkingTasks(this.input.cursor, "turn-cancelled", { turnCalls: true });
+  }
+
+  private async settleLateCancel(turn: ActiveTurn): Promise<void> {
+    const by = turn.cancelledBy;
+    if (by === undefined) return;
+    const control = controlDeliveryOf(by);
+    await this.input.cursor.advance((state) =>
+      settleCancelDeliveryStep({ ...state, control, outcome: "ignored" }),
+    );
   }
 
   /** `session.cancel()` stops the turn, the calls it waits on, and every working task. */

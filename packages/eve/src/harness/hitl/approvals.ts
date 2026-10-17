@@ -180,18 +180,31 @@ export function admitAnswers(
   }
   for (const responseId of check.admit) responses.admit(responseId);
   const refusal = check.refused.map(({ reason }) => reason).join("\n");
-  const refused: SessionEvent[] =
-    check.refused.length === 0
-      ? []
-      : (delivery?.deliveries ?? []).map(({ deliveryId }) => ({
-          data: { deliveryId, outcome: "refused", reason: refusal },
-          type: "delivery.settled",
-        }));
+  const refused: SessionEvent[] = [...refusedDeliveries(check, delivery)].map((deliveryId) => ({
+    data: { deliveryId, outcome: "refused", reason: refusal },
+    type: "delivery.settled",
+  }));
   return {
     events: [...responses.facts(), ...refused],
     responders: { upsert: check.weigh },
     turn: view.turn,
   };
+}
+
+/**
+ * The deliveries that carried a refused answer. A step's input can hold others, such as an answer
+ * of the same batch that already stands, and those aren't refused with it.
+ */
+export function refusedDeliveries(
+  check: ResponderCheck,
+  delivery: ResolvedStepInput | undefined,
+): ReadonlySet<string> {
+  const refused = new Set(check.refused.map(({ responseId }) => responseId));
+  return new Set(
+    (delivery?.answers ?? []).flatMap((answer) =>
+      refused.has(answer.responseId) && answer.deliveryId !== undefined ? [answer.deliveryId] : [],
+    ),
+  );
 }
 
 /** The answer that stands for each open interaction: its latest admitted response. */

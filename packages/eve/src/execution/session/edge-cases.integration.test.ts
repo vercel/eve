@@ -95,6 +95,7 @@ const ALICE = {
   principalId: "alice",
   principalType: "user" as const,
 };
+const BOB = { ...ALICE, principalId: "bob" };
 
 type Prompt = LanguageModelV4CallOptions["prompt"];
 type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
@@ -226,7 +227,7 @@ interface Session {
   ) => Promise<Stage>;
   readonly send: (message: string) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
-  readonly answer: (interactionId: string, optionId: string) => Promise<void>;
+  readonly answer: (interactionId: string, optionId: string, by?: typeof ALICE) => Promise<void>;
   readonly control: (
     kind: "cancel" | "clear" | "compact" | "reset",
     extra?: object,
@@ -342,9 +343,9 @@ async function withSession(
               ? [event.data.interactionId]
               : [],
           ),
-        async answer(interactionId, optionId) {
+        async answer(interactionId, optionId, by = ALICE) {
           await resumeHook(commandInbox, {
-            auth: ALICE,
+            auth: by,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { answers: [{ interactionId, optionId }] },
@@ -909,6 +910,155 @@ describe("approvals off the happy path", () => {
     ]);
     expect(settlements(events)).toEqual(["call_deploy:rejected"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("refuses each answer from someone who may not approve, then runs the call on the turn's own", async () => {
+    const { events, ran } = await withSession(
+      "edge-refused-twice",
+      {
+        message: "Deploy.",
+        model: scriptedModel(({ results }) =>
+          results.length === 0 ? [{ toolName: "deploy", toolCallId: "call_deploy" }] : "Deployed.",
+        ),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("the approval");
+        const [approval] = session.approvals();
+        const refusal = (label: string) =>
+          session.until(
+            label,
+            (event) => event.type === "delivery.settled" && event.data.outcome === "refused",
+          );
+        await session.answer(approval!, "approve", BOB);
+        await refusal("Bob's first answer refused");
+        await session.answer(approval!, "approve", BOB);
+        await refusal("Bob's second answer refused");
+        await session.answer(approval!, "approve");
+        await session.next("the reply");
+      },
+    );
+    expect(ran).toEqual(["deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    const refused = ofType(events, "delivery.settled").filter(
+      (event) => event.data.outcome === "refused",
+    );
+    expect(new Set(refused.map((event) => event.data.deliveryId)).size).toBe(2);
+    expect(refused).toHaveLength(2);
+  });
+
+  it("refuses only the answer someone else gives, while the person's own answer to its batch stands", async () => {
+    const { events, ran } = await withSession(
+      "edge-refused-in-batch",
+      {
+        message: "Deploy twice.",
+        model: scriptedModel(({ results }) =>
+          results.length === 0
+            ? [
+                { toolName: "deploy", toolCallId: "call_a" },
+                { toolName: "deploy", toolCallId: "call_b" },
+              ]
+            : "Deployed.",
+        ),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("the approvals");
+        const [first, second] = session.approvals();
+        await session.answer(first!, "approve");
+        await session.until(
+          "the first answer stands",
+          (event) => event.type === "delivery.settled" && event.data.outcome === "awaiting-input",
+        );
+        await session.answer(second!, "approve", BOB);
+        await session.until(
+          "Bob's answer refused",
+          (event) => event.type === "delivery.settled" && event.data.outcome === "refused",
+        );
+        await session.answer(second!, "approve");
+        await session.next("the reply");
+      },
+    );
+    expect(ran).toEqual(["deploy", "deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    expect(
+      ofType(events, "delivery.settled").filter((event) => event.data.outcome === "refused"),
+    ).toHaveLength(1);
+  });
+
+  it("waits on the next approvals after a message steered past the last ones", async () => {
+    let asked = 0;
+    const { events, ran } = await withSession(
+      "edge-steer-then-ask",
+      {
+        message: "Deploy twice.",
+        model: scriptedModel(({ results }) => {
+          if (results.length === 0 || asked === 1) {
+            asked += 1;
+            return [
+              { toolName: "deploy", toolCallId: `call_${asked}a` },
+              { toolName: "deploy", toolCallId: `call_${asked}b` },
+            ];
+          }
+          return "Deployed.";
+        }),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("the first approvals");
+        const [first] = session.approvals();
+        await session.answer(first!, "approve");
+        await session.until(
+          "the first answer stands",
+          (event) => event.type === "delivery.settled" && event.data.outcome === "awaiting-input",
+        );
+        await session.send("Actually, go ahead with what you have.");
+        let opened = 0;
+        await session.until("the next approvals", (event) => {
+          if (event.type === "interaction.opened") opened += 1;
+          return event.type === "turn.paused" && opened === 2;
+        });
+      },
+    );
+    expect(ran).toEqual(["deploy"]);
+    expect(ofType(events, "turn.paused").at(-1)?.data.awaiting).toHaveLength(2);
+  });
+
+  it("settles a cancel that arrives as its turn ends as ignored", async () => {
+    const hold = gate();
+    const held = gate();
+    const { events } = await withSession(
+      "edge-cancel-at-end",
+      {
+        hooks: {
+          hold: defineHook({
+            events: {
+              "turn.settled": async () => {
+                held.open();
+                await hold.wait;
+              },
+            },
+          }),
+        },
+        message: "Hi.",
+        model: scriptedModel(() => "Hello."),
+        tools: [],
+      },
+      async (session) => {
+        await held.wait;
+        await session.control("cancel");
+        hold.open();
+        await session.until(
+          "the cancel settles",
+          (event) => event.type === "delivery.settled" && event.data.deliveryId === "control_0",
+        );
+      },
+    );
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    expect(
+      ofType(events, "delivery.settled").find((event) => event.data.deliveryId === "control_0")
+        ?.data.outcome,
+    ).toBe("ignored");
   });
 
   it("runs a call once when its approval is answered twice; the late answer reads as text", async () => {
