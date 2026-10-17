@@ -652,7 +652,7 @@ describe("drained Nitro dev server", () => {
 
   // #5001: a busy parent can hand the next request to a pooled worker socket
   // the worker already closed on its keep-alive timeout.
-  it.fails("forwards a request after the parent stalls past the worker keep-alive timeout", async () => {
+  it("forwards a request after the parent stalls past the worker keep-alive timeout", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-keep-alive-"));
     const entry = join(appRoot, "worker.mjs");
     await writeFile(entry, 'export default { fetch: () => new Response("worker") };\n', "utf8");
