@@ -2,7 +2,7 @@ import { defineDynamic, defineOpenAPIConnection } from "eve/connections";
 
 export default defineDynamic({
   events: {
-    "session.started": () => ({
+    beforeSession: () => ({
       "dynamic-catalog": defineOpenAPIConnection({
         baseUrl: "https://catalog.example.com",
         description: "Caller-specific product catalog.",

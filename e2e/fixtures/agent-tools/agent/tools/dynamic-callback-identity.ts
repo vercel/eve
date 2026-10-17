@@ -4,7 +4,7 @@ import metadataProvider from "../channels/metadata-provider";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) => {
+    beforeSession: (_event, ctx) => {
       if (!isChannel(ctx.channel, metadataProvider)) return null;
       const topic = ctx.channel.metadata.topic;
       if (topic === "callback-guarded") {

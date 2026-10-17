@@ -1,3 +1,4 @@
+import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { loadContext } from "#context/container.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
@@ -46,9 +47,9 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
       },
     },
     channel: {
-      kind: context.get(ChannelInstrumentationKey)?.kind,
+      kind: normalizeInstrumentationChannelKind(context.get(ChannelInstrumentationKey)?.kind),
       continuationToken: context.get(ContinuationTokenKey),
-      metadata: context.get(ChannelInstrumentationKey)?.metadata,
+      metadata: context.get(ChannelInstrumentationKey)?.metadata ?? {},
     },
     application: identity.application,
     collection: identity.collection,

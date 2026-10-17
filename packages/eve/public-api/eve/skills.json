@@ -1,6 +1,8 @@
 [
   "DynamicResolveContext",
   "DynamicSentinel",
+  "DynamicSkillEvents",
+  "DynamicSkillResult",
   "NamedSkillDefinition",
   "SkillDefinition",
   "SkillFileContent",

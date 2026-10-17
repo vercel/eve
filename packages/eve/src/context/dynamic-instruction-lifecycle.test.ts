@@ -60,7 +60,7 @@ function makeEvent(type: string): DynamicSessionOrTurnEvent {
 describe("resolveDynamicInstructions", () => {
   it("stores session-scoped instructions on durable key", async () => {
     const ctx = createCtx();
-    const resolver = createResolver("context", ["session.started"], () =>
+    const resolver = createResolver("context", ["beforeSession"], () =>
       defineInstructions({ markdown: "You are a helpful assistant." }),
     );
 
@@ -81,7 +81,7 @@ describe("resolveDynamicInstructions", () => {
 
   it("stores turn-scoped instructions on turn durable key", async () => {
     const ctx = createCtx();
-    const resolver = createResolver("context", ["turn.started"], () =>
+    const resolver = createResolver("context", ["beforeTurn"], () =>
       defineInstructions({ markdown: "Turn context." }),
     );
 
@@ -100,7 +100,7 @@ describe("resolveDynamicInstructions", () => {
   it("queues user-role instructions for durable history instead of system context", async () => {
     const ctx = createCtx();
     prepareDynamicInstructionPreamble(ctx, [{ content: "Static user context.", role: "user" }]);
-    const resolver = createResolver("context", ["session.started"], () =>
+    const resolver = createResolver("context", ["beforeSession"], () =>
       defineInstructions({ content: "Dynamic user context.", role: "user" }),
     );
 
@@ -124,12 +124,12 @@ describe("resolveDynamicInstructions", () => {
     const ctx = createCtx();
     const snapshots: string[][] = [];
     prepareDynamicInstructionPreamble(ctx, [{ content: "Static user.", role: "user" }]);
-    const sessionResolver = createResolver("session", ["session.started"], (_event, rawCtx) => {
+    const sessionResolver = createResolver("session", ["beforeSession"], (_event, rawCtx) => {
       const resolveCtx = rawCtx as DynamicResolveContext;
       snapshots.push(resolveCtx.messages.map((message) => String(message.content)));
       return defineInstructions({ content: "Session user.", role: "user" });
     });
-    const turnResolver = createResolver("turn", ["turn.started"], (_event, rawCtx) => {
+    const turnResolver = createResolver("turn", ["beforeTurn"], (_event, rawCtx) => {
       const resolveCtx = rawCtx as DynamicResolveContext;
       snapshots.push(resolveCtx.messages.map((message) => String(message.content)));
       return defineInstructions({ content: "Turn user.", role: "user" });
@@ -158,7 +158,7 @@ describe("resolveDynamicInstructions", () => {
   it("skips resolvers that do not match the event type", async () => {
     const ctx = createCtx();
     const handler = vi.fn(() => defineInstructions({ markdown: "nope" }));
-    const resolver = createResolver("context", ["session.started"], handler);
+    const resolver = createResolver("context", ["beforeSession"], handler);
 
     await resolveDynamicInstructions({
       ctx,
@@ -172,7 +172,7 @@ describe("resolveDynamicInstructions", () => {
 
   it("skips null returns without error", async () => {
     const ctx = createCtx();
-    const resolver = createResolver("context", ["session.started"], () => null);
+    const resolver = createResolver("context", ["beforeSession"], () => null);
 
     await resolveDynamicInstructions({
       ctx,
@@ -187,7 +187,7 @@ describe("resolveDynamicInstructions", () => {
   it("logs and skips unbranded return values", async () => {
     const logs = captureLogRecords();
     const ctx = createCtx();
-    const resolver = createResolver("context", ["session.started"], () => ({
+    const resolver = createResolver("context", ["beforeSession"], () => ({
       markdown: "not branded",
     }));
 
@@ -211,7 +211,7 @@ describe("resolveDynamicInstructions", () => {
   it("logs and skips throwing resolvers", async () => {
     const logs = captureLogRecords();
     const ctx = createCtx();
-    const resolver = createResolver("broken", ["session.started"], () => {
+    const resolver = createResolver("broken", ["beforeSession"], () => {
       throw new Error("resolver exploded");
     });
 
@@ -233,10 +233,10 @@ describe("resolveDynamicInstructions", () => {
 
   it("unions messages from different resolver slugs", async () => {
     const ctx = createCtx();
-    const r1 = createResolver("a", ["turn.started"], () =>
+    const r1 = createResolver("a", ["beforeTurn"], () =>
       defineInstructions({ markdown: "From A." }),
     );
-    const r2 = createResolver("b", ["turn.started"], () =>
+    const r2 = createResolver("b", ["beforeTurn"], () =>
       defineInstructions({ markdown: "From B." }),
     );
 
@@ -256,7 +256,7 @@ describe("resolveDynamicInstructions", () => {
   it("replaces messages from the same resolver slug on re-dispatch", async () => {
     const ctx = createCtx();
     let version = "v1";
-    const resolver = createResolver("context", ["turn.started"], () =>
+    const resolver = createResolver("context", ["beforeTurn"], () =>
       defineInstructions({ markdown: version }),
     );
 
@@ -284,7 +284,7 @@ describe("resolveDynamicInstructions", () => {
     const logs = captureLogRecords();
     const ctx = createCtx();
     let result: "system" | "user" | "throw" = "system";
-    const resolver = createResolver("context", ["turn.started"], () => {
+    const resolver = createResolver("context", ["beforeTurn"], () => {
       if (result === "throw") throw new Error("failed");
       return defineInstructions({
         content: `${result} context`,
@@ -335,7 +335,7 @@ describe("resolveDynamicInstructions", () => {
     const logs = captureLogRecords();
     const ctx = createCtx();
     let throws = false;
-    const resolver = createResolver("context", ["session.started"], () => {
+    const resolver = createResolver("context", ["beforeSession"], () => {
       if (throws) throw new Error("failed");
       return defineInstructions({ content: "Durable session context." });
     });
@@ -368,7 +368,7 @@ describe("resolveDynamicInstructions", () => {
   it("materializes no message for blank user content", async () => {
     const ctx = createCtx();
     prepareDynamicInstructionPreamble(ctx, []);
-    const resolver = createResolver("context", ["turn.started"], () =>
+    const resolver = createResolver("context", ["beforeTurn"], () =>
       defineInstructions({ content: "  \n", role: "user" }),
     );
 
@@ -386,7 +386,7 @@ describe("resolveDynamicInstructions", () => {
   it("null return clears the resolver's slot", async () => {
     const ctx = createCtx();
     let enabled = true;
-    const resolver = createResolver("context", ["turn.started"], () =>
+    const resolver = createResolver("context", ["beforeTurn"], () =>
       enabled ? defineInstructions({ markdown: "Instructions." }) : null,
     );
 
@@ -413,7 +413,7 @@ describe("resolveDynamicInstructions", () => {
 
   it("session instructions survive step boundary (durable)", async () => {
     const ctx = createCtx();
-    const resolver = createResolver("context", ["session.started"], () =>
+    const resolver = createResolver("context", ["beforeSession"], () =>
       defineInstructions({ markdown: "Session context." }),
     );
 
@@ -435,10 +435,10 @@ describe("resolveDynamicInstructions", () => {
 
   it("session + turn instructions are ordered session first", async () => {
     const ctx = createCtx();
-    const sessionResolver = createResolver("session-ctx", ["session.started"], () =>
+    const sessionResolver = createResolver("session-ctx", ["beforeSession"], () =>
       defineInstructions({ markdown: "Session." }),
     );
-    const turnResolver = createResolver("turn-ctx", ["turn.started"], () =>
+    const turnResolver = createResolver("turn-ctx", ["beforeTurn"], () =>
       defineInstructions({ markdown: "Turn." }),
     );
 
@@ -463,7 +463,7 @@ describe("resolveDynamicInstructions", () => {
 
   it("stores durable messages that survive serialization", async () => {
     const ctx = createCtx();
-    const resolver = createResolver("ctx", ["session.started"], () =>
+    const resolver = createResolver("ctx", ["beforeSession"], () =>
       defineInstructions({ markdown: "Durable." }),
     );
 

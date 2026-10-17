@@ -1,3 +1,4 @@
+import { dynamicEventKey, invokeDynamicResolver } from "#dynamic/definition.js";
 import type { ModelMessage } from "ai";
 
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
@@ -20,7 +21,7 @@ import {
   type ResolvedRuntimeModelSelection,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
-import type { DynamicScopeEvent, DynamicToolEventName } from "#dynamic/definition.js";
+import type { DynamicScopeEvent } from "#dynamic/definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
@@ -44,7 +45,7 @@ export function isDynamicModelSelectionError(error: unknown): error is DynamicMo
 }
 
 function durableKeyForEvent(
-  eventType: DynamicToolEventName,
+  eventType: DynamicScopeEvent["type"],
 ): ContextKey<RuntimeModelReference | null> | undefined {
   switch (eventType) {
     case "session.started":
@@ -66,7 +67,7 @@ export async function resolveDynamicModel(input: {
   readonly scope: RuntimeModelResolutionScope;
 }): Promise<void> {
   if (input.dynamicModel === undefined) return;
-  if (!input.dynamicModel.eventNames.includes(input.event.type)) return;
+  if (!input.dynamicModel.eventNames.includes(dynamicEventKey(input.event.type))) return;
 
   setSelectionForEvent(input.ctx, input.event.type, null);
   try {
@@ -74,7 +75,7 @@ export async function resolveDynamicModel(input: {
       dynamicModel: input.dynamicModel,
       scope: input.scope,
     });
-    const handler = definition.events[input.event.type];
+    const handler = definition.events[dynamicEventKey(input.event.type)];
 
     if (handler === undefined) {
       throw new Error(
@@ -83,7 +84,7 @@ export async function resolveDynamicModel(input: {
     }
 
     input.abortSignal?.throwIfAborted();
-    const rawResult = await handler(input.event.fact, {
+    const rawResult = await invokeDynamicResolver(definition.events, input.event, {
       ...buildResolveContext(input.ctx, input.messages),
       abortSignal: input.abortSignal,
     });
@@ -102,7 +103,7 @@ export async function resolveDynamicModel(input: {
 
 function setSelectionForEvent(
   ctx: AlsContext,
-  eventType: DynamicToolEventName,
+  eventType: DynamicScopeEvent["type"],
   selection: ResolvedRuntimeModelSelection | null,
 ): void {
   if (eventType === "step.started") {

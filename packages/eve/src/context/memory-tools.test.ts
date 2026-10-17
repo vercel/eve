@@ -96,7 +96,7 @@ function resolver(
   });
   const dynamic = createMemoryToolDynamicDefinition(definition, "profile");
   return {
-    eventNames: ["turn.started"],
+    eventNames: ["beforeTurn"],
     events: dynamic.events as ResolvedDynamicToolResolver["events"],
     logicalPath: "tools/profile.ts",
     rebindMissingCallbacks: true,
@@ -286,8 +286,8 @@ describe("memory provider tools", () => {
     const result = await contextStorage.run(
       ctx,
       async () =>
-        await dynamic.events["turn.started"]?.(event.fact, {
-          channel: {},
+        await dynamic.events["beforeTurn"]?.(event.fact, {
+          channel: { kind: "unknown", metadata: {} },
           model: null,
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "session_1" },

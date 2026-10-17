@@ -12,7 +12,7 @@ export function createMemoryToolDynamicDefinition(definition: MemoryDefinition, 
   return markDynamicCallbackRebind(
     defineDynamic({
       events: {
-        "turn.started": async (_event, resolveContext) => {
+        beforeTurn: async (_event, resolveContext) => {
           const lock = loadContext().get(TurnMemoryLocksKey)?.[slot];
           if (lock === undefined || definition.provider.tools === undefined) {
             return null;

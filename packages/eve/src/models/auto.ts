@@ -215,7 +215,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
 
   return defineDynamic({
     events: {
-      "step.started": async (event, ctx) => {
+      beforeModel: async (event, ctx) => {
         ctx.abortSignal?.throwIfAborted();
         const currentTurnId = turnId(event);
         const state = loadContext();

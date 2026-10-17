@@ -1,3 +1,4 @@
+import type { ChannelInfo } from "#shared/channel-info.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { AgentReasoningDefinition, AgentStaticModelDefinition } from "#public/index.js";
 
@@ -5,11 +6,7 @@ import { assertGitRef, assertRepositoryPart } from "../identifiers.js";
 
 /** Principal and channel that requested a deployed source modification. */
 export interface SelfModificationAuthorizationContext {
-  readonly channel: {
-    /** Channel adapter family, such as `"slack"` or `"http"`. */
-    readonly kind?: string;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: ChannelInfo;
   readonly principal: SessionAuthContext | null;
 }
 

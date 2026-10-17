@@ -7,7 +7,7 @@ export const HOUSE_RULES_OVERRIDE_TOKEN = "house-rules-dynamic-ok-M5T8";
 // loading it returns this body, not the authored one.
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       return {
         "house-rules": defineSkill({
           description:

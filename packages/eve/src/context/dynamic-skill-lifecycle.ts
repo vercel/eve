@@ -1,3 +1,4 @@
+import { dynamicEventKey } from "#dynamic/definition.js";
 import type { ModelMessage } from "ai";
 
 import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
@@ -152,7 +153,7 @@ export async function resolveDynamicSkills(input: {
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
-  const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
+  const matching = resolvers.filter((r) => r.eventNames.includes(dynamicEventKey(event.type)));
   if (matching.length === 0) return;
 
   const resolveCtx = buildResolveContext(ctx, messages);
@@ -161,7 +162,7 @@ export async function resolveDynamicSkills(input: {
 
   const outcomes = await Promise.allSettled(
     matching.map(async (resolver) => {
-      const handler = resolver.events[event.type];
+      const handler = resolver.events[dynamicEventKey(event.type)];
       if (handler === undefined) return null;
 
       const rawResult = await handler(event.fact, resolveCtx);

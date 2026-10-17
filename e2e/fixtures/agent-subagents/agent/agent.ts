@@ -158,7 +158,7 @@ export default defineAgent({
   ...agentConfig,
   model: defineDynamic({
     events: {
-      "step.started": (_event, ctx) => {
+      beforeModel: (_event, ctx) => {
         const messages = ctx.messages.flatMap((message) => {
           if (message.role !== "user") return [];
           return [

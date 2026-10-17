@@ -87,9 +87,9 @@ function createResolver(
   extensionNamespace?: string,
 ): ResolvedDynamicSkillResolver {
   return {
-    eventNames: ["session.started"],
+    eventNames: ["beforeSession"],
     events: {
-      "session.started": handler,
+      beforeSession: handler,
     },
     exportName: "default",
     extensionNamespace,

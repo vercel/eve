@@ -10,10 +10,10 @@ eve evaluates a dynamic definition module once during compilation to classify an
 ## Dynamic models
 
 The `model` field in `agent.ts` accepts `defineDynamic({ events })`. Resolvers
-run at `session.started`, `turn.started`, or `step.started` (precedence: step >
+run at `beforeSession`, `beforeTurn`, or `beforeModel` (precedence: step >
 turn > session). Every matching handler must return a concrete model. A
 missing, invalid, or throwing selection fails the turn before model-dependent
-work begins. Prefer `session.started` — prompt caches are per model, so
+work begins. Prefer `beforeSession` — prompt caches are per model, so
 switching mid-session re-ingests the conversation at uncached prices. See
 [agent configuration](../agent-config#choose-the-model-dynamically) for the
 full contract.
@@ -25,7 +25,7 @@ tools, skills, instructions, and subagents may return `null` to omit a capabilit
 
 ### Route image inputs to a vision model
 
-Use `step.started` when model choice depends on the current messages. This
+Use `beforeModel` when model choice depends on the current messages. This
 keeps GLM for text and switches to Gemini Flash when user history contains an
 image:
 
@@ -35,7 +35,7 @@ import { defineAgent, defineDynamic } from "eve";
 export default defineAgent({
   model: defineDynamic({
     events: {
-      "step.started": (_event, ctx) => {
+      beforeModel: (_event, ctx) => {
         const hasImage = ctx.messages.some(
           (message) =>
             message.role === "user" &&
@@ -56,7 +56,7 @@ export default defineAgent({
 ```
 
 eve stages byte-backed `file` parts under `/workspace/.eve/attachments` before
-`step.started`, but keeps their media type in `ctx.messages`. When an image
+`beforeModel`, but keeps their media type in `ctx.messages`. When an image
 reaches the provider, vision models can process it and non-vision models reject
 it. eve does not reroute automatically. See [Inbound
 attachments](../sandbox#inbound-attachments).
@@ -76,7 +76,7 @@ import { defineAgent, defineDynamic } from "eve";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) => {
+    beforeSession: (_event, ctx) => {
       if (ctx.session.auth.current?.attributes.plan !== "enterprise") {
         return null;
       }
@@ -115,7 +115,7 @@ import { defineDynamic, defineRemoteAgent } from "eve";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) =>
+    beforeSession: (_event, ctx) =>
       ctx.session.auth.current?.attributes.plan === "enterprise"
         ? defineRemoteAgent({
             description: "Analyze financial and accounting data.",
@@ -131,7 +131,7 @@ principal forwarding. Function-valued URLs resolve when the
 dynamic event runs. Auth and headers remain lazy and resolve before each
 outbound request without entering durable workflow state.
 
-Dynamic subagents support `session.started` and `turn.started`. A turn selection
+Dynamic subagents support `beforeSession` and `beforeTurn`. A turn selection
 shadows the session selection for that turn, including when the turn handler
 returns `null`. If a resolver throws or returns an invalid definition, eve logs the
 failure and omits the subagent.
@@ -166,7 +166,7 @@ import { listEnabledAccounts, mintAccountToken } from "../lib/accounts";
 
 export default defineDynamic({
   events: {
-    "session.started": async (_event, ctx) => {
+    beforeSession: async (_event, ctx) => {
       const principal = ctx.session.auth.current;
       if (principal?.principalType !== "user") return null;
 
@@ -227,7 +227,7 @@ they resolve. The error names both sides.
 
 ### Events and recovery
 
-Dynamic connections support `session.started` and `turn.started`. A turn result
+Dynamic connections support `beforeSession` and `beforeTurn`. A turn result
 replaces that file's session result for the turn, including when the turn
 handler returns `null`. A throwing or invalid handler fails the current turn
 and parks the session, so a later message can retry after the dependency
@@ -261,7 +261,7 @@ import { listTables, runReadOnly } from "../lib/warehouse";
 
 export default defineDynamic({
   events: {
-    "session.started": async (_event, ctx) =>
+    beforeSession: async (_event, ctx) =>
       Object.fromEntries(
         (await listTables()).map((t) => [
           t.name,
@@ -348,11 +348,11 @@ eve-provided factories, including [memory provider tools](../memory), use the sa
 A parked call binds to its callback within its session, lifecycle scope, and resolver entry. Another session or scope can expose the same tool name without replacing that binding. Callback identity does not depend on source position:
 
 - Editing a callback body while keeping its resolver entry and tool names is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
-- If a persisted session-scoped callback has no registered implementation (a fresh process, a redeploy, or an expired in-process binding), eve re-runs `session.started` resolvers once to rebind it, then replays.
-- If an active turn resumes without a registered turn-scoped callback, eve re-runs the owning `turn.started` resolver to restore the callback while preserving the tool set and closure captured earlier in that turn. If an authored resolver no longer returns the tool, the turn can continue, but calling that tool fails closed. Framework-provided resolvers such as memory provider-tool wrappers require all of their callbacks to be restored and fail the continuation if their locked tool set changed.
+- If a persisted session-scoped callback has no registered implementation (a fresh process, a redeploy, or an expired in-process binding), eve re-runs `beforeSession` resolvers once to rebind it, then replays.
+- If an active turn resumes without a registered turn-scoped callback, eve re-runs the owning `beforeTurn` resolver to restore the callback while preserving the tool set and closure captured earlier in that turn. If an authored resolver no longer returns the tool, the turn can continue, but calling that tool fails closed. Framework-provided resolvers such as memory provider-tool wrappers require all of their callbacks to be restored and fail the continuation if their locked tool set changed.
 - Step-scoped callbacks are restored from the persisted step immediately before eve replays that step.
 
-A recovery rebind is not a new lifecycle event, but it can run resolver code again. Keep `session.started` and `turn.started` resolvers idempotent and return the same tool identities for the same persisted scope.
+A recovery rebind is not a new lifecycle event, but it can run resolver code again. Keep `beforeSession` and `beforeTurn` resolvers idempotent and return the same tool identities for the same persisted scope.
 
 ### Naming
 
@@ -371,17 +371,17 @@ A dynamic connection, tool, or skill whose name matches an **authored** one **ov
 
 ### Events
 
-| Event             | Resolver runs                                            | Tools available for             |
-| ----------------- | -------------------------------------------------------- | ------------------------------- |
-| `session.started` | At session start; may be redelivered during recovery¹    | Every model call in the session |
-| `turn.started`    | Once per turn; may re-run to restore a missing callback¹ | Every model call in the turn    |
-| `step.started`    | Before each model call                                   | That model call                 |
+| Event           | Resolver runs                                            | Tools available for             |
+| --------------- | -------------------------------------------------------- | ------------------------------- |
+| `beforeSession` | At session start; may be redelivered during recovery¹    | Every model call in the session |
+| `beforeTurn`    | Once per turn; may re-run to restore a missing callback¹ | Every model call in the turn    |
+| `beforeModel`   | Before each model call                                   | That model call                 |
 
 ¹ Workflow recovery can redeliver an event or re-run a resolver to restore a missing callback, so keep resolvers idempotent. Rebinding restores the persisted tool set; it does not make newly returned tools available in the active turn.
 
-At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
+At `beforeTurn`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
 
-A message that steers a held turn joins it without another `turn.started`, as does a completed sign-in, so `turn.started` resolvers do not see it; `step.started` resolvers do. A message sent while a session-limit prompt waits queues in the held turn without another `turn.started`. After Continue grants the budget, `step.started` resolvers see the queued message before the model runs. When memory recall runs, its results appear in the projected snapshot before incoming input.
+A message that steers a held turn joins it without another `beforeTurn`, as does a completed sign-in, so `beforeTurn` resolvers do not see it; `beforeModel` resolvers do. A message sent while a session-limit prompt waits queues in the held turn without another `beforeTurn`. After Continue grants the budget, `beforeModel` resolvers see the queued message before the model runs. When memory recall runs, its results appear in the projected snapshot before incoming input.
 
 ### Execution order
 
@@ -393,7 +393,7 @@ When a stream event fires, three things happen in order.
 
 The tool loop reads the current set right before each model call, so a mid-turn update is visible on the next call.
 
-A single file can declare handlers for several events, and the most recently fired one owns that file's tool set. Re-resolve on `turn.started` to replace what `session.started` returned:
+A single file can declare handlers for several events, and the most recently fired one owns that file's tool set. Re-resolve on `beforeTurn` to replace what `beforeSession` returned:
 
 ```ts title="agent/tools/catalog.ts"
 import { defineDynamic, defineTool } from "eve/tools";
@@ -402,7 +402,7 @@ import { runReadOnly, searchCatalog } from "../lib/catalog";
 
 export default defineDynamic({
   events: {
-    "session.started": async (_event, ctx) => ({
+    beforeSession: async (_event, ctx) => ({
       query: defineTool({
         description: "Run a read-only query.",
         inputSchema: z.object({ sql: z.string() }),
@@ -410,7 +410,7 @@ export default defineDynamic({
       }),
     }),
     // On each turn, re-resolve. Replaces this file's session.started tools for later calls.
-    "turn.started": async (_event, ctx) => ({
+    beforeTurn: async (_event, ctx) => ({
       search: defineTool({
         description: "Search the catalog.",
         inputSchema: z.object({ term: z.string() }),
@@ -425,7 +425,7 @@ Resolvers across files run concurrently.
 
 ## Dynamic skills
 
-A dynamic skills file resolves which [skill](../skills) a caller can load, keyed on the principal. It resolves on `session.started` and `turn.started` only (`step.started` is reserved for dynamic tools). Read `ctx.session.auth` or channel metadata and return a `defineSkill(...)` (named after the file slug) or `null`:
+A dynamic skills file resolves which [skill](../skills) a caller can load, keyed on the principal. It resolves on `beforeSession` and `beforeTurn` only (`beforeModel` is reserved for dynamic tools). Read `ctx.session.auth` or channel metadata and return a `defineSkill(...)` (named after the file slug) or `null`:
 
 ```ts title="agent/skills/team_playbook.ts"
 import { defineDynamic, defineSkill } from "eve/skills";
@@ -433,7 +433,7 @@ import { PLAYBOOKS } from "../lib/playbooks";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) => {
+    beforeSession: (_event, ctx) => {
       const team = ctx.session.auth.current?.attributes.team;
       const markdown = team ? PLAYBOOKS[team] : undefined;
       return markdown ? defineSkill({ markdown }) : null;
@@ -459,7 +459,7 @@ import { defineDynamic, defineInstructions } from "eve/instructions";
 
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) => {
+    beforeSession: (_event, ctx) => {
       const plan = ctx.session.auth.current?.attributes.plan ?? "free";
       return defineInstructions({
         content: `The caller is on the ${plan} plan. Match the depth of your answers to it.`,
@@ -477,7 +477,7 @@ import { loadBrief } from "../lib/briefs";
 
 export default defineDynamic({
   events: {
-    "turn.started": async (_event, ctx) => {
+    beforeTurn: async (_event, ctx) => {
       const brief = await loadBrief(ctx.session.auth.current);
       return brief ? defineInstructions({ content: brief, role: "user" }) : null;
     },
@@ -485,9 +485,9 @@ export default defineDynamic({
 });
 ```
 
-Instruction resolvers support `session.started` and `turn.started` only. A system result lives in that scope and stays outside history. A user result is appended to history at the lifecycle boundary, with session results before turn results and both before the current delivery. There is no automatic deduplication: returning the same user content on a later turn intentionally appends another message.
+Instruction resolvers support `beforeSession` and `beforeTurn` only. A system result lives in that scope and stays outside history. A user result is appended to history at the lifecycle boundary, with session results before turn results and both before the current delivery. There is no automatic deduplication: returning the same user content on a later turn intentionally appends another message.
 
-Resolver snapshots reflect that order. At `session.started`, `ctx.messages` includes static user-role instructions. At `turn.started`, it also includes user-role results from `session.started`. These augmented snapshots are specific to instruction resolvers; tools, skills, models, and subagents keep their existing message snapshots.
+Resolver snapshots reflect that order. At `beforeSession`, `ctx.messages` includes static user-role instructions. At `beforeTurn`, it also includes user-role results from `beforeSession`. These augmented snapshots are specific to instruction resolvers; tools, skills, models, and subagents keep their existing message snapshots.
 
 Returning `null` or blank content contributes nothing. A throwing or invalid session resolver leaves any wider valid system selection in place. Every turn starts with fresh turn-scoped system instructions, so a failed or empty turn result cannot leak the previous turn's value. Completed lifecycle steps are replay-safe: parking, resuming, or replaying them does not duplicate user-role messages.
 

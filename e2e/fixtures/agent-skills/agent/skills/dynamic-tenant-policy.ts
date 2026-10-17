@@ -4,7 +4,7 @@ export const DYNAMIC_SKILL_TOKEN = "dynamic-skill-ok-P4K9";
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       return defineSkill({
         description:
           'Use ONLY when the user asks for the smoke-test dynamic tenant policy skill. Triggered by the literal phrase "dynamic tenant policy skill".',

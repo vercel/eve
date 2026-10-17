@@ -5,7 +5,7 @@ export const DYNAMIC_ECHO_TOKEN = "dynamic-echo-ok-X7R2";
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    beforeSession: async () => {
       return {
         echo_dynamic: defineTool({
           description:

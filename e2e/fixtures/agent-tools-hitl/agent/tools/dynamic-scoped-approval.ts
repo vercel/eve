@@ -4,7 +4,7 @@ import { once } from "eve/tools/approval";
 
 export default defineDynamic({
   events: {
-    "session.started": () => ({
+    beforeSession: () => ({
       dynamic_scoped_approval: defineTool({
         description:
           "Echoes a scope after approving that scope. Only call when explicitly asked for dynamic_scoped_approval.",

@@ -1,3 +1,4 @@
+import type { DynamicResolverEvent } from "#dynamic/definition.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
 import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
@@ -27,8 +28,8 @@ export interface DynamicConnectionResolveContext {
 
 /** Session and turn handlers supported by dynamic connections. */
 export type DynamicConnectionEvents = {
-  readonly [K in "session.started" | "turn.started"]?: (
-    event: unknown,
+  readonly [K in "beforeSession" | "beforeTurn"]?: (
+    event: DynamicResolverEvent<K>,
     ctx: DynamicConnectionResolveContext,
   ) => DynamicConnectionResult | Promise<DynamicConnectionResult>;
 };

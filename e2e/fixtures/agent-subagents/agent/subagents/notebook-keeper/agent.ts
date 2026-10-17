@@ -13,7 +13,7 @@ export default defineAgent({
   // models with eve's bootstrap mock, which would drop the keeper's script.
   model: defineDynamic({
     events: {
-      "step.started": () => ({ model: keeperModel, modelContextWindowTokens: 1_000_000 }),
+      beforeModel: () => ({ model: keeperModel, modelContextWindowTokens: 1_000_000 }),
     },
   }),
 });

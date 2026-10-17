@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export default defineDynamic({
   events: {
-    "session.started": async (event, ctx) => {
+    beforeSession: async (event, ctx) => {
       const sessionId = ctx.session.id;
       const version = "v2";
 

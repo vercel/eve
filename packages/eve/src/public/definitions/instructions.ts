@@ -1,3 +1,4 @@
+import type { DynamicResolverEvent } from "#dynamic/definition.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import {
   DYNAMIC_SENTINEL_KIND,
@@ -32,8 +33,8 @@ export function defineInstructions<TInstructions extends InstructionsDefinition>
 export type DynamicInstructionsResult = InstructionsDefinition | null;
 
 export type DynamicInstructionsEvents = {
-  readonly [K in "session.started" | "turn.started"]?: (
-    event: unknown,
+  readonly [K in "beforeSession" | "beforeTurn"]?: (
+    event: DynamicResolverEvent<K>,
     ctx: DynamicResolveContext,
   ) => DynamicInstructionsResult | Promise<DynamicInstructionsResult>;
 };

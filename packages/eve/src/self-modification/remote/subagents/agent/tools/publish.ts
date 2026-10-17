@@ -114,6 +114,6 @@ export function publicationOperationId(ctx: Pick<ToolContext, "session">): strin
 
 export default defineDynamic({
   events: {
-    "session.started": resolveTool,
+    beforeSession: resolveTool,
   },
 });

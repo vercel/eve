@@ -7,7 +7,7 @@ export default defineAgent({
     "Another mind for one scoped slice. Give it a self-contained question and choose the lifetime: keep it and send deltas when it should own the slice end to end, or ask once. It can see the shared tree. You remain the arbiter and keep the writes.",
   model: defineDynamic({
     events: {
-      "session.started": () => {
+      beforeSession: () => {
         const worker = extension.config.worker ?? {
           model: "openai/gpt-5.6-terra-fast",
           reasoning: "xhigh",

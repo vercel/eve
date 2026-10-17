@@ -7,7 +7,7 @@ import { stamp } from "../lib/brand";
 // at session start that composes and runs once mounted.
 export default defineDynamic({
   events: {
-    "session.started": async () => ({
+    beforeSession: async () => ({
       toolkit_forecast: defineTool({
         description:
           "Return the toolkit forecast token. Call when asked to run the toolkit forecast.",

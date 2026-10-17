@@ -4,7 +4,7 @@ const TOKEN = "dynamic-turn-replay-ok-V6N";
 
 export default defineDynamic({
   events: {
-    "turn.started": (_event, ctx) => {
+    beforeTurn: (_event, ctx) => {
       const resolvedSessionId = ctx.session.id;
       return {
         dynamic_turn_replay_probe: defineTool({

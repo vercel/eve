@@ -12,7 +12,7 @@ import { defineDynamic, defineRemoteAgent } from "eve";
  */
 export default defineDynamic({
   events: {
-    "session.started": () =>
+    beforeSession: () =>
       defineRemoteAgent({
         description:
           "Remote loopback agent. Call this only when the user explicitly asks to use the remote-loopback agent, passing the user's requested message through unchanged.",

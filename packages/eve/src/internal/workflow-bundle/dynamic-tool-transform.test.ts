@@ -112,60 +112,8 @@ beforeEach(() => {
 
 describe("transformDynamicToolExecute — evaluation", () => {
   it("stamps independent durable descriptors for every callback phase", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const labelPrefix = "Deploy";
-      const executePrefix = "execute";
-      const resultPrefix = "Deployed to";
-      const updateSuffix = " sources";
-      const requestReason = "confirm";
-      const promptPrefix = "Review";
-      const allowedResponder = "user-123";
-      const projectionPrefix = "visible";
-      return {
-        guarded: defineTool({
-          description: "Guarded",
-          inputSchema: { type: "object" },
-          label: {
-            start(input) {
-              return labelPrefix + " " + input.value;
-            },
-            complete(_input, output) {
-              return resultPrefix + " " + output.url;
-            },
-            delta(_input, partial) {
-              return partial.phase + updateSuffix;
-            },
-          },
-          approval: {
-            request(ctx) {
-              return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";
-            },
-            prompt(ctx) {
-              return promptPrefix + " " + ctx.input.value;
-            },
-            response(ctx) {
-              return ctx.response.principal.principalId === allowedResponder
-                ? { status: "allowed" }
-                : { status: "rejected", reason: "wrong responder" };
-            },
-          },
-          execute(input) {
-            return executePrefix + ":" + input.value;
-          },
-          toModelOutput(output) {
-            return { type: "text", value: projectionPrefix + ":" + output };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const labelPrefix = "Deploy";\n      const executePrefix = "execute";\n      const resultPrefix = "Deployed to";\n      const updateSuffix = " sources";\n      const requestReason = "confirm";\n      const promptPrefix = "Review";\n      const allowedResponder = "user-123";\n      const projectionPrefix = "visible";\n      return {\n        guarded: defineTool({\n          description: "Guarded",\n          inputSchema: { type: "object" },\n          label: {\n            start(input) {\n              return labelPrefix + " " + input.value;\n            },\n            complete(_input, output) {\n              return resultPrefix + " " + output.url;\n            },\n            delta(_input, partial) {\n              return partial.phase + updateSuffix;\n            },\n          },\n          approval: {\n            request(ctx) {\n              return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";\n            },\n            prompt(ctx) {\n              return promptPrefix + " " + ctx.input.value;\n            },\n            response(ctx) {\n              return ctx.response.principal.principalId === allowedResponder\n                ? { status: "allowed" }\n                : { status: "rejected", reason: "wrong responder" };\n            },\n          },\n          execute(input) {\n            return executePrefix + ":" + input.value;\n          },\n          toModelOutput(output) {\n            return { type: "text", value: projectionPrefix + ":" + output };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/all-phases.ts", source);
     const tools = await callHandler();
@@ -203,40 +151,8 @@ export default defineDynamic({
   });
 
   it("preserves top-level function-form approval properties", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-function referencedApproval() {
-  return "user-approval";
-}
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => ({
-      arrow: defineTool({
-        description: "Arrow approval",
-        inputSchema: { type: "object" },
-        approval: () => "user-approval",
-        execute: async () => "ok",
-      }),
-      method: defineTool({
-        description: "Method approval",
-        inputSchema: { type: "object" },
-        approval() {
-          return "user-approval";
-        },
-        execute: async () => "ok",
-      }),
-      referenced: defineTool({
-        description: "Referenced approval",
-        inputSchema: { type: "object" },
-        approval: referencedApproval,
-        execute: async () => "ok",
-      }),
-    }),
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nfunction referencedApproval() {\n  return "user-approval";\n}\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => ({\n      arrow: defineTool({\n        description: "Arrow approval",\n        inputSchema: { type: "object" },\n        approval: () => "user-approval",\n        execute: async () => "ok",\n      }),\n      method: defineTool({\n        description: "Method approval",\n        inputSchema: { type: "object" },\n        approval() {\n          return "user-approval";\n        },\n        execute: async () => "ok",\n      }),\n      referenced: defineTool({\n        description: "Referenced approval",\n        inputSchema: { type: "object" },\n        approval: referencedApproval,\n        execute: async () => "ok",\n      }),\n    }),\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/function-approval.ts", source);
     const tools = await callHandler();
@@ -253,27 +169,8 @@ export default defineDynamic({
   });
 
   it("wrapper calls hoisted function with correct closure vars", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const apiUrl = "https://api.example.com";
-      const tenantName = "Acme";
-      return {
-        query: defineTool({
-          description: "Query",
-          inputSchema: { type: "object" },
-          execute(input) {
-            return { url: apiUrl, tenant: tenantName, q: input.q };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      const apiUrl = "https://api.example.com";\n      const tenantName = "Acme";\n      return {\n        query: defineTool({\n          description: "Query",\n          inputSchema: { type: "object" },\n          execute(input) {\n            return { url: apiUrl, tenant: tenantName, q: input.q };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/tenant.ts", source);
     const tools = await callHandler();
@@ -291,23 +188,8 @@ export default defineDynamic({
   });
 
   it("forwards destructured parameters with defaults", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => ({
-      tool: defineTool({
-        description: "T",
-        inputSchema: { type: "object" },
-        async execute({ dryRun = false }, ctx) {
-          return { dryRun, requestId: ctx.requestId };
-        },
-      }),
-    }),
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => ({\n      tool: defineTool({\n        description: "T",\n        inputSchema: { type: "object" },\n        async execute({ dryRun = false }, ctx) {\n          return { dryRun, requestId: ctx.requestId };\n        },\n      }),\n    }),\n  },\n});\n';
 
     const { callHandler, code } = await transformAndEval("tools/default-param.ts", source);
     const tools = await callHandler();
@@ -327,24 +209,8 @@ export default defineDynamic({
   });
 
   it("__closureVars captures a snapshot at resolver return time", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const config = { endpoint: "/api/v1", retries: 3 };
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute() { return config.endpoint; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const config = { endpoint: "/api/v1", retries: 3 };\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute() { return config.endpoint; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/snapshot.ts", source);
     const tools = await callHandler();
@@ -359,24 +225,8 @@ export default defineDynamic({
   });
 
   it("stamped execute callback is callable with snapshotted vars", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const multiplier = 10;
-      return {
-        calc: defineTool({
-          description: "Calc",
-          inputSchema: { type: "object" },
-          execute(input) { return input.x * multiplier; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const multiplier = 10;\n      return {\n        calc: defineTool({\n          description: "Calc",\n          inputSchema: { type: "object" },\n          execute(input) { return input.x * multiplier; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/calc.ts", source);
     const tools = await callHandler();
@@ -392,25 +242,8 @@ export default defineDynamic({
   });
 
   it("replay path: step function + stored closure vars produce correct result", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const prefix = "RESULT";
-      const separator = "::";
-      return {
-        format: defineTool({
-          description: "Format",
-          inputSchema: { type: "object" },
-          execute(input) { return prefix + separator + input.value; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const prefix = "RESULT";\n      const separator = "::";\n      return {\n        format: defineTool({\n          description: "Format",\n          inputSchema: { type: "object" },\n          execute(input) { return prefix + separator + input.value; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/format.ts", source);
     const tools = await callHandler();
@@ -431,29 +264,8 @@ export default defineDynamic({
   });
 
   it("multiple tools in same resolver each get independent wrappers", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const db = "prod-db";
-      return {
-        read_data: defineTool({
-          description: "Read",
-          inputSchema: { type: "object" },
-          execute(input) { return { op: "read", db, table: input.table }; },
-        }),
-        write_data: defineTool({
-          description: "Write",
-          inputSchema: { type: "object" },
-          execute(input) { return { op: "write", db, record: input.record }; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const db = "prod-db";\n      return {\n        read_data: defineTool({\n          description: "Read",\n          inputSchema: { type: "object" },\n          execute(input) { return { op: "read", db, table: input.table }; },\n        }),\n        write_data: defineTool({\n          description: "Write",\n          inputSchema: { type: "object" },\n          execute(input) { return { op: "write", db, record: input.record }; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/multi.ts", source);
     const tools = await callHandler();
@@ -479,39 +291,8 @@ export default defineDynamic({
   });
 
   it("does not capture object keys or text from string literals", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const tools = {};
-
-      tools.probe_alpha = defineTool({
-        description: "probe alpha",
-        inputSchema: { type: "object" },
-        execute({ q }) {
-          return { url: "/x/" + q, note: "answer from app tools only" };
-        },
-      });
-
-      {
-        const url = "https://example.com";
-        const cred = { a: 1 };
-        tools.probe_beta = defineTool({
-          description: "probe beta",
-          inputSchema: { type: "object" },
-          execute() {
-            return { target: url, cred };
-          },
-        });
-      }
-
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const tools = {};\n\n      tools.probe_alpha = defineTool({\n        description: "probe alpha",\n        inputSchema: { type: "object" },\n        execute({ q }) {\n          return { url: "/x/" + q, note: "answer from app tools only" };\n        },\n      });\n\n      {\n        const url = "https://example.com";\n        const cred = { a: 1 };\n        tools.probe_beta = defineTool({\n          description: "probe beta",\n          inputSchema: { type: "object" },\n          execute() {\n            return { target: url, cred };\n          },\n        });\n      }\n\n      return tools;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/reference-analysis.ts", source);
     const tools = await callHandler();
@@ -534,28 +315,8 @@ export default defineDynamic({
   });
 
   it("captures computed keys and defaults inside binding patterns", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const fallback = "missing";
-      const field = "value";
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute(input) {
-            const { [field]: value = fallback } = input;
-            return value;
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const fallback = "missing";\n      const field = "value";\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute(input) {\n            const { [field]: value = fallback } = input;\n            return value;\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/binding-patterns.ts", source);
     const tools = await callHandler();
@@ -574,18 +335,7 @@ export default defineDynamic({
   it("captures locals bound by an array rest element", async () => {
     const { callHandler } = await transformAndEval(
       "tools/array-rest.ts",
-      `
-      import { defineDynamic, defineTool } from "eve/tools";
-      import { z } from "zod";
-      export default defineDynamic({ events: { "turn.started": () => {
-        const [first, ...rest] = ["a", "b"];
-        return { pick: defineTool({
-          description: "Pick",
-          inputSchema: z.object({ pick: z.enum([first, ...rest]) }),
-          execute: ({ pick }) => pick,
-        }) };
-      } } });
-    `,
+      '\n      import { defineDynamic, defineTool } from "eve/tools";\n      import { z } from "zod";\n      export default defineDynamic({ events: { "beforeTurn": () => {\n        const [first, ...rest] = ["a", "b"];\n        return { pick: defineTool({\n          description: "Pick",\n          inputSchema: z.object({ pick: z.enum([first, ...rest]) }),\n          execute: ({ pick }) => pick,\n        }) };\n      } } });\n    ',
     );
     const { inputSchema } = durableCallbacks((await callHandler()).pick);
     expect(inputSchema!.closure).toEqual({ first: "a", rest: ["b"] });
@@ -598,16 +348,7 @@ export default defineDynamic({
   it("captures a rest parameter of the resolver", async () => {
     const { callHandler } = await transformAndEval(
       "tools/rest-param.ts",
-      `
-      import { defineDynamic, defineTool } from "eve/tools";
-      export default defineDynamic({ events: { "turn.started": (...args) => ({
-        count: defineTool({
-          description: "Count",
-          inputSchema: { type: "object" },
-          execute: () => args.length,
-        }),
-      }) } });
-    `,
+      '\n      import { defineDynamic, defineTool } from "eve/tools";\n      export default defineDynamic({ events: { "beforeTurn": (...args) => ({\n        count: defineTool({\n          description: "Count",\n          inputSchema: { type: "object" },\n          execute: () => args.length,\n        }),\n      }) } });\n    ',
     );
     const tool = (await callHandler()).count as Record<string, unknown>;
     const { execute } = durableCallbacks(tool);
@@ -616,24 +357,8 @@ export default defineDynamic({
   });
 
   it("captures a direct identifier in an arrow expression body", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const result = "captured";
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute: () => result,
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const result = "captured";\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute: () => result,\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/identifier-expression.ts", source);
     const tools = await callHandler();
@@ -644,33 +369,8 @@ export default defineDynamic({
   });
 
   it("captures runtime references inside TypeScript expressions", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const TypeName = "type-only";
-      const asserted = "asserted";
-      const nonNull = "non-null";
-      const satisfied = "satisfied";
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute() {
-            return [
-              asserted as TypeName,
-              nonNull!,
-              satisfied satisfies TypeName,
-            ];
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const TypeName = "type-only";\n      const asserted = "asserted";\n      const nonNull = "non-null";\n      const satisfied = "satisfied";\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute() {\n            return [\n              asserted as TypeName,\n              nonNull!,\n              satisfied satisfies TypeName,\n            ];\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/typescript-expressions.ts", source);
 
@@ -681,27 +381,8 @@ export default defineDynamic({
   });
 
   it("async execute preserves await semantics", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const baseUrl = "https://api.test";
-      return {
-        fetch_data: defineTool({
-          description: "Fetch",
-          inputSchema: { type: "object" },
-          async execute(input) {
-            const url = baseUrl + "/" + input.path;
-            return { fetched: url };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const baseUrl = "https://api.test";\n      return {\n        fetch_data: defineTool({\n          description: "Fetch",\n          inputSchema: { type: "object" },\n          async execute(input) {\n            const url = baseUrl + "/" + input.path;\n            return { fetched: url };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/async.ts", source);
     const tools = await callHandler();
@@ -714,26 +395,8 @@ export default defineDynamic({
   });
 
   it("for-of loop tools each capture their iteration variable", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const tools = {};
-      const prefix = "tool";
-      for (const name of ["alpha", "beta"]) {
-        tools[name] = defineTool({
-          description: name,
-          inputSchema: { type: "object" },
-          execute() { return prefix + "_" + name; },
-        });
-      }
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const tools = {};\n      const prefix = "tool";\n      for (const name of ["alpha", "beta"]) {\n        tools[name] = defineTool({\n          description: name,\n          inputSchema: { type: "object" },\n          execute() { return prefix + "_" + name; },\n        });\n      }\n      return tools;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/loop.ts", source);
     const tools = await callHandler();
@@ -833,33 +496,8 @@ export default defineDynamic({
   });
 
   it("execute inside defineTool() inside a helper function captures closure vars", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const baseUrl = "https://api.example.com";
-
-      function buildTool(action) {
-        const endpoint = baseUrl + "/" + action;
-        return defineTool({
-          description: "Call " + action,
-          inputSchema: { type: "object" },
-          async execute(input) {
-            return { endpoint, action, query: input.q };
-          },
-        });
-      }
-
-      return {
-        search: buildTool("search"),
-        export: buildTool("export"),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const baseUrl = "https://api.example.com";\n\n      function buildTool(action) {\n        const endpoint = baseUrl + "/" + action;\n        return defineTool({\n          description: "Call " + action,\n          inputSchema: { type: "object" },\n          async execute(input) {\n            return { endpoint, action, query: input.q };\n          },\n        });\n      }\n\n      return {\n        search: buildTool("search"),\n        export: buildTool("export"),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/helper-fn.ts", source);
     const tools = await callHandler();
@@ -888,34 +526,8 @@ export default defineDynamic({
   });
 
   it("description computed by a function is captured at event time, not re-evaluated", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      let counter = 0;
-      function makeDescription(name) {
-        counter++;
-        return "Tool " + name + " (v" + counter + ")";
-      }
-
-      return {
-        alpha: defineTool({
-          description: makeDescription("alpha"),
-          inputSchema: { type: "object" },
-          execute() { return { counter }; },
-        }),
-        beta: defineTool({
-          description: makeDescription("beta"),
-          inputSchema: { type: "object" },
-          execute() { return { counter }; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      let counter = 0;\n      function makeDescription(name) {\n        counter++;\n        return "Tool " + name + " (v" + counter + ")";\n      }\n\n      return {\n        alpha: defineTool({\n          description: makeDescription("alpha"),\n          inputSchema: { type: "object" },\n          execute() { return { counter }; },\n        }),\n        beta: defineTool({\n          description: makeDescription("beta"),\n          inputSchema: { type: "object" },\n          execute() { return { counter }; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/desc-fn.ts", source);
     const tools = await callHandler();
@@ -933,33 +545,8 @@ export default defineDynamic({
   });
 
   it("if/else branches each produce a working tool", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const mode = "production";
-      if (mode === "production") {
-        return {
-          tool: defineTool({
-            description: "Prod tool",
-            inputSchema: { type: "object" },
-            execute() { return { env: mode, safe: true }; },
-          }),
-        };
-      }
-      return {
-        tool: defineTool({
-          description: "Dev tool",
-          inputSchema: { type: "object" },
-          execute() { return { env: mode, safe: false }; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const mode = "production";\n      if (mode === "production") {\n        return {\n          tool: defineTool({\n            description: "Prod tool",\n            inputSchema: { type: "object" },\n            execute() { return { env: mode, safe: true }; },\n          }),\n        };\n      }\n      return {\n        tool: defineTool({\n          description: "Dev tool",\n          inputSchema: { type: "object" },\n          execute() { return { env: mode, safe: false }; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/branch.ts", source);
     const tools = await callHandler();
@@ -969,24 +556,8 @@ export default defineDynamic({
   });
 
   it("expression-body arrow execute returns correct value", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const factor = 2;
-      return {
-        double: defineTool({
-          description: "Double",
-          inputSchema: { type: "object" },
-          execute: (input) => input.n * factor,
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const factor = 2;\n      return {\n        double: defineTool({\n          description: "Double",\n          inputSchema: { type: "object" },\n          execute: (input) => input.n * factor,\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/expr.ts", source);
     const tools = await callHandler();
@@ -996,24 +567,8 @@ export default defineDynamic({
   });
 
   it("execute with no params works", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const secret = "s3cr3t";
-      return {
-        reveal: defineTool({
-          description: "Reveal",
-          inputSchema: { type: "object" },
-          execute() { return secret; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const secret = "s3cr3t";\n      return {\n        reveal: defineTool({\n          description: "Reveal",\n          inputSchema: { type: "object" },\n          execute() { return secret; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/noparam.ts", source);
     const tools = await callHandler();
@@ -1023,35 +578,8 @@ export default defineDynamic({
   });
 
   it("switch/case correctly hoists execute from each branch", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const tier = "premium";
-      switch (tier) {
-        case "premium":
-          return {
-            tool: defineTool({
-              description: "Premium",
-              inputSchema: { type: "object" },
-              execute() { return { tier, limit: 1000 }; },
-            }),
-          };
-        default:
-          return {
-            tool: defineTool({
-              description: "Free",
-              inputSchema: { type: "object" },
-              execute() { return { tier, limit: 10 }; },
-            }),
-          };
-      }
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const tier = "premium";\n      switch (tier) {\n        case "premium":\n          return {\n            tool: defineTool({\n              description: "Premium",\n              inputSchema: { type: "object" },\n              execute() { return { tier, limit: 1000 }; },\n            }),\n          };\n        default:\n          return {\n            tool: defineTool({\n              description: "Free",\n              inputSchema: { type: "object" },\n              execute() { return { tier, limit: 10 }; },\n            }),\n          };\n      }\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/switch.ts", source);
     const tools = await callHandler();
@@ -1061,35 +589,8 @@ export default defineDynamic({
   });
 
   it("try/catch hoists execute from both branches", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const fallbackMsg = "service unavailable";
-      try {
-        const config = { ready: true };
-        return {
-          tool: defineTool({
-            description: "Live",
-            inputSchema: { type: "object" },
-            execute() { return { status: "live", ready: config.ready }; },
-          }),
-        };
-      } catch (e) {
-        return {
-          tool: defineTool({
-            description: "Fallback",
-            inputSchema: { type: "object" },
-            execute() { return { status: "fallback", msg: fallbackMsg }; },
-          }),
-        };
-      }
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const fallbackMsg = "service unavailable";\n      try {\n        const config = { ready: true };\n        return {\n          tool: defineTool({\n            description: "Live",\n            inputSchema: { type: "object" },\n            execute() { return { status: "live", ready: config.ready }; },\n          }),\n        };\n      } catch (e) {\n        return {\n          tool: defineTool({\n            description: "Fallback",\n            inputSchema: { type: "object" },\n            execute() { return { status: "fallback", msg: fallbackMsg }; },\n          }),\n        };\n      }\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/trycatch.ts", source);
     const tools = await callHandler();
@@ -1100,35 +601,8 @@ export default defineDynamic({
   });
 
   it("replay simulation: JSON round-trip of closure vars produces same result", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const config = {
-        endpoints: { search: "/api/search", export: "/api/export" },
-        maxResults: 100,
-        flags: [true, false, true],
-      };
-      return {
-        search: defineTool({
-          description: "Search",
-          inputSchema: { type: "object" },
-          execute(input) {
-            return {
-              url: config.endpoints.search,
-              limit: config.maxResults,
-              query: input.q,
-              flagCount: config.flags.filter(Boolean).length,
-            };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const config = {\n        endpoints: { search: "/api/search", export: "/api/export" },\n        maxResults: 100,\n        flags: [true, false, true],\n      };\n      return {\n        search: defineTool({\n          description: "Search",\n          inputSchema: { type: "object" },\n          execute(input) {\n            return {\n              url: config.endpoints.search,\n              limit: config.maxResults,\n              query: input.q,\n              flagCount: config.flags.filter(Boolean).length,\n            };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/replay.ts", source);
     const tools = await callHandler();
@@ -1153,17 +627,8 @@ export default defineDynamic({
   });
 
   it("handler returning null produces no tools and no crash", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      return null;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      return null;\n    },\n  },\n});\n';
 
     // The transform returns null because there's no execute in the source
     const result = await transformDynamicToolExecute("tools/null-return.ts", source);
@@ -1171,25 +636,8 @@ export default defineDynamic({
   });
 
   it("handler conditionally returning null vs tools works for the tools branch", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const enabled = true;
-      if (!enabled) return null;
-      return {
-        tool: defineTool({
-          description: "Conditional",
-          inputSchema: { type: "object" },
-          execute(input) { return { enabled, value: input.v }; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const enabled = true;\n      if (!enabled) return null;\n      return {\n        tool: defineTool({\n          description: "Conditional",\n          inputSchema: { type: "object" },\n          execute(input) { return { enabled, value: input.v }; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/cond-null.ts", source);
     const tools = await callHandler();
@@ -1199,25 +647,8 @@ export default defineDynamic({
   });
 
   it("handler conditionally returning null actually returns null when condition is false", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const enabled = false;
-      if (!enabled) return null;
-      return {
-        tool: defineTool({
-          description: "Conditional",
-          inputSchema: { type: "object" },
-          execute(input) { return { enabled, value: input.v }; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const enabled = false;\n      if (!enabled) return null;\n      return {\n        tool: defineTool({\n          description: "Conditional",\n          inputSchema: { type: "object" },\n          execute(input) { return { enabled, value: input.v }; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/cond-null-off.ts", source);
     const result = await callHandler();
@@ -1230,40 +661,8 @@ export default defineDynamic({
     // This tests that a single file can have a handler that sometimes
     // returns null. The transform still hoists the execute for the
     // non-null branch.
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const featureA = false;
-      const featureB = true;
-
-      if (featureA) {
-        return {
-          feature_a: defineTool({
-            description: "Feature A",
-            inputSchema: { type: "object" },
-            execute() { return "a"; },
-          }),
-        };
-      }
-
-      if (featureB) {
-        return {
-          feature_b: defineTool({
-            description: "Feature B",
-            inputSchema: { type: "object" },
-            execute() { return "b"; },
-          }),
-        };
-      }
-
-      return null;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const featureA = false;\n      const featureB = true;\n\n      if (featureA) {\n        return {\n          feature_a: defineTool({\n            description: "Feature A",\n            inputSchema: { type: "object" },\n            execute() { return "a"; },\n          }),\n        };\n      }\n\n      if (featureB) {\n        return {\n          feature_b: defineTool({\n            description: "Feature B",\n            inputSchema: { type: "object" },\n            execute() { return "b"; },\n          }),\n        };\n      }\n\n      return null;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/multi-null.ts", source);
     const tools = await callHandler();
@@ -1275,25 +674,8 @@ export default defineDynamic({
   });
 
   it("preserves non-serializable captures for strict lifecycle validation", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const label = "test";
-      const helper = function(x) { return x * 2; };
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute(input) { return label + ":" + helper(input.n); },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const label = "test";\n      const helper = function(x) { return x * 2; };\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute(input) { return label + ":" + helper(input.n); },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/non-serial.ts", source);
     const tools = await callHandler();
@@ -1316,26 +698,8 @@ export default defineDynamic({
     // The execute body references handler-scope `tenant` AND execute-param
     // `ctx`. The hoisted function must destructure __vars without shadowing
     // the execute's own `ctx` parameter.
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const tenant = "Acme";
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute(input, ctx) {
-            return { tenant, ctxType: typeof ctx, input };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      const tenant = "Acme";\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute(input, ctx) {\n            return { tenant, ctxType: typeof ctx, input };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/shadow-ctx.ts", source);
     const tools = await callHandler();
@@ -1354,25 +718,8 @@ export default defineDynamic({
     // Handler declares `name = "outer"`, helper takes `name` as a param.
     // The execute body uses `name` — it should get the INNER value
     // (the helper's param), not the handler's var.
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const name = "outer";
-      function buildTool(name) {
-        return defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute() { return name; },
-        });
-      }
-      return { tool: buildTool("inner") };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const name = "outer";\n      function buildTool(name) {\n        return defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute() { return name; },\n        });\n      }\n      return { tool: buildTool("inner") };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/shadow-var.ts", source);
     const tools = await callHandler();
@@ -1385,23 +732,8 @@ export default defineDynamic({
   it("callback bindings that shadow an enclosing name are not captured", async () => {
     // Minifiers reuse short names, so a destructured callback parameter or a
     // callback-local declaration can shadow a binding the tool captures.
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-function makeTool(e) {
-  return defineTool({
-    description: "T",
-    inputSchema: { type: "object" },
-    approval: ({ toolInput: e }) => (e?.value === "secret" ? "user-approval" : "not-applicable"),
-    toModelOutput(output) { const e = "local"; return { type: "text", value: e + output }; },
-    execute({ value }) { return e() + ":" + value; },
-  });
-}
-
-export default defineDynamic({
-  events: { "session.started": async () => ({ tool: makeTool(() => "echo") }) },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nfunction makeTool(e) {\n  return defineTool({\n    description: "T",\n    inputSchema: { type: "object" },\n    approval: ({ toolInput: e }) => (e?.value === "secret" ? "user-approval" : "not-applicable"),\n    toModelOutput(output) { const e = "local"; return { type: "text", value: e + output }; },\n    execute({ value }) { return e() + ":" + value; },\n  });\n}\n\nexport default defineDynamic({\n  events: { "beforeSession": async () => ({ tool: makeTool(() => "echo") }) },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/shadow-pattern.ts", source);
     const tool = (await callHandler()).tool as Record<string, Function>;
@@ -1416,21 +748,8 @@ export default defineDynamic({
   });
 
   it("callback parameter defaults can read captured names", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-function makeTool(fallback) {
-  return defineTool({
-    description: "T",
-    inputSchema: { type: "object" },
-    execute({ limit = fallback }) { return limit; },
-  });
-}
-
-export default defineDynamic({
-  events: { "session.started": async () => ({ tool: makeTool(10) }) },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nfunction makeTool(fallback) {\n  return defineTool({\n    description: "T",\n    inputSchema: { type: "object" },\n    execute({ limit = fallback }) { return limit; },\n  });\n}\n\nexport default defineDynamic({\n  events: { "beforeSession": async () => ({ tool: makeTool(10) }) },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/default-capture.ts", source);
     const tool = (await callHandler()).tool as Record<string, Function>;
@@ -1445,32 +764,8 @@ export default defineDynamic({
     // The execute function receives its own ctx with session.turn etc.
     // These are different objects — verify the resolver snapshot is
     // preserved independently of the execute-time context.
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const resolverSessionId = ctx.session.id;
-      const resolverHasAuth = ctx.session.auth.current !== null;
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute(_input, executeCtx) {
-            return {
-              resolverSessionId,
-              resolverHasAuth,
-              executeCtxType: typeof executeCtx,
-              executeHasSession: executeCtx !== undefined && executeCtx !== null,
-            };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      const resolverSessionId = ctx.session.id;\n      const resolverHasAuth = ctx.session.auth.current !== null;\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute(_input, executeCtx) {\n            return {\n              resolverSessionId,\n              resolverHasAuth,\n              executeCtxType: typeof executeCtx,\n              executeHasSession: executeCtx !== undefined && executeCtx !== null,\n            };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/ctx-separation.ts", source, {
       ctx: { session: { id: "sess-abc", auth: { current: { principalId: "u1" } } } },
@@ -1488,26 +783,8 @@ export default defineDynamic({
   });
 
   it("block-scoped variables (let in if/for) are captured correctly", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const tools = {};
-      for (let i = 0; i < 2; i++) {
-        const tag = "item" + i;
-        tools["t" + i] = defineTool({
-          description: tag,
-          inputSchema: { type: "object" },
-          execute() { return { i, tag }; },
-        });
-      }
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const tools = {};\n      for (let i = 0; i < 2; i++) {\n        const tag = "item" + i;\n        tools["t" + i] = defineTool({\n          description: tag,\n          inputSchema: { type: "object" },\n          execute() { return { i, tag }; },\n        });\n      }\n      return tools;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/block-scope.ts", source);
     const tools = await callHandler();
@@ -1522,34 +799,8 @@ export default defineDynamic({
   });
 
   it("deeply nested scope chain: handler → helper → inner helper", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const orgId = "org-1";
-      function buildCategory(category) {
-        const prefix = orgId + "/" + category;
-        function buildAction(action) {
-          const fullPath = prefix + "/" + action;
-          return defineTool({
-            description: action,
-            inputSchema: { type: "object" },
-            execute() { return fullPath; },
-          });
-        }
-        return buildAction;
-      }
-      const userActions = buildCategory("users");
-      return {
-        list_users: userActions("list"),
-        create_user: userActions("create"),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const orgId = "org-1";\n      function buildCategory(category) {\n        const prefix = orgId + "/" + category;\n        function buildAction(action) {\n          const fullPath = prefix + "/" + action;\n          return defineTool({\n            description: action,\n            inputSchema: { type: "object" },\n            execute() { return fullPath; },\n          });\n        }\n        return buildAction;\n      }\n      const userActions = buildCategory("users");\n      return {\n        list_users: userActions("list"),\n        create_user: userActions("create"),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/deep-scope.ts", source);
     const tools = await callHandler();
@@ -1571,26 +822,8 @@ export default defineDynamic({
 
 describe("transformDynamicToolExecute — safety boundaries", () => {
   it("hoists execute inside a nested helper function with correct scope", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const prefix = "v1";
-      function buildTool(name) {
-        const endpoint = "/" + prefix + "/" + name;
-        return defineTool({
-          description: name,
-          inputSchema: { type: "object" },
-          execute() { return endpoint; },
-        });
-      }
-      return { search: buildTool("search") };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const prefix = "v1";\n      function buildTool(name) {\n        const endpoint = "/" + prefix + "/" + name;\n        return defineTool({\n          description: name,\n          inputSchema: { type: "object" },\n          execute() { return endpoint; },\n        });\n      }\n      return { search: buildTool("search") };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/nested-fn.ts", source);
     const tools = await callHandler();
@@ -1600,23 +833,8 @@ export default defineDynamic({
   });
 
   it("hoists execute inside an arrow function helper", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const prefix = "api";
-      const buildTool = (name) => defineTool({
-        description: name,
-        inputSchema: { type: "object" },
-        execute() { return prefix + "_" + name; },
-      });
-      return { search: buildTool("search"), create: buildTool("create") };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const prefix = "api";\n      const buildTool = (name) => defineTool({\n        description: name,\n        inputSchema: { type: "object" },\n        execute() { return prefix + "_" + name; },\n      });\n      return { search: buildTool("search"), create: buildTool("create") };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/nested-arrow.ts", source);
     const tools = await callHandler();
@@ -1628,27 +846,8 @@ export default defineDynamic({
   });
 
   it("hoists execute inside a .map() callback", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const base = "https://api";
-      const names = ["alpha", "beta"];
-      const toolMap = {};
-      names.forEach(function(name) {
-        toolMap[name] = defineTool({
-          description: name,
-          inputSchema: { type: "object" },
-          execute() { return base + "/" + name; },
-        });
-      });
-      return toolMap;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const base = "https://api";\n      const names = ["alpha", "beta"];\n      const toolMap = {};\n      names.forEach(function(name) {\n        toolMap[name] = defineTool({\n          description: name,\n          inputSchema: { type: "object" },\n          execute() { return base + "/" + name; },\n        });\n      });\n      return toolMap;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/nested-foreach.ts", source);
     const tools = await callHandler();
@@ -1660,27 +859,8 @@ export default defineDynamic({
   });
 
   it("hoists execute inside an IIFE", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const secret = "s3cr3t";
-      const tools = (function() {
-        return {
-          reveal: defineTool({
-            description: "Reveal",
-            inputSchema: { type: "object" },
-            execute() { return secret; },
-          }),
-        };
-      })();
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const secret = "s3cr3t";\n      const tools = (function() {\n        return {\n          reveal: defineTool({\n            description: "Reveal",\n            inputSchema: { type: "object" },\n            execute() { return secret; },\n          }),\n        };\n      })();\n      return tools;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/iife.ts", source);
     const tools = await callHandler();
@@ -1690,29 +870,8 @@ export default defineDynamic({
   });
 
   it("hoists execute inside a .reduce() callback", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const version = "v2";
-      const endpoints = [
-        { name: "search", path: "/search" },
-        { name: "export", path: "/export" },
-      ];
-      return endpoints.reduce(function(acc, ep) {
-        acc[ep.name] = defineTool({
-          description: ep.name,
-          inputSchema: { type: "object" },
-          execute() { return version + ep.path; },
-        });
-        return acc;
-      }, {});
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const version = "v2";\n      const endpoints = [\n        { name: "search", path: "/search" },\n        { name: "export", path: "/export" },\n      ];\n      return endpoints.reduce(function(acc, ep) {\n        acc[ep.name] = defineTool({\n          description: ep.name,\n          inputSchema: { type: "object" },\n          execute() { return version + ep.path; },\n        });\n        return acc;\n      }, {});\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/reduce.ts", source);
     const tools = await callHandler();
@@ -1724,27 +883,8 @@ export default defineDynamic({
   });
 
   it("hoists execute inside doubly-nested helpers", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      function createToolSet(prefix) {
-        function makeTool(name) {
-          return defineTool({
-            description: name,
-            inputSchema: { type: "object" },
-            execute() { return prefix + "_" + name; },
-          });
-        }
-        return { search: makeTool("search") };
-      }
-      return createToolSet("v1");
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      function createToolSet(prefix) {\n        function makeTool(name) {\n          return defineTool({\n            description: name,\n            inputSchema: { type: "object" },\n            execute() { return prefix + "_" + name; },\n          });\n        }\n        return { search: makeTool("search") };\n      }\n      return createToolSet("v1");\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/double-nested.ts", source);
     const tools = await callHandler();
@@ -1754,31 +894,8 @@ export default defineDynamic({
   });
 
   it("helper result stored in variable, other work done, then returned", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const baseUrl = "https://api.test";
-      function buildTools(url) {
-        return {
-          search: defineTool({
-            description: "Search",
-            inputSchema: { type: "object" },
-            execute(input) { return url + "/search?q=" + input.q; },
-          }),
-        };
-      }
-      const tools = buildTools(baseUrl);
-      const timestamp = Date.now();
-      const audit = [];
-      audit.push("tools built at " + timestamp);
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const baseUrl = "https://api.test";\n      function buildTools(url) {\n        return {\n          search: defineTool({\n            description: "Search",\n            inputSchema: { type: "object" },\n            execute(input) { return url + "/search?q=" + input.q; },\n          }),\n        };\n      }\n      const tools = buildTools(baseUrl);\n      const timestamp = Date.now();\n      const audit = [];\n      audit.push("tools built at " + timestamp);\n      return tools;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/var-then-return.ts", source);
     const tools = await callHandler();
@@ -1788,28 +905,8 @@ export default defineDynamic({
   });
 
   it("helper result passed through a wrapper function before return", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const version = "v3";
-      function buildTool(name) {
-        return defineTool({
-          description: name,
-          inputSchema: { type: "object" },
-          execute(input) { return version + "/" + name + "/" + input.id; },
-        });
-      }
-      function wrapTools(toolSet) {
-        return toolSet;
-      }
-      return wrapTools({ search: buildTool("search"), list: buildTool("list") });
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const version = "v3";\n      function buildTool(name) {\n        return defineTool({\n          description: name,\n          inputSchema: { type: "object" },\n          execute(input) { return version + "/" + name + "/" + input.id; },\n        });\n      }\n      function wrapTools(toolSet) {\n        return toolSet;\n      }\n      return wrapTools({ search: buildTool("search"), list: buildTool("list") });\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/wrapped-return.ts", source);
     const tools = await callHandler();
@@ -1821,29 +918,8 @@ export default defineDynamic({
   });
 
   it("helper result stored in variable, mutated, then returned", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const org = "acme";
-      function makeTool(action) {
-        return defineTool({
-          description: action,
-          inputSchema: { type: "object" },
-          execute(input) { return org + ":" + action + ":" + input.target; },
-        });
-      }
-      const tools = {};
-      tools.read = makeTool("read");
-      tools.write = makeTool("write");
-      tools.delete_item = makeTool("delete");
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const org = "acme";\n      function makeTool(action) {\n        return defineTool({\n          description: action,\n          inputSchema: { type: "object" },\n          execute(input) { return org + ":" + action + ":" + input.target; },\n        });\n      }\n      const tools = {};\n      tools.read = makeTool("read");\n      tools.write = makeTool("write");\n      tools.delete_item = makeTool("delete");\n      return tools;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/incremental-build.ts", source);
     const tools = await callHandler();
@@ -1857,29 +933,8 @@ export default defineDynamic({
   });
 
   it("helper result stored in variable with replay round-trip", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const tenant = { name: "Acme", region: "us-east" };
-      function createTool(tenant) {
-        const label = tenant.name + " (" + tenant.region + ")";
-        return {
-          info: defineTool({
-            description: "Info",
-            inputSchema: { type: "object" },
-            execute() { return label; },
-          }),
-        };
-      }
-      const tools = createTool(tenant);
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const tenant = { name: "Acme", region: "us-east" };\n      function createTool(tenant) {\n        const label = tenant.name + " (" + tenant.region + ")";\n        return {\n          info: defineTool({\n            description: "Info",\n            inputSchema: { type: "object" },\n            execute() { return label; },\n          }),\n        };\n      }\n      const tools = createTool(tenant);\n      return tools;\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/var-replay.ts", source);
     const tools = await callHandler();
@@ -1898,26 +953,8 @@ export default defineDynamic({
   });
 
   it("nested helper replay: JSON round-trip produces same result", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const config = { base: "https://api.example.com" };
-      function buildTool(name) {
-        const url = config.base + "/" + name;
-        return defineTool({
-          description: name,
-          inputSchema: { type: "object" },
-          execute(input) { return { url, query: input.q }; },
-        });
-      }
-      return { search: buildTool("search") };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const config = { base: "https://api.example.com" };\n      function buildTool(name) {\n        const url = config.base + "/" + name;\n        return defineTool({\n          description: name,\n          inputSchema: { type: "object" },\n          execute(input) { return { url, query: input.q }; },\n        });\n      }\n      return { search: buildTool("search") };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/nested-replay.ts", source);
     const tools = await callHandler();
@@ -1936,25 +973,8 @@ export default defineDynamic({
   });
 
   it("returns null when execute value is a variable reference (not inline function)", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const endpoint = "/api";
-      const myExec = (input) => endpoint + input.path;
-      return {
-        search: {
-          description: "Search",
-          inputSchema: { type: "object" },
-          execute: myExec,
-        },
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const endpoint = "/api";\n      const myExec = (input) => endpoint + input.path;\n      return {\n        search: {\n          description: "Search",\n          inputSchema: { type: "object" },\n          execute: myExec,\n        },\n      };\n    },\n  },\n});\n';
 
     // execute: myExec — the value is an Identifier, not a
     // FunctionExpression/ArrowFunctionExpression. The transform cannot
@@ -1964,53 +984,16 @@ export default defineDynamic({
   });
 
   it("returns null when execute value is a factory return", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      function makeExec(endpoint) {
-        return async (input) => {
-          return endpoint + input.path;
-        };
-      }
-      const exec = makeExec("/api");
-      return {
-        search: {
-          description: "Search",
-          inputSchema: { type: "object" },
-          execute: exec,
-        },
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      function makeExec(endpoint) {\n        return async (input) => {\n          return endpoint + input.path;\n        };\n      }\n      const exec = makeExec("/api");\n      return {\n        search: {\n          description: "Search",\n          inputSchema: { type: "object" },\n          execute: exec,\n        },\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/factory-exec.ts", source);
     expect(result).toBeNull();
   });
 
   it("returns null when execute value is a method call (e.g. .bind())", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const client = { search(input) { return input; } };
-      return {
-        search: {
-          description: "Search",
-          inputSchema: { type: "object" },
-          execute: client.search.bind(client),
-        },
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const client = { search(input) { return input; } };\n      return {\n        search: {\n          description: "Search",\n          inputSchema: { type: "object" },\n          execute: client.search.bind(client),\n        },\n      };\n    },\n  },\n});\n';
 
     // execute: client.search.bind(client) — the value is a
     // CallExpression, not a function literal.
@@ -2035,21 +1018,8 @@ export default defineTool({
   });
 
   it("transforms aliased defineTool imports", async () => {
-    const source = `
-import { defineDynamic, defineTool as tool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": () => ({
-      aliased: tool({
-        description: "Aliased",
-        inputSchema: { type: "object" },
-        execute(input) { return input.value; },
-      }),
-    }),
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool as tool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": () => ({\n      aliased: tool({\n        description: "Aliased",\n        inputSchema: { type: "object" },\n        execute(input) { return input.value; },\n      }),\n    }),\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("lib/aliased-factory.ts", source);
     expect(result?.code).toContain("aliased: tool({");
@@ -2057,25 +1027,8 @@ export default defineDynamic({
   });
 
   it("supports module-level function references", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-function executeMarker(input) {
-  return "module:" + input.value;
-}
-
-export default defineDynamic({
-  events: {
-    "session.started": () => ({
-      marker: defineTool({
-        description: "Marker",
-        inputSchema: { type: "object" },
-        execute: executeMarker,
-      }),
-    }),
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nfunction executeMarker(input) {\n  return "module:" + input.value;\n}\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": () => ({\n      marker: defineTool({\n        description: "Marker",\n        inputSchema: { type: "object" },\n        execute: executeMarker,\n      }),\n    }),\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("lib/module-reference.ts", source);
     const tools = await callHandler();
@@ -2110,17 +1063,8 @@ export default defineTool({
   });
 
   it("returns null for defineDynamic without execute", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      return null;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      return null;\n    },\n  },\n});\n';
     expect(await transformDynamicToolExecute("tools/null.ts", source)).toBeNull();
   });
 
@@ -2203,34 +1147,8 @@ export default defineTool({
   });
 
   it("every hoisted function has balanced braces", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const data = await fetchData(ctx.session.id);
-      return {
-        tool_a: defineTool({
-          description: "A",
-          inputSchema: {},
-          async execute(input) {
-            if (input.x > 0) {
-              return { positive: true, data };
-            }
-            return { positive: false, data };
-          },
-        }),
-        tool_b: defineTool({
-          description: "B",
-          inputSchema: {},
-          execute: (input) => ({ result: data, input }),
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      const data = await fetchData(ctx.session.id);\n      return {\n        tool_a: defineTool({\n          description: "A",\n          inputSchema: {},\n          async execute(input) {\n            if (input.x > 0) {\n              return { positive: true, data };\n            }\n            return { positive: false, data };\n          },\n        }),\n        tool_b: defineTool({\n          description: "B",\n          inputSchema: {},\n          execute: (input) => ({ result: data, input }),\n        }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/braces.ts", source);
     expect(result).not.toBeNull();
@@ -2251,21 +1169,8 @@ export default defineDynamic({
   });
 
   it("every execute replacement is stamped with its hoisted implementation", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const a = 1;
-      return {
-        t1: defineTool({ description: "1", inputSchema: {}, execute() { return a; } }),
-        t2: defineTool({ description: "2", inputSchema: {}, execute() { return a + 1; } }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const a = 1;\n      return {\n        t1: defineTool({ description: "1", inputSchema: {}, execute() { return a; } }),\n        t2: defineTool({ description: "2", inputSchema: {}, execute() { return a + 1; } }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/markers.ts", source);
     expect(result).not.toBeNull();
@@ -2278,23 +1183,8 @@ export default defineDynamic({
   });
 
   it("stamped wrappers reference hoisted implementations", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: {},
-          execute() { return 1; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: {},\n          execute() { return 1; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/order.ts", source);
     expect(result).not.toBeNull();
@@ -2312,26 +1202,8 @@ export default defineDynamic({
   });
 
   it("only vars referenced in execute body are captured in __vars", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const alpha = 1;
-      const beta = 2;
-      const unused = 999;
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: {},
-          execute() { return { alpha, beta }; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      const alpha = 1;\n      const beta = 2;\n      const unused = 999;\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: {},\n          execute() { return { alpha, beta }; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/refvars.ts", source);
     expect(result).not.toBeNull();
@@ -2351,22 +1223,8 @@ export default defineDynamic({
   });
 
   it("handles defineDynamic with single-tool return", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const flags = { analytics: true };
-      return defineTool({
-        description: "Analytics",
-        inputSchema: { type: "object" },
-        execute(input) { return { flags, input }; },
-      });
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      const flags = { analytics: true };\n      return defineTool({\n        description: "Analytics",\n        inputSchema: { type: "object" },\n        execute(input) { return { flags, input }; },\n      });\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/singular.ts", source);
     expect(result).not.toBeNull();
@@ -2375,25 +1233,8 @@ export default defineDynamic({
   });
 
   it("preserves imports and module-level declarations", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-const MODULE_CONSTANT = "hello";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      return {
-        tool: defineTool({
-          description: MODULE_CONSTANT,
-          inputSchema: {},
-          execute() { return MODULE_CONSTANT; },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nconst MODULE_CONSTANT = "hello";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      return {\n        tool: defineTool({\n          description: MODULE_CONSTANT,\n          inputSchema: {},\n          execute() { return MODULE_CONSTANT; },\n        }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/preserve.ts", source);
     expect(result).not.toBeNull();
@@ -2402,25 +1243,8 @@ export default defineDynamic({
   });
 
   it("captures for-of loop iteration variables", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const tools = {};
-      for (const item of getItems()) {
-        tools[item.name] = defineTool({
-          description: item.name,
-          inputSchema: { type: "object" },
-          execute() { return item.value; },
-        });
-      }
-      return tools;
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const tools = {};\n      for (const item of getItems()) {\n        tools[item.name] = defineTool({\n          description: item.name,\n          inputSchema: { type: "object" },\n          execute() { return item.value; },\n        });\n      }\n      return tools;\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/forof.ts", source);
     expect(result).not.toBeNull();
@@ -2434,26 +1258,8 @@ export default defineDynamic({
   });
 
   it("handles both session.started and step.started handlers", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async () => {
-      const sessionVal = "s";
-      return {
-        s_tool: defineTool({ description: "S", inputSchema: {}, execute() { return sessionVal; } }),
-      };
-    },
-    "step.started": async () => {
-      const stepVal = "p";
-      return {
-        p_tool: defineTool({ description: "P", inputSchema: {}, execute() { return stepVal; } }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async () => {\n      const sessionVal = "s";\n      return {\n        s_tool: defineTool({ description: "S", inputSchema: {}, execute() { return sessionVal; } }),\n      };\n    },\n    "beforeModel": async () => {\n      const stepVal = "p";\n      return {\n        p_tool: defineTool({ description: "P", inputSchema: {}, execute() { return stepVal; } }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/multi-event.ts", source);
     expect(result).not.toBeNull();
@@ -2466,30 +1272,8 @@ export default defineDynamic({
   });
 
   it("the dynamic-ctx fixture pattern works end-to-end", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (event, ctx) => {
-      const resolverSessionId = ctx.session.id;
-
-      return {
-        check_ctx: defineTool({
-          description: "Check",
-          inputSchema: { type: "object" },
-          execute(_input, executeCtx) {
-            return {
-              resolverSessionId,
-              executeCtxType: typeof executeCtx,
-            };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (event, ctx) => {\n      const resolverSessionId = ctx.session.id;\n\n      return {\n        check_ctx: defineTool({\n          description: "Check",\n          inputSchema: { type: "object" },\n          execute(_input, executeCtx) {\n            return {\n              resolverSessionId,\n              executeCtxType: typeof executeCtx,\n            };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const { callHandler } = await transformAndEval("tools/ctx.ts", source, {
       ctx: { session: { id: "sess-42", auth: { current: null } } },
@@ -2505,26 +1289,8 @@ export default defineDynamic({
   });
 
   it("typed params with generic commas (Record<string, unknown>) are handled correctly", async () => {
-    const source = `
-import { defineDynamic, defineTool } from "eve/tools";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (_input, ctx) => {
-      const tag = "typed";
-      return {
-        tool: defineTool({
-          description: "T",
-          inputSchema: { type: "object" },
-          execute(_input: Record<string, unknown>, ctx: import("eve/tools").ToolContext) {
-            return { tag, input: _input, hasCtx: ctx !== undefined };
-          },
-        }),
-      };
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineTool } from "eve/tools";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": async (_input, ctx) => {\n      const tag = "typed";\n      return {\n        tool: defineTool({\n          description: "T",\n          inputSchema: { type: "object" },\n          execute(_input: Record<string, unknown>, ctx: import("eve/tools").ToolContext) {\n            return { tag, input: _input, hasCtx: ctx !== undefined };\n          },\n        }),\n      };\n    },\n  },\n});\n';
 
     const result = await transformDynamicToolExecute("tools/generic-params.ts", source);
     expect(result).not.toBeNull();
@@ -2539,20 +1305,7 @@ describe("durable schema expression transform", () => {
   it("captures inline refinement values separately from the current resolver invocation", async () => {
     const { callHandler } = await transformAndEval(
       "schema.ts",
-      `
-      import { defineTool, defineDynamic } from "eve/tools";
-      import { z } from "zod";
-      const output = z.object({ value: z.string().trim() });
-      export default defineDynamic({ events: { "session.started": (_event, ctx) => {
-        const limit = ctx.limit;
-        return { checked: defineTool({
-          description: "Checked",
-          inputSchema: z.object({ amount: z.number().refine(value => value <= limit) }),
-          outputSchema: output,
-          execute: () => limit,
-        }) };
-      } } });
-    `,
+      '\n      import { defineTool, defineDynamic } from "eve/tools";\n      import { z } from "zod";\n      const output = z.object({ value: z.string().trim() });\n      export default defineDynamic({ events: { "beforeSession": (_event, ctx) => {\n        const limit = ctx.limit;\n        return { checked: defineTool({\n          description: "Checked",\n          inputSchema: z.object({ amount: z.number().refine(value => value <= limit) }),\n          outputSchema: output,\n          execute: () => limit,\n        }) };\n      } } });\n    ',
       { ctx: { limit: 10 } },
     );
     const entry = (await callHandler()).checked;

@@ -11,7 +11,7 @@ import metadataProvider from "../channels/metadata-provider";
  */
 export default defineDynamic({
   events: {
-    "turn.started": (_event, ctx) => {
+    beforeTurn: (_event, ctx) => {
       if (!isChannel(ctx.channel, metadataProvider)) return null;
 
       const { topic, contextMessages } = ctx.channel.metadata;

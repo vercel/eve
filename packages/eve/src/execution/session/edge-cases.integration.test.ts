@@ -254,7 +254,7 @@ async function withSession(
       definition: defineAgent({
         model: defineDynamic({
           events: {
-            "step.started": () => ({ model: options.model, modelContextWindowTokens: 200_000 }),
+            beforeModel: () => ({ model: options.model, modelContextWindowTokens: 200_000 }),
           },
         }),
       }),

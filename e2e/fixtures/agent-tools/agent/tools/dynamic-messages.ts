@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export default defineDynamic({
   events: {
-    "step.started": async (event, ctx) => {
+    beforeModel: async (event, ctx) => {
       const messageCount = ctx.messages.length;
       const toolResultCount = ctx.messages.filter((m) => m.role === "tool").length;
 

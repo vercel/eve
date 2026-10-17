@@ -28,7 +28,7 @@ For investigation tasks, report the findings and supporting evidence requested b
 
 export default defineDynamic({
   events: {
-    "session.started": () => {
+    beforeSession: () => {
       if (!isDeployedRuntime()) return null;
 
       return defineInstructions({

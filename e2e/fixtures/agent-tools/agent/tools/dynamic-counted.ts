@@ -10,7 +10,7 @@ async function simulateIo(): Promise<{ label: string }> {
 
 export default defineDynamic({
   events: {
-    "session.started": async (_event, _ctx) => {
+    beforeSession: async (_event, _ctx) => {
       const data = await simulateIo();
 
       return {

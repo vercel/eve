@@ -102,11 +102,11 @@ export default defineAgent({
   limits: { maxOutputTokensPerSession: 1_000_000 },
   model: defineDynamic({
     events: {
-      "session.started": () => ({
+      beforeSession: () => ({
         model: typeof base.model === "string" ? base.model : "openai/gpt-6.1-sol",
         modelContextWindowTokens: base.modelContextWindowTokens,
       }),
-      "step.started": (_event, ctx) => {
+      beforeModel: (_event, ctx) => {
         switch (ctx.session.auth.initiator?.attributes?.model) {
           case "continuation":
             return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };

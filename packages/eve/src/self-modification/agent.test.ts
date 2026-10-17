@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineSelfModificationAgent } from "./agent.js";
 
 const context: DynamicResolveContext = {
-  channel: {},
+  channel: { kind: "unknown", metadata: {} },
   messages: [],
   model: null,
   session: { auth: { current: null, initiator: null }, id: "session" },
@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe("retired self-modification agent scaffold", () => {
-  it.each(["session.started", "turn.started"] as const)(
+  it.each(["beforeSession", "beforeTurn"] as const)(
     "resolves to null on %s regardless of options",
     async (eventName) => {
       const agent = defineSelfModificationAgent({
@@ -25,7 +25,21 @@ describe("retired self-modification agent scaffold", () => {
         reasoning: "high",
       });
 
-      await expect(agent.events[eventName]?.({}, context)).resolves.toBeNull();
+      const result =
+        eventName === "beforeSession"
+          ? agent.events.beforeSession?.({ type: "session.started", data: {} }, context)
+          : agent.events.beforeTurn?.(
+              {
+                type: "turn.started",
+                data: {
+                  turnId: "turn-test",
+                  cause: { deliveryId: "delivery-test" },
+                  follows: null,
+                },
+              },
+              context,
+            );
+      await expect(result).resolves.toBeNull();
     },
   );
 
@@ -34,8 +48,14 @@ describe("retired self-modification agent scaffold", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const agent = defineSelfModificationAgent();
 
-    await agent.events["session.started"]?.({}, context);
-    await agent.events["turn.started"]?.({}, context);
+    await agent.events["beforeSession"]?.({ type: "session.started", data: {} }, context);
+    await agent.events["beforeTurn"]?.(
+      {
+        type: "turn.started",
+        data: { turnId: "turn-test", cause: { deliveryId: "delivery-test" }, follows: null },
+      },
+      context,
+    );
 
     expect(warning).toHaveBeenCalledTimes(1);
     expect(warning).toHaveBeenCalledWith(
@@ -45,7 +65,10 @@ describe("retired self-modification agent scaffold", () => {
 
   it("does not warn in production", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    await defineSelfModificationAgent().events["session.started"]?.({}, context);
+    await defineSelfModificationAgent().events["beforeSession"]?.(
+      { type: "session.started", data: {} },
+      context,
+    );
     expect(warning).not.toHaveBeenCalled();
   });
 });

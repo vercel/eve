@@ -1,3 +1,4 @@
+import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { getAdapterKind } from "#channel/adapter.js";
@@ -101,7 +102,8 @@ function buildHookContext(
       nodeId: bundle.nodeId,
     },
     channel: {
-      kind,
+      kind: normalizeInstrumentationChannelKind(kind),
+      metadata: ctx.get(ChannelInstrumentationKey)?.metadata ?? {},
       continuationToken,
     },
   };

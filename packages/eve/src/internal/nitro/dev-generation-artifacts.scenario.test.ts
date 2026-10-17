@@ -127,7 +127,7 @@ describe("development generation artifacts", () => {
     const moduleNamespace = moduleMap.nodes[subagent!.nodeId]?.modules[sourceId!] as {
       default: { events: Record<string, Function> };
     };
-    const handler = moduleNamespace.default.events["session.started"];
+    const handler = moduleNamespace.default.events["beforeSession"];
     expect(handler).toBeDefined();
     const remote = handler!() as Record<string, unknown>;
     const credentialsFactory = remote.__eveResolveRemoteAgentCredentials as {
@@ -180,7 +180,7 @@ describe("development generation artifacts", () => {
       subagent.configResolver.sourceId
     ] as { default: { events: Record<string, Function> } };
 
-    expect(moduleNamespace.default.events["session.started"]).toBeDefined();
+    expect(moduleNamespace.default.events["beforeSession"]).toBeDefined();
   });
 
   it("preserves extension scope in a shared generation graph", async () => {

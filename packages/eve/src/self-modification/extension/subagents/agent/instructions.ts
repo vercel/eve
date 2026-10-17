@@ -37,7 +37,7 @@ ${renderLocalSelfModificationExtension()}\`\`\``;
 
 export default defineDynamic({
   events: {
-    "session.started": () => {
+    beforeSession: () => {
       if (!isLocalSelfModificationEnabled(resolveSelfModificationConfig(selfModification.config))) {
         return null;
       }

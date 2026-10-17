@@ -8,6 +8,7 @@
   "DisabledToolSentinel",
   "DynamicEvents",
   "DynamicResolveContext",
+  "DynamicResolverEvent",
   "DynamicSentinel",
   "DynamicToolEntry",
   "DynamicToolEvents",

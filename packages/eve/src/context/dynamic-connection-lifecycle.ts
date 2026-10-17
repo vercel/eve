@@ -1,3 +1,5 @@
+import { dynamicEventKey } from "#dynamic/definition.js";
+import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
@@ -83,7 +85,7 @@ async function resolveConnections(input: {
   readonly event: DynamicSessionOrTurnEvent;
   readonly resolver: ResolvedDynamicConnectionResolver;
 }): Promise<readonly ResolvedConnectionDefinition[]> {
-  const handler = input.resolver.events[input.event.type];
+  const handler = input.resolver.events[dynamicEventKey(input.event.type)];
   if (handler === undefined) return [];
   const value = await handler(input.event.fact, buildConnectionResolveContext(input.ctx));
   if (value === null || value === undefined) return [];
@@ -106,7 +108,7 @@ export async function resolveDynamicConnections(input: {
   readonly event: DynamicSessionOrTurnEvent;
 }): Promise<void> {
   const matching = input.resolvers.filter((resolver) =>
-    resolver.eventNames.includes(input.event.type),
+    resolver.eventNames.includes(dynamicEventKey(input.event.type)),
   );
   if (matching.length === 0) return;
 
@@ -211,7 +213,7 @@ function buildConnectionResolveContext(ctx: ContextContainer): DynamicConnection
       },
     },
     channel: {
-      kind: ctx.get(ChannelInstrumentationKey)?.kind,
+      kind: normalizeInstrumentationChannelKind(ctx.get(ChannelInstrumentationKey)?.kind),
     },
   };
 }

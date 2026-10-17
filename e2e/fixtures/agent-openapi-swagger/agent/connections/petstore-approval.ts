@@ -5,7 +5,7 @@ import { petstoreBaseUrl, petstoreHeaders, petstoreSpecUrl } from "../../petstor
 
 export default defineDynamic({
   events: {
-    "session.started": () => ({
+    beforeSession: () => ({
       "petstore-approval": defineOpenAPIConnection({
         approval: always(),
         baseUrl: petstoreBaseUrl(),

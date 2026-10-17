@@ -80,9 +80,9 @@ describe("mounted extension via authored-source loader", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
-          config: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+          config: EXTENSION_CAPABILITY_VERSIONS.config,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -197,7 +197,9 @@ describe("mounted extension via authored-source loader", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({ extension: 1 }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+        }),
         "node_modules/@acme/crm/extension/extension.mjs": "export default { instance: {} };",
       },
     });
@@ -255,9 +257,9 @@ describe("mounted extension via authored-source loader", () => {
       if ("configResolver" in worker) throw new Error("Expected static worker config.");
       const configSourceId = worker.agent.config.source.sourceId;
       const definition = moduleMap.nodes[worker.nodeId]!.modules[configSourceId]!.default as {
-        model: { events: { "session.started": () => { reasoning: string } } };
+        model: { events: { beforeSession: () => { reasoning: string } } };
       };
-      return definition.model.events["session.started"]().reasoning;
+      return definition.model.events["beforeSession"]().reasoning;
     });
     expect(reasoning).toEqual(["high", "low"]);
     const second = await loadCompiledModuleMapFromAuthoredSource({
@@ -267,9 +269,9 @@ describe("mounted extension via authored-source loader", () => {
       if ("configResolver" in worker) throw new Error("Expected static worker config.");
       const definition = second.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
         .default as {
-        model: { events: { "session.started": () => { reasoning: string } } };
+        model: { events: { beforeSession: () => { reasoning: string } } };
       };
-      return definition.model.events["session.started"]().reasoning;
+      return definition.model.events["beforeSession"]().reasoning;
     });
     expect(secondReasoning).toEqual(["high", "low"]);
   });
@@ -288,8 +290,8 @@ describe("mounted extension via authored-source loader", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": "export default {};",
         "node_modules/@acme/crm/extension/tools/count.mjs": [
@@ -356,8 +358,8 @@ describe("mounted extension via authored-source loader", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": "export default {};",
         "node_modules/@acme/crm/extension/tools/count.mjs": [
@@ -386,7 +388,12 @@ describe("mounted extension via authored-source loader", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
-          ...JSON.parse(compatibilityManifest({ extension: 1, tool: 1 })),
+          ...JSON.parse(
+            compatibilityManifest({
+              extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+              tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+            }),
+          ),
           formatVersion: 2,
           build: { externalDependencies: ["nested-dependency"] },
         }),
@@ -466,9 +473,9 @@ describe("mounted extension via authored-source loader", () => {
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
-          config: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+          config: EXTENSION_CAPABILITY_VERSIONS.config,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -521,8 +528,8 @@ describe("mounted extension without config", () => {
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
         "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
         }),
         "node_modules/@acme/widget/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -569,7 +576,7 @@ describe("mounted extension with an unsupported capability contract", () => {
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
         "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
           tool: unsupportedToolVersion,
         }),
         "node_modules/@acme/widget/extension/extension.mjs": [
@@ -634,10 +641,10 @@ describe("mounted extension via directory form with override", () => {
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
-          dynamicTool: 1,
-          config: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+          dynamicTool: EXTENSION_CAPABILITY_VERSIONS.dynamicTool,
+          config: EXTENSION_CAPABILITY_VERSIONS.config,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -754,8 +761,8 @@ describe("mounted extension via directory form with override", () => {
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          subagent: 6,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -818,9 +825,9 @@ describe("nested extension mounts", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/outer/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          subagent: 6,
-          config: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
+          config: EXTENSION_CAPABILITY_VERSIONS.config,
         }),
         "node_modules/@acme/outer/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -841,10 +848,10 @@ describe("nested extension mounts", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/inner/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          subagent: 6,
-          tool: 1,
-          config: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+          config: EXTENSION_CAPABILITY_VERSIONS.config,
         }),
         "node_modules/@acme/inner/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -870,9 +877,9 @@ describe("nested extension mounts", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/leaf/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
-          config: 1,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+          config: EXTENSION_CAPABILITY_VERSIONS.config,
         }),
         "node_modules/@acme/leaf/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -942,8 +949,8 @@ describe("mounted extension subagent resources", () => {
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
         "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          subagent: 6,
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
         }),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',

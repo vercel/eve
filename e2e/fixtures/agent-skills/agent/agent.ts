@@ -26,7 +26,7 @@ export default defineAgent({
   ...config,
   model: defineDynamic({
     events: {
-      "step.started": (_event, ctx) =>
+      beforeModel: (_event, ctx) =>
         ctx.messages.some(
           (message) => message.role === "user" && message.content === PREFIX_REQUEST,
         )

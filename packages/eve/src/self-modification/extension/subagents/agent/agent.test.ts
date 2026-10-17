@@ -11,7 +11,7 @@ import { defineSelfModificationAgent, type SelfModificationAgentOptions } from "
 
 const serverUrl = "http://127.0.0.1:3000";
 const context: DynamicResolveContext = {
-  channel: {},
+  channel: { kind: "unknown", metadata: {} },
   messages: [],
   model: null,
   session: { auth: { current: null, initiator: null }, id: "session" },
@@ -38,7 +38,15 @@ describe("self-modification local agent", () => {
     await withDevHost(async () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-      await expect(agent.events["turn.started"]?.({}, context)).resolves.toMatchObject({
+      await expect(
+        agent.events["beforeTurn"]?.(
+          {
+            type: "turn.started",
+            data: { turnId: "turn-test", cause: { deliveryId: "delivery-test" }, follows: null },
+          },
+          context,
+        ),
+      ).resolves.toMatchObject({
         model: "openai/gpt-6-luna-fast",
         reasoning: "high",
       });
@@ -88,7 +96,13 @@ describe("self-modification local agent", () => {
           ...options,
           config: { local: { enabled: true } },
         });
-        const resolved = await agent.events["turn.started"]?.({}, { ...context, model: parent });
+        const resolved = await agent.events["beforeTurn"]?.(
+          {
+            type: "turn.started",
+            data: { turnId: "turn-test", cause: { deliveryId: "delivery-test" }, follows: null },
+          },
+          { ...context, model: parent },
+        );
 
         expect(resolved).toMatchObject({ model });
         expect(resolved).toHaveProperty("reasoning", reasoning);
@@ -106,7 +120,15 @@ describe("self-modification local agent", () => {
       await withLocalDevRequestScope(new Request(serverUrl, { headers }), async () => {
         const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-        await expect(agent.events["turn.started"]?.({}, context)).resolves.not.toBeNull();
+        await expect(
+          agent.events["beforeTurn"]?.(
+            {
+              type: "turn.started",
+              data: { turnId: "turn-test", cause: { deliveryId: "delivery-test" }, follows: null },
+            },
+            context,
+          ),
+        ).resolves.not.toBeNull();
       });
     });
   });
@@ -115,14 +137,30 @@ describe("self-modification local agent", () => {
     process.env.EVE_DEV = "1";
     const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
 
-    await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
+    await expect(
+      agent.events["beforeTurn"]?.(
+        {
+          type: "turn.started",
+          data: { turnId: "turn-test", cause: { deliveryId: "delivery-test" }, follows: null },
+        },
+        context,
+      ),
+    ).resolves.toBeNull();
   });
 
   it("honors local.enabled: false even when eve dev facilities are available", async () => {
     await withDevHost(async () => {
       const agent = defineSelfModificationAgent({ config: { local: { enabled: false } } });
 
-      await expect(agent.events["turn.started"]?.({}, context)).resolves.toBeNull();
+      await expect(
+        agent.events["beforeTurn"]?.(
+          {
+            type: "turn.started",
+            data: { turnId: "turn-test", cause: { deliveryId: "delivery-test" }, follows: null },
+          },
+          context,
+        ),
+      ).resolves.toBeNull();
     });
   });
 });

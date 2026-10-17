@@ -20,7 +20,7 @@ function evaluateSessionHandler(code: string): Function {
     .replace(/export\s+default\s+/g, "var __exported = ");
   let handler: Function | undefined;
   const defineDynamic = (definition: { events: Record<string, Function> }) => {
-    handler = definition.events["session.started"];
+    handler = definition.events["beforeSession"];
     return definition;
   };
   const defineRemoteAgent = (definition: Record<string, unknown>) => ({
@@ -40,25 +40,8 @@ function evaluateSessionHandler(code: string): Function {
 
 describe("transformDynamicRemoteAgentCredentials", () => {
   it("registers remote auth and headers without making them enumerable", async () => {
-    const source = `
-import { defineDynamic, defineRemoteAgent } from "eve";
-
-function createAuth() {
-  return async () => ({ headers: { authorization: "Bearer fresh" } });
-}
-
-export default defineDynamic({
-  events: {
-    "session.started": () =>
-      defineRemoteAgent({
-        auth: createAuth(),
-        description: "Remote research.",
-        headers: () => ({ "x-runtime": "fresh" }),
-        url: "https://research.example.com",
-      }),
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineRemoteAgent } from "eve";\n\nfunction createAuth() {\n  return async () => ({ headers: { authorization: "Bearer fresh" } });\n}\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": () =>\n      defineRemoteAgent({\n        auth: createAuth(),\n        description: "Remote research.",\n        headers: () => ({ "x-runtime": "fresh" }),\n        url: "https://research.example.com",\n      }),\n  },\n});\n';
     const handler = evaluateSessionHandler(await transformSource(source));
     const remote = handler() as Record<string, unknown>;
     const credentialsFactory = remote.__eveResolveRemoteAgentCredentials as {
@@ -79,23 +62,8 @@ export default defineDynamic({
   });
 
   it("transforms remote definitions inside conditional expressions", async () => {
-    const source = `
-import { defineDynamic, defineRemoteAgent } from "eve";
-
-const enabled = true;
-export default defineDynamic({
-  events: {
-    "session.started": () =>
-      enabled
-        ? defineRemoteAgent({
-            description: "Remote research.",
-            headers: () => ({ "x-runtime": "fresh" }),
-            url: "https://research.example.com",
-          })
-        : null,
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineRemoteAgent } from "eve";\n\nconst enabled = true;\nexport default defineDynamic({\n  events: {\n    "beforeSession": () =>\n      enabled\n        ? defineRemoteAgent({\n            description: "Remote research.",\n            headers: () => ({ "x-runtime": "fresh" }),\n            url: "https://research.example.com",\n          })\n        : null,\n  },\n});\n';
     const handler = evaluateSessionHandler(await transformSource(source));
     const remote = handler() as Record<string, unknown>;
 
@@ -103,23 +71,8 @@ export default defineDynamic({
   });
 
   it("preserves quoted credential keys and method shorthand", async () => {
-    const source = `
-import { defineDynamic, defineRemoteAgent } from "eve";
-
-export default defineDynamic({
-  events: {
-    "session.started": () =>
-      defineRemoteAgent({
-        "auth": async () => ({ headers: { authorization: "Bearer fresh" } }),
-        description: "Remote research.",
-        headers() {
-          return { "x-runtime": "fresh" };
-        },
-        url: "https://research.example.com",
-      }),
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineRemoteAgent } from "eve";\n\nexport default defineDynamic({\n  events: {\n    "beforeSession": () =>\n      defineRemoteAgent({\n        "auth": async () => ({ headers: { authorization: "Bearer fresh" } }),\n        description: "Remote research.",\n        headers() {\n          return { "x-runtime": "fresh" };\n        },\n        url: "https://research.example.com",\n      }),\n  },\n});\n';
     const handler = evaluateSessionHandler(await transformSource(source));
     const remote = handler() as Record<string, unknown>;
     const credentialsFactory = remote.__eveResolveRemoteAgentCredentials as Function;
@@ -133,8 +86,7 @@ export default defineDynamic({
 
   it("hoists credentials from aliased and namespace imports", async () => {
     for (const source of [
-      `import { defineDynamic, defineRemoteAgent as remote } from "eve";
-export default defineDynamic({ events: { "session.started": () => remote({ description: "Research", url: "https://example.com", headers: () => ({ "x-runtime": "fresh" }) }) } });`,
+      'import { defineDynamic, defineRemoteAgent as remote } from "eve";\nexport default defineDynamic({ events: { "beforeSession": () => remote({ description: "Research", url: "https://example.com", headers: () => ({ "x-runtime": "fresh" }) }) } });',
       `import * as eve from "eve";
 export default eve.defineDynamic({ events: { "session.started": () => eve.defineRemoteAgent({ description: "Research", url: "https://example.com", headers: () => ({ "x-runtime": "fresh" }) }) } });`,
     ]) {
@@ -180,28 +132,8 @@ export default defineDynamic({ events: { "session.started": () => {
   });
 
   it("allows credentials that use module bindings and their own locals", async () => {
-    const source = `
-import { defineDynamic, defineRemoteAgent } from "eve";
-
-const ENV = "PRODUCTION";
-export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) => {
-      if (ctx) {
-        const ENV = "BLOCK";
-      }
-      return defineRemoteAgent({
-        async auth(request) {
-          const ctx = { token: ENV };
-          return { headers: { authorization: ctx.token, url: request?.url } };
-        },
-        description: "Remote research.",
-        url: "https://research.example.com",
-      });
-    },
-  },
-});
-`;
+    const source =
+      '\nimport { defineDynamic, defineRemoteAgent } from "eve";\n\nconst ENV = "PRODUCTION";\nexport default defineDynamic({\n  events: {\n    "beforeSession": (_event, ctx) => {\n      if (ctx) {\n        const ENV = "BLOCK";\n      }\n      return defineRemoteAgent({\n        async auth(request) {\n          const ctx = { token: ENV };\n          return { headers: { authorization: ctx.token, url: request?.url } };\n        },\n        description: "Remote research.",\n        url: "https://research.example.com",\n      });\n    },\n  },\n});\n';
     expect(await transformSource(source)).toContain("__eveResolveRemoteAgentCredentials");
   });
 
@@ -209,7 +141,7 @@ export default defineDynamic({
     await expect(
       transformDynamicRemoteAgentCredentials(
         "subagents/research.ts",
-        `export default defineDynamic({ events: { "session.started": () => defineRemoteAgent({ description: "Research", url: "https://example.com" }) } });`,
+        'export default defineDynamic({ events: { "beforeSession": () => defineRemoteAgent({ description: "Research", url: "https://example.com" }) } });',
       ),
     ).resolves.toBeNull();
   });

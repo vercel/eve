@@ -1,3 +1,4 @@
+import { dynamicEventKey } from "#dynamic/definition.js";
 import type { ModelMessage } from "ai";
 import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 
@@ -378,7 +379,7 @@ async function resolveToolsFromEvent(
   const scope = event.type.split(".")[0] as DynamicToolCallbackScope;
   const outcomes = await Promise.allSettled(
     resolvers.map(async (resolver) => {
-      const handler = resolver.events[event.type];
+      const handler = resolver.events[dynamicEventKey(event.type)];
       if (handler === undefined) return null;
       clearDurableDynamicCallbacks(sessionId, { scope, resolverSlug: resolver.slug });
       try {
@@ -473,7 +474,7 @@ export async function resolveStepDynamicTools(input: {
   }
 
   const matching = input.resolvers.filter((resolver) =>
-    resolver.eventNames.includes("step.started"),
+    resolver.eventNames.includes("beforeModel"),
   );
   const { metadata } =
     matching.length === 0
@@ -530,7 +531,9 @@ export async function resolveDynamicTools(input: {
   }
 
   if (event.type === "turn.started") input.ctx.set(StepDynamicToolMetadataKey, []);
-  const matching = input.resolvers.filter((resolver) => resolver.eventNames.includes(event.type));
+  const matching = input.resolvers.filter((resolver) =>
+    resolver.eventNames.includes(dynamicEventKey(event.type)),
+  );
   const { metadata } =
     matching.length === 0
       ? { metadata: [] }
@@ -576,7 +579,7 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
     return;
   }
   const matching = input.resolvers.filter((resolver) =>
-    resolver.eventNames.includes("session.started"),
+    resolver.eventNames.includes("beforeSession"),
   );
   const { metadata } =
     matching.length === 0

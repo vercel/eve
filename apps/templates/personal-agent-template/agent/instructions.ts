@@ -21,7 +21,7 @@ function instructionsForChannel(kind: string | undefined, base: string) {
 
 export default defineDynamic({
   events: {
-    "session.started": async (_event, ctx: DynamicResolveContext) => {
+    beforeSession: async (_event, ctx: DynamicResolveContext) => {
       const userId = ctx.session.auth.current?.principalId;
       if (!userId || userId.startsWith("eve:")) {
         return defineInstructions({

@@ -138,7 +138,7 @@ import { defineAgent, defineDynamic } from "eve";
 export default defineAgent({
   model: defineDynamic({
     events: {
-      "session.started": (_event, ctx) => {
+      beforeSession: (_event, ctx) => {
         if (ctx.session.auth.initiator?.attributes.plan === "enterprise") {
           return "anthropic/claude-opus-5.5";
         }

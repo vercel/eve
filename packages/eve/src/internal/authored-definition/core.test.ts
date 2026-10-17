@@ -34,7 +34,7 @@ describe("normalizeAgentDefinition", () => {
   it("accepts dynamic model definitions", () => {
     const model = defineDynamic({
       events: {
-        "session.started": () => "openai/gpt-5.5-mini",
+        beforeSession: () => "openai/gpt-5.5-mini",
       },
     });
     const definition = normalizeAgentDefinition(
@@ -47,7 +47,7 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.model).toMatchObject({
       kind: "eve:dynamic",
     });
-    expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
+    expect(typeof (definition.model as typeof model).events["beforeSession"]).toBe("function");
   });
 
   it("rejects fallback-shaped dynamic models", () => {
@@ -55,7 +55,7 @@ describe("normalizeAgentDefinition", () => {
       normalizeAgentDefinition(
         {
           model: {
-            events: { "session.started": () => "openai/gpt-5.5-mini" },
+            events: { beforeSession: () => "openai/gpt-5.5-mini" },
             fallback: "openai/gpt-5.5",
             kind: "eve:dynamic",
           },
@@ -71,7 +71,7 @@ describe("normalizeAgentDefinition", () => {
         {
           model: defineDynamic({
             events: {
-              "session.started": () => "openai/gpt-5.5-mini",
+              beforeSession: () => "openai/gpt-5.5-mini",
             },
           }),
           modelContextWindowTokens: 128_000,
@@ -88,7 +88,7 @@ describe("normalizeAgentDefinition", () => {
           compaction: {
             model: defineDynamic({
               events: {
-                "session.started": () => "openai/gpt-5.5-mini",
+                beforeSession: () => "openai/gpt-5.5-mini",
               },
             }),
           },

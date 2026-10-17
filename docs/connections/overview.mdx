@@ -35,7 +35,7 @@ import { listAccounts } from "../lib/accounts";
 
 export default defineDynamic({
   events: {
-    "session.started": async (_event, ctx) => {
+    beforeSession: async (_event, ctx) => {
       const accounts = await listAccounts(ctx.session.auth.current);
       return Object.fromEntries(
         accounts.map((account) => [

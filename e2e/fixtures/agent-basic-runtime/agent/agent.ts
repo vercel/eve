@@ -60,7 +60,7 @@ export default defineAgent({
   ...agentConfig,
   model: defineDynamic({
     events: {
-      "step.started": (_event, ctx) => {
+      beforeModel: (_event, ctx) => {
         // This child exercises traced HTTP cleanup; schema-following has separate model evals.
         const isResultChild = ctx.messages.some((message) => {
           if (message.role !== "user") return false;

@@ -5,7 +5,7 @@ import { DESTRUCTIVE_DENIAL, SERVICE_TOKEN, previewBypassHeaders, selfMcpUrl } f
 // Resolved per session so the URL is this deployment's, not the build host's.
 export default defineDynamic({
   events: {
-    "session.started": () =>
+    beforeSession: () =>
       defineMcpClientConnection({
         // Decides from what the MCP channel declares about each tool, not from its name.
         approval: ({ toolAnnotations }) =>

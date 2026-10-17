@@ -50,13 +50,13 @@ function createContext() {
 
 it("rebinds a keyed dynamic approval after losing its in-process callback registry", async () => {
   const resolver: ResolvedDynamicToolResolver = {
-    eventNames: ["turn.started"],
+    eventNames: ["beforeTurn"],
     slug: "scoped",
     logicalPath: "tools/scoped.ts",
     sourceId: "test:scoped",
     sourceKind: "module",
     events: {
-      "turn.started": () => ({
+      beforeTurn: () => ({
         deploy: defineTool({
           description: "Deploy Alice's release",
           inputSchema: defineDurableSchema({

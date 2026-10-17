@@ -10,7 +10,7 @@ import actionNarration from "../channels/action-narration";
  */
 export default defineDynamic({
   events: {
-    "step.started": (_event, ctx) => {
+    beforeModel: (_event, ctx) => {
       if (!isChannel(ctx.channel, actionNarration)) return null;
 
       const narration = ctx.channel.metadata.observedNarration;

@@ -133,7 +133,7 @@ describe("initialPromptPlaceholder", () => {
                       ...info.agent.config,
                       logicalPath: "tools/quote.ts",
                       slug: "quote",
-                      eventNames: ["turn.started"],
+                      eventNames: ["beforeTurn"],
                     },
                   ],
                 },
@@ -220,7 +220,7 @@ describe("initialPromptPlaceholder", () => {
                           {
                             ...info.agent.config,
                             slug: "instructions",
-                            eventNames: ["turn.started"],
+                            eventNames: ["beforeTurn"],
                           },
                         ],
                       },

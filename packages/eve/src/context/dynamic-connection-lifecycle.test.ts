@@ -97,15 +97,15 @@ describe("dynamic connection lifecycle", () => {
   it("lets a turn result replace the same resolver's session result", async () => {
     const { ctx, registry } = createContext();
     const resolver = createResolver({
-      eventNames: ["session.started", "turn.started"],
+      eventNames: ["beforeSession", "beforeTurn"],
       events: {
-        "session.started": () => ({
+        beforeSession: () => ({
           primary: defineMcpClientConnection({
             description: "Primary account.",
             url: "https://mcp.example.com/primary",
           }),
         }),
-        "turn.started": () => null,
+        beforeTurn: () => null,
       },
     });
 
@@ -151,15 +151,15 @@ describe("dynamic connection lifecycle", () => {
     const logs = captureLogRecords();
     const { ctx, registry } = createContext([createStaticConnection("production")]);
     const resolver = createResolver({
-      eventNames: ["session.started", "turn.started"],
+      eventNames: ["beforeSession", "beforeTurn"],
       events: {
-        "session.started": () => ({
+        beforeSession: () => ({
           production: defineMcpClientConnection({
             description: "Caller production account.",
             url: "https://dynamic.example.com/mcp",
           }),
         }),
-        "turn.started": () => {
+        beforeTurn: () => {
           throw new Error("account lookup failed");
         },
       },
@@ -224,16 +224,16 @@ describe("dynamic connection lifecycle", () => {
     const { ctx, registry } = createContext();
     let instanceKey = "account-123";
     const resolver = createResolver({
-      eventNames: ["session.started", "turn.started"],
+      eventNames: ["beforeSession", "beforeTurn"],
       events: {
-        "session.started": () =>
+        beforeSession: () =>
           defineMcpClientConnection({
             auth: { getToken: async () => ({ token: "token" }) },
             description: "Current account.",
             instanceKey,
             url: "https://mcp.example.com/current",
           }),
-        "turn.started": () =>
+        beforeTurn: () =>
           defineMcpClientConnection({
             auth: { getToken: async () => ({ token: "token" }) },
             description: "Current account.",
@@ -275,7 +275,7 @@ describe("dynamic connection lifecycle", () => {
     let received: unknown;
     const resolver = createResolver({
       events: {
-        "session.started": (_event, resolveCtx) => {
+        beforeSession: (_event, resolveCtx) => {
           received = resolveCtx;
           return null;
         },
@@ -289,7 +289,7 @@ describe("dynamic connection lifecycle", () => {
     });
 
     expect(received).toEqual({
-      channel: { kind: undefined },
+      channel: { kind: "unknown" },
       session: {
         auth: {
           current: expect.objectContaining({ principalId: "user-1" }),
@@ -352,9 +352,9 @@ describe("dynamic connection lifecycle", () => {
     const { ctx, registry } = createContext();
     ctx.set(StaticModelReferenceKey, { id: "openai/gpt-root" });
     const billing: ResolvedDynamicSubagentResolver = {
-      eventNames: ["session.started"],
+      eventNames: ["beforeSession"],
       events: {
-        "session.started": () =>
+        beforeSession: () =>
           defineAgent({
             description: "Resolve billing disputes.",
             model: "openai/gpt-5.5",
@@ -377,9 +377,9 @@ describe("dynamic connection lifecycle", () => {
     });
     expect(getDynamicSubagentSelection(ctx, billing.nodeId)).toBeDefined();
     const resolver = createResolver({
-      eventNames: ["turn.started"],
+      eventNames: ["beforeTurn"],
       events: {
-        "turn.started": () =>
+        beforeTurn: () =>
           defineMcpClientConnection({
             description: "Billing.",
             url: "https://mcp.example.com/billing",
@@ -558,8 +558,8 @@ function createResolver(
 ): ResolvedDynamicConnectionResolver {
   const slug = input.slug ?? "accounts";
   return {
-    eventNames: input.eventNames ?? ["session.started"],
-    events: input.events ?? { "session.started": input.handler ?? (() => null) },
+    eventNames: input.eventNames ?? ["beforeSession"],
+    events: input.events ?? { beforeSession: input.handler ?? (() => null) },
     extensionNamespace: input.extensionNamespace,
     logicalPath: `connections/${slug}.ts`,
     slug,
