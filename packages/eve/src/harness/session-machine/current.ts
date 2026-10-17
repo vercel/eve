@@ -35,6 +35,16 @@ export function ensureSessionProjection(
   if (!liveProjections.has(ctx)) enterSessionProjection(ctx, state);
 }
 
+/**
+ * The current step's projection, or `undefined` outside a session step, such as a workflow-step
+ * tool, which runs without one.
+ */
+export function liveProjection(
+  ctx: ContextReader | undefined = contextStorage.getStore(),
+): SessionProjection | undefined {
+  return ctx === undefined ? undefined : liveProjections.get(ctx)?.projection;
+}
+
 /** The projection as of the last event the current step published. */
 export function currentProjection(
   ctx: ContextReader | undefined = contextStorage.getStore(),
