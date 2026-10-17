@@ -21,23 +21,25 @@ import { defineAgent } from "#public/definitions/agent.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
 
-// Calls list_issues, then create_issue, once each, then replies.
+// Calls list_issues, then create_issue, then replies; a second turn calls create_issue again.
+const script: readonly ({ readonly tool: string } | { readonly text: string })[] = [
+  { tool: "list_issues" },
+  { tool: "create_issue" },
+  { text: "All done." },
+  { tool: "create_issue" },
+];
+let scriptIndex = 0;
 const scriptedModel = markMockModel(
   new MockLanguageModelV4({
-    doStream: async ({ prompt }) => {
-      const done = new Set(
-        prompt.flatMap((message) =>
-          message.role === "tool"
-            ? message.content.flatMap((part) =>
-                part.type === "tool-result" ? [part.toolName] : [],
-              )
-            : [],
-        ),
-      );
-      const next = ["list_issues", "create_issue"].find((name) => !done.has(name));
-      return next === undefined
-        ? textStreamResult("All done.")
-        : toolCallStreamResult({ input: "{}", toolCallId: `call-${next}`, toolName: next });
+    doStream: async () => {
+      const next = script[scriptIndex++] ?? { text: "Done." };
+      return "text" in next
+        ? textStreamResult(next.text)
+        : toolCallStreamResult({
+            input: "{}",
+            toolCallId: `call-${scriptIndex}`,
+            toolName: next.tool,
+          });
     },
     modelId: "scripted-model",
     provider: "eve-test",
@@ -45,8 +47,9 @@ const scriptedModel = markMockModel(
 );
 
 describe("workflowEntry sign-in failure", () => {
-  // #4943: the failed sign-in is forgotten, so create_issue starts a fresh one.
-  it.fails("does not prompt again for a grant whose sign-in failed with retryable: false", async () => {
+  // #4943: after a terminal sign-in failure, create_issue gets that failure, not a fresh sign-in.
+  it("does not prompt again for a grant whose sign-in failed with retryable: false", async () => {
+    scriptIndex = 0;
     let starts = 0;
     let completes = 0;
     // One Vercel Connect connector shared by two tools; the exchange never yields a token.
@@ -151,6 +154,28 @@ describe("workflowEntry sign-in failure", () => {
         expect(filterEventsByType(resumed, "authorization.required")).toEqual([]);
         expect(starts).toBe(1);
         expect(resumed.at(-1)?.type).toBe("session.waiting");
+        // The model reads why create_issue didn't run.
+        expect(
+          filterEventsByType(resumed, "action.result").map(({ data }) => data.result),
+        ).toContainEqual(
+          expect.objectContaining({
+            isError: true,
+            output: expect.stringContaining("already failed in this turn"),
+            toolName: "create_issue",
+          }),
+        );
+
+        // The refusal lasts the turn: the next one asks for the sign-in again.
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "send",
+          payload: { message: "Create one more." },
+        });
+        const nextTurn = await stream.nextUntil(
+          "next turn's sign-in",
+          (event) => event.type === "authorization.required",
+        );
+        expect(filterEventsByType(nextTurn, "authorization.required")).toHaveLength(1);
+        expect(starts).toBe(2);
       } finally {
         stream.dispose();
         await run.cancel();
