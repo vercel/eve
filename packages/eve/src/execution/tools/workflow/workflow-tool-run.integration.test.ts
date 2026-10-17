@@ -474,6 +474,77 @@ describe("workflow tools", () => {
     });
   }, 60_000);
 
+  // #4923: a typed answer is the person's next message, so its hooks and the
+  // rest of the turn see the request that sent it, as a steering message does.
+  it.fails("runs a typed answer's turn under the auth of the request that sent it", async () => {
+    const asker = {
+      attributes: { msg: "asking request" },
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const seen: (readonly [string, unknown])[] = [];
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-answer-auth",
+      execute: confirmDeployWorkflow,
+      modules: [
+        {
+          logicalPath: "hooks/observe.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "message.received"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.attributes.msg]);
+                },
+                "turn.completed"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.attributes.msg]);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "http:workflow-tool-answer-auth",
+              requestInput: true,
+            }),
+            "eve.auth": asker,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        await stream.nextTurn();
+        seen.length = 0;
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          auth: { ...asker, attributes: { msg: "answering request" } },
+          delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
+          kind: "send",
+          payload: { message: "Deploy" },
+        });
+
+        await stream.nextTurn();
+        expect(seen).toEqual([
+          ["message.received", "answering request"],
+          ["turn.completed", "answering request"],
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   // #3836: the selected option's answer has `text: undefined`, which used to
   // fail the turn when the session projected the result for the model.
   it("completes a workflow tool that returns the selected ctx.ask answer as-is", async () => {
