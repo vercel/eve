@@ -27,8 +27,6 @@ export function tablesSay(view: SessionView): TablesSay {
  *   work, which is starting them;
  * - the tables don't see input the model hasn't read, so a run beside working tasks agrees with
  *   the tables seeing their work.
- *
- * `formal/Eve/StepDecision.lean` models this check and proves which tables each state allows.
  */
 export function decisionDisagreement(
   state: StepState,
@@ -64,21 +62,23 @@ function label(decision: StepDecision): string {
 
 /**
  * Checks the decision the session's state leads to against its tables, in `eve dev` and with
- * `EVE_CHECK_SESSION_EVENTS=1`. The state cursor calls it after every durable step, so a
- * disagreement shows up in whichever step produced it.
+ * `EVE_CHECK_SESSION_EVENTS=1`, at the end of each turn step, where the session decides. Between
+ * the durable steps of one change, such as a cancel stopping its work before it settles the turn,
+ * the session doesn't decide, and its state can be halfway.
  */
-export function checkStepDecision(session: Pick<HarnessSession, "history" | "state">): void {
+export function checkStepDecision(
+  session: Pick<HarnessSession, "history" | "sessionId" | "state">,
+): void {
   if (!checksSessionEvents()) return;
   const state = readStepState(session);
   const decision = decideStep(state);
-  const disagreement = decisionDisagreement(
-    state,
-    decision,
-    tablesSay(storedProjection(session.state).view),
-  );
-  // The cursor runs in the workflow body, where eve's logger can't, so this writes directly.
+  const view = storedProjection(session.state).view;
+  const disagreement = decisionDisagreement(state, decision, tablesSay(view));
   if (disagreement !== undefined)
     console.warn("[eve:execution.step-decision] the session's decision disagrees with its tables", {
       disagreement,
+      // The line the step's state follows.
+      position: view.position - 1,
+      sessionId: session.sessionId,
     });
 }

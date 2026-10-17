@@ -1,4 +1,5 @@
 import { decideStep, readStepState, type StepDecision } from "#execution/session/step-decision.js";
+import { checkStepDecision } from "#execution/session/step-decision-check.js";
 import type {
   DurableStepResult,
   DurableStepResultFields,
@@ -14,6 +15,7 @@ export function resolveSessionStepResult(
   stepResult: StepResult,
   fields: (session: HarnessSession) => DurableStepResultFields,
 ): DurableStepResult {
+  checkStepDecision(stepResult.session);
   return durableResult(stepResult, decideStep(readStepState(stepResult.session)), fields);
 }
 

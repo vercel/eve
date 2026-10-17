@@ -10,7 +10,6 @@ import {
   type SessionStateValues,
 } from "#execution/session/state-delta.js";
 import type { SessionInboxOwnership } from "#execution/session-inbox/inbox.js";
-import { checkStepDecision } from "#execution/session/step-decision-check.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 
 /**
@@ -99,8 +98,6 @@ export class SessionStateCursor {
       throw new Error("Session state changed while a step ran, so its state delta cannot apply.");
     }
     this.values = next;
-    const session = next.sessionState.snapshot?.session;
-    if (session !== undefined) checkStepDecision({ history: next.history, state: session.state });
     return result;
   }
 }
