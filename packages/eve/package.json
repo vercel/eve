@@ -358,16 +358,10 @@
       "default": "./dist/src/extensions/code/tools.js"
     },
     "./extensions/code/sandbox": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/sandbox.js",
-      "types": "./dist/src/extensions/code/extension/lib/sandbox.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/sandbox.js",
-      "default": "./dist/src/extensions/code/extension/lib/sandbox.js"
-    },
-    "./extensions/code/prwatch": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
+      "eve-source": "./dist/src/extensions/code/sandbox.js",
+      "types": "./dist/src/extensions/code/sandbox.d.ts",
+      "import": "./dist/src/extensions/code/sandbox.js",
+      "default": "./dist/src/extensions/code/sandbox.js"
     },
     "./extensions/git": {
       "eve-source": "./dist/src/extensions/git/extension/extension.js",
@@ -536,6 +530,30 @@
       "types": "./dist/src/internal/scaffold.d.ts",
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
+    },
+    "./internal/code/prwatch": {
+      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
+      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
+      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
+      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
+    },
+    "./internal/grep": {
+      "eve-source": "./dist/src/internal/grep.js",
+      "types": "./dist/src/internal/grep.d.ts",
+      "import": "./dist/src/internal/grep.js",
+      "default": "./dist/src/internal/grep.js"
+    },
+    "./internal/workspace": {
+      "eve-source": "./dist/src/internal/workspace.js",
+      "types": "./dist/src/internal/workspace.d.ts",
+      "import": "./dist/src/internal/workspace.js",
+      "default": "./dist/src/internal/workspace.js"
+    },
+    "./internal/git": {
+      "eve-source": "./dist/src/internal/git.js",
+      "types": "./dist/src/internal/git.d.ts",
+      "import": "./dist/src/internal/git.js",
+      "default": "./dist/src/internal/git.js"
     }
   },
   "publishConfig": {

@@ -39,6 +39,7 @@ export {
   githubChannel,
   type GitHubChannel,
   type GitHubChannelConfig,
+  type GitHubChannelContext,
   type GitHubChannelEvents,
   type GitHubEventContext,
   type GitHubInboundContext,

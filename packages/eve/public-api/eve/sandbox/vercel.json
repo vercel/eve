@@ -1,5 +1,6 @@
 [
   "VercelSandbox",
+  "VercelSandboxCreateOptions",
   "VercelSandboxEnvironmentOptions",
   "VercelSandboxMount",
   "VercelSandboxMountMode",

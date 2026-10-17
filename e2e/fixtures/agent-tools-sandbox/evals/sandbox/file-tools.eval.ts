@@ -14,7 +14,7 @@ export default defineEval({
     await t.send(
       [
         `Use the write_file tool to create the file ${FILE_TOOLS_PATH} with exactly this content: ${FILE_TOOLS_TOKEN}`,
-        `Then use the grep tool to search for ${FILE_TOOLS_TOKEN} under /workspace.`,
+        `Then use the grep tool to search for ${FILE_TOOLS_TOKEN} under /workspace with outputMode content.`,
         "Reply with the matching line verbatim.",
       ].join("\n"),
     );

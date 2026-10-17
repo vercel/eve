@@ -2,7 +2,7 @@
   "kind": "eve-extension-capability-contract",
   "capability": "tool",
   "epoch": 93,
-  "sha256": "d096fe362447ed75728a44430978c95b4efc0480b551637e98c71c94ca6295dd",
+  "sha256": "1c94eda3b42e64fbb421f96f32f8e3f30351c8f0fa3efb605d864a8379ddbfe4",
   "exports": [
     "AgentRouterInput",
     "AgentRouterTool",
@@ -17,7 +17,6 @@
     "defineWorkflowTool",
     "disableTool",
     "isDisabledToolSentinel",
-    "serializeModelInputSchema",
     "toolOutput",
     "toolOutputPart",
     "toolResultFrom",

@@ -14,6 +14,7 @@ export {
   telegramChannel,
   type TelegramChannel,
   type TelegramChannelConfig,
+  type TelegramChannelContext,
   type TelegramChannelCredentials,
   type TelegramChannelEvents,
   type TelegramChannelState,

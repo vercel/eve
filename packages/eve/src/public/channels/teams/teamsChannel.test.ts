@@ -104,7 +104,6 @@ describe("teamsChannel", () => {
 
     expect(
       teamsAdapter.instrumentation?.audience?.({
-        auth: null,
         caller: { type: "anonymous" },
         channel: { kind: "channel:teams" },
         environment: "production",
@@ -491,17 +490,10 @@ describe("teamsChannel sign-in button", () => {
 
   function sessionWith(events: readonly SessionEvent[]) {
     return {
-      getEventStream: async () =>
-        new ReadableStream({
-          start(controller) {
-            for (const [line, event] of events.entries())
-              controller.enqueue({
-                ...event,
-                meta: { position: { line, index: 0 }, endOfLine: true },
-              });
-            controller.close();
-          },
-        }),
+      async *stream() {
+        for (const [line, event] of events.entries())
+          yield { ...event, meta: { position: { line, index: 0 }, endOfLine: true } };
+      },
       getStreamTailIndex: async () => events.length - 1,
     };
   }

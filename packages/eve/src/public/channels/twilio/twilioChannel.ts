@@ -57,7 +57,7 @@ export interface TwilioContext {
 }
 
 /** Channel-owned Twilio context returned by `context()`. */
-interface TwilioChannelContext extends TwilioContext {
+export interface TwilioChannelContext extends TwilioContext {
   state: TwilioChannelState;
 }
 

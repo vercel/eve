@@ -14,6 +14,7 @@ export {
   teamsChannel,
   type TeamsChannel,
   type TeamsChannelConfig,
+  type TeamsChannelContext,
   type TeamsChannelCredentials,
   type TeamsChannelEvents,
   type TeamsChannelState,

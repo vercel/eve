@@ -1,7 +1,6 @@
 export {
   defineInstrumentation,
   disableInstrumentation,
-  isInstrumentationProvider,
   isInstrumentationDisabled,
   type InstrumentationProvider,
   type InstrumentationDisabled,
@@ -18,7 +17,6 @@ export {
   type InstrumentationModelInput,
   type InstrumentationParentLineage,
   type InstrumentationUsage,
-  type JsonValue,
   type TraceCaptureContext,
   type TraceCapturePolicy,
   type TracePolicyDecision,
