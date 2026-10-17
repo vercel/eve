@@ -59,6 +59,8 @@ Type to filter a menu, press `Enter` to select, or `Esc` to return to chat. Dism
 
 eve saves API keys and eve-owned OAuth refresh credentials in the OS secret store through just-secrets. It saves the last successful login as the machine default and records the project's connection and team separately as nonsecret metadata in `.eve/provider.json`. Newly entered keys are never written into project files. A key explicitly selected through `/login` takes precedence over another key for that provider in your shell; a project connected through environment credentials continues to use its environment. Vercel CLI retains ownership of its credentials and refresh tokens.
 
+A program that starts `eve dev` and already holds a Gateway credential can serve it instead. Set `EVE_MODEL_CREDENTIAL_URL` and `EVE_MODEL_CREDENTIAL_TOKEN` in the environment of `eve dev`. eve then sends a `GET` to that URL with `Authorization: Bearer <token>` for every Gateway model call, including compaction, ahead of every other connection. The response is `{ "kind": "oauth", "token": "...", "teamId": "..." }` (`kind` may also be `api-key` or `oidc`; `teamId` is optional), or `{ "error": "..." }` with a failure status. When Gateway refuses an `oauth` token, eve asks again with `x-eve-model-rejected-token-sha256` set to the refused token's SHA-256 hex digest, so the server can return a fresh one.
+
 Local discovery runs only in development. Deployments need explicitly provisioned `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or supported project OIDC credentials. ChatGPT subscription models are local-only. `/login` does not link a deployment or authenticate a remote server; `/deploy` handles Vercel CLI installation and account login when needed.
 
 ### Models and settings
