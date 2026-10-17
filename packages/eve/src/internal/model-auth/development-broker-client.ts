@@ -38,6 +38,9 @@ export async function readDevelopmentModelCredential(
   );
 }
 
+/** A credential server's own failure message, written for the person running eve. */
+export class ModelCredentialServerError extends Error {}
+
 /** GETs a credential from a broker: `rejectedToken`, hashed, asks it for a fresh one. */
 export async function fetchModelCredential(
   url: string,
@@ -57,11 +60,9 @@ export async function fetchModelCredential(
     !value.token ||
     !["api-key", "oauth", "oidc"].includes(String(value.kind))
   )
-    throw new Error(
-      typeof value.error === "string"
-        ? value.error
-        : "The model connection is unavailable. Run /login to reconnect.",
-    );
+    throw typeof value.error === "string"
+      ? new ModelCredentialServerError(value.error.slice(0, 500))
+      : new Error("The model connection is unavailable. Run /login to reconnect.");
   return {
     kind: value.kind as DevelopmentModelCredential["kind"],
     token: value.token,
