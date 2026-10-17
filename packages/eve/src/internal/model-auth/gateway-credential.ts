@@ -1,13 +1,25 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
 import { resolveModelApiKey } from "./api-key.js";
+import { fetchModelCredential } from "./development-broker-client.js";
 import { readVercelCliConnection, refreshVercelCliConnection } from "./vercel-cli.js";
 import { resolveVercelSession } from "./vercel.js";
 import type { DevelopmentModelCredential } from "./development-broker-protocol.js";
 
+/** Set by a process that launches eve and serves its credential: it outranks every other source. */
+export const MODEL_CREDENTIAL_URL_ENV = "EVE_MODEL_CREDENTIAL_URL";
+export const MODEL_CREDENTIAL_TOKEN_ENV = "EVE_MODEL_CREDENTIAL_TOKEN";
+
 export async function resolveGatewayModelCredential(
   rejectedToken?: string,
 ): Promise<DevelopmentModelCredential> {
+  const served = process.env[MODEL_CREDENTIAL_URL_ENV];
+  if (served) {
+    const token = process.env[MODEL_CREDENTIAL_TOKEN_ENV];
+    if (!token)
+      throw new Error(`${MODEL_CREDENTIAL_URL_ENV} is set without ${MODEL_CREDENTIAL_TOKEN_ENV}.`);
+    return fetchModelCredential(served, { authorization: `Bearer ${token}` }, rejectedToken);
+  }
   const selected = process.env[MODEL_CONNECTION_ENV];
   if (selected === "vercel" || selected === "vercel-cli") {
     if (selected === "vercel-cli" && rejectedToken) await refreshVercelCliConnection();
