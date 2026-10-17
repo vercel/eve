@@ -12,8 +12,8 @@ import { resumeAuthorizationCallback } from "#execution/legacy-session/authoriza
  * 1. Parses the inbound request into a JSON-serializable
  *    {@link AuthorizationCallback} (params only — never request headers).
  * 2. Calls `resumeHook(token, payload)` to wake the suspended workflow.
- * 3. Renders the standard "Authorization complete" landing page so the
- *    user sees a friendly UI instead of an empty `202 Accepted`.
+ * 3. Acknowledges callback receipt with a landing page. Authorization is
+ *    checked later by `completeAuthorization` in the resumed turn.
  *
  * Owning this route in the framework - instead of routing the IdP at the
  * workflow runtime's raw `/.well-known/workflow/v1/webhook/:token` -
@@ -24,7 +24,7 @@ import { resumeAuthorizationCallback } from "#execution/legacy-session/authoriza
  */
 
 import type { RouteContext } from "#public/definitions/channel.js";
-import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
+import { buildAuthorizationCallbackPage } from "#runtime/connections/authorization-callback-page.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 /** Resumes the exact authorization attempt through the session inbox. */
@@ -60,7 +60,7 @@ export async function handleConnectionCallbackRequest(
     return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
   }
 
-  return buildAuthorizationCompletePage();
+  return buildAuthorizationCallbackPage();
 }
 
 /**

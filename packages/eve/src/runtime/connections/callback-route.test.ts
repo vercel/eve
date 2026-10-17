@@ -67,8 +67,9 @@ describe("handleConnectionCallbackRequest", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     const body = await response.text();
-    expect(body).toContain("Authorization complete");
-    expect(body).toContain("You can close this tab and return to your app.");
+    expect(body).toContain("Sign-in response received");
+    expect(body).not.toContain("Authorization complete");
+    expect(body).toContain("Return to your app to check whether sign-in succeeded.");
     expect(body).toContain('aria-labelledby="authorization-title"');
     expect(body).toContain('class="icon" aria-hidden="true"');
 
@@ -93,6 +94,52 @@ describe("handleConnectionCallbackRequest", () => {
       ],
     });
   });
+
+  it.each([
+    { method: "GET", query: "?error=access_denied", body: undefined },
+    {
+      method: "POST",
+      query: "",
+      body: JSON.stringify({ status: "error", error: { code: "invalid_grant" } }),
+    },
+  ])(
+    "acknowledges a $method failure callback without claiming sign-in succeeded",
+    async ({ method, query, body }) => {
+      resumeHookMock.mockResolvedValueOnce(undefined);
+      const init: RequestInit = { method };
+      if (body !== undefined) {
+        init.body = body;
+        init.headers = { "content-type": "application/json" };
+      }
+      const response = await handleConnectionCallbackRequest(
+        new Request(
+          `https://app.example.com${createEveConnectionCallbackRoutePath("linear", "attempt-1", "tok")}${query}`,
+          init,
+        ),
+        buildRouteContext({ attemptId: "attempt-1", name: "linear", token: "tok" }),
+      );
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain("Sign-in response received");
+      expect(html).not.toContain("Authorization complete");
+      expect(resumeHookMock).toHaveBeenCalledWith(
+        "tok",
+        expect.objectContaining({
+          payloads: [
+            expect.objectContaining({
+              authorizationCallback: expect.objectContaining({
+                callback: {
+                  method,
+                  params: method === "GET" ? { error: "access_denied" } : {},
+                  body,
+                },
+              }),
+            }),
+          ],
+        }),
+      );
+    },
+  );
 
   it("captures form-encoded POST bodies before resuming the hook", async () => {
     resumeHookMock.mockResolvedValueOnce(undefined);
