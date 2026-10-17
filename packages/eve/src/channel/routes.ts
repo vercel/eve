@@ -60,6 +60,7 @@ export interface RouteHandlerArgs<TState = undefined> {
 }
 
 export interface SendPayload {
+  readonly authorizationDecline?: { readonly attemptId: string };
   readonly message?: string | UserContent;
   readonly [key: string]: unknown;
   readonly inputResponses?: readonly InputResponse[];

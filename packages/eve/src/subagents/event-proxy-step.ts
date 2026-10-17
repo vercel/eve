@@ -14,7 +14,7 @@ import {
 } from "#execution/session/state-delta.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
 import { readHitlState } from "#harness/hitl/index.js";
-import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
+import type { ProxyInputRequest, WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { relay } from "#harness/session-machine/transitions.js";
 
 type SubagentEventHookPayload =
@@ -24,6 +24,7 @@ type SubagentEventHookPayload =
 /** Proxies one child event through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
   input: SessionStepState & {
+    readonly remote?: ProxyInputRequest["remote"];
     readonly workflowAsk?: WorkflowAskRoute;
     readonly runId?: string;
     readonly hookPayload: SubagentEventHookPayload;
@@ -36,6 +37,7 @@ export async function runProxySubagentEventStep(
       ...(await restoreSessionStep(target)),
       workflowAsk: target.workflowAsk,
       runId: target.runId,
+      remote: target.remote,
       hookPayload: target.hookPayload,
     }),
   );
@@ -48,6 +50,7 @@ export async function runProxySubagentEventStep(
  */
 export async function emitProxiedSubagentEvent(
   input: RestoredSessionStep & {
+    readonly remote?: ProxyInputRequest["remote"];
     readonly workflowAsk?: WorkflowAskRoute;
     readonly runId?: string;
     readonly hookPayload: SubagentEventHookPayload;
@@ -75,7 +78,13 @@ export async function emitProxiedSubagentEvent(
   return await commitSessionStep(
     input,
     (view) => [
-      relay(view, { payload: hookPayload, replacedRequestIds: replaced, runId, workflowAsk }),
+      relay(view, {
+        payload: hookPayload,
+        replacedRequestIds: replaced,
+        runId,
+        workflowAsk,
+        remote: input.remote,
+      }),
     ],
     {
       origin: "relayed",

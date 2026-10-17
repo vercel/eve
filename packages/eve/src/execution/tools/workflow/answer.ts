@@ -31,6 +31,10 @@ export async function sendWorkflowAskAnswers(
   responder?: ToolInputResponseResponder,
 ): Promise<void> {
   for (const response of responses ?? []) {
+    if (response.decline === true) {
+      await resumeHook(route.control, { kind: "declined", requestId: response.requestId });
+      continue;
+    }
     const { optionId, text } = response;
     const answered: WorkflowToolRunAnswer =
       responder === undefined

@@ -26,9 +26,15 @@ import {
   deferInput,
   stepForRequest,
   withdrawSignIns,
+  rejectUnsupportedDeclines,
 } from "./approvals.js";
 import { rejectApprovedCall, runApprovedCalls, type ApprovedCallResult } from "./approved-calls.js";
-import { getApprovalAuditState, responderOfRequest, retireActiveCandidates } from "./candidates.js";
+import {
+  finishApprovalCandidate,
+  getApprovalAuditState,
+  responderOfRequest,
+  retireActiveCandidates,
+} from "./candidates.js";
 import { coordinateApprovalDelivery } from "./coordinator.js";
 import { deliver, resolveTypedApproval, turnInputOnly, withoutTurnInput } from "./delivery.js";
 import { recheckApprovedCall } from "#harness/tools.js";
@@ -79,9 +85,59 @@ export async function acceptHumanInput(
   // A sign-in completes first, at the coordinates of the turn it holds.
   const completions = config.signInCompletions ?? [];
   if (completions.length > 0) await step.apply(completeSignIn(step.view(), { completions }));
+  const authorizationDeclines = input?.authorizationDeclines;
+  if (authorizationDeclines !== undefined) {
+    const declined = step
+      .view()
+      .signIns.filter(
+        (entry) => entry.attemptId !== undefined && authorizationDeclines.includes(entry.attemptId),
+      );
+    if (declined.length > 0) {
+      const candidateIds = new Set(
+        declined.flatMap((entry) => (entry.candidateId === undefined ? [] : [entry.candidateId])),
+      );
+      // Failing one responder's authorization retires only that candidate, not the shared request.
+      for (const candidateId of candidateIds) {
+        step.session = {
+          ...step.session,
+          state: finishApprovalCandidate({
+            candidateId,
+            completedAt: Date.now(),
+            reason: DECLINED_SIGN_IN_REASON,
+            state: step.session.state,
+            status: "failed",
+          }),
+        };
+      }
+      const ended = step
+        .view()
+        .signIns.filter(
+          (entry) =>
+            declined.includes(entry) ||
+            (entry.candidateId !== undefined && candidateIds.has(entry.candidateId)),
+        );
+      await step.apply(withdrawSignIns(step.view(), DECLINED_SIGN_IN_REASON, ended));
+      const inline = declined.filter((entry) => entry.candidateId === undefined);
+      if (inline.length === 0) return { kind: "stop", result: await holdForInput(step) };
+      const context = inline.map(
+        (entry) =>
+          `The user declined to sign in to ${entry.name}. Continue without it, and don't ask them to sign in again unless they ask.`,
+      );
+      if (step.view().signIns.length > 0) {
+        await step.apply(deferInput(step.view(), { context }));
+      } else {
+        input = { ...input, context: [...(input?.context ?? []), ...context] };
+      }
+    }
+    if (declined.length === 0 || step.view().signIns.length > 0) {
+      return { kind: "stop", result: await holdForInput(step) };
+    }
+  }
   const delivered = deliver(step.view(), input, options);
+  const checked = rejectUnsupportedDeclines(step.view(), delivered.input);
+  if (checked.transition !== undefined) await step.apply(checked.transition);
   // A typed approval answers like a press, so the approval's response policy decides it.
-  const typed = resolveTypedApproval(step.view(), delivered.input);
+  const typed = resolveTypedApproval(step.view(), checked.delivery);
   // A new message reaching the held turn steers it: the sign-ins it waits on end, and its
   // unanswered approvals resolve with the answers below. A typed answer is not a new message.
   const steered =
@@ -377,6 +433,7 @@ export async function runApprovedLocalCalls(
 }
 
 const STEERED_SIGN_IN_REASON = "Cancelled because a new message arrived.";
+const DECLINED_SIGN_IN_REASON = "The user declined to sign in.";
 
 /**
  * The held turn holds on, for a person to act on its sign-in, approval, or the session-limit

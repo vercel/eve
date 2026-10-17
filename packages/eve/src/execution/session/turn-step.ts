@@ -156,6 +156,24 @@ async function runSessionStepBody(
 
   const { signIns } = readHitlState(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
+  // Inline attempts restore their requester; approval responders bind their own identity.
+  const declinedIds = new Set(
+    delivery?.payloads.flatMap((payload) =>
+      payload.authorizationDecline === undefined ? [] : [payload.authorizationDecline.attemptId],
+    ),
+  );
+  const declined = signIns.filter(
+    (entry) =>
+      entry.candidateId === undefined &&
+      entry.attemptId !== undefined &&
+      declinedIds.has(entry.attemptId),
+  );
+  if (delivery !== undefined) {
+    const payloads = delivery.payloads.filter(
+      (payload) => payload.authorizationDecline === undefined,
+    );
+    delivery = payloads.length === 0 ? undefined : { ...delivery, payloads };
+  }
   if (signIns.length > 0 && delivery !== undefined) {
     const { matches, remainingPayloads } = matchAuthorizationCallbacks(signIns, delivery.payloads);
     delivery = { ...delivery, payloads: remainingPayloads };
@@ -201,8 +219,10 @@ async function runSessionStepBody(
   // sign-ins (`candidateId`) bind their responder separately.
   const requester =
     delivery === undefined
-      ? completedAuths?.find(({ challenge }) => challenge.candidateId === undefined)?.challenge
-          .requester
+      ? (
+          completedAuths?.find(({ challenge }) => challenge.candidateId === undefined)?.challenge ??
+          declined[0]
+        )?.requester
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
   const initialSession: HarnessSession = {
@@ -329,6 +349,9 @@ async function runSessionStepBody(
         throw error;
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+    }
+    if (declinedIds.size > 0) {
+      resolved = { ...resolved, authorizationDeclines: [...declinedIds] };
     }
     // A delivery without auth acts as the session's current identity, so
     // only a delivery that names its sender can be answered by someone else.

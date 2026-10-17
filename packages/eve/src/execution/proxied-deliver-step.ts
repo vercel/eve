@@ -1,3 +1,4 @@
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { receiveRelayedAnswer, routeAnswer } from "#harness/session-machine/transitions.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
@@ -96,13 +97,49 @@ async function routeProxiedDeliver(
   const answerMessages: UnstampedMessageStreamEvent[] = [];
   const answerDeliveryIds: string[] = [];
 
-  for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
+  for (const [sourcePayloadIndex, original] of sourceDelivery.payloads.entries()) {
+    let payload = original;
+    const decline = payload.authorizationDecline;
+    const signInRoute =
+      decline === undefined
+        ? undefined
+        : readHitlState(durableSession.state).signInRelays.get(decline.attemptId);
+    if (signInRoute !== undefined) {
+      if (signInRoute.kind === "workflow") {
+        await resumeHook(signInRoute.token, { payloads: [{ authorizationDecline: decline }] });
+      } else if (signInRoute.kind === "remote") {
+        const ctx = await deserializeContext(serializedContext);
+        const headers = await resolveRemoteAgentStreamHeaders({
+          bundle: ctx.require(BundleKey),
+          ...signInRoute.remote,
+        });
+        await respondToRemoteAgentSession({
+          remote: signInRoute.remote,
+          headers,
+          auth: sourceDelivery.auth,
+          authorizationDecline: decline!,
+        });
+      } else {
+        await resumeSessionInbox(
+          { sessionId: signInRoute.sessionId },
+          {
+            ...sourceDelivery,
+            deliveryMetadata: undefined,
+            payloads: [{ authorizationDecline: decline }],
+          },
+        );
+      }
+      const { authorizationDecline: _decline, ...rest } = payload;
+      payload = rest;
+      if (Object.keys(payload).length === 0) continue;
+    }
     const routed = routeDeliverPayload({
       allowRoute: (requestId) => !resolvedRequests.has(requestId),
       payload,
       resolveMessage,
       state: durableSession.state,
     });
+    answerMessages.push(...(routed.rejections ?? []));
     parentAction ??= routed.parentAction;
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 

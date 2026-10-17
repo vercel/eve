@@ -36,6 +36,9 @@ function makeSession(): Session {
     async send() {
       return { sessionId: "sess_1", status: "accepted" };
     },
+    async declineSignIn() {
+      return { sessionId: "sess_1", status: "accepted" };
+    },
     async respond() {
       return { sessionId: "sess_1", status: "accepted" };
     },

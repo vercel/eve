@@ -1,6 +1,6 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DeliverPayload } from "#channel/types.js";
-import { resolveInputOutcome } from "#harness/input-request-resolution.js";
+import { ONLY_QUESTIONS_DECLINE, resolveInputOutcome } from "#harness/input-request-resolution.js";
 import { firstOpenInput } from "#harness/open-input-request.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
@@ -8,6 +8,10 @@ import { readHitlState } from "#harness/hitl/index.js";
 import { resolvedByChild } from "#harness/hitl/relays.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/hitl/relays.js";
 import type { SessionStateMap } from "#harness/types.js";
+import {
+  createMessageCompletedEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import type { InputResolution } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import { resolveTextToResponse } from "#channel/resolve-text.js";
@@ -49,6 +53,7 @@ export interface ProxiedInputResolutions {
  * routed); `forChildren` carries one entry per descendant token.
  */
 export interface RoutedDeliverPayload {
+  readonly rejections?: readonly UnstampedMessageStreamEvent[];
   readonly forChildren: readonly RoutedChildDelivery[];
   readonly forSelf: DeliverPayload | undefined;
   readonly parentAction: { readonly kind: "cancel-turn" } | undefined;
@@ -131,12 +136,22 @@ export function routeDeliverPayload(input: {
     return bucket;
   };
 
+  const rejections: UnstampedMessageStreamEvent[] = [];
   const routedRequestIds = new Set<string>();
   for (const response of inputResponses) {
     const route = entries.get(response.requestId);
 
     if (route === undefined || !routable(response.requestId, route)) {
       unroutedResponses.push(response);
+      continue;
+    }
+    if (response.decline === true && route.kind !== "question") {
+      rejections.push(
+        createMessageCompletedEvent({
+          ...route.event,
+          message: ONLY_QUESTIONS_DECLINE,
+        }),
+      );
       continue;
     }
     // A request takes one answer; the first one in the payload wins.
@@ -224,7 +239,7 @@ export function routeDeliverPayload(input: {
 
   const forSelf = Object.keys(remainder).length > 0 ? (remainder as DeliverPayload) : undefined;
 
-  return { forChildren, forSelf, parentAction };
+  return { ...(rejections.length > 0 && { rejections }), forChildren, forSelf, parentAction };
 }
 
 function resolveRetiredRequests(input: {

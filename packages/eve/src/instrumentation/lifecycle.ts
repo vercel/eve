@@ -216,6 +216,7 @@ export type InstrumentationInputOutcome =
   | "answered"
   | "approved"
   | "cancelled"
+  | "declined"
   | "denied"
   | "failed"
   | "ignored"

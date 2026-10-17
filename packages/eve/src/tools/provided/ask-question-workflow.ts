@@ -40,6 +40,8 @@ export function toAskQuestionOutput(answer: ToolInputResponse): AskQuestionOutpu
       return { answer: answer.optionId ?? answer.text ?? "", status: "answered" };
     case "cancelled":
       return { interrupted: true };
+    case "declined":
+      return { status: "declined" };
     case "unavailable":
       return { status: "unavailable" };
   }

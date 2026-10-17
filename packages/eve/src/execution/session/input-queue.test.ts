@@ -13,6 +13,13 @@ function signInCallback(attemptId: string) {
 }
 
 describe("SessionInputQueue", () => {
+  it("releases a decline while other sign-ins remain pending", () => {
+    const queue = new SessionInputQueue();
+    const decline = { authorizationDecline: { attemptId: "linear-1" } };
+    queue.enqueueAuthorization([decline]);
+    expect(queue.takeAuthorizations(new Set(["linear-1", "notion-1"]))).toEqual([decline]);
+    expect(queue.takeAuthorizations(new Set(["notion-1"]))).toBeUndefined();
+  });
   it("resumes a turn holding several sign-ins only once every one has called back", () => {
     const queue = new SessionInputQueue();
     const held = new Set(["linear-1", "notion-1"]);

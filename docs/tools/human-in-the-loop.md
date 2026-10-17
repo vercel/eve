@@ -218,7 +218,7 @@ The `ask_question` tool lets the model pause and ask the user one question, rath
 - `question`: the question to put to the user, with the context needed to answer it.
 - `options`: two or three mutually exclusive choices, each with a `label` and a one-sentence `description`. Channels render these as buttons or a select menu. Omit `options` for an open-ended question.
 
-The user can always type their own answer instead of picking an option, so the model never needs an "Other" option. The tool returns `{ status: "answered", answer }` with the chosen option's label or the user's words, `{ interrupted: true }` when a new message arrived that did not answer the question, or `{ status: "unavailable" }` when the session cannot request input.
+The user can always type their own answer instead of picking an option, so the model never needs an "Other" option. The tool returns `{ status: "answered", answer }` with the chosen option's label or the user's words, `{ interrupted: true }` when a new message arrived that did not answer the question, `{ status: "declined" }` when the user declined to answer, or `{ status: "unavailable" }` when the session cannot request input.
 
 `ask_question` is an [opt-in framework tool](/docs/concepts/built-in-tools#ask_question). Add it with `eve add tool/ask_question`, which creates this file:
 
@@ -239,7 +239,7 @@ Approvals and questions share one protocol:
 1. A tool call needs approval, or a workflow tool such as `ask_question` calls `ctx.ask()`.
 2. eve emits an `input.requested` stream event carrying the pending requests.
 3. The run parks durably, for as long as it takes. The turn stays open: the stream emits `turn.waiting`, and after the answer the turn resumes under the same `turnId`. That `turn.waiting` carries `on: "input"`, since a person must act.
-4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
+4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. To decline a question without answering it, send `{ requestId, decline: true }`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
 
 To tell the model why a call was denied, send `text` with the `cancel` response, for example `{ requestId, optionId: "cancel", text: "Only the three-pack." }`. The model receives the note quoted in the denial result, marked as written by the person who denied the call, who may not be the user. The note is also visible to anyone who can read the session stream, in `input.resolved`.
 
@@ -298,6 +298,8 @@ Channels turn requests into native UI: the Slack adapter renders approvals as bu
 From your own frontend, scan all messages for pending requests and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
 
 You can answer while a turn is running, such as the second approval of a batch while the first answer is still settling. The default message reducer waits for server confirmation before marking any input request answered. A submitted answer marks its request `responded` in `data.inputs` until `approval.settled` or `input.resolved` arrives; submitting a response alone does not resolve an approval, question, or session-limit prompt. Answering a request that is no longer open rejects without a server request. The `client.input.responded` event remains a submission notification for custom reducers, not confirmation that the server accepted the answer.
+
+To decline a pending sign-in instead of completing it, send `{ authorizationDecline: { attemptId } }` with no message. The session reports `authorization.completed` with `outcome: "declined"`, and the model continues without the connection and doesn't ask again unless the person asks.
 
 ## What to read next
 

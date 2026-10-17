@@ -40,6 +40,12 @@ export async function authorizedDeployWorkflow(input: DeployInput, ctx: Workflow
   return { plan, authenticatedAs };
 }
 
+export async function delegateWeatherWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  const response = await ctx.agent("agent").send("Check Lisbon using get_weather.");
+  return (await response.result()).message;
+}
+
 export async function workflowContextMisuseWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
   "use workflow";
   return await readAgentsStep(ctx);

@@ -138,6 +138,14 @@ export class ClientSession {
     return await this.#send({ ...options, inputResponses }, false);
   }
 
+  /** Declines an inline sign-in without sending a message. */
+  async declineSignIn<TOutput = unknown>(
+    attemptId: string,
+    options: RespondTurnOptions<TOutput> = {},
+  ): Promise<MessageResponse<TOutput>> {
+    return await this.#send({ ...options, authorizationDecline: { attemptId } }, false);
+  }
+
   async #send<TOutput = unknown>(
     input: SendTurnPayload<TOutput>,
     retrySessionNotReady: boolean,
@@ -465,6 +473,7 @@ function createMessageBody(
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
   if (input.message !== undefined) body.message = input.message;
+  if ("authorizationDecline" in input) body.authorizationDecline = input.authorizationDecline;
   if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
     body.inputResponses = input.inputResponses;
   }
@@ -476,6 +485,11 @@ function createMessageBody(
   if (outputSchema !== undefined) body.outputSchema = outputSchema;
 
   if (requireMessage && body.message === undefined) return null;
-  if (body.message === undefined && body.inputResponses === undefined) return null;
+  if (
+    body.message === undefined &&
+    body.inputResponses === undefined &&
+    body.authorizationDecline === undefined
+  )
+    return null;
   return body;
 }

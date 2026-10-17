@@ -1,3 +1,4 @@
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
@@ -187,7 +188,15 @@ async function collectAuthorizationCallbacks(input: {
     } catch (error) {
       // Cancelled turns close their inbox; cancelled tasks discard further deliveries.
       if (!ctx.abortSignal.aborted) {
-        await reportAuthorization(run, ctx.abortSignal, identified, "failed");
+        await reportAuthorization(
+          run,
+          ctx.abortSignal,
+          identified,
+          error instanceof ConnectionAuthorizationFailedError && error.reason === "declined"
+            ? "declined"
+            : "failed",
+        );
+        pending.delete(identified.attemptId);
       }
       throw error;
     }
@@ -215,7 +224,7 @@ async function reportAuthorization(
   run: WorkflowToolRunContext,
   signal: AbortSignal,
   challenge: IdentifiedAuthorizationChallenge,
-  outcome?: "authorized" | "failed",
+  outcome?: "authorized" | "declined" | "failed",
 ): Promise<void> {
   const event = runSignIn(run.from, challenge, outcome);
   const acknowledged = createHook<void>();
@@ -296,6 +305,13 @@ function readCallback(
   }
 
   for (const payload of value.payloads) {
+    if (payload?.authorizationDecline?.attemptId === challenge.attemptId) {
+      throw new ConnectionAuthorizationFailedError(challenge.name, {
+        message: `The user declined to sign in to ${challenge.name}.`,
+        reason: "declined",
+        retryable: false,
+      });
+    }
     const received = payload?.authorizationCallback;
     if (
       received?.attemptId !== challenge.attemptId ||

@@ -128,6 +128,7 @@ function createParentRoute(
   const parent: Session = {
     id: "parent-1",
     send: vi.fn(),
+    declineSignIn: vi.fn().mockResolvedValue({ sessionId: "parent-1", status: "accepted" }),
     respond: vi.fn(),
     async cancel() {
       return { status: "no_active_turn" };

@@ -15,7 +15,7 @@ import {
 } from "#internal/testing/workflow-tool-run-harness.js";
 
 describe("workflow step authorization failures", () => {
-  it.each(["denied", "rejected", "cancel"])(
+  it.each(["denied", "rejected", "cancel", "decline"])(
     "closes authorization on %s",
     async (disposition) => {
       const output = captureConsoleOutput();
@@ -64,6 +64,11 @@ describe("workflow step authorization failures", () => {
               kind: "cancel",
               turnId: "turn_0",
             });
+          } else if (disposition === "decline") {
+            await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+              kind: "send",
+              payload: { authorizationDecline: { attemptId: required.data.attemptId! } },
+            });
           } else {
             url.searchParams.set("code", disposition === "denied" ? "denied" : "approved");
             expect(
@@ -84,7 +89,21 @@ describe("workflow step authorization failures", () => {
               filterEventsByType(events, "authorization.completed").map(
                 (event) => event.data.outcome,
               ),
-            ).toEqual(["failed"]);
+            ).toEqual([disposition === "decline" ? "declined" : "failed"]);
+            if (disposition === "decline") {
+              // The error reaches the call's model result, and its open turn continues.
+              for (
+                let i = 0;
+                i < 6 && filterEventsByType(events, "turn.completed").length === 0;
+                i++
+              )
+                events.push(...(await stream.nextTurn()));
+              expect(JSON.stringify(filterEventsByType(events, "action.result"))).toContain(
+                "The user declined to sign in",
+              );
+              expect(filterEventsByType(events, "turn.completed")).toHaveLength(1);
+              expect(JSON.stringify(events)).not.toContain("authenticatedAs");
+            }
           }
           expect(filterEventsByType(events, "authorization.required")).toHaveLength(1);
           await waitForWorkflowToolRunTerminal(executorRunId);
@@ -100,7 +119,7 @@ describe("workflow step authorization failures", () => {
       // A denied or rejected authorization fails the step fatally.
       expect(
         output.lines.filter((line) => line.startsWith(workflowSdkNotice.fatalStep)),
-      ).toHaveLength(disposition === "cancel" ? 0 : 1);
+      ).toHaveLength(disposition === "cancel" || disposition === "decline" ? 0 : 1);
       expect(output.unexpected(workflowSdkNotice.fatalStep)).toEqual([]);
     },
     60_000,

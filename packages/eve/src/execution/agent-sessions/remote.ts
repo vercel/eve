@@ -34,6 +34,7 @@ import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
+import type { DeliverPayload } from "#channel/types.js";
 import type { InputResponse } from "#shared/input.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
@@ -233,17 +234,23 @@ function buildForwardedTraceAssertion(input: {
   };
 }
 
-export async function respondToRemoteAgentSession(input: {
-  readonly remote: RemoteAgentBinding & { readonly sessionId: string };
-  readonly headers: Record<string, string>;
-  readonly auth: SessionAuthContext | null | undefined;
-  readonly responses: readonly InputResponse[];
-}): Promise<void> {
+export async function respondToRemoteAgentSession(
+  input: {
+    readonly remote: RemoteAgentBinding & { readonly sessionId: string };
+    readonly headers: Record<string, string>;
+    readonly auth: SessionAuthContext | null | undefined;
+  } & (
+    | { readonly responses: readonly InputResponse[] }
+    | { readonly authorizationDecline: NonNullable<DeliverPayload["authorizationDecline"]> }
+  ),
+): Promise<void> {
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
       body: JSON.stringify({
-        inputResponses: input.responses,
+        ...("responses" in input
+          ? { inputResponses: input.responses }
+          : { authorizationDecline: input.authorizationDecline }),
         ...(input.remote.forwardPrincipal === true &&
           input.auth != null && {
             forwardedPrincipal: { current: input.auth },

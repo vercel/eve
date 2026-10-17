@@ -1,3 +1,4 @@
+import { readHitlState } from "#harness/hitl/index.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -22,7 +23,10 @@ export async function routeDeliverToChildren(input: {
   readonly sessionState: DurableSessionState;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
-  if (!input.sessionState.hasProxyInputRequests) {
+  if (
+    !input.sessionState.hasProxyInputRequests &&
+    readHitlState(input.sessionState.snapshot.session.state).signInRelays.size === 0
+  ) {
     return { kind: "continue", remainder: input.delivery, stateDelta: {} };
   }
 

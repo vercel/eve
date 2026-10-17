@@ -50,7 +50,11 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { Transition } from "./commit.js";
 import { inputWithdrawn, signInWithdrawn } from "./events.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
-import { toProxyInputRequestEntries, type WorkflowAskRoute } from "#harness/hitl/relays.js";
+import {
+  toProxyInputRequestEntries,
+  type WorkflowAskRoute,
+  type ProxyInputRequest,
+} from "#harness/hitl/relays.js";
 import type { ApprovedCall, StepCoordinates, SuspendedStep, TurnState } from "./state.js";
 import {
   activeTurnId,
@@ -538,6 +542,7 @@ export function relay(
   view: SessionView,
   input: {
     readonly payload: SubagentInputRequestHookPayload | SubagentAuthorizationEventHookPayload;
+    readonly remote?: ProxyInputRequest["remote"];
     readonly replacedRequestIds?: Iterable<string>;
     /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
     readonly runId?: string;
@@ -566,7 +571,31 @@ export function relay(
     if (event.type !== "authorization.required") return unchanged(view, events);
   }
   events.push(...hold(view, { on: "input" }).events);
-  if (payload.kind !== "subagent-input-request") return unchanged(view, events);
+  if (payload.kind !== "subagent-input-request") {
+    const { event } = payload;
+    if (event.type !== "authorization.required") return unchanged(view, events);
+    const { attemptId, webhookUrl } = event.data;
+    // A decline names its sign-in by attempt id, so one without an id can't be declined here.
+    if (attemptId === undefined) return unchanged(view, events);
+    if (input.runId !== payload.childSessionId) {
+      return {
+        ...unchanged(view, events),
+        signInRelays: {
+          [attemptId]:
+            input.remote === undefined
+              ? { kind: "session", sessionId: payload.childSessionId }
+              : { kind: "remote", remote: input.remote },
+        },
+      };
+    }
+    // The run's own sign-in is declined through the hook its callback URL names.
+    if (webhookUrl === undefined) return unchanged(view, events);
+    const token = decodeURIComponent(new URL(webhookUrl).pathname.split("/").at(-1)!);
+    return {
+      ...unchanged(view, events),
+      signInRelays: { [attemptId]: { kind: "workflow", token } },
+    };
+  }
   // A child's fresh batch replaces the routes its prior one held.
   const entries = toProxyInputRequestEntries(payload).map(
     ([requestId, route]) =>
@@ -637,7 +666,7 @@ export function runSignIn(
     readonly turnId: string;
   },
   challenge: AuthorizationChallenge,
-  outcome?: "authorized" | "failed",
+  outcome?: "authorized" | "declined" | "failed",
 ) {
   const fields = {
     ...authorizationEventFields(challenge),

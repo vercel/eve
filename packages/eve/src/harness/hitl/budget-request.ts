@@ -159,7 +159,7 @@ export function resolveSessionLimitContinuation(input: {
   }
 
   const response = input.responses.find((entry) => entry.requestId === request.requestId);
-  if (response === undefined) {
+  if (response === undefined || response.decline === true) {
     return undefined;
   }
 

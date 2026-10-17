@@ -1,6 +1,8 @@
+import { readHitlState } from "#harness/hitl/index.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-import type { RuntimeActionResultHookPayload } from "#channel/types.js";
+import type { DeliverPayload, RuntimeActionResultHookPayload } from "#channel/types.js";
 import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
 import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
@@ -15,6 +17,7 @@ type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly kind: "cancel" }
   | { readonly kind: "consumed" }
+  | { readonly kind: "authorization" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
@@ -27,6 +30,7 @@ export async function admitSessionInboxPayload(
   value: SessionInboxPayload,
   input: {
     readonly queue: SessionInputQueue;
+    readonly cursor: SessionStateCursor;
   },
 ): Promise<SessionAdmission> {
   if (value.kind === "session-failure") throw new Error(value.error);
@@ -35,7 +39,7 @@ export async function admitSessionInboxPayload(
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
   if (value.kind === "authorization-callback") {
     input.queue.enqueueAuthorization(value.payloads);
-    return { kind: "consumed" };
+    return { kind: "authorization" };
   }
   // A child's questions reach the session only through the run that opened it.
   if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
@@ -52,8 +56,17 @@ export async function admitSessionInboxPayload(
   }
 
   switch (command.kind) {
-    case "deliver":
-      return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
+    case "deliver": {
+      const routes = readHitlState(input.cursor.sessionState.snapshot.session.state).signInRelays;
+      const inlineDecline = (payload: DeliverPayload) =>
+        payload.authorizationDecline !== undefined &&
+        !routes.has(payload.authorizationDecline.attemptId);
+      const declines = command.payloads.filter(inlineDecline);
+      input.queue.enqueueAuthorization(declines);
+      const payloads = command.payloads.filter((payload) => !inlineDecline(payload));
+      if (payloads.length === 0) return { kind: "authorization" };
+      return { admission: input.queue.enqueueDelivery({ ...command, payloads }), kind: "delivery" };
+    }
     case "clear":
     case "compact":
       input.queue.enqueueControl(command.kind);

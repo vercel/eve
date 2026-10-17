@@ -139,6 +139,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 }
 
 interface ParsedSessionMessageBody {
+  authorizationDecline?: { readonly attemptId: string };
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -164,6 +165,23 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
+  let authorizationDecline: { readonly attemptId: string } | undefined;
+  if (payload.authorizationDecline !== undefined) {
+    const value = payload.authorizationDecline;
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !("attemptId" in value) ||
+      typeof value.attemptId !== "string" ||
+      value.attemptId.length === 0
+    ) {
+      return Response.json(
+        { ok: false, error: "Expected authorizationDecline.attemptId to be a non-empty string." },
+        { status: 400 },
+      );
+    }
+    authorizationDecline = { attemptId: value.attemptId };
+  }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
@@ -173,16 +191,29 @@ export function parseSessionMessageBody(
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
   if (turnPolicy instanceof Response) return turnPolicy;
 
-  if (message === undefined && inputResponses === undefined) {
+  if (message === undefined && inputResponses === undefined && authorizationDecline === undefined) {
     return Response.json(
       {
-        error: "Expected a non-empty 'message' or a non-empty 'inputResponses' array.",
+        error:
+          "Expected a non-empty 'message', a non-empty 'inputResponses' array, or 'authorizationDecline'.",
         ok: false,
       },
       { status: 400 },
     );
   }
 
+  if (
+    authorizationDecline !== undefined &&
+    (message !== undefined || inputResponses !== undefined)
+  ) {
+    return Response.json(
+      {
+        ok: false,
+        error: "'authorizationDecline' cannot be combined with 'message' or 'inputResponses'.",
+      },
+      { status: 400 },
+    );
+  }
   if (message !== undefined && inputResponses !== undefined) {
     return Response.json(
       { error: "'message' and 'inputResponses' are mutually exclusive.", ok: false },
@@ -194,6 +225,7 @@ export function parseSessionMessageBody(
     callback,
     message,
     inputResponses,
+    authorizationDecline,
     context,
     outputSchema,
     turnPolicy,

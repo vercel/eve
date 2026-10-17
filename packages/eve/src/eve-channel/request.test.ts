@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCreateBody } from "#eve-channel/request.js";
+import { parseCreateBody, parseSessionMessageBody } from "#eve-channel/request.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 describe("parseCreateBody", () => {
@@ -47,5 +47,33 @@ describe("parseCreateBody", () => {
     await expect((response as Response).json()).resolves.toMatchObject({
       error: expect.stringContaining("does not accept"),
     });
+  });
+});
+
+describe("parseSessionMessageBody authorization decline", () => {
+  it.each([
+    {},
+    { message: "" },
+    { authorizationDecline: { attemptId: "a" }, inputResponses: [{ requestId: "q", text: "hi" }] },
+  ])("rejects empty or mixed session sends %j", (body) => {
+    expect(parseSessionMessageBody(body)).toBeInstanceOf(Response);
+  });
+  it("accepts a decline without a message", () => {
+    expect(
+      parseSessionMessageBody({ authorizationDecline: { attemptId: "attempt-1" } }),
+    ).toMatchObject({
+      authorizationDecline: { attemptId: "attempt-1" },
+    });
+  });
+  it.each([null, {}, { attemptId: "" }, { attemptId: 4 }])(
+    "rejects invalid decline %j",
+    (authorizationDecline) => {
+      expect(parseSessionMessageBody({ authorizationDecline })).toBeInstanceOf(Response);
+    },
+  );
+  it("rejects a decline combined with a message", () => {
+    expect(
+      parseSessionMessageBody({ authorizationDecline: { attemptId: "a" }, message: "hello" }),
+    ).toBeInstanceOf(Response);
   });
 });

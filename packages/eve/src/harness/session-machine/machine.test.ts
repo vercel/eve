@@ -18,6 +18,7 @@ import type { InputRequest } from "#shared/input.js";
 import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
 import {
   answer,
+  rejectUnsupportedDeclines,
   grantedApprovalKeys,
   parkOnApprovals as parkOnApprovalsTransition,
   requestLimit,
@@ -122,10 +123,10 @@ function callMessage(...callIds: string[]): ModelMessage {
 }
 
 /** A call a sign-in for `connection` stopped. */
-function stopped(callId: string, connection: string) {
+function stopped(callId: string, ...connections: string[]) {
   return {
     action: { callId, input: { service: "api" }, kind: "tool-call" as const, toolName: "deploy" },
-    connections: [connection],
+    connections,
   };
 }
 
@@ -152,9 +153,13 @@ const noPolicy = (stepInput?: StepInput): ResponsePolicyPass => ({
 /** Answers through `deliver` and `answer`, as the tool loop does with no response policy. */
 async function respond(machine: Machine, input: StepInput) {
   const delivered = deliver(machine.view(), input, { takeQueued: true });
-  // The intake answers a typed approval before the policy pass, as a press.
-  const typed = resolveTypedApproval(machine.view(), delivered.input);
-  return machine.apply(
+  // The intake rejects an unsupported decline, then answers a typed approval before the policy
+  // pass, as a press.
+  const checked = rejectUnsupportedDeclines(machine.view(), delivered.input);
+  const rejected = checked.transition === undefined ? [] : checked.transition.events;
+  if (checked.transition !== undefined) await machine.apply(checked.transition);
+  const typed = resolveTypedApproval(machine.view(), checked.delivery);
+  const decision = await machine.apply(
     answer(machine.view(), {
       approvalKey: () => undefined,
       delivery: typed,
@@ -163,6 +168,7 @@ async function respond(machine: Machine, input: StepInput) {
       takeQueued: delivered.takeQueued,
     }),
   );
+  return { ...decision, events: [...rejected, ...decision.events] };
 }
 
 /** A turn whose model step called `callIds`, each needing approval. */
@@ -501,6 +507,48 @@ describe("session machine", () => {
     expect(runnable()).toEqual(["call-1"]);
   });
 
+  it("declines one sign-in: only the calls that waited on it fail, and a sign-in another call still needs stays", async () => {
+    const machine = createMachine();
+    await machine.apply(receive(machine.view(), { message: "Read all." }));
+    await machine.apply(startStep(machine.view(), { modelId: "test-model" }));
+    const challenge = (name: string): AuthorizationChallenge => ({
+      attemptId: `attempt-${name}`,
+      challenge: { instructions: `Sign in to ${name}.` },
+      hookUrl: `https://example.test/${name}`,
+      name,
+    });
+    const google = challenge("google");
+    const slack = challenge("slack");
+    await machine.apply(
+      suspendStep(machine.view(), {
+        event: { ...machine.position() },
+        messages: [callMessage("call-1", "call-2")],
+        tasks: [],
+      }),
+    );
+    // call-1 needs both sign-ins; call-2 needs only slack's.
+    await machine.apply(
+      requireSignIn(machine.view(), {
+        calls: [stopped("call-1", "google", "slack"), stopped("call-2", "slack")],
+        challenges: [google, slack],
+      }),
+    );
+    const before = machine.events.length;
+
+    await machine.apply(withdrawSignIns(machine.view(), "The user declined to sign in.", [google]));
+
+    expect(machine.eventsSince(before).map((event) => event.type)).toEqual([
+      "authorization.completed",
+      "action.result",
+    ]);
+    expect(machine.projection.authorizations["attempt-google"]?.status).toBe("declined");
+    expect(machine.projection.authorizations["attempt-slack"]?.status).toBe("required");
+    expect(machine.view().signIns.map((entry) => entry.attemptId)).toEqual(["attempt-slack"]);
+    expect(
+      suspendedSteps(machine.session.state)[0]?.approved?.map((call) => call.action.callId),
+    ).toEqual(["call-2"]);
+  });
+
   it("keeps the request of an approved call that a sign-in stops again", async () => {
     const machine = createMachine();
     await machine.apply(receive(machine.view(), { message: "Deploy." }));
@@ -629,6 +677,21 @@ describe("checkpoint", () => {
 });
 
 describe("answers", () => {
+  it("rejects a decline on an approval and keeps it open for a valid answer", async () => {
+    const machine = createMachine();
+    await parkOnApprovals(machine, "call-1");
+    const decision = await respond(machine, {
+      inputResponses: [{ requestId: "approval-call-1", decline: true }],
+    });
+    expect(decision.next).toBe("park");
+    expect(decision.resolved).toEqual([]);
+    expect(decision.events).toContainEqual(expect.objectContaining({ type: "message.completed" }));
+    expect(machine.view().turn.suspended[0]?.requests[0]?.requestId).toBe("approval-call-1");
+    const accepted = await respond(machine, {
+      inputResponses: [{ requestId: "approval-call-1", optionId: "approve" }],
+    });
+    expect(accepted.resolved[0]?.inputs[0]?.outcome).toBe("approved");
+  });
   it("takes a plain-text answer for the only pending batch", async () => {
     const machine = createMachine();
     await parkOnApprovals(machine, "call-1");
@@ -691,6 +754,18 @@ describe("answers", () => {
       await machine.apply(requestLimit(machine.view(), { request }));
       return machine;
     }
+
+    it("rejects a decline on a session limit and leaves the request open", async () => {
+      const machine = await exhausted();
+      const decision = await respond(machine, {
+        inputResponses: [{ requestId: request.requestId, decline: true }],
+      });
+      expect(decision.next).toBe("park");
+      expect(decision.limit).toBeUndefined();
+      expect(decision.resolved).toEqual([]);
+      expect(machine.projection.inputs[request.requestId]?.status).toBe("open");
+      expect(decision.events.some((event) => event.type === "message.completed")).toBe(true);
+    });
 
     it("asks whether to continue and holds the turn", async () => {
       const machine = await exhausted();

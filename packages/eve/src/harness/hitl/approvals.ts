@@ -10,6 +10,7 @@ import { isApprovalRequest } from "#harness/input-request-class.js";
 import {
   failedCall,
   resolveApprovalOutcome,
+  ONLY_QUESTIONS_DECLINE,
   resolveInputOutcome,
   TOOL_EXECUTION_DENIED_MESSAGE,
   unavailableToolMessage,
@@ -36,7 +37,7 @@ import {
   type SessionProjection,
 } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { signInWithdrawn } from "#harness/session-machine/events.js";
 import {
@@ -187,6 +188,47 @@ export interface Answered extends Transition {
   readonly resolved: readonly ResolvedInputBatch[];
   /** A decision on the session-limit prompt. */
   readonly limit?: { readonly granted: boolean };
+}
+
+/**
+ * Only a question can be declined. A decline aimed at any other open request is rejected
+ * before an approval policy or the answer pass can consume it, and that request stays open.
+ */
+export function rejectUnsupportedDeclines(
+  view: SessionView,
+  delivery: StepInput | undefined,
+): { readonly delivery: StepInput | undefined; readonly transition: Transition | undefined } {
+  const open = new Map(
+    openInputs(view.projection).map(({ request }) => [request.requestId, request]),
+  );
+  const unsupported = (response: InputResponse) =>
+    response.decline === true && (open.get(response.requestId)?.kind ?? "question") !== "question";
+  const rejected = [
+    ...(delivery?.inputResponses ?? []),
+    ...(delivery?.attributedInputResponses ?? []).map(({ response }) => response),
+  ].filter(unsupported);
+  if (delivery === undefined || rejected.length === 0) return { delivery, transition: undefined };
+  const position = turnPosition(view.projection);
+  return {
+    delivery: {
+      ...delivery,
+      inputResponses: delivery.inputResponses?.filter((response) => !unsupported(response)),
+      attributedInputResponses: delivery.attributedInputResponses?.filter(
+        ({ response }) => !unsupported(response),
+      ),
+    },
+    transition: {
+      turn: view.turn,
+      events: rejected.map(() =>
+        createMessageCompletedEvent({
+          message: ONLY_QUESTIONS_DECLINE,
+          sequence: position.sequence,
+          stepIndex: position.stepIndex,
+          turnId: position.turnId,
+        }),
+      ),
+    },
+  };
 }
 
 /**
@@ -539,27 +581,53 @@ export function stepForRequest(view: SessionView, requestId: string): SuspendedS
 }
 
 /**
- * The held turn moves on, steered: the sign-ins it waits on end, declined, including a
- * responder's for one of its approvals, and the calls that waited for them fail with `reason`.
+ * Sign-ins end, declined, and the calls that waited for them fail with `reason`, so the model
+ * reads why. By default the held turn moves on, steered: every sign-in it waits on ends,
+ * including a responder's for one of its approvals. A call that waited on an ended sign-in can't
+ * run, so its other sign-ins end with it, unless another waiting call still needs them.
  */
-export function withdrawSignIns(view: SessionView, reason: string): Transition {
+export function withdrawSignIns(
+  view: SessionView,
+  reason: string,
+  ended: readonly AuthorizationChallenge[] = view.signIns,
+): Transition {
+  const endedKeys = new Set(ended.map(signInAttemptKey));
   const waiting = view.turn.suspended.flatMap((step) =>
     (step.approved ?? []).filter((call) => !runnableCalls(view, step).includes(call)),
   );
-  const withdrawn = [...view.signIns, ...waiting.flatMap((call) => call.signIns ?? [])];
-  const events = [
-    ...new Map(withdrawn.map((challenge) => [signInAttemptKey(challenge), challenge])),
-  ]
+  const failing = waiting.filter((call) =>
+    (call.signIns ?? []).some((challenge) => endedKeys.has(signInAttemptKey(challenge))),
+  );
+  const needed = new Set(
+    waiting
+      .filter((call) => !failing.includes(call))
+      .flatMap((call) => call.signIns ?? [])
+      .map(signInAttemptKey),
+  );
+  const withdrawn = [
+    ...new Map(
+      [...ended, ...failing.flatMap((call) => call.signIns ?? [])].map((challenge) => [
+        signInAttemptKey(challenge),
+        challenge,
+      ]),
+    ),
+  ].filter(([key]) => !needed.has(key));
+  const events = withdrawn
     .map(([, challenge]) => view.projection.authorizations[challenge.attemptId ?? challenge.name])
     .flatMap((attempt) =>
       attempt?.status === "required" ? [signInWithdrawn(attempt, reason)] : [],
     );
   const settled = settle(view, {
-    results: waiting.map(({ action }) =>
+    results: failing.map(({ action }) =>
       failedCall({ callId: action.callId, failure: reason, toolName: action.toolName }),
     ),
   });
-  return { ...settled, events: [...events, ...settled.events], signIns: [] };
+  const withdrawnKeys = new Set(withdrawn.map(([key]) => key));
+  return {
+    ...settled,
+    events: [...events, ...settled.events],
+    signIns: view.signIns.filter((challenge) => !withdrawnKeys.has(signInAttemptKey(challenge))),
+  };
 }
 
 // ---------------------------------------------------------------------------

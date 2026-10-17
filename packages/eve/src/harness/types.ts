@@ -155,6 +155,8 @@ export interface AttributedInputResponse {
 export interface StepInput {
   /** Internal responder-bound input produced at the delivery boundary. */
   readonly attributedInputResponses?: readonly AttributedInputResponse[];
+  /** Session-owned inline sign-ins the person declined. */
+  readonly authorizationDeclines?: readonly string[];
   readonly inputResponses?: readonly InputResponse[];
   readonly message?: string | UserContent;
   /** Internal actor attribution for `message`. */

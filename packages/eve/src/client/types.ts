@@ -178,6 +178,11 @@ export type SendTurnPayload<TOutput = unknown> =
   | (RespondTurnOptions<TOutput> & {
       readonly inputResponses: readonly InputResponse[];
       readonly message?: never;
+    })
+  | (RespondTurnOptions<TOutput> & {
+      readonly authorizationDecline: { readonly attemptId: string };
+      readonly inputResponses?: never;
+      readonly message?: never;
     });
 
 /** Retry and backoff settings for one kind of stream reconnection. */

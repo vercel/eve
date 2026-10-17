@@ -24,11 +24,19 @@ export const LEGACY_HITL_STATE_KEYS = {
   relays: "eve.runtime.proxyInputRequests",
 } as const;
 
+/** The callback hook a workflow run already owns for one relayed sign-in. */
+export type SignInRelay =
+  | { readonly kind: "workflow"; readonly token: string }
+  | { readonly kind: "session"; readonly sessionId: string }
+  | { readonly kind: "remote"; readonly remote: NonNullable<ProxyInputRequest["remote"]> };
+
 /**
  * A read-only snapshot of the human-in-the-loop records, the one way code outside `harness/hitl/`
  * reads them.
  */
 export interface HitlState {
+  readonly signInRelays: ReadonlyMap<string, SignInRelay>;
+
   /** The sign-in attempts the session waits on. */
   readonly signIns: readonly AuthorizationChallenge[];
   /** Requests this session relays for a child session or a workflow run, by `requestId`. */
@@ -40,6 +48,9 @@ export function readHitlState(state: SessionStateMap | undefined): HitlState {
   let signIns: readonly AuthorizationChallenge[] | undefined;
   let relays: ReadonlyMap<string, ProxyInputRequest> | undefined;
   return {
+    get signInRelays() {
+      return new Map(Object.entries(readRequests(state).signInRelays ?? {}));
+    },
     get signIns() {
       return (signIns ??= readSignIns(state));
     },
@@ -59,12 +70,14 @@ export function holdsHitlRequests(state: SessionStateMap | undefined): boolean {
   if (requests === undefined) return false;
   if (!isObject(requests) || Array.isArray(requests)) return true;
   const { signIns, relays } = requests as StoredRequests;
-  if (signIns !== undefined) return true;
+  if (signIns !== undefined || requests.signInRelays !== undefined) return true;
   return relays !== undefined && (!isObject(relays) || Object.keys(relays).length > 0);
 }
 
 /** What a session-machine transition changes in these records. */
 export interface HitlStateChange {
+  readonly signInRelays?: Readonly<Record<string, SignInRelay | null>>;
+
   /** Every sign-in the session waits on once the change applies; `[]` withdraws them all. */
   readonly signIns?: readonly AuthorizationChallenge[];
   readonly relays?: RelayChange;
@@ -88,6 +101,18 @@ export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
   change: HitlStateChange,
 ): T {
   let state = session.state;
+  if (change.signInRelays !== undefined) {
+    const routes = { ...readRequests(state).signInRelays };
+    for (const [id, route] of Object.entries(change.signInRelays)) {
+      if (route === null) delete routes[id];
+      else routes[id] = route;
+    }
+    state = writeRequests(
+      state,
+      "signInRelays",
+      Object.keys(routes).length > 0 ? routes : undefined,
+    );
+  }
   if (change.signIns !== undefined) {
     state = writeSignIns(state, resolveActiveAuthorizationChallenges(change.signIns));
   }
@@ -103,6 +128,8 @@ export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
 // Every request the session holds sits under one key, a field per kind, so no kind's ids can
 // collide with another's.
 interface StoredRequests {
+  readonly signInRelays?: Readonly<Record<string, SignInRelay>>;
+
   readonly approvals?: unknown;
   /** The sign-in attempts the session waits on. */
   readonly signIns?: unknown;

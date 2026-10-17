@@ -101,8 +101,9 @@ describe("toAskQuestionOutput", () => {
     });
   });
 
-  it("reports a withdrawn question as interrupted and passes through unavailable", () => {
+  it("reports a withdrawn question as interrupted and passes through declined and unavailable", () => {
     expect(toAskQuestionOutput({ status: "cancelled" })).toEqual({ interrupted: true });
+    expect(toAskQuestionOutput({ status: "declined" })).toEqual({ status: "declined" });
     expect(toAskQuestionOutput({ status: "unavailable" })).toEqual({
       status: "unavailable",
     });

@@ -16,6 +16,7 @@ export const ASK_QUESTION_TOOL_DESCRIPTION = [
   '- Do not add an "Other" option; the user can always type their own answer.',
   "- The result's `answer` is the chosen option's label or the user's own words.",
   "- If the question stopped early because a new message arrived, respond to that message instead.",
+  '- If the status is "declined", the user chose not to answer; continue without the answer and do not ask the same question again.',
   '- If the status is "unavailable", no one can answer in this session; continue with your best judgment and state the assumption you made.',
 ].join("\n");
 
@@ -27,6 +28,7 @@ export interface AskQuestionInput {
 export type AskQuestionOutput =
   | { answer: string; status: "answered" }
   | InterruptedOutput
+  | { status: "declined" }
   | { status: "unavailable" };
 
 export const ASK_QUESTION_INPUT_SCHEMA = defineJsonSchema<AskQuestionInput>(
@@ -92,6 +94,12 @@ const ASK_QUESTION_OUTPUT_SCHEMA = defineJsonSchema<AskQuestionOutput>({
       additionalProperties: false,
     },
     INTERRUPTED_OUTPUT_SCHEMA,
+    {
+      type: "object",
+      properties: { status: { type: "string", const: "declined" } },
+      required: ["status"],
+      additionalProperties: false,
+    },
     {
       type: "object",
       properties: { status: { type: "string", const: "unavailable" } },

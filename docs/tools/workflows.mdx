@@ -452,6 +452,7 @@ const answer = await ctx.ask(
 );
 // | { status: "answered"; optionId?: string; text?: string }
 // | { status: "cancelled" }
+// | { status: "declined" }
 // | { status: "unavailable" }
 ```
 
@@ -466,6 +467,8 @@ The answer's `status` tells the body what happened:
   `ctx.ask` or the call's `abortSignal` aborted, or because a `serve` body replied to the call. The
   session emits `input.resolved` with
   `outcome: "cancelled"`, so clients stop offering the question.
+- `declined`: the person chose not to answer. A client declines with `{ requestId, decline: true }`
+  in `inputResponses`, and the session emits `input.resolved` with `outcome: "declined"`.
 - `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
   immediately instead of waiting for an answer no one can give.
 

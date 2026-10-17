@@ -28,6 +28,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "wrun_A",
     send: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
+    declineSignIn: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     respond: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),
     compact: vi.fn().mockResolvedValue({ sessionId: "wrun_A", status: "accepted" }),

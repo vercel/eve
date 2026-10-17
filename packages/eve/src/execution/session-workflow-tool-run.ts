@@ -107,7 +107,12 @@ async function handleWorkflowToolRunRequest(
     const request = message.request;
     await deliverWorkflowAuthorization({ ...message, request }, async () => {
       await cursor.advance((state) =>
-        runProxySubagentEventStep({ hookPayload: request.event, ...state }),
+        runProxySubagentEventStep({
+          hookPayload: request.event,
+          runId: message.from.runId,
+          remote: message.remote,
+          ...state,
+        }),
       );
     });
     return;

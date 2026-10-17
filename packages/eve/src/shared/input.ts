@@ -79,11 +79,21 @@ export type ValidatedInputResponse = InputResponse & {
  */
 export const inputResponseSchema = z
   .object({
+    /**
+     * The person declined to answer a question. A declined response carries no `optionId` or
+     * `text`; the asker reads it as `{ status: "declined" }`.
+     */
+    decline: z.literal(true).optional(),
     optionId: z.string().optional(),
     requestId: z.string(),
     text: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (response) =>
+      response.decline !== true || (response.optionId === undefined && response.text === undefined),
+    { message: "A decline cannot include optionId or text." },
+  );
 
 /** Parses one response and preserves schema validation in its static type. */
 export function parseInputResponse(value: unknown): ValidatedInputResponse {

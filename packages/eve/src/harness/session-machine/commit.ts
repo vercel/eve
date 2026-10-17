@@ -6,7 +6,12 @@ import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
-import { readHitlState, writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
+import {
+  readHitlState,
+  writeHitlState,
+  type RelayChange,
+  type HitlStateChange,
+} from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import type { SessionView } from "./view.js";
 
@@ -18,6 +23,7 @@ import type { SessionView } from "./view.js";
 
 /** What a machine transition returns; approval storage still has direct writers. */
 export interface Transition {
+  readonly signInRelays?: HitlStateChange["signInRelays"];
   readonly turn: TurnState;
   readonly events: readonly UnstampedMessageStreamEvent[];
   /** Messages the transition commits to the end of history. */
@@ -112,5 +118,10 @@ export function dropClosedRecords<T extends HarnessSessionBase>(
     const input = projection.inputs[requestId];
     return input === undefined || input.status === "settled";
   });
-  return writeHitlState(session, { relays: { retire: closed } });
+  const signInRelays = Object.fromEntries(
+    [...readHitlState(session.state).signInRelays.keys()]
+      .filter((id) => projection.authorizations[id]?.status !== "required")
+      .map((id) => [id, null]),
+  );
+  return writeHitlState(session, { relays: { retire: closed }, signInRelays });
 }

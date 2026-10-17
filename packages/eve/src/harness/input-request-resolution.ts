@@ -14,7 +14,7 @@ type ApprovalTerminalStatus = "approved" | "denied" | "ignored" | "invalid";
 export interface ResolvedInputBatch {
   readonly event: PendingInputBatchEvent;
   readonly inputs: readonly {
-    readonly outcome: "answered" | ApprovalTerminalStatus;
+    readonly outcome: "answered" | "declined" | ApprovalTerminalStatus;
     readonly request: InputRequest;
     readonly response?: InputResponse;
   }[];
@@ -22,14 +22,15 @@ export interface ResolvedInputBatch {
 
 /**
  * One request's terminal outcome once its batch resolves: an approval's
- * decision, or whether a question received a response.
+ * decision, or whether a question received an answer or was declined.
  */
 export function resolveInputOutcome(
   kind: InputRequest["kind"],
   response: InputResponse | undefined,
-): "answered" | ApprovalTerminalStatus {
+): "answered" | "declined" | ApprovalTerminalStatus {
   if (kind === "tool-approval") return resolveApprovalOutcome(response).status;
-  return response === undefined ? "ignored" : "answered";
+  if (response === undefined) return "ignored";
+  return response.decline === true ? "declined" : "answered";
 }
 
 export function resolveApprovalOutcome(response: InputResponse | undefined): {
@@ -105,3 +106,7 @@ export function failedCall(call: {
     result: createRuntimeToolResultFromValue({ callId, isError: true, output: failure, toolName }),
   };
 }
+
+/** What a person reads when they decline a request that isn't a question. */
+export const ONLY_QUESTIONS_DECLINE =
+  "Only questions can be declined. Choose an option for this request instead.";

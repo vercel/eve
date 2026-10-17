@@ -91,6 +91,32 @@ describe("createSession#cancel", () => {
 });
 
 describe("fixed session operations", () => {
+  it("rejects mixed and empty sends before dispatch", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime);
+    await expect(
+      // @ts-expect-error a decline is not a send option, including for untyped callers.
+      session.send("hi", { auth: null, authorizationDecline: { attemptId: "a" } }),
+    ).rejects.toThrow("declineSignIn");
+    // @ts-expect-error send requires a message, including for untyped callers.
+    await expect(session.send(undefined, { auth: null })).rejects.toThrow("nonempty");
+    await expect(session.send("", { auth: null })).rejects.toThrow("nonempty");
+    await expect(session.send([], { auth: null })).rejects.toThrow("nonempty");
+    expect(runtime.dispatchSession).not.toHaveBeenCalled();
+  });
+  it("dispatches a sign-in decline", async () => {
+    const runtime = createRuntime();
+    await createSession("sess_1", runtime).declineSignIn("attempt-1", { auth: null });
+    expect(runtime.dispatchSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess_1",
+        command: expect.objectContaining({
+          kind: "send",
+          payload: expect.objectContaining({ authorizationDecline: { attemptId: "attempt-1" } }),
+        }),
+      }),
+    );
+  });
   it("dispatches ephemeral context separately from durable channel context", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);

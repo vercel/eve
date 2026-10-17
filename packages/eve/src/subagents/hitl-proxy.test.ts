@@ -26,6 +26,29 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
 }
 
 describe("routeDeliverPayload", () => {
+  it.each(["tool-approval", "session-limit"] as const)(
+    "rejects a decline for relayed %s without forwarding or retiring it",
+    (kind) => {
+      const session = withRelays(createSession(), {
+        entries: [["req-a", { childContinuationToken: "child", event: REQUEST_EVENT, kind }]],
+        forChildContinuationToken: "child",
+      });
+      const routed = routeDeliverPayload({
+        payload: { inputResponses: [{ requestId: "req-a", decline: true }] },
+        state: session.state,
+      });
+      expect(routed.forChildren).toEqual([]);
+      expect(routed.rejections).toContainEqual(
+        expect.objectContaining({ type: "message.completed" }),
+      );
+      expect(
+        routeDeliverPayload({
+          payload: { inputResponses: [{ requestId: "req-a", optionId: "approve" }] },
+          state: session.state,
+        }).forChildren,
+      ).toHaveLength(1);
+    },
+  );
   it("keeps original child inboxes separate when they share a continuation alias", () => {
     const session = withRelays(createSession(), {
       entries: [

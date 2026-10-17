@@ -325,6 +325,7 @@ export type InputResolutionOutcome =
   | "answered"
   | "approved"
   | "cancelled"
+  | "declined"
   | "denied"
   | "ignored"
   | "invalid";

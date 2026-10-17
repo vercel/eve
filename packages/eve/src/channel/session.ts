@@ -49,6 +49,11 @@ export interface Session {
     message: string | UserContent,
     options: SessionSendOptions,
   ): Promise<SessionSendCommandResult>;
+  /** Declines one inline sign-in without sending a message. */
+  declineSignIn(
+    attemptId: string,
+    options: SessionRespondOptions,
+  ): Promise<SessionSendCommandResult>;
   /** Answers pending input requests on this exact session ID. Throws `SessionStrandedError` like {@link send}. */
   respond<const TResponses extends readonly InputResponse[]>(
     inputResponses: StrictInputResponses<TResponses>,
@@ -114,13 +119,24 @@ export function createSession(
   return {
     id,
     async send(message, options) {
+      if ("authorizationDecline" in options) {
+        throw new Error("Use declineSignIn() instead of combining a message with a decline.");
+      }
+      if (message === undefined || message.length === 0) {
+        throw new Error("send() requires a nonempty message.");
+      }
       const delivery = createDelivery(metadata);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const payload = attachClientContext<{
         context?: readonly string[];
         message: string | UserContent | undefined;
         outputSchema?: JsonObject;
-      }>({ message: serializeFilePartsInMessage(message) }, readClientContext(options));
+      }>(
+        {
+          message: serializeFilePartsInMessage(message),
+        },
+        readClientContext(options),
+      );
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
@@ -134,6 +150,28 @@ export function createSession(
       };
       return await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
+        sessionId: id,
+      });
+    },
+    async declineSignIn(attemptId, options) {
+      if (attemptId.length === 0) throw new Error("declineSignIn() requires an attempt ID.");
+      const caller = sessionCallbackToTurnCaller(options.callback);
+      const command = {
+        auth: options.auth,
+        delivery: createDelivery(metadata),
+        kind: "send" as const,
+        payload: attachClientContext(
+          {
+            authorizationDecline: { attemptId },
+            ...(options.context !== undefined && { context: options.context }),
+            ...(options.outputSchema !== undefined && { outputSchema: options.outputSchema }),
+          },
+          readClientContext(options),
+        ),
+        requestId: metadata.requestId,
+      };
+      return await runtime.dispatchSession({
+        command: caller === undefined ? command : { ...command, caller },
         sessionId: id,
       });
     },

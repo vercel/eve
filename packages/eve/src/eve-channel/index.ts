@@ -446,9 +446,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             body.context,
           );
           result =
-            body.inputResponses === undefined
-              ? await session.send(body.message!, options)
-              : await session.respond(body.inputResponses, options);
+            body.authorizationDecline !== undefined
+              ? await session.declineSignIn(body.authorizationDecline.attemptId, options)
+              : body.inputResponses === undefined
+                ? await session.send(body.message!, options)
+                : await session.respond(body.inputResponses, options);
         } catch (error) {
           const stranded = strandedSessionResponse(error);
           if (stranded !== undefined) return stranded;

@@ -96,6 +96,7 @@ export class SessionInputQueue {
   /**
    * Removes and returns the queued callbacks for `attemptIds` once every one
    * has arrived, so a turn holding several sign-ins resumes when all are done.
+   * A decline settles immediately; the harness keeps holding any remaining sign-ins.
    */
   takeAuthorizations(attemptIds: ReadonlySet<string>): DeliverPayload[] | undefined {
     const taken = this.entries.filter(
@@ -104,7 +105,8 @@ export class SessionInputQueue {
     );
     if (
       taken.length === 0 ||
-      new Set(taken.map((entry) => entry.attemptId)).size < attemptIds.size
+      (new Set(taken.map((entry) => entry.attemptId)).size < attemptIds.size &&
+        !taken.some((entry) => entry.payload.authorizationDecline !== undefined))
     ) {
       return undefined;
     }
@@ -269,6 +271,7 @@ function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
 }
 
 function authorizationAttemptId(payload: DeliverPayload): string | undefined {
+  if (payload.authorizationDecline !== undefined) return payload.authorizationDecline.attemptId;
   const callback = payload["authorizationCallback"] as { readonly attemptId?: unknown } | undefined;
   return typeof callback?.attemptId === "string" ? callback.attemptId : undefined;
 }

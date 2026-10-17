@@ -19,6 +19,7 @@ import { buildSerializedContext, withTimeout } from "#internal/testing/entry-tes
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { always } from "#tools/approval/policies.js";
+import { ONLY_QUESTIONS_DECLINE } from "#harness/input-request-resolution.js";
 import { defineTool } from "#tools/definition.js";
 import {
   type WorkflowExecuteToolDefinition,
@@ -294,6 +295,35 @@ describe("approval caller", () => {
         { tool: "deploy_change", responder: "bob" },
         { tool: "publish_change", responder: "alice" },
       ]);
+    },
+    60_000,
+  );
+
+  it.each([
+    ["the requester", "alice"],
+    ["another person", "bob"],
+  ] as const)(
+    "rejects %s's decline on an approval with a response policy and keeps it answerable",
+    async (_who, principal) => {
+      const { seen, stages } = await withChainRun(`approval-decline-${principal}`, async (run) => {
+        const request = filterEventsByType(run.stages[0]!, "input.requested")[0]!.data.requests[0]!;
+        const declined = await run.deliver(principal === "alice" ? ALICE : BOB, {
+          inputResponses: [{ requestId: request.requestId, decline: true }],
+        });
+        expect(
+          filterEventsByType(declined, "message.completed").map((event) => event.data.message),
+        ).toContain(ONLY_QUESTIONS_DECLINE);
+        expect(filterEventsByType(declined, "input.resolved")).toEqual([]);
+        expect(filterEventsByType(declined, "approval.candidate")).toEqual([]);
+        await run.approve(BOB);
+        await run.approve(ALICE);
+      });
+      expect(seen.map((entry) => entry.tool)).toEqual([
+        "deploy_change",
+        "read_notes",
+        "publish_change",
+      ]);
+      expect(stages.at(-1)?.some((event) => event.type === "turn.completed")).toBe(true);
     },
     60_000,
   );

@@ -29,6 +29,7 @@ export async function forwardAgentSessionRequest(input: {
       from,
       kind: "request",
       replyTo: input.replyTo,
+      remote: input.remote,
       request: { event: request, kind: "authorization-request" },
     });
     return;

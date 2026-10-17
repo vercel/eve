@@ -174,6 +174,8 @@ export interface TurnCaller {
  * attachments and other multimodal input straight to the harness.
  */
 export interface DeliverPayload {
+  /** Declines this session’s own pending inline sign-in. */
+  readonly authorizationDecline?: { readonly attemptId: string };
   readonly inputResponses?: readonly InputResponse[];
   readonly message?: string | UserContent;
   readonly context?: readonly string[];

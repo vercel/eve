@@ -224,7 +224,7 @@ export type WorkflowToolRunAnswer = Extract<ToolInputResponse, { readonly status
 
 /**
  * The session's decision on one `ctx.ask()` question: it accepted an answer,
- * or it withdrew the question first. It decides once, and the ask resolves
+ * the person declined to answer, or it withdrew the question first. It decides once, and the ask resolves
  * from that decision alone.
  */
 export type WorkflowToolRunAskDecision =
@@ -233,6 +233,7 @@ export type WorkflowToolRunAskDecision =
       readonly requestId: string;
       readonly response: WorkflowToolRunAnswer;
     }
+  | { readonly kind: "declined"; readonly requestId: string }
   | { readonly kind: "withdrawn"; readonly requestId: string };
 
 /**
@@ -273,6 +274,7 @@ export function isWorkflowToolRunControlMessage(
       return isWorkflowToolRunCall(call);
     case "answer":
       return typeof requestId === "string" && isWorkflowToolRunAnswer(response);
+    case "declined":
     case "withdrawn":
       return typeof requestId === "string";
     default:
@@ -283,7 +285,7 @@ export function isWorkflowToolRunControlMessage(
 export function isWorkflowToolRunAskDecision(
   message: WorkflowToolRunControlMessage,
 ): message is WorkflowToolRunAskDecision {
-  return message.kind === "answer" || message.kind === "withdrawn";
+  return message.kind === "answer" || message.kind === "declined" || message.kind === "withdrawn";
 }
 
 function isWorkflowToolRunAnswer(value: unknown): value is WorkflowToolRunAnswer {

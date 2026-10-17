@@ -286,8 +286,10 @@ export class ActiveTurn {
       case "cancel":
         if (this.cancelsThisTurn(value)) this.abort();
         return false;
+      case "authorization":
+        return true;
       case "consumed":
-        return value.kind === "authorization-callback";
+        return false;
     }
   }
 

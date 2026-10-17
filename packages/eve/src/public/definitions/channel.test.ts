@@ -644,6 +644,9 @@ describe("defineChannel", () => {
           async send() {
             return { sessionId: channelId, status: "accepted" as const };
           },
+          async declineSignIn() {
+            return { sessionId: channelId, status: "accepted" as const };
+          },
           async respond() {
             return { sessionId: channelId, status: "accepted" as const };
           },

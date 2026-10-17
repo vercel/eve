@@ -232,6 +232,9 @@ function createHarness(input: {
   const session: Session = {
     id: coordinates.parentSessionId,
     send: vi.fn(),
+    declineSignIn: vi
+      .fn()
+      .mockResolvedValue({ sessionId: coordinates.parentSessionId, status: "accepted" }),
     respond: vi.fn(),
     async cancel() {
       return { status: "no_active_turn" };

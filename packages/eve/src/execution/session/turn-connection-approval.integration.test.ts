@@ -533,78 +533,119 @@ describe("turn connection approval restoration", () => {
     });
   });
 
-  it("names the responder, not the requester, on a candidate's sign-in events", async () => {
-    const signIn = defineInteractiveAuthorization<{ readonly nonce: string }>({
-      async getToken() {
-        throw new ConnectionAuthorizationRequiredError("notes-approver");
-      },
-      async startAuthorization() {
-        return { challenge: { url: "https://idp.example/sign-in" }, resume: { nonce: "n1" } };
-      },
-      async completeAuthorization() {
-        return { token: "approver-token" };
-      },
-    });
-    const fixture = setup();
-    fixture.response.mockImplementation(((context: ApprovalResponseContext) =>
-      context.auth
-        .getToken(signIn, { authKey: "notes-approver" })
-        .then(() => ({ status: "allowed" as const }))) as never);
-    await fixture.step({
-      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
-    });
-    const parked = await fixture.step();
-    const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!.requests[0]!;
+  it.each(["authorized", "declined"])(
+    "settles a responder sign-in as %s without changing its identity",
+    async (outcome) => {
+      const signIn = defineInteractiveAuthorization<{ readonly nonce: string }>({
+        async getToken() {
+          throw new ConnectionAuthorizationRequiredError("notes-approver");
+        },
+        async startAuthorization() {
+          return { challenge: { url: "https://idp.example/sign-in" }, resume: { nonce: "n1" } };
+        },
+        async completeAuthorization() {
+          return { token: "approver-token" };
+        },
+      });
+      const fixture = setup();
+      fixture.response.mockImplementation(((context: ApprovalResponseContext) =>
+        context.auth
+          .getToken(signIn, { authKey: "notes-approver" })
+          .then(() => ({ status: "allowed" as const }))) as never);
+      await fixture.step({
+        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
+      });
+      const parked = await fixture.step();
+      const request = suspendedSteps(readDurableSession(parked.sessionState).state)[0]!
+        .requests[0]!;
 
-    const signInStart = fixture.events.length;
-    await fixture.step({
-      delivery: {
-        kind: "deliver",
-        auth: bob,
-        payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
-      },
-    });
-    // Ingesting the candidate, running its policy, and parking on sign-in are separate passes.
-    for (let result = await fixture.step(); result.action === "continue";) {
-      result = await fixture.step();
-    }
-    const candidate = fixture.events
-      .slice(signInStart)
-      .find((event) => event.type === "approval.candidate");
-    const required = fixture.events
-      .slice(signInStart)
-      .find((event) => event.type === "authorization.required");
-    expect(candidate?.data).toMatchObject({ responderPrincipalId: "bob" });
-    expect(required?.data).toMatchObject({
-      attemptId: expect.any(String),
-      candidateId: candidate?.data.candidateId,
-      principalId: "bob",
-    });
+      const signInStart = fixture.events.length;
+      await fixture.step({
+        delivery: {
+          kind: "deliver",
+          auth: bob,
+          payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
+        },
+      });
+      // Ingesting the candidate, running its policy, and parking on sign-in are separate passes.
+      for (let result = await fixture.step(); result.action === "continue";) {
+        result = await fixture.step();
+      }
+      const candidate = fixture.events
+        .slice(signInStart)
+        .find((event) => event.type === "approval.candidate");
+      const required = fixture.events
+        .slice(signInStart)
+        .find((event) => event.type === "authorization.required");
+      expect(candidate?.data).toMatchObject({ responderPrincipalId: "bob" });
+      expect(required?.data).toMatchObject({
+        attemptId: expect.any(String),
+        candidateId: candidate?.data.candidateId,
+        principalId: "bob",
+      });
 
-    const completionStart = fixture.events.length;
-    await fixture.step({
-      delivery: {
-        kind: "deliver",
-        payloads: [
-          {
-            authorizationCallback: {
-              attemptId: required?.data.attemptId,
-              callback: { method: "GET", params: { code: "ok" } },
-              connectionName: required?.data.name,
-            },
+      if (typeof required?.data.attemptId !== "string") throw new Error("Expected an attempt id.");
+      if (outcome === "authorized") {
+        const completionStart = fixture.events.length;
+        await fixture.step({
+          delivery: {
+            kind: "deliver",
+            payloads: [
+              {
+                authorizationCallback: {
+                  attemptId: required.data.attemptId,
+                  callback: { method: "GET", params: { code: "ok" } },
+                  connectionName: required.data.name,
+                },
+              },
+            ],
           },
-        ],
-      },
-    });
-    const completed = fixture.events
-      .slice(completionStart)
-      .find((event) => event.type === "authorization.completed");
-    expect(completed?.data).toMatchObject({
-      attemptId: required?.data.attemptId,
-      outcome: "authorized",
-      principalId: "bob",
-    });
-  });
+        });
+        expect(fixture.events.slice(completionStart)).toContainEqual(
+          expect.objectContaining({
+            type: "authorization.completed",
+            data: expect.objectContaining({
+              attemptId: required.data.attemptId,
+              outcome,
+              principalId: "bob",
+            }),
+          }),
+        );
+        return;
+      }
+      const declineStart = fixture.events.length;
+      const modelCalls = fixture.doStream.mock.calls.length;
+      await fixture.step({
+        delivery: {
+          kind: "deliver",
+          payloads: [{ authorizationDecline: { attemptId: required.data.attemptId } }],
+        },
+      });
+      expect(fixture.events.slice(declineStart)).toContainEqual(
+        expect.objectContaining({
+          type: "authorization.completed",
+          data: expect.objectContaining({
+            attemptId: required.data.attemptId,
+            outcome: "declined",
+            principalId: "bob",
+          }),
+        }),
+      );
+      const audit = getApprovalAuditState(fixture.state());
+      expect(audit.activeCandidates).toEqual([]);
+      expect(audit.candidateHistory).toContainEqual(
+        expect.objectContaining({
+          candidateId: candidate?.data.candidateId,
+          status: "failed",
+          reason: "The user declined to sign in.",
+        }),
+      );
+      expect(audit.settlements).toEqual([]);
+      expect(suspendedSteps(fixture.state())[0]!.requests[0]!.requestId).toBe(request.requestId);
+      expect(fixture.doStream).toHaveBeenCalledTimes(modelCalls);
+      expect(fixture.fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it("restores the originating connection for a sign-in callback without a premature turn", async () => {
     const fixture = setup();

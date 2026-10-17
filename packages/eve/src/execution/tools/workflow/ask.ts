@@ -73,6 +73,7 @@ export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunConte
 }
 
 const CANCELLED: ToolInputResponse = { status: "cancelled" };
+const DECLINED: ToolInputResponse = { status: "declined" };
 const UNAVAILABLE: ToolInputResponse = { status: "unavailable" };
 
 interface PendingAsk {
@@ -146,8 +147,7 @@ export class WorkflowToolRunAsks {
 
   /** Applies the session's decision. The first one wins; a repeated one is dropped. */
   settle(decision: WorkflowToolRunAskDecision): void {
-    const response = decision.kind === "answer" ? decision.response : CANCELLED;
-    this.take(decision.requestId)?.resolve(response);
+    this.take(decision.requestId)?.resolve(askResponse(decision));
   }
 
   /** The session stopped the work, so it answers none of its questions anymore. */
@@ -161,6 +161,17 @@ export class WorkflowToolRunAsks {
     const pending = this.pending.get(requestId);
     this.pending.delete(requestId);
     return pending;
+  }
+}
+
+function askResponse(decision: WorkflowToolRunAskDecision): ToolInputResponse {
+  switch (decision.kind) {
+    case "answer":
+      return decision.response;
+    case "declined":
+      return DECLINED;
+    case "withdrawn":
+      return CANCELLED;
   }
 }
 

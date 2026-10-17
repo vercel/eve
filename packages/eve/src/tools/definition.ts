@@ -142,6 +142,7 @@ export interface ToolInputResponseResponder {
  *   session accepted before a withdrawal wins, even after a signal aborted.
  * - `cancelled`: the request was withdrawn before anyone answered it, because
  *   the ask's `signal` or the call's `abortSignal` aborted.
+ * - `declined`: the person chose not to answer.
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
@@ -156,6 +157,7 @@ export type ToolInputResponse =
       readonly text?: string;
     }
   | { readonly status: "cancelled" }
+  | { readonly status: "declined" }
   | { readonly status: "unavailable" };
 
 /** Options for `ctx.ask` in a `defineWorkflowTool` executor. */

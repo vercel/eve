@@ -23,6 +23,14 @@ export async function dispatchSessionTurn<TOutput>(input: {
   }
 
   beforeSend?.();
+  if ("authorizationDecline" in turn) {
+    const { authorizationDecline, ...options } = turn;
+    return {
+      session,
+      response: await session.declineSignIn(authorizationDecline.attemptId, options),
+      created: false,
+    };
+  }
   if (turn.inputResponses === undefined) {
     const { message, ...options } = turn;
     return { session, response: await session.send(message, options), created: false };

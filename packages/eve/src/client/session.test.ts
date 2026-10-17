@@ -1528,3 +1528,13 @@ describe("ClientSession.agent", () => {
     expect(urls[0]!.pathname).toBe("/eve/v1/session/child_1/stream");
   });
 });
+
+describe("ClientSession.declineSignIn", () => {
+  it("posts an authorization decline without a message", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(createAcceptedResponse());
+    await createSession().declineSignIn("attempt-1");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      authorizationDecline: { attemptId: "attempt-1" },
+    });
+  });
+});

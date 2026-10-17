@@ -79,6 +79,7 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
   return {
     id: "test-session-id",
     send: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
+    declineSignIn: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     respond: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
     compact: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
