@@ -5,6 +5,7 @@ export {
   type SlackBotToken,
   type SlackChannel,
   type SlackChannelConfig,
+  type SlackChannelContext,
   type SlackChannelCredentials,
   type SlackChannelState,
   type SlackContext,

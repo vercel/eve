@@ -18,8 +18,6 @@ export {
   type ChannelAudience,
   type AudienceCaller,
   type AudienceContext,
-  type AudienceInput,
-  type AudiencePrincipal,
   type ConversationEnvironment,
   type ChannelFrom,
   type ChannelReceiveContext,
@@ -138,3 +136,5 @@ export function isChannel<TChannel extends Channel<any, any, any>>(
 }
 
 export { answerFromText } from "#channel/resolve-text.js";
+
+export type { UploadPolicyInput } from "#public/channels/upload-policy.js";

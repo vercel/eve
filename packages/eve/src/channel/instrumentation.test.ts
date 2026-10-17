@@ -7,7 +7,6 @@ import type { AudienceContext } from "#shared/conversation-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const audienceInput: AudienceContext<Record<string, unknown>> = {
-  auth: null,
   caller: { type: "anonymous" },
   channel: { kind: "channel:support", name: "support" },
   environment: "production",

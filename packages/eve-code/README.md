@@ -7,7 +7,6 @@ It ships inside the `eve` package. This private `@eve/code` workspace package is
 - `eve/extensions/code`: the extension
 - `eve/extensions/code/sandbox`: sandbox bootstrap and credential helpers
 - `eve/extensions/code/tools`: `apply_patch` and `grep` (`gh` is a deprecated re-export)
-- `eve/extensions/code/prwatch`: PR-watch primitives for consumer-owned workflow tools
 
 ## Mount
 
@@ -48,7 +47,7 @@ export default defineSandbox(() => environment.open());
 
 eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve alone does not rebuild an existing prepared artifact.
 
-Computer use lives in `eve/computer-use`. Mount it next to this extension when the sandbox has a desktop. `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY` are still re-exported from `eve/extensions/code/sandbox`, and `computer_use` from `eve/extensions/code/tools`, but both are deprecated.
+Computer use lives in its own extension. Import its tools and sandbox helpers directly; the deprecated code re-exports are removed.
 
 Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. With `eve/extensions/git` configured for `github`, repositories requiring verified signatures use `gh-signed-commit` through its `gh` tool.
 

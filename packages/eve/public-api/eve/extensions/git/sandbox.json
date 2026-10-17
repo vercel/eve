@@ -1,16 +1,8 @@
 [
-  "GH_SIGNED_COMMIT_SOURCE",
-  "GH_SIGNED_COMMIT_VERSION",
-  "GH_TOOL_DESCRIPTION",
-  "GITHUB_TOOLING_PATHS",
   "GitHubConfig",
   "GitHubLeaseRule",
   "GitHubShellInput",
   "GitHubShellOutput",
-  "defineGhTool",
   "executeGitHubShell",
-  "githubInstructions",
-  "githubShellApproval",
-  "prSkillDescription",
-  "prSkillMarkdown"
+  "githubShellApproval"
 ]

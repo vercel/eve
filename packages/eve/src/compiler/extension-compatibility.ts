@@ -20,7 +20,13 @@ interface ExtensionCapabilityContract {
 }
 
 const EXTENSION_CAPABILITY_CONTRACTS = {
-  extension: { current: 1, supported: [1], dropped: {} },
+  extension: {
+    current: 2,
+    supported: [2],
+    dropped: {
+      1: "The unused defineExtension namespace argument was removed; rebuild the extension.",
+    },
+  },
   tool: {
     current: 93,
     supported: [93],
@@ -470,7 +476,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       25: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
     },
   },
-  config: { current: 1, supported: [1], dropped: {} },
+  config: { current: 2, supported: [1, 2], dropped: {} },
   state: {
     current: 14,
     supported: [1, 2, 3, 4, 5, 7, 9, 10, 12, 13, 14],

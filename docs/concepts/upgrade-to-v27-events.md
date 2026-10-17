@@ -312,6 +312,21 @@ Reusable eve config callbacks can use `WithEveConfigFunction` and `WithEveConfig
 `eve/workflow-modules` now declares only the authored workflow helpers documented by eve,
 not the entire vendored Workflow SDK.
 
+## Retired aliases and internal helpers
+
+Mount `eve/extensions/git` with `github` settings instead of `code({ github })`, and import
+computer-use tools from their own extension. `eve/models/openai` exports `chatgpt`, not
+`experimental_chatgpt`. `defineExtension` takes only its options, not a namespace argument.
+
+Audience callbacks take `AudienceContext` and its privacy-limited `caller`; `auth`,
+`AudienceInput`, and `AudiencePrincipal` are removed. Event framing records and loader-only
+guards are not public authoring APIs. `JsonValue`, `JsonObject`, `JsonArray`, and `JsonPrimitive`
+have one public home, `eve/events`.
+
+`grep` and `code__grep` now share the code extension's modes, bounded output, and workspace
+containment. The default output lists matching files; pass `outputMode: "content"` to retain
+line output. `limit` bounds returned rows (50 by default, maximum 200), not matches per file.
+
 ## Clients and frontends
 
 - **Frontend commands resolve on acceptance.** `EveAgentStore.send()` and the frontend hooks'

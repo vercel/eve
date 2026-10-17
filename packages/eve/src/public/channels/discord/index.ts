@@ -13,6 +13,7 @@ export {
   discordChannel,
   type DiscordChannel,
   type DiscordChannelConfig,
+  type DiscordChannelContext,
   type DiscordChannelCredentials,
   type DiscordChannelEvents,
   type DiscordChannelState,

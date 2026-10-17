@@ -382,7 +382,8 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `glob
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. Add it:
+`grep` searches files inside the sandbox workspace. It is also the implementation of the code
+extension's `code__grep` tool. Add it:
 
 ```sh
 eve add tool/grep
@@ -405,6 +406,16 @@ export default defineTool({
 ```
 
 Remove the file to remove the tool. `disableTool()` is unnecessary because `grep` is not added by default.
+
+Inputs are `pattern`, optional `path`, `glob`, `ignoreCase`, `literal`, `context`, `limit`, and
+`outputMode`. `files_with_matches` is the default and lists paths; `content` returns matching
+lines and `count` returns per-file totals. Identifier-like patterns use literal matching unless
+`literal: false` is explicit. The default limit is 50 rows, capped at 200, with additional byte
+and line bounds. Relative paths resolve inside the workspace; parent traversal and symlinks
+outside it are rejected. Ripgrep respects `.gitignore`; the POSIX fallback does not.
+
+Results contain `content`, `matchCount`, `outputMode`, `path`, and `truncated`. Use
+`outputMode: "content"` when migrating a caller that previously expected matching lines.
 
 ### `no_reply`
 

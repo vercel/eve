@@ -22,31 +22,14 @@ export {
   TERMINAL_OUTCOMES,
   FACT_CATALOG,
   type ProgressDescriptor,
-  PROGRESS_CATALOG,
   type FactType,
   type ProgressType,
-  isFactType,
-  isProgressType,
-  isTerminalType,
-  isKnownOutcome,
-  contentPhase,
 } from "#protocol/session-events/catalog.js";
 
 export {
-  type StoredLine,
-  type CommitLine,
-  type ProgressLine,
   type Scope,
   type Envelope,
-  type TransportRecord,
-  type PositionMarker,
-  HEARTBEAT_RECORD,
-  LEASE_ENDED_RECORD,
-  STREAM_ENDED_RECORD,
   type FactPosition,
-  type ReadRecord,
-  classifyRecord,
-  isStoredLine,
   type Cause,
   type Principal,
   type ErrorInfo,
@@ -258,3 +241,5 @@ export type {
 export { interaction, signInEnding, type Interaction } from "#protocol/session-reader.js";
 
 export { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#protocol/interaction-options.js";
+
+export type { JsonObject, JsonArray, JsonPrimitive } from "#shared/json.js";

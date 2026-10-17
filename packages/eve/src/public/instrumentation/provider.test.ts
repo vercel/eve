@@ -4,7 +4,6 @@ import {
   defineInstrumentation,
   disableInstrumentation,
   isInstrumentationDisabled,
-  isInstrumentationProvider,
 } from "#public/instrumentation/index.js";
 
 describe("defineInstrumentation", () => {
@@ -105,3 +104,5 @@ describe("disableInstrumentation", () => {
     expect(isInstrumentationDisabled(defineInstrumentation({}))).toBe(false);
   });
 });
+
+import { isInstrumentationProvider } from "#instrumentation/provider.js";

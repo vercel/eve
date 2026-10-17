@@ -3,6 +3,7 @@ export {
   type TwilioAllowFrom,
   type TwilioChannel,
   type TwilioChannelConfig,
+  type TwilioChannelContext,
   type TwilioChannelCredentials,
   type TwilioChannelEvents,
   type TwilioChannelState,

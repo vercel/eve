@@ -11,6 +11,7 @@
   "TeamsChannel",
   "TeamsChannelAccount",
   "TeamsChannelConfig",
+  "TeamsChannelContext",
   "TeamsChannelCredentials",
   "TeamsChannelEvents",
   "TeamsChannelState",

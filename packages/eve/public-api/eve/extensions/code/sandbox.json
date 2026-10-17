@@ -1,15 +1,1 @@
-[
-  "BrokeredCredentialOptions",
-  "CODE_TOOLING_REVALIDATION_KEY",
-  "COMPUTER_USE_REVALIDATION_KEY",
-  "GitHubLeaseRule",
-  "GitHubShellInput",
-  "GitHubShellOutput",
-  "authenticateGitHub",
-  "authenticateVercel",
-  "executeGitHubShell",
-  "githubShellApproval",
-  "installCodeTooling",
-  "installComputerUse",
-  "startComputerUse"
-]
+["BrokeredCredentialOptions", "authenticateGitHub", "authenticateVercel", "installCodeTooling"]

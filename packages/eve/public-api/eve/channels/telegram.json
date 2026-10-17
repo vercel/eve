@@ -6,6 +6,7 @@
   "TelegramCallbackQuery",
   "TelegramChannel",
   "TelegramChannelConfig",
+  "TelegramChannelContext",
   "TelegramChannelCredentials",
   "TelegramChannelEvents",
   "TelegramChannelState",

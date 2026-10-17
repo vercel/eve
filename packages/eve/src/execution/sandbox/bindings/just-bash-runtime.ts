@@ -121,7 +121,30 @@ export async function createBashSandbox(input: {
 
   const sandbox = await Sandbox.create({
     cwd: WORKSPACE_ROOT,
-    customCommands: input.customCommands === undefined ? undefined : [...input.customCommands],
+    customCommands: [
+      // just-bash has no realpath command. Workspace tools need the filesystem's
+      // symlink-aware result, not lexical path normalization, for containment.
+      justBash.defineCommand("realpath", async (args, context) => {
+        const path = args.at(-1);
+        if (
+          args.length !== 4 ||
+          args[0] !== "-e" ||
+          args[1] !== "-z" ||
+          args[2] !== "--" ||
+          !path
+        ) {
+          return { stdout: "", stderr: "realpath: expected -e -z -- path", exitCode: 2 };
+        }
+        try {
+          const real = await context.fs.realpath(path);
+          await context.fs.stat(real);
+          return { stdout: real + "\0", stderr: "", exitCode: 0 };
+        } catch (error) {
+          return { stdout: "", stderr: `realpath: ${String(error)}`, exitCode: 1 };
+        }
+      }),
+      ...(input.customCommands ?? []),
+    ],
     env: metadata === null ? undefined : { ...metadata.env },
     fs: filesystem,
     network: {

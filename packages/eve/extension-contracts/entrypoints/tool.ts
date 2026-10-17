@@ -3,7 +3,6 @@ export {
   defineWorkflowTool,
   disableTool,
   isDisabledToolSentinel,
-  serializeModelInputSchema,
   toolOutput,
   toolOutputPart,
   toolResultFrom,

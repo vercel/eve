@@ -6,6 +6,7 @@
   "TwilioAuthToken",
   "TwilioChannel",
   "TwilioChannelConfig",
+  "TwilioChannelContext",
   "TwilioChannelCredentials",
   "TwilioChannelEvents",
   "TwilioChannelState",

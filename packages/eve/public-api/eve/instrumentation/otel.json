@@ -15,8 +15,6 @@
   "TraceCapturePolicy",
   "TracePolicyDecision",
   "agentRuns",
-  "isOtelDeclaration",
-  "isOtelIntegration",
   "localTraces",
   "otel",
   "otelIntegration"

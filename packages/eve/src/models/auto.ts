@@ -35,7 +35,7 @@ type AutoOption =
       readonly reasoning?: AgentReasoningDefinition;
     };
 
-interface AutoConfig<
+export interface AutoConfig<
   T extends Readonly<Record<string, AutoOption>> = Readonly<Record<string, AutoOption>>,
 > {
   /** Decision model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */

@@ -105,12 +105,19 @@ describe("just-bash sandbox file API", () => {
       path: "/source",
     });
     await expect(
-      executeGrepOnSandbox(handle.sandbox, { path: "/source", pattern: "before" }),
-    ).resolves.toMatchObject({
-      content: "/source/instructions.md:1:before",
-      matchCount: 1,
-      path: "/source",
-    });
+      executeGrepOnSandbox(handle.sandbox, {
+        path: "/source",
+        pattern: "before",
+        outputMode: "content",
+      }),
+    ).rejects.toThrow("outside the workspace");
+    await handle.sandbox.writeTextFile({ path: "/workspace/grep-note.txt", content: "before" });
+    await expect(
+      executeGrepOnSandbox(handle.sandbox, { pattern: "before", outputMode: "content" }),
+    ).resolves.toMatchObject({ content: "/workspace/grep-note.txt:1:before", matchCount: 1 });
+    await expect(
+      executeGrepOnSandbox(handle.sandbox, { pattern: "[", literal: false, outputMode: "content" }),
+    ).rejects.toThrow("grep failed");
     await handle.sandbox.writeTextFile({
       content: "after",
       path: "/source/instructions.md",

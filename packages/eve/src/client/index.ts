@@ -101,3 +101,5 @@ export { endsTurn, failureOf } from "#client/session-utils.js";
 
 export type { AskedCall } from "#protocol/session-reader.js";
 export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";
+
+export type { AgentInfoMemoryEntry } from "#client/types.js";

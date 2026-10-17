@@ -8,6 +8,7 @@
   "DiscordBotToken",
   "DiscordChannel",
   "DiscordChannelConfig",
+  "DiscordChannelContext",
   "DiscordChannelCredentials",
   "DiscordChannelEvents",
   "DiscordChannelState",

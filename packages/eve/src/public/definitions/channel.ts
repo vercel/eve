@@ -61,8 +61,6 @@ export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
   AudienceCaller,
   AudienceContext,
-  AudienceInput,
-  AudiencePrincipal,
   ConversationEnvironment,
 } from "#shared/conversation-context.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
