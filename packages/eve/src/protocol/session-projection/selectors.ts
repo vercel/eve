@@ -215,10 +215,11 @@ export type Waiting =
  * has the id.
  *
  * `session` is never a false alarm: the session writes another line for the turn without
- * anything arriving. `person` and `work` are exact once a step ends: until an answer, a callback,
- * a call's result, a task's end, a steering message, or a cancel arrives, the session writes
- * nothing more for the turn. Inside a step, a line can read as a wait the step goes on from, so a
- * reader that stops on a wait waits for `turn.paused`, which only a step's end writes.
+ * anything arriving. `person` and `work` are exact whenever the session waits: until an answer, a
+ * callback, a call's result, a task's end, a message, or a cancel arrives, it writes nothing more
+ * for the turn. While it works, inside a step or between the steps of one change such as a
+ * cancel, a line can read as a wait it goes on from, so a reader that stops on a wait for a person
+ * waits for `turn.paused`, which the session writes once it waits.
  *
  * Who the turn waits on isn't always what wakes it: while one task asks someone, another task
  * ending can move the turn on too, so a wait on a person isn't a promise that only an answer
