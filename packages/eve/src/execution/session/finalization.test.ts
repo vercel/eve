@@ -4,6 +4,7 @@ import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { writeTaskTable } from "#execution/tasks/table.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -183,6 +184,26 @@ describe("session finalization with an unsettled caller", () => {
 
   it("terminates child sessions when a task run is live", async () => {
     const sessionState = sessionWithTaskRun();
+    await finalizeSession(
+      { kind: "expired" },
+      {
+        caller: undefined,
+        cursor: { serializedContext: {}, sessionState },
+        sessionWritable: new WritableStream(),
+      },
+    );
+    expect(terminateChildSessionsStep).toHaveBeenCalledExactlyOnceWith({ sessionState });
+  });
+
+  it("terminates the workflow tool calls a turn waits on when no task run is live", async () => {
+    const sessionState = createDurableSessionState({
+      session: registerWorkflowToolRun(baseSession(), {
+        address: { hookToken: "hook-call-1", runId: "run-call-1" },
+        callId: "call-1",
+        origin: { stepIndex: 0, turnId: "turn_0" },
+        toolName: "deploy",
+      }),
+    });
     await finalizeSession(
       { kind: "expired" },
       {
