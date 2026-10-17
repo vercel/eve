@@ -30,21 +30,38 @@ export async function readDevelopmentModelCredential(
   if (!isLoopbackHostname(url.hostname) || url.protocol !== "http:" || url.username || url.password)
     throw new Error("The local model connection is unavailable. Restart eve dev.");
   url.searchParams.set("provider", provider);
-  const headers: Record<string, string> = {
-    [DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER]: process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV]!,
-  };
+  return fetchModelCredential(
+    url.href,
+    { [DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER]: process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV]! },
+    rejectedToken,
+    signal,
+  );
+}
+
+/** GETs a credential from a broker: `rejectedToken`, hashed, asks it for a fresh one. */
+export async function fetchModelCredential(
+  url: string,
+  headers: Record<string, string>,
+  rejectedToken?: string,
+  signal?: AbortSignal | null,
+): Promise<DevelopmentModelCredential> {
   if (rejectedToken)
-    headers[DEVELOPMENT_MODEL_REJECTED_HEADER] = createHash("sha256")
-      .update(rejectedToken)
-      .digest("hex");
-  // The host may wait for the refresh lock and complete two OAuth requests.
-  const value = await authJson(url.href, { headers, signal }, 256_000, 75_000);
+    headers = {
+      ...headers,
+      [DEVELOPMENT_MODEL_REJECTED_HEADER]: createHash("sha256").update(rejectedToken).digest("hex"),
+    };
+  // The broker may wait for a refresh lock and complete two OAuth requests.
+  const value = await authJson(url, { headers, signal }, 256_000, 75_000);
   if (
     typeof value.token !== "string" ||
     !value.token ||
     !["api-key", "oauth", "oidc"].includes(String(value.kind))
   )
-    throw new Error("The model connection is unavailable. Run /login to reconnect.");
+    throw new Error(
+      typeof value.error === "string"
+        ? value.error
+        : "The model connection is unavailable. Run /login to reconnect.",
+    );
   return {
     kind: value.kind as DevelopmentModelCredential["kind"],
     token: value.token,

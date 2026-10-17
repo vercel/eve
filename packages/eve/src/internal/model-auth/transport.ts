@@ -5,7 +5,7 @@ import {
   developmentModelBrokerAvailable,
   readDevelopmentModelCredential,
 } from "./development-broker-client.js";
-import { resolveGatewayModelCredential } from "./gateway-credential.js";
+import { MODEL_CREDENTIAL_URL_ENV, resolveGatewayModelCredential } from "./gateway-credential.js";
 import { VERCEL_TEAM_HEADER } from "./vercel.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
 
@@ -30,6 +30,7 @@ function createLocalGateway(): ReturnType<typeof createGateway> | undefined {
   const selected = process.env[MODEL_CONNECTION_ENV];
   if (
     !developmentModelBrokerAvailable() &&
+    !process.env[MODEL_CREDENTIAL_URL_ENV] &&
     selected !== "vercel" &&
     selected !== "vercel-cli" &&
     selected !== "ai-gateway-key" &&
