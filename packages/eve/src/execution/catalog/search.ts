@@ -139,6 +139,7 @@ function labelQuery(input: unknown): string {
  * model would read it in its tool list.
  */
 export function createSearchTool(input: {
+  readonly language?: "js" | "py";
   readonly deferred: readonly HarnessToolDefinition[];
   readonly describe: (definition: HarnessToolDefinition) => string;
   readonly reach: SearchReach;
@@ -146,7 +147,13 @@ export function createSearchTool(input: {
   readonly skills: readonly CatalogSkill[];
 }): HarnessToolDefinition {
   return {
-    description: searchDescription(input.reach),
+    description:
+      input.language === "py"
+        ? searchDescription(input.reach).replace(
+            "TypeScript signature",
+            "Python signature; invoke its flat function with await in eve__execute",
+          )
+        : searchDescription(input.reach),
     execute: (rawInput: unknown) => search(input, rawInput as SearchInput),
     frameworkTool: true,
     inputSchema: SEARCH_INPUT_SCHEMA,
@@ -169,7 +176,9 @@ async function search(
   const inScope = (name: string) => namespace === undefined || inNamespace(name, namespace);
 
   const candidates: SearchCandidate[] = [
-    ...catalog.deferred.map((definition) => entryCandidate(definition, catalog.describe)),
+    ...catalog.deferred.map((definition) =>
+      entryCandidate(definition, catalog.describe, catalog.language),
+    ),
     ...catalog.skills.map(skillCandidate),
   ].filter((candidate) => inScope(candidate.fullName));
   const unavailable: UnavailableConnection[] = [];
@@ -182,7 +191,7 @@ async function search(
           namespace === undefined || mayOwnNamespace(connectionName, namespace),
       );
     const found = await Promise.all(
-      connections.map((connection) => searchConnection(registry, connection)),
+      connections.map((connection) => searchConnection(registry, connection, catalog.language)),
     );
     for (const connection of found) {
       if ("unavailable" in connection) unavailable.push(connection.unavailable);
@@ -270,6 +279,7 @@ function unknownNamespaceMessage(
 async function searchConnection(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
+  language: "js" | "py" = "js",
 ): Promise<
   | { readonly candidates: readonly SearchCandidate[] }
   | { readonly unavailable: UnavailableConnection }
@@ -285,13 +295,15 @@ async function searchConnection(
     return { unavailable: { connection: name, error: listingFailureMessage(name, error) } };
   }
   if ("failure" in listing) return { unavailable: { connection: name, error: listing.failure } };
-  if ("authorization" in listing) return { candidates: [signInCandidate(registry, connection)] };
-  return { candidates: listing.tools.map((tool) => toolCandidate(connection, tool)) };
+  if ("authorization" in listing)
+    return { candidates: [signInCandidate(registry, connection, language)] };
+  return { candidates: listing.tools.map((tool) => toolCandidate(connection, tool, language)) };
 }
 
 function entryCandidate(
   definition: HarnessToolDefinition,
   describe: (definition: HarnessToolDefinition) => string,
+  language: "js" | "py" = "js",
 ): SearchCandidate {
   const inputSchema = serializeInputSchema(definition.inputSchema as ToolSchemaSource);
   const description = describe(definition);
@@ -301,7 +313,7 @@ function entryCandidate(
     name: definition.name,
     result: () => ({
       description,
-      signature: entrySignature(definition, inputSchema),
+      signature: entrySignature(definition, inputSchema, language),
       tool: definition.name,
     }),
     fullName: definition.name,
@@ -320,6 +332,7 @@ function skillCandidate({ description, name, path }: CatalogSkill): SearchCandid
 function toolCandidate(
   connection: ResolvedConnectionDefinition,
   tool: ConnectionToolMetadata,
+  language: "js" | "py" = "js",
 ): SearchCandidate {
   const name = connectionToolName(connection.connectionName, tool.name);
   return {
@@ -329,7 +342,7 @@ function toolCandidate(
     name: tool.name,
     result: () => ({
       description: tool.description,
-      signature: connectionToolSignature(connection, tool),
+      signature: connectionToolSignature(connection, tool, language),
       tool: name,
     }),
     fullName: name,
@@ -340,6 +353,7 @@ function toolCandidate(
 function signInCandidate(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
+  language: "js" | "py" = "js",
 ): SearchCandidate {
   const entry = connectionSignInEntry(registry, connection);
   return {
@@ -347,7 +361,7 @@ function signInCandidate(
     name: connection.connectionName,
     result: () => ({
       description: entry.description,
-      signature: entrySignature(entry),
+      signature: entrySignature(entry, undefined, language),
       tool: entry.name,
     }),
     fullName: entry.name,

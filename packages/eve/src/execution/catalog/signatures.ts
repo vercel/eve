@@ -1,3 +1,4 @@
+import { renderPythonSignature } from "./python-signatures.js";
 /** TypeScript signatures for catalog entries, rendered from the schemas each call sees. */
 
 import { connectionToolName } from "#connections/ownership.js";
@@ -18,8 +19,9 @@ import { renderToolSignature } from "#tools/signature.js";
 export function entrySignature(
   definition: HarnessToolDefinition,
   inputSchema = serializeInputSchema(definition.inputSchema as ToolSchemaSource),
+  language: "js" | "py" = "js",
 ): string {
-  return renderToolSignature({
+  return (language === "py" ? renderPythonSignature : renderToolSignature)({
     inputSchema,
     name: definition.name,
     outputSchema: serializeOutputSchema(definition.outputSchema as ToolSchemaSource | undefined),
@@ -30,8 +32,9 @@ export function entrySignature(
 export function connectionToolSignature(
   connection: ResolvedConnectionDefinition,
   tool: ConnectionToolMetadata,
+  language: "js" | "py" = "js",
 ): string {
-  return renderToolSignature({
+  return (language === "py" ? renderPythonSignature : renderToolSignature)({
     inputSchema: tool.inputSchema,
     name: connectionToolName(connection.connectionName, tool.name),
     outputSchema: tool.outputSchema,

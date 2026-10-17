@@ -1,7 +1,11 @@
+import { MontyProgramRuntime } from "./monty-runtime.js";
 import { JavaScriptProgramRuntime } from "./javascript.js";
 import type { ProgramLanguage, ProgramRuntime } from "./runtime.js";
 
-const runtimes = new Map<ProgramLanguage, ProgramRuntime>([["js", new JavaScriptProgramRuntime()]]);
+const runtimes = new Map<ProgramLanguage, ProgramRuntime>([
+  ["js", new JavaScriptProgramRuntime()],
+  ["py", new MontyProgramRuntime()],
+]);
 
 /** Registers an interpreter without changing the language-neutral driver. */
 export function registerProgramRuntime(runtime: ProgramRuntime): void {

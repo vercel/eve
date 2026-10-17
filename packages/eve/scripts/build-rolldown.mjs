@@ -161,6 +161,7 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  * the package `imports` map.
  */
 const EXTERNAL_PACKAGES = new Set([
+  "@pydantic/monty",
   "@nuxt/kit",
   "@sveltejs/kit",
   "ai",

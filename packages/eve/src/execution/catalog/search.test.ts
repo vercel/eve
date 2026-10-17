@@ -1,3 +1,4 @@
+import { createSearchTool } from "./search.js";
 import { describe, expect, it, vi } from "vitest";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
@@ -40,6 +41,24 @@ const OPTIONS = { messages: [], toolCallId: "call-1" };
 const names = (output: SearchOutput) => output.results.map((result) => result.tool ?? result.skill);
 
 describe("search", () => {
+  it("returns Python discovery stubs when the language is py", async () => {
+    const definition = inlineTool("echo", {
+      deferred: true,
+      schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+    });
+    const search = createSearchTool({
+      language: "py",
+      deferred: [definition],
+      describe: () => "Echo text",
+      reach: { connections: false, skills: false, tools: true },
+      registry: undefined,
+      skills: [],
+    });
+    const output = (await search.execute!({ query: "echo" }, OPTIONS)) as SearchOutput;
+    expect(output.results[0]?.signature).toContain("async def echo(");
+    expect(output.results[0]?.signature).toContain("Required[str]");
+    expect(search.description).toContain("Python signature");
+  });
   const tools = [
     inlineTool("add"),
     inlineTool("refund_invoice", {

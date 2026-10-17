@@ -3,9 +3,9 @@ import { getProgramRuntime, registerProgramRuntime } from "./registry.js";
 import type { ProgramRuntime } from "./runtime.js";
 
 describe("program runtime registry", () => {
-  it("defaults to QuickJS and clearly rejects an unavailable language", () => {
+  it("registers QuickJS and Monty by default", () => {
     expect(getProgramRuntime("js").language).toBe("js");
-    expect(() => getProgramRuntime("py")).toThrow('Code-mode language "py" is not available');
+    expect(getProgramRuntime("py").language).toBe("py");
   });
   it("allows the Python runtime to register without changing the driver", () => {
     const runtime: ProgramRuntime = {

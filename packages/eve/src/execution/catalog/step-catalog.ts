@@ -219,6 +219,7 @@ export function buildStepCatalog(input: {
   };
   if (catalogTools.search) {
     const search = createSearchTool({
+      language: codeMode === true ? "js" : codeMode?.language,
       deferred: [...deferred.values()],
       describe,
       reach: {

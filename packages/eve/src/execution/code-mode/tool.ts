@@ -14,13 +14,19 @@ export interface ExecuteInput {
 export function createExecuteTool(config: AgentCodeModeDefinition): HarnessToolDefinition {
   const language = config === true ? "js" : config.language;
   const definition = defineWorkflowTool({
-    description: `Execute an isolated ${language === "js" ? "JavaScript async function body" : "Python program"}. Call tools.<exact_name>(input) for tools discovered with eve__search. Tool calls use their normal approval policies. Calls issued together run concurrently. Return a JSON value. Maximum 32 concurrent calls, 256 total calls, default 5-minute deadline.`,
+    description: `Execute an isolated ${language === "js" ? "JavaScript async function body" : "Python program"}. ${language === "py" ? "Call await exact_name(input) using flat tool names discovered with eve__search. The last expression is the JSON result; print() captures logs. Clock, entropy and OS access are disabled." : "Call tools.<exact_name>(input) for tools discovered with eve__search."} Tool calls use their normal approval policies. Calls issued together run concurrently. Return a JSON value. Maximum 32 concurrent calls, 256 total calls, default 5-minute deadline.`,
     inputSchema: defineJsonSchema<ExecuteInput>({
       type: "object",
       additionalProperties: false,
       required: ["source"],
       properties: {
-        source: { type: "string" },
+        source: {
+          type: "string",
+          description:
+            language === "py"
+              ? "Python source with top-level await and a final JSON-valued expression (not return)."
+              : "JavaScript async function body with top-level await and return.",
+        },
         timeoutMs: {
           type: "integer",
           minimum: 1,

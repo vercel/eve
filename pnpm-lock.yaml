@@ -1878,6 +1878,9 @@ importers:
       '@photon-ai/chat-adapter-imessage':
         specifier: 3.2.0
         version: 3.2.0(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.5.4)
+      '@pydantic/monty':
+        specifier: 1.1.0
+        version: 1.1.0
       '@shadcn/registry':
         specifier: 0.1.3
         version: 0.1.3(supports-color@10.2.2)
@@ -2699,6 +2702,9 @@ packages:
 
   '@bufbuild/protobuf@2.15.0':
     resolution: {integrity: sha512-DAheWUkVr/SJTWCc+lg9dhY0eN4SaWlf4+bG1KzHeXbnqt0AfB/NX0Z+VunGlM1ki1B4zVvye27MpKh/svySUA==}
+
+  '@bytecodealliance/preview2-shim@0.19.0':
+    resolution: {integrity: sha512-OSUlcM62fXLuzYP0DjBn/SwjKMZ/y/2PMXZ8v5cRiiFcroauntlPRl/oCnx0xYjYiqdYvE0PY50VCNutll0xOw==}
 
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
@@ -5039,6 +5045,42 @@ packages:
 
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
+
+  '@pydantic/monty-darwin-arm64@1.1.0':
+    resolution: {integrity: sha512-pyOXRe44oQFjxwtcSyO++BgfqFJPfFGR/oOpygvdoOVXmG4nDZN4cYQdRaaYKgU6Tkb7FjAaGF6pqQy5syk3qg==}
+    engines: {node: '>= 20'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@pydantic/monty-darwin-x64@1.1.0':
+    resolution: {integrity: sha512-zOdJlDiaaI8sp1z4feCJdQwn6Rv0nmt8/e+QOqShg9qpjP9hGZMeh5ad+ylUyeCNCuOPysWec6o9tMxIercHPA==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@pydantic/monty-linux-arm64-gnu@1.1.0':
+    resolution: {integrity: sha512-Sm1xCcp7C3/aZC153PaWmeW6Tw0Z2hRsjRND+XhSZWS87fjuoeSrjSOQf8vzmONopKgt96CSSwzE61hJE8dshA==}
+    engines: {node: '>= 20'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pydantic/monty-linux-x64-gnu@1.1.0':
+    resolution: {integrity: sha512-46UEy3ye06iHIMO81Gg49R2HJn6szaWrJ+ICMeNhTEkXHOsdPPXkUqw5LLIrHRjBBYNKHkPkdZP9FQrlChlKNA==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pydantic/monty-win32-x64-msvc@1.1.0':
+    resolution: {integrity: sha512-eWNPsSb3hXv62lB4Al3KTsUH743Xhbf2TzqmXxbu+o9sPElV1xDqtw8bm55FBqTEcmrIu+c3UetYUlLpL2slRQ==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [win32]
+
+  '@pydantic/monty@1.1.0':
+    resolution: {integrity: sha512-XUTCkAt9ZXkUoOBL9UuSFFG31y5dFd+BFvbpDSR9vSzb820djjWgGXv4nOmZdMXcoHAcXCtXaZ7Ra8MgzzL44w==}
+    engines: {node: '>= 20'}
 
   '@radix-ui/number@1.1.2':
     resolution: {integrity: sha512-ceTwaxc4I5IOi97DgCotl3pqiyRGvffcc0oOsE2dQYaJOFIDsDt4VWG6xEbg1QePv9QWausCEIppud/tJ1wNig==}
@@ -16243,6 +16285,8 @@ snapshots:
 
   '@bufbuild/protobuf@2.15.0': {}
 
+  '@bytecodealliance/preview2-shim@0.19.0': {}
+
   '@cfworker/json-schema@4.1.1': {}
 
   '@changesets/apply-release-plan@8.1.1':
@@ -19061,6 +19105,33 @@ snapshots:
   '@protobufjs/pool@1.1.0': {}
 
   '@protobufjs/utf8@1.1.2': {}
+
+  '@pydantic/monty-darwin-arm64@1.1.0':
+    optional: true
+
+  '@pydantic/monty-darwin-x64@1.1.0':
+    optional: true
+
+  '@pydantic/monty-linux-arm64-gnu@1.1.0':
+    optional: true
+
+  '@pydantic/monty-linux-x64-gnu@1.1.0':
+    optional: true
+
+  '@pydantic/monty-win32-x64-msvc@1.1.0':
+    optional: true
+
+  '@pydantic/monty@1.1.0':
+    dependencies:
+      '@bytecodealliance/preview2-shim': 0.19.0
+      '@opentelemetry/api': 1.9.1
+      '@opentelemetry/api-logs': 0.222.0
+    optionalDependencies:
+      '@pydantic/monty-darwin-arm64': 1.1.0
+      '@pydantic/monty-darwin-x64': 1.1.0
+      '@pydantic/monty-linux-arm64-gnu': 1.1.0
+      '@pydantic/monty-linux-x64-gnu': 1.1.0
+      '@pydantic/monty-win32-x64-msvc': 1.1.0
 
   '@radix-ui/number@1.1.2': {}
 

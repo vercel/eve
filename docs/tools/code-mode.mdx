@@ -1,6 +1,6 @@
 ---
 title: "Code Mode"
-description: "Let an agent coordinate tool calls in an isolated JavaScript program."
+description: "Let an agent coordinate tool calls in an isolated JavaScript or Python program."
 url: /tools/code-mode
 ---
 
@@ -17,7 +17,7 @@ export default defineAgent({
 });
 ```
 
-`codeMode: true` selects JavaScript. You can also write `codeMode: { language: "js" }`. The configuration accepts `"py"` for Python runtimes; selecting an unregistered language returns a clear “not available” error.
+`codeMode: true` selects JavaScript. You can also write `codeMode: { language: "js" }`. Python is opt-in: install `@pydantic/monty` in your app, then select `codeMode: { language: "py" }` for Python, executed with Monty's WASM sandbox. JavaScript-only installations do not install or load Monty. Search returns Python signatures for Python agents.
 
 ## Execute a program
 
@@ -35,6 +35,24 @@ return details;
 Use exact tool names discovered through `eve__search`. The sandbox exposes a frozen `tools` object; it has no host filesystem or network access. Tool calls leave the interpreter and resolve through the session's catalog, input validation, and normal approval policies. A required approval suspends execution until the person responds. Calls issued together run concurrently, and every call has its own durable record.
 
 The v1 dispatcher supports ordinary authored and connection tools. Workflow-backed tools must currently be called directly rather than from a program.
+
+## Python programs
+
+Python uses exact tool names as flat external functions, not a `tools` object:
+
+```python
+import asyncio
+projects = await list_projects({})
+details = await asyncio.gather(*[
+    project_details({"id": project["id"]}) for project in projects
+])
+print("Fetched", len(details), "projects")
+details
+```
+
+Supply this program in `source`. Top-level `await` is supported; the final expression is the result, rather than a top-level `return`. Inputs and outputs must be JSON values. `asyncio.gather` parks concurrent calls as a batch. Python clock, entropy, filesystem and other OS access are disabled. The recursion limit is 1,000.
+
+Within a process, a warm WASM worker continues live execution at external calls. This is only a cache: after a restart, recorded results reconstruct execution without dispatching completed tools again. No Monty snapshot is persisted. The native package currently cannot load on Vercel's Linux x64 runtime, so Python uses WASM on every platform.
 
 ## Limits and results
 
