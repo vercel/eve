@@ -550,7 +550,7 @@ Pass a string, as in `postCompletedSlackReply(ctx.channel, reply)`, to deliver M
 `taskCard` runs for every turn that calls a tool, and receives the same card eve's default renders from:
 
 - `calls`: the turn's tool calls on this card as rows from the session's tables, in call order. A call that started a task has a `taskId`. eve's own task controls, and calls a tool makes on the model's behalf, are left out.
-- `view`: the session's tables, to read each call with the selectors from `eve/events`: `callState(view, callId)` for where it stands (`running`, `blocked`, `completed`, `cancelled`, ...), `callLabel(row)` for its title, and `waiting(view, { callId })` for the requests its task waits on.
+- `view`: the session's tables, to read each call with the selectors from `eve/events`: `callState(view, callId)` for where it stands (`running`, `blocked`, `completed`, `cancelled`, ...), `callLabel(row)` for its title, and `blockedBy(view, { callId })` for the requests its task waits on.
 - `state`: `blocked` while any task waits on a person, `working` while the turn or any task works, then `finished`.
 - `audience`: who reads the card. eve's default shows a failed task's error and a request's prompt only when it is `private`, in a DM or private channel; do the same with what you show from `calls`.
 

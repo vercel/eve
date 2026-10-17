@@ -5,6 +5,7 @@ import { createDurableSessionValues } from "#execution/durable-session-store.js"
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createCodexSubscriptionModel } from "./model.js";
+import { awaitsModel } from "#execution/session/step-decision.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
@@ -73,7 +74,7 @@ describe("ChatGPT streamed reasoning replay", () => {
 
     const first = await runStep(session, { message: "Check the invoice total." });
     expect(execute).toHaveBeenCalledOnce();
-    if (typeof first.next !== "function") throw new Error("Expected a second model step.");
+    if (!awaitsModel(first.session.history)) throw new Error("Expected a second model step.");
 
     const stored: ReturnType<typeof createDurableSessionValues> = JSON.parse(
       JSON.stringify(createDurableSessionValues(first.session)),
@@ -94,8 +95,8 @@ describe("ChatGPT streamed reasoning replay", () => {
       },
     ]);
 
-    const second = await first.next({ ...first.session, history });
-    expect(second.next).toBeNull();
+    const second = await runStep({ ...first.session, history });
+    expect(awaitsModel(second.session.history)).toBe(false);
     expect(JSON.stringify(second.session.history)).toContain("The total is 42.");
     expect(requests).toHaveLength(2);
     expect(requests[1]?.input).toEqual(
@@ -121,7 +122,7 @@ describe("ChatGPT streamed reasoning replay", () => {
       { ...second.session, history: JSON.parse(JSON.stringify(second.session.history)) },
       { message: "Confirm the total." },
     );
-    expect(followup.next).toBeNull();
+    expect(awaitsModel(followup.session.history)).toBe(false);
     expect(requests).toHaveLength(3);
     const replayedReasoning = (request: RecordedRequest | undefined) =>
       request?.input.filter((item) => item.type === "reasoning");

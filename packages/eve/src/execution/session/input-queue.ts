@@ -125,6 +125,20 @@ export class SessionInputQueue {
     return taken.map((entry) => entry.payload);
   }
 
+  /** Every control waiting here that arrived as a delivery, in arrival order. */
+  controls(): readonly { readonly control: SessionControl; readonly origin: ControlOrigin }[] {
+    return this.entries.flatMap((entry) =>
+      entry.kind === "control" && entry.origin !== undefined
+        ? [{ control: entry.control, origin: entry.origin }]
+        : [],
+    );
+  }
+
+  /** Every delivery waiting here, in arrival order. */
+  deliveries(): readonly DeliverHookPayload[] {
+    return this.entries.flatMap((entry) => (entry.kind === "delivery" ? [entry.delivery] : []));
+  }
+
   delivery(sequence: number): DeliverHookPayload | undefined {
     const entry = this.entries.find(
       (candidate): candidate is QueuedDelivery =>

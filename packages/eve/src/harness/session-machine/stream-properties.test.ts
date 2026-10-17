@@ -10,13 +10,8 @@ import { announceWaiting } from "#harness/session-machine/waiting.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { copyView, emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
-import {
-  activeTurn,
-  activity,
-  idle,
-  openWork,
-  waiting,
-} from "#protocol/session-projection/selectors.js";
+import { selectorAnswers } from "#internal/testing/selector-answers.js";
+import { activeTurn } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 function rng(seed: number) {
@@ -367,26 +362,6 @@ function moves(v: SessionView, ids: () => string): Move[] {
   return out;
 }
 
-/** What readers ask of a view, for comparing two retentions. */
-function answers(view: SessionView) {
-  const turnId = activeTurn(view)?.turnId;
-  const waits = turnId === undefined ? undefined : waiting(view, turnId);
-  const latest = view.session.latestTurnId;
-  return {
-    activity: activity(view).kind,
-    idle: idle(view),
-    open: Object.values(openWork(view, { session: true })).map((rows) => rows.length),
-    reply: latest === undefined ? undefined : view.turns[latest]?.reply,
-    turnId,
-    waiting:
-      waits === undefined
-        ? undefined
-        : waits.on === "person"
-          ? waits.interactions.map((row) => row.interactionId)
-          : waits.calls.map((row) => row.callId),
-  };
-}
-
 const plain = (events: readonly SessionEvent[]) =>
   JSON.stringify(events.map(({ data, type }) => ({ data, type })));
 
@@ -412,7 +387,10 @@ function brokenPromise(seed: number, cascades = true): string | undefined {
     const before = [copyView(complete), copyView(operational)] as const;
     foldLine(complete, line, complete.position);
     foldLine(operational, line, operational.position, { retention: "operational" });
-    if (JSON.stringify(answers(complete)) !== JSON.stringify(answers(operational)))
+    if (
+      JSON.stringify(selectorAnswers(complete, operational)) !==
+      JSON.stringify(selectorAnswers(operational))
+    )
       return "selectors";
     if (
       plain(announceWaiting(before[0], complete)) !== plain(announceWaiting(before[1], operational))

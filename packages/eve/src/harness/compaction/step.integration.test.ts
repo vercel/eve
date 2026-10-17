@@ -15,6 +15,8 @@ import {
   turnStartedForResolvers,
 } from "#harness/session-machine/change-points.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { eventsOf } from "#harness/publication.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
@@ -23,6 +25,7 @@ import { foldingHandler } from "#internal/testing/session-machine.js";
 import { defineMemory } from "#public/memory/index.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
 import { projectMemoryHistoryFromSessionState } from "#shared/memory-state.js";
+import { awaitsModel } from "#execution/session/step-decision.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -58,8 +61,11 @@ const summaryStream = (): StreamResult =>
     },
   ]);
 
-/** Manually compacts a short conversation with `model`, as `session.compact()` does. */
-async function compactWith(model: MockLanguageModelV3) {
+/**
+ * Manually compacts a short conversation with `model`, as `session.compact()` does, into
+ * `published`.
+ */
+async function compactWith(model: MockLanguageModelV3, published: SessionEvent[] = []) {
   const session: HarnessSession = {
     agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
     compaction: { recentWindowSize: 1, threshold: 100_000 },
@@ -73,7 +79,7 @@ async function compactWith(model: MockLanguageModelV3) {
   };
   return createToolLoopHarness({
     compactOnly: true,
-    handleEvent: async () => {},
+    handleEvent: async (publication) => void published.push(...eventsOf(publication)),
     resolveModel: async () => model,
     tools: new Map(),
   })(session, {});
@@ -146,8 +152,14 @@ describe("compaction summary call", () => {
         ]),
     });
 
-    const result = await compactWith(model);
+    const published: SessionEvent[] = [];
+    const result = await compactWith(model, published);
 
+    // The failed change and its run each end once.
+    expect(published.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { outcome: "failed" } },
+    ]);
+    expect(published.filter((event) => event.type === "model.settled")).toHaveLength(1);
     expect(result.session.history).toHaveLength(3);
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
     expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120 });
@@ -258,7 +270,7 @@ describe("memory recalled after a compaction", () => {
       sessionId: "memory-compaction-session",
     };
     const result = await contextStorage.run(ctx, async () => {
-      let stepped = await createToolLoopHarness({
+      const runStep = createToolLoopHarness({
         compactOnly: options.compactOnly,
         // The memory points the session's participants dispatch from these facts.
         handleEvent: foldingHandler(async (event, messages) => {
@@ -316,8 +328,11 @@ describe("memory recalled after a compaction", () => {
             },
           ],
         ]),
-      })(session, options.input);
-      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+      });
+      let stepped = await runStep(session, options.input);
+      // A turn's steps go on while the model has something to read; a compaction alone is one.
+      if (options.compactOnly === true) return stepped;
+      while (awaitsModel(stepped.session.history)) stepped = await runStep(stepped.session);
       return stepped;
     });
     const history = result.session.history.flatMap((message) =>

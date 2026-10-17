@@ -5,6 +5,9 @@ import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
+import { admitHeldDeliveriesStep } from "#execution/session/admit-held-deliveries-step.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import {
   isSteeringDelivery,
   isSteeringMessage,
@@ -211,6 +214,9 @@ export class ActiveTurn {
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
+      // Whatever the turn holds and can't take yet, such as someone else's message, is on the
+      // stream before the session waits.
+      await admitHeldDeliveries(this.input.cursor, this.input.queue);
       const elapsed = await this.waitForInboxOrTimer(timers);
       if (elapsed !== undefined) return { callId: elapsed, kind: "timeout" };
       const payload = await this.input.inbox.next();
@@ -378,4 +384,27 @@ function splitAnswers(delivery: DeliverHookPayload): {
     answers: selectDeliveryPayloads(delivery, answers),
     rest: rest.length === 0 ? undefined : selectDeliveryPayloads(delivery, rest),
   };
+}
+
+/**
+ * Before the session waits, its stream shows every delivery it holds. Takes a step only when one
+ * isn't admitted yet.
+ */
+async function admitHeldDeliveries(
+  cursor: SessionStateCursor,
+  queue: SessionInputQueue,
+): Promise<void> {
+  const deliveries = queue.deliveries();
+  const controls = queue
+    .controls()
+    .map(({ control, origin }) => ({ control, delivery: controlDeliveryOf(origin) }));
+  const view = storedProjection(readDurableSession(cursor.sessionState).state).view;
+  const held = [
+    ...deliveries.flatMap((delivery) =>
+      (delivery.deliveryMetadata ?? []).map((entry) => entry.deliveryId),
+    ),
+    ...controls.map(({ delivery }) => delivery.deliveryId),
+  ];
+  if (held.every((deliveryId) => view.deliveries[deliveryId] !== undefined)) return;
+  await cursor.advance((state) => admitHeldDeliveriesStep({ ...state, controls, deliveries }));
 }

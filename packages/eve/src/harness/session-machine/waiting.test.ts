@@ -48,7 +48,7 @@ const approval: SessionEvent = {
 
 describe("waiting", () => {
   it("is undefined while the model runs, and a person once only one can go on", () => {
-    expect(waiting(viewOf(started, [callRequested, approval]), turnId)).toBeUndefined();
+    expect(waiting(viewOf(started, [callRequested, approval]), turnId)).toEqual({ on: "session" });
     expect(waiting(viewOf(started, [callRequested, approval, modelSettled]), turnId)).toMatchObject(
       { interactions: [{ interactionId: "i_1" }], on: "person" },
     );
@@ -76,7 +76,7 @@ describe("waiting", () => {
         },
       ],
     );
-    expect(waiting(view, turnId)).toBeUndefined();
+    expect(waiting(view, turnId)).toEqual({ on: "session" });
   });
 });
 

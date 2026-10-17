@@ -13,9 +13,6 @@ describe("model call batching and steering", () => {
       compaction: { threshold: 100000, recentWindowSize: 10 },
     };
     const completed: StepResult = {
-      next: async () => {
-        throw new Error("The owner must apply steering first");
-      },
       session: {
         ...session,
         history: [

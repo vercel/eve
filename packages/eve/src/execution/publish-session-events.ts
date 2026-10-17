@@ -26,6 +26,7 @@ import {
 } from "#harness/session-machine/commit.js";
 import { announceWaiting } from "#harness/session-machine/waiting.js";
 import { cascade } from "#harness/session-machine/cascade.js";
+import { checksSessionEvents } from "#execution/check-session-events.js";
 import { copyView } from "#protocol/session-projection/fold.js";
 import {
   currentProjection,
@@ -351,18 +352,6 @@ export interface SessionEventPublisher {
   finish(options?: { readonly announce?: boolean }): Promise<void>;
 }
 
-/**
- * Whether publication checks each line against the event contract before writing it: on under
- * `eve dev` and with `EVE_CHECK_SESSION_EVENTS=1`, off with `EVE_CHECK_SESSION_EVENTS=0`. A
- * violation fails the publication instead of writing a line readers can't fold.
- */
-export function checksSessionEvents(): boolean {
-  const configured = process.env.EVE_CHECK_SESSION_EVENTS;
-  if (configured === "1") return true;
-  if (configured === "0") return false;
-  return process.env.EVE_DEV === "1";
-}
-
 export function openSessionEventPublisher(input: {
   readonly cancelTurn?: () => void;
   readonly ctx: ContextContainer;
@@ -379,6 +368,7 @@ export function openSessionEventPublisher(input: {
   // The tables as the step's first publication found them, for what its end announces.
   let before: SessionView | undefined;
   const emitOne = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
+    // A violation fails the publication instead of writing a line readers can't fold.
     if (checker === undefined && checksSessionEvents()) {
       const { schemaViolation } = await import("#protocol/session-events/schemas.js");
       checker = createStreamChecker({

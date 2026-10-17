@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 
 import { taskCards, type TaskCard } from "#channel/task-card.js";
 import {
+  blockedBy,
   callLabel,
   callOutputSource,
   callState,
-  waiting,
 } from "#protocol/session-projection/selectors.js";
 import type { CallRow, InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -82,7 +82,7 @@ export function renderDefaultSlackTaskCard(card: TaskCard): SlackTaskCard | null
 function planTitle(card: TaskCard, tasks: readonly CallRow[]): string {
   const { view } = card;
   if (card.state === "blocked") {
-    const asked = tasks.flatMap((row) => waiting(view, { callId: row.callId })?.interactions ?? []);
+    const asked = tasks.flatMap((row) => blockedBy(view, { callId: row.callId }));
     return waitingText(asked[0]?.request.kind);
   }
   const total = tasks.length;
@@ -185,7 +185,7 @@ function toSlackTask(card: TaskCard, row: CallRow): SlackTaskObject {
     task_id: slackTaskId(row.callId),
     title: truncate(callLabel(row), MAX_TITLE_LENGTH),
   };
-  const asked = waiting(view, { callId: row.callId })?.interactions.at(-1);
+  const asked = blockedBy(view, { callId: row.callId }).at(-1);
   if (asked !== undefined) slackTask.details = richText(blockerLine(card, asked));
   const output = outputLine(card, row);
   if (output !== undefined) slackTask.output = richText(output);

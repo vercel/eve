@@ -83,7 +83,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const changeId = nextChangeId(projection);
   if (step.session.history.length === 0) {
     await step.apply([controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)]);
-    return { next: null, session: step.session };
+    return { session: step.session };
   }
   const messages = validateHarnessModelMessages(step.projectHistory(step.session.history));
   await step.apply(
@@ -140,7 +140,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   // Applied, not only published: the step's applied session is the compacted one.
   const reason = outcome === "failed" ? "compaction-failed" : undefined;
   await step.apply([fact("delivery.settled", { deliveryId, outcome, reason })]);
-  return { next: null, session: step.session };
+  return { session: step.session };
 }
 
 /** What a compaction's summary calls spent, together, as the summary run records it. */
@@ -160,7 +160,10 @@ function summaryFailed(
   },
 ): SessionEvent[] {
   const error = { code: "COMPACTION_FAILED", message: toErrorMessage(input.error) };
-  // The summary run failed, and its change with it; the writer closes what else they held.
+  // The summary run failed, and its change with it; the writer closes what else they held. A
+  // change whose failure is already on the stream, as a summary that failed inside its pipeline
+  // is before it reaches its caller, ends once.
+  if (view.changes[input.changeId]?.status !== "running") return [];
   const runs = openWork(view, { changeId: input.changeId }).runs;
   const { spent } = input;
   return [

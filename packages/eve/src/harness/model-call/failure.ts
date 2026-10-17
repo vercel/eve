@@ -134,7 +134,7 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
         message: toErrorMessage(error),
       }),
     );
-    return { next: null, session: step.session };
+    return { session: step.session };
   }
 
   const errorId = createErrorId();
@@ -186,9 +186,9 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
     // A delegated run's caller needs a failed result to report; a conversation already ended
     // with `session.ended`.
     return {
-      next: step.hasDelegatedCaller
-        ? { done: true, isError: true, output: taskFailureOutput }
-        : { done: true, output: "" },
+      ended: step.hasDelegatedCaller
+        ? { isError: true, output: taskFailureOutput }
+        : { output: "" },
       session: step.session,
     };
   }
@@ -202,7 +202,6 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
   );
   step.session = { ...step.session, outputSchema: undefined };
   return {
-    next: null,
     session: step.session,
     settledTurn: { isError: true, output: taskFailureOutput },
   };

@@ -9,6 +9,7 @@ import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { awaitsModel } from "#execution/session/step-decision.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
@@ -230,7 +231,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
       { message: "Hi" },
     );
 
-    expect(inertResult.next).toBe(bareResult.next);
+    expect(awaitsModel(inertResult.session.history)).toBe(awaitsModel(bareResult.session.history));
     expect(inert.events.map((event) => event.type)).toEqual(bare.events.map((event) => event.type));
   });
 });

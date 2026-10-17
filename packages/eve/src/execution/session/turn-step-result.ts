@@ -1,85 +1,56 @@
-import { storedProjection } from "#harness/session-machine/view.js";
-import { createDurableSessionValues } from "#execution/durable-session-store.js";
-import {
-  pausedOnCalls,
-  pausedOnPerson,
-  pausedOnTasks,
-} from "#execution/session/pending-turn-state.js";
+import { decideStep, readStepState, type StepDecision } from "#execution/session/step-decision.js";
+import { checkStepDecision } from "#execution/session/step-decision-check.js";
 import type {
   DurableStepResult,
   DurableStepResultFields,
 } from "#execution/session/turn-step-types.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
-import type { HarnessSession, SettledTurn, StepResult } from "#harness/types.js";
-
-export function resolveSessionStepResult(
-  stepResult: StepResult,
-  nextSerializedContext: Record<string, unknown>,
-): DurableStepResult {
-  const values = {
-    serializedContext: nextSerializedContext,
-    ...createDurableSessionValues(stepResult.session),
-  };
-  // Steering cut the model call short; the next step reads it.
-  if (stepResult.steered) return { action: "continue", ...values };
-
-  if (
-    stepResult.next !== null &&
-    typeof stepResult.next === "object" &&
-    "done" in stepResult.next
-  ) {
-    return {
-      action: "done",
-      output: stepResult.next.output,
-      isError: stepResult.next.isError,
-      ...values,
-      usage: sessionUsage(stepResult.session),
-      usageDelta: takeSessionUsageDelta(stepResult.session).delta,
-    };
-  }
-
-  if (stepResult.held?.kind === "tasks") {
-    return { action: "paused", ...pausedOnTasks(stepResult.held.taskIds), ...values };
-  }
-  if (stepResult.held?.kind === "request") {
-    const projection = storedProjection(stepResult.session.state);
-    return { action: "paused", ...pausedOnPerson(stepResult.session, projection), ...values };
-  }
-  if (stepResult.next !== null) return { action: "continue", ...values };
-
-  // Usage stays unreported until the turn settles, so the caller's result includes all of it.
-  const reported =
-    stepResult.settledTurn === undefined ? undefined : takeSessionUsageDelta(stepResult.session);
-  const fields =
-    reported === undefined
-      ? values
-      : {
-          serializedContext: nextSerializedContext,
-          ...createDurableSessionValues(reported.session),
-        };
-  return pausedOrParked(
-    stepResult.session,
-    fields,
-    stepResult.settledTurn === undefined
-      ? undefined
-      : {
-          output: stepResult.settledTurn.output,
-          isError: stepResult.settledTurn.isError,
-          usage: reported?.delta,
-        },
-  );
-}
+import type { HarnessSession, StepResult } from "#harness/types.js";
 
 /**
- * The turn pauses on the calls the runtime runs for it, or, with none, parks the session.
- * `settled` is a settled turn's answer to its delegated caller.
+ * A turn step's durable result: what the step reported, with what happens next decided from the
+ * session it left. `fields` is the state the result carries for a session.
  */
-export function pausedOrParked(
-  session: HarnessSession,
-  fields: DurableStepResultFields,
-  settled?: SettledTurn,
+export function resolveSessionStepResult(
+  stepResult: StepResult,
+  fields: (session: HarnessSession) => DurableStepResultFields,
 ): DurableStepResult {
-  const calls = pausedOnCalls(session);
-  if (calls !== undefined) return { action: "paused", ...calls, ...fields };
-  return { action: "parked", ...(settled !== undefined && { settled }), ...fields };
+  checkStepDecision(stepResult.session);
+  return durableResult(stepResult, decideStep(readStepState(stepResult.session)), fields);
+}
+
+function durableResult(
+  { ended, session, settledTurn }: StepResult,
+  decision: StepDecision,
+  fields: (session: HarnessSession) => DurableStepResultFields,
+): DurableStepResult {
+  switch (decision.kind) {
+    case "end":
+      return {
+        action: "done",
+        isError: ended?.isError,
+        output: ended?.output,
+        ...fields(session),
+        usage: sessionUsage(session),
+        usageDelta: takeSessionUsageDelta(session).delta,
+      };
+    case "run":
+      return { action: "continue", ...fields(session) };
+    case "wait":
+      return { action: "paused", ...decision.pause, ...fields(session) };
+    case "park": {
+      if (settledTurn === undefined) return { action: "parked", ...fields(session) };
+      // Usage stays unreported until the turn settles, so the caller's result includes all of it.
+      const reported = takeSessionUsageDelta(session);
+      return {
+        action: "parked",
+        settled: {
+          isError: settledTurn.isError,
+          output: settledTurn.output,
+          usage: reported.delta,
+        },
+        ...fields(reported.session),
+      };
+    }
+  }
 }

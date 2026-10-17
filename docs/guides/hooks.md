@@ -98,6 +98,21 @@ failed stop, follows the normal
 example, `ctx.view.calls[event.data.callId]` on a `call.settled` holds the call's capability and
 input as well as its outcome.
 
+`ctx.view` keeps what a hook needs, not the whole session: everything still open and what it
+belongs to, what the event's line touched, the latest turn with its reply, and any turn whose
+calls still work. Rows that closed before are dropped, and a finished call's input or output
+longer than 16,384 characters of JSON is withheld. A missing row means the view no longer holds
+it, not that it never existed. These selectors from `eve/events` answer on `ctx.view` as they do
+on the session's complete view:
+
+- `activeTurn`, `waiting`, `activity`, and `idle`;
+- `queue`, `openInteractions`, and `tasks` with `status: "working"` or `"idle"`;
+- `callState` and `blockedBy` for any call the view holds;
+- `reply` and `failure` for the latest turn.
+
+`conversation(ctx.view)` reads only the turns the view holds. Read the session's stream for its
+whole history.
+
 For `task.started`, `task.ended`, and `child.opened`, `ctx.session.id`
 identifies the session that started the task or opened the subagent session.
 Typed handlers and `*` handlers receive this context even when the event

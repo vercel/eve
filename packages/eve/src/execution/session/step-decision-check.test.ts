@@ -1,44 +1,49 @@
 import { describe, expect, it } from "vitest";
 
-import { stepDisagreement } from "#execution/session/step-decision-check.js";
-import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import { emptySessionView } from "#protocol/session-projection/fold.js";
+import { decisionDisagreement, type TablesSay } from "#execution/session/step-decision-check.js";
+import type { StepDecision, StepState } from "#execution/session/step-decision.js";
 
-const fields = { history: [], serializedContext: {}, sessionState: {} as never };
-const paused = (on: "person" | "calls", dispatch = false) =>
-  ({
-    action: "paused",
-    on,
-    dispatch,
-    callIds: [],
-    taskToolCalls: [],
-    attemptIds: [],
-    requestIds: [],
-    ...fields,
-  }) as DurableStepResult;
+const state: StepState = {
+  ended: false,
+  queuedInput: false,
+  requestIds: [],
+  signIns: [],
+  turnOpen: true,
+  unreadInput: false,
+  unweighedAnswers: false,
+  workingTaskIds: [],
+};
+const calls = (dispatch: boolean): StepDecision => ({
+  kind: "wait",
+  pause: { callIds: ["call_1"], dispatch, on: "calls", taskToolCalls: [] },
+});
 
-describe("stepDisagreement", () => {
-  it("agrees when a step parks between turns", () => {
-    expect(stepDisagreement({ action: "parked", ...fields }, emptySessionView())).toBeUndefined();
+describe("decisionDisagreement", () => {
+  it.each<[string, StepDecision, TablesSay, StepState?]>([
+    ["a park between turns", { kind: "park" }, "no-turn"],
+    ["a run on the session's own work", { kind: "run" }, "session"],
+    ["a run beside working tasks", { kind: "run" }, "work", { ...state, workingTaskIds: ["t_1"] }],
+    ["calls whose run asked someone", calls(false), "person"],
+    ["calls whose runs haven't started", calls(true), "session"],
+    [
+      "tasks whose task asked someone",
+      { kind: "wait", pause: { on: "tasks", taskIds: [] } },
+      "person",
+    ],
+  ])("agrees with %s", (_name, decision, tables, given = state) => {
+    expect(decisionDisagreement(given, decision, tables)).toBeUndefined();
   });
 
-  it("names a pause the tables don't show, and labels deferred dispatch", () => {
-    const view = {
-      ...emptySessionView(),
-      session: { latestTurnId: "turn_0", status: "open", turnCount: 1 },
-      turns: {
-        turn_0: {
-          cause: {},
-          follows: null,
-          introducedAt: 0,
-          startedAt: "",
-          status: "running",
-          turnId: "turn_0",
-        },
-      },
-    } as never;
-    expect(stepDisagreement(paused("person"), view)).toBe("person-but-session");
-    expect(stepDisagreement(paused("calls", true), view)).toBe("dispatch-deferred");
-    expect(stepDisagreement({ action: "continue", ...fields }, view)).toBeUndefined();
+  it.each<[StepDecision, TablesSay, string]>([
+    [{ kind: "run" }, "work", "run-but-work"],
+    [calls(false), "session", "wait-calls-but-session"],
+    [
+      { kind: "wait", pause: { attemptIds: [], on: "person", requestIds: [] } },
+      "session",
+      "wait-person-but-session",
+    ],
+    [{ kind: "park", turnOpen: true }, "session", "stranded"],
+  ])("names %j beside tables that say %s", (decision, tables, named) => {
+    expect(decisionDisagreement(state, decision, tables)).toBe(named);
   });
 });

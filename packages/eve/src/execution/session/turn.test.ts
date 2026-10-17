@@ -1,4 +1,4 @@
-import type { TurnPause } from "#execution/session/pending-turn-state.js";
+import type { TurnPause } from "#execution/session/step-decision.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";

@@ -6,7 +6,6 @@ import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-author
 import { completeSignIn, settle } from "#harness/session-machine/transitions.js";
 import type { SuspendedStep } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
-import { park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/session-usage.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
@@ -18,6 +17,7 @@ import {
   grantedApprovals,
   openLimit,
   queueInput,
+  refusedDeliveries,
   requireSignIn,
   settleApprovals,
   settleLimit,
@@ -90,7 +90,7 @@ export async function admitHumanInput(
   }
   if (weighed.challenges.length > 0) {
     await step.apply(requireSignIn(step.view(), { challenges: weighed.challenges, queued: input }));
-    return { kind: "stop", result: await park(step) };
+    return { kind: "stop", result: { session: step.session } };
   }
   const delivered = deliver(step.view(), input, options);
   if (delivered.takeQueued && step.view().turn.queued !== undefined) {
@@ -114,16 +114,18 @@ export async function admitHumanInput(
   // refused.
   const check = checkResponders(step.view(), answered, Date.now());
   await step.apply(admitAnswers(step.view(), { check, delivery: answered }));
+  // A refused delivery is settled, so the turn doesn't carry it on, or settle it again.
+  const rest = withoutDeliveries(answered, refusedDeliveries(check, answered));
   if (Object.keys(check.weigh).length > 0) {
     // The answers are recorded before any policy runs: the next step weighs them, with the rest
     // of the delivery.
-    await step.apply(queueInput(step.view(), compactInput(withoutResponses(answered))));
-    return { kind: "stop", result: { next: step.runStep, session: step.session } };
+    await step.apply(queueInput(step.view(), compactInput(rest)));
+    return { kind: "stop", result: { session: step.session } };
   }
   const consumedMessage = answered?.messageConsumed === true;
   return {
     consumedMessage,
-    input: withoutResponses(answered),
+    input: rest,
     kind: "run",
     message: consumedMessage ? undefined : (delivered.displayMessage ?? delivered.input?.message),
     opensTurn: hasTurnInput(delivered.input) || hasTurnInput(steered),
@@ -309,7 +311,7 @@ async function runApproved(
     }),
     step.session.history,
   );
-  return park(step);
+  return { session: step.session };
 }
 
 // A step's catalog is built once per suspended step. Restoring a step's tools runs its
@@ -377,6 +379,17 @@ async function withdrawSteeredSignIns(
       `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead. Ask to sign in again only if the new message still needs it.`,
     ],
   };
+}
+
+function withoutDeliveries(
+  input: ResolvedStepInput | undefined,
+  settled: ReadonlySet<string>,
+): HarnessStepInput | undefined {
+  const rest = withoutResponses(input);
+  if (rest === undefined || settled.size === 0) return rest;
+  const deliveries = rest.deliveries?.filter(({ deliveryId }) => !settled.has(deliveryId));
+  const { deliveries: _all, ...other } = rest;
+  return deliveries === undefined || deliveries.length === 0 ? other : { ...other, deliveries };
 }
 
 /** Whether the input carries user-facing turn input. */
