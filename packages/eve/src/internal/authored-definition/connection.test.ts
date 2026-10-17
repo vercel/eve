@@ -185,8 +185,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect((result.auth as Record<string, unknown>).evict).toBe(evict);
     });
 
-    // Bug #4978: the documented `auth.displayName` is rejected as an unknown key.
-    it.fails("preserves the optional auth displayName", () => {
+    it("preserves the optional auth displayName", () => {
       const result = normalizeMcpClientConnectionDefinition(
         validInput({
           auth: {
