@@ -225,7 +225,7 @@ interface Session {
     label: string,
     matches: (event: SessionStreamEvent) => boolean,
   ) => Promise<Stage>;
-  readonly send: (message: string) => Promise<void>;
+  readonly send: (message: string, by?: typeof ALICE) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
   readonly answer: (interactionId: string, optionId: string, by?: typeof ALICE) => Promise<void>;
   readonly control: (
@@ -382,9 +382,9 @@ async function withSession(
           });
         },
         next: (label) => read(label, stream.nextTurn()),
-        async send(message) {
+        async send(message, by = ALICE) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
-            auth: ALICE,
+            auth: by,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { message },
@@ -1059,6 +1059,46 @@ describe("approvals off the happy path", () => {
       ofType(events, "delivery.settled").find((event) => event.data.deliveryId === "control_0")
         ?.data.outcome,
     ).toBe("ignored");
+  });
+
+  it("admits someone else's message while the turn waits, and takes it up once the turn ends", async () => {
+    const { events } = await withSession(
+      "edge-held-admitted",
+      {
+        message: "Deploy.",
+        model: scriptedModel(({ results, said }) =>
+          said("Me next.")
+            ? "Your turn, Bob."
+            : results.length === 0
+              ? [{ toolName: "deploy", toolCallId: "call_deploy" }]
+              : "Deployed.",
+        ),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("the approval");
+        await session.send("Me next.", BOB);
+        // Bob's message waits behind Alice's turn, but the stream shows it before the turn ends.
+        await session.until(
+          "Bob's message admitted",
+          (event) => event.type === "delivery.admitted",
+        );
+        await session.answer(session.approvals()[0]!, "approve");
+        // Each delivery that queues behind a person announces the wait again, so read on to
+        // Bob's turn's end rather than to the next boundary.
+        await session.until(
+          "Bob's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+        );
+      },
+    );
+    const bob = ofType(events, "delivery.admitted").find(
+      (event) => event.data.principal?.id === "bob",
+    );
+    const alice = ofType(events, "turn.settled").find((event) => event.data.turnId === "turn_0");
+    expect(bob!.meta.position.line).toBeLessThan(alice!.meta.position.line);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    expect(ofType(events, "delivery.admitted").filter((event) => event === bob)).toHaveLength(1);
   });
 
   it("runs a call once when its approval is answered twice; the late answer reads as text", async () => {

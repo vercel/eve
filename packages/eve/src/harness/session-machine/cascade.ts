@@ -45,6 +45,10 @@ const ENDS_WITH: Record<Exclude<Family, "child" | "part">, { cut: string; supers
  * still holding open ones, this closes them first, leaves first, as their families close when
  * an owner ends; the deliveries a turn consumed settle after it. Writers that already closed
  * them leave nothing to add.
+ *
+ * A delivery is admitted once, by the first commit that names it: one the session held while it
+ * waited is already admitted when the commit that takes it admits it again, and that admits
+ * nothing.
  */
 export function cascade(view: SessionView, events: readonly SessionEvent[]): SessionEvent[] {
   if (!events.some((event) => isFactType(event.type))) return [...events];
@@ -64,6 +68,11 @@ export function cascade(view: SessionView, events: readonly SessionEvent[]): Ses
   const cascaded = (refs: readonly Ref[]) =>
     refs.filter((ref) => !explicit.has(`${ref.family}:${ref.id}`));
   for (const event of events) {
+    if (
+      event.type === "delivery.admitted" &&
+      scratch.deliveries[event.data.deliveryId] !== undefined
+    )
+      continue;
     const owner = endedBy(scratch, event);
     if (owner === undefined) {
       apply(event);
