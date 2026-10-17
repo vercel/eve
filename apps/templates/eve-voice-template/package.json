@@ -29,7 +29,7 @@
     "@tailwindcss/postcss": "4.3.3",
     "@upstash/redis": "1.38.2",
     "ai": "7.0.139",
-    "better-auth": "1.7.1",
+    "better-auth": "1.7.7",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "drizzle-orm": "0.45.2",
