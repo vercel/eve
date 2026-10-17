@@ -2058,7 +2058,6 @@
         }
       },
       "dependencies": [
-        "@radix-ui/react-use-controllable-state@1.2.2",
         "@shadcn/react@0.3.1",
         "@shikijs/core@3.23.0",
         "@shikijs/engine-javascript@3.23.0",
@@ -2072,7 +2071,6 @@
         "clsx@2.1.1",
         "cmdk@1.1.1",
         "lucide-react@1.16.0",
-        "motion@12.40.0",
         "nanoid@5.1.11",
         "next@16.3.6",
         "radix-ui@1.4.3",
@@ -2143,16 +2141,6 @@
           "target": "apps/web/components.json"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/chain-of-thought.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/code-block.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/code-block.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ai-elements/conversation.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ai-elements/conversation.tsx"
@@ -2168,26 +2156,6 @@
           "target": "apps/web/components/ai-elements/prompt-input.tsx"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/reasoning.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/shimmer.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/tool.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/tool.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/badge.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/badge.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ui/button-group.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/button-group.tsx"
@@ -2196,6 +2164,11 @@
           "path": "registry/channel/web/components/ui/button.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/button.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/code-block.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/code-block.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/collapsible.tsx",
@@ -2233,6 +2206,11 @@
           "target": "apps/web/components/ui/input.tsx"
         },
         {
+          "path": "registry/channel/web/components/ui/item.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/item.tsx"
+        },
+        {
           "path": "registry/channel/web/components/ui/questionnaire.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/questionnaire.tsx"
@@ -2261,6 +2239,11 @@
           "path": "registry/channel/web/components/ui/tooltip.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/tooltip.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/trace.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/trace.tsx"
         },
         {
           "path": "registry/channel/web/css.d.ts",
@@ -2325,7 +2308,6 @@
       "dependencies": [
         "@fontsource-variable/geist-mono@5.3.0",
         "@fontsource-variable/geist@5.3.0",
-        "@radix-ui/react-use-controllable-state@1.2.2",
         "@shadcn/react@0.3.1",
         "@shikijs/core@3.23.0",
         "@shikijs/engine-javascript@3.23.0",
@@ -2342,7 +2324,6 @@
         "clsx@2.1.1",
         "cmdk@1.1.1",
         "lucide-react@1.16.0",
-        "motion@12.40.0",
         "nanoid@5.1.11",
         "nitro@3.0.260903-beta",
         "radix-ui@1.4.3",
@@ -2419,16 +2400,6 @@
           "target": "apps/web/components.json"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/chain-of-thought.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/code-block.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/code-block.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ai-elements/conversation.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ai-elements/conversation.tsx"
@@ -2444,26 +2415,6 @@
           "target": "apps/web/components/ai-elements/prompt-input.tsx"
         },
         {
-          "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/reasoning.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/shimmer.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/shimmer.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ai-elements/tool.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ai-elements/tool.tsx"
-        },
-        {
-          "path": "registry/channel/web/components/ui/badge.tsx",
-          "type": "registry:file",
-          "target": "apps/web/components/ui/badge.tsx"
-        },
-        {
           "path": "registry/channel/web/components/ui/button-group.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/button-group.tsx"
@@ -2472,6 +2423,11 @@
           "path": "registry/channel/web/components/ui/button.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/button.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/code-block.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/code-block.tsx"
         },
         {
           "path": "registry/channel/web/components/ui/collapsible.tsx",
@@ -2509,6 +2465,11 @@
           "target": "apps/web/components/ui/input.tsx"
         },
         {
+          "path": "registry/channel/web/components/ui/item.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/item.tsx"
+        },
+        {
           "path": "registry/channel/web/components/ui/questionnaire.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/questionnaire.tsx"
@@ -2537,6 +2498,11 @@
           "path": "registry/channel/web/components/ui/tooltip.tsx",
           "type": "registry:file",
           "target": "apps/web/components/ui/tooltip.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ui/trace.tsx",
+          "type": "registry:file",
+          "target": "apps/web/components/ui/trace.tsx"
         },
         {
           "path": "registry/channel/web/lib/utils.ts",

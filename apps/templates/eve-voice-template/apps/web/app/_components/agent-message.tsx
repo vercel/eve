@@ -7,27 +7,37 @@ import type {
   EveMessage,
   EveMessageInputRequest,
   EveMessagePart,
+  ToolCallState,
 } from "eve/react";
 import type { FormEvent } from "react";
+import { useState } from "react";
 import {
-  CheckCircleIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleXIcon,
   ExternalLinkIcon,
   FileIcon,
   ImageIcon,
   KeyRoundIcon,
-  XCircleIcon,
+  LoaderCircleIcon,
 } from "lucide-react";
+import { Streamdown } from "streamdown";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
-import {
-  BashToolContent,
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
+import {
+  CodeBlock,
+  CodeBlockContent,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@/components/ui/code-block";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Questionnaire,
   QuestionnaireActions,
@@ -40,6 +50,16 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@/components/ui/trace";
 import { cn } from "@/lib/utils";
 
 export type AgentInputResponse = {
@@ -48,28 +68,56 @@ export type AgentInputResponse = {
   readonly text?: string;
 };
 
+export type StepStatus = "done" | "failed" | "running" | "stopped";
+
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
+type EveReasoningPart = Extract<EveMessagePart, { type: "reasoning" }>;
+type StepPart = EveAuthorizationPart | EveDynamicToolPart | EveReasoningPart;
+type Indexed<T> = { readonly index: number; readonly part: T };
 
 export function AgentMessage({
+  callState,
   canRespond,
   isStreaming,
   message,
   onInputResponses,
   questionsFor,
+  reasoningDurations = {},
 }: {
+  readonly callState: (callId: string) => ToolCallState | undefined;
   readonly canRespond: (requestId: string) => boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly questionsFor: (callId: string) => readonly ConversationInput[];
+  readonly reasoningDurations?: Readonly<Record<string, number>>;
 }) {
   const lastTextIndex = message.parts.reduce(
     (last, part, index) => (part.type === "text" ? index : last),
     -1,
   );
-  const hasAssistantText =
-    message.role === "assistant" &&
-    message.parts.some((part) => part.type === "text" && part.text.length > 0);
+  const isStep = (part: EveMessagePart): part is StepPart =>
+    part.type === "reasoning" ||
+    (part.type === "authorization" && part.state === "completed") ||
+    (part.type === "dynamic-tool" &&
+      questionsFor(part.toolCallId).length === 0 &&
+      !isAwaitingApproval(part));
+
+  // Steps between two pieces of content share one Trace.
+  const blocks: (Indexed<EveMessagePart> | Indexed<StepPart>[])[] = [];
+  for (const [index, part] of message.parts.entries()) {
+    if (part.type === "step-start" || (part.type === "text" && part.text.length === 0)) {
+      continue;
+    }
+    const last = blocks.at(-1);
+    if (!isStep(part)) {
+      blocks.push({ index, part });
+    } else if (Array.isArray(last)) {
+      last.push({ index, part });
+    } else {
+      blocks.push([{ index, part }]);
+    }
+  }
 
   return (
     <Message
@@ -77,20 +125,224 @@ export function AgentMessage({
       from={message.role}
     >
       <MessageContent>
-        {message.parts.map((part, index) =>
-          hasAssistantText && part.type === "reasoning" ? null : (
+        {blocks.map((block) =>
+          Array.isArray(block) ? (
+            <Trace key={`steps:${block[0]?.index}`}>
+              {block.map(({ index, part }) => (
+                <StepRow
+                  callState={callState}
+                  duration={
+                    part.type === "reasoning" && part.id ? reasoningDurations[part.id] : undefined
+                  }
+                  isStreaming={isStreaming}
+                  key={partKey(part, index)}
+                  part={part}
+                />
+              ))}
+            </Trace>
+          ) : (
             <AgentMessagePart
               canRespond={canRespond}
-              key={partKey(part, index)}
+              key={partKey(block.part, block.index)}
               onInputResponses={onInputResponses}
-              part={part}
+              part={block.part}
               questionsFor={questionsFor}
-              showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
+              showCaret={
+                isStreaming && message.role === "assistant" && block.index === lastTextIndex
+              }
             />
           ),
         )}
       </MessageContent>
     </Message>
+  );
+}
+
+export function StepLine({
+  detail,
+  status,
+  title,
+}: {
+  readonly detail?: string;
+  readonly status: StepStatus;
+  readonly title: string;
+}) {
+  return (
+    <TraceLine
+      status={status === "running" ? "running" : status === "failed" ? "error" : undefined}
+    >
+      <TraceIcon>
+        {status === "running" ? (
+          <LoaderCircleIcon className="animate-spin" />
+        ) : status === "failed" ? (
+          <CircleAlertIcon />
+        ) : status === "stopped" ? (
+          <CircleXIcon />
+        ) : (
+          <CircleCheckIcon />
+        )}
+      </TraceIcon>
+      <TraceTitle>{title}</TraceTitle>
+      {detail ? <TraceDescription>{detail}</TraceDescription> : null}
+    </TraceLine>
+  );
+}
+
+function StepRow({
+  callState,
+  duration,
+  isStreaming,
+  part,
+}: {
+  readonly callState: (callId: string) => ToolCallState | undefined;
+  readonly duration?: number;
+  readonly isStreaming: boolean;
+  readonly part: StepPart;
+}) {
+  switch (part.type) {
+    case "reasoning":
+      return (
+        <ReasoningRow
+          duration={duration}
+          running={isStreaming && part.state === "streaming"}
+          text={part.text}
+        />
+      );
+    case "authorization":
+      if (part.state === "required") {
+        return null;
+      }
+      return part.outcome === "authorized" ? (
+        <StepLine status="done" title={`Connected ${part.displayName}`} />
+      ) : (
+        <StepLine
+          detail={part.reason}
+          status="failed"
+          title={`${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}`}
+        />
+      );
+    case "dynamic-tool":
+      return <ToolRow part={part} state={callState(part.toolCallId)} />;
+  }
+}
+
+function ReasoningRow({
+  duration,
+  running,
+  text,
+}: {
+  readonly duration?: number;
+  readonly running: boolean;
+  readonly text: string;
+}) {
+  const [open, setOpen] = useState<boolean>();
+  const line = (
+    <StepLine
+      // A block that arrived whole was never timed.
+      detail={!running && duration ? `${Math.max(1, Math.round(duration / 1000))}s` : undefined}
+      status={running ? "running" : "done"}
+      title={running ? "Thinking" : "Thought"}
+    />
+  );
+
+  if (text.length === 0) {
+    return line;
+  }
+
+  return (
+    <TraceCollapsible onOpenChange={setOpen} open={open ?? running}>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <Streamdown className="text-sm">{text}</Streamdown>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+}
+
+function ToolRow({
+  part,
+  state,
+}: {
+  readonly part: EveDynamicToolPart;
+  readonly state: ToolCallState | undefined;
+}) {
+  const title = part.toolMetadata?.eve?.label ?? part.toolName;
+  const status = toolStepStatus(state);
+  const line = <StepLine detail={toolStepDetail(state)} status={status} title={title} />;
+  const output = state?.output ?? part.output;
+  const errorText = state?.errorText ?? part.errorText;
+
+  if (status === "running" || status === "stopped") {
+    return line;
+  }
+
+  return (
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="flex flex-col gap-2">
+        {part.toolName === "bash" ? (
+          <BashOutput errorText={errorText} input={part.input} output={output} />
+        ) : (
+          <>
+            {hasValue(part.input) ? <ToolPayload title="Input" value={part.input} /> : null}
+            {errorText ? (
+              <ToolPayload failed title="Error" value={errorText} />
+            ) : hasValue(output) ? (
+              <ToolPayload title="Output" value={output} />
+            ) : null}
+          </>
+        )}
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+}
+
+function ToolPayload({
+  failed = false,
+  title,
+  value,
+}: {
+  readonly failed?: boolean;
+  readonly title: string;
+  readonly value: unknown;
+}) {
+  return (
+    <CodeBlock size="sm" variant={failed ? "destructive" : "default"}>
+      <CodeBlockHeader>
+        <CodeBlockTitle>{title}</CodeBlockTitle>
+      </CodeBlockHeader>
+      <CodeBlockContent className="max-h-64" wrap>
+        {formatPayload(value)}
+      </CodeBlockContent>
+    </CodeBlock>
+  );
+}
+
+function BashOutput({
+  errorText,
+  input,
+  output,
+}: {
+  readonly errorText?: string;
+  readonly input: unknown;
+  readonly output: unknown;
+}) {
+  const stdout = getRecordValue(output, "stdout") ?? (typeof output === "string" ? output : "");
+  const stderr = getRecordValue(output, "stderr") ?? errorText ?? "";
+  const exitCode = getRecordValue(output, "exitCode");
+  const lines = [
+    `$ ${getRecordValue(input, "command") ?? "…"}`,
+    String(stdout).trimEnd(),
+    String(stderr).trimEnd(),
+    typeof exitCode === "number" && exitCode !== 0 ? `Exited with code ${exitCode}` : "",
+  ].filter(Boolean);
+
+  return (
+    <CodeBlock size="sm" variant={errorText ? "destructive" : "default"}>
+      <CodeBlockContent className="max-h-64" wrap>
+        {lines.join("\n")}
+      </CodeBlockContent>
+    </CodeBlock>
   );
 }
 
@@ -108,20 +360,11 @@ function AgentMessagePart({
   readonly showCaret: boolean;
 }) {
   switch (part.type) {
-    case "step-start":
-      return null;
     case "text":
       return (
         <MessageResponse caret="block" isAnimating={showCaret}>
           {part.text}
         </MessageResponse>
-      );
-    case "reasoning":
-      return (
-        <Reasoning defaultOpen isStreaming={part.state === "streaming"}>
-          <ReasoningTrigger />
-          <ReasoningContent>{part.text}</ReasoningContent>
-        </Reasoning>
       );
     case "file":
       return <AttachmentPart part={part} />;
@@ -129,55 +372,32 @@ function AgentMessagePart({
       return <AuthorizationPrompt part={part} />;
     case "dynamic-tool": {
       const questions = questionsFor(part.toolCallId);
-      if (questions.length > 0) {
+      if (questions.length === 0) {
         return (
-          <div className="space-y-4">
-            {questions.map(({ request, response }) => (
-              <QuestionRequest
-                canRespond={canRespond(request.requestId)}
-                inputRequest={request}
-                inputResponse={response}
-                key={request.requestId}
-                onInputResponses={onInputResponses}
-              />
-            ))}
-          </div>
+          <ApprovalRequest
+            canRespond={canRespond}
+            onInputResponses={onInputResponses}
+            part={part}
+          />
         );
       }
 
       return (
-        <>
-          <Tool>
-            <ToolHeader
-              state={part.state}
-              title={part.toolMetadata?.eve?.label ?? part.toolName}
-              toolName={part.toolName}
-              type="dynamic-tool"
+        <div className="flex flex-col gap-4">
+          {questions.map(({ request, response }) => (
+            <QuestionRequest
+              canRespond={canRespond(request.requestId)}
+              inputRequest={request}
+              inputResponse={response}
+              key={request.requestId}
+              onInputResponses={onInputResponses}
             />
-            <ToolContent>
-              {part.toolName === "bash" ? (
-                <BashToolContent
-                  errorText={part.errorText}
-                  input={part.input}
-                  output={part.output}
-                />
-              ) : (
-                <>
-                  <ToolInput input={part.input} />
-                  <ToolOutput errorText={part.errorText} output={part.output} />
-                </>
-              )}
-            </ToolContent>
-          </Tool>
-          {/* Kept outside the collapsed card so a pending approval is always visible. */}
-          <InputRequestActions
-            canRespond={canRespond}
-            part={part}
-            onInputResponses={onInputResponses}
-          />
-        </>
+          ))}
+        </div>
       );
     }
+    default:
+      return null;
   }
 }
 
@@ -262,6 +482,49 @@ function QuestionRequest({
   );
 }
 
+/** A tool waiting for approval is a question for the person, not a step. */
+function ApprovalRequest({
+  canRespond,
+  onInputResponses,
+  part,
+}: {
+  readonly canRespond: (requestId: string) => boolean;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly part: EveDynamicToolPart;
+}) {
+  const inputRequest = part.toolMetadata?.eve?.inputRequest;
+  if (!inputRequest) {
+    return null;
+  }
+
+  return (
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <ItemTitle>{part.toolMetadata?.eve?.label ?? part.toolName}</ItemTitle>
+        <ItemDescription>{inputRequest.prompt}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        {inputRequest.options?.map((option, index) => (
+          <Button
+            disabled={!canRespond(inputRequest.requestId)}
+            key={option.id}
+            onClick={() => {
+              void onInputResponses([{ optionId: option.id, requestId: inputRequest.requestId }]);
+            }}
+            size="sm"
+            type="button"
+            variant={
+              option.style === "danger" ? "destructive" : index === 0 ? "default" : "outline"
+            }
+          >
+            {option.label}
+          </Button>
+        ))}
+      </ItemActions>
+    </Item>
+  );
+}
+
 function AttachmentPart({ part }: { readonly part: EveFilePart }) {
   const label = part.filename ?? "Attachment";
   const detail = [part.mediaType, formatBytes(part.size)].filter(Boolean).join(" - ");
@@ -293,87 +556,83 @@ function AttachmentPart({ part }: { readonly part: EveFilePart }) {
   );
 }
 
+/** A sign-in the person still has to finish. Once settled it reads as a step. */
 function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) {
-  const isAuthorized = part.state === "completed" && part.outcome === "authorized";
-  const isCompleted = part.state === "completed";
-  const Icon = isAuthorized ? CheckCircleIcon : isCompleted ? XCircleIcon : KeyRoundIcon;
   const instructions = part.authorization?.instructions;
-  const shouldShowInstructions = instructions !== undefined && instructions !== part.description;
 
   return (
-    <div
-      className={cn(
-        "space-y-3 rounded-md border p-3",
-        isAuthorized
-          ? "border-emerald-500/30 bg-emerald-500/5"
-          : isCompleted
-            ? "border-destructive/30 bg-destructive/5"
-            : "border-blue-500/30 bg-blue-500/5",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <span
-          className={cn(
-            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
-            isAuthorized
-              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-              : isCompleted
-                ? "bg-destructive/10 text-destructive"
-                : "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-          )}
-        >
-          <Icon className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1 space-y-2">
-          <p className="font-medium text-sm">{authorizationTitle(part)}</p>
-          <p className="text-muted-foreground text-sm">{authorizationDescription(part)}</p>
-          {shouldShowInstructions ? (
-            <p className="text-muted-foreground text-sm">{instructions}</p>
-          ) : null}
-          {part.state === "required" && part.authorization?.userCode ? (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Code</span>
-              <code className="rounded-md bg-background px-2 py-1 font-mono">
-                {part.authorization.userCode}
-              </code>
-            </div>
-          ) : null}
-          {part.state === "required" && part.authorization?.url ? (
-            <Button asChild size="sm">
-              <a href={part.authorization.url} rel="noreferrer" target="_blank">
-                <ExternalLinkIcon className="size-4" />
-                Sign in with {part.displayName}
-              </a>
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    </div>
+    <Item size="sm" variant="outline">
+      <ItemMedia variant="icon">
+        <KeyRoundIcon />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>Connect {part.displayName}</ItemTitle>
+        <ItemDescription>{part.description}</ItemDescription>
+        {instructions !== undefined && instructions !== part.description ? (
+          <ItemDescription>{instructions}</ItemDescription>
+        ) : null}
+        {part.authorization?.userCode ? (
+          <ItemDescription>
+            Code{" "}
+            <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+              {part.authorization.userCode}
+            </code>
+          </ItemDescription>
+        ) : null}
+      </ItemContent>
+      {part.authorization?.url ? (
+        <ItemActions>
+          <Button asChild size="sm">
+            <a href={part.authorization.url} rel="noreferrer" target="_blank">
+              <ExternalLinkIcon />
+              Sign in with {part.displayName}
+            </a>
+          </Button>
+        </ItemActions>
+      ) : null}
+    </Item>
   );
 }
 
-function authorizationTitle(part: EveAuthorizationPart): string {
-  if (part.state === "required") {
-    return `Connect ${part.displayName}`;
-  }
-  if (part.outcome === "authorized") {
-    return `${part.displayName} connected`;
-  }
-  return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}`;
+function isAwaitingApproval(part: EveDynamicToolPart) {
+  return (
+    part.state === "approval-requested" &&
+    part.toolMetadata?.eve?.inputRequest !== undefined &&
+    part.toolMetadata.eve.inputResponse === undefined
+  );
 }
 
-function authorizationDescription(part: EveAuthorizationPart): string {
-  if (part.state === "required") {
-    return part.description;
+function toolStepStatus(state: ToolCallState | undefined): StepStatus {
+  switch (state?.status) {
+    case "completed":
+      return "done";
+    case "failed":
+      return "failed";
+    case "rejected":
+    case "cancelled":
+    case "interrupted":
+      return "stopped";
+    default:
+      return "running";
   }
-  if (part.outcome === "authorized") {
-    return `${part.displayName} connected.`;
-  }
-  const tail = part.reason !== undefined ? ` (${part.reason})` : "";
-  return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}${tail}.`;
 }
 
-function formatAuthorizationOutcome(outcome: NonNullable<EveAuthorizationPart["outcome"]>): string {
+function toolStepDetail(state: ToolCallState | undefined) {
+  switch (state?.status) {
+    case "failed":
+      return "Failed";
+    case "rejected":
+      return "Denied";
+    case "cancelled":
+      return "Cancelled";
+    case "interrupted":
+      return "Interrupted";
+    default:
+      return undefined;
+  }
+}
+
+function formatAuthorizationOutcome(outcome: NonNullable<EveAuthorizationPart["outcome"]>) {
   switch (outcome) {
     case "authorized":
       return "authorized";
@@ -384,6 +643,32 @@ function formatAuthorizationOutcome(outcome: NonNullable<EveAuthorizationPart["o
     case "timed-out":
       return "timed out";
   }
+}
+
+function formatPayload(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function hasValue(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return false;
+  }
+  return typeof value !== "object" || Object.keys(value).length > 0;
+}
+
+function getRecordValue(value: unknown, key: string): string | number | undefined {
+  if (typeof value !== "object" || value === null || !(key in value)) {
+    return undefined;
+  }
+  const property = value[key as keyof typeof value];
+  return typeof property === "string" || typeof property === "number" ? property : undefined;
 }
 
 function formatBytes(size: number | undefined): string | undefined {
@@ -397,70 +682,6 @@ function formatBytes(size: number | undefined): string | undefined {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function InputRequestActions({
-  canRespond,
-  onInputResponses,
-  part,
-}: {
-  readonly canRespond: (requestId: string) => boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly part: EveDynamicToolPart;
-}) {
-  const inputRequest = part.toolMetadata?.eve?.inputRequest;
-  if (!inputRequest) {
-    return null;
-  }
-
-  const inputResponse = part.toolMetadata?.eve?.inputResponse;
-  const selectedOption = inputRequest.options?.find(
-    (option) => option.id === inputResponse?.optionId,
-  );
-  // An approval can settle before its batch resolves, without an input response.
-  const settledApproval =
-    part.approval?.approved === undefined
-      ? undefined
-      : part.approval.approved
-        ? "Approved"
-        : "Denied";
-
-  return (
-    <div className="space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
-      <p className="text-muted-foreground text-sm">{inputRequest.prompt}</p>
-      {inputResponse || settledApproval ? (
-        <p className="font-medium text-sm">
-          Responded:{" "}
-          {selectedOption?.label ??
-            inputResponse?.text ??
-            inputResponse?.optionId ??
-            settledApproval}
-        </p>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {inputRequest.options?.map((option) => (
-            <Button
-              disabled={!canRespond(inputRequest.requestId)}
-              key={option.id}
-              onClick={() => {
-                void onInputResponses([
-                  {
-                    optionId: option.id,
-                    requestId: inputRequest.requestId,
-                  },
-                ]);
-              }}
-              size="sm"
-              type="button"
-              variant={option.style === "danger" ? "destructive" : "default"}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function partKey(part: EveMessagePart, index: number): string {

@@ -223,11 +223,13 @@ function questionGroup(page: Page, prompt: string): Locator {
   return page.getByRole("group", { exact: true, name: prompt }).last();
 }
 
-/** A tool approval: the prompt above one button per choice until it's answered. */
+/** A tool approval: an item with the prompt and one button per choice until it's answered. */
 async function approvalOptions(page: Page, prompt: string): Promise<RenderedOption[] | undefined> {
   const label = page.locator("p").getByText(prompt, { exact: true }).last();
   if ((await label.count()) === 0) return undefined;
-  return await readButtons(label.locator("xpath=..").getByRole("button"));
+  return await readButtons(
+    label.locator("xpath=ancestor::*[@data-slot='item'][1]").getByRole("button"),
+  );
 }
 
 /** The buttons a person can press now, labelled by their first line of text. */
