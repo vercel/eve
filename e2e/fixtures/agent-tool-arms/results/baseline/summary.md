@@ -1,0 +1,14 @@
+| Model                     | Size     | Arm       | Success |  Runs | Mean input tokens | Cache read ratio | Mean model calls | Mean actions | Mean program attempts | Mean latency (s) | Error classes      |
+| ------------------------- | -------- | --------- | ------: | ----: | ----------------: | ---------------: | ---------------: | -----------: | --------------------: | ---------------: | ------------------ |
+| openai/gpt-6.1-sol        | moderate | direct    |   30/30 | 30/30 |            6346.4 |            97.7% |              2.0 |          1.2 |                   0.0 |             6.61 | -                  |
+| openai/gpt-6.1-sol        | moderate | deferred  |   27/30 | 30/30 |            9314.7 |            95.0% |              3.3 |          1.2 |                   0.0 |             8.82 | tool-not-called ×3 |
+| openai/gpt-6.1-sol        | moderate | subagents |   30/30 | 30/30 |           14882.5 |            92.9% |              6.1 |          3.0 |                   0.0 |            19.28 | -                  |
+| openai/gpt-6.1-sol        | large    | direct    |   30/30 | 30/30 |           21458.4 |            98.2% |              2.0 |          1.2 |                   0.0 |             9.63 | -                  |
+| openai/gpt-6.1-sol        | large    | deferred  |   30/30 | 30/30 |           13559.7 |            90.2% |              3.5 |          1.3 |                   0.0 |            11.42 | -                  |
+| openai/gpt-6.1-sol        | large    | subagents |   30/30 | 30/30 |           19099.7 |            92.5% |              6.1 |          3.0 |                   0.0 |            19.51 | -                  |
+| anthropic/claude-opus-5.5 | moderate | direct    |   30/30 | 30/30 |           14044.1 |            95.5% |              2.0 |          1.2 |                   0.0 |             5.21 | -                  |
+| anthropic/claude-opus-5.5 | moderate | deferred  |   30/30 | 30/30 |           17019.7 |            95.6% |              3.1 |          1.2 |                   0.0 |             7.47 | -                  |
+| anthropic/claude-opus-5.5 | moderate | subagents |   30/30 | 30/30 |           30715.5 |            89.3% |              6.0 |          3.1 |                   0.0 |            15.12 | -                  |
+| anthropic/claude-opus-5.5 | large    | direct    |   30/30 | 30/30 |           58123.1 |            96.5% |              2.1 |          1.2 |                   0.0 |             5.38 | -                  |
+| anthropic/claude-opus-5.5 | large    | deferred  |   30/30 | 30/30 |           17505.1 |            93.6% |              3.1 |          1.2 |                   0.0 |             6.84 | -                  |
+| anthropic/claude-opus-5.5 | large    | subagents |   30/30 | 30/30 |           44533.4 |            88.4% |              6.4 |          3.3 |                   0.0 |            15.66 | -                  |
