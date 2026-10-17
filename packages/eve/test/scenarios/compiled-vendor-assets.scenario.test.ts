@@ -48,6 +48,62 @@ function rewriteDeclarationImports(
 }
 
 describe("compiled vendor assets", () => {
+  it("copies and rewrites transitive declaration chunks for an isolated consumer", async () => {
+    const root = await createTemporaryDirectory("eve-vendor-declarations-");
+    const upstream = join(root, "upstream");
+    const destinationRoot = join(root, "consumer");
+    await mkdir(join(upstream, "dist", "nested"), { recursive: true });
+    await mkdir(destinationRoot);
+    await writeFile(
+      join(upstream, "dist", "index.d.ts"),
+      'export type { Item } from "./nested/chunk.js";',
+    );
+    await writeFile(
+      join(upstream, "dist", "nested", "chunk.d.ts"),
+      'import type { Value } from "external-types"; export interface Item { value: Value; next?: import("./cycle.js").Next }',
+    );
+    await writeFile(
+      join(upstream, "dist", "nested", "cycle.d.ts"),
+      'export type Next = import("../index.js").Item;',
+    );
+    const { createDeclarationCopier } = await import(
+      pathToFileURL(join(EVE_PACKAGE_ROOT, "scripts", "vendor-compiled", "_shared.mjs")).href
+    );
+    await createDeclarationCopier({
+      rewrites: {
+        "external-types": {
+          kind: "stub",
+          stubBaseName: "_value",
+          build: () => "export type Value = string;",
+        },
+      },
+    })({
+      destinationRoot,
+      packageInfo: { packageRoot: upstream, packageJson: { name: "example" } },
+    });
+    await writeFile(
+      join(destinationRoot, "consumer.ts"),
+      'import type { Item } from "./index.js"; const item: Item = { value: "ok" }; const value: string = item.value;',
+    );
+    await execFileAsync(process.execPath, [
+      join(EVE_PACKAGE_ROOT, "..", "..", "node_modules", "typescript", "bin", "tsc"),
+      "--ignoreConfig",
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "false",
+      "--types",
+      "node",
+      "--typeRoots",
+      join(EVE_PACKAGE_ROOT, "..", "..", "node_modules", "@types"),
+      "--module",
+      "NodeNext",
+      join(destinationRoot, "consumer.ts"),
+    ]).catch((error) => {
+      throw new Error(error.stdout || error.message, { cause: error });
+    });
+  });
+
   it("vendors a symlinked workspace package before its compiled export exists", async () => {
     const root = await createTemporaryDirectory("eve-vendor-workspace-");
     const packageRoot = join(root, "packages", "consumer");

@@ -105,9 +105,9 @@ export async function loadDeclaration(relativePath) {
  * `declarationRoot` changes the package-relative source directory when
  * declarations live outside `dist`.
  *
- * `discoverExtraFiles` is consulted for chunk files the upstream `.d.ts`
- * references by relative path (e.g. chat's `./jsx-runtime-<hash>.d.ts`).
- * Each returned filename is co-copied verbatim into the destination.
+ * Relative declaration imports are followed recursively, including hashed chunks,
+ * and receive the same external rewrite rules as the entry declarations.
+ * `discoverExtraFiles` can additionally copy non-declaration assets verbatim.
  */
 export function createDeclarationCopier({
   declarationRoot = "dist",
@@ -125,12 +125,69 @@ export function createDeclarationCopier({
           ? files
           : [{ source: "index.d.ts", output: "index.d.ts" }];
 
-    const declarations = await Promise.all(
-      declarationFiles.map(async (file) => ({
-        ...file,
-        sourceText: await readFile(join(distDir, file.source), "utf8"),
-      })),
-    );
+    const declarations = [];
+    const queued = new Map(declarationFiles.map((file) => [file.source, file]));
+    const extras = typeof discoverExtraFiles === "function" ? discoverExtraFiles(distEntries) : [];
+    for (const file of extras.filter((file) => /\.d\.[cm]?ts$/u.test(file))) {
+      if (!queued.has(file)) queued.set(file, { source: file, output: file });
+    }
+    for (const file of queued.values()) {
+      const sourceText = await readFile(join(distDir, file.source), "utf8");
+      declarations.push({ ...file, sourceText });
+      const uncommented = sourceText.replace(
+        /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu,
+        (_match, literal) => literal ?? "",
+      );
+      const references = uncommented.matchAll(
+        /\b(?:from\s*|import\s*\(\s*|import\s*)["'](\.[^"']+)["']|<reference\s+path=["'](\.[^"']+)["']/gu,
+      );
+      for (const match of references) {
+        const specifier = match[1] ?? match[2];
+        const candidates = /\.d\.[cm]?ts$/u.test(specifier)
+          ? [specifier]
+          : /\.[cm]?js$/u.test(specifier)
+            ? [
+                specifier
+                  .replace(/\.js$/u, ".d.ts")
+                  .replace(/\.mjs$/u, ".d.mts")
+                  .replace(/\.cjs$/u, ".d.cts"),
+              ]
+            : [`${specifier}.d.ts`, `${specifier}/index.d.ts`];
+        let resolved;
+        for (const candidate of candidates) {
+          const source = posix.normalize(posix.join(posix.dirname(file.source), candidate));
+          if (source.startsWith("../") || posix.isAbsolute(source)) {
+            throw new Error(
+              `Vendor: declaration ${file.source} escapes ${declarationRoot}: ${specifier}`,
+            );
+          }
+          try {
+            if ((await stat(join(distDir, source))).isFile()) {
+              resolved = source;
+              break;
+            }
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+          }
+        }
+        if (resolved === undefined) {
+          throw new Error(
+            `Vendor: ${packageInfo.packageJson.name}'s declaration ${file.source} imports missing declaration ${specifier}`,
+          );
+        }
+        if (!queued.has(resolved)) {
+          queued.set(resolved, {
+            source: resolved,
+            output: posix.normalize(
+              posix.join(
+                posix.dirname(file.output),
+                posix.relative(posix.dirname(file.source), resolved),
+              ),
+            ),
+          });
+        }
+      }
+    }
     const externals = mergeExternalDeclarationImports(
       declarations.map((declaration) => declaration.sourceText),
     );
@@ -183,14 +240,15 @@ export function createDeclarationCopier({
       }),
     );
 
-    if (typeof discoverExtraFiles === "function") {
-      const extras = discoverExtraFiles(distEntries);
+    if (extras.length > 0) {
       await Promise.all(
-        extras.map(async (file) => {
-          const outputPath = join(destinationRoot, file);
-          await mkdir(dirname(outputPath), { recursive: true });
-          await copyFile(join(distDir, file), outputPath);
-        }),
+        extras
+          .filter((file) => !/\.d\.[cm]?ts$/u.test(file))
+          .map(async (file) => {
+            const outputPath = join(destinationRoot, file);
+            await mkdir(dirname(outputPath), { recursive: true });
+            await copyFile(join(distDir, file), outputPath);
+          }),
       );
     }
   };

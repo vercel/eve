@@ -28,6 +28,25 @@ export default defineTool({
 });
 ```
 
+## Integration dependencies
+
+Install the framework packages for the integration you import. These are optional peers of eve;
+using another entry does not require them.
+
+| Entry                                      | Required integration packages          |
+| ------------------------------------------ | -------------------------------------- |
+| `eve/react`                                | `react` 19                             |
+| `eve/vue`                                  | `vue` 3.5 or later in v3               |
+| `eve/svelte`                               | `svelte` 5                             |
+| `eve/next`                                 | `next` 16 and `react` 19               |
+| `eve/vite`                                 | `vite` 8.3.1 or later in v8            |
+| `eve/nuxt`                                 | `@nuxt/kit` 4 and `@nuxt/schema` 4     |
+| `@vercel/connect/eve` with eve connections | `@vercel/connect` 2.5.2 or later in v2 |
+
+The AI SDK is a required peer and has its own Zod peer requirement. Client inspection types
+(`AgentInfoResult`, its entry types, and `HealthResult`) are eve-owned data contracts, not
+inferences from eve's runtime validators.
+
 ## The define\* helpers
 
 | Helper                                                | Import from                                                             | Authored at                                                                            | Guide                                                  |

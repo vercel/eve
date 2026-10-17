@@ -10,7 +10,7 @@ import type { TurnPolicy } from "#channel/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
-export type { HealthResult } from "#client/health-schema.js";
+export type { HealthResult } from "#client/health-types.js";
 
 export type {
   AgentInfoChannelEntry,
@@ -31,7 +31,7 @@ export type {
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,
-} from "./agent-info-schema.js";
+} from "./agent-info-types.js";
 
 /**
  * Static credential value or per-request credential resolver.
