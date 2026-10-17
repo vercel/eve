@@ -69,19 +69,15 @@ test("gh resolves with replayable callbacks when github is configured", async ()
     const tool = await definition.events["session.started"]();
     assert.ok(tool, "gh resolved to null with github configured");
 
-    // Bug #4986: execute captures the config getter, so eve rejects git__gh. The fix
-    // replaces this assertion with one that validation succeeds.
-    assert.throws(
-      () =>
-        validateDurableDynamicToolCallbacks("git__gh", tool, {
-          entryKey: "gh",
-          name: "git__gh",
-          resolverSlug: resolver.slug,
-          scope: "session",
-          sessionId: "session",
-        }),
-      /Dynamic tool "git__gh" callback "execute" has a non-serializable capture/,
-    );
+    // #4986: a function capture in any callback makes eve drop git__gh at session start.
+    const callbacks = validateDurableDynamicToolCallbacks("git__gh", tool, {
+      entryKey: "gh",
+      name: "git__gh",
+      resolverSlug: resolver.slug,
+      scope: "session",
+      sessionId: "session",
+    });
+    assert.deepEqual(callbacks.execute.closure, {});
   } finally {
     await rm(root, { recursive: true, force: true });
   }
