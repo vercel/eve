@@ -53,7 +53,7 @@ describe("production server output", () => {
     },
   );
 
-  it.fails("fails when another process already holds the requested port", async () => {
+  it("fails when another process already holds the requested port", async () => {
     const occupant = createServer((_request, response) => response.end("not eve"));
     await new Promise<void>((resolveListen) => occupant.listen(0, "127.0.0.1", resolveListen));
     const { port } = occupant.address() as AddressInfo;

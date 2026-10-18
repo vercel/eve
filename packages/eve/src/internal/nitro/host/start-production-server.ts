@@ -66,16 +66,23 @@ function createKnownPortUrl(input: { host: string; port: number }): string | und
   return `http://${formatClientHost(input.host)}:${String(input.port)}/`;
 }
 
+// Binds once before spawning: readiness falls back to probing the port, and
+// the probe cannot tell another process on it apart from the built server.
 async function resolveListenPort(input: { host: string; port: number }): Promise<number> {
-  if (input.port !== 0) {
-    return input.port;
-  }
-
   const server = createServer();
 
   return await new Promise((resolvePort, rejectPort) => {
-    server.once("error", rejectPort);
-    server.listen(0, input.host, () => {
+    server.once("error", (error: NodeJS.ErrnoException) => {
+      rejectPort(
+        error.code === "EADDRINUSE"
+          ? new Error(
+              `Port ${String(input.port)} on ${input.host} is already in use. Stop the process using it or pass a different --port.`,
+              { cause: error },
+            )
+          : error,
+      );
+    });
+    server.listen(input.port, input.host, () => {
       const address = server.address();
 
       server.close((error) => {
