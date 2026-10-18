@@ -339,28 +339,27 @@
       ]
     },
     {
-      "name": "extension/hindsight",
+      "name": "memory/hindsight",
       "type": "registry:item",
       "title": "Hindsight",
       "description": "Recall relevant context before every turn and retain each exchange automatically.",
       "dependencies": [
-        "@vectorize-io/hindsight-eve"
+        "@vectorize-io/hindsight-eve@^0.3.1"
       ],
       "envVars": {
         "HINDSIGHT_API_KEY": "",
-        "HINDSIGHT_API_URL": "",
-        "HINDSIGHT_BANK_ID": ""
+        "HINDSIGHT_API_URL": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.45.1"
+        }
       },
       "files": [
         {
-          "path": "registry/extensions/hindsight-instructions.ts",
+          "path": "registry/memory/hindsight.ts",
           "type": "registry:file",
-          "target": "agent/instructions/hindsight.ts"
-        },
-        {
-          "path": "registry/extensions/hindsight-hook.ts",
-          "type": "registry:file",
-          "target": "agent/hooks/hindsight.ts"
+          "target": "agent/memory/hindsight.ts"
         }
       ]
     },

@@ -527,8 +527,8 @@ importers:
         specifier: ^1.38.4
         version: 1.38.4
       '@vectorize-io/hindsight-eve':
-        specifier: ^0.2.1
-        version: 0.2.1(eve@packages+eve)
+        specifier: ^0.3.1
+        version: 0.3.1(eve@packages+eve)
       '@veltdev/chat-sdk-adapter':
         specifier: 0.2.4
         version: 0.2.4(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
@@ -7767,11 +7767,11 @@ packages:
   '@upstash/redis@1.38.4':
     resolution: {integrity: sha512-ZX69mKReun/yieyHYLoBg0eSiF6hjCQjd8zUKkJ5eCHehDV6P8S8oZOHxGSfkH1spfOhGZk0EGerBrfUsXow8g==}
 
-  '@vectorize-io/hindsight-eve@0.2.1':
-    resolution: {integrity: sha512-dFrCRgX/fXNV7bCCXfifmKTEQnj4insbxOQ79GU9mHMwZ9XfjQ1Oq8679C9xHwpItCtx6cDPqWZkluq8iY+qNg==}
+  '@vectorize-io/hindsight-eve@0.3.1':
+    resolution: {integrity: sha512-Qi8CTDKB3ZFmepyBVsc5BPCZptKL/OLwrs+K4re8LaQlHyxZw2WtRRo0mkNuEJWJu5wdks/KF0Gp2+BfBFsINw==}
     engines: {node: '>=24'}
     peerDependencies:
-      eve: '>=0.11.0'
+      eve: '>=0.45.1'
 
   '@veltdev/chat-sdk-adapter@0.2.4':
     resolution: {integrity: sha512-Amzn9rMKpkDjpC1uxpn9ztsIdFSF6sC+6KOUhyIPkQhinKCS5AUI1XCO8aLZTlolyDObPt4Gmib8XSmSg9Uclg==}
@@ -21807,7 +21807,7 @@ snapshots:
     dependencies:
       uncrypto: 0.1.3
 
-  '@vectorize-io/hindsight-eve@0.2.1(eve@packages+eve)':
+  '@vectorize-io/hindsight-eve@0.3.1(eve@packages+eve)':
     dependencies:
       eve: link:packages/eve
 
