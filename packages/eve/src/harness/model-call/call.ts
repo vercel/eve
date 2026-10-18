@@ -439,7 +439,8 @@ export class ModelCaller {
       ),
       {
         excludedActionToolNames,
-        hidesHeldText: this.input.hidesHeldText && workingTaskIds(step.session).length > 0,
+        hidesHeldText: this.input.hidesHeldText,
+        tasksWorking: workingTaskIds(step.session).length > 0,
         tools: catalog,
         unsettledActionToolNames,
       },
