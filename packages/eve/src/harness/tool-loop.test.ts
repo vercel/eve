@@ -4724,6 +4724,42 @@ describe("createToolLoopHarness", () => {
     expect(events.map((event) => event.type)).not.toContain("session.waiting");
   });
 
+  // #4870: the text completes as tool-call narration, which channels never post.
+  it.fails("completes a root session's text written beside eve__task_wait", async () => {
+    const reply = "I've asked for the draft; one moment.";
+    const waitToolCall = {
+      input: {},
+      toolCallId: "wait-1",
+      toolName: "eve__task_wait",
+      type: "tool-call" as const,
+    };
+    const assistantContent = [{ text: reply, type: "text" as const }, waitToolCall];
+    setupMockAgent({
+      content: assistantContent,
+      finishReason: "tool-calls",
+      response: { messages: [{ content: assistantContent, role: "assistant" }] },
+      responseMessages: [{ content: assistantContent, role: "assistant" }],
+      text: reply,
+      toolCalls: [waitToolCall],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit, { tools: createTaskToolMap() }));
+    const { table } = createTask(
+      { tasks: [] },
+      { callId: "call-task", kind: "tool", name: "research", resumable: false, turnId: "turn_0" },
+    );
+
+    await runStep(writeTaskTable(createTestSession(), table), { message: "Draft the notes." });
+
+    // Channels post only a `message.completed` that isn't tool-call narration.
+    expect(events.filter((event) => event.type === "message.completed")).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ finishReason: "stop", message: reply }),
+      }),
+    ]);
+  });
+
   const REPLY_BEFORE_RESULT = "If the person should hear from you now";
   const WAIT_INSTEAD_OF_REPLYING = "Only your final reply reaches your caller.";
 
