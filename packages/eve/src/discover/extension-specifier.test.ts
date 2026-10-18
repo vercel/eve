@@ -55,6 +55,18 @@ describe("parseExtensionMountSpecifier", () => {
     expect(parseExtensionMountSpecifier(source)).toBe("@acme/crm");
   });
 
+  // https://github.com/vercel/eve/issues/4953
+  it.fails("reads a compiled identifier default export", () => {
+    const source = 'import b from "@acme/b";\nvar b_default = b;\nexport { b_default as default };';
+    expect(parseExtensionMountSpecifier(source)).toBe("@acme/b");
+  });
+
+  // https://github.com/vercel/eve/issues/4953
+  it.fails("reads an emitted default re-export", () => {
+    const source = 'import b_default from "@acme/b";\nexport { b_default as default };';
+    expect(parseExtensionMountSpecifier(source)).toBe("@acme/b");
+  });
+
   it("does not use an unrelated factory for an emitted default export", () => {
     const source =
       'import crm from"@acme/crm";const other=crm({});const exported={};export{exported as default};';
