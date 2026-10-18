@@ -96,6 +96,7 @@ export async function runApprovedCalls(input: {
           ...at,
           outcome: reason === undefined ? "authorized" : "failed",
           ...(reason !== undefined && { reason }),
+          ...(isConnectionAuthorizationFailedError(failure) && { retryable: failure.retryable }),
         }),
       );
     }

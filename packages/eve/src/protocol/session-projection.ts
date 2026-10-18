@@ -2,6 +2,7 @@ import type {
   ActionResultError,
   ApprovalCandidateOutcome,
   AuthorizationOutcome,
+  AuthorizationPrincipal,
   InputResolutionOutcome,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -114,7 +115,14 @@ export interface SessionAuthorization {
   readonly principalId?: string;
   /** The approval candidate whose responder signs in. */
   readonly candidateId?: string;
+  /** The credential the sign-in grants, which every scope that uses it shares. */
+  readonly grant?: string;
+  readonly principal?: AuthorizationPrincipal;
   readonly status: "required" | AuthorizationOutcome;
+  /** A `failed` sign-in that reported `retryable: false`: the turn reports it, not asks again. */
+  readonly retryable?: boolean;
+  /** Why a `failed` sign-in failed, as its completion reported it. */
+  readonly reason?: string;
   /** The sign-in resumes its work through a callback, rather than inline. */
   readonly awaitsCallback?: true;
 }
@@ -524,13 +532,15 @@ export function foldSession<S extends SessionProjection>(
       if (typed.data.taskId !== undefined) authorization.taskId = typed.data.taskId;
       if (typed.data.principalId !== undefined) authorization.principalId = typed.data.principalId;
       if (typed.data.candidateId !== undefined) authorization.candidateId = typed.data.candidateId;
+      if (typed.data.grant !== undefined) authorization.grant = typed.data.grant;
+      if (typed.data.principal !== undefined) authorization.principal = typed.data.principal;
       if (typed.data.webhookUrl !== undefined) authorization.awaitsCallback = true;
       return { ...state, authorizations: { ...state.authorizations, [attemptId]: authorization } };
     }
     case "authorization.completed": {
       const attemptId = typed.data.attemptId ?? typed.data.name;
       const current = state.authorizations[attemptId];
-      const completed: SessionAuthorization = {
+      const completed: Mutable<SessionAuthorization> = {
         ...(current ?? {
           attemptId,
           name: typed.data.name,
@@ -540,6 +550,10 @@ export function foldSession<S extends SessionProjection>(
         }),
         status: typed.data.outcome,
       };
+      if (typed.data.grant !== undefined) completed.grant = typed.data.grant;
+      if (typed.data.principal !== undefined) completed.principal = typed.data.principal;
+      if (typed.data.retryable !== undefined) completed.retryable = typed.data.retryable;
+      if (typed.data.reason !== undefined) completed.reason = typed.data.reason;
       return { ...state, authorizations: { ...state.authorizations, [attemptId]: completed } };
     }
     default:

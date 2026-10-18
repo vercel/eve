@@ -219,4 +219,29 @@ describe("foldSession", () => {
     expect(callStatus(denied, "call_1")).toBe("rejected");
     expect(pruneSessionProjection(denied)).toMatchObject({ calls: {}, inputs: {}, turns: {} });
   });
+
+  it("folds a sign-in's grant and principal, and why and whether its failure may be retried", () => {
+    const sameSignIn = {
+      attemptId: "attempt_1",
+      grant: "oauth/issues",
+      name: "issues",
+      principal: { id: "user-1", issuer: "idp", type: "user" },
+      ...at,
+    } as const;
+    const projection = fold([
+      turnStarted,
+      { type: "authorization.required", data: { ...sameSignIn, description: "Sign in." } },
+      {
+        type: "authorization.completed",
+        data: { ...sameSignIn, outcome: "failed", reason: "denied", retryable: false },
+      },
+    ]);
+    expect(projection.authorizations.attempt_1).toMatchObject({
+      grant: "oauth/issues",
+      principal: { id: "user-1", issuer: "idp", type: "user" },
+      reason: "denied",
+      retryable: false,
+      status: "failed",
+    });
+  });
 });

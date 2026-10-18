@@ -1,8 +1,12 @@
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import type { SessionAuthorization, SessionProjection } from "#protocol/session-projection.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
 // Which sign-in attempts replace which. Pure: the session state that holds them is
 // `requests.ts`'s.
+
+/** What makes two sign-in attempts the same one. */
+type SignInIdentity = Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">;
 
 /** The pending sign-ins once `challenges` are asked for: each replaces the attempt it supersedes. */
 export function withSignIns(
@@ -35,14 +39,29 @@ export function supersededChallenges(
 }
 
 /**
+ * The sign-in this turn already tried and failed terminally (`retryable: false`) for the same
+ * grant and principal as `challenge`: asking again would send the person through the same
+ * failure. Calls before the turn's first sign-in failure have nothing to find.
+ */
+export function terminalSignInFailure(
+  projection: SessionProjection,
+  challenge: SignInIdentity,
+): SessionAuthorization | undefined {
+  return Object.values(projection.authorizations).find(
+    (attempt) =>
+      attempt.status === "failed" &&
+      attempt.retryable === false &&
+      attempt.turnId === projection.activeTurnId &&
+      sameSignIn(attempt, challenge),
+  );
+}
+
+/**
  * Same scope, or the same grant from another scope, such as two tools and a
  * connection that all use one Vercel Connect connector. Approval sign-ins
  * stay per candidate because each one settles its own approval.
  */
-function sameSignIn(
-  left: Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">,
-  right: Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">,
-): boolean {
+function sameSignIn(left: SignInIdentity, right: SignInIdentity): boolean {
   const sameGrant =
     left.grant !== undefined &&
     left.grant === right.grant &&
