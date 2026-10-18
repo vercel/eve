@@ -59,6 +59,24 @@ describe("resolveEvalClientOptions", () => {
     expect(options.headers).toBeUndefined();
   });
 
+  it("sends EVE_EVAL_OIDC_TOKEN as a Vercel Trusted Sources token", () => {
+    vi.stubEnv("EVE_EVAL_OIDC_TOKEN", " ci-oidc-token ");
+    const options = resolveEvalClientOptions({
+      kind: "remote",
+      url: "https://example.vercel.app",
+    });
+    expect(options.auth).toEqual({ vercelOidc: { token: "ci-oidc-token" } });
+    expect(options.redirect).toBe("manual");
+  });
+
+  it("rejects EVE_EVAL_AUTH_TOKEN and EVE_EVAL_OIDC_TOKEN together", () => {
+    vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "static-token");
+    vi.stubEnv("EVE_EVAL_OIDC_TOKEN", "ci-oidc-token");
+    expect(() =>
+      resolveEvalClientOptions({ kind: "remote", url: "https://example.vercel.app" }),
+    ).toThrow("Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both");
+  });
+
   it("ignores a blank EVE_EVAL_AUTH_TOKEN", () => {
     vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "   ");
     const options = resolveEvalClientOptions({
@@ -162,6 +180,7 @@ describe("remote eval project verification", () => {
 
   beforeEach(() => {
     vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "");
+    vi.stubEnv("EVE_EVAL_OIDC_TOKEN", "");
     vi.stubEnv("VERCEL_ORG_ID", "");
     vi.stubEnv("VERCEL_PROJECT_ID", "");
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "bypass-secret");
@@ -259,6 +278,22 @@ describe("remote eval project verification", () => {
     expect(headers.get("authorization")).toBeNull();
     expect(headers.get("x-vercel-trusted-oidc-idp-token")).toBeNull();
     expect(headers.get("x-vercel-protection-bypass")).toBeNull();
+    expect(resolveDevelopmentOidcToken).not.toHaveBeenCalled();
+  });
+
+  it("sends an explicit Trusted Sources token without resolving a Vercel project", async () => {
+    vi.stubEnv("EVE_EVAL_OIDC_TOKEN", "ci-oidc-token");
+
+    const client = await createRemoteClient();
+    await client.health();
+
+    const request = vi.mocked(fetch).mock.calls[0]?.[1];
+    const headers = new Headers(request?.headers);
+    expect(headers.get("authorization")).toBe("Bearer ci-oidc-token");
+    expect(headers.get("x-vercel-trusted-oidc-idp-token")).toBe("ci-oidc-token");
+    expect(request?.redirect).toBe("manual");
+    expect(vi.mocked(readFile)).not.toHaveBeenCalled();
+    expect(captureVercel).not.toHaveBeenCalled();
     expect(resolveDevelopmentOidcToken).not.toHaveBeenCalled();
   });
 
