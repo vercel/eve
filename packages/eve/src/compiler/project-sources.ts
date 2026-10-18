@@ -176,6 +176,32 @@ export function projectAgentSources(input: {
   return { candidates, resources, subagents };
 }
 
+/**
+ * Lists the application module files a compile may evaluate, across local
+ * subagents, so they can be bundled as one shared graph. Extension mounts load
+ * with their own scope and are left out.
+ */
+export function listApplicationModulePaths(manifest: AgentSourceManifest): string[] {
+  const sources: readonly { readonly logicalPath: string; readonly sourceKind: string }[] = [
+    ...(manifest.configModule === undefined ? [] : [manifest.configModule]),
+    ...(manifest.sandbox === null ? [] : [manifest.sandbox]),
+    ...manifest.channels,
+    ...manifest.connections,
+    ...manifest.hooks,
+    ...manifest.memories,
+    ...manifest.tools,
+    ...manifest.instructions,
+    ...manifest.schedules,
+    ...manifest.skills,
+  ];
+  return [
+    ...sources.flatMap((source) =>
+      source.sourceKind === "module" ? [join(manifest.agentRoot, source.logicalPath)] : [],
+    ),
+    ...manifest.subagents.flatMap((subagent) => listApplicationModulePaths(subagent.manifest)),
+  ];
+}
+
 export function projectSelectedSources(input: {
   readonly candidates: Iterable<AgentSourceCandidate>;
   readonly resources: readonly ProjectedResourceSource[];
