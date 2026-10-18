@@ -1,6 +1,6 @@
 import { isObject } from "#shared/guards.js";
 
-/** Max structural depth the schema dereferencer descends before truncating. */
+/** Max subschema nesting the schema dereferencer descends before truncating. */
 const MAX_DEREF_DEPTH = 12;
 
 /** A path, query, header, or cookie parameter resolved from an operation. */
@@ -76,6 +76,9 @@ export function deref(document: Record<string, unknown>, node: Record<string, un
  * their shape. This keeps the output valid JSON Schema (draft 2020-12)
  * for strict model providers, while the depth bound prevents recursive
  * specs (e.g. Notion blocks) from expanding without limit.
+ *
+ * Depth counts subschema levels, so arrays, property maps, and `$ref` hops
+ * do not spend it.
  */
 export function derefSchema(
   document: Record<string, unknown>,
@@ -84,7 +87,7 @@ export function derefSchema(
   seen: ReadonlySet<string> = new Set(),
 ): unknown {
   if (isArray(node)) {
-    return node.map((item) => derefSchema(document, item, depth + 1, seen));
+    return node.map((item) => derefSchema(document, item, depth, seen));
   }
   if (!isObject(node)) {
     return node;
@@ -100,7 +103,7 @@ export function derefSchema(
     if (target === undefined) {
       return {};
     }
-    return derefSchema(document, target, depth + 1, new Set([...seen, node.$ref]));
+    return derefSchema(document, target, depth, new Set([...seen, node.$ref]));
   }
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node)) {
@@ -117,7 +120,7 @@ export function derefSchema(
       result[key] = Object.fromEntries(
         Object.entries(value).map(([name, schema]) => [
           name,
-          derefSchema(document, schema, depth + 2, seen),
+          derefSchema(document, schema, depth + 1, seen),
         ]),
       );
     } else {
