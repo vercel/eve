@@ -6,7 +6,8 @@ import type { SendTurnPayload } from "#client/types.js";
 
 interface ReconciledSubmissions {
   readonly alreadyProjected: boolean;
-  readonly event: Extract<MessageStreamEvent, { readonly type: "message.received" }>;
+  /** The event that settled the submissions: their `message.received`, or their turn's end. */
+  readonly event: MessageStreamEvent;
   readonly ids: readonly string[];
 }
 
@@ -62,16 +63,12 @@ export class OptimisticMessageSubmissions {
   }
 
   apply(event: MessageStreamEvent): ReconciledSubmissions | undefined {
-    if (event.type !== "message.received") {
+    const settling = this.#settling(event);
+    if (settling.length === 0) {
       for (const projection of this.#projections) projection.append(event);
       return undefined;
     }
-    const matching = this.#matching(event);
-    if (matching.length === 0) {
-      for (const projection of this.#projections) projection.append(event);
-      return undefined;
-    }
-    return this.#reconcile(matching, event, false);
+    return this.#settle(settling, event, false);
   }
 
   correlate(
@@ -88,10 +85,9 @@ export class OptimisticMessageSubmissions {
     const pending = this.#pending.find((candidate) => candidate.id === submissionId);
     if (pending === undefined) return undefined;
     for (const event of events.slice(pending.eventStartIndex)) {
-      if (event.type !== "message.received") continue;
-      const matching = this.#matching(event);
-      if (matching.some((candidate) => candidate.id === submissionId)) {
-        return this.#reconcile(matching, event, true);
+      const settling = this.#settling(event);
+      if (settling.some((candidate) => candidate.id === submissionId)) {
+        return this.#settle(settling, event, true);
       }
     }
     return undefined;
@@ -126,6 +122,18 @@ export class OptimisticMessageSubmissions {
     for (const pending of this.#pending) this.fail(error, pending.id);
   }
 
+  /** The pending submissions this event settles: received by it, or left unread by its turn's end. */
+  #settling(event: MessageStreamEvent): readonly PendingMessageSubmission[] {
+    if (event.type === "message.received") return this.#matching(event);
+    // A turn that ends without receiving a delivery keeps it in history, and the server never
+    // announces it with `message.received` afterwards.
+    if (event.type !== "turn.cancelled" && event.type !== "turn.failed") return [];
+    const named = event.meta.deliveryIds ?? [];
+    return this.#pending.filter(
+      (pending) => pending.deliveryId !== undefined && named.includes(pending.deliveryId),
+    );
+  }
+
   #matching(event: Extract<MessageStreamEvent, { readonly type: "message.received" }>) {
     return this.#pending.filter((pending) =>
       pending.deliveryId === undefined
@@ -134,13 +142,18 @@ export class OptimisticMessageSubmissions {
     );
   }
 
-  #reconcile(
+  #settle(
     submissions: readonly PendingMessageSubmission[],
-    event: Extract<MessageStreamEvent, { readonly type: "message.received" }>,
+    event: MessageStreamEvent,
     alreadyProjected: boolean,
   ): ReconciledSubmissions {
     const ids = submissions.map((pending) => pending.id);
-    this.#withdraw(ids);
+    if (event.type === "message.received") {
+      this.#withdraw(ids);
+    } else {
+      const error = new Error("The turn ended before the agent read the message.");
+      for (const id of ids) this.fail(error, id);
+    }
     if (!alreadyProjected) for (const projection of this.#projections) projection.append(event);
     return { alreadyProjected, event, ids };
   }
