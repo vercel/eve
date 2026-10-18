@@ -1232,6 +1232,107 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  // Anthropic defers a web search called beside a local tool: the search runs once the local
+  // results are in, and its result opens the next response. A request that adds anything after
+  // those results ends the turn early and fails with a 400.
+  it.fails("holds a steering message until a deferred web search result arrives", async () => {
+    const searchCall = {
+      input: { query: "node lts" },
+      providerExecuted: true,
+      toolCallId: "srvtoolu_1",
+      toolName: "web_search",
+      type: "tool-call" as const,
+    };
+    const bashCall = {
+      input: { command: "date" },
+      toolCallId: "toolu_1",
+      toolName: "bash",
+      type: "tool-call" as const,
+    };
+    const bashResult = {
+      output: { type: "text" as const, value: "Thu Jan  1 00:00:00 UTC 1970" },
+      toolCallId: "toolu_1",
+      toolName: "bash",
+      type: "tool-result" as const,
+    };
+    const searchResult = {
+      output: { type: "json" as const, value: [] },
+      toolCallId: "srvtoolu_1",
+      toolName: "web_search",
+      type: "tool-result" as const,
+    };
+    const answerText = { text: "Node 24 is LTS.", type: "text" as const };
+    setupMockAgentSequence([
+      {
+        content: [searchCall, bashCall],
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [searchCall, bashCall], role: "assistant" },
+            { content: [bashResult], role: "tool" },
+          ],
+        },
+        text: "",
+        toolCalls: [searchCall, bashCall],
+        toolResults: [bashResult],
+      },
+      {
+        content: [{ ...searchResult, providerExecuted: true }, answerText],
+        finishReason: "stop",
+        response: { messages: [{ content: [searchResult, answerText], role: "assistant" }] },
+        text: "Node 24 is LTS.",
+        toolCalls: [],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "npm 11 ships with it.", role: "assistant" }] },
+        text: "npm 11 ships with it.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const runStep = createToolLoopHarness(
+      createTestConfig(undefined, {
+        tools: new Map([
+          [
+            "bash",
+            {
+              description: "Run shell commands",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
+          ],
+        ]),
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "anthropic/claude-sonnet-5-5" },
+        system: "You are a test assistant.",
+        tools: [
+          { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+    const promptOf = (call: number): ModelMessage[] => {
+      const agent = vi.mocked(ToolLoopAgent).mock.results[call]!.value as {
+        stream: ReturnType<typeof vi.fn>;
+      };
+      return agent.stream.mock.calls[0]?.[0].messages;
+    };
+
+    const first = await runStep(session, { message: "Run date and search for the Node LTS." });
+    const second = await runStep(first.session, { message: "Also tell me the npm version." });
+    if (typeof second.next === "function") await second.next(second.session);
+
+    expect(promptOf(1).at(-1)).toEqual({ content: [bashResult], role: "tool" });
+    expect(promptOf(2).at(-1)).toMatchObject({
+      content: "Also tell me the npm version.",
+      role: "user",
+    });
+  });
+
   it("omits user messages with no model-visible content", async () => {
     setupMockAgent({
       finishReason: "stop",
