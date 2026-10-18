@@ -9,6 +9,7 @@ import { Client } from "#client/client.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { conversationReducer } from "#client/conversation-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
+import type { EveMessageData } from "#client/message-reducer-types.js";
 import { TEST_USAGE, stampTestEvent, stampTestEvents } from "#internal/testing/events.js";
 import {
   createApprovalSettledEvent,
@@ -19,6 +20,8 @@ import {
   createMessageReceivedEvent,
   createSessionFailedEvent,
   createSessionWaitingEvent,
+  createStepFailedEvent,
+  createTurnFailedEvent,
   createAgentStartedEvent,
   createInputRequestedEvent,
   createInputResolvedEvent,
@@ -2671,6 +2674,265 @@ describe("EveAgentStore cancellation", () => {
     await expect(cancellation).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
     await answering;
     expect(store.snapshot.status).toBe("ready");
+  });
+
+  describe("a submission whose turn ends before the server acknowledges it", () => {
+    const userMessages = (store: EveAgentStore<EveMessageData>) =>
+      store.snapshot.data.messages.filter((message) => message.role === "user");
+
+    function deliveredEvents(
+      deliveryIds: string | readonly string[],
+      events: UnstampedMessageStreamEvent[],
+      firstIndex = 0,
+    ) {
+      return events.map((event, index) => {
+        const stamped = stampTestEvent(event, firstIndex + index);
+        return { ...stamped, meta: { ...stamped.meta, deliveryIds: [deliveryIds].flat() } };
+      });
+    }
+
+    // https://github.com/vercel/eve/issues/3102
+    it.fails("settles a submission cancelled before the server received it", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          streamResponse(
+            deliveredEvents("delivery_1", [
+              createTurnCancelledEvent({ sequence: 0, turnId: "turn_1" }),
+              createSessionWaitingEvent(TEST_USAGE),
+            ] as UnstampedMessageStreamEvent[]),
+          ),
+        )
+        .mockResolvedValueOnce(startedResponse("delivery_1"));
+      const store = createStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        reducer: defaultMessageReducer(),
+      });
+
+      await store.send({ message: "are you there?" });
+
+      expect(store.snapshot.status).toBe("ready");
+      expect(userMessages(store)).toMatchObject([
+        {
+          metadata: { optimistic: true, status: "failed" },
+          parts: [{ text: "are you there?", type: "text" }],
+        },
+      ]);
+    });
+
+    it.fails("settles a submission whose turn failed before the server received it", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          streamResponse(
+            deliveredEvents("delivery_1", [
+              createStepFailedEvent({
+                code: "connection_failed",
+                message: "Connection resolver threw.",
+                sequence: 0,
+                stepIndex: 0,
+                turnId: "turn_1",
+              }),
+              createTurnFailedEvent({
+                code: "connection_failed",
+                message: "Connection resolver threw.",
+                sequence: 1,
+                terminal: false,
+                turnId: "turn_1",
+              }),
+              createSessionWaitingEvent(TEST_USAGE),
+            ] as UnstampedMessageStreamEvent[]),
+          ),
+        )
+        .mockResolvedValueOnce(startedResponse("delivery_1"));
+      const store = createStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        reducer: defaultMessageReducer(),
+      });
+
+      await store.send({ message: "are you there?" });
+
+      expect(store.snapshot.status).toBe("ready");
+      expect(userMessages(store)).toMatchObject([
+        {
+          metadata: { optimistic: true, status: "failed" },
+          parts: [{ text: "are you there?", type: "text" }],
+        },
+      ]);
+    });
+
+    it.fails("keeps a cancelled bubble failed when the cancel streams after the server accepted it", async () => {
+      const live = controlledStreamResponse();
+      const accepted = Promise.withResolvers<Response>();
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(live.response)
+        .mockImplementationOnce(() => accepted.promise);
+      const store = createStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        reducer: defaultMessageReducer(),
+      });
+
+      const first = store.send({ message: "first" });
+      await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+      live.emit(
+        deliveredEvents("delivery_1", [
+          createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        ] as UnstampedMessageStreamEvent[])[0]!,
+      );
+      // A cancel request goes out only once the POST resolved (and its delivery id is matched) and
+      // the turn id is known, so the cancelled turn's events reach an already-accepted message.
+      const cancellation = store.cancel();
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(acceptedCancellationResponse());
+      accepted.resolve(startedResponse("delivery_1"));
+      await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3));
+      for (const event of deliveredEvents(
+        "delivery_1",
+        [
+          createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+          createSessionWaitingEvent(TEST_USAGE),
+        ] as UnstampedMessageStreamEvent[],
+        1,
+      )) {
+        live.emit(event);
+      }
+      await Promise.all([first, cancellation]);
+
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(startedResponse("delivery_2"));
+      const second = store.send({ message: "second" });
+      await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(4));
+      for (const event of deliveredEvents(
+        "delivery_2",
+        [
+          createMessageReceivedEvent({ message: "second", sequence: 1, turnId: "turn_2" }),
+          createSessionWaitingEvent(TEST_USAGE),
+        ] as UnstampedMessageStreamEvent[],
+        3,
+      )) {
+        live.emit(event);
+      }
+      await second;
+      live.close();
+
+      expect(store.snapshot.status).toBe("ready");
+      expect(userMessages(store)).toMatchObject([
+        {
+          metadata: { optimistic: true, status: "failed" },
+          parts: [{ text: "first", type: "text" }],
+        },
+        { parts: [{ text: "second", type: "text" }] },
+      ]);
+      expect(userMessages(store)[1]?.metadata).not.toMatchObject({ optimistic: true });
+    });
+
+    /** Sends "First", then steers "Instead" into its running turn; returns both sends. */
+    async function steerWhileRunning() {
+      const live = controlledStreamResponse();
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(live.response)
+        .mockResolvedValueOnce(startedResponse("delivery_1"))
+        .mockResolvedValueOnce(startedResponse("delivery_2"));
+      const store = createStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        reducer: defaultMessageReducer(),
+      });
+      const first = store.send({ message: "First" });
+      await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+      for (const event of deliveredEvents("delivery_1", [
+        createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+        createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      ] as UnstampedMessageStreamEvent[])) {
+        live.emit(event);
+      }
+      await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+      const instead = store.send({ message: "Instead", turnPolicy: "steer" });
+      await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3));
+      return { first, instead, live, store };
+    }
+
+    it.fails("settles a steered message that the cancelled turn never read", async () => {
+      const { first, instead, live, store } = await steerWhileRunning();
+
+      for (const event of deliveredEvents(
+        ["delivery_1", "delivery_2"],
+        [
+          createTurnCancelledEvent({ sequence: 2, turnId: "turn_1" }),
+          createSessionWaitingEvent(TEST_USAGE),
+        ] as UnstampedMessageStreamEvent[],
+        2,
+      )) {
+        live.emit(event);
+      }
+      await Promise.all([first, instead]);
+      live.close();
+
+      expect(store.snapshot.status).toBe("ready");
+      expect(userMessages(store)).toMatchObject([
+        { parts: [{ text: "First", type: "text" }] },
+        {
+          metadata: { optimistic: true, status: "failed" },
+          parts: [{ text: "Instead", type: "text" }],
+        },
+      ]);
+    });
+
+    it("leaves a steered message the turn did not name until its own receipt", async () => {
+      const { first, instead, live, store } = await steerWhileRunning();
+
+      for (const event of deliveredEvents(
+        "delivery_1",
+        [
+          createTurnCompletedEvent({ sequence: 2, turnId: "turn_1" }),
+          createSessionWaitingEvent(TEST_USAGE),
+        ] as UnstampedMessageStreamEvent[],
+        2,
+      )) {
+        live.emit(event);
+      }
+      await vi.waitFor(() =>
+        expect(userMessages(store)[1]?.metadata).toMatchObject({
+          optimistic: true,
+          status: "submitted",
+        }),
+      );
+      for (const event of deliveredEvents(
+        "delivery_2",
+        [
+          createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_2" }),
+          createSessionWaitingEvent(TEST_USAGE),
+        ] as UnstampedMessageStreamEvent[],
+        4,
+      )) {
+        live.emit(event);
+      }
+      await Promise.all([first, instead]);
+      live.close();
+
+      expect(store.snapshot.status).toBe("ready");
+      expect(userMessages(store)).toHaveLength(2);
+      expect(userMessages(store)[1]?.metadata).not.toMatchObject({ optimistic: true });
+    });
+
+    it("keeps a received message when its turn completes naming the delivery", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          streamResponse(
+            deliveredEvents("delivery_1", [
+              createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+              createTurnCompletedEvent({ sequence: 1, turnId: "turn_1" }),
+              createSessionWaitingEvent(TEST_USAGE),
+            ] as UnstampedMessageStreamEvent[]),
+          ),
+        )
+        .mockResolvedValueOnce(startedResponse("delivery_1"));
+      const store = createStore({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        reducer: defaultMessageReducer(),
+      });
+
+      await store.send({ message: "Hello" });
+
+      expect(store.snapshot.status).toBe("ready");
+      expect(userMessages(store)).toHaveLength(1);
+      expect(userMessages(store)[0]?.metadata).not.toMatchObject({ optimistic: true });
+    });
   });
 
   it("resolves a queued cancellation when reset wins before dispatch", async () => {
