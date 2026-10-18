@@ -341,6 +341,33 @@ export default eveChannel({
 
 `onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
+### Turn context
+
+`context` strings become user messages in durable session history. For context that applies to one turn only, return `clientContext` instead. It replaces the request's [`clientContext`](../guides/client/messages) for that turn: it reaches every model call in the turn and is not kept in session history.
+
+`ctx.eve.clientContext` holds the request's `clientContext` exactly as the client sent it, or `undefined` when it sent none. Use it to check or correct client-supplied state before the model sees it:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel, defaultEveAuth } from "eve/channels/eve";
+import { vercelOidc } from "eve/channels/auth";
+
+import { getVerifiedPlan } from "../lib/billing";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  async onMessage(ctx) {
+    const auth = defaultEveAuth(ctx);
+    const plan = await getVerifiedPlan(auth);
+    return { auth, clientContext: [`The user's plan is ${plan}.`] };
+  },
+});
+```
+
+- Omit `clientContext` to keep the request's context. Return `[]` to drop it.
+- The returned value takes the same shape as request `clientContext` (`ClientContextValue`, exported from `eve/channels/eve`): a string, an array of strings, or a JSON object. eve turns it into model messages the same way.
+- eve labels client-supplied entries `Client context:` for the model. Returned context is sent without the label.
+- `onMessage` runs only for requests with a message. An input response keeps the context its request sent.
+
 ## Clients
 
 The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the eve channel from React UI.

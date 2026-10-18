@@ -81,6 +81,7 @@ import {
   type RemoteAgentBinding,
   normalizeEveCors,
   resolveOnMessage,
+  resolveTurnClientContext,
   strandedSessionResponse,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
@@ -309,9 +310,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const messageResult =
           body.message === undefined
-            ? { auth: forwarded.auth }
+            ? {
+                auth: forwarded.auth,
+                clientContext: resolveTurnClientContext(undefined, body.context),
+              }
             : await resolveOnMessage({
                 auth: forwarded.auth,
+                clientContext: body.context,
                 config: input,
                 invocation:
                   parent === undefined || body.operationId === undefined
@@ -362,7 +367,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                     context: messageResult.context,
                     outputSchema: body.outputSchema,
                   },
-                  body.context,
+                  messageResult.clientContext,
                 ),
                 conversationId,
                 parent,
@@ -414,18 +419,21 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
+        let clientContext = resolveTurnClientContext(undefined, body.context);
         let context: readonly string[] | undefined;
         let title: string | undefined;
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
             auth: forwarded.auth,
+            clientContext: body.context,
             config: input,
             message: body.message,
             request: req,
             sessionId,
           });
           if (messageResult instanceof Response) return messageResult;
+          clientContext = messageResult.clientContext;
           context = messageResult.context;
           title = messageResult.title;
           dispatchAuth = messageResult.auth;
@@ -443,7 +451,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               turnPolicy: body.turnPolicy,
               title,
             },
-            body.context,
+            clientContext,
           );
           result =
             body.inputResponses === undefined
