@@ -3,9 +3,9 @@ title: "Voice Notes"
 description: "Transcribe voice notes, voice messages, and other audio attachments with an AI Gateway transcription model so an eve agent can answer them."
 ---
 
-Voice notes and other audio files reach your agent, but the model does not hear them. eve stages each file in the sandbox and gives the model only a label with its path, such as `Attached file /workspace/.eve/attachments/<hash>/voice-note.m4a (audio/mp4)`. To answer a voice note, add a tool that transcribes the staged file.
+Voice notes and other audio files reach your agent, but by default the model does not transcribe them. To give your agent the ability to answer a voice note, you will need to add a tool that transcribes the staged file.
 
-This works for any channel that delivers audio as a file, such as Slack voice clips and files sent through the [eve](../channels/eve) and [Chat SDK](../channels/chat-sdk#attachments) channels. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stages files.
+This works for any channel that delivers audio as a file, such as iMessage voice notes through [Photon](../channels/photon), Slack voice clips, and files sent through the [eve](../channels/eve) and [Chat SDK](../channels/chat-sdk#attachments) channels. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stages files.
 
 ## Add a transcription tool
 
@@ -54,7 +54,7 @@ export default defineTool({
 });
 ```
 
-`transcribe()` comes from the `ai` package your eve project already depends on. A string model ID routes through [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) with the same credentials as a string agent model; see [Set the model](../agent-config#set-the-model). Transcription models accept different audio formats, so choose one that handles what your channels deliver.
+`transcribe()` uses the same credentials as your eve agent.
 
 ## Tell the agent when to transcribe
 
@@ -64,4 +64,4 @@ When a message has an audio attachment (`Attached file ... (audio/...)`), such a
 
 ## When transcription fails
 
-When `execute` throws, eve gives the error to the model as a tool error, so the messages above tell the model what to say. See [When a tool throws](../tools#when-a-tool-throws). A file over the channel's upload limit, 25 MB by default, or a file eve can't download reaches the agent as a short note instead of a file.
+When `execute` throws, eve gives the error to the model as a tool error, which it can relay to the user. See [When a tool throws](../tools#when-a-tool-throws). A file over the channel's upload limit, 25 MB by default, or a file eve can't download reaches the agent as a short note instead of a file.
