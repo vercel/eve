@@ -16,9 +16,8 @@ handshake and covers the resulting no-owner interval with markers, an ingress re
 activation round trip. That puts about 10 serial durable operations in front of the user's
 message, where an ordinary turn has one.
 
-Workflow now ships the atomic primitive the
-[single-workflow sessions plan](./single-workflow-session-upgrades.md#the-no-owner-interval) was
-waiting for: `createHook({ token, experimental_force: true })`. Both first-party Worlds declare
+Workflow now ships the atomic primitive the original handoff design was waiting for:
+`createHook({ token, experimental_force: true })`. Both first-party Worlds declare
 `hookForceClaim: true` (`@workflow/world-vercel` 5.2.0 and `@workflow/world-local` 5.1.0), and
 current runs are stamped at the spec version that understands a takeover (8). This plan replaces
 the release-based handoff with a force-claim protocol (handoff version 3):
@@ -40,10 +39,10 @@ There is no public API change. Observable changes:
 - Rolling back to an eve build older than this protocol leaves existing sessions on the newer
   owner, as a checkpoint version bump already does.
 
-This plan supersedes the Handoff, Compaction handoff, and no-owner-interval sections of
-[single-workflow-session-upgrades.md](./single-workflow-session-upgrades.md). The rest of that
-design is unchanged: one owner runs turns, the original run anchors the stream, checkpoints carry
-settled state, and handoff targets the exact accepting deployment.
+This plan replaces the release-based handoff and compaction trigger from the single-workflow
+session design ([#876](https://github.com/vercel/eve/issues/876)). The rest of that design is
+unchanged: one owner runs turns, the original run anchors the stream, checkpoints carry settled
+state, and handoff targets the exact accepting deployment.
 
 ## Where the time goes today
 
@@ -389,4 +388,4 @@ sent immediately after `session.waiting`, asserting one reply turn and an unbrok
 - Let a cross-deployment `start()` skip or prefetch the capability probe when the caller already
   holds a fresh attestation, for example one stamped by ingress on the accepting deployment.
 - A global stream independent of any run would let the original run stop parking as the anchor.
-  This is unchanged from the previous plan.
+  This request predates this plan and is still open.
