@@ -1,4 +1,5 @@
 import type { SessionHandle } from "#channel/session.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -42,6 +43,7 @@ import {
   dispatchWorkflowRun,
 } from "#public/channels/github/dispatch.js";
 import {
+  applyDeliveredGitHubState,
   continuationTokenFromState,
   conversationFromState,
   initialGitHubState,
@@ -256,6 +258,14 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
+    },
+
+    deliver(payload, channel) {
+      applyDeliveredGitHubState(
+        channel.state,
+        payload.state as Partial<GitHubChannelState> | undefined,
+      );
+      return defaultDeliverResult(payload);
     },
 
     routes: [
