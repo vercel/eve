@@ -41,6 +41,7 @@ const KNOWN_OPENAPI_TOP_LEVEL_KEYS = [
 const KNOWN_AUTHORIZATION_KEYS = [
   "completeAuthorization",
   "credentialOwner",
+  "displayName",
   "evict",
   "getToken",
   "principalType",
