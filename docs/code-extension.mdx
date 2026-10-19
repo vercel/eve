@@ -129,7 +129,7 @@ export default git({
 });
 ```
 
-Commits made by the `gh` tool are authored by the GitHub App. To credit the person a turn works for, return them from `github.attribution`. The callback receives the tool's context, so it can read the verified caller from `ctx.session.auth.current` or resolve their linked accounts with `ctx.getToken`. The `gh` tool then ends every `gh-signed-commit` message and `gh pr create` body with `Co-authored-by: <name> <email>`. Return `null` to publish without a co-author. `Co-authored-by` lines the agent writes itself are kept. Other paths, such as `gh api`, are not rewritten.
+Commits made by the `gh` tool are authored by the GitHub App. To credit the person a turn works for, return them from `github.attribution`. The callback receives the tool's context, so it can read the verified caller from `ctx.session.auth.current` or resolve their linked accounts with `ctx.getToken`. The `gh` tool then ends every `gh-signed-commit` message, and every `gh pr create` body passed with `--body` or `--body-file`, with `Co-authored-by: <name> <email>`. Return `null` to publish without a co-author. `Co-authored-by` lines the agent writes itself are kept, and the trailer joins their block so they still count. Pull requests created without a body flag, such as with `--fill` or `--template`, and other paths, such as `gh api`, are not attributed.
 
 ```ts
 git({

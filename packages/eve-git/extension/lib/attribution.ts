@@ -10,6 +10,8 @@ export interface GitHubCoAuthor {
 /** Pull request body flags accepted by `gh pr create`. */
 const BODY_FLAGS = new Set(["-b", "--body"]);
 const BODY_FILE_FLAGS = new Set(["-F", "--body-file"]);
+/** A `Key: value` line, the shape of every line in a git trailer block. */
+const TRAILER_LINE = /^[A-Za-z0-9][A-Za-z0-9-]*: \S/u;
 
 /** Format a validated `Co-authored-by` trailer. */
 export function coAuthorTrailer(coAuthor: GitHubCoAuthor): string {
@@ -24,12 +26,20 @@ export function coAuthorTrailer(coAuthor: GitHubCoAuthor): string {
   return `Co-authored-by: ${name} <${email}>`;
 }
 
-/** Append a trailer unless the body already carries it. */
+/**
+ * Append a trailer unless the body already carries it. Git and GitHub read
+ * only the last paragraph as trailers, so an existing trailer block is
+ * extended rather than followed by a new paragraph.
+ */
 export function withTrailer(body: string, trailer: string): string {
   const lines = body.split(/\r?\n/u).map((line) => line.trim().toLowerCase());
   if (lines.includes(trailer.toLowerCase())) return body;
   const trimmed = body.trimEnd();
-  return trimmed ? `${trimmed}\n\n${trailer}` : trailer;
+  if (!trimmed) return trailer;
+  const paragraphs = trimmed.split(/\r?\n[ \t]*\r?\n/u);
+  const last = paragraphs.at(-1)!.split(/\r?\n/u);
+  const extendsTrailers = paragraphs.length > 1 && last.every((line) => TRAILER_LINE.test(line));
+  return `${trimmed}${extendsTrailers ? "\n" : "\n\n"}${trailer}`;
 }
 
 /** True for the commands whose bodies carry attribution. */
@@ -63,7 +73,7 @@ export async function attributeCommand(
   // gh keeps the last body flag, so attribute that one.
   for (let index = result.length - 1; index >= 3; index -= 1) {
     const value = result[index]!;
-    const [flag, inline] = value.startsWith("--") ? splitInline(value) : [value, undefined];
+    const [flag, inline] = splitInline(value);
     if (BODY_FLAGS.has(flag)) {
       const body = withTrailer(inline ?? result[index + 1] ?? "", trailer);
       if (inline === undefined) result[index + 1] = body;
@@ -85,7 +95,13 @@ export async function attributeCommand(
   return result;
 }
 
+/** Split `--flag=value`, `-fvalue`, and `-f=value` the way gh's flag parser does. */
 function splitInline(value: string): [string, string | undefined] {
+  if (!value.startsWith("--")) {
+    if (!value.startsWith("-") || value.length <= 2) return [value, undefined];
+    const rest = value.slice(2);
+    return [value.slice(0, 2), rest.startsWith("=") ? rest.slice(1) : rest];
+  }
   const separator = value.indexOf("=");
   return separator === -1
     ? [value, undefined]

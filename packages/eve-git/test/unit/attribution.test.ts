@@ -37,6 +37,17 @@ test("appends the trailer once", () => {
   assert.equal(withTrailer(`Fix it.\n\n${TRAILER}`, TRAILER), `Fix it.\n\n${TRAILER}`);
 });
 
+test("extends an existing trailer block so earlier co-authors still count", () => {
+  const existing = "Fix it.\n\nCo-authored-by: A <a@x.y>\n";
+  assert.equal(withTrailer(existing, TRAILER), `Fix it.\n\nCo-authored-by: A <a@x.y>\n${TRAILER}`);
+  // A lone `Key: value` paragraph is the subject or prose, not a trailer block.
+  assert.equal(withTrailer("Note: details", TRAILER), `Note: details\n\n${TRAILER}`);
+  assert.equal(
+    withTrailer("Fix it.\n\nSee: this is prose\nacross lines", TRAILER),
+    `Fix it.\n\nSee: this is prose\nacross lines\n\n${TRAILER}`,
+  );
+});
+
 test("adds the trailer to signed commit bodies", async () => {
   assert.deepEqual(await attribute(["gh-signed-commit", "--repo", "o/r", "-m", "Fix"]), [
     "gh-signed-commit",
@@ -65,6 +76,18 @@ test("adds the trailer to pull request bodies without touching the model's file"
     "create",
     `--body=Why.\n\n${TRAILER}`,
   ]);
+  assert.deepEqual(await attribute(["gh", "pr", "create", "-bWhy."]), [
+    "gh",
+    "pr",
+    "create",
+    `-b=Why.\n\n${TRAILER}`,
+  ]);
+  assert.deepEqual(await attribute(["gh", "pr", "create", "-b=Why."]), [
+    "gh",
+    "pr",
+    "create",
+    `-b=Why.\n\n${TRAILER}`,
+  ]);
   const sandbox = files({ "/workspace/repo/pr.md": "Why.\n" });
   assert.deepEqual(await attribute(["gh", "pr", "create", "--body-file", "pr.md"], sandbox), [
     "gh",
@@ -75,12 +98,19 @@ test("adds the trailer to pull request bodies without touching the model's file"
   ]);
   assert.equal(sandbox.store.get("/tmp/body.md"), `Why.\n\n${TRAILER}`);
   assert.equal(sandbox.store.get("/workspace/repo/pr.md"), "Why.\n");
+  assert.deepEqual(await attribute(["gh", "pr", "create", "-Fpr.md"], sandbox), [
+    "gh",
+    "pr",
+    "create",
+    "-F=/tmp/body.md",
+  ]);
 });
 
 test("leaves other commands unchanged", async () => {
   for (const argv of [
     ["gh", "pr", "comment", "1", "--body", "hi"],
     ["gh", "pr", "create", "--fill"],
+    ["gh", "pr", "create", "--template", "bug.md"],
     ["git", "push", "origin", "HEAD"],
   ]) {
     assert.deepEqual(await attribute(argv), argv);
