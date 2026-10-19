@@ -458,21 +458,23 @@ eve add channel/chat-sdk-gchat
 import { createGoogleChatAdapter } from "@chat-adapter/gchat";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { gchat: createGoogleChatAdapter() },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -498,21 +500,25 @@ eve add channel/chat-sdk-whatsapp
 import { createWhatsAppAdapter } from "@chat-adapter/whatsapp";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { whatsapp: createWhatsAppAdapter() },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
+  // WhatsApp can't edit sent messages, so send each reply whole.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -538,27 +544,29 @@ eve add channel/chat-sdk-x
 import { createXAdapter } from "@chat-adapter/x";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { x: createXAdapter() },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
   // X buffers replies and posts once rather than editing a streamed message.
   streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onDirectMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -584,21 +592,25 @@ eve add channel/chat-sdk-messenger
 import { createMessengerAdapter } from "@chat-adapter/messenger";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { messenger: createMessengerAdapter() },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
+  // Messenger can't edit sent messages, so send each reply whole.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -635,7 +647,7 @@ eve add channel/chat-sdk-zernio
 import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -643,15 +655,17 @@ export const { bot, channel, send } = chatSdkChannel({
     zernio: createZernioAdapter(),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -686,7 +700,7 @@ eve add channel/chat-sdk-velt
 import { createVeltAdapter } from "@veltdev/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -699,15 +713,17 @@ export const { bot, channel, send } = chatSdkChannel({
     }),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -733,7 +749,7 @@ eve add channel/chat-sdk-sendblue
 import { createSendblueAdapter } from "chat-adapter-sendblue";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -741,16 +757,18 @@ export const { bot, channel, send } = chatSdkChannel({
     sendblue: createSendblueAdapter(),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
   streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -785,7 +803,7 @@ eve add channel/chat-sdk-novu
 import { createNovuAdapter } from "@novu/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -793,15 +811,17 @@ export const { bot, channel, send } = chatSdkChannel({
     novu: createNovuAdapter(),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -835,7 +855,7 @@ eve add channel/chat-sdk-liveblocks
 import { createLiveblocksAdapter } from "@liveblocks/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -848,15 +868,17 @@ export const { bot, channel, send } = chatSdkChannel({
     }),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -904,7 +926,7 @@ eve add channel/chat-sdk-kapso
 import { createKapsoAdapter } from "@kapso/chat-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -916,15 +938,19 @@ export const { bot, channel, send } = chatSdkChannel({
     }),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
+  // WhatsApp can't edit sent messages, so send each reply whole.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -973,7 +999,7 @@ eve add channel/chat-sdk-dial
 import { createDialAdapter } from "@getdial/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -985,15 +1011,19 @@ export const { bot, channel, send } = chatSdkChannel({
     }),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
+  // Text messages can't be edited after they're sent, so send each reply whole.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -1019,7 +1049,7 @@ eve add channel/chat-sdk-agentphone
 import { createAgentPhoneAdapter } from "@agentphone/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1031,15 +1061,19 @@ export const { bot, channel, send } = chatSdkChannel({
     }),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
+  // Text messages can't be edited after they're sent, so send each reply whole.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -1065,7 +1099,7 @@ eve add channel/chat-sdk-lark
 import { createLarkAdapter } from "@larksuite/vercel-chat-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1073,15 +1107,17 @@ export const { bot, channel, send } = chatSdkChannel({
     lark: createLarkAdapter(),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 await bot.initialize();
@@ -1102,14 +1138,14 @@ See the [Lark / Feishu adapter documentation](https://chat-sdk.dev/adapters/vend
 \`\`\`bash
 eve add channel/chat-sdk-beeper
 \`\`\``,
-    quickStart: `Create \`agent/channels/matrix.ts\`:
+    quickStart: `Create \`agent/channels/beeper.ts\`:
 
 \`\`\`ts
-// agent/channels/matrix.ts
+// agent/channels/beeper.ts
 import { createMatrixAdapter } from "@beeper/chat-adapter-matrix";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1117,15 +1153,17 @@ export const { bot, channel, send } = chatSdkChannel({
     matrix: createMatrixAdapter(),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 await bot.initialize();
@@ -1160,7 +1198,7 @@ eve add channel/chat-sdk-resend
 import { createResendAdapter } from "@resend/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
@@ -1171,15 +1209,19 @@ export const { bot, channel, send } = chatSdkChannel({
     }),
   },
   state: createMemoryState(),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
+  // Email can't be edited after it's sent, so send each reply whole.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 export default channel;
@@ -1213,7 +1255,7 @@ eve add channel/chat-sdk-gmail
 import { createGmailAdapter } from "@chat-adapter/gmail";
 import { createRedisState } from "@chat-adapter/state-redis";
 import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 export const gmail = createGmailAdapter();
 
@@ -1221,17 +1263,19 @@ export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { gmail },
   state: createRedisState({ keyPrefix: "gmail-agent" }),
+  // Hand every message to eve, even mid-reply, so eve can steer the running turn.
+  concurrency: "concurrent",
   // Gmail sends email once and cannot edit an in-progress response.
   streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
+  await send(messageToUserContent(message), { thread });
 });
 
 await bot.initialize();
