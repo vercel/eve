@@ -109,6 +109,7 @@ describe("prepareSuccessorStep", () => {
 
     await expect(
       prepareSuccessorStep({
+        handoffVersion: 3,
         migration: { kind: "incompatible", detail },
         sessionId: "session-1",
       }),
@@ -264,6 +265,7 @@ describe("stopUntrackedChildSessionsStep", () => {
 
 function validate(checkpoint: SessionCheckpoint) {
   return prepareSuccessorStep({
+    handoffVersion: 3,
     migration: { kind: "current", checkpoint, childRunIdsToStop: [] },
     sessionId: "session-1",
   });

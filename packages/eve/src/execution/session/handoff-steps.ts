@@ -153,6 +153,8 @@ export type SessionCheckpointValidation =
  * so it returns rather than throws: retrying the step can never change it.
  */
 export async function prepareSuccessorStep(input: {
+  /** Absent for version 1 sources, which predate the field. */
+  readonly handoffVersion: number | undefined;
   readonly migration: SessionCheckpointMigration;
   readonly sessionId: string;
 }): Promise<SessionCheckpointValidation> {
@@ -210,6 +212,14 @@ export async function prepareSuccessorStep(input: {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
   }
   await recordSessionOwner(input.sessionId);
+  // Owners on releases before version 3 release their addresses first. This
+  // line shows when none remain, which is when that compatibility can go.
+  if ((input.handoffVersion ?? 1) < SESSION_HANDOFF_VERSION) {
+    log.info("session moved from an owner that releases its addresses first", {
+      handoffVersion: input.handoffVersion ?? 1,
+      sessionId: input.sessionId,
+    });
+  }
   return { kind: "valid" };
 }
 

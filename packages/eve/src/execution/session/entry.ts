@@ -268,7 +268,11 @@ async function prepareSuccessor(
   const { sessionId } = input;
   // The previous owner may run an older eve build; read its checkpoint in this build's shape.
   const migration = migrateSessionCheckpoint(input.checkpoint);
-  const validation = await prepareSuccessorStep({ migration, sessionId });
+  const validation = await prepareSuccessorStep({
+    handoffVersion: input.handoffVersion,
+    migration,
+    sessionId,
+  });
   if (migration.kind === "incompatible" || validation.kind === "incompatible") {
     await signalSessionOwnerActivationStep({
       activation: {

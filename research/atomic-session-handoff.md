@@ -324,9 +324,15 @@ target deployment.
    successor compatibility. Delete markers and the release step from the owner side. Update
    [execution model and durability](../docs/concepts/execution-model-and-durability.mdx) (the
    compaction paragraph and handoff failure behavior). Add a `patch` changeset.
-4. **Retire v2 compatibility.** After one default session lifetime (30 days) from the release,
-   delete the ingress marker path, `SessionHandoffPendingError`, the v2 `active` branch, and the
-   marker token. Track this in a follow-up issue opened alongside step 3 (not opened yet).
+4. **Retire v2 compatibility, on evidence rather than a date.** Every session that is live when
+   this ships is owned by a run on an earlier release, and it can reach current code only through
+   a released handoff. The successor logs `session moved from an owner that releases its
+addresses first` each time it accepts one. Once production logs show none for a sustained
+   period, a later release may delete the ingress marker path, `SessionHandoffPendingError`,
+   `bootReleasedHandoffOwner`, and the marker token, as a deliberate breaking change in its
+   changeset. Sessions with disabled timeouts (`sessionTimeoutMs: false`) can stay on an earlier
+   owner indefinitely, so a fixed window would strand them. Track this in a follow-up issue
+   opened alongside step 3 (not opened yet).
 
 ## Validation
 
@@ -363,10 +369,9 @@ sent immediately after `session.waiting`, asserting one reply turn and an unbrok
   candidate still live when input arrives past the boot deadline. A watch then costs a wait plus
   a step every 10 s. A candidate that never boots holds the session's next input for up to the
   boot deadline; whether to also cancel such a candidate is deferred.
-- **Retirement window.** Sessions with `sessionTimeoutMs: false` can stay on a v2 owner beyond 30
-  days. After retirement, such a session's next release-based handoff could briefly read as
-  unowned to ingress. Accept this, or keep the marker read path until stranded-session revival
-  covers those owners.
+- **Retirement signal.** The released-path log shows sessions that moved, not sessions that are
+  still waiting on an earlier owner for their next message. Before retiring, decide whether the
+  log's silence is enough, or whether to count remaining owners by `$eve.version` in the World.
 
 ## Upstream follow-ups
 
