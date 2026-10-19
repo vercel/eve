@@ -1,11 +1,11 @@
 ---
 title: "Voice Notes"
-description: "Transcribe voice notes, voice messages, and other audio attachments so an eve agent can answer them."
+description: "Transcribe voice notes, voice messages, and other audio attachments with an AI Gateway transcription model so an eve agent can answer them."
 ---
 
 Voice notes and other audio files reach your agent, but the model does not hear them. eve stages each inbound audio file in the sandbox and gives the model only a label with its path, such as `Attached file /workspace/.eve/attachments/<hash>/voice-note.m4a (audio/mp4)`. To let the agent answer a voice note, add a tool that transcribes the staged file to text.
 
-The tool works for every channel that delivers audio as a file, including Slack voice clips, iMessage voice messages through [Photon](../channels/photon), and audio uploaded in [eve Web Chat](../channels/eve). See [Inbound attachments](../sandbox#inbound-attachments) for how eve stages files and which formats the model reads directly.
+The tool works for every channel that delivers audio as a file, such as Slack voice clips, audio uploaded in [eve Web Chat](../channels/eve), and attachments forwarded by [Chat SDK channels](../channels/chat-sdk#attachments). See [Inbound attachments](../sandbox#inbound-attachments) for how eve stages files and which formats the model reads directly.
 
 ## Add a transcription tool
 
@@ -22,7 +22,7 @@ import { transcribe } from "ai";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-const TRANSCRIPTION_MODEL = "openai/gpt-4o-mini-transcribe";
+const TRANSCRIPTION_MODEL = "openai/whisper-1";
 const ATTACHMENTS_DIR = "/workspace/.eve/attachments/";
 
 export default defineTool({
@@ -74,13 +74,21 @@ When a message has an audio attachment (`Attached file ... (audio/...)`), such a
 
 ## Choose a transcription model
 
-Set `TRANSCRIPTION_MODEL` to any AI Gateway transcription model, such as `openai/gpt-4o-mini-transcribe` or `openai/whisper-1`. Transcription is billed separately from the agent's chat model; see [AI Gateway pricing](https://vercel.com/docs/ai-gateway/pricing).
+Set `TRANSCRIPTION_MODEL` to any AI Gateway transcription model. Transcription models accept different audio formats, so pick one that decodes what your channels deliver. iMessage voice notes, for example, arrive as Opus audio in a CAF container (`audio/x-caf`). Through AI Gateway, these models handled an iMessage voice note as follows:
 
-Transcription models accept different audio formats. Send a sample from each channel you support, such as a Slack voice clip or an iMessage voice message, and confirm the model you choose transcribes it.
+| Model                           | Opus in CAF (`audio/x-caf`)                                      |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `openai/whisper-1`              | Transcribed                                                      |
+| `openai/gpt-4o-mini-transcribe` | Rejected: "This model does not support the format you provided." |
+| `spacexai/grok-stt`             | Rejected: "Failed to decode audio"                               |
+
+Send a sample from each channel you support and confirm the model you choose transcribes it. Transcription is billed separately from the agent's chat model; see [AI Gateway pricing](https://vercel.com/docs/ai-gateway/pricing).
 
 ## Handle failed transcriptions
 
 When `execute` throws, eve gives the error to the model as a tool error. The error messages above tell the model what to say: ask the user to resend a missing file, or to type the message when transcription fails. See [When a tool throws](../tools#when-a-tool-throws).
+
+Some audio never becomes a file the tool can read. A file over the channel's upload limit, 25 MB by default, or a file eve can't download reaches the agent as a short note instead.
 
 Transcription runs as a tool call, so the model sees the attachment label first and then calls the tool. Each voice note adds one tool call to the turn.
 
@@ -89,3 +97,4 @@ Transcription runs as a tool call, so the model sees the attachment label first 
 - How eve stores files and shows them to the model → [Inbound attachments](../sandbox#inbound-attachments)
 - Tool authoring and the `ctx` parameter → [Tools](../tools)
 - Slack attachment behavior → [Slack attachments](../channels/slack#attachments)
+- Forwarding Chat SDK attachments → [Chat SDK attachments](../channels/chat-sdk#attachments)

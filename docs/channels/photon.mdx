@@ -37,10 +37,6 @@ webhook lists each file without its bytes, so eve downloads it from Photon by
 its attachment id with the project's credentials. A failed download, or a file
 over 25 MB, reaches the agent as a short note.
 
-Voice messages arrive the same way, as audio files the model sees only as a
-label. To answer them, give the agent a transcription tool; see
-[Voice notes](../patterns/voice-notes).
-
 Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
 
 ```ts
