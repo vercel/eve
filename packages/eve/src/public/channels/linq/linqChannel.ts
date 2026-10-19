@@ -11,6 +11,15 @@ import {
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import type { Channel } from "#public/definitions/channel.js";
 import {
+  dispatchIMessageTapbacks,
+  iMessageTapbackTool,
+  type IMessageTapback,
+  type IMessageTapbackContext,
+  type IMessageTapbackResult,
+  type IMessageTapbackToolInput,
+} from "#public/channels/imessage-tapbacks.js";
+import type { ToolDefinition } from "#public/tools/index.js";
+import {
   createLinqAdapter,
   type LinqAdapterConfig,
   type LinqCredentialProvider,
@@ -66,6 +75,15 @@ export interface LinqChannelConfig {
     ctx: LinqInboundMessageContext,
     message: Message,
   ) => LinqInboundResultOrPromise;
+  /**
+   * Inbound tapback policy. Tapbacks are ignored by default. Return a result to
+   * send the tapback to the agent as a message such as `Tapback: Loved “See you at 7”`,
+   * or `null` to ignore it.
+   */
+  readonly onTapback?: (
+    ctx: IMessageTapbackContext,
+    tapback: IMessageTapback,
+  ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
   /** Override the default webhook route (`/eve/v1/linq`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -79,7 +97,13 @@ export interface LinqChannel extends Channel<
   ChatSdkChannelState,
   ChatSdkReceiveTarget,
   ChatSdkInstrumentationMetadata
-> {}
+> {
+  /**
+   * Returns a tool that lets the model react to the latest message in the
+   * conversation with a tapback. Export it from a file in `agent/tools/`.
+   */
+  tapbackTool(): ToolDefinition<IMessageTapbackToolInput, string>;
+}
 
 /**
  * Creates an eve channel for Linq-powered iMessage and SMS conversations.
@@ -118,8 +142,18 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
     await dispatchMessage(bridge, onMessage, thread, message);
   });
+  if (config.onTapback) dispatchIMessageTapbacks(bridge, config.onTapback);
 
-  return bridge.channel;
+  const channel: LinqChannel = Object.assign(bridge.channel, {
+    tapbackTool: () =>
+      iMessageTapbackTool({
+        adapterName: "linq",
+        bot: bridge.bot,
+        channel,
+        channelLabel: "Linq",
+      }),
+  });
+  return channel;
 }
 
 function normalizeCredentials(
@@ -156,7 +190,7 @@ async function resolveCredentialValue(value: LinqCredentialValue): Promise<strin
 }
 
 /** Default Linq auth projection for inbound Chat SDK message authors. */
-export function defaultLinqAuth(message: Message): SessionAuthContext {
+export function defaultLinqAuth(message: Pick<Message, "author">): SessionAuthContext {
   const attributes: Record<string, string> = {};
   if (message.author.userName !== undefined) attributes.user_name = message.author.userName;
   return {

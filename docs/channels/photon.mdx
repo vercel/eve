@@ -55,6 +55,51 @@ export default photonIMessageChannel({
 Set `route` to override the webhook path or `webhookVerifier` to use a different
 trusted-forwarder verifier.
 
+## Tapbacks
+
+eve ignores tapbacks people send unless you pass `onTapback`. It receives the
+tapback and returns the same result as `onMessage`, or `null` to ignore it:
+
+```ts title="agent/channels/photon.ts"
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { defaultPhotonAuth, photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+  onTapback(_ctx, tapback) {
+    if (!tapback.added) return null;
+    return { auth: defaultPhotonAuth(tapback) };
+  },
+});
+```
+
+The agent reads an accepted tapback as a message in the form iMessage uses when
+it shows a tapback as text, such as `Tapback: Loved “See you at 7”` or
+`Tapback: Removed a like tapback from a message`. The quoted text appears when
+Photon includes the message the tapback is on. `tapback.tapback` is `love`,
+`like`, `dislike`, `laugh`, `emphasize`, or `question`, or the emoji itself for
+an emoji tapback. `tapback.messageId` and `tapback.author` identify the message
+and the person. An accepted tapback starts or steers a turn like any other
+message, following `turnPolicy`. The agent's own tapbacks never reach
+`onTapback`.
+
+To let the agent send tapbacks, export the channel's tapback tool from a file in
+`agent/tools/`. The file name becomes the tool name:
+
+```ts title="agent/tools/tapback.ts"
+import photon from "../channels/photon";
+
+export default photon.tapbackTool();
+```
+
+The model calls it with one of the six standard tapbacks, such as
+`{ "tapback": "love" }`, and eve reacts to the latest message someone sent in
+the conversation. The model can send a tapback alongside a reply. To let a
+tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply).
+The tool is never added on its own, and subagents don't receive it. In a session
+that didn't come through this channel, such as a web chat, or before anyone has
+sent a message, the call fails with an error the model reads.
+
 ## Other hosts
 
 For a host without Vercel Connect, choose **Use portable credentials** during

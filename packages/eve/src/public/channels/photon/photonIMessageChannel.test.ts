@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, newMessage, send } = vi.hoisted(() => ({
+const { directMessage, newMessage, reaction, send } = vi.hoisted(() => ({
   directMessage: vi.fn(),
   newMessage: vi.fn(),
+  reaction: vi.fn(),
   send: vi.fn(),
 }));
 
@@ -12,6 +13,7 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
       getAdapter: () => ({ markRead: vi.fn() }),
       onDirectMessage: directMessage,
       onNewMessage: newMessage,
+      onReaction: reaction,
     },
     channel: { routes: [] },
     send,
@@ -26,12 +28,27 @@ vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
 }));
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
 
-import { photonIMessageChannel } from "#public/channels/photon/photonIMessageChannel.js";
+import {
+  defaultPhotonAuth,
+  photonIMessageChannel,
+} from "#public/channels/photon/photonIMessageChannel.js";
 import { Message } from "#compiled/chat/index.js";
 
 describe("photonIMessageChannel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("ignores tapbacks unless onTapback accepts them", () => {
+    const credentials = async () => ({ projectId: "project-id", projectSecret: "project-secret" });
+    photonIMessageChannel({ credentials });
+    expect(reaction).not.toHaveBeenCalled();
+
+    photonIMessageChannel({
+      credentials,
+      onTapback: (_ctx, tapback) => ({ auth: defaultPhotonAuth(tapback) }),
+    });
+    expect(reaction).toHaveBeenCalledTimes(1);
   });
 
   it("inherits the shared steering default for a direct message", async () => {

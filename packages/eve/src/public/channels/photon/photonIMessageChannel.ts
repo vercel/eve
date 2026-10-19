@@ -6,6 +6,15 @@ import {
   type ChatSdkChannelBridge,
   type ChatSdkChannelEvents,
 } from "#public/channels/chat-sdk/index.js";
+import {
+  dispatchIMessageTapbacks,
+  iMessageTapbackTool,
+  type IMessageTapback,
+  type IMessageTapbackContext,
+  type IMessageTapbackResult,
+  type IMessageTapbackToolInput,
+} from "#public/channels/imessage-tapbacks.js";
+import type { ToolDefinition } from "#public/tools/index.js";
 import type { Message, Thread } from "#compiled/chat/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
@@ -51,6 +60,15 @@ export interface PhotonIMessageChannelConfig {
     ctx: PhotonInboundMessageContext,
     message: Message,
   ) => PhotonInboundResultOrPromise;
+  /**
+   * Inbound tapback policy. Tapbacks are ignored by default. Return a result to
+   * send the tapback to the agent as a message such as `Tapback: Loved “See you at 7”`,
+   * or `null` to ignore it.
+   */
+  readonly onTapback?: (
+    ctx: IMessageTapbackContext,
+    tapback: IMessageTapback,
+  ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
   /** Override the default webhook route (`/eve/v1/photon`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -64,7 +82,13 @@ export interface PhotonIMessageChannelConfig {
 }
 
 /** First-class eve channel backed by Photon iMessage. */
-export interface PhotonIMessageChannel extends ChatSdkChannel {}
+export interface PhotonIMessageChannel extends ChatSdkChannel {
+  /**
+   * Returns a tool that lets the model react to the latest message in the
+   * conversation with a tapback. Export it from a file in `agent/tools/`.
+   */
+  tapbackTool(): ToolDefinition<IMessageTapbackToolInput, string>;
+}
 
 /**
  * Creates an eve channel for Photon-powered iMessage.
@@ -108,12 +132,22 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
     await dispatchMessage(bridge, onMessage, thread, message);
   });
+  if (config.onTapback) dispatchIMessageTapbacks(bridge, config.onTapback);
 
-  return bridge.channel;
+  const channel: PhotonIMessageChannel = Object.assign(bridge.channel, {
+    tapbackTool: () =>
+      iMessageTapbackTool({
+        adapterName: "imessage",
+        bot: bridge.bot,
+        channel,
+        channelLabel: "Photon iMessage",
+      }),
+  });
+  return channel;
 }
 
 /** Default Photon auth projection for inbound Chat SDK message authors. */
-export function defaultPhotonAuth(message: Message): SessionAuthContext {
+export function defaultPhotonAuth(message: Pick<Message, "author">): SessionAuthContext {
   const attributes: Record<string, string> = {};
   if (message.author.userName !== undefined) attributes.user_name = message.author.userName;
   return {

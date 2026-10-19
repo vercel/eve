@@ -98,6 +98,8 @@ export interface ChatSdkChannelState extends Record<string, unknown>, PromptQueu
   usersByPrincipal?: Record<string, string | null>;
   /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
+  /** Id of the latest message someone other than the bot sent in the thread. */
+  latestMessageId?: string;
   streamStepIndex?: number | null;
 }
 
@@ -383,6 +385,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
     ) {
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
+      recordLatestMessage(channel.state, payload);
       return defaultDeliverResult(payload);
     },
     events: mergedEvents,
@@ -719,6 +722,17 @@ function recordPrincipalUser(
     ...state.usersByPrincipal,
     [caller.principalId]: recorded === undefined ? author.userId : null,
   };
+}
+
+/**
+ * Records the delivery's message as the thread's latest. Session state keeps
+ * the thread from the first delivery, so its `currentMessage` goes stale.
+ */
+function recordLatestMessage(state: ChatSdkChannelState, payload: DeliverPayload): void {
+  const message = (payload.state as Partial<ChatSdkChannelState> | undefined)?.thread
+    ?.currentMessage;
+  if (message === undefined || message.author.isMe) return;
+  state.latestMessageId = message.id;
 }
 
 function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {

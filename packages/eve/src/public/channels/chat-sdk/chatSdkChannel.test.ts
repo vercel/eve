@@ -171,6 +171,39 @@ describe("chatSdkChannel", () => {
     ]);
   });
 
+  it("records each delivery's message as the thread's latest, skipping the bot's own", () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const adapter = getAdapter(bridge.channel);
+    const state: ChatSdkChannelState = { thread: null };
+    const deliver = (id: string, isMe: boolean) =>
+      adapter.deliver?.(
+        {
+          message: "hello",
+          state: {
+            thread: {
+              _type: "chat:Thread",
+              adapterName: "test",
+              channelId: CHANNEL_ID,
+              currentMessage: { author: { isBot: isMe, isMe, userId: id }, id },
+              id: THREAD_ID,
+              isDM: true,
+            },
+          },
+        } as never,
+        { session: { auth: { current: null } }, state } as never,
+      );
+
+    deliver("first", false);
+    deliver("second", false);
+    deliver("bot-post", true);
+
+    expect(state.latestMessageId).toBe("second");
+  });
+
   it("routes GET verification challenges to the adapter webhook", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
