@@ -22,7 +22,8 @@ import type {
 } from "#tracing/eve/agent-trace-state.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { eveActivationMetadata } from "#tracing/eve/metadata.js";
-import { eveCapture, eveTurnIdentity } from "#tracing/eve/operation-input.js";
+import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
+import type { createEveCapturePolicy } from "#tracing/eve/policy.js";
 import type { AgentTurnTraceState } from "#tracing/eve/agent-trace-state.js";
 import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
@@ -46,6 +47,7 @@ interface EveSessionTracingInput {
   readonly frameworkVersion: string;
   readonly stateStore: AgentTraceStateStore;
   readonly tracePolicy?: TraceCapturePolicy;
+  readonly capturePolicy: ReturnType<typeof createEveCapturePolicy>;
 }
 
 type SessionMetadata = Omit<InstrumentationSessionStartedEvent, "idempotencyKey" | "type">;
@@ -171,7 +173,7 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
         agentName,
         identity: eveTurnIdentity({ ...event, sessionId: event.sessionId }),
         framework: { name: "eve", version: input.frameworkVersion },
-        capture: eveCapture(reserved),
+        capture: { emit: true, ...(await input.capturePolicy.forOperation(event)) },
         reference: reserved,
         parent: nested ? adoptedSpanContext(caller) : undefined,
         links: activationLinks(turn),

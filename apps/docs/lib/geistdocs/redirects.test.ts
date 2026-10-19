@@ -194,6 +194,14 @@ describe("compatibilityRedirects", () => {
       permanent: true,
     });
   });
+
+  it("redirects the Hindsight extension registry item to its memory provider", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/r/extension/hindsight.json",
+      destination: "/r/memory/hindsight.json",
+      permanent: true,
+    });
+  });
 });
 
 describe("defaultLanguageRedirects", () => {

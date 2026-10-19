@@ -8,7 +8,7 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
 const REGISTRY_ROOT = fileURLToPath(new URL("../../../../apps/docs/", import.meta.url));
-const ITEM_NAME = "extension/hindsight";
+const ITEM_NAME = "memory/hindsight";
 
 const scenarioApp = useScenarioApp();
 
@@ -28,7 +28,7 @@ function dependencyEntry(specifier: string): [string, string] {
 
 describe(`registry ${ITEM_NAME}`, () => {
   // https://github.com/vercel/eve/issues/4961
-  it.fails("builds the agent the registry item installs", async () => {
+  it("builds the agent the registry item installs", async () => {
     const registry = JSON.parse(await readFile(join(REGISTRY_ROOT, "registry.json"), "utf8")) as {
       readonly items: readonly RegistryItem[];
     };

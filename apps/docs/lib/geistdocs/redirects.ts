@@ -119,6 +119,11 @@ export const compatibilityRedirects: DocsRedirect[] = [
     destination: "/r/memory/upstash-agentkit.json",
     permanent: true,
   },
+  {
+    source: "/r/extension/hindsight.json",
+    destination: "/r/memory/hindsight.json",
+    permanent: true,
+  },
   { source: "/evals", destination: "/benchmarks", permanent: true },
   { source: "/feed", destination: "/rss.xml", permanent: true },
   { source: "/feed.xml", destination: "/rss.xml", permanent: true },

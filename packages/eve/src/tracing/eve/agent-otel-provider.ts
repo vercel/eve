@@ -73,10 +73,16 @@ export function createAgentOtelInstrumentation(
   const recordInputs = input.recordInputs ?? false;
   const recordOutputs = input.recordOutputs ?? false;
   const tracing = createEveTracing(input);
+  const capturePolicy = createEveCapturePolicy({
+    stateStore: input.stateStore,
+    environment,
+    recordInputs,
+    recordOutputs,
+  });
   // Attempts run in one process; a lost serverless worker retries the whole step.
   const steps = new Map<string, AttemptOperation>();
   const modelSpans = new Map<string, Map<string, ModelOperation>>();
-  const sessionTracing = createEveSessionTracing({ ...input, environment, tracing });
+  const sessionTracing = createEveSessionTracing({ ...input, environment, tracing, capturePolicy });
   const { prepareSessionTrace, prepareTurnTrace } = sessionTracing;
 
   /** The attempt in its turn's tree, hydrating it when another process started it. */
@@ -105,13 +111,6 @@ export function createAgentOtelInstrumentation(
     actionStateFor: tools.stateFor,
   });
   const memory = createAgentMemoryInstrumentation({ ...input, environment, tracing });
-
-  const capturePolicy = createEveCapturePolicy({
-    stateStore: input.stateStore,
-    environment,
-    recordInputs,
-    recordOutputs,
-  });
 
   function turnState(scope: { sessionId: string; turnId: string }) {
     return input.stateStore.get("turn", JSON.stringify([scope.sessionId, scope.turnId]));
