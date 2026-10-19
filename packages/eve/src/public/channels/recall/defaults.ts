@@ -106,7 +106,16 @@ export const defaultEvents: RecallChannelEvents = {
     // Text before a tool call is the agent saying it's starting, which a
     // meeting wants to hear about while it waits.
     if (!event.message) return;
-    await channel.recall.sendChatMessage(event.message);
+    const { replyTo } = channel.state;
+    if (replyTo === undefined) {
+      await channel.recall.sendChatMessage(event.message);
+    } else if (channel.recall.supportsDirectMessages) {
+      await channel.recall.sendChatMessage(event.message, { to: replyTo });
+    } else {
+      await channel.recall.sendChatMessage(
+        "I got a private message, but this meeting's chat can't reply privately.",
+      );
+    }
   },
 
   // Meeting chat has no buttons, so a reply can only answer the request it sees.
@@ -131,8 +140,11 @@ export const defaultEvents: RecallChannelEvents = {
     }
     const participantId = participantIdOf(event.principalId, channel.recall.botId);
     // A sign-in link or code is a credential, so it goes only to the person signing in.
-    if (participantId !== undefined && channel.recall.supportsDirectMessages) {
-      await channel.recall.sendChatMessage(prompt, { to: participantId });
+    if (
+      participantId !== undefined &&
+      channel.recall.supportsDirectMessages &&
+      (await channel.recall.sendChatMessage(prompt, { to: participantId }))
+    ) {
       await channel.recall.sendChatMessage(
         `${displayName} needs a sign-in. I sent the link privately.`,
       );
