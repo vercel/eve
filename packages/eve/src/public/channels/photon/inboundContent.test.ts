@@ -32,7 +32,7 @@ describe("photonInboundContent", () => {
       ),
     ).toEqual([
       {
-        text: "Attachment voice was not retrieved: Photon did not provide a download for it.",
+        text: "Attachment voice was not retrieved: the platform did not provide a download for it.",
         type: "text",
       },
     ]);
