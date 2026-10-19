@@ -466,7 +466,7 @@ describe("session usage limit", () => {
 
     expect(check.kind).toBe("ask");
     if (check.kind !== "ask") throw new Error("expected ask");
-    expect(check.request.requestId).toBe("wrun_test:2:limit:usage:13");
+    expect(check.request.requestId).toBe("wrun_test:2:limit:usage:0");
     expect(check.request.kind).toBe("session-limit");
     expect(check.request.action).toMatchObject({
       input: {
@@ -474,6 +474,31 @@ describe("session usage limit", () => {
         window: { inputTokens: 10, outputTokens: 3 },
       },
     });
+  });
+
+  it("gives each approval window its own ask when only cost advances", () => {
+    const limit: SessionUsageLimit = ({ window }) => (window.costUsd ?? 0) >= 1;
+    const costStep = (session: HarnessSession) =>
+      addTurnUsage(session, "turn_0", extractTokenUsageDelta({ costUsd: 1, usage: undefined }));
+    const ask = (session: HarnessSession) => {
+      const check = checkSessionUsageLimit({ canAsk: true, limit, session, turnSequence: 0 });
+      if (check.kind !== "ask") throw new Error(`expected ask, got ${check.kind}`);
+      return check.request.requestId;
+    };
+
+    const first = costStep(makeSession());
+    const firstId = ask(first);
+    expect(ask(first)).toBe(firstId);
+
+    const approved = resetSessionUsageWindow(first);
+    expect(
+      checkSessionUsageLimit({ canAsk: true, limit, session: approved, turnSequence: 0 }),
+    ).toEqual({
+      kind: "within",
+    });
+    const second = costStep(approved);
+    expect(getSessionUsage(second)).toMatchObject({ costUsd: 2, inputTokens: 0, outputTokens: 0 });
+    expect(ask(second)).not.toBe(firstId);
   });
 });
 

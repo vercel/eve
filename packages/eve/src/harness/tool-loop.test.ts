@@ -2078,7 +2078,7 @@ describe("createToolLoopHarness", () => {
 
   // Session state with 12 input tokens already spent against a 12-token
   // window: the next model call is over the limit. The matching continuation
-  // request id is `test-session:0:limit:usage:15` (absolute total = 12 + 3).
+  // request id is `test-session:0:limit:usage:0` (the first usage window).
   function createLimitReachedSession(): HarnessSession {
     const usage = {
       cacheReadTokens: 0,
@@ -2099,7 +2099,7 @@ describe("createToolLoopHarness", () => {
     return createTestConfig(emit, { sessionUsageLimit: TWELVE_NEW_INPUT_TOKENS });
   }
 
-  const LIMIT_REQUEST_ID = "test-session:0:limit:usage:15";
+  const LIMIT_REQUEST_ID = "test-session:0:limit:usage:0";
   const LIMIT_PROMPT =
     "This session has hit its usage limit. This is a guardrail against defective " +
     "long-running sessions. If session activity looks fine, just approve to keep going.";

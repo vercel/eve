@@ -43,6 +43,7 @@ describe("isApprovalRequest", () => {
           total: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 12, outputTokens: 0 },
           turnSequence: 0,
           window: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 12, outputTokens: 0 },
+          windowIndex: 0,
         }),
       ),
     ).toBe(false);

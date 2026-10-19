@@ -30,14 +30,16 @@ export function createSessionLimitContinuationRequest(input: {
   /** The turn's `sequence`, which tells its prompt apart from another turn's at the same usage. */
   readonly turnSequence: number;
   readonly window: TokenUsage;
+  /** Which usage window the prompt is for; approving starts the next one. */
+  readonly windowIndex: number;
 }): InputRequest {
-  const { sessionId, total, turnSequence, window } = input;
-  // Re-raising an unanswered prompt within a turn keeps its id. Usage alone
-  // doesn't separate prompts across turns: after Stop the next turn is over
-  // budget at the same usage, and clients drop request ids they've seen. The
-  // sequence rather than the turn id keeps the id short enough for Discord's
+  const { sessionId, total, turnSequence, window, windowIndex } = input;
+  // Re-raising an unanswered prompt keeps its id; clients drop ids they've
+  // seen, so each window and each turn gets its own. Usage can't tell windows
+  // apart: a cost-only window leaves token counts unchanged. The sequence
+  // rather than the turn id keeps the id short enough for Discord's
   // 100-character `custom_id`.
-  const requestId = `${sessionId}:${String(turnSequence)}:limit:usage:${String(total.inputTokens + total.outputTokens)}`;
+  const requestId = `${sessionId}:${String(turnSequence)}:limit:usage:${String(windowIndex)}`;
   const actionInput: JsonObject = { total: toJsonUsage(total), window: toJsonUsage(window) };
 
   return {

@@ -13,7 +13,11 @@ import {
   createSessionLimitContinuationRequest,
   toJsonUsage,
 } from "#harness/hitl/budget-request.js";
-import { getSessionUsage, getSessionUsageWindow } from "#harness/turn-tag-state.js";
+import {
+  getSessionUsage,
+  getSessionUsageWindow,
+  getSessionUsageWindowIndex,
+} from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { InputRequest } from "#shared/input.js";
@@ -62,6 +66,7 @@ export function checkSessionUsageLimit(input: {
         total,
         turnSequence: input.turnSequence,
         window,
+        windowIndex: getSessionUsageWindowIndex(input.session),
       }),
     };
   }

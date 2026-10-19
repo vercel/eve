@@ -26,6 +26,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
 const SESSION_USAGE_WINDOW_START_KEY = "eve.harness.sessionUsageWindowStart";
+const SESSION_USAGE_WINDOW_INDEX_KEY = "eve.harness.sessionUsageWindowIndex";
 
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
@@ -98,9 +99,15 @@ export function resetSessionUsageWindow<T extends Pick<HarnessSession, "state">>
     ...session,
     state: {
       ...session.state,
+      [SESSION_USAGE_WINDOW_INDEX_KEY]: getSessionUsageWindowIndex(session) + 1,
       [SESSION_USAGE_WINDOW_START_KEY]: getSessionTokenUsage(session),
     },
   };
+}
+
+/** How many usage windows the session has started before its current one. */
+export function getSessionUsageWindowIndex(session: Pick<HarnessSession, "state">): number {
+  return (session.state?.[SESSION_USAGE_WINDOW_INDEX_KEY] as number | undefined) ?? 0;
 }
 
 function getWindowStart(session: Pick<HarnessSession, "state">): TokenUsageTotals {

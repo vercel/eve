@@ -447,8 +447,8 @@ it("reaches the next budget prompt after a grant without an older approval [cont
   await f.drive(f.respond("session_limit_continuation", "continue"));
   expect(f.executions).toEqual(["read"]);
   expect(f.pending().map((r) => r.kind)).toEqual(["session-limit"]);
-  // Two model calls so far, 1 input + 1 output token each: total 4.
-  expect(f.pending()[0]?.requestId).toContain(":limit:usage:4");
+  // The grant started the second usage window.
+  expect(f.pending()[0]?.requestId).toMatch(/:limit:usage:1$/u);
 });
 
 for (const pending of [true, false]) {

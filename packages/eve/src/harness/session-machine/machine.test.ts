@@ -684,6 +684,7 @@ describe("answers", () => {
       total: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 101, outputTokens: 0 },
       turnSequence: 1,
       window: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 101, outputTokens: 0 },
+      windowIndex: 0,
     });
 
     async function exhausted() {
