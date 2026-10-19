@@ -24,7 +24,7 @@ import {
   requestLimit,
   requireSignIn,
 } from "./approvals.js";
-import { checkSessionUsageLimit } from "./budget.js";
+import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
 import { retireActiveCandidates } from "./candidates.js";
 import { isEmptyInput } from "./delivery.js";
 import { holdForInput } from "./intake.js";
@@ -116,6 +116,7 @@ export async function enforceBudget(
 ): Promise<StepResult | undefined> {
   const limit = checkSessionUsageLimit({
     canAsk: step.emit !== undefined && step.config.capabilities?.requestInput === true,
+    limit: step.config.sessionUsageLimit ?? DEFAULT_SESSION_USAGE_LIMIT,
     session: step.session,
     turnSequence: step.position().sequence,
   });

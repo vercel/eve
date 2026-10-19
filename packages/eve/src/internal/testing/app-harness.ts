@@ -44,12 +44,7 @@ interface TestAppDescriptor {
   readonly agent?: {
     /** Full agent definition; overrides `model` and `limits`. */
     readonly definition?: import("#public/definitions/agent.js").AgentDefinition;
-    readonly limits?: {
-      readonly maxInputTokensPerSession?: number | false;
-      readonly maxOutputTokensPerSession?: number | false;
-      readonly maxTokenCostUsdPerSession?: number | false;
-      readonly sessionTimeoutMs?: number | false;
-    };
+    readonly limits?: import("#shared/agent-definition.js").AgentLimitsDefinition;
     readonly model?: string;
     readonly name?: string;
   };

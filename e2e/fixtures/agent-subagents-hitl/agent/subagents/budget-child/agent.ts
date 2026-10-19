@@ -7,7 +7,7 @@ import { mockModel } from "eve/evals";
  */
 export default defineAgent({
   description: "Record the release step, then confirm it.",
-  limits: { maxInputTokensPerSession: 1 },
+  limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
   model: mockModel(({ toolResults }) =>
     toolResults.some((entry) => entry.name === "record_step")
       ? "BUDGET-CHILD-RESULT recorded"

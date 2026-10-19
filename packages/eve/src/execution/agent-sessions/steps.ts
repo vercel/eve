@@ -328,7 +328,6 @@ async function startLocalSession(
     graph: bundle.graph,
     inheritedConversation: context.conversation,
     initiatorAuth: auth.initiator,
-    limits: context.limits,
     parent: createParentContext(context, input.replyTo),
     sandboxSessionId: context.sandbox.sessionId,
     selfAgent: target.source.type === "runtime",

@@ -17,13 +17,15 @@ import { resolveDynamicSkillDefinition } from "#runtime/resolve-dynamic-skill.js
 import { resolveDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
 import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
+import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type {
   ResolvedAgent,
   ResolvedChannelDefinition,
   ResolvedSkillDefinition,
   ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
-import type { AgentToolExposure } from "#shared/agent-definition.js";
+import type { AgentToolExposure, SessionUsageLimit } from "#shared/agent-definition.js";
 
 /**
  * Input for resolving one compiled authored agent into a runtime-owned model.
@@ -133,8 +135,34 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   };
 
   return "config" in input.manifest
-    ? { ...resolvedAgent, config: createResolvedAgentConfig(input.manifest) }
+    ? {
+        ...resolvedAgent,
+        config: createResolvedAgentConfig(
+          input.manifest,
+          await loadSessionUsageLimit(input.manifest, input.moduleMap, input.nodeId),
+        ),
+      }
     : resolvedAgent;
+}
+
+/** Loads the authored `limits.sessionUsage` function, which the manifest can only mark. */
+async function loadSessionUsageLimit(
+  manifest: CompiledAgentNodeManifest,
+  moduleMap: CompiledModuleMap,
+  nodeId: string | undefined,
+): Promise<SessionUsageLimit | undefined> {
+  const source = manifest.config.source;
+  if (manifest.config.limits?.sessionUsage !== true || source === undefined) return undefined;
+  const definition = await loadResolvedModuleExport({
+    definition: source,
+    kindLabel: "agent config",
+    moduleMap,
+    nodeId,
+  });
+  return normalizeAgentDefinition(
+    definition,
+    `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
+  ).limits?.sessionUsage;
 }
 
 function requireBindingOwner(
@@ -177,6 +205,7 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
+  sessionUsage: SessionUsageLimit | undefined,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
@@ -261,12 +290,7 @@ function createResolvedAgentConfig(
   }
 
   if (manifest.config.limits !== undefined) {
-    config.limits = {
-      maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
-      maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
-      maxTokenCostUsdPerSession: manifest.config.limits.maxTokenCostUsdPerSession,
-      sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
-    };
+    config.limits = { sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs, sessionUsage };
   }
 
   if (manifest.config.dynamicModel !== undefined) {

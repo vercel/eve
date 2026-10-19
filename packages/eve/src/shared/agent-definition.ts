@@ -1,6 +1,7 @@
 import type { CallSettings, LanguageModel } from "ai";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import {
   isDynamicSentinel,
   type DynamicResolveContext,
@@ -184,48 +185,28 @@ export interface AgentLimitsDefinition {
    */
   readonly sessionTimeoutMs?: number | false;
   /**
-   * Maximum new input tokens accumulated by one durable session: uncached
-   * input plus cache writes. Cache reads don't count. When the provider
-   * reports no cache details, all input counts.
+   * Decides whether a session has reached its usage limit. eve calls it before
+   * each model call; returning `true` pauses the turn on a continuation prompt,
+   * or fails it when nobody can answer. Approving starts a new window.
    *
-   * eve checks this before starting each model call. The model call that crosses
-   * the limit is allowed to finish because providers only report exact usage
-   * after the call completes; later model calls in the same session are blocked.
+   * Subagent sessions without their own `sessionUsage` use the root agent's.
+   * Return `false` to leave sessions uncapped.
    *
-   * `false` disables the limit: the session is uncapped.
-   *
-   * Delegated subagent sessions default to the delegating parent's remaining
-   * quota at dispatch time, and the parent's remaining quota always caps an
-   * authored child limit — a child can never outspend its parent's budget.
-   *
-   * @default 40_000_000 for root sessions; the parent's remaining quota for delegated subagent sessions
+   * @default ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000
    */
-  readonly maxInputTokensPerSession?: number | false;
-  /**
-   * Maximum provider-reported output tokens accumulated by one durable session.
-   *
-   * eve checks this before starting each model call. The model call that crosses
-   * the limit is allowed to finish because providers only report exact usage
-   * after the call completes; later model calls in the same session are blocked.
-   *
-   * `false` disables the limit. Unset by default; delegated subagent sessions
-   * inherit the parent's remaining output quota when the parent has one.
-   */
-  readonly maxOutputTokensPerSession?: number | false;
-  /**
-   * Maximum provider-reported model token cost accumulated by one durable
-   * session, in US dollars.
-   *
-   * eve checks this before starting each model call. The model call that
-   * crosses the limit is allowed to finish because providers report cost only
-   * after the call completes; later model calls in the same session are
-   * blocked.
-   *
-   * `false` disables the limit. Unset by default; delegated subagent sessions
-   * inherit the parent's remaining token-cost quota when the parent has one.
-   */
-  readonly maxTokenCostUsdPerSession?: number | false;
+  readonly sessionUsage?: SessionUsageLimit;
 }
+
+/**
+ * Usage limit check for one session. `inputTokens` includes cache reads and
+ * writes. Usage counts what the session's subagents spent once they reply.
+ */
+export type SessionUsageLimit = (usage: {
+  /** Everything the session has spent. */
+  readonly total: TokenUsage;
+  /** What the session has spent since the last approved continuation. */
+  readonly window: TokenUsage;
+}) => boolean;
 
 /**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
@@ -356,8 +337,17 @@ export type InternalAgentDefinition = {
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   tool?: AgentToolExposure;
-  limits?: AgentLimitsDefinition;
+  limits?: CompiledAgentLimitsDefinition;
 };
+
+/**
+ * Compiled `limits`. `sessionUsage` is a function, so the manifest only marks that the agent
+ * config module authors one; the runtime loads it from `source`.
+ */
+export interface CompiledAgentLimitsDefinition {
+  readonly sessionTimeoutMs?: number | false;
+  readonly sessionUsage?: true;
+}
 
 /**
  * Shared public definition for an agent.

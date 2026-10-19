@@ -1,6 +1,5 @@
 import type {
   ChannelInstrumentationProjection,
-  RunSessionLimits,
   SessionCapabilities,
   SessionParent,
   SessionTraceRoot,
@@ -15,9 +14,7 @@ import {
   type DurableCompiledArtifactsSource,
 } from "#runtime/durable-compiled-artifacts-source.js";
 import type { SandboxState } from "#sandbox/state.js";
-import { findTask, readTaskTable } from "#execution/tasks/table.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
-import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 import {
   resolveToolCallAgentTrace,
@@ -46,8 +43,6 @@ export interface AgentSessionContext {
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
   readonly dynamicSelections: DynamicSubagentSelections;
-  /** The token budget each session inherits: its share of the caller's remaining quota. */
-  readonly limits: RunSessionLimits;
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** The calling session, turn, and tool call, recorded as each session's lineage. */
   readonly parent: SessionParent;
@@ -85,29 +80,10 @@ type CallerDispatch = Pick<
   | "workflowAgents"
 >;
 
-/**
- * The token budget every session a model step's calls open inherits: the
- * caller's remaining quota split evenly across the agent tasks the step
- * starts, local or remote, so those tasks are bounded by the remainder
- * together. Sessions a workflow tool opens with `ctx.agent` get the same
- * share without dividing it further. A call to a running task starts none,
- * so it takes no share.
- */
-export function resolveStepAgentLimits(
-  caller: Pick<PreparedCoordinationDispatch, "plan" | "session">,
-): RunSessionLimits {
-  const table = readTaskTable(caller.session.state);
-  const agentTasksStarted = caller.plan.filter(
-    ({ entry }) => entry.entryPoint === "serve" && findTask(table, entry.taskId)?.kind === "agent",
-  ).length;
-  return resolveRemainingSessionTokenLimits(caller.session, agentTasksStarted);
-}
-
 /** Captures the agent session context for one workflow tool call, in the step that admits it. */
 export function captureAgentSessionContext(
   caller: CallerDispatch,
   callId: string,
-  limits: RunSessionLimits,
 ): AgentSessionContext {
   const { batch, session } = caller;
   return {
@@ -122,7 +98,6 @@ export function captureAgentSessionContext(
     channelMetadata: caller.channelMetadata,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
-    limits,
     localDevRequest: caller.localDevRequest,
     parent: {
       callId,

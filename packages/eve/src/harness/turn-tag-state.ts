@@ -21,21 +21,11 @@
  * the shared {@link TokenUsage} contract.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import {
-  findRuntimeUsageLimitViolation,
-  grantRuntimeUsageLimits,
-  remainingRuntimeUsageQuota,
-  resolveRuntimeUsageLimits,
-  type SessionRuntimeUsageLimits,
-  type SessionUsageLimitViolation,
-} from "#harness/session-usage-limits.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-
-export type { SessionRuntimeUsageLimits, SessionUsageLimitViolation };
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
-const SESSION_RUNTIME_USAGE_LIMIT_KEY = "eve.harness.sessionRuntimeTokenLimit";
+const SESSION_USAGE_WINDOW_START_KEY = "eve.harness.sessionUsageWindowStart";
 
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
@@ -95,87 +85,29 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
 }
 
 /**
- * The lifetime-usage ceilings currently in force, per axis. An axis is
- * absent when the configured limit leaves it uncapped. Before any granted
- * continuation the runtime limit equals the configured limit; each grant
- * re-anchors it to `usage + configured limit` via
- * {@link bumpSessionRuntimeUsageLimits}.
+ * What the session spent since the last approved continuation, or since it
+ * started. This is the `window` the session usage limit sees.
  */
-export function getSessionRuntimeUsageLimits(
-  session: Pick<HarnessSession, "limits" | "state">,
-): SessionRuntimeUsageLimits {
-  const stored = session.state?.[SESSION_RUNTIME_USAGE_LIMIT_KEY] as
-    | SessionRuntimeUsageLimits
-    | undefined;
-  return resolveRuntimeUsageLimits({
-    configured: configuredSessionUsageLimits(session),
-    stored,
-  });
+export function getSessionUsageWindow(session: Pick<HarnessSession, "state">): TokenUsage {
+  return toUsage(subtractTokenUsage(getSessionTokenUsage(session), getWindowStart(session)));
 }
 
-/**
- * Bumps the runtime usage limits after the user grants a continuation. Each
- * capped axis is re-anchored to `current budget usage + configured limit`, so one
- * approval buys one full configured window even after an overshoot. All axes
- * bump together to avoid back-to-back prompts. Configured limits never change.
- */
-export function bumpSessionRuntimeUsageLimits(session: HarnessSession): HarnessSession {
-  const bumped = grantRuntimeUsageLimits({
-    configured: configuredSessionUsageLimits(session),
-    usage: getSessionBudgetUsage(session),
-  });
+/** Starts a new usage window at the session's current totals, after an approved continuation. */
+export function resetSessionUsageWindow<T extends Pick<HarnessSession, "state">>(session: T): T {
   return {
     ...session,
     state: {
       ...session.state,
-      [SESSION_RUNTIME_USAGE_LIMIT_KEY]: bumped satisfies SessionRuntimeUsageLimits,
+      [SESSION_USAGE_WINDOW_START_KEY]: getSessionTokenUsage(session),
     },
   };
 }
 
-/**
- * Remaining lifetime usage quota under the runtime limits, per axis.
- * `false` marks an uncapped axis. This is the pool a delegated child's
- * budget is granted from.
- */
-export function getSessionRemainingUsageQuota(session: Pick<HarnessSession, "limits" | "state">): {
-  costUsd: number | false;
-  inputTokens: number | false;
-  outputTokens: number | false;
-} {
-  const runtime = getSessionRuntimeUsageLimits(session);
-  return remainingRuntimeUsageQuota({ runtime, usage: getSessionBudgetUsage(session) });
-}
-
-export function getSessionUsageLimitViolation(
-  session: Pick<HarnessSession, "limits" | "state">,
-): SessionUsageLimitViolation | null {
-  const runtime = getSessionRuntimeUsageLimits(session);
-  return findRuntimeUsageLimitViolation({
-    configured: configuredSessionUsageLimits(session),
-    runtime,
-    usage: getSessionBudgetUsage(session),
-  });
-}
-
-/**
- * The session's usage as the limits count it. Cache reads are replayed history, not new work,
- * so the input axis counts only new input: uncached input plus cache writes. A provider that
- * reports no cache details counts its full input, as before.
- */
-function getSessionBudgetUsage(session: Pick<HarnessSession, "state">): TokenUsageTotals {
-  const usage = getSessionTokenUsage(session);
-  return { ...usage, inputTokens: Math.max(0, usage.inputTokens - usage.cacheReadTokens) };
-}
-
-function configuredSessionUsageLimits(
-  session: Pick<HarnessSession, "limits">,
-): SessionRuntimeUsageLimits {
-  return {
-    costUsd: session.limits?.maxTokenCostUsdPerSession,
-    inputTokens: session.limits?.maxInputTokensPerSession,
-    outputTokens: session.limits?.maxOutputTokensPerSession,
-  };
+function getWindowStart(session: Pick<HarnessSession, "state">): TokenUsageTotals {
+  return (
+    (session.state?.[SESSION_USAGE_WINDOW_START_KEY] as TokenUsageTotals | undefined) ??
+    ZERO_TOKEN_USAGE
+  );
 }
 
 /**
@@ -201,13 +133,7 @@ export function takeSessionUsageDelta<T extends Pick<HarnessSession, "state">>(
     (session.state?.[REPORTED_SESSION_USAGE_STATE_KEY] as TokenUsageTotals | undefined) ??
     ZERO_TOKEN_USAGE;
   return {
-    delta: {
-      cacheReadTokens: totals.cacheReadTokens - reported.cacheReadTokens,
-      cacheWriteTokens: totals.cacheWriteTokens - reported.cacheWriteTokens,
-      costUsd: totals.sawCost || reported.sawCost ? totals.costUsd - reported.costUsd : undefined,
-      inputTokens: totals.inputTokens - reported.inputTokens,
-      outputTokens: totals.outputTokens - reported.outputTokens,
-    },
+    delta: toUsage(subtractTokenUsage(totals, reported)),
     session: {
       ...session,
       state: {
@@ -328,6 +254,17 @@ function addTokenUsage(base: TokenUsageTotals, delta: TokenUsageTotals): TokenUs
     inputTokens: base.inputTokens + delta.inputTokens,
     outputTokens: base.outputTokens + delta.outputTokens,
     sawCost: base.sawCost || delta.sawCost,
+  };
+}
+
+function subtractTokenUsage(total: TokenUsageTotals, base: TokenUsageTotals): TokenUsageTotals {
+  return {
+    cacheReadTokens: total.cacheReadTokens - base.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens - base.cacheWriteTokens,
+    costUsd: total.costUsd - base.costUsd,
+    inputTokens: total.inputTokens - base.inputTokens,
+    outputTokens: total.outputTokens - base.outputTokens,
+    sawCost: total.sawCost || base.sawCost,
   };
 }
 

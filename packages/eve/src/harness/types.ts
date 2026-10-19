@@ -15,7 +15,7 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
@@ -80,7 +80,6 @@ export interface HarnessSessionBase {
   readonly agent: SessionAgent;
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
-  readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
    * Stable identifier of the top user-facing session in the dispatch
@@ -112,30 +111,6 @@ export function requireSessionModelReference(session: HarnessSession): RuntimeMo
     throw new Error("Expected a concrete model selection for the active model call.");
   }
   return reference;
-}
-
-/**
- * Token limits stored on one durable session.
- */
-export interface SessionLimits {
-  /**
-   * Maximum new input tokens (input minus cache reads) this durable session
-   * may spend before eve refuses to start another model call. Absent when the session
-   * is uncapped. Root sessions default to 40M unless authored otherwise;
-   * delegated subagent sessions receive the parent's remaining quota at
-   * dispatch time.
-   */
-  readonly maxInputTokensPerSession?: number;
-  /**
-   * Maximum provider-reported output tokens this durable session may spend before
-   * eve refuses to start another model call.
-   */
-  readonly maxOutputTokensPerSession?: number;
-  /**
-   * Maximum provider-reported model token cost this durable session may spend,
-   * in US dollars, before eve refuses to start another model call.
-   */
-  readonly maxTokenCostUsdPerSession?: number;
 }
 
 /**
@@ -361,6 +336,8 @@ export interface ToolLoopHarnessConfig {
    * authoritative server-side metadata.
    */
   readonly runtimeIdentity?: RuntimeIdentity;
+  /** The agent's `limits.sessionUsage`; the default limit applies when absent. */
+  readonly sessionUsageLimit?: SessionUsageLimit;
   /**
    * Unified tool definitions for this harness step.
    *

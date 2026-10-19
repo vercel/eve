@@ -4,7 +4,6 @@ import type {
   HarnessSession,
   HarnessSessionBase,
   SessionAgent,
-  SessionLimits,
   SessionToolDefinition,
 } from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
@@ -12,18 +11,6 @@ import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
 const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
 const FALLBACK_COMPACTION_THRESHOLD = 100_000;
-export const DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION = 40_000_000;
-
-/**
- * Authored session token limits before resolution. `false` means the author
- * explicitly uncapped the axis (skipping the root default). Resolution maps
- * this shape onto the numeric {@link SessionLimits} the harness checks.
- */
-interface AuthoredSessionLimits {
-  readonly maxInputTokensPerSession?: number | false;
-  readonly maxOutputTokensPerSession?: number | false;
-  readonly maxTokenCostUsdPerSession?: number | false;
-}
 
 /**
  * Creates the durable compaction configuration used by one harness session.
@@ -72,7 +59,6 @@ interface CreateSessionInput {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly turnAgent: RuntimeTurnAgent;
-  readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
 }
 
@@ -97,7 +83,6 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   if (input.rootSessionId !== undefined) {
     session.rootSessionId = input.rootSessionId;
   }
-  session.limits = resolveSessionLimits(input);
   if (input.outputSchema !== undefined) {
     session.outputSchema = input.outputSchema;
   }
@@ -185,7 +170,6 @@ export function projectToDurableSession(session: HarnessSessionBase): DurableSes
       lastKnownPromptMessageCount?: number;
     };
     continuationToken: string;
-    limits?: HarnessSession["limits"];
     outputSchema?: HarnessSession["outputSchema"];
     rootSessionId?: string;
     sandboxState?: HarnessSession["sandboxState"];
@@ -208,9 +192,6 @@ export function projectToDurableSession(session: HarnessSessionBase): DurableSes
   }
   if (session.rootSessionId !== undefined) {
     durable.rootSessionId = session.rootSessionId;
-  }
-  if (session.limits !== undefined) {
-    durable.limits = session.limits;
   }
   if (session.outputSchema !== undefined) {
     durable.outputSchema = session.outputSchema;
@@ -256,12 +237,6 @@ export function hydrateDurableSession(input: {
   if (durable.rootSessionId !== undefined) {
     session.rootSessionId = durable.rootSessionId;
   }
-  // Persisted limits are already resolved (defaults, `false`, and any
-  // inherited parent budget applied at creation). Rehydrating verbatim keeps
-  // an uncapped session uncapped instead of re-applying the root default.
-  if (durable.limits !== undefined) {
-    session.limits = durable.limits;
-  }
   if (durable.outputSchema !== undefined) {
     session.outputSchema = durable.outputSchema;
   }
@@ -281,45 +256,4 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
     name: tool.name,
     outputSchema: tool.outputSchema,
   }));
-}
-
-function resolveSessionLimits(input: { readonly limits?: AuthoredSessionLimits }): SessionLimits {
-  const maxInputTokensPerSession = resolveSessionTokenLimit({
-    authored: input.limits?.maxInputTokensPerSession,
-    // Local children carry an explicit inherited value, including `false` for
-    // an uncapped parent. Remote lineage alone must not remove this default.
-    fallback: DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
-  });
-  const maxOutputTokensPerSession = resolveSessionTokenLimit({
-    authored: input.limits?.maxOutputTokensPerSession,
-    fallback: undefined,
-  });
-
-  const maxTokenCostUsdPerSession = resolveSessionTokenLimit({
-    authored: input.limits?.maxTokenCostUsdPerSession,
-    fallback: undefined,
-  });
-
-  const limits: {
-    maxInputTokensPerSession?: number;
-    maxOutputTokensPerSession?: number;
-    maxTokenCostUsdPerSession?: number;
-  } = {};
-  if (maxInputTokensPerSession !== undefined) {
-    limits.maxInputTokensPerSession = maxInputTokensPerSession;
-  }
-  if (maxOutputTokensPerSession !== undefined) {
-    limits.maxOutputTokensPerSession = maxOutputTokensPerSession;
-  }
-  if (maxTokenCostUsdPerSession !== undefined) {
-    limits.maxTokenCostUsdPerSession = maxTokenCostUsdPerSession;
-  }
-  return limits;
-}
-
-function resolveSessionTokenLimit(input: {
-  readonly authored: number | false | undefined;
-  readonly fallback: number | undefined;
-}): number | undefined {
-  return input.authored === false ? undefined : (input.authored ?? input.fallback);
 }

@@ -11,7 +11,6 @@ import type {
 } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -23,11 +22,6 @@ export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
 
 import type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
-
-export type RunSessionLimits = Pick<
-  AgentLimitsDefinition,
-  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxTokenCostUsdPerSession"
->;
 
 /** Identifies the session turn to cancel. */
 export interface CancelTurnInput {
@@ -545,13 +539,6 @@ export interface RunInput {
    * because trace state is scoped to one session's context.
    */
   readonly parentTraceContext?: SessionTraceContext;
-  /**
-   * Runtime-supplied session limits. Delegated local subagents use this to
-   * carry the parent's remaining quota and delegation caps with the same limit
-   * fields authors configure on agents; `false` means no inherited token cap
-   * for that axis.
-   */
-  readonly limits?: RunSessionLimits;
   /** Framework-owned metadata for a protocol-neutral external invocation. */
   readonly externalInvocation?: {
     readonly continuationToken: string;

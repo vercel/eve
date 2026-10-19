@@ -3,7 +3,6 @@ import { formatSubagentInput, type SubagentParentContext } from "#subagents/invo
 import type { JsonObject } from "#shared/json.js";
 import type {
   ChannelInstrumentationProjection,
-  RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
   RunInput,
@@ -78,8 +77,6 @@ export function buildSubagentRunInput(input: {
   /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
-  /** Session token limits the child inherits. */
-  readonly limits: RunSessionLimits;
   readonly parent: SubagentParentContext;
   readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
@@ -134,7 +131,6 @@ export function buildSubagentRunInput(input: {
       // `ctx.agent` already dropped an empty schema, so what arrives is one to honor.
       outputSchema: action.input.outputSchema as JsonObject | undefined,
     },
-    limits: input.limits,
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,

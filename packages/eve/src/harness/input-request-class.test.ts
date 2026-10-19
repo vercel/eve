@@ -40,8 +40,9 @@ describe("isApprovalRequest", () => {
       isApprovalRequest(
         createSessionLimitContinuationRequest({
           sessionId: "sess-test",
+          total: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 12, outputTokens: 0 },
           turnSequence: 0,
-          violation: { kind: "input", limit: 12, usedTokens: 12 },
+          window: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 12, outputTokens: 0 },
         }),
       ),
     ).toBe(false);

@@ -681,8 +681,9 @@ describe("answers", () => {
   describe("the session-limit prompt", () => {
     const request = createSessionLimitContinuationRequest({
       sessionId: "session-test",
+      total: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 101, outputTokens: 0 },
       turnSequence: 1,
-      violation: { kind: "input", limit: 100, usedTokens: 101 },
+      window: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 101, outputTokens: 0 },
     });
 
     async function exhausted() {

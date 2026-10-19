@@ -233,7 +233,7 @@ export default defineAgent({
       (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / TEST_CONTEXT_WINDOW_TOKENS,
   },
   limits: {
-    maxInputTokensPerSession: 100_000,
+    sessionUsage: ({ window }) => window.inputTokens >= 100_000,
   },
 });
 

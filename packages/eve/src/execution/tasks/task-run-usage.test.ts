@@ -13,12 +13,11 @@ import {
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
-  getSessionTokenUsage,
-  getSessionUsageLimitViolation,
+  getSessionUsage,
+  getSessionUsageWindow,
+  resetSessionUsageWindow,
   setTurnUsageState,
-  toUsage,
 } from "#harness/turn-tag-state.js";
-import type { HarnessSession } from "#harness/types.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
@@ -38,14 +37,10 @@ function usage(inputTokens: number, costUsd?: number): TokenUsage {
 }
 
 /**
- * A session that has spent `ownInputTokens` itself, under `limits`, with one
- * agent task, `name`, whose run is working on a call.
+ * A session that has spent `ownInputTokens` itself (all of it before a usage-window
+ * reset), with one agent task, `name`, whose run is working on a call.
  */
-function sessionWithTask(input: {
-  readonly limits?: HarnessSession["limits"];
-  readonly name: string;
-  readonly ownInputTokens: number;
-}): {
+function sessionWithTask(input: { readonly name: string; readonly ownInputTokens: number }): {
   readonly cursor: SessionStateCursor;
   readonly execution: SessionExecution;
   readonly from: WorkflowToolRunRef;
@@ -65,9 +60,8 @@ function sessionWithTask(input: {
     runId,
   });
   const snapshot = writeTaskTable(
-    setTurnUsageState(
-      { ...base.snapshot.session, limits: input.limits },
-      { ...own, session: own, turnId: "turn_1" },
+    resetSessionUsageWindow(
+      setTurnUsageState(base.snapshot.session, { ...own, session: own, turnId: "turn_1" }),
     ),
     table,
   );
@@ -108,13 +102,12 @@ function committed(cursor: SessionStateCursor): DurableSession {
 }
 
 function spent(cursor: SessionStateCursor): TokenUsage {
-  return toUsage(getSessionTokenUsage(committed(cursor)));
+  return getSessionUsage(committed(cursor));
 }
 
 describe("delegated agent usage", () => {
-  it("counts a task's usage once from its replies, usage reports, and outcome, however often they arrive, against the session's limits", async () => {
+  it("counts a task's usage once from its replies, usage reports, and outcome, however often they arrive, in the session's usage window", async () => {
     const alice = sessionWithTask({
-      limits: { maxInputTokensPerSession: 1_000 },
       name: "reviewer",
       ownInputTokens: 100,
     });
@@ -136,7 +129,8 @@ describe("delegated agent usage", () => {
     await alice.execution.handleWorkflowMessage({ from, kind: "usage", usage: usage(600, 0.5) });
 
     expect(spent(alice.cursor)).toEqual(usage(700, 0.5));
-    expect(getSessionUsageLimitViolation(committed(alice.cursor))).toBeNull();
+    // The window started after Alice's own 100 tokens, so it holds only the reviewer's spend.
+    expect(getSessionUsageWindow(committed(alice.cursor))).toEqual(usage(600, 0.5));
 
     const outcome = {
       from,
@@ -149,10 +143,6 @@ describe("delegated agent usage", () => {
     await alice.execution.handleWorkflowMessage(outcome);
 
     expect(spent(alice.cursor)).toEqual(usage(1_000, 0.75));
-    expect(getSessionUsageLimitViolation(committed(alice.cursor))).toEqual({
-      kind: "input",
-      limit: 1_000,
-      usedTokens: 1_000,
-    });
+    expect(getSessionUsageWindow(committed(alice.cursor))).toEqual(usage(900, 0.75));
   });
 });

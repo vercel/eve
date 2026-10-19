@@ -958,6 +958,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       ...createConfig(model, execute),
       capabilities: { requestInput: true },
       handleEvent: async () => {},
+      sessionUsageLimit: ({ window }) => window.inputTokens >= 12,
     } satisfies ToolLoopHarnessConfig;
     const usageState = {
       cacheReadTokens: 0,
@@ -967,13 +968,11 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       outputTokens: 3,
       sawCost: false,
     };
-    const session = setTurnUsageState(
-      {
-        ...createPendingApprovalSession(),
-        limits: { maxInputTokensPerSession: 12 },
-      },
-      { ...usageState, session: usageState, turnId: "turn_previous" },
-    );
+    const session = setTurnUsageState(createPendingApprovalSession(), {
+      ...usageState,
+      session: usageState,
+      turnId: "turn_previous",
+    });
     const runStep = createToolLoopHarness(config);
 
     const limited = await runStep(session, {

@@ -41,6 +41,7 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import {
   ConversationContextKey,
@@ -77,8 +78,9 @@ import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { createTask, writeTaskTable } from "#execution/tasks/table.js";
 import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
-  getSessionUsageLimitViolation,
   getSessionTokenUsage,
+  getSessionUsage,
+  getSessionUsageWindow,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -1984,112 +1986,99 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it.each([
-    {
-      // The limit counts new input (14 minus 2 cache reads); details keep the raw totals.
-      details: {
-        cacheReadTokens: 2,
-        inputTokens: 14,
-        kind: "input",
-        limit: 12,
-        outputTokens: 3,
-        usedTokens: 12,
-      },
-      message: "The session reached its configured input token limit.",
-      limits: {
-        maxInputTokensPerSession: 12,
-      },
-      usage: {
-        cacheReadTokens: 2,
-        cacheWriteTokens: 1,
-        costUsd: 0,
-        inputTokens: 14,
-        outputTokens: 3,
-        sawCost: false,
-      },
-      errorCode: "SESSION_TOKEN_LIMIT_REACHED",
-      tokenKind: "input",
-    },
-    {
-      details: {
-        inputTokens: 7,
-        kind: "output",
-        limit: 3,
-        outputTokens: 3,
-        usedTokens: 3,
-      },
-      message: "The session reached its configured output token limit.",
-      limits: {
-        maxOutputTokensPerSession: 3,
-      },
-      usage: {
-        cacheReadTokens: 2,
-        cacheWriteTokens: 1,
-        costUsd: 0,
-        inputTokens: 7,
-        outputTokens: 3,
-        sawCost: false,
-      },
-      errorCode: "SESSION_TOKEN_LIMIT_REACHED",
-      tokenKind: "output",
-    },
-    {
-      details: {
-        costUsd: 1.51,
-        kind: "token-cost",
-        limitUsd: 1.5,
-        usedCostUsd: 1.51,
-      },
-      message: "The session reached its configured model token-cost limit.",
-      limits: {
-        maxTokenCostUsdPerSession: 1.5,
-      },
-      usage: {
-        cacheReadTokens: 2,
-        cacheWriteTokens: 1,
-        costUsd: 1.51,
-        inputTokens: 7,
-        outputTokens: 3,
-        sawCost: true,
-      },
-      errorCode: "SESSION_TOKEN_COST_LIMIT_REACHED",
-      tokenKind: "model token-cost",
-    },
-  ])(
-    "fails fast after the $tokenKind limit when the session cannot request input",
-    async (testCase) => {
-      const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig(emit, { capabilities: undefined }));
-      const session = setTurnUsageState(createTestSession({ limits: testCase.limits }), {
-        turnId: "turn_previous",
-        ...testCase.usage,
-        session: testCase.usage,
-      });
+  // A limit that trips once the window holds 12 new input tokens (cache reads excluded).
+  const TWELVE_NEW_INPUT_TOKENS: SessionUsageLimit = ({ window }) =>
+    window.inputTokens - window.cacheReadTokens >= 12;
 
-      const result = await runStep(session, { message: "Hi again" });
+  it("fails fast past the usage limit when the session cannot request input", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig(emit, {
+        capabilities: undefined,
+        sessionUsageLimit: TWELVE_NEW_INPUT_TOKENS,
+      }),
+    );
+    // 14 input tokens of which 2 are cache reads: 12 new input tokens.
+    const usage = {
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      costUsd: 0,
+      inputTokens: 14,
+      outputTokens: 3,
+      sawCost: false,
+    };
+    const session = setTurnUsageState(createTestSession(), {
+      turnId: "turn_previous",
+      ...usage,
+      session: usage,
+    });
 
-      expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-      expect(result.next).toEqual({ done: true, output: "" });
-      expect(events.map((event) => event.type)).toEqual([
-        "session.started",
-        "turn.started",
-        "message.received",
-        "step.started",
-        "step.failed",
-        "turn.failed",
-        "session.failed",
-      ]);
-      expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
-        code: testCase.errorCode,
-        details: testCase.details,
-        message: testCase.message,
-      });
-    },
-  );
+    const result = await runStep(session, { message: "Hi again" });
+
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(result.next).toEqual({ done: true, output: "" });
+    expect(events.map((event) => event.type)).toEqual([
+      "session.started",
+      "turn.started",
+      "message.received",
+      "step.started",
+      "step.failed",
+      "turn.failed",
+      "session.failed",
+    ]);
+    // Details keep the raw totals; an unreported cost is left out.
+    const reported = { cacheReadTokens: 2, cacheWriteTokens: 1, inputTokens: 14, outputTokens: 3 };
+    expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
+      code: "SESSION_USAGE_LIMIT_REACHED",
+      details: { total: reported, window: reported },
+      message: "The session reached its usage limit.",
+    });
+    expect(
+      events.find((event) => event.type === "step.failed")?.data.details?.total,
+    ).not.toHaveProperty("costUsd");
+  });
+
+  it("hands the limit the session total and the usage window", async () => {
+    const { emit } = createEventCollector();
+    const sessionUsageLimit = vi.fn<SessionUsageLimit>(() => false);
+    const runStep = createToolLoopHarness(createTestConfig(emit, { sessionUsageLimit }));
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const usage = {
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      costUsd: 0.5,
+      inputTokens: 14,
+      outputTokens: 3,
+      sawCost: true,
+    };
+    const session = setTurnUsageState(createTestSession(), {
+      turnId: "turn_previous",
+      ...usage,
+      session: usage,
+    });
+
+    await runStep(session, { message: "Hi again" });
+
+    const expected = {
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      costUsd: 0.5,
+      inputTokens: 14,
+      outputTokens: 3,
+    };
+    expect(sessionUsageLimit).toHaveBeenCalledWith({ total: expected, window: expected });
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+  });
 
   // Session state with 12 input tokens already spent against a 12-token
-  // budget: the next model call is over the limit. The matching continuation
-  // request id is `test-session:limit:input:12` (absolute total = 12).
+  // window: the next model call is over the limit. The matching continuation
+  // request id is `test-session:0:limit:usage:15` (absolute total = 12 + 3).
   function createLimitReachedSession(): HarnessSession {
     const usage = {
       cacheReadTokens: 0,
@@ -2099,18 +2088,25 @@ describe("createToolLoopHarness", () => {
       outputTokens: 3,
       sawCost: false,
     };
-    return setTurnUsageState(createTestSession({ limits: { maxInputTokensPerSession: 12 } }), {
+    return setTurnUsageState(createTestSession(), {
       turnId: "turn_previous",
       ...usage,
       session: usage,
     });
   }
 
-  const LIMIT_REQUEST_ID = "test-session:0:limit:input:12";
+  function createLimitedConfig(emit?: HarnessEmitFn): ToolLoopHarnessConfig {
+    return createTestConfig(emit, { sessionUsageLimit: TWELVE_NEW_INPUT_TOKENS });
+  }
 
-  it("parks on a deterministic continuation prompt when the session reaches its token limit", async () => {
+  const LIMIT_REQUEST_ID = "test-session:0:limit:usage:15";
+  const LIMIT_PROMPT =
+    "This session has hit its usage limit. This is a guardrail against defective " +
+    "long-running sessions. If session activity looks fine, just approve to keep going.";
+
+  it("parks on a deterministic continuation prompt when the session reaches its usage limit", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const runStep = createToolLoopHarness(createLimitedConfig(emit));
 
     const result = await runStep(createLimitReachedSession(), { message: "Hi again" });
 
@@ -2126,12 +2122,13 @@ describe("createToolLoopHarness", () => {
       "turn.waiting",
     ]);
     const requested = events.find((event) => event.type === "input.requested");
+    const reported = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 12, outputTokens: 3 };
     expect(requested?.data).toMatchObject({
       requests: [
         {
           action: {
             callId: LIMIT_REQUEST_ID,
-            input: { kind: "input", limit: 12, usedTokens: 12 },
+            input: { total: reported, window: reported },
             kind: "tool-call",
             toolName: "session_limit_continuation",
           },
@@ -2142,13 +2139,14 @@ describe("createToolLoopHarness", () => {
             { id: "continue", label: "Approve", style: "primary" },
             { id: "stop", label: "Stop", style: "danger" },
           ],
+          prompt: LIMIT_PROMPT,
           requestId: LIMIT_REQUEST_ID,
         },
       ],
     });
   });
 
-  it("parks and grants a fresh model token-cost budget", async () => {
+  it("parks on a cost limit and starts a new window on continue", async () => {
     const usage = {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
@@ -2157,22 +2155,25 @@ describe("createToolLoopHarness", () => {
       outputTokens: 3,
       sawCost: true,
     };
-    const reached = setTurnUsageState(
-      createTestSession({ limits: { maxTokenCostUsdPerSession: 1.5 } }),
-      { turnId: "turn_previous", ...usage, session: usage },
-    );
+    const reached = setTurnUsageState(createTestSession(), {
+      turnId: "turn_previous",
+      ...usage,
+      session: usage,
+    });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const runStep = createToolLoopHarness(
+      createTestConfig(emit, { sessionUsageLimit: ({ window }) => (window.costUsd ?? 0) >= 1.5 }),
+    );
 
     const parked = await runStep(reached, { message: "Hi again" });
     expect(events.find((event) => event.type === "input.requested")?.data).toMatchObject({
       requests: [
         {
           action: {
-            input: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.51 },
+            input: { total: { costUsd: 1.51 }, window: { costUsd: 1.51 } },
           },
-          prompt: expect.stringContaining("$1.5 model token-cost limit"),
-          requestId: "test-session:0:limit:token-cost:1.51",
+          prompt: LIMIT_PROMPT,
+          requestId: LIMIT_REQUEST_ID,
         },
       ],
     });
@@ -2185,14 +2186,16 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
     const resumed = await runStep(parked.session, {
-      inputResponses: [{ optionId: "continue", requestId: "test-session:0:limit:token-cost:1.51" }],
+      inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
     });
 
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
-    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+    // The total keeps the spend; the window restarted at the grant.
+    expect(getSessionUsage(resumed.session)).toMatchObject({ costUsd: 1.51, inputTokens: 12 });
+    expect(getSessionUsageWindow(resumed.session)).toMatchObject({ costUsd: 0, inputTokens: 0 });
   });
 
-  it("grants a fresh token budget when the user continues past the limit prompt", async () => {
+  it("starts a new usage window when the user continues past the limit prompt", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -2202,7 +2205,7 @@ describe("createToolLoopHarness", () => {
       usage: { inputTokens: 7, outputTokens: 3 },
     });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const runStep = createToolLoopHarness(createLimitedConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
@@ -2213,7 +2216,12 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
     expect(resumed.next).toBeNull();
-    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+    // The window holds only the resumed call's spend; the total has both.
+    expect(getSessionUsageWindow(resumed.session)).toMatchObject({
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+    expect(getSessionUsage(resumed.session)).toMatchObject({ inputTokens: 19, outputTokens: 6 });
     // The parked user message survives into model history for the resumed call.
     expect(resumed.session.history).toContainEqual({
       content: "Hi again",
@@ -2240,7 +2248,7 @@ describe("createToolLoopHarness", () => {
     ).toBeGreaterThan(resolutionIndex);
   });
 
-  it("grants the budget when the user types the continue option as plain text", async () => {
+  it("starts a new window when the user types the continue option as plain text", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -2250,7 +2258,7 @@ describe("createToolLoopHarness", () => {
       usage: { inputTokens: 7, outputTokens: 3 },
     });
     const { emit } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const runStep = createToolLoopHarness(createLimitedConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
 
@@ -2260,12 +2268,12 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
     expect(resumed.next).toBeNull();
-    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+    expect(getSessionUsageWindow(resumed.session)).toMatchObject({ inputTokens: 7 });
   });
 
   it("cancels the turn when the user declines the limit continuation prompt", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const runStep = createToolLoopHarness(createLimitedConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
     const declined = runStep(parked.session, {
@@ -2283,15 +2291,25 @@ describe("createToolLoopHarness", () => {
     expect(events.some((event) => event.type === "session.completed")).toBe(false);
   });
 
-  it("fails a zero-budget session instead of raising a continuation that cannot grant tokens", async () => {
+  it("does not consult the limit before the session spent anything", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
-    const session = createTestSession({ limits: { maxInputTokensPerSession: 0 } });
+    const sessionUsageLimit = vi.fn<SessionUsageLimit>(() => true);
+    const runStep = createToolLoopHarness(createTestConfig(emit, { sessionUsageLimit }));
 
-    const result = await runStep(session, { message: "Hi again" });
+    // An empty window has nothing to judge, and approving could only start another empty one.
+    const result = await runStep(createTestSession(), { message: "Hi again" });
 
-    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    expect(result.next).toEqual({ done: true, output: "" });
+    expect(sessionUsageLimit).not.toHaveBeenCalled();
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(result.next).toBeNull();
     expect(events.some((event) => event.type === "input.requested")).toBe(false);
   });
 
@@ -2305,7 +2323,7 @@ describe("createToolLoopHarness", () => {
       usage: { inputTokens: 7, outputTokens: 3 },
     });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const runStep = createToolLoopHarness(createLimitedConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
     const beforeQueued = events.length;
@@ -2349,7 +2367,7 @@ describe("createToolLoopHarness", () => {
       usage: { inputTokens: 7, outputTokens: 3 },
     });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const runStep = createToolLoopHarness(createLimitedConfig(emit));
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
 
     // Before this change requestLimit published input.requested followed by
@@ -2389,7 +2407,7 @@ describe("createToolLoopHarness", () => {
       data: { resolutions: [{ requestId: LIMIT_REQUEST_ID, outcome: "answered" }] },
     });
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
-    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+    expect(getSessionUsageWindow(resumed.session)).toMatchObject({ inputTokens: 7 });
     expect(
       resumed.session.history.filter((message) => message.content === "also do this other thing"),
     ).toHaveLength(1);
@@ -8358,7 +8376,6 @@ describe("createToolLoopHarness", () => {
       }),
     );
     const state = { retained: "yes" };
-    const limits = { maxInputTokensPerSession: 1_000 };
     const outputSchema = { type: "string" };
     const session = createTestSession({
       compaction: {
@@ -8372,7 +8389,6 @@ describe("createToolLoopHarness", () => {
         { content: "Dynamic user instructions.", kind: "user" as const, role: "user" },
         { content: "old reply", role: "assistant" },
       ],
-      limits,
       outputSchema,
       state,
     });
@@ -8385,7 +8401,6 @@ describe("createToolLoopHarness", () => {
       compaction: { recentWindowSize: 10, threshold: 100_000 },
       continuationToken: session.continuationToken,
       history: [],
-      limits,
       outputSchema,
       sessionId: session.sessionId,
       state,

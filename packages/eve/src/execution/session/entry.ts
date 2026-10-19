@@ -188,7 +188,6 @@ export async function bootInitialOwner(
         | undefined,
       // With a first message, its delivery carries the history instead.
       history: input.input.message === undefined ? input.input.history : undefined,
-      inheritedLimits: input.limits,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
       rootSessionId: readRootSessionId(serializedContext),

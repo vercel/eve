@@ -144,10 +144,8 @@ export async function compileAgentConfig(
 
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
-      maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
-      maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
-      maxTokenCostUsdPerSession: definition.limits.maxTokenCostUsdPerSession,
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
+      sessionUsage: definition.limits.sessionUsage === undefined ? undefined : true,
     };
   }
 

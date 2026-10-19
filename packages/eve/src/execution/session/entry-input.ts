@@ -20,7 +20,6 @@ export interface InitialWorkflowEntryInput {
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
   readonly kind: "initial";
-  readonly limits?: RunInput["limits"];
   readonly ownerDeploymentId: string;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly sessionTimeoutMs?: number | false;

@@ -14,7 +14,7 @@ import type { SessionView, SuspendedStep } from "#harness/session-machine/view.j
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Step } from "#harness/step/context.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
+import { resetSessionUsageWindow } from "#harness/turn-tag-state.js";
 import type { HarnessToolLookup, StepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
@@ -213,13 +213,13 @@ export async function acceptHumanInput(
 }
 
 /**
- * Admits what a delivery decided before its turn calls the model: a session-limit answer grants a
- * fresh budget or ends the turn tree, and a step its answers completed, as denials do, commits.
+ * Admits what a delivery decided before its turn calls the model: a session-limit answer starts a
+ * new usage window or ends the turn tree, and a step its answers completed, as denials do, commits.
  */
 export async function admitApprovedWork(step: Step, work: ApprovedWork): Promise<void> {
   if (work.limit !== undefined) {
     if (!work.limit.granted) throw new SessionLimitDeclinedError();
-    step.session = bumpSessionRuntimeUsageLimits(step.session);
+    step.session = resetSessionUsageWindow(step.session);
   }
   await step.apply(settle(step.view(), { results: [] }));
 }

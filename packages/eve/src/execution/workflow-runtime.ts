@@ -184,7 +184,6 @@ export function createWorkflowRuntime(config: {
       ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
       serializedContext,
     };
-    if (input.limits !== undefined) workflowInput.limits = input.limits;
     if (input.continuationConflictCommand !== undefined) {
       workflowInput.continuationConflictCommand = input.continuationConflictCommand;
     }

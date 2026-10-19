@@ -311,10 +311,12 @@ async function expectFileReachesAgent(conversation: ChannelConversation, file: S
   ).toEqual([{ ...asSeen(file), url: undefined }]);
 }
 
-const ONE_TOKEN_BUDGET = { limits: { maxInputTokensPerSession: 1 } } as const;
+const ONE_TOKEN_BUDGET = {
+  limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+} as const satisfies Pick<ConversationOptions, "limits">;
 const BUDGET_PROMPT =
-  "This session has hit the input-token limit (1) per session. This is a guardrail against " +
-  "defective long-running sessions. If session activity looks fine, just approve to keep going.";
+  "This session has hit its usage limit. This is a guardrail against defective " +
+  "long-running sessions. If session activity looks fine, just approve to keep going.";
 const LOOK_UP_NOTES = `Use ${PLAIN_TOOL} to find Bob's review notes.`;
 const LATER_MESSAGE = "Carol wants the review by Friday.";
 

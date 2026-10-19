@@ -1261,7 +1261,7 @@ describe("workflowEntry integration", () => {
     await withHeldApprovalRun(
       {
         agent: {
-          limits: { maxInputTokensPerSession: 1 },
+          limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
           name: "workflow-entry-steer-held-limit",
         },
         auth: ALICE,

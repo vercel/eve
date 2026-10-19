@@ -80,6 +80,7 @@ interface CreateExecutionNodeStepInput {
   readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  readonly sessionUsageLimit?: ToolLoopHarnessConfig["sessionUsageLimit"];
 }
 
 /**
@@ -119,6 +120,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
+    sessionUsageLimit: input.sessionUsageLimit,
     tools,
     titleAttributeWrite: input.titleAttributeWrite,
   });

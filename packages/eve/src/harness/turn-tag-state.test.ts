@@ -1,20 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "#harness/hitl/budget.js";
 import { extractTokenUsageDelta } from "#harness/model-call/usage.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import {
   accumulateSessionUsage,
   accumulateTurnUsage,
   addTurnUsage,
-  bumpSessionRuntimeUsageLimits,
-  getSessionRemainingUsageQuota,
-  getSessionRuntimeUsageLimits,
-  getSessionUsageLimitViolation,
   getSessionTokenUsage,
+  getSessionUsage,
+  getSessionUsageWindow,
   getTurnUsageState,
+  resetSessionUsageWindow,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { SessionUsageLimit } from "#shared/agent-definition.js";
 
 const ZERO_SESSION_USAGE = {
   cacheReadTokens: 0,
@@ -292,195 +293,186 @@ describe("session state round-trip", () => {
   });
 });
 
-describe("session token limits", () => {
+describe("session usage limit", () => {
   it("reads zero session usage before token state exists", () => {
     expect(getSessionTokenUsage(makeSession())).toEqual(ZERO_SESSION_USAGE);
-  });
-
-  it.each([
-    {
-      expected: { kind: "input", limit: 10, usedTokens: 10 },
-      limits: { maxInputTokensPerSession: 10 },
-    },
-    {
-      expected: { kind: "output", limit: 3, usedTokens: 3 },
-      limits: { maxOutputTokensPerSession: 3 },
-    },
-  ])("reports the first exhausted $expected.kind limit", (testCase) => {
-    const session = setTurnUsageState(makeSession(), {
-      turnId: "turn_0",
+    expect(getSessionUsageWindow(makeSession())).toEqual({
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsd: 0,
-      inputTokens: 10,
-      outputTokens: 3,
-      sawCost: false,
-      session: {
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        costUsd: 0,
-        inputTokens: 10,
-        outputTokens: 3,
-        sawCost: false,
-      },
-    });
-
-    expect(getSessionUsageLimitViolation({ ...session, limits: testCase.limits })).toEqual(
-      testCase.expected,
-    );
-  });
-
-  it("checks usage against the bumped runtime limit after a grant", () => {
-    const usage = {
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      costUsd: 0,
-      inputTokens: 10,
-      outputTokens: 3,
-      sawCost: false,
-    };
-    const session = {
-      ...setTurnUsageState(makeSession(), { turnId: "turn_0", ...usage, session: usage }),
-      limits: { maxInputTokensPerSession: 10, maxOutputTokensPerSession: 3 },
-    };
-
-    expect(getSessionUsageLimitViolation(session)).toEqual({
-      kind: "input",
-      limit: 10,
-      usedTokens: 10,
-    });
-
-    const bumped = bumpSessionRuntimeUsageLimits(session);
-
-    // Both axes bump together so a session near two limits gets one prompt.
-    expect(getSessionRuntimeUsageLimits(bumped)).toEqual({ inputTokens: 20, outputTokens: 6 });
-    expect(getSessionUsageLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
-
-    const laterUsage = { ...usage, inputTokens: 20, outputTokens: 3 };
-    const later = setTurnUsageState(bumped, {
-      turnId: "turn_1",
-      ...laterUsage,
-      session: laterUsage,
-    });
-
-    // `limit` reports the configured window size; `usedTokens` the lifetime total.
-    expect(getSessionUsageLimitViolation({ ...later, limits: session.limits })).toEqual({
-      kind: "input",
-      limit: 10,
-      usedTokens: 20,
-    });
-  });
-
-  it("every grant moves the runtime limit, even after a large overshoot", () => {
-    const usage = {
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      costUsd: 0,
-      inputTokens: 35,
+      costUsd: undefined,
+      inputTokens: 0,
       outputTokens: 0,
-      sawCost: false,
-    };
-    // A single model call overshot the 10-token window by several windows.
-    const session = {
-      ...setTurnUsageState(makeSession(), { turnId: "turn_0", ...usage, session: usage }),
-      limits: { maxInputTokensPerSession: 10 },
-    };
-
-    expect(getSessionUsageLimitViolation(session)).toMatchObject({ usedTokens: 35 });
-
-    // One approval always unblocks: the runtime limit re-anchors to
-    // usage + configured limit rather than incrementing by the limit.
-    const bumped = bumpSessionRuntimeUsageLimits(session);
-    expect(getSessionRuntimeUsageLimits(bumped)).toEqual({ inputTokens: 45 });
-    expect(getSessionUsageLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
-
-    // A second grant cycle moves the ceiling again -- never idempotent.
-    const laterUsage = { ...usage, inputTokens: 45 };
-    const later = setTurnUsageState(bumped, {
-      turnId: "turn_1",
-      ...laterUsage,
-      session: laterUsage,
-    });
-    expect(getSessionUsageLimitViolation({ ...later, limits: session.limits })).not.toBeNull();
-    const bumpedAgain = bumpSessionRuntimeUsageLimits(later);
-    expect(getSessionRuntimeUsageLimits(bumpedAgain)).toEqual({ inputTokens: 55 });
-    expect(getSessionUsageLimitViolation({ ...bumpedAgain, limits: session.limits })).toBeNull();
-  });
-
-  it("reports remaining quota from the runtime limit", () => {
-    const usage = {
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      costUsd: 0,
-      inputTokens: 4,
-      outputTokens: 9,
-      sawCost: false,
-    };
-    const session = {
-      ...setTurnUsageState(makeSession(), { turnId: "turn_0", ...usage, session: usage }),
-      limits: { maxInputTokensPerSession: 10 },
-    };
-
-    expect(getSessionRemainingUsageQuota(session)).toEqual({
-      costUsd: false,
-      inputTokens: 6,
-      outputTokens: false,
-    });
-    expect(getSessionRemainingUsageQuota(makeSession())).toEqual({
-      costUsd: false,
-      inputTokens: false,
-      outputTokens: false,
     });
   });
 
-  describe("counts only new input", () => {
-    // One model step that replayed 90 cached tokens, wrote 4 to the cache and sent 6 uncached.
-    function sessionAfterStep(usage: Partial<NonNullable<HarnessStepResult["usage"]>>) {
-      return {
-        ...addTurnUsage(
-          makeSession(),
-          "turn_0",
-          extractTokenUsageDelta({
-            costUsd: undefined,
-            usage: usage as NonNullable<HarnessStepResult["usage"]>,
-          }),
-        ),
-        limits: { maxInputTokensPerSession: 30 },
-      };
-    }
+  function sessionAfterStep(
+    usage: Partial<NonNullable<HarnessStepResult["usage"]>>,
+    session: HarnessSession = makeSession(),
+    turnId = "turn_0",
+  ) {
+    return addTurnUsage(
+      session,
+      turnId,
+      extractTokenUsageDelta({
+        costUsd: undefined,
+        usage: usage as NonNullable<HarnessStepResult["usage"]>,
+      }),
+    );
+  }
 
-    it("excludes cache reads from the limit, the grant and the remaining quota", () => {
+  describe("default limit counts only new input", () => {
+    it("excludes cache reads from the window", () => {
+      // One model step that replayed 20 cached tokens and sent the rest uncached.
       const session = sessionAfterStep({
-        inputTokens: 100,
-        inputTokenDetails: { cacheReadTokens: 90, cacheWriteTokens: 4, noCacheTokens: 6 },
+        inputTokens: 40_000_010,
+        inputTokenDetails: { cacheReadTokens: 20, cacheWriteTokens: 4, noCacheTokens: 39_999_986 },
         outputTokens: 1,
       });
 
       // Telemetry keeps the raw totals.
       expect(getSessionTokenUsage(session)).toMatchObject({
-        cacheReadTokens: 90,
+        cacheReadTokens: 20,
         cacheWriteTokens: 4,
-        inputTokens: 100,
+        inputTokens: 40_000_010,
       });
-      expect(getSessionUsageLimitViolation(session)).toBeNull();
-      expect(getSessionRemainingUsageQuota(session)).toMatchObject({ inputTokens: 20 });
-      expect(getSessionRuntimeUsageLimits(bumpSessionRuntimeUsageLimits(session))).toEqual({
-        inputTokens: 40,
-      });
+      expect(
+        checkSessionUsageLimit({
+          canAsk: false,
+          limit: DEFAULT_SESSION_USAGE_LIMIT,
+          session,
+          turnSequence: 0,
+        }),
+      ).toEqual({ kind: "within" });
     });
 
     it("counts the full input when the provider reports no cache details", () => {
-      const session = sessionAfterStep({ inputTokens: 100, outputTokens: 1 });
+      const session = sessionAfterStep({ inputTokens: 40_000_000, outputTokens: 1 });
 
-      expect(getSessionUsageLimitViolation(session)).toEqual({
-        kind: "input",
-        limit: 30,
-        usedTokens: 100,
+      expect(
+        checkSessionUsageLimit({
+          canAsk: false,
+          limit: DEFAULT_SESSION_USAGE_LIMIT,
+          session,
+          turnSequence: 0,
+        }),
+      ).toEqual({
+        code: "SESSION_USAGE_LIMIT_REACHED",
+        details: {
+          total: {
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 40_000_000,
+            outputTokens: 1,
+          },
+          window: {
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 40_000_000,
+            outputTokens: 1,
+          },
+        },
+        kind: "fail",
+        message: "The session reached its usage limit.",
       });
-      expect(getSessionRemainingUsageQuota(session)).toMatchObject({ inputTokens: 0 });
-      expect(getSessionRuntimeUsageLimits(bumpSessionRuntimeUsageLimits(session))).toEqual({
-        inputTokens: 130,
-      });
+    });
+  });
+
+  it("starts a new window after a reset while the total keeps accumulating", () => {
+    const session = sessionAfterStep({ inputTokens: 10, outputTokens: 3 });
+    const limit: SessionUsageLimit = ({ window }) => window.inputTokens >= 10;
+
+    expect(
+      checkSessionUsageLimit({ canAsk: false, limit, session, turnSequence: 0 }),
+    ).toMatchObject({ kind: "fail" });
+
+    const reset = resetSessionUsageWindow(session);
+    expect(getSessionUsage(reset)).toMatchObject({ inputTokens: 10, outputTokens: 3 });
+    expect(getSessionUsageWindow(reset)).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    expect(
+      checkSessionUsageLimit({ canAsk: false, limit, session: reset, turnSequence: 0 }),
+    ).toEqual({ kind: "within" });
+
+    // Later usage only counts its delta since the reset.
+    const later = sessionAfterStep({ inputTokens: 4, outputTokens: 2 }, reset, "turn_1");
+    expect(getSessionUsage(later)).toMatchObject({ inputTokens: 14, outputTokens: 5 });
+    expect(getSessionUsageWindow(later)).toMatchObject({ inputTokens: 4, outputTokens: 2 });
+    expect(
+      checkSessionUsageLimit({ canAsk: false, limit, session: later, turnSequence: 1 }),
+    ).toEqual({ kind: "within" });
+
+    const much = sessionAfterStep({ inputTokens: 6, outputTokens: 0 }, later, "turn_1");
+    expect(
+      checkSessionUsageLimit({ canAsk: false, limit, session: much, turnSequence: 1 }),
+    ).toMatchObject({
+      details: { total: { inputTokens: 20 }, window: { inputTokens: 10 } },
+      kind: "fail",
+    });
+  });
+
+  it("passes the total and the window to the limit", () => {
+    const limit = vi.fn<SessionUsageLimit>(() => false);
+    const session = sessionAfterStep({ inputTokens: 4, outputTokens: 2 }, undefined, "turn_0");
+    const later = sessionAfterStep(
+      { inputTokens: 5, outputTokens: 1 },
+      resetSessionUsageWindow(session),
+      "turn_1",
+    );
+
+    expect(
+      checkSessionUsageLimit({ canAsk: true, limit, session: later, turnSequence: 1 }),
+    ).toEqual({ kind: "within" });
+    expect(limit).toHaveBeenCalledTimes(1);
+    expect(limit).toHaveBeenCalledWith({
+      total: {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: undefined,
+        inputTokens: 9,
+        outputTokens: 3,
+      },
+      window: {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: undefined,
+        inputTokens: 5,
+        outputTokens: 1,
+      },
+    });
+  });
+
+  it("does not consult the limit on an empty window", () => {
+    const limit = vi.fn<SessionUsageLimit>(() => true);
+
+    expect(
+      checkSessionUsageLimit({ canAsk: false, limit, session: makeSession(), turnSequence: 0 }),
+    ).toEqual({ kind: "within" });
+    // A fresh window after a grant is empty too, even though the total is not.
+    const reset = resetSessionUsageWindow(sessionAfterStep({ inputTokens: 10, outputTokens: 3 }));
+    expect(
+      checkSessionUsageLimit({ canAsk: false, limit, session: reset, turnSequence: 1 }),
+    ).toEqual({ kind: "within" });
+    expect(limit).not.toHaveBeenCalled();
+  });
+
+  it("asks to continue when the session can take input", () => {
+    const session = sessionAfterStep({ inputTokens: 10, outputTokens: 3 });
+
+    const check = checkSessionUsageLimit({
+      canAsk: true,
+      limit: () => true,
+      session,
+      turnSequence: 2,
+    });
+
+    expect(check.kind).toBe("ask");
+    if (check.kind !== "ask") throw new Error("expected ask");
+    expect(check.request.requestId).toBe("wrun_test:2:limit:usage:13");
+    expect(check.request.kind).toBe("session-limit");
+    expect(check.request.action).toMatchObject({
+      input: {
+        total: { inputTokens: 10, outputTokens: 3 },
+        window: { inputTokens: 10, outputTokens: 3 },
+      },
     });
   });
 });

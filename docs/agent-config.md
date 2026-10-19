@@ -137,7 +137,7 @@ export default defineAgent({
   starting points on Ollama.
 - **Usage.** `includeUsage: true` lets token usage reach eve's
   [session limits](#runtime-limits). Local models report no cost, so
-  `maxTokenCostUsdPerSession` does not apply.
+  `costUsd` stays unset in a `sessionUsage` check.
 - **Other servers.** Change `baseURL`, for example to
   `http://localhost:1234/v1` for LM Studio. Pass `apiKey` for a remote
   OpenAI-compatible server that requires one.
@@ -262,17 +262,18 @@ See [Default harness](./concepts/default-harness#compaction) for how the loop ap
 
 ## Runtime limits
 
-Use `limits` for framework-owned runtime caps. Session usage limits stop the
-current durable session from starting another model call after accumulated
-provider-reported tokens or model token cost reaches a configured limit:
+Use `limits` for framework-owned runtime caps. `sessionUsage` decides when the
+current durable session must stop starting model calls. It receives the
+session's usage and returns `true` when the limit is reached:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
   limits: {
-    maxInputTokensPerSession: 200_000,
-    maxOutputTokensPerSession: 20_000,
-    maxTokenCostUsdPerSession: 1.5,
+    sessionUsage: ({ window }) =>
+      window.inputTokens - window.cacheReadTokens >= 200_000 ||
+      window.outputTokens >= 20_000 ||
+      (window.costUsd ?? 0) >= 1.5,
     sessionTimeoutMs: 7 * 24 * 60 * 60 * 1_000,
   },
 });
@@ -293,22 +294,34 @@ disable the timeout. Session expiration follows
 [run-data retention](#run-data-retention); a zero-retention session loses its
 stored payloads when it ends.
 
-Input tokens, output tokens, and model token cost are checked independently.
-The input limit counts only new input: uncached input plus cache writes. Cache
-reads, the history a provider replays from its prompt cache on every step, do
-not count, so long tool-heavy sessions are not stopped for re-reading their own
-context. When a provider reports no cache details, all input counts.
-The model call that crosses a limit is allowed to finish because exact usage
+`sessionUsage` gets two usage records with `inputTokens`, `outputTokens`,
+`cacheReadTokens`, `cacheWriteTokens`, and `costUsd`: `total` is everything
+the session has spent, and `window` is what it spent since the last approved
+continuation. `inputTokens` includes cache reads and writes. Subtract
+`cacheReadTokens` to count only new input; cache reads are the history a
+provider replays from its prompt cache on every step. `costUsd` is the model
+token cost in US dollars that AI Gateway reports with each step, not tool or
+infrastructure spend; it is unset when no step reported a cost.
+
+When `sessionUsage` is omitted, the limit is `40_000_000` new input tokens per
+window:
+
+```ts
+({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000;
+```
+
+Return `false` to leave sessions uncapped. eve calls `sessionUsage` before each
+model call once the window has usage. The model call that crosses a limit is allowed to finish because exact usage
 arrives after the call completes. Before the next model call, eve pauses the
 turn (`turn.waiting`) and sends a deterministic continuation prompt with two options:
-**Continue** grants a fresh window of each configured size and resumes the same
+**Continue** starts a new window and resumes the same
 turn, and **Stop**
 cancels the in-flight turn through the standard cancellation path
 (`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
 still over budget after Stop, the next message raises a new prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree — the delegating parent never receives an error result it
-could retry against a fresh quota share. A reply that answers neither option
+could retry. A reply that answers neither option
 is queued while the existing prompt stays pending; eve does not raise another
 copy or start another turn. The reply is received (`message.received`) and
 processed in the held turn once the budget is granted.
@@ -321,44 +334,22 @@ turn or duplicate the prompt.
 
 Sessions that cannot request input from a human, such as markdown schedules and
 delegated runs without input proxying, skip the prompt and fail the next model
-call with `SESSION_TOKEN_LIMIT_REACHED` for token budgets or
-`SESSION_TOKEN_COST_LIMIT_REACHED` for model token cost. A delegated task with
-no inherited quota also fails instead of raising a continuation prompt that
-could only grant another zero-value window.
+call with `SESSION_USAGE_LIMIT_REACHED`. Its details carry the `total` and
+`window` usage the check saw.
 
-When `maxInputTokensPerSession` is omitted, root sessions apply a default
-input budget of `40_000_000` new input tokens.
-`maxOutputTokensPerSession` and `maxTokenCostUsdPerSession` are unset by
-default. `maxTokenCostUsdPerSession` is a US-dollar limit on model token cost,
-not tool or infrastructure spend. It uses the cost reported with each model
-step; AI Gateway supplies this value, while model steps without reported cost
-do not add to the limit. Set any usage limit to `false` to uncap that axis.
+Each subagent session checks its own usage against its own `sessionUsage`, or
+the root agent's when it authors none. A dynamic subagent can't select
+`sessionUsage` at runtime and always uses the root agent's. Remote agents run
+under their own deployment's limits.
 
-Delegated subagent sessions have no fixed default. Each child receives a share
-of the delegating parent's remaining quota when it starts: the remainder in
-the current budget window split evenly across the agent tasks that one model
-step starts. A session that a workflow tool opens with `ctx.agent` receives
-the share of the model step that called the tool, or the whole remainder when
-that step starts no agent tasks; eve does not divide that share among several
-sessions one call opens. A child keeps its grant for its whole session,
-including turns that later calls with `taskId` start. Remote agent tasks count
-toward the split but receive no grant: they run under their own deployment's
-limits.
-
-A child's usage, including what the child's own subagents spent, counts
-against the parent's quota. An agent task's usage counts with each reply it
+A child's usage, including what the child's own subagents spent, also counts
+in the parent's usage. An agent task's usage counts with each reply it
 sends. A turn it doesn't reply to, such as one a cancel stopped, counts with
 the next reply, or when the turn ends if no call waits for a reply. Sessions
 that any other `serve` workflow tool opens with `ctx.agent` count the same
 way; those of an `execute` or `task` tool count when the tool finishes. Remote
-agents' reported usage counts the same way. Later children draw from what
-remains, and the parent's own limit and continuation prompt include delegated
-spend. Token-cost budgets follow the same rules, including splitting the
-remaining US-dollar budget and adding child cost back to the parent. Approving
-a continuation opens a fresh parent window for later child grants without
-erasing lifetime usage. An authored child limit applies only when it is
-tighter than the parent's grant; an uncapped parent delegates uncapped
-children.
+agents' reported usage counts the same way, cost included. Approving a
+continuation starts a new window without erasing `total`.
 
 Some delegated usage doesn't count against the parent: a `ctx.agent` turn
 still running when its workflow tool finishes or is cancelled; the `ctx.agent`
