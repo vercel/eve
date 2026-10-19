@@ -1,18 +1,32 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { IncompatibleStateLayoutError } from "#context/serialize.js";
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import {
+  prepareSuccessorStep,
+  signalSessionOwnerActivationStep,
+  startSuccessorStep,
   stopUntrackedChildSessionsStep,
-  validateSessionCheckpointStep,
+  type SuccessorStartInput,
 } from "#execution/session/handoff-steps.js";
+import { positionState } from "#internal/testing/session-machine.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const deserializeContextMock = vi.fn();
 const readDurableSessionMock = vi.fn();
 const cancelRunMock = vi.fn();
+const setAttributesMock = vi.fn();
+const getWorldMock = vi.fn(async () => ({}));
+const getRunMock = vi.fn();
+const resumeHookMock = vi.fn();
+const startWorkflowOnDeploymentMock = vi.fn();
+
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  setAttributes: (...args: unknown[]) => setAttributesMock(...args),
+}));
 
 vi.mock("#context/serialize.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -25,15 +39,21 @@ vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
 vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
-  getWorld: async () => ({}),
+  getRun: (...args: unknown[]) => getRunMock(...args),
+  getWorld: () => getWorldMock(),
+  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
+}));
+vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  startWorkflowOnDeployment: (...args: unknown[]) => startWorkflowOnDeploymentMock(...args),
 }));
 
-describe("validateSessionCheckpointStep", () => {
+describe("prepareSuccessorStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("hydrates the target bundle and durable state for a complete hook set", async () => {
+  it("hydrates the target bundle and durable state, then records this owner", async () => {
     const require = vi.fn();
     deserializeContextMock.mockResolvedValue({ require });
     readDurableSessionMock.mockReturnValue({});
@@ -43,6 +63,10 @@ describe("validateSessionCheckpointStep", () => {
 
     expect(require).toHaveBeenCalledWith(BundleKey);
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
+    expect(setAttributesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ "$eve.session": "session-1" }),
+      { allowReservedAttributes: true },
+    );
   });
 
   it("ignores a sandbox record saved before the provider redesign", async () => {
@@ -84,12 +108,13 @@ describe("validateSessionCheckpointStep", () => {
     const detail = "checkpoint version 7 is outside the supported range";
 
     await expect(
-      validateSessionCheckpointStep({
+      prepareSuccessorStep({
         migration: { kind: "incompatible", detail },
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ kind: "incompatible", reason: "checkpoint-version" });
     expect(deserializeContextMock).not.toHaveBeenCalled();
+    expect(setAttributesMock).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("cannot read the checkpoint"),
       expect.objectContaining({ detail, sessionId: "session-1" }),
@@ -122,6 +147,102 @@ describe("validateSessionCheckpointStep", () => {
   );
 });
 
+describe("startSuccessorStep", () => {
+  const forcingWorld = { capabilities: { hookForceClaim: true, hookRetention: { active: true } } };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getWorldMock.mockResolvedValue(forcingWorld);
+    readDurableSessionMock.mockReturnValue({ state: undefined });
+  });
+
+  it.each([
+    ["force-claim", { hookRetention: { active: true } }],
+    ["hook retention", { hookForceClaim: true }],
+  ])("starts nothing on a World without %s support", async (_name, capabilities) => {
+    getWorldMock.mockResolvedValue({ capabilities });
+    const records = captureLogRecords();
+    await expect(startSuccessorStep(startInput())).resolves.toEqual({ kind: "unsupported" });
+    expect(startWorkflowOnDeploymentMock).not.toHaveBeenCalled();
+    expect(records.records).toContainEqual(
+      expect.objectContaining({ message: expect.stringContaining("cannot force-claim hooks") }),
+    );
+  });
+
+  it("starts nothing when the checkpoint still holds work", async () => {
+    readDurableSessionMock.mockReturnValue({
+      state: positionState({ sequence: 1, turnId: "turn_0" }),
+    });
+    await expect(startSuccessorStep(startInput())).resolves.toEqual({ kind: "not-idle" });
+    expect(startWorkflowOnDeploymentMock).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 0, "default"] as const)(
+    "starts a version 3 successor on the original stream with retention=%s",
+    async (retention) => {
+      const sessionWritable = new WritableStream<Uint8Array>();
+      getRunMock.mockReturnValue({ getWritable: () => sessionWritable });
+      startWorkflowOnDeploymentMock.mockResolvedValue({ runId: "owner-2" });
+      const input = startInput();
+      const checkpoint = { ...input.checkpoint, retention };
+
+      await expect(startSuccessorStep({ ...input, checkpoint })).resolves.toEqual({
+        kind: "started",
+        runId: "owner-2",
+      });
+
+      expect(getRunMock).toHaveBeenCalledWith("anchor-1");
+      expect(startWorkflowOnDeploymentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ workflowId: expect.stringContaining("workflowEntry") }),
+        [
+          {
+            activationToken: "owner-1:handoff:0",
+            attemptKey: "owner-1:0",
+            checkpoint,
+            delivery: input.delivery,
+            handoffVersion: 3,
+            hookTokens: input.hookTokens,
+            kind: "handoff",
+            ownerDeploymentId: "deployment-b",
+            sessionWritable,
+            sessionId: "anchor-1",
+            sourceRunId: "owner-1",
+          },
+        ],
+        "deployment-b",
+        retention === undefined ? undefined : { experimental_retention: retention },
+      );
+    },
+  );
+
+  function startInput(): SuccessorStartInput & {
+    readonly delivery: { readonly kind: "deliver"; readonly payloads: { message: string }[] };
+  } {
+    return {
+      activationToken: "owner-1:handoff:0",
+      anchorRunId: "anchor-1",
+      attemptKey: "owner-1:0",
+      checkpoint: createCheckpoint(),
+      delivery: { kind: "deliver", payloads: [{ message: "hello" }] },
+      hookTokens: ["eve:session:anchor-1:inbox", "http:alias"],
+      sourceRunId: "owner-1",
+      targetDeploymentId: "deployment-b",
+    };
+  }
+});
+
+describe("signalSessionOwnerActivationStep", () => {
+  it("treats an owner that already settled the attempt as told", async () => {
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("owner-1:handoff:0"));
+    await expect(
+      signalSessionOwnerActivationStep({
+        activation: { kind: "active" },
+        token: "owner-1:handoff:0",
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("stopUntrackedChildSessionsStep", () => {
   it("stops every child except the session itself and tolerates finished runs", async () => {
     cancelRunMock.mockReset();
@@ -142,7 +263,7 @@ describe("stopUntrackedChildSessionsStep", () => {
 });
 
 function validate(checkpoint: SessionCheckpoint) {
-  return validateSessionCheckpointStep({
+  return prepareSuccessorStep({
     migration: { kind: "current", checkpoint, childRunIdsToStop: [] },
     sessionId: "session-1",
   });

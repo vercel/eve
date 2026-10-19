@@ -279,8 +279,9 @@ async function runSessionLoop(
       : undefined;
   /**
    * Hands a session that compacted to a fresh run on this deployment while
-   * nothing is waiting. When input arrives first, the next lone delivery
-   * carries the handoff instead; see `runDeliveredTurn`.
+   * nothing is waiting. Input that is already waiting runs here first, and
+   * the session moves at the next quiet boundary; input that arrives once the
+   * move has started runs on the successor.
    */
   const tryCompactionHandoff = async (): Promise<SessionLoopOutcome | undefined> => {
     const compaction = dueCompactionHandoff();
@@ -291,9 +292,7 @@ async function runSessionLoop(
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
-    const transfer = await handoff.tryTransfer(next, transferState(), {
-      compaction: dueCompactionHandoff(),
-    });
+    const transfer = await handoff.tryTransfer(next, transferState());
     if (transfer.kind === "transferred") return transfer;
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
@@ -309,9 +308,12 @@ async function runSessionLoop(
     while (true) {
       const next = await nextParkedActivity();
       switch (next.kind) {
+        case "closed":
+          // Taken over outside an attempt: the new owner now writes the stream.
+          if (inbox.takenOver) return await handoff.adoptTakeover();
+          return { kind: "terminal", outcome: { kind: "expired" } };
         case "expired":
         case "reset":
-        case "closed":
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
@@ -380,9 +382,12 @@ async function runSessionLoop(
       const next = await nextParkedActivity();
 
       switch (next.kind) {
+        case "closed":
+          // Taken over outside an attempt: the new owner now writes the stream.
+          if (inbox.takenOver) return await handoff.adoptTakeover();
+          return { kind: "terminal", outcome: { kind: "expired" } };
         case "expired":
         case "reset":
-        case "closed":
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
