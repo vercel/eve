@@ -129,14 +129,16 @@ describe("linqChannel", () => {
     expect(reaction).toHaveBeenCalledTimes(1);
   });
 
-  it("offers a tapback tool for the Linq adapter", () => {
+  it("offers a tapback tool that takes standard tapbacks and emoji", () => {
     const channel = linqChannel({
       credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" },
     });
 
     expect(channel.tapbackTool().inputSchema).toMatchObject({
       properties: {
-        tapback: { enum: ["love", "like", "dislike", "laugh", "emphasize", "question"] },
+        tapback: {
+          description: "One of love, like, dislike, laugh, emphasize, question, or a single emoji.",
+        },
       },
     });
   });

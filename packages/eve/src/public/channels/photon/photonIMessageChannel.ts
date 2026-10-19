@@ -15,7 +15,7 @@ import {
   type IMessageTapbackToolInput,
 } from "#public/channels/imessage-tapbacks.js";
 import type { ToolDefinition } from "#public/tools/index.js";
-import type { Message, Thread } from "#compiled/chat/index.js";
+import type { Adapter, Message, Thread } from "#compiled/chat/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   createiMessageAdapter,
@@ -141,9 +141,28 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
         bot: bridge.bot,
         channel,
         channelLabel: "Photon iMessage",
+        sendEmoji: sendPhotonEmojiTapback,
       }),
   });
   return channel;
+}
+
+/**
+ * The Photon adapter's `addReaction` accepts only the six standard tapbacks,
+ * but the spectrum message it returns from `fetchMessage` can react with any emoji.
+ */
+async function sendPhotonEmojiTapback(
+  adapter: Adapter,
+  threadId: string,
+  messageId: string,
+  emoji: string,
+): Promise<void> {
+  const message = await adapter.fetchMessage?.(threadId, messageId);
+  const target = message?.raw as { react?: (emoji: string) => Promise<unknown> } | undefined;
+  if (typeof target?.react !== "function") {
+    throw new Error("Photon could not find the message to react to.");
+  }
+  await target.react(emoji);
 }
 
 /** Default Photon auth projection for inbound Chat SDK message authors. */

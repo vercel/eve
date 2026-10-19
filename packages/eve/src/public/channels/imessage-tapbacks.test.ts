@@ -89,24 +89,51 @@ describe("iMessage tapbacks", () => {
     });
   });
 
+  it("fetches the reacted message when the event leaves it out, and lets the hook replace the text", async () => {
+    const onReaction = vi.fn();
+    const send = vi.fn();
+    dispatchIMessageTapbacks({ bot: { onReaction }, send } as never, (_ctx, tapback) =>
+      tapback.tapback === "like" && tapback.message?.text === "Approve the deploy?"
+        ? { auth: null, message: "approve" }
+        : null,
+    );
+    const handler = onReaction.mock.calls[0]?.[0] as (event: ReactionEvent) => Promise<void>;
+    const fetchMessage = vi.fn(async () => message("Approve the deploy?"));
+
+    await handler(
+      reaction({
+        adapter: { fetchMessage } as never,
+        emoji: getEmoji("thumbs_up"),
+        rawEmoji: "like",
+      }),
+    );
+
+    expect(fetchMessage).toHaveBeenCalledWith("thread-id", "message-id");
+    expect(send).toHaveBeenCalledWith("approve", expect.objectContaining({ auth: null }));
+  });
+
   describe("tapback tool", () => {
     const channel = { __kind: "eve:channel", adapter: { kind: "channel:photon" }, routes: [] };
 
     function setup(state: Record<string, unknown>, kind = "channel:photon") {
       const addReaction = vi.fn();
+      const sendEmoji = vi.fn();
       const bot = { getAdapter: vi.fn(() => ({ addReaction })), initialize: vi.fn() };
       const tool = iMessageTapbackTool({
         adapterName: "imessage",
         bot: bot as never,
         channel: channel as never,
         channelLabel: "Photon iMessage",
+        sendEmoji,
       });
       const ctx = new ContextContainer();
       ctx.set(ChannelKey, { kind, state } as never);
       const run = (tapback: string) =>
         contextStorage.run(ctx, async () => tool.execute({ tapback } as never, {} as never));
-      return { addReaction, bot, run };
+      return { addReaction, bot, run, sendEmoji };
     }
+
+    const conversation = { latestMessageId: "latest-id", thread: { id: "imessage:chat" } };
 
     it("reacts to the latest message in the session's conversation", async () => {
       const { addReaction, bot, run } = setup({
@@ -117,6 +144,43 @@ describe("iMessage tapbacks", () => {
       await expect(run("love")).resolves.toBe("Sent a love tapback.");
       expect(bot.getAdapter).toHaveBeenCalledWith("imessage");
       expect(addReaction).toHaveBeenCalledWith("imessage:chat", "latest-id", "love");
+    });
+
+    it("sends a standard tapback's own emoji as that tapback", async () => {
+      const { addReaction, run, sendEmoji } = setup(conversation);
+
+      await expect(run("👍")).resolves.toBe("Sent a like tapback.");
+      expect(addReaction).toHaveBeenCalledWith("imessage:chat", "latest-id", "like");
+      expect(sendEmoji).not.toHaveBeenCalled();
+    });
+
+    it("sends any other single emoji as an emoji tapback", async () => {
+      const { addReaction, run, sendEmoji } = setup(conversation);
+
+      await expect(run("🎉")).resolves.toBe("Sent a 🎉 tapback.");
+      await run("👩‍💻");
+      expect(sendEmoji).toHaveBeenNthCalledWith(
+        1,
+        { addReaction },
+        "imessage:chat",
+        "latest-id",
+        "🎉",
+      );
+      expect(sendEmoji).toHaveBeenNthCalledWith(
+        2,
+        { addReaction },
+        "imessage:chat",
+        "latest-id",
+        "👩‍💻",
+      );
+    });
+
+    it.each(["party", "🎉🎉", "a"])("rejects %j", async (tapback) => {
+      const { addReaction, run, sendEmoji } = setup(conversation);
+
+      await expect(run(tapback)).rejects.toThrow(`Unknown tapback "${tapback}"`);
+      expect(addReaction).not.toHaveBeenCalled();
+      expect(sendEmoji).not.toHaveBeenCalled();
     });
 
     it("refuses sessions from another channel", async () => {

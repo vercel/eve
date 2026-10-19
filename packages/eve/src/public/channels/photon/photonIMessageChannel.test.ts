@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, newMessage, reaction, send } = vi.hoisted(() => ({
+const { directMessage, fetchMessage, newMessage, reaction, send } = vi.hoisted(() => ({
   directMessage: vi.fn(),
+  fetchMessage: vi.fn(),
   newMessage: vi.fn(),
   reaction: vi.fn(),
   send: vi.fn(),
@@ -10,12 +11,13 @@ const { directMessage, newMessage, reaction, send } = vi.hoisted(() => ({
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
   chatSdkChannel: () => ({
     bot: {
-      getAdapter: () => ({ markRead: vi.fn() }),
+      getAdapter: () => ({ fetchMessage, markRead: vi.fn() }),
+      initialize: vi.fn(),
       onDirectMessage: directMessage,
       onNewMessage: newMessage,
       onReaction: reaction,
     },
-    channel: { routes: [] },
+    channel: { __kind: "eve:channel", adapter: { kind: "channel:photon" }, routes: [] },
     send,
   }),
   messageToUserContent: (message: Message) => message.text,
@@ -33,10 +35,30 @@ import {
   photonIMessageChannel,
 } from "#public/channels/photon/photonIMessageChannel.js";
 import { Message } from "#compiled/chat/index.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 describe("photonIMessageChannel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("sends emoji tapbacks through the fetched spectrum message", async () => {
+    const react = vi.fn();
+    fetchMessage.mockResolvedValue({ raw: { react } });
+    const tool = photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    }).tapbackTool();
+    const ctx = new ContextContainer();
+    ctx.set(ChannelKey, {
+      kind: "channel:photon",
+      state: { latestMessageId: "latest-id", thread: { id: "imessage:chat" } },
+    } as never);
+
+    await contextStorage.run(ctx, () => tool.execute({ tapback: "🎉" }, {} as never));
+
+    expect(fetchMessage).toHaveBeenCalledWith("imessage:chat", "latest-id");
+    expect(react).toHaveBeenCalledWith("🎉");
   });
 
   it("ignores tapbacks unless onTapback accepts them", () => {

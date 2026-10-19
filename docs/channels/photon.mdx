@@ -75,8 +75,7 @@ export default photonIMessageChannel({
 
 The agent reads an accepted tapback as a message in the form iMessage uses when
 it shows a tapback as text, such as `Tapback: Loved “See you at 7”` or
-`Tapback: Removed a like tapback from a message`. The quoted text appears when
-Photon includes the message the tapback is on. `tapback.tapback` is `love`,
+`Tapback: Removed a like tapback from a message`. The quoted text appears when Photon can return the message the tapback is on. `tapback.tapback` is `love`,
 `like`, `dislike`, `laugh`, `emphasize`, or `question`, or the emoji itself for
 an emoji tapback. `tapback.messageId` and `tapback.author` identify the message
 and the person. An accepted tapback starts or steers a turn like any other
@@ -92,13 +91,31 @@ import photon from "../channels/photon";
 export default photon.tapbackTool();
 ```
 
-The model calls it with one of the six standard tapbacks, such as
-`{ "tapback": "love" }`, and eve reacts to the latest message someone sent in
-the conversation. The model can send a tapback alongside a reply. To let a
-tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply).
-The tool is never added on its own, and subagents don't receive it. In a session
-that didn't come through this channel, such as a web chat, or before anyone has
-sent a message, the call fails with an error the model reads.
+The model calls it with a standard tapback, such as `{ "tapback": "love" }`, or any single emoji, such as `{ "tapback": "🎉" }`, and eve reacts to the latest message someone sent in the conversation. A standard tapback's own emoji, such as `👍`, sends that tapback. The model can send a tapback alongside a reply. To let a tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply). The tool is never added on its own, and subagents don't receive it. In a session that didn't come through this channel, such as a web chat, or before anyone has sent a message, the call fails with an error the model reads.
+
+### Answer approvals with a tapback
+
+Return `message` from `onTapback` to replace the text the agent receives. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `cancel`, and a reply that names an option answers the approval the conversation is waiting on. So a like or dislike can approve or cancel it:
+
+```ts title="agent/channels/photon.ts"
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { defaultPhotonAuth, photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+  onTapback(_ctx, tapback) {
+    if (!tapback.added) return null;
+    const auth = defaultPhotonAuth(tapback);
+    if (tapback.message?.author.isMe) {
+      if (tapback.tapback === "like") return { auth, message: "approve" };
+      if (tapback.tapback === "dislike") return { auth, message: "cancel" };
+    }
+    return { auth };
+  },
+});
+```
+
+`tapback.message` is the message the tapback is on; eve fetches it from Photon when the event leaves it out, so `author.isMe` limits this to tapbacks on the agent's own messages, such as the approval prompt. The approval's response policy still decides whether the person who sent the tapback may answer. When no approval is waiting, the agent reads `approve` or `cancel` as an ordinary message.
 
 ## Other hosts
 

@@ -50,13 +50,19 @@ export interface IMessageTapback {
 export type IMessageTapbackResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /**
+   * Replaces the text the agent receives, such as `"approve"` to answer a
+   * waiting tool approval. Defaults to text like `Tapback: Loved “See you at 7”`.
+   */
+  readonly message?: string;
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
 
 /** Input of the tool returned by `tapbackTool()`. */
 export interface IMessageTapbackToolInput {
-  readonly tapback: IMessageTapbackType;
+  /** A standard tapback, or a single emoji such as `"🎉"`. */
+  readonly tapback: IMessageTapbackType | (string & {});
 }
 
 /** Context passed to an `onTapback` hook. */
@@ -70,6 +76,14 @@ type TapbackHook = (
   tapback: IMessageTapback,
 ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
 
+/** Sends an emoji tapback (not one of the six standard ones) through the channel's adapter. */
+export type SendEmojiTapback = (
+  adapter: Adapter,
+  threadId: string,
+  messageId: string,
+  emoji: string,
+) => Promise<void>;
+
 const TAPBACK_BY_EMOJI_NAME: Readonly<Record<string, IMessageTapbackType>> = {
   exclamation: "emphasize",
   heart: "love",
@@ -78,6 +92,21 @@ const TAPBACK_BY_EMOJI_NAME: Readonly<Record<string, IMessageTapbackType>> = {
   thumbs_down: "dislike",
   thumbs_up: "like",
 };
+
+// The emoji iMessage shows for each standard tapback, so the model can pass either.
+const TAPBACK_BY_GLYPH: Readonly<Record<string, IMessageTapbackType>> = {
+  "❓": "question",
+  "❤": "love",
+  "❤️": "love",
+  "‼": "emphasize",
+  "‼️": "emphasize",
+  "👍": "like",
+  "👎": "dislike",
+  "😂": "laugh",
+};
+
+const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 // iMessage's own wording when it shows a tapback as text.
 const ADDED_VERB: Readonly<Record<IMessageTapbackType, string>> = {
@@ -125,16 +154,28 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
 ): void {
   bridge.bot.onReaction(async (event: ReactionEvent) => {
     if (event.user.isMe) return;
-    const tapback = toIMessageTapback(event);
+    const tapback = toIMessageTapback({
+      ...event,
+      message: event.message ?? (await fetchMessageBestEffort(event)),
+    });
     const result = await onTapback({ thread: event.thread }, tapback);
     if (result === null) return;
-    await bridge.send(iMessageTapbackText(tapback), {
+    await bridge.send(result.message ?? iMessageTapbackText(tapback), {
       auth: result.auth,
       context: [...(result.context ?? [])],
       thread: event.thread.toJSON(),
       title: result.title,
     });
   });
+}
+
+// Photon and Linq leave the reacted message out of the event, but both can fetch it by id.
+async function fetchMessageBestEffort(event: ReactionEvent): Promise<Message | undefined> {
+  try {
+    return (await event.adapter.fetchMessage?.(event.threadId, event.messageId)) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -146,28 +187,33 @@ export function iMessageTapbackTool(options: {
   readonly bot: Chat;
   readonly channel: ChatSdkChannel;
   readonly channelLabel: string;
+  /** Defaults to the adapter's `addReaction`. */
+  readonly sendEmoji?: SendEmojiTapback;
 }): ToolDefinition<IMessageTapbackToolInput, string> {
   const { adapterName, bot, channel, channelLabel } = options;
+  const sendEmoji: SendEmojiTapback =
+    options.sendEmoji ??
+    ((adapter, threadId, messageId, emoji) => adapter.addReaction(threadId, messageId, emoji));
   return defineTool<IMessageTapbackToolInput, string>({
     availableInSubagents: false,
     description:
-      "React to the latest message in this iMessage conversation with a tapback: love (heart), like (thumbs up), dislike (thumbs down), laugh (haha), emphasize (!!), or question (?). Use it to acknowledge a message, alone or alongside a reply.",
+      "React to the latest message in this iMessage conversation with a tapback: love (heart), like (thumbs up), dislike (thumbs down), laugh (haha), emphasize (!!), question (?), or any single emoji such as 🎉. Use it to acknowledge a message, alone or alongside a reply.",
     inputSchema: {
       type: "object",
       properties: {
         tapback: {
           type: "string",
-          enum: [...IMESSAGE_TAPBACKS],
-          description: "The tapback to add.",
+          description: `One of ${IMESSAGE_TAPBACKS.join(", ")}, or a single emoji.`,
         },
       },
       required: ["tapback"],
       additionalProperties: false,
     },
-    async execute({ tapback }) {
-      if (!(IMESSAGE_TAPBACKS as readonly string[]).includes(tapback)) {
+    async execute(input) {
+      const tapback = normalizeOutgoingTapback(input.tapback);
+      if (tapback === undefined) {
         throw new Error(
-          `Unknown tapback "${tapback}". Use one of: ${IMESSAGE_TAPBACKS.join(", ")}.`,
+          `Unknown tapback "${input.tapback}". Use one of ${IMESSAGE_TAPBACKS.join(", ")}, or a single emoji.`,
         );
       }
       const adapter = loadContext().get(ChannelKey);
@@ -185,10 +231,26 @@ export function iMessageTapbackTool(options: {
       }
       // The step may run where the webhook didn't, so the adapter may not be initialized yet.
       await bot.initialize();
-      await bot.getAdapter(adapterName).addReaction(threadId, messageId, tapback);
+      const chatAdapter = bot.getAdapter(adapterName);
+      if (isStandardTapback(tapback)) {
+        await chatAdapter.addReaction(threadId, messageId, tapback);
+      } else {
+        await sendEmoji(chatAdapter, threadId, messageId, tapback);
+      }
       return `Sent a ${tapback} tapback.`;
     },
   });
+}
+
+/** A standard tapback name for a standard name or its emoji, the emoji itself for any other single emoji. */
+function normalizeOutgoingTapback(value: string): string | undefined {
+  const trimmed = value.trim();
+  const lower = trimmed.toLowerCase();
+  if (isStandardTapback(lower)) return lower;
+  const standard = TAPBACK_BY_GLYPH[trimmed];
+  if (standard !== undefined) return standard;
+  const segments = [...graphemes.segment(trimmed)];
+  return segments.length === 1 && EMOJI.test(trimmed) ? trimmed : undefined;
 }
 
 function isStandardTapback(value: string): value is IMessageTapbackType {
