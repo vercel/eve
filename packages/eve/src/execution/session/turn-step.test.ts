@@ -81,6 +81,7 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { defineTool } from "#tools/definition.js";
 import { defineState } from "#public/definitions/state.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
@@ -1107,6 +1108,56 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  describe("session usage limit", () => {
+    const uncappedRoot = () => false;
+    const childLimit = () => true;
+
+    async function limitPassedToHarness(childSessionUsage: (() => boolean) | undefined) {
+      const bundle = createStubBundle();
+      vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+        ...bundle,
+        graph: {
+          ...bundle.graph,
+          nodesByNodeId: new Map([
+            [
+              ROOT_RUNTIME_AGENT_NODE_ID,
+              { agent: { config: { limits: { sessionUsage: uncappedRoot } } } },
+            ],
+          ]),
+        },
+        resolvedAgent: {
+          config:
+            childSessionUsage === undefined ? {} : { limits: { sessionUsage: childSessionUsage } },
+        },
+      } as never);
+      installSessionStoreMocks([createStubSession()]);
+      let passed: unknown = "unset";
+      vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+        passed = input.sessionUsageLimit;
+        return async (session: HarnessSession): Promise<StepResult> => ({
+          next: { done: true, output: "complete" },
+          session,
+        });
+      });
+
+      await turnStep({
+        input: { kind: "deliver", payloads: [{ message: "Survey the pier." }] },
+        sessionWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState: createStubSessionState(),
+      });
+      return passed;
+    }
+
+    it("runs a subagent's own limit over an uncapped root's", async () => {
+      await expect(limitPassedToHarness(childLimit)).resolves.toBe(childLimit);
+    });
+
+    it("runs the root agent's limit for a subagent without one", async () => {
+      await expect(limitPassedToHarness(undefined)).resolves.toBe(uncappedRoot);
+    });
+  });
+
   it("starts model work before the title attribute write settles and joins it before returning", async () => {
     let finishTitle!: () => void;
     vi.mocked(setEveAttributes)
