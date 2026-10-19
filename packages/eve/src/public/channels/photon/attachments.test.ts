@@ -60,7 +60,7 @@ describe("addPhotonAttachmentDownloads", () => {
       ["one.jpg", "two.jpg"],
     );
 
-    addPhotonAttachmentDownloads(inbound, adapter);
+    await addPhotonAttachmentDownloads(inbound, adapter);
 
     const [one, two] = inbound.attachments;
     expect(await one?.fetchData?.()).toEqual(Buffer.from("first"));
@@ -72,11 +72,43 @@ describe("addPhotonAttachmentDownloads", () => {
     );
   });
 
+  it("refetches the message by id when the webhook omits a voice note's id", async () => {
+    const { adapter, getAttachment } = appServing({ "v-1": "audio" });
+    const getMessage = vi.fn(async (_id: string) => ({
+      content: { id: "v-1", type: "attachment" },
+    }));
+    const resolveSpace = vi.fn(async (_threadId: string) => ({ getMessage }));
+    const inbound = message(
+      { content: { type: "voice" }, space: { id: "chat", phone: "+15550100" } },
+      ["voice"],
+    );
+
+    await addPhotonAttachmentDownloads(inbound, Object.assign(adapter, { resolveSpace }));
+
+    expect(resolveSpace).toHaveBeenCalledWith("thread-id");
+    expect(getMessage).toHaveBeenCalledWith("message-id");
+    expect(inbound.attachments[0]?.fetchMetadata).toEqual({ id: "v-1", phone: "+15550100" });
+    expect(await inbound.attachments[0]?.fetchData?.()).toEqual(Buffer.from("audio"));
+    expect(getAttachment).toHaveBeenCalledWith(expect.anything(), "v-1", "+15550100");
+  });
+
+  it("leaves an attachment without a download when the refetch fails", async () => {
+    const { adapter } = appServing({});
+    const resolveSpace = vi.fn(async () => {
+      throw new Error("Photon is unavailable");
+    });
+    const inbound = message({ content: { type: "voice" } }, ["voice"]);
+
+    await addPhotonAttachmentDownloads(inbound, Object.assign(adapter, { resolveSpace }));
+
+    expect(inbound.attachments[0]?.fetchData).toBeUndefined();
+  });
+
   it("fails the download when iMessage no longer has the attachment", async () => {
     const { adapter } = appServing({});
     const inbound = message({ content: { id: "gone", type: "attachment" } }, ["gone.jpg"]);
 
-    addPhotonAttachmentDownloads(inbound, adapter);
+    await addPhotonAttachmentDownloads(inbound, adapter);
 
     await expect(inbound.attachments[0]?.fetchData?.()).rejects.toThrow(
       "iMessage attachment gone was not found.",
@@ -89,7 +121,7 @@ describe("addPhotonAttachmentDownloads", () => {
       { content: { id: "a-1", type: "attachment" }, space: { id: "chat", phone: "+15550100" } },
       ["one.jpg"],
     );
-    addPhotonAttachmentDownloads(inbound, adapter);
+    await addPhotonAttachmentDownloads(inbound, adapter);
     addPhotonAttachmentRehydration(adapter);
 
     const { fetchData: _dropped, ...serialized } = inbound.attachments[0]!;

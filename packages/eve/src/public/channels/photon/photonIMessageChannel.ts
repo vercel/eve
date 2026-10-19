@@ -143,7 +143,7 @@ async function dispatchMessage(
   if (result === null) return;
   const adapter = bridge.bot.getAdapter("imessage");
   await markReadBestEffort(adapter, thread, message);
-  addPhotonAttachmentDownloads(message, adapter);
+  await addPhotonAttachmentDownloads(message, adapter);
   const content = photonInboundContent(message);
   if (content === undefined) return;
   await bridge.send(content, {

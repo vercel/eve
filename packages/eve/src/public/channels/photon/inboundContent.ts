@@ -8,9 +8,9 @@ type UserContentParts = Exclude<UserContent, string>;
 /**
  * Returns model-visible Photon content, or `undefined` for non-message events.
  *
- * Photon's webhook strips file bytes, and it sends some files, such as voice
- * notes, without the id eve downloads them by. Each of those reaches the agent
- * as a short note, so an attachment-only message still starts a turn.
+ * An attachment eve has no way to download, because neither the webhook nor
+ * the refetched message carried its id, reaches the agent as a short note, so
+ * an attachment-only message still starts a turn.
  */
 export function photonInboundContent(message: Message): string | UserContent | undefined {
   const content = messageToUserContent(message);
