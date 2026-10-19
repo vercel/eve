@@ -88,13 +88,46 @@ describe("startProductionServer", () => {
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
+  it("starts the built server with Nitro host and port environment", async () => {
+    const { startProductionServer } = await import("./start-production-server.js");
+    const child = createChildProcess();
+    (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
+    mocks.spawn.mockReturnValueOnce(child);
+
+    const server = await startProductionServer("/tmp/app", {
+      host: "127.0.0.1",
+      port: 4321,
+    });
+
+    expect(server.url).toBe("http://127.0.0.1:4321/");
+    expect(stdoutWrites).toContain("Listening on http://127.0.0.1:4321/\n");
+    expect(mocks.loadDevelopmentEnvironmentFiles).toHaveBeenCalledWith("/tmp/app");
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      process.execPath,
+      ["/tmp/app/.output/server/index.mjs"],
+      {
+        cwd: "/tmp/app",
+        env: expect.objectContaining({
+          HOST: "127.0.0.1",
+          NITRO_HOST: "127.0.0.1",
+          NITRO_PORT: "4321",
+          PORT: "4321",
+        }),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    await server.close();
+
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it.each([
     { schedules: undefined, inherited: undefined, expected: undefined },
     { schedules: false, inherited: undefined, expected: "1" },
     { schedules: undefined, inherited: "true", expected: "true" },
     { schedules: false, inherited: "false", expected: "1" },
   ])(
-    "starts with Nitro host/port and schedule settings $schedules/$inherited",
+    "passes EVE_SCHEDULES_DISABLED=$expected for schedules=$schedules over $inherited",
     async ({ schedules, inherited, expected }) => {
       vi.stubEnv("EVE_SCHEDULES_DISABLED", inherited);
       const { startProductionServer } = await import("./start-production-server.js");
@@ -102,35 +135,11 @@ describe("startProductionServer", () => {
       (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
       mocks.spawn.mockReturnValueOnce(child);
 
-      const server = await startProductionServer("/tmp/app", {
-        host: "127.0.0.1",
-        port: 4321,
-        schedules,
-      });
-
-      expect(server.url).toBe("http://127.0.0.1:4321/");
-      expect(stdoutWrites).toContain("Listening on http://127.0.0.1:4321/\n");
-      expect(mocks.loadDevelopmentEnvironmentFiles).toHaveBeenCalledWith("/tmp/app");
-      expect(mocks.spawn).toHaveBeenCalledWith(
-        process.execPath,
-        ["/tmp/app/.output/server/index.mjs"],
-        {
-          cwd: "/tmp/app",
-          env: expect.objectContaining({
-            HOST: "127.0.0.1",
-            NITRO_HOST: "127.0.0.1",
-            NITRO_PORT: "4321",
-            PORT: "4321",
-          }),
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
+      const server = await startProductionServer("/tmp/app", { schedules });
       const spawnOptions = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv };
       expect(spawnOptions.env.EVE_SCHEDULES_DISABLED).toBe(expected);
       expect(process.env.EVE_SCHEDULES_DISABLED).toBe(inherited);
       await server.close();
-
-      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     },
   );
 

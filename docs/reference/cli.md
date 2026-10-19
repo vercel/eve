@@ -250,7 +250,7 @@ eve start [--host <host>] [--port <port>] [--no-schedules]
 | `--port <port>`  | number | `$PORT`, then 3000 | Port to listen on                             |
 | `--no-schedules` | flag   | schedules on       | Start without running authored cron schedules |
 
-Serves the previously built output. Prints the listening URL and, with `--no-schedules`, a `schedules disabled` line. HTTP requests and workflow jobs continue to run.
+Serves the previously built output. Prints the listening URL, and a `schedules disabled` line when `--no-schedules` or `EVE_SCHEDULES_DISABLED` turns schedules off. HTTP requests and workflow jobs continue to run.
 
 Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored cron schedules at runtime, including when you run `node .output/server/index.mjs` directly. Unset, empty, and other values leave schedules enabled. `--no-schedules` sets the variable to `1` only for the spawned server; omitting the flag preserves any value you already set. The same build can run with schedules enabled or disabled.
 

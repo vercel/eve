@@ -1,6 +1,7 @@
 import { Command, CommanderError } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
+import { areSchedulesDisabled } from "#internal/schedules/disabled.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
@@ -277,7 +278,8 @@ export function createCliProgram(
         }),
       );
 
-      if (options.schedules === false) {
+      // The server inherits this process environment, including loaded env files.
+      if (options.schedules === false || areSchedulesDisabled()) {
         logger.log(
           renderCliTaggedLine(theme, {
             message: "schedules disabled",
