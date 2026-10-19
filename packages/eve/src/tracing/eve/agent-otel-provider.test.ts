@@ -3049,8 +3049,8 @@ describe("createAgentOtelInstrumentation", () => {
       "vercel.ai_gateway.affinity.displaced_provider": "bedrock",
       "vercel.ai_gateway.affinity.outcome": "promoted",
       "vercel.ai_gateway.affinity.pinned_provider": "anthropic",
-      "vercel.ai_gateway.session.id": "conversation-1",
-      "vercel.ai_gateway.session.id_source": "explicit",
+      "vercel.ai_gateway.client_session_id": "conversation-1",
+      "vercel.ai_gateway.client_session_id_source": "explicit",
     });
   });
 
@@ -3058,7 +3058,13 @@ describe("createAgentOtelInstrumentation", () => {
     const runtime = createRuntime();
     await emitAttempt({
       hooks: runtime.hooks,
-      providerMetadata: { anthropic: { cacheCreationInputTokens: 0 } },
+      providerMetadata: {
+        anthropic: {
+          cacheCreationInputTokens: 0,
+          cost: "0.01",
+          routing: { affinity: { outcome: "confirmed" }, clientSessionId: "conversation-1" },
+        },
+      },
       runInContext: runtime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",

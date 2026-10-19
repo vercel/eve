@@ -1,3 +1,5 @@
+import { isObject, readNonEmptyString } from "#shared/guards.js";
+
 /**
  * The session affinity report AI Gateway returns in `providerMetadata.gateway.routing`.
  *
@@ -19,9 +21,9 @@ export interface GatewayRouting {
  * `providerMetadata.gateway.routing` value and drops every other key.
  */
 export function readGatewayRouting(value: unknown): GatewayRouting | undefined {
-  const routing = asRecord(value);
-  if (routing === undefined) return undefined;
-  const affinitySource = asRecord(routing.affinity);
+  if (!isObject(value)) return undefined;
+  const routing = value;
+  const affinitySource = isObject(routing.affinity) ? routing.affinity : undefined;
   const affinity = pickStrings(affinitySource, [
     "displacedProvider",
     "outcome",
@@ -41,14 +43,8 @@ function pickStrings<const K extends string>(
   if (source === undefined) return undefined;
   const picked: { [P in K]?: string } = {};
   for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.length > 0) picked[key] = value;
+    const value = readNonEmptyString(source[key]);
+    if (value !== undefined) picked[key] = value;
   }
   return Object.keys(picked).length === 0 ? undefined : picked;
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : undefined;
 }

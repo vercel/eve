@@ -9,6 +9,7 @@ import {
 
 import { stripEveTraceBaggage } from "#protocol/baggage.js";
 import { readGatewayRouting } from "#shared/gateway-routing.js";
+import { isObject } from "#shared/guards.js";
 
 const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
 const traceContextSetter: TextMapSetter<Record<string, string>> = {
@@ -75,12 +76,11 @@ export function gatewayRoutingAttributes(
   providerMetadata: Readonly<Record<string, unknown>> | undefined,
 ): Attributes | undefined {
   const gateway = providerMetadata?.gateway;
-  if (typeof gateway !== "object" || gateway === null || Array.isArray(gateway)) return undefined;
-  const routing = readGatewayRouting((gateway as Record<string, unknown>).routing);
+  const routing = readGatewayRouting(isObject(gateway) ? gateway.routing : undefined);
   if (routing === undefined) return undefined;
   return {
-    "vercel.ai_gateway.session.id": routing.clientSessionId,
-    "vercel.ai_gateway.session.id_source": routing.clientSessionIdSource,
+    "vercel.ai_gateway.client_session_id": routing.clientSessionId,
+    "vercel.ai_gateway.client_session_id_source": routing.clientSessionIdSource,
     "vercel.ai_gateway.affinity.outcome": routing.affinity?.outcome,
     "vercel.ai_gateway.affinity.pinned_provider": routing.affinity?.pinnedProvider,
     "vercel.ai_gateway.affinity.displaced_provider": routing.affinity?.displacedProvider,

@@ -69,8 +69,9 @@ takes precedence; AI Gateway hashes IDs longer than 256 characters.
 
 AI Gateway also uses this ID for
 [session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity),
-which sends each call in a session to the provider that served the previous
-call, so that provider can read the prompt from its cache. The conversation
+which tries the provider that served the session's previous call first, among
+the providers your routing settings allow, so that provider can read the prompt
+from its cache. The conversation
 appears as one session in the AI Gateway logs Sessions view. Affinity can move
 the pinned provider ahead of your `order`. To keep `order` exactly, set
 `sessionAffinity: false`:
