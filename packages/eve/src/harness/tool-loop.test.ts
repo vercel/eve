@@ -10291,6 +10291,46 @@ describe("createToolLoopHarness", () => {
       );
     });
 
+    it("completes rather than fails the attempt when the turn is cancelled mid-call", async () => {
+      const abortController = new AbortController();
+      vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
+        this.stream = vi.fn().mockImplementation(async () => {
+          // A cancellation can reach the step without its reason, so the stream
+          // rejects with the platform's plain AbortError.
+          abortController.abort();
+          throw abortController.signal.reason;
+        });
+        return this;
+      } as MockAgentConstructor);
+      const attemptCompleted = vi.fn();
+      const attemptFailed = vi.fn();
+      const hooks = createInstrumentationHooks([
+        {
+          events: {
+            "step.attempt.completed": attemptCompleted,
+            "step.attempt.failed": attemptFailed,
+          },
+          name: "attempt",
+        },
+      ]);
+      const runStep = createToolLoopHarness(
+        createTestConfig(undefined, {
+          abortSignal: abortController.signal,
+          instrumentation: bindHookInstrumentation(hooks),
+        }),
+      );
+
+      await expect(runStep(createTestSession(), { message: "hi" })).rejects.toBeInstanceOf(
+        TurnCancelledError,
+      );
+
+      expect(attemptFailed).not.toHaveBeenCalled();
+      expect(attemptCompleted).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ type: "step.attempt.completed" }),
+        expect.anything(),
+      );
+    });
+
     it("publishes a delegation action when the AI SDK skips execution callbacks", async () => {
       setupMockAgent({
         finishReason: "tool-calls",
