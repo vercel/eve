@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: implemented
-last_updated: "2026-10-02"
+last_updated: "2026-10-19"
 ---
 
 # Single-workflow sessions with ingress-driven upgrades
@@ -193,6 +193,10 @@ ids do not need to identify a Workflow run.
 
 ## Handoff
 
+> Superseded by [Atomic session handoff](./atomic-session-handoff.md), which replaces the
+> release-based transfer below, the compaction trigger, and the no-owner interval with forced hook
+> claims.
+
 The first version releases hooks before starting the successor. This avoids a claim race between
 two live owners; it does not provide atomic transfer (see [Open questions](#open-questions-and-upstream-request)).
 
@@ -238,6 +242,8 @@ work, not a prerequisite.
 
 ## Compaction handoff
 
+> Superseded by [Atomic session handoff](./atomic-session-handoff.md).
+
 Workflow replay reads every step output of a run, so one owner that serves a session for its whole
 life accumulates an unbounded event log. Compaction is the natural reset point: it rewrites history
 to a summary plus a recent window, and it is already a slow, infrequent operation.
@@ -266,6 +272,8 @@ turns between two compactions.
 ## Open questions and upstream request
 
 ### The no-owner interval
+
+> Superseded by [Atomic session handoff](./atomic-session-handoff.md).
 
 The branch carries no `@workflow/core` patch. `@workflow/core` ≥ 5.0.0-beta.51
 landed with [vercel/workflow#3941](https://github.com/vercel/workflow/pull/3941),
