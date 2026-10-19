@@ -2666,6 +2666,46 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(await response.text()).toBe("abc123");
   });
 
+  // #5012: Slack only shows a threaded ephemeral once the thread has a reply.
+  it.fails("omits thread_ts from postEphemeral for a top-level mention", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.thread.postEphemeral("U01", "text");
+        return null;
+      },
+    });
+    const mention = buildMentionBody();
+
+    await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    const ephemeral = slackCalls(fetchMock, "chat.postEphemeral");
+    expect(ephemeral).toHaveLength(1);
+    const requestBody = parseSlackRequestBody(ephemeral[0]![1]);
+    expect(requestBody).toMatchObject({ channel: "C01", markdown_text: "text", user: "U01" });
+    expect(requestBody.thread_ts).toBeUndefined();
+  });
+
+  it("keeps thread_ts from postEphemeral for a threaded mention", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.thread.postEphemeral("U01", "text");
+        return null;
+      },
+    });
+    const rootTs = "1700000000.100000";
+    const mention = buildMentionBody({ ts: "1700000000.100001", threadTs: rootTs });
+
+    await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    const ephemeral = slackCalls(fetchMock, "chat.postEphemeral");
+    expect(ephemeral).toHaveLength(1);
+    const requestBody = parseSlackRequestBody(ephemeral[0]![1]);
+    expect(requestBody).toMatchObject({ channel: "C01", markdown_text: "text", user: "U01" });
+    expect(requestBody.thread_ts).toBe(rootTs);
+  });
+
   it("dispatches when onAppMention returns an auth result", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
