@@ -310,19 +310,20 @@ window:
 ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000;
 ```
 
-Return `false` to leave sessions uncapped. eve calls `sessionUsage` before each
-model call once the window has usage. The model call that crosses a limit is allowed to finish because exact usage
-arrives after the call completes. Before the next model call, eve pauses the
-turn (`turn.waiting`) and sends a deterministic continuation prompt with two options:
-**Continue** starts a new window and resumes the same
-turn, and **Stop**
-cancels the in-flight turn through the standard cancellation path
-(`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
-still over budget after Stop, the next message raises a new prompt. Declining a
+Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
+false` is not accepted. eve calls `sessionUsage` before each model call once
+the window has usage. The model call that crosses a limit is allowed to finish
+because exact usage arrives after the call completes. Before the next model
+call, eve pauses the turn (`turn.waiting`) and sends a deterministic
+continuation prompt with two options: **Continue** starts a new window and
+resumes the same turn, and **Stop** cancels the in-flight turn through the
+standard cancellation path (`turn.cancelled` → `session.waiting`). Stop is a
+user decision, not an error. The session stays resumable; because it is still
+over budget after Stop, the next message raises a new prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
-delegation tree — the delegating parent never receives an error result it
-could retry. A reply that answers neither option
-is queued while the existing prompt stays pending; eve does not raise another
+delegation tree, so the delegating parent never receives an error result it
+could retry. A reply that answers neither option is queued while the existing
+prompt stays pending; eve does not raise another
 copy or start another turn. The reply is received (`message.received`) and
 processed in the held turn once the budget is granted.
 

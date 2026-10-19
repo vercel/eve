@@ -6,7 +6,7 @@
  * limit, a session that can request input asks whether to continue (the
  * machine's `requestLimit`); one nobody can answer fails with
  * `SESSION_USAGE_LIMIT_REACHED`. The answer is the machine's `answer`: a
- * grant starts a new usage window with {@link resetSessionUsageWindow}; a
+ * grant starts a new usage window with `resetSessionUsageWindow`; a
  * decline cancels the turn tree.
  */
 import {
@@ -23,8 +23,6 @@ import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-
-export { resetSessionUsageWindow } from "#harness/turn-tag-state.js";
 
 const DEFAULT_MAX_NEW_INPUT_TOKENS_PER_WINDOW = 40_000_000;
 

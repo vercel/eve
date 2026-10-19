@@ -190,7 +190,7 @@ export interface AgentLimitsDefinition {
    * or fails it when nobody can answer. Approving starts a new window.
    *
    * Subagent sessions without their own `sessionUsage` use the root agent's.
-   * Return `false` to leave sessions uncapped.
+   * Set `sessionUsage: () => false` to leave sessions uncapped.
    *
    * @default ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000
    */

@@ -76,7 +76,10 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import {
+  resolveEffectiveAgentRuntime,
+  resolveSessionUsageLimit,
+} from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { createExecutionHistoryView } from "#execution/history-view.js";
@@ -88,7 +91,6 @@ import {
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -297,11 +299,7 @@ async function runSessionStepBody(
   try {
     const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
-    // A subagent without its own `limits.sessionUsage` runs the root agent's.
-    const sessionUsageLimit =
-      bundle.resolvedAgent.config?.limits?.sessionUsage ??
-      bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits
-        ?.sessionUsage;
+    const sessionUsageLimit = resolveSessionUsageLimit(bundle);
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,

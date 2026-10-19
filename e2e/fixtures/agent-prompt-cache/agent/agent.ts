@@ -14,5 +14,5 @@ export default defineAgent({
       }
     : {}),
   reasoning: "high",
-  limits: { sessionUsage: ({ window }) => window.inputTokens >= 300_000 },
+  limits: { sessionUsage: ({ window }) => window.inputTokens - window.cacheReadTokens >= 300_000 },
 });

@@ -51,7 +51,7 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   }
   if (definition.limits?.sessionUsage !== undefined) {
     throw new Error(
-      `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's applies.`,
+      `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's \`sessionUsage\` applies.`,
     );
   }
 

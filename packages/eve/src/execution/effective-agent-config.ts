@@ -1,8 +1,9 @@
 import type { ContextReader } from "#context/key.js";
 import { AgentSessionRuntimeOverridesKey, DynamicSubagentAgentConfigKey } from "#context/keys.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
+import type { AgentLimitsDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
@@ -20,6 +21,19 @@ export function resolveEffectiveAgentRuntime(
     bundle,
     context.get(DynamicSubagentAgentConfigKey),
     context.get(AgentSessionRuntimeOverridesKey),
+  );
+}
+
+/**
+ * The session's `limits.sessionUsage`: the agent's own, else the root agent's.
+ * A dynamic subagent config can't carry one, so its sessions run the root's.
+ */
+export function resolveSessionUsageLimit(
+  bundle: Pick<CompiledBundle, "graph" | "resolvedAgent">,
+): SessionUsageLimit | undefined {
+  return (
+    bundle.resolvedAgent.config?.limits?.sessionUsage ??
+    bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits?.sessionUsage
   );
 }
 
