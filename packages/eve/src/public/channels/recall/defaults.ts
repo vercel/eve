@@ -85,6 +85,80 @@ export function isAddressedTo(text: string, botName: string): boolean {
   );
 }
 
+const NUMBER_WORDS = [
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+];
+const ORDINALS = [
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "fifth",
+  "sixth",
+  "seventh",
+  "eighth",
+  "ninth",
+  "tenth",
+];
+/** Words people wrap a choice in, such as "okay, let's go with option two, please". */
+const FILLER_WORDS = new Set(
+  "okay ok so um uh hey yes yeah yep sure please it that this the option number let's lets go with do pick choose i we and then".split(
+    " ",
+  ),
+);
+
+function words(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[’]/gu, "'")
+    .split(/[^\p{L}\p{N}']+/u)
+    .filter(Boolean);
+}
+
+/**
+ * The option a natural reply picks, such as "Okay eve, approve it" or "eve,
+ * option one". Drops the bot's name, filler words, and number words, then
+ * matches what's left exactly, so "neither, Thursday is bad" picks nothing.
+ */
+export function matchSpokenOption<T extends { readonly id: string; readonly label: string }>(
+  text: string,
+  botName: string,
+  options: readonly T[],
+): T | undefined {
+  const name = words(botName);
+  const optionWords = new Set(options.flatMap(({ id, label }) => [...words(id), ...words(label)]));
+  const said = words(text);
+  const rest: string[] = [];
+  for (let i = 0; i < said.length; i++) {
+    if (name.length > 0 && name.every((part, j) => said[i + j] === part)) {
+      i += name.length - 1;
+      continue;
+    }
+    const word = said[i]!;
+    if (optionWords.has(word)) rest.push(word);
+    else if (NUMBER_WORDS.includes(word)) rest.push(String(NUMBER_WORDS.indexOf(word) + 1));
+    else if (ORDINALS.includes(word)) rest.push(String(ORDINALS.indexOf(word) + 1));
+    else if (!FILLER_WORDS.has(word)) rest.push(word);
+  }
+  const phrase = rest.join(" ");
+  if (!phrase) return undefined;
+  const named = options.find(
+    ({ id, label }) => words(id).join(" ") === phrase || words(label).join(" ") === phrase,
+  );
+  if (named !== undefined) return named;
+  const index = Number(phrase);
+  return Number.isInteger(index) && index >= 1 ? options[index - 1] : undefined;
+}
+
 /** Default inbound hook: speech, chat, joins, and leaves, each as its participant. */
 export function defaultOnMeetingEvent(
   _ctx: RecallContext,
@@ -106,16 +180,7 @@ export const defaultEvents: RecallChannelEvents = {
     // Text before a tool call is the agent saying it's starting, which a
     // meeting wants to hear about while it waits.
     if (!event.message) return;
-    const { replyTo } = channel.state;
-    if (replyTo === undefined) {
-      await channel.recall.sendChatMessage(event.message);
-    } else if (channel.recall.supportsDirectMessages) {
-      await channel.recall.sendChatMessage(event.message, { to: replyTo });
-    } else {
-      await channel.recall.sendChatMessage(
-        "I got a private message, but this meeting's chat can't reply privately.",
-      );
-    }
+    await channel.recall.sendChatMessage(event.message);
   },
 
   // Meeting chat has no buttons, so a reply can only answer the request it sees.
@@ -190,9 +255,16 @@ async function showPrompt(channel: RecallEventContext, request: InputRequest): P
       : request.allowFreeform === true
         ? "Reply with a number, or with your own answer."
         : "Reply with a number to choose.";
-  return await channel.recall.sendChatMessage(
+  const shown = await channel.recall.sendChatMessage(
     instruction === undefined ? body : `${body}\n\n${instruction}`,
   );
+  if (shown) {
+    channel.state.shownOptions = {
+      options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
+      requestId: request.requestId,
+    };
+  }
+  return shown;
 }
 
 function renderAuthorizationOutcome(input: {
