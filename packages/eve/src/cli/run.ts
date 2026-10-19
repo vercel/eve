@@ -79,6 +79,7 @@ interface CliRuntimeDependencies {
     options?: {
       host?: string;
       port?: number;
+      schedules?: boolean;
     },
   ): Promise<ProductionServerHandle>;
 }
@@ -253,6 +254,7 @@ export function createCliProgram(
 
   agentCommand(program.command("start"), applicationContext)
     .description("Start a built eve application.")
+    .option("--no-schedules", "Start without running authored cron schedules")
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
     .action(async (options: ProductionCliOptions) => {
@@ -264,6 +266,7 @@ export function createCliProgram(
       const server = await startProductionHost(applicationContext.root, {
         host: options.host,
         port: options.port,
+        schedules: options.schedules,
       });
 
       logger.log(
@@ -273,6 +276,16 @@ export function createCliProgram(
           tone: "success",
         }),
       );
+
+      if (options.schedules === false) {
+        logger.log(
+          renderCliTaggedLine(theme, {
+            message: "schedules disabled",
+            tag: "start",
+            tone: "info",
+          }),
+        );
+      }
 
       await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });

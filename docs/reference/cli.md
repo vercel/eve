@@ -241,15 +241,20 @@ Useful stable artifacts written by inspection and development flows under `.eve/
 ## `eve start`
 
 ```bash
-eve start [--host <host>] [--port <port>]
+eve start [--host <host>] [--port <port>] [--no-schedules]
 ```
 
-| Flag            | Type   | Default            | Description            |
-| --------------- | ------ | ------------------ | ---------------------- |
-| `--host <host>` | string | all interfaces     | Host interface to bind |
-| `--port <port>` | number | `$PORT`, then 3000 | Port to listen on      |
+| Flag             | Type   | Default            | Description                                   |
+| ---------------- | ------ | ------------------ | --------------------------------------------- |
+| `--host <host>`  | string | all interfaces     | Host interface to bind                        |
+| `--port <port>`  | number | `$PORT`, then 3000 | Port to listen on                             |
+| `--no-schedules` | flag   | schedules on       | Start without running authored cron schedules |
 
-Serves the previously built output. Prints the listening URL.
+Serves the previously built output. Prints the listening URL and, with `--no-schedules`, a `schedules disabled` line. HTTP requests and workflow jobs continue to run.
+
+Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored cron schedules at runtime, including when you run `node .output/server/index.mjs` directly. Unset, empty, and other values leave schedules enabled. `--no-schedules` sets the variable to `1` only for the spawned server; omitting the flag preserves any value you already set. The same build can run with schedules enabled or disabled.
+
+Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosting#run-schedules). It also disables authored cron dispatch on Vercel if set there, but does not affect explicit schedule dispatch in `eve dev`.
 
 For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. The deployment directory can differ from the build directory. Preserve the relative layout of any workspace packages used by the app; startup resolves sandbox prewarm modules from the deployed source.
 
