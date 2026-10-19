@@ -1,5 +1,4 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { loadContext } from "#context/container.js";
 import type {
   Adapter,
@@ -14,6 +13,7 @@ import type {
   ChatSdkChannelBridge,
   ChatSdkChannelState,
 } from "#public/channels/chat-sdk/index.js";
+import { isChannel } from "#public/channels/index.js";
 import { defineTool, type ToolDefinition } from "#public/tools/index.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -48,11 +48,18 @@ export interface IMessageTapback {
 
 /** Result of an `onTapback` hook. Return `null` to ignore the tapback. */
 export type IMessageTapbackResult = {
+  /**
+   * Option id that answers the input request eve posted in the message the
+   * tapback is on, such as `"approve"` or `"cancel"` for a tool approval.
+   * When that message isn't waiting on an answer with this option, the agent
+   * receives the tapback as a message instead.
+   */
+  readonly answer?: string;
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
   /**
-   * Replaces the text the agent receives, such as `"approve"` to answer a
-   * waiting tool approval. Defaults to text like `Tapback: Loved “See you at 7”`.
+   * Replaces the text the agent receives. Defaults to text like
+   * `Tapback: Loved “See you at 7”`.
    */
   readonly message?: string;
   /** Overrides the workflow run title without changing the message sent to the model. */
@@ -163,6 +170,10 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
     await bridge.send(result.message ?? iMessageTapbackText(tapback), {
       auth: result.auth,
       context: [...(result.context ?? [])],
+      inputAnswer:
+        result.answer === undefined
+          ? undefined
+          : { messageId: tapback.messageId, optionId: result.answer },
       thread: event.thread.toJSON(),
       title: result.title,
     });
@@ -217,8 +228,7 @@ export function iMessageTapbackTool(options: {
         );
       }
       const adapter = loadContext().get(ChannelKey);
-      const kind = getChannelInstrumentationKind(channel);
-      if (adapter === undefined || kind === undefined || adapter.kind !== kind) {
+      if (adapter === undefined || !isChannel({ kind: adapter.kind }, channel)) {
         throw new Error(
           `Tapbacks work only in a conversation that came through the ${channelLabel} channel.`,
         );

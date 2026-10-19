@@ -89,16 +89,16 @@ describe("iMessage tapbacks", () => {
     });
   });
 
-  it("fetches the reacted message when the event leaves it out, and lets the hook replace the text", async () => {
+  it("fetches the reacted message when the event leaves it out, and passes the hook's answer for that message", async () => {
     const onReaction = vi.fn();
     const send = vi.fn();
     dispatchIMessageTapbacks({ bot: { onReaction }, send } as never, (_ctx, tapback) =>
-      tapback.tapback === "like" && tapback.message?.text === "Approve the deploy?"
-        ? { auth: null, message: "approve" }
+      tapback.tapback === "like" && tapback.message?.text === "See you at 7"
+        ? { answer: "approve", auth: null }
         : null,
     );
     const handler = onReaction.mock.calls[0]?.[0] as (event: ReactionEvent) => Promise<void>;
-    const fetchMessage = vi.fn(async () => message("Approve the deploy?"));
+    const fetchMessage = vi.fn(async () => message("See you at 7"));
 
     await handler(
       reaction({
@@ -109,7 +109,13 @@ describe("iMessage tapbacks", () => {
     );
 
     expect(fetchMessage).toHaveBeenCalledWith("thread-id", "message-id");
-    expect(send).toHaveBeenCalledWith("approve", expect.objectContaining({ auth: null }));
+    expect(send).toHaveBeenCalledWith(
+      "Tapback: Liked “See you at 7”",
+      expect.objectContaining({
+        auth: null,
+        inputAnswer: { messageId: "message-id", optionId: "approve" },
+      }),
+    );
   });
 
   describe("tapback tool", () => {

@@ -204,6 +204,54 @@ describe("chatSdkChannel", () => {
     expect(state.latestMessageId).toBe("second");
   });
 
+  it("answers only the waiting request on the card a delivery's inputAnswer names", () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const adapter = getAdapter(bridge.channel);
+    const approval = {
+      kind: "tool-approval",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve Deploy?",
+    };
+    const state: ChatSdkChannelState = {
+      pendingInputCards: {
+        "answered-card": {
+          requests: [{ ...approval, requestId: "answered" }],
+          resolved: { answered: { outcome: "answered", requestId: "answered" } },
+        },
+        "deploy-card": { requests: [{ ...approval, requestId: "deploy" }], resolved: {} },
+      },
+      thread: null,
+    } as never;
+    const deliver = (messageId: string, optionId: string) =>
+      adapter.deliver?.(
+        {
+          context: [],
+          message: "Tapback: Liked a message",
+          state: { inputAnswer: { messageId, optionId } },
+        } as never,
+        { session: { auth: { current: null } }, state } as never,
+      );
+
+    expect(deliver("deploy-card", "approve")).toEqual({
+      context: [],
+      inputResponses: [{ optionId: "approve", requestId: "deploy" }],
+    });
+    expect(deliver("other-message", "approve")).toMatchObject({
+      message: "Tapback: Liked a message",
+    });
+    expect(deliver("answered-card", "approve")).toMatchObject({
+      message: "Tapback: Liked a message",
+    });
+    expect(deliver("deploy-card", "maybe")).toMatchObject({ message: "Tapback: Liked a message" });
+  });
+
   it("routes GET verification challenges to the adapter webhook", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },

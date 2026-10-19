@@ -56,7 +56,7 @@ export default linqChannel({
 });
 ```
 
-The agent reads an accepted tapback as a message in the form iMessage uses when it shows a tapback as text, such as `Tapback: Loved “See you at 7”` or `Tapback: Removed a like tapback from a message`. The quoted text appears when Linq can return the message the tapback is on. `tapback.tapback` is `love`, `like`, `dislike`, `laugh`, `emphasize`, or `question`, or the emoji itself for an emoji tapback. `tapback.messageId` and `tapback.author` identify the message and the person. An accepted tapback starts or steers a turn like any other message, following `turnPolicy`. The agent's own tapbacks never reach `onTapback`. Tapbacks arrive through the `reaction.added` and `reaction.removed` webhook events, which `eve add channel/linq` subscribes to.
+The agent reads an accepted tapback as a message in the form iMessage uses when it shows a tapback as text, such as `Tapback: Loved “See you at 7”` or `Tapback: Removed a like tapback from a message`. The quoted text appears when Linq can return the message the tapback is on. `tapback.tapback` is `love`, `like`, `dislike`, `laugh`, `emphasize`, or `question`, or the emoji itself for an emoji tapback. `tapback.messageId` and `tapback.author` identify the message and the person. An accepted tapback starts or steers a turn like any other message, following `turnPolicy`. The agent's own tapbacks never reach `onTapback`. `onTapback` runs instead of `onMessage` for tapbacks, so repeat any sender checks from `onMessage` there. Tapbacks arrive through the `reaction.added` and `reaction.removed` webhook events, which `eve add channel/linq` subscribes to.
 
 To let the agent send tapbacks, export the channel's tapback tool from a file in `agent/tools/`. The file name becomes the tool name:
 
@@ -70,7 +70,7 @@ The model calls it with a standard tapback, such as `{ "tapback": "love" }`, or 
 
 ### Answer approvals with a tapback
 
-Return `message` from `onTapback` to replace the text the agent receives. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `cancel`, and a reply that names an option answers the approval the conversation is waiting on. So a like or dislike can approve or cancel it:
+Return `answer` from `onTapback` to answer the input request eve posted in the message the tapback is on. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `cancel`, so a like or dislike on the approval prompt can approve or cancel it:
 
 ```ts title="agent/channels/linq.ts"
 import { connectLinqCredentials } from "@vercel/connect/eve";
@@ -81,16 +81,14 @@ export default linqChannel({
   onTapback(_ctx, tapback) {
     if (!tapback.added) return null;
     const auth = defaultLinqAuth(tapback);
-    if (tapback.message?.author.isMe) {
-      if (tapback.tapback === "like") return { auth, message: "approve" };
-      if (tapback.tapback === "dislike") return { auth, message: "cancel" };
-    }
+    if (tapback.tapback === "like") return { auth, answer: "approve" };
+    if (tapback.tapback === "dislike") return { auth, answer: "cancel" };
     return { auth };
   },
 });
 ```
 
-`tapback.message` is the message the tapback is on; eve fetches it from Linq when the event leaves it out, so `author.isMe` limits this to tapbacks on the agent's own messages, such as the approval prompt. The approval's response policy still decides whether the person who sent the tapback may answer. When no approval is waiting, the agent reads `approve` or `cancel` as an ordinary message.
+`answer` settles only the request posted in that message, and only while it is still waiting and offers that option. A tapback on any other message, or on a prompt that was already answered, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the person who sent the tapback may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids. To replace the text the agent receives for a tapback, return `message`.
 
 ## Other hosts
 
