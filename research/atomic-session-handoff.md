@@ -380,7 +380,7 @@ sent immediately after `session.waiting`, asserting one reply turn and an unbrok
   before the claim commits can append after the disposal row, where it is neither redirected nor
   delivered (the same class as vercel/workflow#2781, for a run's own disposal). eve carries a
   pnpm patch (`patches/@workflow__world-local@5.1.0.patch`) that takes the victim's lock for that
-  write. Report and fix it in vercel/workflow (issue: TBD (vercel/workflow)), then drop the
+  write. Report and fix it in vercel/workflow ([vercel/workflow#4923](https://github.com/vercel/workflow/issues/4923), fix in [vercel/workflow#4924](https://github.com/vercel/workflow/pull/4924)), then drop the
   patch. `@workflow/world-postgres` 5.0.4 serializes the same pair with row locks in one
   transaction and does not need it.
 - Let a cross-deployment `start()` skip or prefetch the capability probe when the caller already

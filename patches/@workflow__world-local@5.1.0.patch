@@ -26,7 +26,7 @@ index 40c5edaa130fc97daee369a731e6d61437bb3d00..c14f4ae6f6f4ab39e55b1a89b95c371a
 +                    // the holder changed in between, the takeover retries, which only
 +                    // repeats while the holder keeps changing. Like upstream's own
 +                    // per-hook locks, these serialize within one process.
-+                    // Upstream issue: TBD (vercel/workflow).
++                    // Upstream: https://github.com/vercel/workflow/issues/4923 (fix: vercel/workflow PR 4924).
 +                    const victimHookLockKey = (claim) => tag
 +                        ? `${claim.runId}-${claim.hookId}.hook.${tag}`
 +                        : `${claim.runId}-${claim.hookId}.hook`;
