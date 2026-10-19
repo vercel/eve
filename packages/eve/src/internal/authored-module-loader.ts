@@ -32,7 +32,7 @@ import {
   isNodeModulesPath,
   normalizeExternalDependencies,
 } from "#internal/authored-package-boundary.js";
-import { expectObjectRecord } from "#internal/authored-module.js";
+import { expectObjectRecord, interopAuthoredModuleNamespace } from "#internal/authored-module.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import {
@@ -148,7 +148,7 @@ async function doLoadAuthoredModuleNamespace(
     : await import(createFileImportSpecifier(modulePath));
 
   return expectObjectRecord(
-    loadedModule,
+    interopAuthoredModuleNamespace(loadedModule),
     `Expected "${modulePath}" to export a module namespace object.`,
   );
 }
