@@ -2,16 +2,20 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { Message as ExternalMessage, Thread as ExternalThread } from "chat";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
-import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import type { ChannelAdapter } from "#channel/adapter.js";
 import { INACTIVE_REQUEST_NOTICE } from "#channel/inactive-prompt.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { fail } from "#harness/session-machine/transitions.js";
-import { SessionKey } from "#context/keys.js";
+import {
+  callChannelEvent as callEvent,
+  channelEvent as makeEvent,
+  compiledChannel as asCompiled,
+  postToChannelRoute,
+  stubSessionAccessor as stubAccessor,
+} from "#internal/testing/mocks/mock-channel-calls.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -57,13 +61,6 @@ const AUTH = {
   principalType: "user",
 } as const;
 
-function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
-  if (!isCompiledChannel(channel)) {
-    throw new Error("Expected a CompiledChannel.");
-  }
-  return channel as CompiledChannel<T>;
-}
-
 function getAdapter(channel: unknown): ChannelAdapter<any> {
   return asCompiled(channel).adapter;
 }
@@ -72,42 +69,10 @@ function withState(adapter: ChannelAdapter<any>, state: ChatSdkChannelState): Ch
   return { ...adapter, state };
 }
 
-function stubAccessor() {
-  const accessor = { get: () => undefined, set: () => {} } as any;
-  // A step enters its projection before it publishes.
-  enterSessionProjection(accessor, undefined);
-  return accessor;
-}
-
-const stubAlsContext = (() => {
-  const ctx = new ContextContainer();
-  ctx.setVirtualContext(SessionKey, {
-    sessionId: "test-session",
-    auth: { current: null, initiator: null },
-    turn: { id: "test-turn", sequence: 0 },
-  });
-  return ctx;
-})();
-
-function callEvent(
-  adapter: ChannelAdapter,
-  event: UnstampedMessageStreamEvent,
-  ctx: any,
-): Promise<UnstampedMessageStreamEvent> {
-  return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
-}
-
 /** Delivers `event` as a session publishes it: the handler runs, then the session records it. */
 async function publishEvent(adapter: ChannelAdapter, event: UnstampedMessageStreamEvent, ctx: any) {
   await callEvent(adapter, event, ctx);
   recordPublishedEvent(ctx.ctx, event);
-}
-
-function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
-  type: T,
-  data: unknown,
-): UnstampedMessageStreamEvent {
-  return { type, data } as UnstampedMessageStreamEvent;
 }
 
 async function firePost(
@@ -121,25 +86,20 @@ async function firePost(
   send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
 }> {
-  const compiled = asCompiled<ChatSdkChannelState>(channel);
-  const post = compiled.routes.find((route) => route.method === "POST" && route.path === path);
-  if (!post || !isHttpRouteDefinition(post)) {
-    throw new Error(`Expected POST ${path}.`);
-  }
   const send = vi.fn().mockResolvedValue({ id: "session-1" });
   if (sendError) send.mockRejectedValue(sendError);
   const cancel = vi.fn().mockResolvedValue({ sessionId: "session-1", status: "accepted" });
   const waitUntil = vi.fn();
   const channelContext = mockChannelContext<ChatSdkChannelState>(send);
 
-  const response = await post.handler(
+  const response = await postToChannelRoute(
+    asCompiled<ChatSdkChannelState>(channel),
     new Request(`https://example.com${path}`, {
       body: JSON.stringify(body),
       headers: { "content-type": "application/json" },
       method: "POST",
     }),
     {
-      ...mockAgentRouteArgs(),
       from(continuationToken) {
         return {
           ...channelContext.from(continuationToken),
@@ -147,20 +107,9 @@ async function firePost(
         };
       },
       resolveSession: channelContext.resolveSession,
-      attachSession: vi.fn() as any,
-      params: {},
-      to: vi.fn() as any,
-      requestIp: null,
-      waitUntil,
-    } satisfies RouteHandlerArgs<ChatSdkChannelState>,
+    },
+    waitUntil,
   );
-
-  let drained = 0;
-  while (drained < waitUntil.mock.calls.length) {
-    const pending = waitUntil.mock.calls.slice(drained).map(([task]) => task as Promise<unknown>);
-    drained = waitUntil.mock.calls.length;
-    await Promise.allSettled(pending);
-  }
 
   return { cancel, response, send, waitUntil };
 }

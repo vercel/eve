@@ -14,17 +14,17 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
-import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
-import { isHttpRouteDefinition } from "#channel/routes.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
-import { enterSessionProjection } from "#harness/session-machine/current.js";
+import type { ChannelAdapter } from "#channel/adapter.js";
+import type { CompiledChannel } from "#channel/compiled-channel.js";
+import {
+  callChannelEvent,
+  channelEvent,
+  compiledChannel,
+  postToChannelRoute,
+  stubSessionAccessor,
+} from "#internal/testing/mocks/mock-channel-calls.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
-import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ChatSdkChannelState } from "#public/channels/chat-sdk/index.js";
-import type { RouteHandlerArgs } from "#public/definitions/channel.js";
 import type { Adapter } from "#compiled/chat/index.js";
 import { Chat, Message, parseMarkdown } from "#compiled/chat/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
@@ -49,8 +49,8 @@ const b64 = (value: string) => Buffer.from(value).toString("base64url");
 interface Platform {
   /** A direct-message thread, in the id format the adapter decodes. */
   readonly thread: string;
-  /** An id the adapter accepts for a message it sent, when it checks their format. */
-  readonly sentMessageId?: string;
+  /** The id of the `sent`th message the adapter sent, when it checks their format. */
+  readonly sentMessageId?: (sent: number) => string;
   /** Why the adapter can't send without a live platform, if it can't. */
   readonly streamingUntestable?: string;
 }
@@ -64,7 +64,7 @@ const PLATFORMS: Record<string, Platform> = {
   "channel/chat-sdk-dial": { thread: "dial:+15550000000:+15550001111" },
   "channel/chat-sdk-gchat": {
     thread: "gchat:spaces/AAAA:dm",
-    sentMessageId: "spaces/AAAA/messages/m1",
+    sentMessageId: (sent) => `spaces/AAAA/messages/m${sent}`,
   },
   "channel/chat-sdk-gmail": {
     thread: `gmail:${b64("agent@example.com")}:dm:${b64("alice@example.com")}`,
@@ -140,16 +140,22 @@ beforeAll(() => {
   }
   // Start Chat SDK without the network: adapters whose startup calls the platform
   // (bot identity lookups, logins) start anyway, as they would once it answered.
-  vi.spyOn(Chat.prototype as any, "ensureInitialized").mockImplementation(
-    async function (this: any) {
-      if (this.initialized) return;
-      await this._stateAdapter.connect();
-      for (const adapter of this.adapters.values()) {
-        await reachesPlatform(() => adapter.initialize(this));
-      }
-      this.initialized = true;
-    },
-  );
+  // Some templates initialize at import, before a test can reach their adapter,
+  // so this hooks Chat SDK's own init path rather than each adapter.
+  const ensureInitialized = Reflect.get(Chat.prototype, "ensureInitialized") as () => Promise<void>;
+  const tolerant = new WeakSet<Adapter>();
+  vi.spyOn(Chat.prototype as any, "ensureInitialized").mockImplementation(function (this: Chat) {
+    const adapters = Reflect.get(this, "adapters") as Map<string, Adapter>;
+    for (const adapter of adapters.values()) {
+      if (tolerant.has(adapter)) continue;
+      tolerant.add(adapter);
+      const initialize = adapter.initialize.bind(adapter);
+      adapter.initialize = async (chat) => {
+        await reachesPlatform(() => initialize(chat));
+      };
+    }
+    return ensureInitialized.call(this);
+  });
   // The Gmail template keeps state in Redis; give it memory state instead.
   vi.doMock(resolveFromDocs("@chat-adapter/state-redis"), () => ({
     createRedisState: () => createMemoryState(),
@@ -201,8 +207,7 @@ async function importTemplate(item: RegistryItem): Promise<LoadedTemplate> {
     bot: Chat;
     channel: unknown;
   };
-  if (!isCompiledChannel(module.channel)) throw new Error(`${item.name} exports no channel.`);
-  const channel = module.channel as CompiledChannel<ChatSdkChannelState>;
+  const channel = compiledChannel<ChatSdkChannelState>(module.channel);
   const adapterName = channel.routes[0]!.path.split("/").at(-1)!;
   const adapter = module.bot.getAdapter(adapterName) as Adapter;
   const platform = PLATFORMS[item.name];
@@ -256,36 +261,21 @@ async function deliver(
   send = vi.fn().mockResolvedValue({ id: "session-1" }),
 ) {
   const route = template.channel.routes.find((candidate) => candidate.method === "POST");
-  if (!route || !isHttpRouteDefinition(route)) throw new Error("Expected a POST webhook route.");
-  const waitUntil = vi.fn();
-  const channelContext = mockChannelContext<ChatSdkChannelState>(send);
+  if (!route) throw new Error("Expected a POST webhook route.");
   await Promise.all(
     bodies.map((body) => {
       nextMessage += 1;
-      return route.handler(
+      return postToChannelRoute(
+        template.channel,
         new Request(`https://agent.example.com${route.path}`, {
           body: JSON.stringify({ id: `message-${nextMessage}`, ...body }),
           headers: { "content-type": "application/json" },
           method: "POST",
         }),
-        {
-          ...mockAgentRouteArgs(),
-          ...channelContext,
-          attachSession: vi.fn() as any,
-          params: {},
-          requestIp: null,
-          to: vi.fn() as any,
-          waitUntil,
-        } satisfies RouteHandlerArgs<ChatSdkChannelState>,
+        mockChannelContext<ChatSdkChannelState>(send),
       );
     }),
   );
-  let drained = 0;
-  while (drained < waitUntil.mock.calls.length) {
-    const pending = waitUntil.mock.calls.slice(drained).map(([task]) => task as Promise<unknown>);
-    drained = waitUntil.mock.calls.length;
-    await Promise.allSettled(pending);
-  }
   return send;
 }
 
@@ -304,7 +294,8 @@ async function streamReply(template: LoadedTemplate, deltas: readonly string[]) 
   adapter.postMessage = async (threadId, message) => {
     const result = await reachesPlatform(() => postMessage(threadId, message));
     sent += 1;
-    const id = result === "sent" ? (template.platform.sentMessageId ?? `sent-${sent}`) : result.id;
+    const id =
+      result === "sent" ? (template.platform.sentMessageId?.(sent) ?? `sent-${sent}`) : result.id;
     shown.set(id, textOf(message));
     return result === "sent" ? { id, raw: {}, threadId } : result;
   };
@@ -324,30 +315,28 @@ async function streamReply(template: LoadedTemplate, deltas: readonly string[]) 
       },
     };
     const channelAdapter = { ...template.channel.adapter, state } as ChannelAdapter<any>;
-    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+    const ctx = buildAdapterContext(channelAdapter, stubSessionAccessor());
     for (const [sequence, messageDelta] of deltas.entries()) {
-      await callEvent(
+      await callChannelEvent(
         channelAdapter,
-        "message.appended",
-        {
+        channelEvent("message.appended", {
           messageDelta,
           sequence,
           stepIndex: 0,
           turnId: "turn-1",
-        },
+        }),
         ctx,
       );
     }
-    await callEvent(
+    await callChannelEvent(
       channelAdapter,
-      "message.completed",
-      {
+      channelEvent("message.completed", {
         finishReason: "stop",
         message: deltas.join(""),
         sequence: deltas.length,
         stepIndex: 0,
         turnId: "turn-1",
-      },
+      }),
       ctx,
     );
   } finally {
@@ -355,27 +344,6 @@ async function streamReply(template: LoadedTemplate, deltas: readonly string[]) 
     adapter.editMessage = editMessage;
   }
   return [...shown.values()];
-}
-
-function stubAccessor() {
-  const accessor = { get: () => undefined, set: () => {} } as any;
-  enterSessionProjection(accessor, undefined);
-  return accessor;
-}
-
-const sessionContext = (() => {
-  const ctx = new ContextContainer();
-  ctx.setVirtualContext(SessionKey, {
-    auth: { current: null, initiator: null },
-    sessionId: "test-session",
-    turn: { id: "turn-1", sequence: 0 },
-  });
-  return ctx;
-})();
-
-function callEvent(adapter: ChannelAdapter, type: string, data: unknown, ctx: any) {
-  const event = { data, type } as UnstampedMessageStreamEvent;
-  return contextStorage.run(sessionContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
