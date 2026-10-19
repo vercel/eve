@@ -55,6 +55,8 @@ export interface RecallChannelState extends PromptQueueState {
   platform: string | null;
   /** Lines the agent heard but didn't answer since its last turn, oldest first. */
   transcript?: string[];
+  /** Participant id to answer privately, set when a private chat started the current turn. */
+  replyTo?: string;
 }
 
 /** Per-delivery state: the event a line came from, which `deliver` reads and doesn't keep. */
@@ -275,6 +277,12 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
         return undefined;
       }
       channel.state.transcript = [];
+      // The latest line a turn answers picks where its reply goes.
+      if (event.type === "chat" && event.to === "only_bot") {
+        channel.state.replyTo = event.participant.id;
+      } else {
+        delete channel.state.replyTo;
+      }
       const input = defaultDeliverResult(payload);
       if (input === undefined || transcript.length === 0) return input;
       return { ...input, context: [...(input.context ?? []), formatTranscript(transcript)] };

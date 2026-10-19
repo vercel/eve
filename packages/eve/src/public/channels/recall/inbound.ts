@@ -1,3 +1,5 @@
+import { isObject } from "#shared/guards.js";
+
 /** A meeting participant as Recall reports them. Names and emails come from the meeting platform and are not verified. */
 export interface RecallParticipant {
   /** Recall's participant id, unique within one bot's meeting. */
@@ -62,12 +64,12 @@ export const RECALL_REALTIME_EVENTS = [
 
 /** Parses a Recall real-time or status webhook body. Returns `null` for events the channel ignores. */
 export function parseRecallEvent(payload: unknown): RecallMeetingEvent | null {
-  if (!isRecord(payload) || typeof payload.event !== "string" || !isRecord(payload.data)) {
+  if (!isObject(payload) || typeof payload.event !== "string" || !isObject(payload.data)) {
     return null;
   }
   const envelope = payload.data;
-  const bot = isRecord(envelope.bot) ? envelope.bot : undefined;
-  if (typeof bot?.id !== "string" || !isRecord(envelope.data)) return null;
+  const bot = isObject(envelope.bot) ? envelope.bot : undefined;
+  if (typeof bot?.id !== "string" || !isObject(envelope.data)) return null;
   const base: RecallEventBase = { botId: bot.id, botMetadata: readMetadata(bot.metadata) };
   const data = envelope.data;
 
@@ -88,14 +90,14 @@ export function parseRecallEvent(payload: unknown): RecallMeetingEvent | null {
       const text = Array.isArray(data.words)
         ? normalizeText(
             data.words
-              .map((word) => (isRecord(word) && typeof word.text === "string" ? word.text : ""))
+              .map((word) => (isObject(word) && typeof word.text === "string" ? word.text : ""))
               .join(" "),
           )
         : "";
       return text ? { ...base, participant, text, type: "speech" } : null;
     }
     case "participant_events.chat_message": {
-      const message = isRecord(data.data) ? data.data : {};
+      const message = isObject(data.data) ? data.data : {};
       const text = typeof message.text === "string" ? message.text.trim() : "";
       if (!text) return null;
       const to = typeof message.to === "string" ? message.to : undefined;
@@ -111,7 +113,7 @@ export function parseRecallEvent(payload: unknown): RecallMeetingEvent | null {
 }
 
 function readParticipant(value: unknown): RecallParticipant | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isObject(value)) return undefined;
   const id = typeof value.id === "number" || typeof value.id === "string" ? String(value.id) : "";
   if (!id) return undefined;
   const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "";
@@ -125,7 +127,7 @@ function readParticipant(value: unknown): RecallParticipant | undefined {
 }
 
 function readMetadata(value: unknown): Readonly<Record<string, string>> {
-  if (!isRecord(value)) return {};
+  if (!isObject(value)) return {};
   return Object.fromEntries(
     Object.entries(value).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string",
@@ -138,8 +140,4 @@ function normalizeText(text: string): string {
     .replace(/\s+([,.!?;:])/gu, "$1")
     .replace(/\s+/gu, " ")
     .trim();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
