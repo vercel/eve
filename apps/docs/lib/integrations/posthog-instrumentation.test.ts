@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+type RuntimeContextResolver = (input: unknown) => Record<string, unknown> | undefined;
+
 const captured = vi.hoisted(() => ({
   runtimeContext: undefined as RuntimeContextResolver | undefined,
 }));
@@ -20,8 +22,6 @@ const POSTHOG_SPAN_DISTINCT_ID_KEYS = [
   "posthog.distinct_id",
   "user.id",
 ] as const;
-
-type RuntimeContextResolver = (input: unknown) => Record<string, unknown> | undefined;
 
 function posthogDistinctId(attributes: Record<string, unknown>): unknown {
   const key = POSTHOG_SPAN_DISTINCT_ID_KEYS.find((candidate) => attributes[candidate]);
