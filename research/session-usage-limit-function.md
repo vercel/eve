@@ -37,6 +37,15 @@ spend still counts in the parent's usage once the child replies. Dynamic
 subagent configs are serialized into workflow input, so they can't carry a
 function and always use the root agent's.
 
+The cost is a looser bound on fan-out. Parallel children each get a full
+window, and their spend reaches the parent only when they reply, so one model
+step that starts N children can spend about N times the limit before the
+parent's next check asks. The old split capped the whole tree, but a child's
+limit depended on how many siblings started with it and on what earlier
+children had spent. A tree-wide check, which counts in-flight child usage
+before each child model call, would restore the bound and is left for a
+follow-up.
+
 ## Runtime
 
 The manifest marks `limits.sessionUsage: true`; the agent config module

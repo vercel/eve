@@ -310,6 +310,26 @@ window:
 ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000;
 ```
 
+`sessionUsage` can raise its threshold after each approval. This limit asks
+at 20,000 new input tokens, then at 40,000, 80,000, and so on:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  limits: {
+    sessionUsage: ({ total, window }) => {
+      const used = total.inputTokens - total.cacheReadTokens;
+      // Usage when the last continuation was approved; 0 before the first.
+      const approvedAt = used - (window.inputTokens - window.cacheReadTokens);
+      // Double past it, so each approval allows twice the usage before the next prompt.
+      let next = 20_000;
+      while (next <= approvedAt) next *= 2;
+      return used >= next;
+    },
+  },
+});
+```
+
 Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
 false` is not accepted. eve calls `sessionUsage` before each model call once
 the window has usage. The model call that crosses a limit is allowed to finish
