@@ -378,11 +378,14 @@ sent immediately after `session.waiting`, asserting one reply turn and an unbrok
 - `@workflow/world-local` 5.1 writes a force-claimed victim's `hook_disposed` without the
   victim's per-hook lock that `hook_received` takes. A resume that passed the disposal check just
   before the claim commits can append after the disposal row, where it is neither redirected nor
-  delivered (the same class as vercel/workflow#2781, for a run's own disposal). eve carries a
-  pnpm patch (`patches/@workflow__world-local@5.1.0.patch`) that takes the victim's lock for that
-  write. Report and fix it in vercel/workflow ([vercel/workflow#4923](https://github.com/vercel/workflow/issues/4923), fix in [vercel/workflow#4924](https://github.com/vercel/workflow/pull/4924)), then drop the
-  patch. `@workflow/world-postgres` 5.0.4 serializes the same pair with row locks in one
-  transaction and does not need it.
+  delivered (the same class as vercel/workflow#2781, for a run's own disposal). Reported as
+  [vercel/workflow#4923](https://github.com/vercel/workflow/issues/4923) and fixed in
+  [vercel/workflow#4924](https://github.com/vercel/workflow/pull/4924). eve does not patch it:
+  until it upgrades to a `@workflow/world-local` release with that fix, a delivery racing a
+  forced claim on the local world can be lost, and the alias-delivery integration test that races
+  the claim is skipped. Upgrade and re-enable that test once the fix ships.
+  `@workflow/world-postgres` 5.0.4 serializes the same pair with row locks in one transaction and
+  is not affected.
 - Let a cross-deployment `start()` skip or prefetch the capability probe when the caller already
   holds a fresh attestation, for example one stamped by ingress on the accepting deployment.
 - A global stream independent of any run would let the original run stop parking as the anchor.

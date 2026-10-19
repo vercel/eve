@@ -60,9 +60,7 @@ export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
   chunkGroup: "workflow",
-  // `events-storage.js` carries a pnpm patch (patches/@workflow__world-local@*.patch);
-  // fingerprinting it re-vendors when the patch changes without a version bump.
-  fingerprintFiles: ["dist/fs.js", "dist/storage/events-storage.js"],
+  fingerprintFiles: ["dist/fs.js"],
   declaration: await loadDeclaration("workflow-world-local.d.ts"),
   plugins: [workflowWorldLocalVersionPlugin],
 };
