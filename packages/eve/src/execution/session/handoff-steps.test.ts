@@ -14,6 +14,7 @@ import {
 import { positionState } from "#internal/testing/session-machine.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 
 const deserializeContextMock = vi.fn();
 const readDurableSessionMock = vi.fn();
@@ -22,6 +23,7 @@ const setAttributesMock = vi.fn();
 const getWorldMock = vi.fn(async () => ({}));
 const getRunMock = vi.fn();
 const resumeHookMock = vi.fn();
+const getHookByTokenMock = vi.fn();
 const startWorkflowOnDeploymentMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -40,6 +42,7 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   cancelRun: (...args: unknown[]) => cancelRunMock(...args),
   getRun: (...args: unknown[]) => getRunMock(...args),
+  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   getWorld: () => getWorldMock(),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
@@ -47,6 +50,8 @@ vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   startWorkflowOnDeployment: (...args: unknown[]) => startWorkflowOnDeploymentMock(...args),
 }));
+
+const SOURCE_TOKENS = ["eve:session:session-1", "channel:alias"];
 
 describe("prepareSuccessorStep", () => {
   beforeEach(() => {
@@ -67,6 +72,34 @@ describe("prepareSuccessorStep", () => {
       expect.objectContaining({ "$eve.session": "session-1" }),
       { allowReservedAttributes: true },
     );
+  });
+
+  it.each([
+    ["every address is still the source's", ["run-a", "run-a"], "valid"],
+    ["another run now holds an alias", ["run-a", "run-other"], "source-gone"],
+    ["an address is no longer held", ["run-a", undefined], "source-gone"],
+  ] as const)("checks the source still holds its addresses: %s", async (_name, holders, kind) => {
+    deserializeContextMock.mockResolvedValue({ require: vi.fn() });
+    readDurableSessionMock.mockReturnValue({});
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      const runId = holders[token.includes("channel:alias") ? 1 : 0];
+      if (runId === undefined) throw new HookNotFoundError(token);
+      return { runId };
+    });
+
+    await expect(
+      prepareSuccessorStep({
+        handoffVersion: 3,
+        migration: { kind: "current", checkpoint: createCheckpoint(), childRunIdsToStop: [] },
+        sessionId: "session-1",
+        source: { hookTokens: SOURCE_TOKENS, runId: "run-a" },
+      }),
+    ).resolves.toEqual({ kind });
+    expect(getHookByTokenMock.mock.calls.map(([token]) => token)).toEqual(
+      SOURCE_TOKENS.map(sessionInboxHookToken),
+    );
+    // Ingress reads the recorded owner version, so only a successor that will claim records it.
+    expect(setAttributesMock).toHaveBeenCalledTimes(kind === "valid" ? 1 : 0);
   });
 
   it("ignores a sandbox record saved before the provider redesign", async () => {

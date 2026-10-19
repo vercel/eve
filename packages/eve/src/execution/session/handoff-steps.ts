@@ -9,7 +9,8 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 import type { SessionHandoverPayload } from "#execution/session-inbox/inbox.js";
-import { getStepMetadata } from "#compiled/@workflow/core/index.js";
+import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
+import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -143,7 +144,9 @@ export async function hasRunEndedStep(input: { readonly runId: string }): Promis
 
 export type SessionCheckpointValidation =
   | { readonly kind: "valid" }
-  | { readonly kind: "incompatible"; readonly reason: "checkpoint-version" };
+  | { readonly kind: "incompatible"; readonly reason: "checkpoint-version" }
+  /** The source no longer holds every address it handed over, so none may be taken. */
+  | { readonly kind: "source-gone" };
 
 /**
  * Validates an upgraded checkpoint, resolves the target deployment's compiled
@@ -157,6 +160,8 @@ export async function prepareSuccessorStep(input: {
   readonly handoffVersion: number | undefined;
   readonly migration: SessionCheckpointMigration;
   readonly sessionId: string;
+  /** Version 3: the run that still holds the session and the addresses it hands over. */
+  readonly source?: { readonly runId: string; readonly hookTokens: readonly string[] };
 }): Promise<SessionCheckpointValidation> {
   "use step";
   const { migration } = input;
@@ -211,6 +216,9 @@ export async function prepareSuccessorStep(input: {
   if (!isSessionStateIdleForHandoff(checkpoint)) {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
   }
+  if (input.source !== undefined && !(await holdsEveryAddress(input.source))) {
+    return { kind: "source-gone" };
+  }
   await recordSessionOwner(input.sessionId);
   // Owners on releases before version 3 release their addresses first. This
   // line shows when none remain, which is when that compatibility can go.
@@ -221,6 +229,23 @@ export async function prepareSuccessorStep(input: {
     });
   }
   return { kind: "valid" };
+}
+
+/**
+ * Whether `source.runId` still holds every address. A delayed successor whose
+ * source has ended could otherwise force-claim a channel alias that a new
+ * session reuses. The source can still end between this check and the claims
+ * that follow, but that window is one step rather than a queue delay.
+ */
+async function holdsEveryAddress(source: {
+  readonly runId: string;
+  readonly hookTokens: readonly string[];
+}): Promise<boolean> {
+  // A session may hold up to 256 addresses.
+  const holders = await mapWithConcurrency(source.hookTokens, 16, (token) =>
+    findSessionHookHolder(sessionInboxHookToken(token)),
+  );
+  return holders.every((holder) => holder?.runId === source.runId);
 }
 
 /**
@@ -316,19 +341,30 @@ export async function reportSessionTakenOverOutsideAttemptStep(input: {
   });
 }
 
-/** Attempts per non-final handover part before it is reported lost. */
-const HANDOVER_PART_MAX_RETRIES = 3;
+/**
+ * Makes a move whose handover part keeps failing visible; the owner keeps
+ * retrying, because dropping the part would lose an accepted message.
+ */
+export async function reportHandoverPartStuckStep(input: {
+  readonly attemptKey: string;
+  readonly error: string | undefined;
+  readonly failures: number;
+  readonly index: number;
+  readonly sessionId: string;
+}): Promise<void> {
+  "use step";
+  log.warn("session handover part keeps failing; the previous owner keeps retrying", input);
+}
 
 /**
  * Sends one handover part through the stable session address, which reaches
- * whichever run owns the session. A part that keeps failing is logged as lost
- * and skipped, so one undeliverable payload cannot hold the rest; the final
- * part instead fails, for the caller to retry until it is delivered.
+ * whichever run owns the session. A part that keeps failing fails the step,
+ * for the caller to retry until it is delivered.
  */
 export async function sendSessionHandoverPartStep(input: {
   readonly part: Omit<SessionHandoverPayload, "kind">;
   readonly sessionId: string;
-}): Promise<"delivered" | "lost" | "session-ended"> {
+}): Promise<"delivered" | "session-ended"> {
   "use step";
   try {
     await resumeHook(sessionInboxHookToken(sessionCommandHookToken(input.sessionId)), {
@@ -339,17 +375,9 @@ export async function sendSessionHandoverPartStep(input: {
   } catch (error) {
     // The session has ended, so nothing waits for these payloads.
     if (HookNotFoundError.is(error)) return "session-ended";
-    if (input.part.final !== undefined || getStepMetadata().attempt <= HANDOVER_PART_MAX_RETRIES)
-      throw error;
-    logError(log, "session handover part lost; the new owner continues without it", error, {
-      attemptKey: input.part.attemptKey,
-      index: input.part.index,
-      sessionId: input.sessionId,
-    });
-    return "lost";
+    throw error;
   }
 }
-Object.assign(sendSessionHandoverPartStep, { maxRetries: HANDOVER_PART_MAX_RETRIES });
 
 export async function signalSessionAnchorStep(input: {
   readonly result: { readonly output: unknown };

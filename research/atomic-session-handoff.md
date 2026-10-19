@@ -144,7 +144,7 @@ exits, or parks as the stream anchor
 | `failed` verdict with `claimedHooks: true`                  | retained    | Force-reclaim the full hook set with the gate armed and run the delivery at once; the candidate's `handover` lands behind it, which keeps FIFO because the trigger precedes anything the candidate accepted. |
 | `failed` with `HookConflictError` (successor older than v3) | retained    | Treat as `known-incompatible` for that deployment.                                                                                                                                                           |
 | The candidate run ended with neither takeover nor verdict   | retained    | Force-reclaim the full hook set (forced claims replace A's own hooks, so pump timing does not matter), then run the delivery.                                                                                |
-| Input arrives after the boot deadline (5 min), no verdict   | retained    | Fence; if no live candidate holds the lease, run the delivery (reclaiming the full set if a lease holder ended).                                                                                             |
+| Input waits through the boot deadline (5 min), no verdict   | retained    | Fence; if no live candidate holds the lease, run the delivery (reclaiming the full set if a lease holder ended).                                                                                             |
 
 The takeover itself is the success signal. Because A waits for every one of its pumps to close,
 the leftovers it forwards are complete. The handover goes through the stable address, which
@@ -167,13 +167,12 @@ have claimed addresses: one that gave a verdict reports what it holds, and A for
 full set from any other that gave up.
 
 **Handover parts.** A sends leftovers one payload per part, each carrying the attempt key and
-an index, then a final part with the next index and the indexes it could not deliver. Each
-payload was accepted on its own, so no part exceeds a limit the original did not. The gate
-applies parts in index order at the armed position, ignores repeated indexes (a retried send step
-repeats its index), skips the lost ones the final part lists, and opens on the final part. A part
-that still fails after its step's retries is logged as lost and skipped; the final part is retried
-with durable backoff until delivered or the session has ended (`HookNotFound`). A takeover
-therefore always ends with a final part, so B is never left gated by a live A.
+an index, then a final part with the next index. Each payload was accepted on its own, so no
+part exceeds a limit the original did not. The gate applies parts in index order at the armed
+position, ignores repeated indexes (a retried send step repeats its index), and opens once the
+final part and every part before it have been applied. Every part, data and final alike, is
+retried with durable backoff until delivered or the session has ended (`HookNotFound`), so no
+accepted message is dropped and a takeover always ends with a final part.
 
 **Counterpart watch.** No wait on the other run is unbounded once that run is gone. A shared
 helper sleeps durably (10 s) between checks of the run's status, keeps looping when a check
@@ -181,11 +180,12 @@ fails, and stops as soon as the awaited event happens. An open wait due within t
 inline window (2, 5, or 10 minutes by function deadline, plus 30 s skew) turns off Workflow's
 inline step delta, so no watch runs on the healthy path:
 
-- A awaiting the takeover or verdict uses no timer. It records the attempt's start on the
-  replay-stable workflow clock and also races the next payload the inbox accepts (readable or
-  gated). A stuck attempt only matters once input is waiting, and all input, including the
-  session timeout command, arrives through the inbox. On an arrival more than 5 minutes into the
-  attempt, A fences; if a live candidate still holds the lease, A watches that run.
+- A awaiting the takeover or verdict records the attempt's start, before the start step, on the
+  replay-stable workflow clock. A stuck attempt only matters once input is waiting, and all input,
+  including the session timeout command, arrives through the inbox, so A sets no timer while the
+  inbox is empty; it races the next arrival instead. Once input is pending, A races one durable
+  sleep for the time left until 5 minutes after the start. Reaching it fences the attempt; if a
+  live candidate still holds the lease, A watches that run.
 - A gated after a `claimedHooks` failure, and B gated awaiting A's handover, start watching only
   when a read (`next`, `whenPending`) actually blocks on the gate. If the counterpart has ended,
   the gate opens with nothing restored.
@@ -207,10 +207,14 @@ and B, watching A, stops waiting and exits without writing to the stream.
    owner already took the lease after a failed start step, conflicts and exits without touching
    session hooks or signaling. A `v3` input missing `attemptKey`, `hookTokens`, or `sourceRunId`
    is malformed and signals `failed` rather than taking the released path.
-2. **Prepare in one step.** `prepareSuccessorStep` migrates the checkpoint, validates it, and
-   records `$eve.version`. Recording must precede any
-   claim, because ingress reads it. If validation fails, signal `incompatible` or `failed` and
-   exit. Nothing was claimed, so A has nothing to recover.
+2. **Prepare in one step.** `prepareSuccessorStep` migrates the checkpoint, validates it,
+   confirms A (`sourceRunId`) still holds every token in `hookTokens`, and records `$eve.version`.
+   Recording must precede any claim, because ingress reads it. If validation fails, signal
+   `incompatible` or `failed` and exit. If A no longer holds an address (A was cancelled or failed
+   while B was queued, and a new session may reuse a channel alias), B claims nothing, signals
+   `failed` (a no-op once A is gone), and exits. The source can still end between this check and
+   the claims; that window is one step rather than a queue delay. Nothing was claimed, so A has
+   nothing to recover.
 3. **Force-claim A's hook set** (`hookTokens`) in one batch, arming the gate before any hook
    exists so a handover that is a hook's first payload is never dropped. B claims exactly A's set:
    forcing a token A never held could take it from an unrelated run, and A reclaims only its own
@@ -361,13 +365,17 @@ sent immediately after `session.waiting`, asserting one reply turn and an unbrok
 - **Lease overlap.** Claiming the lease in the same suspension as the prepare step removes one
   operation, but a `getConflict` awaiter disables inline execution for steps in that suspension.
   Measure both orders on hosted before choosing.
-- **Handover part lost after a takeover.** A part whose step still fails after its retries is
-  logged and skipped, so that one payload A accepted is lost; the final part lists it and B moves
-  on. The final part itself is retried until delivered, so B is never left gated by a live A.
-- **Watch cost.** No path creates a wait until something is actually blocked: a gated read, or a
-  candidate still live when input arrives past the boot deadline. A watch then costs a wait plus
-  a step every 10 s. A candidate that never boots holds the session's next input for up to the
-  boot deadline; whether to also cancel such a candidate is deferred.
+- **A handover part that never delivers.** Every part is retried until delivered or the session
+  ends. A part that fails permanently therefore keeps the move retrying, and B gated, rather than
+  dropping a message the session accepted. A only stops when the session has ended.
+- **Watch cost.** No path creates a wait until something is actually blocked or waiting: input
+  pending behind an open attempt (one sleep until the boot deadline), a gated read, or a candidate
+  still live past the deadline. A watch then costs a wait plus a step every 10 s. A candidate that
+  never boots holds the session's pending input for up to the boot deadline; whether to also
+  cancel such a candidate is deferred. When a message races the move, the deadline sleep cannot
+  be cancelled: after a retain it turns off Workflow's inline step delta for up to the boot
+  deadline and wakes the run once with nothing to do (a parked original run also gets one extra
+  replay).
 - **Retirement signal.** The released-path log shows sessions that moved, not sessions that are
   still waiting on an earlier owner for their next message. Before retiring, decide whether the
   log's silence is enough, or whether to count remaining owners by `$eve.version` in the World.
@@ -382,7 +390,9 @@ sent immediately after `session.waiting`, asserting one reply turn and an unbrok
   [vercel/workflow#4924](https://github.com/vercel/workflow/pull/4924). eve does not patch it:
   until it upgrades to a `@workflow/world-local` release with that fix, a delivery racing a
   forced claim on the local world can be lost, and the alias-delivery integration test that races
-  the claim is skipped. Upgrade and re-enable that test once the fix ships.
+  the claim is skipped. `eve dev` runs on the local world, so a delivery racing a handoff after a
+  dev reload is exposed to the same race until that upgrade. Upgrade and re-enable that test once
+  the fix ships.
   `@workflow/world-postgres` 5.0.4 serializes the same pair with row locks in one transaction and
   is not affected.
 - Let a cross-deployment `start()` skip or prefetch the capability probe when the caller already

@@ -264,6 +264,7 @@ interface PreparedSuccessor {
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
 async function prepareSuccessor(
   input: HandoffWorkflowEntryInput,
+  source?: { readonly runId: string; readonly hookTokens: readonly string[] },
 ): Promise<PreparedSuccessor | undefined> {
   const { sessionId } = input;
   // The previous owner may run an older eve build; read its checkpoint in this build's shape.
@@ -272,6 +273,7 @@ async function prepareSuccessor(
     handoffVersion: input.handoffVersion,
     migration,
     sessionId,
+    ...(source !== undefined && { source }),
   });
   if (migration.kind === "incompatible" || validation.kind === "incompatible") {
     await signalSessionOwnerActivationStep({
@@ -283,6 +285,12 @@ async function prepareSuccessor(
       },
       token: input.activationToken,
     });
+    return undefined;
+  }
+  if (validation.kind === "source-gone") {
+    // A source that ended no longer listens; a live one keeps the session.
+    const error = new Error("The session's previous owner no longer holds all of its addresses.");
+    await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
   }
   const { checkpoint, childRunIdsToStop } = migration;
@@ -341,7 +349,7 @@ async function bootForcedHandoffOwner(
   }
   let prepared: PreparedSuccessor | undefined;
   try {
-    prepared = await prepareSuccessor(input);
+    prepared = await prepareSuccessor(input, { hookTokens, runId: sourceRunId });
   } catch (error) {
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;

@@ -19,6 +19,7 @@ import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionHandoffStart, WorkflowEntryResult } from "#execution/session/entry-input.js";
 import {
   hasRunEndedStep,
+  reportHandoverPartStuckStep,
   reportSessionHandoffRetainedStep,
   reportSessionTakenOverOutsideAttemptStep,
   sendSessionHandoverPartStep,
@@ -133,6 +134,7 @@ type AttemptSettlement =
   | { readonly kind: "taken-over" }
   | { readonly kind: "candidate-ended" }
   | { readonly kind: "arrival" }
+  | { readonly kind: "deadline" }
   | { readonly kind: "verdict"; readonly verdict: SessionOwnerActivation };
 
 /** Who holds an attempt's lease once the owner has tried to claim it. */
@@ -152,8 +154,8 @@ function verdictRunId(settled: AttemptSettlement): string | undefined {
 }
 
 /**
- * How long a candidate may stay silent before input that arrives makes the
- * owner fence the attempt. Checked on arrival rather than by a timer: an
+ * How long a candidate may stay silent, once input is waiting, before the
+ * owner fences the attempt. The timer starts only when input is pending: an
  * open wait turns off Workflow's inline step delta, and a stuck attempt only
  * matters once input is waiting for it.
  */
@@ -161,9 +163,10 @@ const HANDOFF_BOOT_DEADLINE_MS = 5 * 60_000;
 
 /**
  * Sends `payloads` as handover parts, one payload per part: each was accepted
- * on its own, so no part exceeds what the World already took. The receiver
- * reads nothing until the final part lands, so that part is retried with
- * backoff until it is delivered or the session has ended.
+ * on its own, so no part exceeds what the World already took. Every part is
+ * retried with backoff until it is delivered or the session has ended: the
+ * receiver reads nothing until the final part lands, and dropping a part
+ * would lose a message the session accepted.
  */
 export async function sendSessionHandover(input: {
   readonly attemptKey: string;
@@ -175,27 +178,41 @@ export async function sendSessionHandover(input: {
   const payloads = input.payloads.filter(
     (payload): payload is SessionHandoverPayload["payloads"][number] => payload.kind !== "handover",
   );
-  const lost: number[] = [];
   for (const [index, payload] of payloads.entries()) {
-    const sent = await sendSessionHandoverPartStep({
-      part: { attemptKey, index, payloads: [payload] },
-      sessionId,
-    });
+    const sent = await sendHandoverPart({ attemptKey, index, payloads: [payload] }, sessionId);
     if (sent === "session-ended") return;
-    if (sent === "lost") lost.push(index);
   }
-  for (let delaySeconds = 1; ; delaySeconds = Math.min(delaySeconds * 2, 60)) {
+  await sendHandoverPart(
+    { attemptKey, final: true, index: payloads.length, payloads: [] },
+    sessionId,
+  );
+}
+
+async function sendHandoverPart(
+  part: Omit<SessionHandoverPayload, "kind">,
+  sessionId: string,
+): Promise<"delivered" | "session-ended"> {
+  for (let failures = 1, delaySeconds = 1; ; failures++) {
     try {
-      await sendSessionHandoverPartStep({
-        part: { attemptKey, final: { lost }, index: payloads.length, payloads: [] },
-        sessionId,
-      });
-      return;
-    } catch {
+      return await sendSessionHandoverPartStep({ part, sessionId });
+    } catch (error) {
+      if (failures === HANDOVER_PART_FAILURES_BEFORE_REPORT) {
+        await reportHandoverPartStuckStep({
+          attemptKey: part.attemptKey,
+          error: isObject(error) && typeof error.message === "string" ? error.message : undefined,
+          failures,
+          index: part.index,
+          sessionId,
+        }).catch(() => {});
+      }
       await sleep(delaySeconds * 1000);
+      delaySeconds = Math.min(delaySeconds * 2, 60);
     }
   }
 }
+
+/** Each failure is a send step that already exhausted its own retries. */
+const HANDOVER_PART_FAILURES_BEFORE_REPORT = 5;
 
 type RetainedAttempt = {
   readonly error?: unknown;
@@ -282,6 +299,8 @@ export class SessionHandoff {
     });
     this.ensureAnchor();
     const attemptEnded = new AbortController();
+    // Workflow's clock is replay-stable.
+    const startedAt = Date.now();
     try {
       let candidateRunId: string;
       try {
@@ -314,27 +333,30 @@ export class SessionHandoff {
       const takenOver = inbox
         .whenTakenOver(attemptEnded.signal)
         .then((): AttemptSettlement => ({ kind: "taken-over" }));
-      // Workflow's clock is replay-stable.
-      const startedAt = Date.now();
       // Watching a candidate costs a wait every few seconds, so it starts only
       // once the deadline has fenced the attempt and a live candidate remains.
       let watch: RunWatch | undefined;
+      let deadline: Promise<AttemptSettlement> | undefined;
       while (true) {
+        if (watch === undefined && deadline === undefined && inbox.hasPending()) {
+          const remaining = startedAt + HANDOFF_BOOT_DEADLINE_MS - Date.now();
+          deadline = sleep(Math.max(0, remaining)).then(() => ({ kind: "deadline" }));
+        }
         let settled: AttemptSettlement;
         try {
           settled = await Promise.race<AttemptSettlement>([
             takenOver,
             activation.then((verdict) => ({ kind: "verdict", verdict })),
-            watch === undefined
-              ? inbox.whenArrival().then(() => ({ kind: "arrival" }))
-              : watch.ended.then(() => ({ kind: "candidate-ended" })),
+            watch !== undefined
+              ? watch.ended.then(() => ({ kind: "candidate-ended" }))
+              : (deadline ?? inbox.whenArrival().then(() => ({ kind: "arrival" }))),
           ]);
         } finally {
           watch?.stop();
         }
         if (settled.kind === "taken-over") return await this.handOver(attemptKey);
-        if (settled.kind === "arrival" && Date.now() - startedAt < HANDOFF_BOOT_DEADLINE_MS)
-          continue;
+        // Input is now waiting, so the next pass starts the deadline.
+        if (settled.kind === "arrival") continue;
         // A duplicate candidate from a retried start step may have given this
         // outcome while the lease winner can still take over.
         // A candidate silent past the deadline may still be booting.
@@ -425,9 +447,9 @@ export class SessionHandoff {
     await this.input.inbox.claimSessionHooks(hookTokens, { force: true });
   }
 
-  private recoverFromSilentCandidate(kind: "candidate-ended" | "arrival"): RetainedAttempt {
+  private recoverFromSilentCandidate(kind: "candidate-ended" | "deadline"): RetainedAttempt {
     const message =
-      kind === "arrival"
+      kind === "deadline"
         ? `The successor run did not report within ${String(HANDOFF_BOOT_DEADLINE_MS / 60_000)} minutes.`
         : "The successor run ended before the handoff settled.";
     return { error: new Error(message), reason: "activation-failed" };

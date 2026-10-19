@@ -393,6 +393,45 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  describe("source gone before the successor claims", () => {
+    it("claims nothing when its source ended before the successor prepared", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "handoff-source-gone" } });
+      await runtime.run(async () => {
+        const { anchor, stream, workflowRuntime } = await openSession();
+        let candidateRunId: string | undefined;
+        // Alice's session is cancelled while its successor is still booting.
+        const world = await instrumentWorld({
+          async beforeEvent(runId, event) {
+            if (
+              runId === anchor.runId ||
+              event.eventType !== "hook_created" ||
+              !String(event.eventData.token).startsWith("eve:handoff:lease:")
+            )
+              return;
+            candidateRunId = runId;
+            await anchor.cancel();
+          },
+        });
+        try {
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          await waitForParkedTurnStep(anchor.runId);
+          await workflowRuntime.dispatchSession({
+            command: handoffFollowUp("dpl_b", "Bob requests the next step.", "trigger"),
+            sessionId: anchor.runId,
+          });
+
+          await vi.waitFor(() => expect(candidateRunId).toBeDefined(), { timeout: 10_000 });
+          await expect(getRun(candidateRunId!).returnValue).resolves.toEqual({ output: "" });
+          expect(await countSessionHookClaims(candidateRunId!)).toBe(0);
+          expect(await readTurnStepStates(candidateRunId!)).toEqual([]);
+        } finally {
+          world.restore();
+          stream.dispose();
+        }
+      });
+    });
+  });
+
   // Every live session takes this path on the first deploy of this protocol:
   // its owner runs an older build, which releases its addresses before it
   // starts the successor and waits for `active`.

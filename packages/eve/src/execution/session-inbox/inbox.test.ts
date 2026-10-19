@@ -366,18 +366,18 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
-  it("applies handover parts in index order, once each, and opens only on the final part", async () => {
-    const final = createDeferred<IteratorResult<SessionInboxPayload>>();
+  it("applies handover parts in index order, once each, and opens only after every part", async () => {
+    const first = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(
       createMockHook({
         reads: [
           Promise.resolve(resolved(send("direct"))),
           Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
-          Promise.resolve(resolved(part("owner-a:1", 0, send("a")))),
           // A retried send step repeats its index.
-          Promise.resolve(resolved(part("owner-a:1", 0, send("a")))),
+          Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
+          Promise.resolve(resolved(finalPart("owner-a:1", 2))),
           Promise.resolve(resolved(cancel)),
-          final.promise,
+          first.promise,
         ],
         token: "stable",
       }),
@@ -386,11 +386,11 @@ describe("createSessionInbox", () => {
     const pumped = nextInterrupt(inbox);
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
     await pumped;
+    // The final part has arrived, but part 0 has not.
     expect(inbox.awaitingHandover).toBe(true);
     expect(inbox.drain()).toEqual([]);
 
-    // The sender could not deliver part 2.
-    final.resolve(resolved(finalPart("owner-a:1", 3, [2])));
+    first.resolve(resolved(part("owner-a:1", 0, send("a"))));
 
     await vi.waitFor(() => expect(inbox.awaitingHandover).toBe(false));
     expect(inbox.drain()).toEqual([send("a"), send("b"), send("direct"), cancel]);
@@ -725,8 +725,8 @@ function part(attemptKey: string, index: number, ...payloads: SessionInboxPayloa
   return { attemptKey, index, kind: "handover", payloads } as SessionInboxPayload;
 }
 
-function finalPart(attemptKey: string, index: number, lost: number[] = []): SessionInboxPayload {
-  return { attemptKey, final: { lost }, index, kind: "handover", payloads: [] };
+function finalPart(attemptKey: string, index: number): SessionInboxPayload {
+  return { attemptKey, final: true, index, kind: "handover", payloads: [] };
 }
 
 function forceClaimed(claimedByRunId: string): Error {

@@ -37,8 +37,8 @@ export interface SessionHandoverPayload {
   readonly attemptKey: string;
   /** Parts apply in index order; a retried send repeats its index. */
   readonly index: number;
-  /** The last part. It lists the indexes the sender could not deliver, which are skipped. */
-  readonly final?: { readonly lost: readonly number[] };
+  /** The last part; reads resume once every part before it has been applied. */
+  readonly final?: true;
   readonly payloads: readonly Exclude<SessionInboxPayload, SessionHandoverPayload>[];
 }
 
@@ -190,7 +190,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         index: number;
         nextPart: number;
         readonly parts: Map<number, SessionHandoverPayload>;
-        readonly lost: Set<number>;
       }
     | undefined;
   const blockedWaiters = new Set<() => void>();
@@ -238,19 +237,17 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     if (current === undefined || part.attemptKey !== current.attemptKey) return;
     if (part.index < current.nextPart || current.parts.has(part.index)) return;
     current.parts.set(part.index, part);
-    for (const index of part.final?.lost ?? []) current.lost.add(index);
     const restored: SessionInboxPayload[] = [];
     while (true) {
       const next = current.parts.get(current.nextPart);
-      if (next === undefined && !current.lost.has(current.nextPart)) break;
-      if (next?.final !== undefined) {
+      if (next === undefined) break;
+      if (next.final === true) {
         observe(interruptHandlers, restored, isInterrupt);
         openHandover();
         return;
       }
       current.parts.delete(current.nextPart);
       current.nextPart += 1;
-      if (next === undefined) continue;
       queue.splice(current.index, 0, ...next.payloads);
       current.index += next.payloads.length;
       restored.push(...next.payloads);
@@ -394,7 +391,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         handover = {
           attemptKey: options.handover,
           index: queue.length,
-          lost: new Set(),
           nextPart: 0,
           parts: new Map(),
         };
