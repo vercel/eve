@@ -18,8 +18,10 @@ import {
   type LinqWebhookVerifier,
 } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
 import type { Message, Thread } from "#compiled/chat/index.js";
+import { formatReplyContext } from "#public/channels/chat-sdk/reply-context.js";
 import {
   linqInboundContent,
+  linqQuotedMessage,
   rehydrateLinqAttachment,
 } from "#public/channels/linq/inboundContent.js";
 
@@ -184,12 +186,14 @@ async function dispatchMessage(
 ): Promise<void> {
   const result = await onMessage({ thread }, message);
   if (result === null) return;
-  await markReadBestEffort(bridge.bot.getAdapter("linq"), thread, message);
+  const adapter = bridge.bot.getAdapter("linq");
+  await markReadBestEffort(adapter, thread, message);
   const content = linqInboundContent(message);
   if (content === undefined) return;
+  const quoted = await linqQuotedMessage(adapter, message);
   await bridge.send(content, {
     auth: result.auth,
-    context: [...(result.context ?? [])],
+    context: [...(result.context ?? []), ...(quoted ? [formatReplyContext(quoted)] : [])],
     thread,
     title: result.title,
   });

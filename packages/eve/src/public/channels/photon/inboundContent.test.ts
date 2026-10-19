@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import { Message } from "#compiled/chat/index.js";
-import { photonInboundContent } from "#public/channels/photon/inboundContent.js";
+import {
+  photonInboundContent,
+  photonQuotedMessage,
+} from "#public/channels/photon/inboundContent.js";
 
-function message(text: string, attachments: Message["attachments"] = []): Message {
+function message(
+  text: string,
+  attachments: Message["attachments"] = [],
+  raw: unknown = {},
+): Message {
   return new Message({
     attachments,
     formatted: { type: "root", children: [] },
     metadata: { dateSent: new Date(0), edited: false },
     author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
     id: "message-id",
-    raw: {},
+    raw,
     text,
     threadId: "thread-id",
   });
@@ -38,5 +45,41 @@ describe("photonInboundContent", () => {
         ]),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("photonQuotedMessage", () => {
+  it("returns nothing for a message that is not a reply", () => {
+    expect(photonQuotedMessage(message("hi", [], { content: { type: "text", text: "hi" } }))).toBe(
+      undefined,
+    );
+  });
+
+  it("reads the target preview from a webhook reply", () => {
+    const raw = {
+      content: {
+        content: { text: "yes", type: "text" },
+        target: { contentPreview: "Dinner at 7?", id: "target-id" },
+        type: "reply",
+      },
+    };
+    expect(photonQuotedMessage(message("yes", [], raw))).toEqual({
+      id: "target-id",
+      text: "Dinner at 7?",
+    });
+  });
+
+  it("reads the target text from a gateway reply", () => {
+    const raw = {
+      content: {
+        content: { text: "yes", type: "text" },
+        target: { content: { text: "Dinner at 7?", type: "text" }, id: "target-id" },
+        type: "reply",
+      },
+    };
+    expect(photonQuotedMessage(message("yes", [], raw))).toEqual({
+      id: "target-id",
+      text: "Dinner at 7?",
+    });
   });
 });
