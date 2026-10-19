@@ -16,17 +16,24 @@ export function photonInboundContent(message: Message): string | UserContent | u
 /**
  * The part of a Spectrum message that names what it replies to. A webhook
  * delivery carries the target's `contentPreview`; a gateway delivery carries
- * the target as a built message with text `content`.
+ * the target as a built message whose `content` may nest text in a group or reply.
  */
 interface SpectrumReply {
   readonly content?: {
     readonly type?: unknown;
     readonly target?: {
-      readonly content?: { readonly text?: unknown; readonly type?: unknown };
+      readonly content?: SpectrumContent;
       readonly contentPreview?: unknown;
       readonly id?: unknown;
     };
   };
+}
+
+interface SpectrumContent {
+  readonly content?: SpectrumContent;
+  readonly items?: unknown;
+  readonly text?: unknown;
+  readonly type?: unknown;
 }
 
 /**
@@ -41,8 +48,17 @@ export function photonQuotedMessage(message: Message): QuotedMessage | undefined
   const text =
     typeof target.contentPreview === "string"
       ? target.contentPreview
-      : target.content?.type === "text" && typeof target.content.text === "string"
-        ? target.content.text
-        : undefined;
+      : spectrumText(target.content);
   return text === undefined ? { id: target.id } : { id: target.id, text };
+}
+
+function spectrumText(content: SpectrumContent | undefined): string | undefined {
+  if (content?.type === "text") return typeof content.text === "string" ? content.text : undefined;
+  if (content?.type === "reply") return spectrumText(content.content);
+  if (content?.type !== "group" || !Array.isArray(content.items)) return undefined;
+  const texts = content.items.flatMap((item: { readonly content?: SpectrumContent }) => {
+    const text = spectrumText(item?.content);
+    return text ? [text] : [];
+  });
+  return texts.length > 0 ? texts.join("\n") : undefined;
 }

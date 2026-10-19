@@ -106,7 +106,7 @@ describe("linqChannel", () => {
         context: [
           [
             "<reply_context>",
-            "The person's next message is a reply to one of your earlier messages (message_id: target-id).",
+            'The person\'s message "yes" is a reply to one of your earlier messages (message_id: target-id).',
             "<quoted_message>",
             "Dinner at 7?",
             "</quoted_message>",

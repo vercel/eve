@@ -51,4 +51,19 @@ describe("linqQuotedMessage", () => {
 
     await expect(linqQuotedMessage({ fetchMessage }, reply)).resolves.toEqual({ id: "target-id" });
   });
+
+  it("stops waiting for a slow lookup", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMessage = vi.fn(() => new Promise<Message | null>(() => {}));
+      const quoted = linqQuotedMessage(
+        { fetchMessage },
+        message({ reply_to: { message_id: "target-id" } }),
+      );
+      await vi.advanceTimersByTimeAsync(3000);
+      await expect(quoted).resolves.toEqual({ id: "target-id" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

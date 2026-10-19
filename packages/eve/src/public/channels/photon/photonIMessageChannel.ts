@@ -153,7 +153,10 @@ async function dispatchMessage(
   const quoted = photonQuotedMessage(message);
   await bridge.send(content, {
     auth: result.auth,
-    context: [...(result.context ?? []), ...(quoted ? [formatReplyContext(quoted)] : [])],
+    context: [
+      ...(result.context ?? []),
+      ...(quoted ? [formatReplyContext(quoted, message.text)] : []),
+    ],
     thread,
     title: result.title,
   });

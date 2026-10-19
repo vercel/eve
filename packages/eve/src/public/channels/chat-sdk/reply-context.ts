@@ -10,25 +10,31 @@ export interface QuotedMessage {
 
 // A reply can quote a long agent answer; the model needs enough to know which one.
 const MAX_QUOTED_CHARS = 1000;
+// Enough of the reply to pick it out when several messages share one turn.
+const MAX_REPLY_CHARS = 200;
 
 /**
  * Renders a `context` entry telling the model that the person's message is a
  * reply to an earlier message, and what that message said. Messaging apps show
  * the quote above the reply; without this the model sees only the reply.
  */
-export function formatReplyContext(quoted: QuotedMessage): string {
+export function formatReplyContext(quoted: QuotedMessage, reply: string): string {
   const target = quoted.fromAgent === true ? "one of your earlier messages" : "an earlier message";
   const text = quoted.text?.trim();
+  const replyText = reply.trim();
+  const subject = replyText
+    ? `The person's message ${JSON.stringify(truncate(replyText, MAX_REPLY_CHARS))}`
+    : "The person's next message";
   return [
     "<reply_context>",
-    `The person's next message is a reply to ${target} (message_id: ${quoted.id}).`,
+    `${subject} is a reply to ${target} (message_id: ${quoted.id}).`,
     ...(text
-      ? ["<quoted_message>", truncate(text), "</quoted_message>"]
+      ? ["<quoted_message>", truncate(text, MAX_QUOTED_CHARS), "</quoted_message>"]
       : ["The replied-to message's text is not available."]),
     "</reply_context>",
   ].join("\n");
 }
 
-function truncate(text: string): string {
-  return text.length > MAX_QUOTED_CHARS ? `${text.slice(0, MAX_QUOTED_CHARS)}…` : text;
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }

@@ -82,4 +82,27 @@ describe("photonQuotedMessage", () => {
       text: "Dinner at 7?",
     });
   });
+
+  it("reads the text parts of a multi-part gateway target", () => {
+    const raw = {
+      content: {
+        content: { text: "yes", type: "text" },
+        target: {
+          content: {
+            items: [
+              { content: { text: "Here is the menu", type: "text" } },
+              { content: { name: "menu.png", type: "attachment" } },
+            ],
+            type: "group",
+          },
+          id: "target-id",
+        },
+        type: "reply",
+      },
+    };
+    expect(photonQuotedMessage(message("yes", [], raw))).toEqual({
+      id: "target-id",
+      text: "Here is the menu",
+    });
+  });
 });

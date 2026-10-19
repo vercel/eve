@@ -18,9 +18,12 @@ interface LinqMessageLookup {
   fetchMessage(threadId: string, messageId: string): Promise<Message | null>;
 }
 
+// The person's message waits on this lookup, and the Linq SDK retries for minutes.
+const LOOKUP_TIMEOUT_MS = 3000;
+
 /**
  * Returns the message a Linq reply quotes. The webhook names only the target's
- * id, so this fetches its text; a failed lookup still reports the reply.
+ * id, so this fetches its text; a failed or slow lookup still reports the reply.
  */
 export async function linqQuotedMessage(
   adapter: LinqMessageLookup,
@@ -31,10 +34,18 @@ export async function linqQuotedMessage(
   const id = replyTo?.message_id;
   if (typeof id !== "string" || id.length === 0) return undefined;
   let target: Message | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    target = await adapter.fetchMessage(message.threadId, id);
+    target = await Promise.race([
+      adapter.fetchMessage(message.threadId, id),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(resolve, LOOKUP_TIMEOUT_MS, null);
+      }),
+    ]);
   } catch {
     // The reply still reaches the model, just without the quoted text.
+  } finally {
+    clearTimeout(timer);
   }
   if (target === null) return { id };
   return { fromAgent: target.author.isMe, id, text: target.text };
