@@ -424,7 +424,7 @@ async function buildApplicationInWorkspace(
   }
 
   const deploymentId =
-    !isVercelBuild && nitro.options.preset === "node-server"
+    nitro.options.preset === "node-server"
       ? await measureBuildPhase(profiler, "id.compute", () =>
           stageBuildDeploymentId(workspace.publication.output.stagedDir),
         )

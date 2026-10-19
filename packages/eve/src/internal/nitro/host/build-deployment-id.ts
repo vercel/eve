@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
-export const BUILD_DEPLOYMENT_ID_PLACEHOLDER = "eve_BUILD_DEPLOYMENT_ID_PLACEHOLDER_";
+import { BUILD_DEPLOYMENT_ID_PATTERN } from "#execution/install-workflow-deployment-id.js";
 
-const BUILD_DEPLOYMENT_ID_PATTERN = /^eve_[a-f0-9]{32}$/;
+export const BUILD_DEPLOYMENT_ID_PLACEHOLDER = "eve_BUILD_DEPLOYMENT_ID_PLACEHOLDER_";
 const READ_AHEAD = 16;
 
 export interface BuildDeploymentFile {
