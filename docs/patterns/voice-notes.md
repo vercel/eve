@@ -5,7 +5,7 @@ description: "Transcribe voice notes, voice messages, and other audio attachment
 
 Voice notes and other audio files reach your agent, but by default the model does not transcribe them. To give your agent the ability to answer a voice note, you will need to add a tool that transcribes the staged file.
 
-This works for any channel that delivers audio as a file, such as iMessage voice notes through [Photon](../channels/photon), Slack voice clips, and files sent through the [eve](../channels/eve) and [Chat SDK](../channels/chat-sdk#attachments) channels. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stages files.
+This works for any channel that delivers audio as a file, such as iMessage voice notes through [Photon](../channels/photon), [Slack](../channels/slack#attachments) voice clips, and files sent through the [eve](../channels/eve) and [Chat SDK](../channels/chat-sdk#attachments) channels. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stages files.
 
 ## Add a transcription tool
 
