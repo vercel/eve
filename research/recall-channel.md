@@ -103,11 +103,15 @@ session, so another channel can hand a request into a meeting.
   verified (Recall's emails are fuzzy calendar matches).
 - **Model input:** `Alice: …` for speech, `Alice (in chat):\n…` for chat, plus
   a `<recall_context>` block and any `<meeting_transcript>` the agent heard
-  but didn't answer. Pending prompts resolve against the raw words:
-  "Eve, approve." answers an approval as `approve`.
+  but didn't answer. Pending prompts resolve against what was
+  said with the bot's name, filler words, and number words dropped: "okay
+  Eve, approve it" approves, and "Eve, one" picks option 1. What's left must
+  name exactly one option.
 - **Replies:** `message.completed` posts to the chat, including text before a
-  tool call. A reply to a private Zoom chat goes privately to its sender; on
-  other platforms the bot posts a notice instead. Messages are split at the platform limit (Meet 500, Zoom and
+  tool call. Once a private Zoom chat joins a turn, everything the turn posts
+  without an explicit `to` (replies, prompts, errors, notices) goes privately
+  to its sender until the turn ends. Private chats from several people in one
+  turn, or a platform without private chat, get a notice instead. Messages are split at the platform limit (Meet 500, Zoom and
   Teams 4096). Approvals and questions use the text prompt queue, like Twilio.
 - **Joining:** a bot `receive` creates can't chat until the meeting admits
   it. The channel holds its chat messages and posts them on the first meeting
@@ -135,10 +139,13 @@ session, so another channel can hand a request into a meeting.
 - Under `queue`, lines spoken during a running turn are delivered when it
   ends, and each runs `shouldRespond` then.
 - Each declined line still costs a workflow step and one decision call.
-- `queue` with an open question can stall: a message that doesn't answer the
-  question waits for the turn to end, but the turn is waiting on the question.
-  This is recorded as broken in the matrix and is being investigated
-  separately.
+- `queue` with a `ctx.ask()` question from a workflow tool can stall: a
+  message that doesn't answer the question waits for the turn to end, but the
+  turn is waiting on the question. Approvals and sign-ins don't stall, because
+  the turn's own person steers a turn held on them even under `queue`; the
+  same exemption doesn't yet cover a workflow tool's runtime wait. Recorded as
+  broken in the matrix and documented in `docs/channels/recall.mdx`; the fix
+  belongs in the session core, not the channel.
 
 ## Output Media
 
@@ -182,6 +189,4 @@ characters on Meet. Open questions:
 
 `eve setup` integration, an integrations gallery card (needs a Recall logo),
 platforms without chat (Webex can't send, Slack huddles can't receive), live
-verification against Zoom, Meet, and Teams. A turn that answers several
-queued lines replies to wherever the last one came from, so a public line
-queued behind a private one makes the reply public.
+verification against Zoom, Meet, and Teams.

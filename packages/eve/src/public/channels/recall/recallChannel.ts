@@ -3,6 +3,7 @@ import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
+import { type ContextAccessor, ContextKey } from "#context/key.js";
 import { attachInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -30,6 +31,7 @@ import {
   defaultOnMeetingEvent,
   defaultShouldRespond,
   isAddressedTo,
+  matchSpokenOption,
 } from "#public/channels/recall/defaults.js";
 import { parseRecallEvent, type RecallMeetingEvent } from "#public/channels/recall/inbound.js";
 import {
@@ -41,6 +43,13 @@ const log = createLogger("recall.channel");
 
 /** Real-time payloads are one utterance or chat message; anything near this is not Recall. */
 const MAX_WEBHOOK_BYTES = 256 * 1024;
+
+/**
+ * How many held chat messages were already posted. It lives outside channel
+ * state because eve restores that state when a held turn ignores a delivery,
+ * which would otherwise bring the posted messages back.
+ */
+const PostedOutboxKey = new ContextKey<number>("recall.posted-outbox");
 
 /** How many lines the agent didn't answer stay in state for the next turn it takes. */
 const MAX_TRANSCRIPT_LINES = 60;
@@ -55,8 +64,14 @@ export interface RecallChannelState extends PromptQueueState {
   platform: string | null;
   /** Lines the agent heard but didn't answer since its last turn, oldest first. */
   transcript?: string[];
-  /** Participant id to answer privately, set when a private chat started the current turn. */
-  replyTo?: string;
+  /**
+   * Who the current turn answers privately: a participant id once a private
+   * chat joins the turn, or `null` when private chats from several people
+   * did. Cleared when the turn ends.
+   */
+  replyTo?: string | null;
+  /** The options of the prompt last shown, so a spoken or loosely typed reply can pick one. */
+  shownOptions?: { requestId: string; options: { id: string; label: string }[] };
   /** Set while a bot `receive` sent is still joining; chat waits in `outbox` until it hears the meeting. */
   awaitingCall?: boolean;
   outbox?: { message: string; to?: string }[];
@@ -96,7 +111,9 @@ export interface RecallHandle {
    * Posts to the meeting chat, split to fit the platform's limit. Returns
    * `false` instead of throwing when Recall rejects it, such as after the bot
    * left the call. While a bot `receive` sent is still joining, the message
-   * waits and posts once the bot hears its first meeting event.
+   * waits and posts once the bot hears its first meeting event. Without `to`,
+   * a turn that answers a private chat replies privately; pass
+   * `{ to: "everyone" }` to post publicly anyway.
    */
   sendChatMessage(message: string, options?: { readonly to?: string }): Promise<boolean>;
   /** Plays an MP3 clip through the bot. The bot must be created with `automatic_audio_output`. */
@@ -163,6 +180,7 @@ export interface RecallChannelEvents {
   readonly "approval.settled"?: RecallEventHandler<"approval.settled">;
   readonly "turn.failed"?: RecallEventHandler<"turn.failed">;
   readonly "turn.completed"?: RecallEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: RecallEventHandler<"turn.cancelled">;
   readonly "session.failed"?: (
     data: EventData<"session.failed">,
     channel: RecallEventContext,
@@ -272,7 +290,12 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
         return defaultDeliverResult(payload);
       }
 
-      if (channel.state.awaitingCall && isInCall(event)) await flushOutbox(channel);
+      if (channel.state.awaitingCall && isInCall(event)) {
+        await flushOutbox(
+          channel,
+          (channel as RecallChannelContext & { readonly ctx: ContextAccessor }).ctx,
+        );
+      }
 
       const transcript = channel.state.transcript ?? [];
       const line = payload.message;
@@ -283,13 +306,16 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
         return undefined;
       }
       channel.state.transcript = [];
-      // The latest line a turn answers picks where its reply goes.
+      // A private chat keeps the rest of the turn private, even if public lines join it.
       if (event.type === "chat" && event.to === "only_bot") {
-        channel.state.replyTo = event.participant.id;
-      } else {
-        delete channel.state.replyTo;
+        const { replyTo } = channel.state;
+        channel.state.replyTo =
+          replyTo === undefined || replyTo === event.participant.id ? event.participant.id : null;
       }
       const input = defaultDeliverResult(payload);
+      const option =
+        "text" in event ? shownOptionIn(channel.state, event.text, botName) : undefined;
+      if (input !== undefined && option !== undefined) attachInputText(input, option.id);
       if (input === undefined || transcript.length === 0) return input;
       return { ...input, context: [...(input.context ?? []), formatTranscript(transcript)] };
     },
@@ -316,7 +342,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       });
     },
 
-    events: { ...defaultEvents, ...config.events },
+    events: clearReplyToAfterTurn({ ...defaultEvents, ...config.events }),
   });
 }
 
@@ -468,13 +494,46 @@ function isInCall(event: RecallMeetingEvent): boolean {
   return event.type !== "status" || event.status.startsWith("in_call");
 }
 
-async function flushOutbox(channel: RecallChannelContext): Promise<void> {
+async function flushOutbox(channel: RecallChannelContext, ctx: ContextAccessor): Promise<void> {
   delete channel.state.awaitingCall;
   const outbox = channel.state.outbox ?? [];
   delete channel.state.outbox;
-  for (const { message, to } of outbox) {
-    await channel.recall.sendChatMessage(message, to === undefined ? undefined : { to });
+  const posted = ctx.get(PostedOutboxKey) ?? 0;
+  for (const { message, to } of outbox.slice(posted)) {
+    await channel.recall.sendChatMessage(message, { to: to ?? "everyone" });
   }
+  ctx.set(PostedOutboxKey, outbox.length);
+}
+
+/** The option of the prompt still on screen that `text` picks, such as "okay eve, approve it". */
+function shownOptionIn(state: RecallChannelState, text: string, botName: string) {
+  const shown = state.shownOptions;
+  if (shown === undefined || shown.requestId !== state.shownPromptId) return undefined;
+  return matchSpokenOption(text, botName, shown.options);
+}
+
+/** Wraps the turn-ending handlers so the turn's private reply target ends with it. */
+function clearReplyToAfterTurn(events: RecallChannelEvents): RecallChannelEvents {
+  const {
+    "turn.cancelled": cancelled,
+    "turn.completed": completed,
+    "turn.failed": failed,
+  } = events;
+  return {
+    ...events,
+    async "turn.cancelled"(data, channel, ctx) {
+      await cancelled?.(data, channel, ctx);
+      delete channel.state.replyTo;
+    },
+    async "turn.completed"(data, channel, ctx) {
+      await completed?.(data, channel, ctx);
+      delete channel.state.replyTo;
+    },
+    async "turn.failed"(data, channel, ctx) {
+      await failed?.(data, channel, ctx);
+      delete channel.state.replyTo;
+    },
+  };
 }
 
 function isOwnMessage(event: RecallMeetingEvent, botName: string): boolean {
@@ -483,7 +542,7 @@ function isOwnMessage(event: RecallMeetingEvent, botName: string): boolean {
 
 function buildRecallHandle(
   api: RecallApiOptions,
-  state: Pick<RecallChannelState, "awaitingCall" | "botId" | "outbox" | "platform">,
+  state: Pick<RecallChannelState, "awaitingCall" | "botId" | "outbox" | "platform" | "replyTo">,
 ): RecallHandle {
   const botId = (): string => {
     if (!state.botId) throw new Error("recallChannel: this session has no Recall bot.");
@@ -500,10 +559,16 @@ function buildRecallHandle(
       return recallSupportsDirectMessages(state.platform ?? undefined);
     },
     async sendChatMessage(message, options) {
+      let to = options?.to;
+      if (to === undefined && state.replyTo !== undefined) {
+        if (state.replyTo !== null && recallSupportsDirectMessages(state.platform ?? undefined)) {
+          to = state.replyTo;
+        } else {
+          message = PRIVATE_REPLY_UNAVAILABLE;
+        }
+      }
       if (state.awaitingCall) {
-        (state.outbox ??= []).push(
-          options?.to === undefined ? { message } : { message, to: options.to },
-        );
+        (state.outbox ??= []).push(to === undefined ? { message } : { message, to });
         return true;
       }
       try {
@@ -512,7 +577,7 @@ function buildRecallHandle(
           botId: botId(),
           message,
           platform: state.platform ?? undefined,
-          to: options?.to,
+          to: to === "everyone" ? undefined : to,
         });
         return true;
       } catch (error) {
@@ -527,6 +592,9 @@ function buildRecallHandle(
     request: (path, init) => callRecallApi({ ...api, ...init, path }),
   };
 }
+
+const PRIVATE_REPLY_UNAVAILABLE =
+  "I got a private message, but I can't answer it privately here. Ask me again in the meeting chat, or one person at a time.";
 
 function resolveWebhookUrl(explicit: string | undefined, route: string): string {
   if (explicit) return explicit;

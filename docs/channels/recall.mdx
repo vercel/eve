@@ -137,7 +137,7 @@ export default recallChannel({
 
 The default `message.completed` handler posts each reply to the meeting chat, including text the agent writes before a tool call. Long replies are split at the platform's limit: 500 characters on Google Meet, and 4,096 on Zoom and Microsoft Teams.
 
-A reply to a private Zoom chat message goes privately to its sender. Other platforms can't send a private message, so the bot posts a notice instead of the reply.
+When a private Zoom chat message joins a turn, the whole turn stays private: replies, approval and question prompts, error notices, and sign-in notices all go only to the sender, even if public lines join the same turn. The next turn posts publicly again. If private messages from more than one person join one turn, or the platform can't send a private message, the bot posts a notice instead of the reply.
 
 Webex bots can't send chat messages. The channel replies only in text; it doesn't speak.
 
@@ -145,9 +145,11 @@ Webex bots can't send chat messages. The channel replies only in text; it doesn'
 
 The channel defaults to `turnPolicy: "queue"`, because people keep talking while the agent works, and `"steer"` would restart the turn on every utterance. Lines spoken during a turn are delivered after it ends, and each runs `shouldRespond` then.
 
+While a turn waits on a tool approval or sign-in, the person it's working for can still redirect it: a message from them that doesn't answer the prompt cancels the prompt and steers the turn. A question asked with `ctx.ask()` inside a [workflow tool](../tools/workflows) doesn't work this way yet. Until someone answers it, every message waits behind it and the bot stays quiet. If that matters for your agent, set `turnPolicy: "steer"`, which lets a message cancel the question but interrupts pending model output on every line the session receives.
+
 ### Human-in-the-loop (HITL)
 
-Meeting chat has no buttons, so the default handlers post each question and tool approval as text with numbered options. Participants answer in the chat, or by speaking to the bot: "eve, approve." answers an approval with `approve`. To render questions differently, declare your own `events["input.requested"]` handler.
+Meeting chat has no buttons, so the default handlers post each question and tool approval as text with numbered options. Participants answer in the chat, or by speaking to the bot. Answers can be phrased naturally: "okay eve, approve it" approves, and "eve, option two" or "the second one" picks the second option. The bot's name, filler words, and number words are ignored, and what's left must name exactly one option, so "neither, approve is wrong" doesn't pick one. To render questions differently, declare your own `events["input.requested"]` handler.
 
 ### Sign-ins
 
@@ -161,7 +163,7 @@ Recall sends bot status changes, such as `call_ended`, as workspace webhooks tha
 
 Hooks and event handlers receive `recall`, a handle on the meeting's bot:
 
-- `sendChatMessage(message, { to? })` posts to the chat and returns `false` if Recall rejects it. Pass a participant id as `to` to reach one person; check `supportsDirectMessages` first.
+- `sendChatMessage(message, { to? })` posts to the chat and returns `false` if Recall rejects it. Pass a participant id as `to` to reach one person; check `supportsDirectMessages` first. Without `to`, it follows the turn: a private turn posts privately. Pass `{ to: "everyone" }` to post publicly anyway.
 - `outputAudio(mp3)` plays an MP3 clip through the bot. The bot must be created with Recall's `automatic_audio_output` option, and you can't combine it with Output Media.
 - `startOutputMedia(url)` and `stopOutputMedia()` stream a web page into the meeting as the bot's camera and microphone, using Recall Output Media. Output Media isn't available in Slack huddles.
 - `leaveCall()` removes the bot from the meeting.

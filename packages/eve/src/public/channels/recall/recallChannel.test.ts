@@ -6,8 +6,12 @@ import { readInputText } from "#internal/input-text.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { sendRecallChatMessage } from "#public/channels/recall/api.js";
-import { defaultEvents } from "#public/channels/recall/defaults.js";
-import { recallChannel, type RecallChannelConfig } from "#public/channels/recall/recallChannel.js";
+import { defaultEvents, matchSpokenOption } from "#public/channels/recall/defaults.js";
+import {
+  recallChannel,
+  type RecallChannelConfig,
+  type RecallHandle,
+} from "#public/channels/recall/recallChannel.js";
 import { signRecallWebhook } from "#public/channels/recall/verify.js";
 
 const SECRET = `whsec_${Buffer.from("recall-test-secret").toString("base64")}`;
@@ -204,42 +208,97 @@ describe("recallChannel deliver", () => {
     expect(await deliver(failing, {}, "Eve, file it")).toBeDefined();
     expect(await deliver(failing, {}, "moving on")).toBeUndefined();
   });
+});
 
-  it("answers a private chat privately, and a later spoken question in the open", async () => {
-    const channel = recallChannel({ credentials: { verificationSecret: SECRET } });
-    const state: Record<string, unknown> = { botId: "bot_1", platform: "zoom" };
-    const { channel: ctx, sendChatMessage } = handlerContext(state);
-    const reply = { message: "The code is 1234." } as never;
+/** A channel on a fake Recall API, driven the way a session step drives it. */
+function liveChannel(state: Record<string, unknown>) {
+  const posts: { message: string; to?: string }[] = [];
+  const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    if (String(url).endsWith("/bot/")) return Response.json({ id: "bot_1" });
+    posts.push(JSON.parse(String(init?.body)) as { message: string; to?: string });
+    return new Response("{}");
+  });
+  const channel = recallChannel({
+    api: { fetch: fetch as never },
+    credentials: { apiKey: "key", verificationSecret: SECRET },
+    webhookUrl: "https://agent.example.com/eve/v1/recall",
+  });
+  if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
+  // Durable context survives eve restoring channel state after an ignored delivery.
+  const durable = new Map<string, unknown>();
+  const ctx = {
+    get: (key: { name: string }) => durable.get(key.name),
+    set: (key: { name: string }, value: unknown) => (durable.set(key.name, value), value),
+  };
+  const adapterCtx = () =>
+    channel.adapter.createAdapterContext!({ ctx, session: {}, state } as never) as {
+      recall: RecallHandle;
+    };
+  return {
+    channel,
+    posts,
+    send: (message: string) => adapterCtx().recall.sendChatMessage(message),
+    async hear(payload: string) {
+      const { send } = await post(signed(payload));
+      const [, delivery] = send.mock.calls[0]!;
+      return await channel.adapter.deliver!(
+        { context: delivery.context, message: delivery.message, state: delivery.state },
+        adapterCtx() as never,
+      );
+    },
+  };
+}
 
-    await deliver(channel, state, "", chat("what's the door code?", "only_bot"));
-    await defaultEvents["message.completed"]!(reply, ctx, {} as never);
-    await deliver(channel, state, "Eve, what's next?");
-    await defaultEvents["message.completed"]!(reply, ctx, {} as never);
+const approvalOptions = [
+  { id: "approve", label: "Approve" },
+  { id: "cancel", label: "Cancel" },
+];
 
-    expect(sendChatMessage.mock.calls).toEqual([
-      ["The code is 1234.", { to: "7" }],
-      ["The code is 1234."],
-    ]);
+describe("recallChannel private replies", () => {
+  it("keeps a turn private once a private chat joins it", async () => {
+    const meeting = liveChannel({ botId: "bot_1", platform: "zoom" });
+
+    await meeting.hear(chat("can you deploy v2.4?", "only_bot"));
+    await meeting.hear(speech("Eve, use the release branch"));
+    await meeting.send("Deploying.");
+
+    expect(meeting.posts).toEqual([{ message: "Deploying.", to: "7" }]);
+  });
+});
+
+describe("recallChannel spoken answers", () => {
+  it.each([
+    ["Okay Eve, approve.", "approve"],
+    ["Eve, approve it", "approve"],
+    ["Eve, one", "approve"],
+    ["eve option two please", "cancel"],
+    ["let's go with the first", "approve"],
+    ["neither, approve is wrong", undefined],
+    ["Eve, what does it deploy?", undefined],
+  ])("reads %j as %s", (said, picked) => {
+    expect(matchSpokenOption(said, "eve", approvalOptions)?.id).toBe(picked);
+  });
+
+  it("answers the prompt on screen with what a natural reply picks", async () => {
+    const meeting = liveChannel({
+      botId: "bot_1",
+      platform: "zoom",
+      shownOptions: { options: approvalOptions, requestId: "req_1" },
+      shownPromptId: "req_1",
+    });
+
+    const input = (await meeting.hear(speech("Okay Eve, approve it."))) ?? undefined;
+
+    expect(readInputText(input)).toBe("approve");
   });
 });
 
 describe("recallChannel receive", () => {
-  it("holds chat until the bot it sent hears the meeting, then posts it", async () => {
-    const bodies: unknown[] = [];
-    const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      if (String(url).endsWith("/bot/")) return Response.json({ id: "bot_1" });
-      bodies.push(body);
-      return new Response("{}");
-    });
-    const channel = recallChannel({
-      api: { fetch: fetch as never },
-      credentials: { apiKey: "key", verificationSecret: SECRET },
-      webhookUrl: "https://agent.example.com/eve/v1/recall",
-    });
-    if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
+  async function received() {
+    const state: Record<string, unknown> = {};
+    const meeting = liveChannel(state);
     const sent = vi.fn().mockResolvedValue({ id: "session" });
-    await channel.receive!(
+    await meeting.channel.receive!(
       {
         auth: null,
         message: "Join and take notes.",
@@ -247,20 +306,41 @@ describe("recallChannel receive", () => {
       },
       { from: () => ({ send: sent }) } as never,
     );
-    const state = structuredClone(sent.mock.calls[0]![1].state) as Record<string, unknown>;
-    const ctx = channel.adapter.createAdapterContext!({ ctx: {}, session: {}, state } as never);
+    Object.assign(state, structuredClone(sent.mock.calls[0]![1].state));
+    return { meeting, state };
+  }
 
-    await defaultEvents["message.completed"]!({ message: "On it." } as never, ctx, {} as never);
-    expect(bodies).toEqual([]);
+  it("holds chat until the bot it sent hears the meeting, then posts it", async () => {
+    const { meeting } = await received();
+
+    await meeting.send("On it.");
+    expect(meeting.posts).toEqual([]);
 
     // A line the bot doesn't answer still shows it's in the call.
-    const { send } = await post(signed(speech("the login page times out")));
-    const [, delivery] = send.mock.calls[0]!;
-    await channel.adapter.deliver!(
-      { context: delivery.context, message: delivery.message, state: delivery.state },
-      ctx,
-    );
-    expect(bodies).toEqual([{ message: "On it." }]);
+    await meeting.hear(speech("the login page times out"));
+    expect(meeting.posts).toEqual([{ message: "On it." }]);
+  });
+
+  it("posts held chat once while a held turn ignores what people say", async () => {
+    const { meeting, state } = await received();
+    await meeting.send("Deploy release v2.4 to production?");
+
+    // eve ignores each overheard line while the turn waits on its approval,
+    // and restores the channel state it had before the line.
+    for (const line of ["the staging numbers look fine", "let's wait for Bob"]) {
+      const before = structuredClone(state);
+      expect(await meeting.hear(speech(line))).toBeUndefined();
+      for (const key of Object.keys(state)) delete state[key];
+      Object.assign(state, before);
+    }
+    // The restored state still holds chat, so the next reply queues behind the posted one.
+    await meeting.send("Deployed.");
+    await meeting.hear(speech("sounds good"));
+
+    expect(meeting.posts.map(({ message }) => message)).toEqual([
+      "Deploy release v2.4 to production?",
+      "Deployed.",
+    ]);
   });
 });
 

@@ -28,13 +28,17 @@ interface ChatBody {
  * type in the meeting chat, or with `"speech"` say each message to the bot
  * by name. `platform` decides what the chat can do: only Zoom reaches one
  * participant privately. Messages `overheard` picks are spoken without naming
- * the bot, as people talking to each other do.
+ * the bot, as people talking to each other do. Messages `privately` picks are
+ * typed to the bot alone. `spoken` phrases a spoken message, by default
+ * `Eve, <text>`.
  */
 export function recallDriver(
   options: {
     readonly input?: "chat" | "speech";
     readonly platform?: string;
     readonly overheard?: (text: string, person: Person) => boolean;
+    readonly privately?: (text: string, person: Person) => boolean;
+    readonly spoken?: (text: string) => string;
   } = {},
 ): ChannelDriver {
   const input = options.input ?? "chat";
@@ -78,13 +82,13 @@ export function recallDriver(
     if (input === "speech" || overheard) {
       return webhook("transcript.data", {
         participant: participant(person),
-        words: (overheard ? text : `Eve, ${text}`)
+        words: (overheard ? text : (options.spoken?.(text) ?? `Eve, ${text}`))
           .split(/\s+/u)
           .map((word) => ({ end_timestamp: null, start_timestamp: { relative: 0 }, text: word })),
       });
     }
     return webhook("participant_events.chat_message", {
-      data: { text, to: "everyone" },
+      data: { text, to: options.privately?.(text, person) === true ? "only_bot" : "everyone" },
       participant: participant(person),
       timestamp: { absolute: new Date().toISOString(), relative: 0 },
     });
