@@ -223,6 +223,47 @@ describe("recallChannel deliver", () => {
   });
 });
 
+describe("recallChannel receive", () => {
+  it("holds chat until the bot it sent hears the meeting, then posts it", async () => {
+    const bodies: unknown[] = [];
+    const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (String(url).endsWith("/bot/")) return Response.json({ id: "bot_1" });
+      bodies.push(body);
+      return new Response("{}");
+    });
+    const channel = recallChannel({
+      api: { fetch: fetch as never },
+      credentials: { apiKey: "key", verificationSecret: SECRET },
+      webhookUrl: "https://agent.example.com/eve/v1/recall",
+    });
+    if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
+    const sent = vi.fn().mockResolvedValue({ id: "session" });
+    await channel.receive!(
+      {
+        auth: null,
+        message: "Join and take notes.",
+        target: { meetingUrl: "https://zoom.us/j/1" },
+      },
+      { from: () => ({ send: sent }) } as never,
+    );
+    const state = structuredClone(sent.mock.calls[0]![1].state) as Record<string, unknown>;
+    const ctx = channel.adapter.createAdapterContext!({ ctx: {}, session: {}, state } as never);
+
+    await defaultEvents["message.completed"]!({ message: "On it." } as never, ctx, {} as never);
+    expect(bodies).toEqual([]);
+
+    // A line the bot doesn't answer still shows it's in the call.
+    const { send } = await post(signed(speech("the login page times out")));
+    const [, delivery] = send.mock.calls[0]!;
+    await channel.adapter.deliver!(
+      { context: delivery.context, message: delivery.message, state: delivery.state },
+      ctx,
+    );
+    expect(bodies).toEqual([{ message: "On it." }]);
+  });
+});
+
 describe("recall sign-in", () => {
   const required = {
     authorization: { url: "https://auth.example.com/device", userCode: "ABCD" },

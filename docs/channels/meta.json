@@ -12,6 +12,7 @@
     "linear",
     "teams",
     "twilio",
+    "recall",
     "chat-sdk",
     "mcp",
     "custom"
