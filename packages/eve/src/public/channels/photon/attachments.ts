@@ -45,21 +45,9 @@ interface SpectrumApp {
 /** The adapter that owns the spectrum-ts app eve downloads attachments through. */
 interface PhotonAdapter {
   readonly app: unknown;
+  /** Asks Photon for the message by id; webhook deliveries are never cached, so this refetches. */
+  fetchMessage(threadId: string, messageId: string): Promise<Message | null>;
   rehydrateAttachment?(attachment: Attachment): Attachment;
-}
-
-/**
- * The adapter's private `resolveSpace`. Its public `fetchMessage` returns the
- * cached webhook copy, so refetching a message from Photon goes through the
- * Space directly.
- */
-interface SpaceResolver {
-  resolveSpace?(
-    threadId: string,
-  ): Promise<
-    | { getMessage(id: string): Promise<{ readonly content?: SpectrumContent } | undefined> }
-    | undefined
-  >;
 }
 
 /**
@@ -78,9 +66,12 @@ export async function addPhotonAttachmentDownloads(
   if (attachments.length === 0) return;
   const raw = message.raw as { readonly content?: SpectrumContent; readonly space?: unknown };
   // The adapter lists attachments in the order it walks the content, so their ids line up.
-  let ids = contentAttachmentIds(raw.content);
+  const ids = contentAttachmentIds(raw.content);
   if (attachments.some((_, index) => ids[index] === undefined)) {
-    ids = (await refetchedAttachmentIds(adapter, message)) ?? ids;
+    const refetched = await refetchedAttachmentIds(adapter, message);
+    attachments.forEach((_, index) => {
+      ids[index] ??= refetched[index];
+    });
   }
   const phone = spacePhone(raw.space);
   attachments.forEach((attachment: Attachment, index) => {
@@ -104,18 +95,18 @@ export function addPhotonAttachmentRehydration(adapter: PhotonAdapter): void {
   };
 }
 
-/** Attachment ids from the message as Photon serves it by id, or `undefined` when it can't. */
+/** Attachment ids from the message as Photon serves it by id; empty when it can't. */
 async function refetchedAttachmentIds(
   adapter: PhotonAdapter,
   message: Message,
-): Promise<(string | undefined)[] | undefined> {
+): Promise<(string | undefined)[]> {
   try {
-    const space = await (adapter as SpaceResolver).resolveSpace?.(message.threadId);
-    const refetched = await space?.getMessage(message.id);
-    return refetched === undefined ? undefined : contentAttachmentIds(refetched.content);
+    const refetched = await adapter.fetchMessage(message.threadId, message.id);
+    const raw = refetched?.raw as { readonly content?: SpectrumContent } | undefined;
+    return contentAttachmentIds(raw?.content);
   } catch {
     // An attachment without an id reaches the agent as a note.
-    return undefined;
+    return [];
   }
 }
 
