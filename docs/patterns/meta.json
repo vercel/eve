@@ -6,6 +6,7 @@
     "durable-cross-channel-notifications",
     "multi-tenant-auth",
     "multi-tenant-approvals",
+    "voice-notes",
     "../protocols/ucp"
   ]
 }
