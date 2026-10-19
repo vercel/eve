@@ -188,6 +188,19 @@ Gateway-routed model calls propagate the configured OpenTelemetry context at
 each provider request. Eve-owned baggage is removed before forwarding. Gateway
 controls whether its spans are sampled and which destinations receive them.
 
+When AI Gateway reports
+[session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity)
+for a model call, the `agent.step` span records it. These attributes appear even
+when the trace content policy omits outputs.
+
+| Attribute                                       | Value                                                           |
+| ----------------------------------------------- | --------------------------------------------------------------- |
+| `vercel.ai_gateway.session.id`                  | Session ID AI Gateway used, normally `gen_ai.conversation.id`   |
+| `vercel.ai_gateway.session.id_source`           | `explicit`, `agent`, or `fingerprint`                           |
+| `vercel.ai_gateway.affinity.outcome`            | What affinity did, such as `promoted`, `confirmed`, or `no_pin` |
+| `vercel.ai_gateway.affinity.pinned_provider`    | Provider the session's pin named                                |
+| `vercel.ai_gateway.affinity.displaced_provider` | Provider that would have gone first, when the pin moved it      |
+
 ## Local traces
 
 `eve dev` records local traces by default. Omitting
