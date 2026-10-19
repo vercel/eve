@@ -1232,6 +1232,7 @@ async function dispatchSlackMessage(input: {
     botUserId: input.botUserId,
     channelId: input.message.channelId,
     threadTs: input.message.threadTs,
+    threadHasReplies: input.message.threadTs !== input.message.ts,
     installationTeamId: input.installationTeamId,
     teamId: input.message.teamId,
   });

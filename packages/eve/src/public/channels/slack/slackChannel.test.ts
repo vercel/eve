@@ -2667,7 +2667,7 @@ describe("slackChannel() inbound mention pipeline", () => {
   });
 
   // #5012: Slack only shows a threaded ephemeral once the thread has a reply.
-  it.fails("omits thread_ts from postEphemeral for a top-level mention", async () => {
+  it("omits thread_ts from postEphemeral for a top-level mention", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       async onAppMention(ctx) {
