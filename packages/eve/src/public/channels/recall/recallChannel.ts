@@ -57,6 +57,9 @@ export interface RecallChannelState extends PromptQueueState {
   transcript?: string[];
   /** Participant id to answer privately, set when a private chat started the current turn. */
   replyTo?: string;
+  /** Set while a bot `receive` sent is still joining; chat waits in `outbox` until it hears the meeting. */
+  awaitingCall?: boolean;
+  outbox?: { message: string; to?: string }[];
 }
 
 /** Per-delivery state: the event a line came from, which `deliver` reads and doesn't keep. */
@@ -92,7 +95,8 @@ export interface RecallHandle {
   /**
    * Posts to the meeting chat, split to fit the platform's limit. Returns
    * `false` instead of throwing when Recall rejects it, such as after the bot
-   * left the call.
+   * left the call. While a bot `receive` sent is still joining, the message
+   * waits and posts once the bot hears its first meeting event.
    */
   sendChatMessage(message: string, options?: { readonly to?: string }): Promise<boolean>;
   /** Plays an MP3 clip through the bot. The bot must be created with `automatic_audio_output`. */
@@ -268,6 +272,8 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
         return defaultDeliverResult(payload);
       }
 
+      if (channel.state.awaitingCall && isInCall(event)) await flushOutbox(channel);
+
       const transcript = channel.state.transcript ?? [];
       const line = payload.message;
       if (!(await shouldRespond({ botName, event, line, transcript }))) {
@@ -305,7 +311,8 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       });
       return await from(bot.id).send(input.message, {
         auth: input.auth,
-        state: { botId: bot.id, platform: null },
+        // Recall rejects chat until the bot is admitted, which can take minutes.
+        state: { awaitingCall: true, botId: bot.id, platform: null },
       });
     },
 
@@ -456,13 +463,27 @@ function formatRecallContextBlock(event: RecallMeetingEvent, platform: string | 
   return lines.join("\n");
 }
 
+/** Real-time events only flow once the bot is in the call; joining statuses don't count. */
+function isInCall(event: RecallMeetingEvent): boolean {
+  return event.type !== "status" || event.status.startsWith("in_call");
+}
+
+async function flushOutbox(channel: RecallChannelContext): Promise<void> {
+  delete channel.state.awaitingCall;
+  const outbox = channel.state.outbox ?? [];
+  delete channel.state.outbox;
+  for (const { message, to } of outbox) {
+    await channel.recall.sendChatMessage(message, to === undefined ? undefined : { to });
+  }
+}
+
 function isOwnMessage(event: RecallMeetingEvent, botName: string): boolean {
   return event.type === "chat" && event.participant.name === botName;
 }
 
 function buildRecallHandle(
   api: RecallApiOptions,
-  state: Pick<RecallChannelState, "botId" | "platform">,
+  state: Pick<RecallChannelState, "awaitingCall" | "botId" | "outbox" | "platform">,
 ): RecallHandle {
   const botId = (): string => {
     if (!state.botId) throw new Error("recallChannel: this session has no Recall bot.");
@@ -479,6 +500,12 @@ function buildRecallHandle(
       return recallSupportsDirectMessages(state.platform ?? undefined);
     },
     async sendChatMessage(message, options) {
+      if (state.awaitingCall) {
+        (state.outbox ??= []).push(
+          options?.to === undefined ? { message } : { message, to: options.to },
+        );
+        return true;
+      }
       try {
         await sendRecallChatMessage({
           ...api,

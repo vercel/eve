@@ -1,7 +1,7 @@
 ---
 issue: TBD
-status: spike
-last_updated: "2026-10-15"
+status: implemented
+last_updated: "2026-10-19"
 ---
 
 # Recall.ai meeting channel
@@ -10,9 +10,10 @@ last_updated: "2026-10-15"
 
 `eve/channels/recall` turns a Recall.ai meeting bot into an eve channel. Each
 bot's meeting is one session. Speech and chat arrive through Recall's real-time
-webhooks, and the agent replies in the meeting chat. The spike lives in
-`packages/eve/src/public/channels/recall/` and passes the channel conformance
-suite in three columns (`recall`, `recall-speech`, `recall-google-meet`).
+webhooks, and the agent replies in the meeting chat. The channel lives in
+`packages/eve/src/public/channels/recall/`, is documented at
+`docs/channels/recall.mdx`, and passes the channel conformance suite in three
+columns (`recall`, `recall-speech`, `recall-google-meet`).
 
 ## Authoring API
 
@@ -105,10 +106,14 @@ session, so another channel can hand a request into a meeting.
   but didn't answer. Pending prompts resolve against the raw words:
   "Eve, approve." answers an approval as `approve`.
 - **Replies:** `message.completed` posts to the chat, including text before a
-  tool call. Messages are split at the platform limit (Meet 500, Zoom and
+  tool call. A reply to a private Zoom chat goes privately to its sender; on
+  other platforms the bot posts a notice instead. Messages are split at the platform limit (Meet 500, Zoom and
   Teams 4096). Approvals and questions use the text prompt queue, like Twilio.
+- **Joining:** a bot `receive` creates can't chat until the meeting admits
+  it. The channel holds its chat messages and posts them on the first meeting
+  event the bot hears.
 - **Sign-ins:** a link or code is a credential. It goes to the participant by
-  Zoom direct message. Other platforms have no private chat, so the bot says
+  Zoom direct message, and if that send fails, nothing is posted publicly. Other platforms have no private chat, so the bot says
   to connect outside the meeting. Instructions without a link or code are
   posted for everyone.
 - **Webhooks:** Recall retries any non-2xx every second for a minute, so the
@@ -139,7 +144,7 @@ session, so another channel can hand a request into a meeting.
 
 Output Media streams a web page into the meeting as the bot's camera and
 microphone. The page can play audio and read meeting audio and the live
-transcript. The spike exposes only primitives:
+transcript. The channel exposes only primitives:
 
 - `recallBotConfig({ outputMediaUrl })`, set at creation;
 - `RecallHandle.startOutputMedia(url)` and `stopOutputMedia()`;
@@ -175,6 +180,8 @@ characters on Meet. Open questions:
 
 ## Not yet covered
 
-`eve setup` integration, docs page, catalog entry, changeset, platforms
-without chat (Webex can't send, Slack huddles can't receive), live
-verification against Zoom, Meet, and Teams.
+`eve setup` integration, an integrations gallery card (needs a Recall logo),
+platforms without chat (Webex can't send, Slack huddles can't receive), live
+verification against Zoom, Meet, and Teams. A turn that answers several
+queued lines replies to wherever the last one came from, so a public line
+queued behind a private one makes the reply public.

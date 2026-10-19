@@ -1,0 +1,186 @@
+---
+title: "Recall.ai"
+description: "Put your agent in Zoom, Google Meet, and Microsoft Teams meetings through Recall.ai meeting bots."
+type: integration
+---
+
+The Recall.ai channel puts your agent in a video meeting as a bot. [Recall.ai](https://www.recall.ai) runs the bot in Zoom, Google Meet, or Microsoft Teams. It sends the meeting's live transcript and chat to your agent as webhooks, and the agent replies in the meeting chat. Each bot's meeting is one eve session, and each participant is their own principal. See [Channels](./overview) for the contract this builds on.
+
+## Add the channel
+
+```bash
+eve add channel/recall
+```
+
+This writes `agent/channels/recall.ts`:
+
+```ts title="agent/channels/recall.ts"
+import { recallChannel } from "eve/channels/recall";
+
+export default recallChannel();
+```
+
+```bash
+RECALL_API_KEY=...                         # required to create bots and post to chat
+RECALL_WORKSPACE_VERIFICATION_SECRET=whsec_... # required to verify webhooks
+RECALL_REGION=us-east-1                    # optional; your Recall workspace region
+```
+
+Create the API key in the Recall dashboard, and copy the workspace verification secret from **Developers > Webhooks**. To skip env vars, pass the same values through `credentials: { apiKey, verificationSecret }` and `region`.
+
+The channel mounts one route, `POST /eve/v1/recall`, for both real-time and bot status webhooks. Set `route` to change it. Recall must reach this route over public HTTPS, so for local development, expose `eve dev` through a tunnel.
+
+## Send a bot to a meeting
+
+Recall sends a bot's real-time speech and chat events to the webhook URL set when the bot is created, so every bot must be created with the channel's route. There are two ways to create one.
+
+### From eve
+
+Hand a request to the channel with its `{ meetingUrl, metadata? }` target. The channel creates the bot and starts the session with your message. This example runs from a schedule; a route handler uses the same target through `ctx.to(...)`.
+
+```ts title="agent/schedules/standup.ts"
+import { defineSchedule } from "eve/schedules";
+
+import recall from "../channels/recall";
+
+export default defineSchedule({
+  cron: "0 9 * * 1-5",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(recall, { meetingUrl: "https://zoom.us/j/1234567890" }).send(
+        "Join the standup and take notes.",
+        { auth: appAuth },
+      ),
+    );
+  },
+});
+```
+
+Bots created this way send webhooks to `webhookUrl`, which defaults to the route on `VERCEL_PROJECT_PRODUCTION_URL`. Set `webhookUrl` explicitly on preview deployments, behind a proxy, or in local development.
+
+A new bot can't post to the chat until the meeting admits it, which can take minutes when the meeting has a waiting room. Until then, the channel holds the agent's chat messages and posts them once the session receives its first meeting event, such as someone speaking or joining. If nobody speaks, chats, or joins after the bot is admitted, the held messages wait until someone does. While a message is held, `sendChatMessage` returns `true`, and a later failure to post it is only logged.
+
+### From your own code
+
+To create bots elsewhere, such as in a tool or for Recall's calendar auto-join, build the request body with `recallBotConfig` and send it with `createRecallBot`. The config subscribes the bot to every real-time event the channel understands and turns on Recall's low-latency streaming transcription.
+
+```ts
+import { createRecallBot, recallBotConfig } from "eve/channels/recall";
+
+const bot = await createRecallBot({
+  body: recallBotConfig({
+    meetingUrl: "https://meet.google.com/abc-defg-hij",
+    webhookUrl: "https://your-agent.example.com/eve/v1/recall",
+    greeting: "Hi, I'm taking notes. Type in the chat or say my name to ask me something.",
+  }),
+});
+```
+
+`recallBotConfig` returns a plain object. Spread it into your own body for Recall options eve doesn't model. Recall's low-latency transcription is English-only; replace `recording_config.transcript` with a third-party streaming provider for other languages.
+
+## How the channel handles meetings
+
+### What the agent hears
+
+Two hooks decide what reaches the agent:
+
+- `onMeetingEvent(ctx, event)` runs in the webhook route and decides which events enter the session and as whom. Return `{ auth }` to deliver the event, optionally with `message` to replace the line the model sees, or `null` to drop it. The default delivers speech, chat, joins, and leaves, each as its participant, and drops bot status changes.
+- `shouldRespond({ event, line, transcript, botName })` runs in the session and decides whether a delivered line starts a turn. The default answers every chat message and any speech that names the bot. A throw falls back to the default.
+
+A line that `shouldRespond` declines costs no model call. The channel keeps the last 60 declined lines and gives them to the next turn as recent transcript, so the agent knows what "can you file that?" refers to. A declined line also doesn't cancel a pending approval or question.
+
+The model sees speech as `Alice: ...` and chat as `Alice (in chat):` followed by the message. Each turn also gets the meeting platform, the bot id, and the speaker's participant id, name, and host flag.
+
+`shouldRespond` is a good place for a fast decision model, because it sees the recent transcript:
+
+```ts title="agent/channels/recall.ts"
+import { decide } from "eve/ai";
+import { recallChannel } from "eve/channels/recall";
+
+export default recallChannel({
+  async shouldRespond({ event, line, transcript, botName }) {
+    if (event.type === "chat") return true;
+    if (event.type !== "speech") return false;
+    const { answers } = await decide({
+      state: { assistant: botName, recentTranscript: transcript.slice(-10), latest: line },
+      questions: {
+        addressed: {
+          type: "boolean",
+          instructions: `Is the latest line asking ${botName} to do or answer something?`,
+        },
+      },
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+    return answers.addressed.probability >= 0.5;
+  },
+});
+```
+
+### Identity
+
+Each participant is the principal `recall:<botId>:<participantId>` with `principalType: "user"`. Participant ids are scoped to one bot, so nothing carries over between meetings. Display names, host flags, and emails come from the meeting platform, and anyone can set their display name, so don't use them for authorization.
+
+To treat the whole meeting as one principal instead, return `recallMeetingAuth(event)` from `onMeetingEvent`. With one principal, the `queue` turn policy can batch a burst of lines from different speakers into one turn.
+
+```ts
+import { recallChannel, recallMeetingAuth } from "eve/channels/recall";
+
+export default recallChannel({
+  onMeetingEvent: (_ctx, event) =>
+    event.type === "status" ? null : { auth: recallMeetingAuth(event) },
+});
+```
+
+`botName` sets the bot's display name, which defaults to `eve`. The channel matches it to find speech addressed to the bot and to ignore the bot's own chat messages. A participant with the same display name as the bot is ignored too.
+
+### Replies
+
+The default `message.completed` handler posts each reply to the meeting chat, including text the agent writes before a tool call. Long replies are split at the platform's limit: 500 characters on Google Meet, and 4,096 on Zoom and Microsoft Teams.
+
+A reply to a private Zoom chat message goes privately to its sender. Other platforms can't send a private message, so the bot posts a notice instead of the reply.
+
+Webex bots can't send chat messages. The channel replies only in text; it doesn't speak.
+
+### Overlapping messages
+
+The channel defaults to `turnPolicy: "queue"`, because people keep talking while the agent works, and `"steer"` would restart the turn on every utterance. Lines spoken during a turn are delivered after it ends, and each runs `shouldRespond` then.
+
+### Human-in-the-loop (HITL)
+
+Meeting chat has no buttons, so the default handlers post each question and tool approval as text with numbered options. Participants answer in the chat, or by speaking to the bot: "eve, approve." answers an approval with `approve`. To render questions differently, declare your own `events["input.requested"]` handler.
+
+### Sign-ins
+
+A sign-in link or code is a credential, so it never goes to the shared chat. On Zoom, the bot sends it privately to the participant who needs to sign in. On other platforms, the bot asks them to connect the account outside the meeting. Instructions without a link or code, such as "approve on your phone", are posted for everyone.
+
+### Meeting end
+
+Recall sends bot status changes, such as `call_ended`, as workspace webhooks that you configure in the Recall dashboard. Point them at the same route to receive them. The default `onMeetingEvent` drops them. Return `{ auth }` for a status event to deliver it, for example to have the agent post a summary when the call ends.
+
+## Recall API handle
+
+Hooks and event handlers receive `recall`, a handle on the meeting's bot:
+
+- `sendChatMessage(message, { to? })` posts to the chat and returns `false` if Recall rejects it. Pass a participant id as `to` to reach one person; check `supportsDirectMessages` first.
+- `outputAudio(mp3)` plays an MP3 clip through the bot. The bot must be created with Recall's `automatic_audio_output` option, and you can't combine it with Output Media.
+- `startOutputMedia(url)` and `stopOutputMedia()` stream a web page into the meeting as the bot's camera and microphone, using Recall Output Media. Output Media isn't available in Slack huddles.
+- `leaveCall()` removes the bot from the meeting.
+- `request(path, init)` calls any Recall REST endpoint under `/api/v1`.
+
+The same operations are exported as standalone functions for code outside the channel, such as `sendRecallChatMessage`, `leaveRecallCall`, and `callRecallApi`.
+
+## Webhook handling
+
+The route answers `503` when no verification secret is configured and `413` for bodies over 256 KiB. It then checks Recall's `webhook-signature` header and answers `401` when the signature doesn't match. Nothing reaches the session before the signature check. Recall retries any other non-2xx response every second, so the route acknowledges with `204` before it delivers the event, and also acknowledges signed bodies it can't parse.
+
+## Disclaimer
+
+As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
+
+For example, you may be required to tell meeting participants that the meeting is transcribed and processed by an automated AI system, and to obtain consent where required, including in two-party-consent jurisdictions. A `greeting` in `recallBotConfig` is one way to announce the bot when it joins.
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection): principals and authorization
+- [Custom channels](./custom#cross-channel-hand-off): hand a request from another channel into a meeting
