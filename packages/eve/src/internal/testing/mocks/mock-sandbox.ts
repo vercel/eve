@@ -13,10 +13,14 @@ import type {
   SandboxWriteTextFileOptions,
 } from "#public/definitions/sandbox.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  readonly name: string;
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
+import {
+  createSandboxNetworkPolicyControl,
+  type SandboxNetworkPolicyControl,
+} from "#execution/sandbox/network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession &
+  SandboxNetworkPolicyControl & {
+    readonly name: string;
+  };
 import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 
@@ -39,6 +43,8 @@ interface MockSandboxInput {
   readonly id?: string;
   /** Sandbox name exposed by Vercel sessions. Defaults to `"sbx_mock"`. */
   readonly name?: string;
+  /** Network policy the sandbox was opened with. Defaults to `"allow-all"`. */
+  readonly networkPolicy?: SandboxNetworkPolicy;
   /**
    * Initial file contents visible to the sandbox.
    *
@@ -188,9 +194,12 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     resolvePath(path: string): string {
       return resolveWorkspacePath(path);
     },
-    async setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void> {
-      networkPolicyUpdates.push(policy);
-    },
+    ...createSandboxNetworkPolicyControl({
+      async apply(policy) {
+        networkPolicyUpdates.push(policy);
+      },
+      readUserPolicy: async () => input.networkPolicy ?? "allow-all",
+    }),
     async run(options: SandboxRunOptions): Promise<SandboxCommandResult> {
       return await run(options);
     },

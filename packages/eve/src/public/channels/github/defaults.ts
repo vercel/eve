@@ -1,8 +1,3 @@
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
 import { promptQueueEvents } from "#channel/prompt-queue.js";
 import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -27,7 +22,6 @@ import type {
 } from "#public/channels/github/githubChannel.js";
 import { splitGitHubCommentBody } from "#public/channels/github/limits.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
 import type { InputRequest } from "#shared/input.js";
 
 const log = createLogger("github.defaults");
@@ -175,26 +169,20 @@ async function checkoutRepositoryForTurn(
   const { state } = channel;
   try {
     const sandbox = await ctx.getSandbox();
-    if (!("setNetworkPolicy" in sandbox)) {
-      throw new Error("GitHub checkout requires a sandbox provider with mutable network policy.");
-    }
-    const checkout = await checkoutGitHubRepository(
-      sandbox as RuntimeSandboxSession & NetworkPolicySandboxSession,
-      {
-        api: options.api,
-        baseRef: state.baseRef,
-        baseSha: state.baseSha,
-        credentials: options.credentials,
-        defaultBranch: state.defaultBranch,
-        headRef: state.headRef,
-        headSha: state.headSha,
-        includeBase: state.pullRequestNumber !== null,
-        installationId: state.installationId,
-        owner: state.owner,
-        pullRequestNumber: state.pullRequestNumber,
-        repo: state.repo,
-      },
-    );
+    const checkout = await checkoutGitHubRepository(sandbox, {
+      api: options.api,
+      baseRef: state.baseRef,
+      baseSha: state.baseSha,
+      credentials: options.credentials,
+      defaultBranch: state.defaultBranch,
+      headRef: state.headRef,
+      headSha: state.headSha,
+      includeBase: state.pullRequestNumber !== null,
+      installationId: state.installationId,
+      owner: state.owner,
+      pullRequestNumber: state.pullRequestNumber,
+      repo: state.repo,
+    });
     state.checkoutPath = checkout.path;
     state.headSha = checkout.sha;
     state.baseRef = checkout.baseRef;

@@ -16,7 +16,7 @@ import {
   createDockerCli,
   type DockerCli,
 } from "#execution/sandbox/bindings/docker-cli.js";
-import { setDockerNetworkPolicy } from "#execution/sandbox/bindings/docker-network.js";
+import { createDockerNetworkPolicyBinding } from "#execution/sandbox/bindings/docker-network.js";
 import {
   createDockerSandboxOptionsHash,
   resolveDockerSandboxOptions,
@@ -174,7 +174,7 @@ export function createDockerSandboxProvider(
     const containerIdentity = await resolveDockerHandleIdentity(cli, containerName);
     const session = buildSandboxSession(
       createDockerInternalSession({ cli, containerIdentity }),
-      (policy) => setDockerNetworkPolicy(cli, containerIdentity, policy),
+      createDockerNetworkPolicyBinding(cli, containerIdentity),
     );
     return {
       sandbox: session,
@@ -271,7 +271,7 @@ export function createDockerSandboxProvider(
             cli,
             containerIdentity: buildContainerIdentity,
           }),
-          (policy) => setDockerNetworkPolicy(cli, buildContainerIdentity, policy),
+          createDockerNetworkPolicyBinding(cli, buildContainerIdentity),
         );
 
         await hydrateSandboxProviderResources({

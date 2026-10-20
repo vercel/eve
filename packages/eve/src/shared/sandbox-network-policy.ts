@@ -26,6 +26,11 @@ import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
  */
 export type SandboxNetworkPolicy = Vercel.NetworkPolicy;
 
+/** Rules eve attaches to hosts the user's policy allows, keyed by host. */
+export type SandboxNetworkCredentials = Readonly<
+  Record<string, readonly Vercel.NetworkPolicyRule[]>
+>;
+
 /** Initial network configuration shared by network-capable sandbox providers. */
 export interface SandboxNetworkOptions {
   readonly networkPolicy?: SandboxNetworkPolicy;

@@ -1,7 +1,9 @@
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
+import {
+  createSandboxNetworkPolicyControl,
+  type SandboxNetworkPolicyBinding,
+  type SandboxNetworkPolicyControl,
+} from "#execution/sandbox/network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & SandboxNetworkPolicyControl;
 import type {
   InternalSandboxSession,
   SandboxProcess,
@@ -36,17 +38,18 @@ export const SANDBOX_AGENT_ENV: Readonly<Record<string, string>> = { AI_AGENT: "
  * provider's `spawn`: collect stdout/stderr to strings, await `wait()`,
  * then return the combined result.
  *
- * Providers without mutable firewall support omit `setNetworkPolicy`; the
- * dedicated Vercel provider wires it to `sandbox.update`.
+ * Providers without mutable firewall support omit the network-policy binding.
+ * With one, the session owns its policy: see
+ * {@link createSandboxNetworkPolicyControl}.
  */
 export function buildSandboxSession(
   primitives: InternalSandboxSession,
-  setNetworkPolicy: (policy: SandboxNetworkPolicy) => Promise<void>,
+  networkPolicy: SandboxNetworkPolicyBinding,
 ): NetworkPolicySandboxSession;
 export function buildSandboxSession(primitives: InternalSandboxSession): SandboxSession;
 export function buildSandboxSession(
   primitives: InternalSandboxSession,
-  setNetworkPolicy?: (policy: SandboxNetworkPolicy) => Promise<void>,
+  networkPolicy?: SandboxNetworkPolicyBinding,
 ): SandboxSession {
   async function run(options: SandboxRunOptions) {
     const process = await primitives.spawn(options);
@@ -125,8 +128,8 @@ export function buildSandboxSession(
       });
     },
   };
-  if (setNetworkPolicy === undefined) return session;
-  return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
+  if (networkPolicy === undefined) return session;
+  return { ...session, ...createSandboxNetworkPolicyControl(networkPolicy) };
 }
 
 /**

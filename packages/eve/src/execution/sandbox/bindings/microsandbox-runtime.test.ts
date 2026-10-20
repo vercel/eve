@@ -93,6 +93,37 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
     expect(runtime.removedSnapshots).toEqual([runtime.createdFromSnapshot]);
   });
 
+  it("persists the user's policy apart from merged credentials across reconnects", async () => {
+    const sandbox = createMockMicrosandbox();
+    const runtime = createMockMicrosandboxModule(sandbox);
+    const userPolicy = { allow: ["github.com"] };
+    const merged = { allow: { "github.com": [{ transform: [{ headers: { a: "b" } }] }] } };
+    const connect = (metadata: MicrosandboxSessionMetadata) =>
+      connectMicrosandbox({
+        metadata,
+        metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
+        module: runtime.module,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      });
+    const vm = expectConnected(
+      await connect({
+        networkPolicy: userPolicy,
+        optionsHash: "options-hash",
+        sandboxName: "eve-sbx-ses-old",
+        version: 2,
+      }),
+    );
+    expect(vm.userNetworkPolicy).toEqual(userPolicy);
+
+    await vm.setNetworkPolicy(merged, userPolicy);
+
+    const written = metadataState.writeSessionMetadata.mock.lastCall?.[1];
+    expect(written).toMatchObject({ networkPolicy: merged, userNetworkPolicy: userPolicy });
+    const resumed = expectConnected(await connect(written));
+    expect(resumed.userNetworkPolicy).toEqual(userPolicy);
+  });
+
   it("captures a durable session snapshot", async () => {
     const sandbox = createMockMicrosandbox();
     const runtime = createMockMicrosandboxModule(sandbox);

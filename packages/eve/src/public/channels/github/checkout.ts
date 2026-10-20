@@ -1,8 +1,5 @@
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
+import { withSandboxNetworkCredentials } from "#execution/sandbox/network-policy.js";
 import {
   getGitHubPullRequest,
   getGitHubRepository,
@@ -13,7 +10,7 @@ import {
   resolveGitHubInstallationToken,
   type GitHubChannelCredentials,
 } from "#public/channels/github/auth.js";
-import { gitHubGitBrokerNetworkPolicy, gitHubRemoteUrl, isFullGitSha } from "#shared/git.js";
+import { gitHubGitCredentials, gitHubRemoteUrl, isFullGitSha } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
 const DEFAULT_CHECKOUT_PATH = "/workspace";
@@ -61,15 +58,16 @@ interface GitHubCheckoutInput extends GitHubCheckoutOptions {
  * the session, so when the workspace is already at the target commit this is a
  * no-op probe — no token is minted and nothing is fetched.
  *
- * The installation token is brokered at the sandbox firewall
- * (`sandbox.setNetworkPolicy`) rather than embedded in the remote URL, so it
- * never enters the sandbox process. Requires a firewall-capable backend; the
- * local backend rejects `setNetworkPolicy`.
+ * The installation token is brokered at the sandbox firewall rather than
+ * embedded in the remote URL, so it never enters the sandbox process. The
+ * credential only attaches to GitHub hosts the sandbox network policy already
+ * allows, and is removed once the fetch ends. Requires a firewall-capable
+ * backend.
  *
  * Channel-internal; not part of the public GitHub channel API.
  */
 export async function checkoutGitHubRepository(
-  sandbox: NetworkPolicySandboxSession,
+  sandbox: SandboxSession,
   input: GitHubCheckoutInput,
 ): Promise<GitHubCheckout> {
   const descriptor = await resolveCheckoutDescriptor(input);
@@ -99,12 +97,42 @@ export async function checkoutGitHubRepository(
   const remote = gitHubRemoteUrl({ owner: descriptor.owner, repo: descriptor.repo });
   const fetchedRef = isFullGitSha(checkoutRef) ? checkoutRef : "FETCH_HEAD";
 
-  // Broker the installation token at the sandbox firewall: git fetches a clean
-  // (token-free) URL and the platform injects `Authorization` on egress to
-  // GitHub, so the token never enters the sandbox process. The `"*"` rule keeps
-  // the agent's other egress open.
-  await sandbox.setNetworkPolicy(gitHubGitBrokerNetworkPolicy(token));
+  await withSandboxNetworkCredentials(sandbox, gitHubGitCredentials(token), async () => {
+    await fetchCheckout({
+      baseSha: input.includeBase === true ? descriptor.baseSha : null,
+      checkoutPath,
+      checkoutRef,
+      fetchDepth,
+      fetchedRef,
+      remote,
+      sandbox,
+    });
+  });
 
+  const head = await runCheckoutCommand({
+    command: `cd ${shellQuote(checkoutPath)} && git rev-parse HEAD`,
+    label: "resolve checked out commit",
+    sandbox,
+  });
+  const sha = head.stdout.trim() || descriptor.headSha || checkoutRef;
+  return {
+    baseRef: descriptor.baseRef,
+    path: checkoutPath,
+    ref: checkoutRef,
+    sha,
+  };
+}
+
+async function fetchCheckout(input: {
+  readonly baseSha: string | null;
+  readonly checkoutPath: string;
+  readonly checkoutRef: string;
+  readonly fetchDepth: string;
+  readonly fetchedRef: string;
+  readonly remote: string;
+  readonly sandbox: SandboxSession;
+}): Promise<void> {
+  const { checkoutPath, checkoutRef, fetchDepth, fetchedRef, remote, sandbox } = input;
   await runCheckoutCommand({
     command: `mkdir -p ${shellQuote(checkoutPath)}`,
     label: "create checkout directory",
@@ -137,28 +165,15 @@ export async function checkoutGitHubRepository(
     label: "checkout GitHub ref",
     sandbox,
   });
-  if (input.includeBase === true && descriptor.baseSha !== null) {
+  if (input.baseSha !== null) {
     await runCheckoutCommand({
       command: `cd ${shellQuote(checkoutPath)} && GIT_TERMINAL_PROMPT=0 git fetch${fetchDepth} origin ${shellQuote(
-        descriptor.baseSha,
+        input.baseSha,
       )}`,
       label: "fetch GitHub base ref",
       sandbox,
     });
   }
-
-  const head = await runCheckoutCommand({
-    command: `cd ${shellQuote(checkoutPath)} && git rev-parse HEAD`,
-    label: "resolve checked out commit",
-    sandbox,
-  });
-  const sha = head.stdout.trim() || descriptor.headSha || checkoutRef;
-  return {
-    baseRef: descriptor.baseRef,
-    path: checkoutPath,
-    ref: checkoutRef,
-    sha,
-  };
 }
 
 interface ResolvedCheckoutDescriptor {

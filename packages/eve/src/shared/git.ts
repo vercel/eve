@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import type { SandboxNetworkPolicy } from "./sandbox-network-policy.js";
+import type { SandboxNetworkCredentials } from "./sandbox-network-policy.js";
 
 /** Returns whether a value is a complete Git object SHA. */
 export function isFullGitSha(value: string): boolean {
@@ -31,12 +31,12 @@ export function gitHubRemoteUrl(input: { readonly owner: string; readonly repo: 
 }
 
 /**
- * Brokers a GitHub installation token at the sandbox firewall without exposing
- * it to the process running git. codeload.github.com is required for redirects
- * from shallow fetches.
+ * Credential rules that broker a GitHub installation token at the sandbox
+ * firewall without exposing it to the process running git. codeload.github.com
+ * is required for redirects from shallow fetches.
  */
-export function gitHubGitBrokerNetworkPolicy(token: string): SandboxNetworkPolicy {
+export function gitHubGitCredentials(token: string): SandboxNetworkCredentials {
   const authorization = `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
   const rule = [{ transform: [{ headers: { Authorization: authorization } }] }];
-  return { allow: { "*": [], "github.com": rule, "codeload.github.com": rule } };
+  return { "github.com": rule, "codeload.github.com": rule };
 }

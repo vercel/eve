@@ -2,7 +2,7 @@ import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
-  createVercelNetworkPolicySetter,
+  createVercelNetworkPolicyBinding,
   ensureVercelSandboxBaseRuntime,
   withBaseSetupNetworkPolicy,
 } from "#execution/sandbox/bindings/vercel-base-runtime.js";
@@ -415,7 +415,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
 
   const templateSession = buildSandboxSession(
     createVercelInternalSandboxSession(sandbox, input.createOptions.env),
-    createVercelNetworkPolicySetter(sandbox),
+    createVercelNetworkPolicyBinding(sandbox),
   );
 
   await writeVercelSandboxSeedFiles({
@@ -570,7 +570,7 @@ function createHandle(input: {
     sandbox: {
       ...buildSandboxSession(
         createVercelInternalSandboxSession(sandbox, input.createOptions.env),
-        createVercelNetworkPolicySetter(sandbox),
+        createVercelNetworkPolicyBinding(sandbox),
       ),
       name: sandbox.name,
     },

@@ -119,7 +119,9 @@ Summon the agent on a PR and it always sees the diff. PR metadata and the change
 
 ### Sandbox checkout
 
-Before the first model call, every triggered turn checks out the relevant ref into the sandbox, so `read_file`/`glob`/`grep`/`bash` all run against the real tree. The installation token never enters the sandbox. `git` fetches a token-free URL, and the platform injects auth on egress at the firewall. That requires a firewall-capable backend (Vercel); the local backend skips checkout. Within a session, checkout is incremental across turns.
+Before the first model call, every triggered turn checks out the relevant ref into the sandbox, so `read_file`/`glob`/`grep`/`bash` all run against the real tree. The installation token never enters the sandbox. `git` fetches a token-free URL, and the platform injects auth on egress at the firewall. That requires a firewall-capable backend (Vercel or microsandbox); the local backend skips checkout. Within a session, checkout is incremental across turns.
+
+The checkout stays inside the sandbox's network policy. It attaches the token only to `github.com` and `codeload.github.com`, removes it once the fetch ends, and restores your policy exactly. If your policy does not allow both hosts (for example `"deny-all"`), the checkout fails and logs an error naming them. Any header rules you set on those two hosts are replaced while the fetch runs. On Vercel, header rules on any other host also make the checkout fail: Vercel does not return header values, so eve cannot restore them.
 
 ### Arbitrary API calls
 

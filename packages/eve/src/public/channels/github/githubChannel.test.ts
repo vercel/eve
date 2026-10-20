@@ -135,9 +135,12 @@ function networkPolicySandbox(input: {
       return { exitCode: 0, stderr: "", stdout: "" };
     },
   }).session;
-  const session = buildSandboxSession(primitives, async (policy) => {
-    writes.push(policy);
-    inForce = policy;
+  const session = buildSandboxSession(primitives, {
+    async apply(policy) {
+      writes.push(policy);
+      inForce = policy;
+    },
+    readUserPolicy: async () => input.networkPolicy,
   });
   const access: SandboxAccess = {
     async captureState() {
@@ -1209,7 +1212,7 @@ describe("GitHub checkout network policy", () => {
     allow: { "codeload.github.com": [], "github.com": [] },
   };
 
-  it.fails("refuses to check out under deny-all without writing a policy", async () => {
+  it("refuses to check out under deny-all without writing a policy", async () => {
     const logs = captureLogRecords();
     const sandbox = networkPolicySandbox({ networkPolicy: "deny-all" });
 
@@ -1222,7 +1225,7 @@ describe("GitHub checkout network policy", () => {
     expect(failure).toContain("codeload.github.com");
   });
 
-  it.fails("fetches with the credential on allowed GitHub hosts only", async () => {
+  it("fetches with the credential on allowed GitHub hosts only", async () => {
     const sandbox = networkPolicySandbox({ networkPolicy: gitHubHosts });
 
     const ctx = await runCheckoutTurn(sandbox);
@@ -1237,7 +1240,7 @@ describe("GitHub checkout network policy", () => {
     expect(sandbox.inForce()).toEqual(gitHubHosts);
   });
 
-  it.fails("restores the configured policy when the fetch fails", async () => {
+  it("restores the configured policy when the fetch fails", async () => {
     const logs = captureLogRecords();
     const sandbox = networkPolicySandbox({ fetchExitCode: 128, networkPolicy: gitHubHosts });
 

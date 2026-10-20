@@ -55,6 +55,7 @@ import {
 } from "#execution/sandbox/bindings/microsandbox-templates.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { withDevelopmentSandboxMetadataPathTag } from "#execution/sandbox/development-run.js";
+import type { SandboxNetworkPolicyBinding } from "#execution/sandbox/network-policy.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import {
   isSandboxPreparedArtifactRecord,
@@ -166,9 +167,7 @@ export async function prewarmMicrosandboxTemplate(input: {
   });
   const templateSession = buildSandboxSession(
     createMicrosandboxInternalSession(templateSandbox),
-    async (policy) => {
-      await templateSandbox.setNetworkPolicy(policy);
-    },
+    microsandboxNetworkPolicyBinding(templateSandbox),
   );
 
   try {
@@ -384,9 +383,7 @@ function createHandle(
 ): SandboxProviderHandle<NetworkPolicySandboxSession> {
   const session = buildSandboxSession(
     createMicrosandboxInternalSession(sandbox),
-    async (policy) => {
-      await sandbox.setNetworkPolicy(policy);
-    },
+    microsandboxNetworkPolicyBinding(sandbox),
   );
   return {
     sandbox: session,
@@ -408,6 +405,13 @@ function createHandle(
 
 function createMicrosandboxInternalSession(sandbox: MicrosandboxVm): InternalSandboxSession {
   return createFileBackedInternalSandboxSession({ sandbox });
+}
+
+function microsandboxNetworkPolicyBinding(sandbox: MicrosandboxVm): SandboxNetworkPolicyBinding {
+  return {
+    apply: (policy, userPolicy) => sandbox.setNetworkPolicy(policy, userPolicy),
+    readUserPolicy: async () => sandbox.userNetworkPolicy,
+  };
 }
 
 function createActiveMicrosandboxSessionKey(sessionRootPath: string, optionsHash: string): string {

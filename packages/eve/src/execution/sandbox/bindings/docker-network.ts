@@ -1,6 +1,24 @@
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
+import type { SandboxNetworkPolicyBinding } from "#execution/sandbox/network-policy.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+
+const DOCKER_COARSE_POLICY_ONLY =
+  'The local Docker sandbox provider supports only the "allow-all" and "deny-all" network ' +
+  "policies. Domain-level allow-lists and credential brokering require the Vercel provider " +
+  "(VercelSandbox) or MicrosandboxSandbox.";
+
+export function createDockerNetworkPolicyBinding(
+  cli: DockerCli,
+  containerName: string,
+): SandboxNetworkPolicyBinding {
+  return {
+    apply: (policy) => setDockerNetworkPolicy(cli, containerName, policy),
+    async readUserPolicy() {
+      throw new Error(DOCKER_COARSE_POLICY_ONLY);
+    },
+  };
+}
 
 /**
  * Applies a coarse-grained run-time network policy by attaching or
@@ -13,11 +31,7 @@ export async function setDockerNetworkPolicy(
   policy: SandboxNetworkPolicy,
 ): Promise<void> {
   if (policy !== "allow-all" && policy !== "deny-all") {
-    throw new Error(
-      'The local Docker sandbox provider supports only the "allow-all" and "deny-all" network ' +
-        "policies. Domain-level allow-lists and credential brokering require the Vercel provider " +
-        "(VercelSandbox) or MicrosandboxSandbox.",
-    );
+    throw new Error(DOCKER_COARSE_POLICY_ONLY);
   }
 
   const inspect = await cli.run([

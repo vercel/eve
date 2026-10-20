@@ -77,6 +77,7 @@ export class MicrosandboxVm {
   #sandbox: MicrosandboxSandbox;
   #sandboxName: string;
   #stateSnapshotName?: string;
+  #userNetworkPolicy?: SandboxNetworkPolicy;
 
   constructor(
     input: {
@@ -91,6 +92,7 @@ export class MicrosandboxVm {
     metadataPath?: string,
     optionsHash?: string,
     stateSnapshotName?: string,
+    userNetworkPolicy: SandboxNetworkPolicy | undefined = networkPolicy,
   ) {
     this.#input = input;
     this.#sandbox = sandbox;
@@ -99,6 +101,7 @@ export class MicrosandboxVm {
     this.#metadataPath = metadataPath;
     this.#optionsHash = optionsHash;
     this.#stateSnapshotName = stateSnapshotName;
+    this.#userNetworkPolicy = userNetworkPolicy;
   }
 
   get id(): string {
@@ -107,6 +110,11 @@ export class MicrosandboxVm {
 
   get name(): string {
     return this.#sandboxName;
+  }
+
+  /** The user's own policy, without credentials eve has merged in. */
+  get userNetworkPolicy(): SandboxNetworkPolicy {
+    return this.#userNetworkPolicy ?? "allow-all";
   }
 
   async captureState(optionsHash: string): Promise<MicrosandboxSessionMetadata> {
@@ -120,6 +128,7 @@ export class MicrosandboxVm {
         optionsHash,
         sandboxName: this.#sandboxName,
         stateSnapshotName: this.#stateSnapshotName,
+        userNetworkPolicy: this.#userNetworkPolicy,
       });
     }
 
@@ -142,6 +151,7 @@ export class MicrosandboxVm {
       optionsHash,
       sandboxName: this.#sandboxName,
       stateSnapshotName,
+      userNetworkPolicy: this.#userNetworkPolicy,
     });
   }
 
@@ -196,7 +206,10 @@ export class MicrosandboxVm {
     this.#stateSnapshotName = undefined;
   }
 
-  async setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void> {
+  async setNetworkPolicy(
+    policy: SandboxNetworkPolicy,
+    userPolicy: SandboxNetworkPolicy = policy,
+  ): Promise<void> {
     const previousStateSnapshotName = this.#stateSnapshotName;
     const stateSnapshotName = createProviderName(
       "eve-sbx-state",
@@ -223,6 +236,7 @@ export class MicrosandboxVm {
     });
     this.#sandboxName = nextSandboxName;
     this.#networkPolicy = policy;
+    this.#userNetworkPolicy = userPolicy;
     this.#stateSnapshotName = undefined;
     if (this.#metadataPath !== undefined && this.#optionsHash !== undefined) {
       await this.writeMetadata(this.#metadataPath, this.#optionsHash);
@@ -299,6 +313,7 @@ export class MicrosandboxVm {
       optionsHash,
       sandboxName: this.#sandboxName,
       stateSnapshotName: this.#stateSnapshotName,
+      userNetworkPolicy: this.#userNetworkPolicy,
       version: MICROSANDBOX_METADATA_VERSION,
     });
   }
@@ -420,6 +435,7 @@ export async function connectMicrosandbox(input: {
     input.metadataPath,
     input.metadata.optionsHash,
     input.metadata.stateSnapshotName,
+    input.metadata.userNetworkPolicy,
   );
 }
 
@@ -464,6 +480,7 @@ async function restoreMicrosandboxSessionSnapshot(input: {
     input.metadataPath,
     input.metadata.optionsHash,
     input.metadata.stateSnapshotName,
+    input.metadata.userNetworkPolicy,
   );
   await vm.writeMetadata(input.metadataPath, input.metadata.optionsHash);
   return vm;

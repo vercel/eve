@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  gitHubGitBrokerNetworkPolicy,
-  gitHubRemoteUrl,
-  isFullGitSha,
-  isValidGitRef,
-} from "./git.js";
+import { gitHubGitCredentials, gitHubRemoteUrl, isFullGitSha, isValidGitRef } from "./git.js";
 
 describe("Git helpers", () => {
   it("recognizes full object SHAs", () => {
@@ -27,12 +22,9 @@ describe("Git helpers", () => {
       "https://github.com/vercel/eve.git",
     );
     const authorization = `Basic ${Buffer.from("x-access-token:secret").toString("base64")}`;
-    expect(gitHubGitBrokerNetworkPolicy("secret")).toEqual({
-      allow: {
-        "*": [],
-        "codeload.github.com": [{ transform: [{ headers: { Authorization: authorization } }] }],
-        "github.com": [{ transform: [{ headers: { Authorization: authorization } }] }],
-      },
+    expect(gitHubGitCredentials("secret")).toEqual({
+      "codeload.github.com": [{ transform: [{ headers: { Authorization: authorization } }] }],
+      "github.com": [{ transform: [{ headers: { Authorization: authorization } }] }],
     });
   });
 });

@@ -19,10 +19,13 @@ export interface MicrosandboxTemplateMetadata {
 
 export interface MicrosandboxSessionMetadata {
   readonly image?: string;
+  /** The policy in force, including credentials eve has merged in. */
   readonly networkPolicy?: SandboxNetworkPolicy;
   readonly optionsHash: string;
   readonly sandboxName: string;
   readonly stateSnapshotName?: string;
+  /** The user's own policy: the limit eve's credentials must stay inside. */
+  readonly userNetworkPolicy?: SandboxNetworkPolicy;
   readonly version: typeof MICROSANDBOX_METADATA_VERSION;
 }
 
@@ -31,12 +34,14 @@ export function createMicrosandboxSessionMetadata(input: {
   readonly optionsHash: string;
   readonly sandboxName: string;
   readonly stateSnapshotName: string | undefined;
+  readonly userNetworkPolicy: SandboxNetworkPolicy | undefined;
 }): MicrosandboxSessionMetadata {
   const metadata: {
     networkPolicy?: SandboxNetworkPolicy;
     optionsHash: string;
     sandboxName: string;
     stateSnapshotName?: string;
+    userNetworkPolicy?: SandboxNetworkPolicy;
     version: typeof MICROSANDBOX_METADATA_VERSION;
   } = {
     optionsHash: input.optionsHash,
@@ -45,6 +50,7 @@ export function createMicrosandboxSessionMetadata(input: {
   };
   if (input.networkPolicy !== undefined) metadata.networkPolicy = input.networkPolicy;
   if (input.stateSnapshotName !== undefined) metadata.stateSnapshotName = input.stateSnapshotName;
+  if (input.userNetworkPolicy !== undefined) metadata.userNetworkPolicy = input.userNetworkPolicy;
   return metadata;
 }
 
@@ -92,7 +98,8 @@ export function readSessionMetadataRecord(value: unknown): MicrosandboxSessionMe
     value.version !== MICROSANDBOX_METADATA_VERSION ||
     typeof value.optionsHash !== "string" ||
     typeof value.sandboxName !== "string" ||
-    (value.networkPolicy !== undefined && !isSandboxNetworkPolicy(value.networkPolicy))
+    (value.networkPolicy !== undefined && !isSandboxNetworkPolicy(value.networkPolicy)) ||
+    (value.userNetworkPolicy !== undefined && !isSandboxNetworkPolicy(value.userNetworkPolicy))
   ) {
     return null;
   }
@@ -103,6 +110,7 @@ export function readSessionMetadataRecord(value: unknown): MicrosandboxSessionMe
     sandboxName: value.sandboxName,
     stateSnapshotName:
       typeof value.stateSnapshotName === "string" ? value.stateSnapshotName : undefined,
+    userNetworkPolicy: value.userNetworkPolicy,
     version: MICROSANDBOX_METADATA_VERSION,
   };
 }

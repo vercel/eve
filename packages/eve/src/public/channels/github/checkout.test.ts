@@ -76,7 +76,7 @@ describe("GitHub checkout", () => {
       false,
     );
     expect(sandbox.commandLog.some((command) => command.includes("ghs_checkout"))).toBe(false);
-    // Token brokered at the firewall via a github.com header transform.
+    // Token brokered at the firewall via a github.com header transform, then removed.
     const authorization = `Basic ${Buffer.from("x-access-token:ghs_checkout").toString("base64")}`;
     expect(sandbox.networkPolicyUpdates).toEqual([
       {
@@ -86,6 +86,7 @@ describe("GitHub checkout", () => {
           "*": [],
         },
       },
+      "allow-all",
     ]);
   });
 

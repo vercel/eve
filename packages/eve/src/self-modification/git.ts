@@ -1,6 +1,7 @@
 import type { SandboxSession } from "eve/sandbox";
 
-import { gitHubGitBrokerNetworkPolicy } from "#shared/git.js";
+import { mergeSandboxNetworkCredentials } from "#execution/sandbox/network-policy.js";
+import { gitHubGitCredentials } from "#shared/git.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
@@ -20,7 +21,9 @@ export async function withBrokeredGitHubCredential<T>(
     | { readonly ok: true; readonly value: T }
     | { readonly error: unknown; readonly ok: false };
   try {
-    await sandbox.setNetworkPolicy(gitHubGitBrokerNetworkPolicy(token));
+    await sandbox.setNetworkPolicy(
+      mergeSandboxNetworkCredentials("allow-all", gitHubGitCredentials(token)),
+    );
     outcome = { ok: true, value: await operation() };
   } catch (error) {
     outcome = { error, ok: false };

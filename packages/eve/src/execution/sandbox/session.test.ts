@@ -41,9 +41,12 @@ describe("buildSandboxSession", () => {
   // setNetworkPolicy
   // ---------------------------------------------------------------------------
 
-  it("forwards setNetworkPolicy to the supplied applier", async () => {
+  it("applies setNetworkPolicy as the user's policy", async () => {
     const apply = vi.fn(async () => {});
-    const session = buildSandboxSession(createTestPrimitives(), apply);
+    const session = buildSandboxSession(createTestPrimitives(), {
+      apply,
+      readUserPolicy: async () => "allow-all",
+    });
     const policy = {
       allow: {
         "github.com": [{ transform: [{ headers: { authorization: "Basic abc" } }] }],
@@ -53,7 +56,7 @@ describe("buildSandboxSession", () => {
 
     await session.setNetworkPolicy(policy);
 
-    expect(apply).toHaveBeenCalledWith(policy);
+    expect(apply).toHaveBeenCalledWith(policy, policy);
   });
 
   it("returns the common session surface when no applier is supplied", () => {
