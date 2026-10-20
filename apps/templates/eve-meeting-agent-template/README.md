@@ -8,11 +8,11 @@ An [eve](https://eve.dev) agent that joins Zoom, Google Meet, and Microsoft Team
 Recall bot → transcript + chat webhooks → eve session → Linear MCP → meeting chat
 ```
 
-Recall joins the call, transcribes it, and posts each final utterance and chat message to eve's [Recall.ai channel](https://eve.dev/docs/channels/recall). Each bot gets one durable session, so "update that ticket" can refer to an issue opened earlier in the call. Only chat messages and speech that says "eve" start a turn; everything else is kept as recent transcript, so quiet stretches of the meeting cost no model calls.
+Recall joins the call, transcribes it, and posts each final utterance and chat message to eve's [Recall.ai channel](https://eve.dev/docs/channels/recall). Each bot gets one durable session, so "update that ticket" can refer to an issue opened earlier in the call. Every chat message starts a turn. For speech, a fast [`decide`](https://eve.dev/docs/guides/decide) call judges whether the line is asking eve for something, which holds up better than name matching when transcription mangles "eve". Everything else is kept as recent transcript, so quiet stretches of the meeting cost only decision calls, not agent turns.
 
 The main pieces are:
 
-- `agent/channels/recall.ts`: `recallChannel()` from `eve/channels/recall`, which verifies Recall webhooks, decides which lines get an answer, and posts replies to the meeting chat
+- `agent/channels/recall.ts`: `recallChannel()` from `eve/channels/recall`, which verifies Recall webhooks and posts replies to the meeting chat, plus the `shouldRespond` check for which lines get an answer
 - `agent/lib/webhook-url.ts`: the public webhook URL bots post to
 - `agent/tools/join_meeting.ts`: sends a bot to a meeting on request, for testing
 - `agent/connections/linear.ts`: [Linear's MCP server](https://linear.app/docs/mcp) through an app-scoped [Vercel Connect](https://vercel.com/docs/connect) connector
@@ -71,5 +71,5 @@ Expose the dev server with an HTTPS tunnel and set `RECALL_WEBHOOK_URL` to `http
 ## Limits
 
 - Each participant is their own principal, `recall:<botId>:<participantId>`, but display names prove nothing. Anyone in the meeting can use the Linear connector's access, so scope its Linear user accordingly.
-- Speech that mentions "eve" in passing still starts a turn; the agent calls `no_reply` when it isn't a request.
+- Every final utterance makes one decision-model call. If it fails or takes over five seconds, the channel falls back to answering speech that names "eve".
 - Replies are chat text, split to fit each platform's chat limit.
