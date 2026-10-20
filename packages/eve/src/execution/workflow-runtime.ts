@@ -59,6 +59,7 @@ import {
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";
+import { findExpiredSession } from "#execution/session/expired-session-link-steps.js";
 import {
   SESSION_HOOK_HANDOVER_TIMEOUT_MS,
   waitForSessionHooksRelease,
@@ -136,15 +137,25 @@ export function createWorkflowRuntime(config: {
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
 }): Runtime {
-  /** `predecessor` is set only on a successor of a retired session that has just ended. */
+  /**
+   * `stranded` names the retired session this one replaces. Otherwise a
+   * session that last timed out at the continuation address, if any, becomes
+   * the predecessor.
+   */
   const startSession = async (
     input: RunInput,
-    predecessor?: SessionPredecessor,
+    stranded?: SessionPredecessor,
   ): Promise<RunHandle> => {
-    const bundle = await getCompiledRuntimeAgentBundle({
-      compiledArtifactsSource: config.compiledArtifactsSource,
-      nodeId: config.nodeId,
-    });
+    const [bundle, expired] = await Promise.all([
+      getCompiledRuntimeAgentBundle({
+        compiledArtifactsSource: config.compiledArtifactsSource,
+        nodeId: config.nodeId,
+      }),
+      stranded === undefined && input.continuationToken !== undefined
+        ? findExpiredSession(input.continuationToken)
+        : undefined,
+    ]);
+    const predecessor = stranded ?? expired;
     if (input.toolStubs !== undefined && input.toolStubs.rootSessionId === undefined) {
       validateToolStubTargets(input.toolStubs.rules, bundle.graph);
     }
@@ -182,6 +193,7 @@ export function createWorkflowRuntime(config: {
     if (input.continuationConflictCommand !== undefined) {
       workflowInput.continuationConflictCommand = input.continuationConflictCommand;
     }
+    if (expired !== undefined) workflowInput.continuesExpiredSession = true;
     if (sessionTimeoutMs !== undefined) {
       workflowInput.sessionTimeoutMs = sessionTimeoutMs;
     }

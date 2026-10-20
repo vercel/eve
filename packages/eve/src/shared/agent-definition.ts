@@ -172,12 +172,14 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
-   * Session lifetime from creation or the latest ownership handoff, in milliseconds.
+   * How long a session may sit idle before eve completes it, in milliseconds.
    *
-   * A successful deployment handoff or legacy-session import restarts the
-   * original configured duration. Process restarts and failed or skipped
-   * handoffs preserve the deadline. If it elapses during an active turn, eve lets
-   * that turn settle before completing the session normally.
+   * The idle window starts at creation and restarts each time a turn settles.
+   * Work that runs while no turn is active, such as a working task, does not
+   * restart it. If it elapses during an active turn, eve lets that turn settle
+   * before completing the session normally. The next channel message at the
+   * session's current continuation address starts a fresh session that names
+   * the expired one as `ctx.session.predecessor`.
    *
    * `false` disables the timeout.
    *

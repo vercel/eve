@@ -249,7 +249,6 @@ describe("bootInitialOwner timeout startup", () => {
     const boot = await bootInitialOwner(initialInput({ sessionTimeoutMs: false }), "session-1");
 
     expect(boot?.session.initialTurnControl).toBeDefined();
-    expect(boot?.session.sessionTimeoutDeadline).toBeUndefined();
     expect(boot?.session.sessionTimeoutControl).toBeUndefined();
     expect(createTurnControl).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();

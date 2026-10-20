@@ -30,7 +30,8 @@ export interface SessionContext {
     readonly schedule?: SessionSchedule;
     /**
      * Present when eve started this session in place of one whose deployment
-     * was retired. It names the earlier session, whose recorded stream
+     * was retired or whose session timeout elapsed. It names the earlier
+     * session, whose recorded stream
      * `sessions.attach(predecessor.sessionId)` from `eve/server` reads.
      */
     readonly predecessor?: SessionPredecessor;

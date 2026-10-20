@@ -26,6 +26,7 @@ import {
   sessionCommandHookToken,
   sessionHandoffMarkerToken,
 } from "#execution/session-inbox/address.js";
+import { expiredSessionLinkToken } from "#execution/session/expired-session-link.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -63,7 +64,12 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 beforeEach(() => {
   cancelRunMock.mockResolvedValue(undefined);
   getHookByTokenMock.mockImplementation(async (token: string) => {
-    if (token.startsWith(sessionHandoffMarkerToken(""))) throw new HookNotFoundError(token);
+    if (
+      token.startsWith(sessionHandoffMarkerToken("")) ||
+      token.startsWith(expiredSessionLinkToken(""))
+    ) {
+      throw new HookNotFoundError(token);
+    }
     return currentSessionHook(token);
   });
   getWorldMock.mockResolvedValue(world);
@@ -632,7 +638,7 @@ describe("createWorkflowRuntime#createSession", () => {
       }),
     ).resolves.toMatchObject({ sessionId: "owner-run" });
 
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(getHookByTokenMock.mock.calls).toEqual([[expiredSessionLinkToken("invocation:token")]]);
   });
 
   it("passes a channel's losing-candidate delivery to the workflow", async () => {

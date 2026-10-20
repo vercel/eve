@@ -120,11 +120,6 @@ type SessionRetainedReason =
   | "known-incompatible"
   | "unsupported-world";
 
-/** A compaction handoff the owner owes; the successor keeps this deadline. */
-export interface CompactionHandoff {
-  readonly sessionTimeoutDeadline: Date | undefined;
-}
-
 type SessionTransferState = Pick<
   SessionCheckpoint,
   "history" | "serializedContext" | "sessionState"
@@ -267,16 +262,13 @@ export class SessionHandoff {
   /**
    * Attempts to move a session that compacted to a fresh run on this
    * deployment. The caller guarantees no input is waiting; the successor
-   * parks until the next one arrives and keeps the session's deadline.
+   * parks until the next one arrives.
    */
-  async tryCompactionTransfer(
-    state: SessionTransferState,
-    compaction: CompactionHandoff,
-  ): Promise<SessionTransferOutcome> {
+  async tryCompactionTransfer(state: SessionTransferState): Promise<SessionTransferOutcome> {
     const { deploymentId } = this.input;
     if (this.incompatibleTargetDeploymentIds.has(deploymentId))
       return { kind: "retained", reason: "known-incompatible" };
-    return await this.transfer(state, deploymentId, { ...compaction, reason: "compaction" });
+    return await this.transfer(state, deploymentId, { reason: "compaction" });
   }
 
   private async transfer(

@@ -17,6 +17,11 @@ export const SESSION_HANDOFF_VERSION = 3;
  */
 export interface InitialWorkflowEntryInput {
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
+  /**
+   * The continuation address linked this session's predecessor, a session that
+   * timed out there. The owner releases that link once it holds the address.
+   */
+  readonly continuesExpiredSession?: true;
   readonly input: RunInput["input"];
   readonly kind: "initial";
   readonly limits?: RunInput["limits"];
@@ -46,8 +51,6 @@ export type SessionHandoffStart =
        * successor parks until the next input arrives.
        */
       readonly delivery?: DeliverHookPayload;
-      /** Compaction does not extend the session's lifetime. */
-      readonly sessionTimeoutDeadline?: Date;
     };
 
 /** A successor owner started by a previous owner during a handoff. */

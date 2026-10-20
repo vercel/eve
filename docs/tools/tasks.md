@@ -308,9 +308,10 @@ task's start and end instead. See
   and enforce per-person access inside the tool.
 - **Working tasks.** A session runs at most 32 working tasks at once. An idle resumable task doesn't
   count, and a call that makes it work again does.
-- **No time limits.** Tasks have no timeout of their own. The session lifetime,
-  `limits.sessionTimeoutMs` (30 days by default), bounds all work in a session. A body that needs a
-  deadline races `sleep` against its work.
+- **No time limits.** Tasks have no timeout of their own. A working task does not keep its session
+  alive: when `limits.sessionTimeoutMs` (30 idle days by default) passes with no turn settling, the
+  session completes and stops its working tasks. A body that needs a deadline races `sleep` against
+  its work.
 
 ## Upgrade from background tasks
 

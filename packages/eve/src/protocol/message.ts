@@ -121,9 +121,9 @@ export interface SubagentSessionInvocationMetadata {
 }
 
 /**
- * The session this one replaced. Present on a session eve started in place of
- * one whose deployment was retired, when the next ordinary channel message
- * arrived before the earlier session timed out. This session has its own id,
+ * The session this one replaced. Present on a session eve started at a channel
+ * address in place of one whose deployment was retired, or of one whose session
+ * timeout elapsed while it held that address. This session has its own id,
  * stream, auth, and state, and starts with no history from its predecessor;
  * read the predecessor with `sessions.attach(sessionId)` from `eve/server`.
  */

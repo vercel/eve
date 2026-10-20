@@ -126,17 +126,13 @@ describe("SessionHandoff", () => {
   it("moves a compacted session to a parked successor on this deployment", async () => {
     installActivation();
     startSuccessorStepMock.mockResolvedValue(STARTED);
-    const sessionTimeoutDeadline = new Date("2026-11-01T00:00:00.000Z");
 
     await expect(
-      createHandoff(createInbox({ takenOver: true })).tryCompactionTransfer(state(), {
-        sessionTimeoutDeadline,
-      }),
+      createHandoff(createInbox({ takenOver: true })).tryCompactionTransfer(state()),
     ).resolves.toEqual({ kind: "transferred" });
     const [start] = startSuccessorStepMock.mock.calls[0] as [Record<string, unknown>];
     expect(start).toMatchObject({
       reason: "compaction",
-      sessionTimeoutDeadline,
       targetDeploymentId: "deployment-a",
     });
     expect(start).not.toHaveProperty("delivery");
@@ -409,9 +405,10 @@ describe("SessionHandoff", () => {
       kind: "retained",
       reason: "unsupported-world",
     });
-    await expect(
-      handoff.tryCompactionTransfer(state(), { sessionTimeoutDeadline: undefined }),
-    ).resolves.toEqual({ kind: "retained", reason: "unsupported-world" });
+    await expect(handoff.tryCompactionTransfer(state())).resolves.toEqual({
+      kind: "retained",
+      reason: "unsupported-world",
+    });
     expect(startSuccessorStepMock).toHaveBeenCalledTimes(1);
     expect(reportSessionHandoffRetainedStepMock).not.toHaveBeenCalled();
   });

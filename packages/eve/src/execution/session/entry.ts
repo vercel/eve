@@ -15,7 +15,8 @@ import {
   type SessionInboxPayload,
 } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
-import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session/timeout.js";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
+import { releaseExpiredSessionLink } from "#execution/session/expired-session-link.js";
 import {
   createSessionTimeoutControl,
   type SessionTimeoutControl,
@@ -107,8 +108,9 @@ async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
     readonly continuationToken: string;
-    readonly deadline: Date | undefined;
+    readonly continuesExpiredSession: boolean;
     readonly sessionId: string;
+    readonly sessionTimeoutMs: number | false;
   },
 ): Promise<InitialOwnerPreparation> {
   const [stableClaim, aliasClaim] = await Promise.allSettled([
@@ -122,12 +124,14 @@ async function prepareInitialOwner(
     if (isHookConflictError(aliasClaim.reason)) return { kind: "alias-conflict" };
     throw aliasClaim.reason;
   }
+  // Only the run that won the address may release its link.
+  if (input.continuesExpiredSession) await releaseExpiredSessionLink(input.continuationToken);
 
   const turnControl = createTurnControl();
-  const timeoutControl =
-    input.deadline === undefined
-      ? undefined
-      : createSessionTimeoutControl({ deadline: input.deadline, sessionId: input.sessionId });
+  const timeoutControl = createSessionTimeoutControl({
+    sessionId: input.sessionId,
+    timeoutMs: input.sessionTimeoutMs,
+  });
   const owner: OwnedInitialSession = {
     kind: "owned",
     timeoutControl,
@@ -169,8 +173,6 @@ export async function bootInitialOwner(
   const sessionWritable = getWritable<Uint8Array>();
   const inbox = createSessionInbox(sessionId);
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
-  // Workflow's clock is replay-stable; its optimistic startedAt metadata is not.
-  const deadline = sessionTimeoutDeadline(sessionTimeoutMs, Date.now());
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
     source: DurableCompiledArtifactsSource;
@@ -192,8 +194,9 @@ export async function bootInitialOwner(
     });
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
       continuationToken,
-      deadline,
+      continuesExpiredSession: input.continuesExpiredSession === true,
       sessionId,
+      sessionTimeoutMs,
     });
     const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
       ? resolveInitialTurnCallerStep({ serializedContext })
@@ -238,7 +241,6 @@ export async function bootInitialOwner(
         sessionState: created.state,
         sessionTimeoutControl: prepared.timeoutControl,
         sessionTimeoutMs,
-        sessionTimeoutDeadline: deadline,
         sessionWritable,
       },
     };
@@ -435,12 +437,6 @@ async function startSuccessor(
   if (childRunIdsToStop.length > 0) {
     await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
   }
-  const deadline =
-    input.reason === "compaction"
-      ? input.sessionTimeoutDeadline
-      : sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now());
-  const timeoutControl =
-    deadline === undefined ? undefined : createSessionTimeoutControl({ deadline, sessionId });
   return {
     inbox,
     session: {
@@ -455,10 +451,11 @@ async function startSuccessor(
       serializedContext,
       sessionId,
       sessionState: checkpoint.sessionState,
-      sessionTimeoutControl: timeoutControl,
+      sessionTimeoutControl: createSessionTimeoutControl({
+        sessionId,
+        timeoutMs: checkpoint.sessionTimeoutMs,
+      }),
       sessionTimeoutMs: checkpoint.sessionTimeoutMs,
-      // A deployment handoff renews the configured lifetime; compaction keeps the deadline.
-      sessionTimeoutDeadline: deadline,
       sessionWritable: input.sessionWritable,
     },
   };

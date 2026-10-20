@@ -56,7 +56,8 @@ export interface DynamicResolveContext {
     readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
     /**
      * Present when eve started this session in place of a stranded session,
-     * one that another eve version built. It names the earlier session, whose recorded stream
+     * one that another eve version built, or of one whose session timeout
+     * elapsed. It names the earlier session, whose recorded stream
      * `sessions.attach(predecessor.sessionId)` from `eve/server` reads.
      */
     readonly predecessor?: SessionPredecessor;

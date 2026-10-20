@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
+import {
+  createSessionTimeoutControl,
+  type SessionTimeoutControl,
+} from "#execution/session/timeout-control.js";
 import {
   cancelSessionTimeoutStep,
   startSessionTimeoutStep,
@@ -15,28 +18,71 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
 
+const BOOT = new Date("2026-02-01T00:00:00.000Z");
+const TIMEOUT_MS = 60_000;
+
+function createControl(): SessionTimeoutControl {
+  const control = createSessionTimeoutControl({ sessionId: "wrun_1", timeoutMs: TIMEOUT_MS });
+  if (control === undefined) throw new Error("expected a timeout control");
+  return control;
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(BOOT);
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
 describe("createSessionTimeoutControl", () => {
-  it("starts one absolute deadline against the stable command inbox", async () => {
-    const deadline = new Date("2026-02-01T00:00:00.000Z");
+  it("arms one timer for the idle window against the stable command inbox", async () => {
     vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
 
-    const control = createSessionTimeoutControl({
-      deadline,
-      sessionId: "wrun_1",
-    });
+    const control = createControl();
     await control.start();
     await control.start();
 
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
     expect(startSessionTimeoutStep).toHaveBeenCalledWith({
-      deadline,
+      deadline: new Date(BOOT.getTime() + TIMEOUT_MS),
       ownerRunId: "owner-1",
       token: "eve:session:wrun_1:inbox",
     });
+  });
+
+  it("extends the deadline from the latest activity instead of expiring", async () => {
+    vi.mocked(startSessionTimeoutStep)
+      .mockResolvedValueOnce({ runId: "timer-1" })
+      .mockResolvedValueOnce({ runId: "timer-2" });
+    const control = createControl();
+    await control.start();
+
+    vi.setSystemTime(BOOT.getTime() + 40_000);
+    control.recordActivity();
+    vi.setSystemTime(BOOT.getTime() + TIMEOUT_MS);
+
+    await expect(control.handleTimerElapsed()).resolves.toBe("extended");
+    expect(startSessionTimeoutStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadline: new Date(BOOT.getTime() + 40_000 + TIMEOUT_MS) }),
+    );
+    // The elapsed timer already ended; only its replacement is cancelled.
+    await control.dispose();
+    expect(cancelSessionTimeoutStep).toHaveBeenCalledOnce();
+    expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timer-2" });
+  });
+
+  it("expires once the session has been idle for the whole window", async () => {
+    vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
+    const control = createControl();
+    await control.start();
+
+    vi.setSystemTime(BOOT.getTime() + TIMEOUT_MS);
+
+    await expect(control.handleTimerElapsed()).resolves.toBe("expired");
+    expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
   });
 
   it("shares in-progress startup across concurrent start calls", async () => {
@@ -46,10 +92,7 @@ describe("createSessionTimeoutControl", () => {
         resolveStartup = resolve;
       }),
     );
-    const control = createSessionTimeoutControl({
-      deadline: new Date("2026-02-01T00:00:00.000Z"),
-      sessionId: "wrun_1",
-    });
+    const control = createControl();
 
     const first = control.start();
     const second = control.start();
@@ -67,10 +110,7 @@ describe("createSessionTimeoutControl", () => {
         resolveStartup = resolve;
       }),
     );
-    const control = createSessionTimeoutControl({
-      deadline: new Date("2026-02-01T00:00:00.000Z"),
-      sessionId: "wrun_1",
-    });
+    const control = createControl();
 
     const startup = control.start();
     const disposal = control.dispose();
@@ -83,10 +123,7 @@ describe("createSessionTimeoutControl", () => {
 
   it("cancels the active timer when the session settles", async () => {
     vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
-    const control = createSessionTimeoutControl({
-      deadline: new Date("2026-02-01T00:00:00.000Z"),
-      sessionId: "wrun_1",
-    });
+    const control = createControl();
 
     await control.start();
     await control.dispose();
@@ -100,10 +137,7 @@ describe("createSessionTimeoutControl", () => {
     const failure = new Error("timer startup failed");
     vi.mocked(startSessionTimeoutStep).mockRejectedValue(failure);
 
-    const control = createSessionTimeoutControl({
-      deadline: new Date("2026-02-01T00:00:00.000Z"),
-      sessionId: "wrun_1",
-    });
+    const control = createControl();
 
     await expect(control.start()).rejects.toBe(failure);
     await expect(control.start()).rejects.toBe(failure);

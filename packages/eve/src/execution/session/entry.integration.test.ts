@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
@@ -16,6 +17,8 @@ import {
   buildSubagentRootAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { readSessionEventStream } from "#execution/session-event-stream.js";
+import { expiredSessionLinkToken } from "#execution/session/expired-session-link.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#dynamic/definition.js";
@@ -674,7 +677,40 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("completes an expired conversation and lets its channel start a fresh session", async () => {
+  it("keeps a session open when its timer fires within the idle window of its last turn", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-idle-timeout" } });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "hello there" },
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+          sessionTimeoutMs: 60_000,
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+        await vi.waitFor(async () => expect(await countSessionTimers(run.runId)).toBe(1));
+
+        // The timer armed at creation fires after the first turn moved the deadline.
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "session-timeout",
+          ownerRunId: run.runId,
+        });
+
+        await vi.waitFor(async () => expect(await countSessionTimers(run.runId)).toBe(2));
+        await expect(run.status).resolves.toBe("running");
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
+  it("completes an expired conversation and links it to the next session at its address", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
     const continuationToken = "http:workflow-entry-timeout";
     const workflowRuntime = createWorkflowRuntime({
@@ -726,6 +762,17 @@ describe("workflowEntry integration", () => {
             token: sessionInboxHookToken(continuationToken),
           },
         );
+        await expect(readSessionStarted(replacement.id)).resolves.toMatchObject({
+          data: { predecessor: { sessionId: run.runId } },
+        });
+        // Released once the replacement holds the address, so a later session there starts unlinked.
+        await vi.waitFor(async () => {
+          const lookup = await getHookByToken(expiredSessionLinkToken(continuationToken)).then(
+            () => "linked",
+            (error: unknown) => (HookNotFoundError.is(error) ? "released" : error),
+          );
+          expect(lookup).toBe("released");
+        });
       } finally {
         stream.dispose();
         if (replacementSessionId !== undefined) {
@@ -1804,4 +1851,24 @@ async function resetAndRelease(run: HeldApprovalRun["run"]): Promise<void> {
     "reset",
   );
   await withTimeout(run.returnValue, "session release");
+}
+
+async function countSessionTimers(ownerRunId: string): Promise<number> {
+  const steps = await (await getWorld()).steps.list({ runId: ownerRunId });
+  return steps.data.filter(
+    (step) => step.stepName.endsWith("//startSessionTimeoutStep") && step.status === "completed",
+  ).length;
+}
+
+async function readSessionStarted(sessionId: string): Promise<MessageStreamEvent> {
+  const reader = readSessionEventStream(sessionId).getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error(`Session "${sessionId}" ended before it started.`);
+      if (value.type === "session.started") return value;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
 }

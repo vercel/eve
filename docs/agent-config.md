@@ -278,15 +278,29 @@ export default defineAgent({
 });
 ```
 
-`sessionTimeoutMs` sets the lifetime for every session, including delegated
-sessions. It defaults to 30 days and starts at creation. Each successful
-deployment handoff or legacy-session import restarts the original configured
-duration. Process restarts, ordinary messages, compaction handoffs, and failed
-or skipped handoffs keep the existing deadline. At the deadline, eve lets an active turn settle,
-then emits `session.completed` and releases every continuation address; the next
-qualifying channel message starts fresh. Set it to `false` to disable the
-timeout. Session expiration follows [run-data retention](#run-data-retention);
-a zero-retention session loses its stored payloads when it ends.
+`sessionTimeoutMs` sets how long a session may sit idle before eve completes it,
+for every session, including delegated sessions. It defaults to 30 days. The
+idle window starts at creation and restarts each time a turn settles, including
+turns that answer a message, clear or compact the context, or end in
+cancellation. Work that runs while no turn is active, such as a working
+[task](./tools/tasks), does not restart it, and process restarts do not change
+it. When the window elapses, eve lets an active turn settle, then emits
+`session.completed` and releases every continuation address. Set it to `false`
+to disable the timeout. Session expiration follows
+[run-data retention](#run-data-retention); a zero-retention session loses its
+stored payloads when it ends.
+
+The next channel message at an expired session's current continuation address
+starts a fresh session whose `ctx.session.predecessor` names the expired
+session, so your instructions can read the earlier conversation. See
+[What a replacement session receives](./concepts/execution-model-and-durability#what-a-replacement-session-receives).
+The link lasts at least 30 days, and only while the expired session's run data is
+still retained. A zero-retention session leaves no link, and neither does a
+reset. The fresh session consumes the link, so a later session at the same
+address starts unlinked. Links need a Workflow world with the `hookForceClaim`
+and `hookRetention` capabilities, the same ones
+[session handoffs](./concepts/execution-model-and-durability#compaction-handoff)
+need.
 
 Input tokens, output tokens, and model token cost are checked independently.
 The model call that crosses a limit is allowed to finish because exact usage
@@ -496,7 +510,7 @@ keeps the data. Confirm support with your World provider. See
 | -------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                        |
 | `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                                                |
-| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                          |
+| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 idle days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                                                                                                     |
 | `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data.                                                                            |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                             |
 | `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` keeps it out of the model's tool list; the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`. |

@@ -21,13 +21,14 @@ whichever session currently owns a platform conversation, such as a Slack thread
 That identity stays behind the channel boundary and is never accepted or returned
 by the eve HTTP session API. See [Custom channels](../channels/custom#channel-operations-and-session-handles).
 
-Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
-`agent.ts`, or set it to `false` to disable the deadline. A successful deployment
-handoff or legacy-session import restarts the original configured duration.
-Ordinary messages, compaction handoffs, and process restarts keep the existing deadline. At expiration, eve
+A session completes after 30 idle days by default; configure
+`limits.sessionTimeoutMs` in `agent.ts`, or set it to `false` to disable the
+timeout. The idle window restarts each time a turn settles. At expiration, eve
 lets an active turn settle, emits `session.completed`, and releases the
-session's continuation addresses so the next qualifying channel message starts fresh. Stored
-session data is not deleted. See [Agent config](../agent-config#runtime-limits).
+session's continuation addresses. The next qualifying channel message starts a
+fresh session that names the expired one as its predecessor, so your
+instructions can read the earlier conversation. Stored session data is not
+deleted. See [Agent config](../agent-config#runtime-limits).
 
 React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
@@ -67,39 +68,39 @@ curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
 
-| Event                     | Meaning                                                                                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `session.started`         | A durable session was created; carries `trace` when the runtime is traced, and `predecessor` when the session [replaced a stranded one](./execution-model-and-durability#what-a-replacement-session-receives). |
-| `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                                                                                                                       |
-| `message.received`        | Input reached a turn; carries flattened text plus structured text/file parts.                                                                                                                                  |
-| `step.started`            | A model step began.                                                                                                                                                                                            |
-| `action.input.appended`   | A raw tool-input text delta and its tool-call identity.                                                                                                                                                        |
-| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                                                                                                                  |
-| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                                                                                                       |
-| `action.result`           | A tool call returned.                                                                                                                                                                                          |
-| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`.                                                                                       |
-| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                                                                                                         |
-| `agent.started`           | A workflow run opened a session with `ctx.agent`, such as an agent tool's; carries `taskId` when the run is a task, `sessionId`, and the `streamPath` that `session.agent(started).stream()` follows.          |
-| `task.started`            | A tool call started a [task](#task-events); carries `taskId`, `callId`, `turnId`, the tool `name`, and `kind`: `"agent"` for an agent tool, `"tool"` otherwise.                                                |
-| `task.settled`            | A task's call settled; carries `taskId`, `callId`, `turnId`, the tool `name`, `kind`, `status`, and `output` or `error.message`; a cancelled call carries `cancel.reason` instead.                             |
-| `reasoning.appended`      | A reasoning text delta.                                                                                                                                                                                        |
-| `reasoning.completed`     | The finalized reasoning block.                                                                                                                                                                                 |
-| `message.appended`        | An assistant text delta.                                                                                                                                                                                       |
-| `message.completed`       | A finalized assistant text block.                                                                                                                                                                              |
-| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                                                                                                  |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `stepIndex`, and `usageInputTokens`.                                                                                                |
-| `compaction.completed`    | A compaction checkpoint was written to durable history; carries the same model, session, turn, and step identity.                                                                                              |
-| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                                                                                                                     |
-| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                                                                                                      |
-| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                                                                                                       |
-| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                                                                                                                    |
-| `turn.waiting`            | The open turn parked; carries `turnId` and `on`: `"input"` while a person must act on a sign-in, approval, or question, `"tasks"` while work it started runs. The turn has not ended.                          |
-| `turn.completed`          | The turn finished.                                                                                                                                                                                             |
-| `turn.failed`             | The turn failed; carries `{ code, message, details?, terminal? }`. `terminal` is `true` when `session.failed` follows instead of `session.waiting`.                                                            |
-| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                                                                                                                 |
-| `session.waiting`         | The session parked and is ready for the next message.                                                                                                                                                          |
-| `session.failed`          | The session failed.                                                                                                                                                                                            |
-| `session.completed`       | The session reached a terminal end.                                                                                                                                                                            |
+| Event                     | Meaning                                                                                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session.started`         | A durable session was created; carries `trace` when the runtime is traced, and `predecessor` when the session [replaced a stranded or expired one](./execution-model-and-durability#what-a-replacement-session-receives). |
+| `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                                                                                                                                  |
+| `message.received`        | Input reached a turn; carries flattened text plus structured text/file parts.                                                                                                                                             |
+| `step.started`            | A model step began.                                                                                                                                                                                                       |
+| `action.input.appended`   | A raw tool-input text delta and its tool-call identity.                                                                                                                                                                   |
+| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                                                                                                                             |
+| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                                                                                                                  |
+| `action.result`           | A tool call returned.                                                                                                                                                                                                     |
+| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`.                                                                                                  |
+| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                                                                                                                    |
+| `agent.started`           | A workflow run opened a session with `ctx.agent`, such as an agent tool's; carries `taskId` when the run is a task, `sessionId`, and the `streamPath` that `session.agent(started).stream()` follows.                     |
+| `task.started`            | A tool call started a [task](#task-events); carries `taskId`, `callId`, `turnId`, the tool `name`, and `kind`: `"agent"` for an agent tool, `"tool"` otherwise.                                                           |
+| `task.settled`            | A task's call settled; carries `taskId`, `callId`, `turnId`, the tool `name`, `kind`, `status`, and `output` or `error.message`; a cancelled call carries `cancel.reason` instead.                                        |
+| `reasoning.appended`      | A reasoning text delta.                                                                                                                                                                                                   |
+| `reasoning.completed`     | The finalized reasoning block.                                                                                                                                                                                            |
+| `message.appended`        | An assistant text delta.                                                                                                                                                                                                  |
+| `message.completed`       | A finalized assistant text block.                                                                                                                                                                                         |
+| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                                                                                                             |
+| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `stepIndex`, and `usageInputTokens`.                                                                                                           |
+| `compaction.completed`    | A compaction checkpoint was written to durable history; carries the same model, session, turn, and step identity.                                                                                                         |
+| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                                                                                                                                |
+| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                                                                                                                 |
+| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                                                                                                                  |
+| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                                                                                                                               |
+| `turn.waiting`            | The open turn parked; carries `turnId` and `on`: `"input"` while a person must act on a sign-in, approval, or question, `"tasks"` while work it started runs. The turn has not ended.                                     |
+| `turn.completed`          | The turn finished.                                                                                                                                                                                                        |
+| `turn.failed`             | The turn failed; carries `{ code, message, details?, terminal? }`. `terminal` is `true` when `session.failed` follows instead of `session.waiting`.                                                                       |
+| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                                                                                                                            |
+| `session.waiting`         | The session parked and is ready for the next message.                                                                                                                                                                     |
+| `session.failed`          | The session failed.                                                                                                                                                                                                       |
+| `session.completed`       | The session reached a terminal end.                                                                                                                                                                                       |
 
 The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
 

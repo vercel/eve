@@ -222,7 +222,7 @@ describe("workflowEntry integration", () => {
   describe("compaction handoff", () => {
     afterEach(() => vi.restoreAllMocks());
 
-    it("moves each compacted session to a fresh run on its deployment and keeps its deadline", async () => {
+    it("moves each compacted session to a fresh run on its deployment and restarts its idle window", async () => {
       const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-compaction" } });
 
@@ -277,9 +277,7 @@ describe("workflowEntry integration", () => {
           const originalTimer = await readSessionTimer(anchor.runId);
 
           const successor = await compactTo(anchor.runId);
-          expect((await readSessionTimer(successor.runId)).deadline).toEqual(
-            originalTimer.deadline,
-          );
+          await expectIdleWindowFromBoot(successor.runId, originalTimer.deadline);
           await vi.waitFor(async () =>
             expect((await world.runs.get(originalTimer.runId)).status).toBe("cancelled"),
           );
@@ -339,9 +337,7 @@ describe("workflowEntry integration", () => {
             expect((await world.runs.get(successor.runId)).status).toBe("completed"),
           );
           expect((await world.runs.get(anchor.runId)).status).toBe("running");
-          expect((await readSessionTimer(nextOwner.runId)).deadline).toEqual(
-            originalTimer.deadline,
-          );
+          await expectIdleWindowFromBoot(nextOwner.runId, originalTimer.deadline);
 
           await workflowRuntime.dispatchSession({
             command: { kind: "reset", reason: "compaction handoff test" },
@@ -460,6 +456,16 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+/** A successor boots right after the turn that compacted, so its window starts at boot. */
+async function expectIdleWindowFromBoot(ownerRunId: string, previousDeadline: Date): Promise<void> {
+  const timer = await readSessionTimer(ownerRunId);
+  const owner = await (await getWorld()).runs.get(ownerRunId);
+  expect(timer.deadline.getTime()).toBeGreaterThan(previousDeadline.getTime());
+  expect(timer.deadline.getTime()).toBeGreaterThanOrEqual(
+    (owner.startedAt ?? owner.createdAt).getTime() + 60_000,
+  );
+}
 
 async function readSessionTimer(ownerRunId: string): Promise<{ runId: string; deadline: Date }> {
   const world = await getWorld();
