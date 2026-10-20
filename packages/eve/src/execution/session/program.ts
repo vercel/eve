@@ -22,7 +22,6 @@ import { finalizeSession, type SessionTerminalOutcome } from "#execution/session
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
-import { linkExpiredSession } from "#execution/session/expired-session-link.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -305,14 +304,6 @@ async function runSessionLoop(
     progress.caller = undefined;
     return settled;
   };
-  const expire = async (): Promise<SessionLoopOutcome> => {
-    const { continuationToken, sessionId } = cursor.sessionState;
-    // A zero-retention session's data is deleted when it ends, so there is nothing to continue.
-    if (continuationToken !== "" && boot.retention !== 0) {
-      await linkExpiredSession({ continuationToken, sessionId });
-    }
-    return { kind: "terminal", outcome: { kind: "expired" } };
-  };
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
       const next = await nextParkedActivity();
@@ -322,7 +313,6 @@ async function runSessionLoop(
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "expired":
-          return await expire();
         case "reset":
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
@@ -397,7 +387,6 @@ async function runSessionLoop(
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "expired":
-          return await expire();
         case "reset":
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":

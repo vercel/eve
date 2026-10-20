@@ -16,7 +16,6 @@ import {
 } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
-import { releaseExpiredSessionLink } from "#execution/session/expired-session-link.js";
 import {
   createSessionTimeoutControl,
   type SessionTimeoutControl,
@@ -108,7 +107,6 @@ async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
     readonly continuationToken: string;
-    readonly releaseExpiredSessionLink: boolean;
     readonly sessionId: string;
     readonly sessionTimeoutMs: number | false;
   },
@@ -124,8 +122,6 @@ async function prepareInitialOwner(
     if (isHookConflictError(aliasClaim.reason)) return { kind: "alias-conflict" };
     throw aliasClaim.reason;
   }
-  // Only the run that won the address may release its link.
-  if (input.releaseExpiredSessionLink) await releaseExpiredSessionLink(input.continuationToken);
 
   const turnControl = createTurnControl();
   const timeoutControl = createSessionTimeoutControl({
@@ -196,7 +192,6 @@ export async function bootInitialOwner(
     });
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
       continuationToken,
-      releaseExpiredSessionLink: input.releaseExpiredSessionLink === true,
       sessionId,
       sessionTimeoutMs,
     });

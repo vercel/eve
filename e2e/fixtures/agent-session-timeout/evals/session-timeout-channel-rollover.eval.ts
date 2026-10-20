@@ -24,7 +24,7 @@ async function postJson<T>(target: EveEvalTargetHandle, path: string, body: unkn
 
 export default defineEval({
   description:
-    "Session idle timeout waits out an active turn, then the same channel thread starts a new session that names the expired one.",
+    "Session idle timeout waits out an active turn, then the same channel thread starts a new session.",
 
   async test(t) {
     const threadId = crypto.randomUUID();
@@ -78,15 +78,6 @@ export default defineEval({
     replacementTurn.expectOk();
     replacementTurn.notEvent("turn.failed");
     replacementTurn.notEvent("session.failed");
-    replacementTurn.eventsSatisfy(
-      "the replacement session names the expired session as its predecessor",
-      (events) =>
-        events.some(
-          (event) =>
-            event.type === "session.started" &&
-            event.data.predecessor?.sessionId === expiredSessionId,
-        ),
-    );
     await t.require(replacementTurn.message, equals("timeout-ack:REPLACEMENT-TURN"));
   },
 });

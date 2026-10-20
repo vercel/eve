@@ -81,9 +81,9 @@ A reset cannot be undone. A fresh session started by a message can read at most 
 
 #### What a replacement session receives
 
-A replacement session is a new session with its own ID, stream, auth, channel binding, and state. eve starts one at a channel address in place of a stranded session, or in place of a session that kept its run data and whose [session timeout](../agent-config#runtime-limits) elapsed while it held that address as its current one. It starts with no history from the earlier session. `ctx.session.predecessor` and the `session.started` event's `data.predecessor` name the session it replaced: `{ sessionId }`.
+A replacement session is a new session with its own ID, stream, auth, channel binding, and state. It starts with no history from the stranded session. `ctx.session.predecessor` and the `session.started` event's `data.predecessor` name the session it replaced: `{ sessionId }`.
 
-To let the model continue the conversation, read the earlier session's recorded stream with `sessions.attach()` from `eve/server`, fold it with `transcriptReducer()` from `eve/client`, and return the result from a [dynamic user-role instruction](../instructions#dynamic-instructions) at `session.started`:
+To let the model continue the conversation, read the stranded session's recorded stream with `sessions.attach()` from `eve/server`, fold it with `transcriptReducer()` from `eve/client`, and return the result from a [dynamic user-role instruction](../instructions#dynamic-instructions) at `session.started`:
 
 ```ts title="agent/instructions/replaced-conversation.ts"
 import { transcriptReducer } from "eve/client";
@@ -122,7 +122,7 @@ export default defineDynamic({
 
 The resolver runs before the replacement's first model call, and its result enters the replacement's durable history once, ahead of the new message. In a session that replaced no other, `ctx.session.predecessor` is undefined and the instruction contributes nothing.
 
-`transcriptReducer()` keeps history added with `history`, user message text, and completed assistant text, oldest first, as `{ role, text }` messages. Reasoning, tool calls and results, attachments, approvals, and output from a turn that never completed are left out. A clear in the earlier session starts the transcript over, so text the user cleared is never returned. `maxMessages` keeps only the newest messages.
+`transcriptReducer()` keeps history added with `history`, user message text, and completed assistant text, oldest first, as `{ role, text }` messages. Reasoning, tool calls and results, attachments, approvals, and output from a turn that never completed are left out. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. `maxMessages` keeps only the newest messages.
 
 The read and the prompt are yours to bound:
 
@@ -132,13 +132,13 @@ The read and the prompt are yours to bound:
 
 To use other context instead, such as a summary your application stored for the earlier session, look it up by `ctx.session.predecessor.sessionId`.
 
-The transcript is context only: tools, approvals, files, sandbox contents, authored state, and interrupted work do not carry over. It includes only messages the earlier session recorded itself. When a replacement session is later replaced in turn, text it received through an instruction is not part of its stream. Each session's `session.started` event records its own `data.predecessor`, so you can follow `predecessor.sessionId` back through earlier sessions if you need older text.
+The transcript is context only: tools, approvals, files, sandbox contents, authored state, and interrupted work do not carry over. It includes only messages the stranded session recorded itself. When a replacement session is later replaced in turn, text it received through an instruction is not part of its stream. Each session's `session.started` event records its own `data.predecessor`, so you can follow `predecessor.sessionId` back through earlier sessions if you need older text.
 
 #### How a stranded session ends
 
 A stranded root session ends on its next channel message, a reset, or its [session timeout](../agent-config#runtime-limits), whichever comes first. It executes nothing while it waits. When the local world or Postgres recovers active runs at startup, eve acknowledges the root session's delivery without replaying it and logs a warning naming the run and both eve versions. The run keeps its `pending` or `running` status and its addresses. A later restart skips it the same way.
 
-The timeout is the session's own durable timer, which its last owner armed for the end of an idle window (30 days by default). An owner re-arms the timer only when the timer fires before the window ends, so a stranded session ends at most `sessionTimeoutMs` after its last turn settled, and possibly sooner. The timer is a separate workflow run that keeps working after the upgrade, and when it fires on a stranded session it ends the session the same way a reset does, without starting a fresh one. The next message to the address then starts an ordinary session with no predecessor. A session with `sessionTimeoutMs: false` has no timer, so a stranded one stays until a message or a reset, just as a healthy one would stay open.
+The timeout is the session's own durable timer, which its last owner armed for the end of an idle window (30 days by default). An owner re-arms the timer only when the timer fires before the window ends, so a stranded session ends at most `sessionTimeoutMs` after its last turn settled, and possibly sooner. The timer is a separate workflow run that keeps working after the upgrade, and when it fires on a stranded session it ends the session the same way a reset does, without starting a fresh one. The next message to the address then starts an ordinary session. A session with `sessionTimeoutMs: false` has no timer, so a stranded one stays until a message or a reset, just as a healthy one would stay open.
 
 Ending a root session does not find or cancel its subagent sessions and workflow tool runs. Each one is cancelled when a delivery for it reaches the current deployment, with the cancellation reason `Run retired: its eve deployment is no longer available`, and eve logs a `Retired stranded descendant run` warning. A run that never receives a delivery, such as one parked in a dormant `eve dev` generation, can stay active; cancel it in your Workflow world if you need to. Cancellation does not run authored cleanup or lifecycle hooks, undo side effects, or stop independent external jobs, and results and approvals do not carry over to a replacement session.
 

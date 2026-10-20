@@ -176,9 +176,7 @@ export interface AgentLimitsDefinition {
    *
    * The idle window starts at creation and restarts each time a turn settles.
    * A session never expires while a turn is open, including a turn held open
-   * for working tasks or human input. When the expired session kept its
-   * run data, the next channel message at its current continuation address
-   * starts a fresh session that names it as `ctx.session.predecessor`.
+   * for working tasks or human input.
    *
    * `false` disables the timeout.
    *
