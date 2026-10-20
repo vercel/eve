@@ -207,15 +207,28 @@ A remote subagent call runs a child session in the remote deployment as a task:
 2. The remote accepts the child and runs its turn while the task works.
 3. The callback delivers the child's reply, which becomes the task's result.
 
-The parent stream carries the same `task.started`, `agent.started`, and `task.settled` events as local delegation. For a remote child, `agent.started.data.remote.url` records the target.
+The parent stream carries the same `task.started`, `child.opened`, and `call.settled` facts as local delegation. A remote child's deployment binding is private: only the parent's stream proxy reads it.
 
-Clients follow a remote child through the parent. [`session.agent(started).stream()`](./client/streaming#follow-a-subagent) reads the `agent.started` event's `streamPath`, a route on the parent deployment. The parent verifies that its session recorded the child for that tool call, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
+Clients follow a remote child through the parent. [`session.agent(opened).stream()`](./client/streaming#follow-a-subagent) reads the `child.opened` event's `stream` path, a route on the parent deployment. The parent verifies that its session recorded the child for that tool call, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
 
-Cancelling the parent turn or the agent task with `eve__task_cancel` also cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
+Cancelling the parent turn or the agent task with `eve__task_cancel` also cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.settled` with `outcome: "cancelled"` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the workflow run that opened a remote child finishes, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for it. An agent task's run finishes when the parent session ends. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-The parent names its eve remote agent protocol version when it creates the child, and the remote answers with the version it serves. A remote also serves parents on protocol 1 (eve 0.66 through 0.68), including their approvals and sign-in requests, so upgrade remote agents before their callers; see [Upgrade remote agents before their callers](../tools/tasks-upgrade#upgrade-remote-agents-before-their-callers). A parent accepts a protocol-1 remote's results and failures, but that remote's approvals and sign-in requests don't reach the parent. Any other mismatch fails the call at start with an error naming both versions. A failed _start_ fails the call immediately. After a remote starts, a terminal failure callback fails the call with the remote's error. Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than completing the call, so the engine retries it.
+The parent names its remote agent protocol version when it creates the child, and the remote
+answers with the version it serves. This release serves protocols 1 through 3. A protocol-3 remote
+returns results and failures to callers on protocols 1 and 2, but cannot relay approvals,
+questions, or sign-ins to them. A turn that needs a person fails with upgrade guidance instead of
+waiting on an unreachable prompt. Upgrade remote agents before their callers; see
+[Upgrade remote agents before their callers](../tools/tasks-upgrade#upgrade-remote-agents-before-their-callers).
+A protocol-3 parent also accepts earlier remotes' results and failures, but cannot follow their
+live streams or receive their human-input requests. Unsupported versions fail at start with an
+error naming both versions.
+
+A failed start fails the call immediately. After a remote starts, a terminal failure callback
+fails the call with the remote's error. Terminal callback delivery runs as a durable step on the
+underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)).
+A failed callback POST is rethrown so the engine retries it.
 
 If a remote accepts the create request but its response has an incompatible
 protocol or an unreadable body, the work may have completed. eve stops workflow

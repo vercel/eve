@@ -189,7 +189,7 @@ The stub verification endpoint also requires `allowToolStubs`, checked before re
 
 Stubs replace execution of existing ordinary, dynamic, and workflow tools. They retain the real tool's input schema, approvals, and output processing. A stub does not register a new tool or make it visible to the model.
 
-Ordinary tools with configured stub rules can emit an extra `action.partial` containing the final response. This also applies when no rule matches and the real tool returns a non-streaming result. The final `action.result` remains correct, and real streaming still delivers progress. Use `action.result` for final-result assertions. Removing the extra event is tracked in [AX-5164](https://linear.app/vercel/issue/AX-5164).
+Ordinary tools with configured stub rules can emit an extra `call.progress` containing the final response. This also applies when no rule matches and the real tool returns a non-streaming result. The final `call.settled` remains correct, and real streaming still delivers progress. Use `call.settled` for final-result assertions. Removing the extra event is tracked in [AX-5164](https://linear.app/vercel/issue/AX-5164).
 
 ### Subagents
 

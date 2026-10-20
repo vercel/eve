@@ -58,11 +58,11 @@ export default twilioChannel({
 
 ### Delivery
 
-The default `message.completed` handler sends the reply as SMS through Twilio's Messages API. A reply to an inbound message can reuse the webhook's `To` as the sender, but a proactive send has nothing to reuse, so it needs `messaging.from` or `messaging.messagingServiceSid`. Behind a proxy, set `webhookUrl` so signature verification matches the exact configured URL, and `publicBaseUrl` so voice TwiML can build absolute callback URLs.
+The default `content.completed` handler sends each reply part as SMS through Twilio's Messages API. A reply to an inbound message can reuse the webhook's `To` as the sender, but a proactive send has nothing to reuse, so it needs `messaging.from` or `messaging.messagingServiceSid`. Behind a proxy, set `webhookUrl` so signature verification matches the exact configured URL, and `publicBaseUrl` so voice TwiML can build absolute callback URLs.
 
 ### Human-in-the-loop (HITL)
 
-SMS has no buttons or cards, so the default `input.requested` handler sends each question and tool approval as an SMS with its options numbered. A reply with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, any other text is taken as that answer. Callers on a voice call get the question by SMS too. To render questions differently, declare your own `events["input.requested"]` handler.
+SMS has no buttons or cards, so the default `interaction.opened` handler sends each question and tool approval as an SMS with its options numbered. A reply with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, any other text is taken as that answer. Callers on a voice call get the question by SMS too. To render questions differently, declare your own `events["input.requested"]` handler.
 
 ### Proactive sessions
 

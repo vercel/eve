@@ -3,7 +3,7 @@ title: "useEveAgent (Vue)"
 description: "Use the eve Vue composable and its Vue-specific reactive interface."
 ---
 
-`useEveAgent()` from `eve/vue` exposes the shared eve frontend client as Vue computed refs and methods. Read the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, reducers, and persistence. This page covers the Vue-specific interface.
+`useEveAgent()` from `eve/vue` exposes the shared eve frontend client as Vue computed refs and methods. Read the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, and persistence. This page covers the Vue-specific interface.
 
 Nuxt users normally receive the composable as an auto-import after registering the [`eve/nuxt` module](./nuxt).
 
@@ -61,29 +61,32 @@ Call `send(text)` for text or pass content parts for attachments. The API and tr
 
 ## Human-in-the-loop prompts
 
-Open requests appear in the `data.value.inputs` ledger. Read them with `openConversationInputs()`, then answer through `respond()`. An answered request leaves the list right away, so its buttons can't be pressed twice:
+Open requests appear in the `data.value.interactions` ledger. Read them with `openConversationInteractions()`, then answer through `respond()`. An answered request leaves the list right away, so its buttons can't be pressed twice:
 
 ```vue
 <script setup lang="ts">
 import { computed } from "vue";
-import { openConversationInputs, useEveAgent } from "eve/vue";
+import { openConversationInteractions, useEveAgent } from "eve/vue";
 
 const { data, respond } = useEveAgent();
 
 const pendingRequests = computed(() =>
-  openConversationInputs(data.value).map((input) => input.request),
+  openConversationInteractions(data.value)
+    .map((interaction) => interaction.request)
+    // A sign-in is answered by signing in; render it from its interaction part.
+    .filter((request) => request.kind !== "sign-in"),
 );
 </script>
 
 <template>
-  <fieldset v-for="request in pendingRequests" :key="request.requestId">
+  <fieldset v-for="request in pendingRequests" :key="request.interactionId">
     <legend>
       {{
-        request.kind === "tool-approval"
+        request.kind === "approval"
           ? "Approval required"
           : request.kind === "question"
             ? "Question"
-            : "Session limit"
+            : "Budget"
       }}
     </legend>
     <p>{{ request.prompt }}</p>
@@ -91,7 +94,7 @@ const pendingRequests = computed(() =>
       v-for="option in request.options ?? []"
       :key="option.id"
       type="button"
-      @click="respond([{ requestId: request.requestId, optionId: option.id }])"
+      @click="respond([{ interactionId: request.interactionId, optionId: option.id }])"
     >
       {{ option.label }}
     </button>
@@ -122,9 +125,9 @@ Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add con
 
 Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application needs lifecycle notifications. See [Lifecycle callbacks](./overview#lifecycle-callbacks) for callback timing and optimistic projection behavior.
 
-## Custom reducer
+## Derive your own state
 
-Import `EveAgentReducer` from `eve/vue` when projecting events into application-specific state. The resulting `data` remains a `ComputedRef<TData>`; `conversation` remains a `ComputedRef<ConversationState>` regardless of your reducer. See [Custom reducer](./overview#custom-reducer) for the reducer contract and client projection events.
+`data` is the conversation. Derive anything else from `events`, the authoritative list of the session's stream events. See [Derive your own state](./overview#derive-your-own-state).
 
 ## What to read next
 

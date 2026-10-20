@@ -145,17 +145,17 @@ curl -X POST https://<deployment>/eve/v1/session \
 ```
 
 When the create request includes a message, a follow-up request accepts exactly one of
-`message` or `inputResponses`; use the latter to answer a pending HITL request:
+`message` or `answers`; use the latter to answer a pending HITL request:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -H "Content-Type: application/json" \
-  -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
+  -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
 Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output; interrupted provider-managed search may run again. The turn ID stays the same.
 
-Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
+Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `answers` answer their addressed requests.
 
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
@@ -201,13 +201,13 @@ export default eveChannel({
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
 
-Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before a reset. A reset attempts to append `session.failed` with code `session_stranded` and close the stream. Existing readers finish when they receive that terminal event.
+Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before a reset. A reset attempts to append `session.ended` with `outcome: "failed"`, error code `session_stranded`, and cause `{ policy: "stranded-reset" }`, then close the stream. Existing readers finish when the stream ends.
 
 After a session ends, the World keeps its stream only for its retention period. Reading a stream past that point returns `410 session_expired`. The history is gone, so the TypeScript client fails on the first response with a `ClientError` whose `code` is `"session_expired"`, without retrying.
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.settled` with `outcome: "cancelled"`.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 
@@ -330,8 +330,9 @@ export default eveChannel({
     };
   },
   events: {
-    "message.completed"(eventData, _channel, ctx) {
-      console.log("eve response completed", {
+    "turn.settled"(event, ctx) {
+      console.log("eve turn settled", {
+        outcome: event.data.outcome,
         sessionId: ctx.session.id,
       });
     },
