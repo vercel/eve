@@ -51,13 +51,11 @@ export function photonQuotedMessage(message: Message): QuotedMessage | undefined
     typeof target.contentPreview === "string"
       ? target.contentPreview
       : spectrumText(target.content);
-  const fromAgent =
-    target.direction === "outbound" ? true : target.direction === "inbound" ? false : undefined;
-  return {
-    id: target.id,
-    ...(text === undefined ? {} : { text }),
-    ...(fromAgent === undefined ? {} : { fromAgent }),
-  };
+  const quoted: { id: string; text?: string; fromAgent?: boolean } = { id: target.id };
+  if (text !== undefined) quoted.text = text;
+  if (target.direction === "outbound") quoted.fromAgent = true;
+  if (target.direction === "inbound") quoted.fromAgent = false;
+  return quoted;
 }
 
 function spectrumText(content: SpectrumContent | undefined): string | undefined {
