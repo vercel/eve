@@ -502,9 +502,9 @@ and can only show the model's input. Both compose: `approval` before the run, `c
 
 ## Delegate work: `ctx.agent`
 
-`ctx.agent(name)` returns a session with an agent, shaped like the TypeScript client's session. The
-session opens on its first `send`, and each `response.result()` resolves when that message's turn
-ends:
+`ctx.agent(name, options?)` returns a session with an agent, shaped like the TypeScript client's
+session. The session opens on its first `send`, and each `response.result()` resolves when that
+message's turn ends:
 
 ```ts
 import { z } from "zod";
@@ -516,6 +516,37 @@ const response = await reviewer.send("Review the deployment plan for security ri
 });
 const { data, message, status } = await response.result();
 ```
+
+Set `model` when the workflow should run a local child with a different AI Gateway model. The
+selection belongs to the returned session, so every message sent through that handle uses it:
+
+```ts
+const reviewer = ctx.agent("agent", {
+  model: "anthropic/claude-opus-5.5",
+});
+
+const response = await reviewer.send("Review the migration plan.", {
+  signal: ctx.abortSignal,
+});
+```
+
+The override changes only the model. The child keeps the target agent's instructions, tools, skills,
+connections, sandbox behavior, limits, reasoning, and explicit compaction model. Pass a selection
+object to override model-specific settings too:
+
+```ts
+const reviewer = ctx.agent("agent", {
+  model: {
+    model: "anthropic/claude-opus-5.5",
+    modelContextWindowTokens: 200_000,
+    reasoning: "high",
+  },
+});
+```
+
+The selection must contain an AI Gateway model id. A live AI SDK `LanguageModel` cannot cross the
+durable workflow boundary. A remote agent rejects the option because its deployment owns its model
+configuration.
 
 The name is an available agent target. On the root agent, `"agent"` starts a copy of the root agent.
 A declared subagent uses its path-derived name and remains callable when hidden with `tool: false`
@@ -544,8 +575,8 @@ client's `MessageResult` fields, plus `error` when the turn failed:
 | `status`  | `"waiting"` when the session waits for its next message, `"completed"` when the session ended with the turn, or `"failed"` when the turn failed. A cancelled turn is `"waiting"` with neither `data` nor `message`. |
 | `error`   | `{ message }` with the reason the turn failed, present only when `status` is `"failed"`.                                                                                                                            |
 
-Every `ctx.agent(name)` call returns a new session that only the workflow run can address. The model
-does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
+Every `ctx.agent(name, options?)` call returns a new session that only the workflow run can address.
+The model does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
 caller's capabilities. A remote child does not inherit the caller's session principal by default;
 the receiving deployment determines its identity from the outbound request. To forward the caller's
 identity, set `forwardPrincipal: true` on the remote agent and configure the receiver's

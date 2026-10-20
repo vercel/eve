@@ -35,7 +35,6 @@ import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
-  AgentSession,
   WorkflowServeCall,
   WorkflowServeContext,
   WorkflowServeReceive,
@@ -405,7 +404,7 @@ async function executeServeBody(
 function createServeContext(
   input: WorkflowBodyInput,
   calls: WorkflowServeCalls,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
 ): ServeContext {
   const ctx: ServeContext = {
     ...createSharedContext(input, agent, (request, options) => {

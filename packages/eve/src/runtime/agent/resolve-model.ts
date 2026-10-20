@@ -39,6 +39,14 @@ import {
 
 export { shouldMockAuthoredRuntimeModels };
 
+/** A deterministic authoring or selection error that retrying cannot repair. */
+export class InvalidRuntimeModelSelectionError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "InvalidRuntimeModelSelectionError";
+  }
+}
+
 /** Loaded compiled-module scope used to resolve source-backed runtime models. */
 export interface RuntimeModelResolutionScope {
   readonly moduleMap: CompiledModuleMap;
@@ -156,24 +164,31 @@ export async function resolveRuntimeModelSelection(input: {
   readonly state: ContextAccessor;
 }): Promise<ResolvedRuntimeModelSelection> {
   if (input.selection === null || input.selection === undefined) {
-    throw new Error(
+    throw new InvalidRuntimeModelSelectionError(
       "Dynamic model resolver returned no model. Every matching dynamic model handler must return a concrete model selection.",
     );
   }
 
-  const selection = normalizeDynamicModelSelection(input.selection);
-  validateDynamicModelSelection(selection);
-  const providerOptions =
-    selection.modelOptions?.providerOptions === undefined
-      ? undefined
-      : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
-  const promptCache =
-    selection.modelOptions?.promptCache === undefined
-      ? undefined
-      : normalizeAgentPromptCache(
-          selection.modelOptions.promptCache,
-          "Dynamic model resolver returned an invalid selection.",
-        );
+  let selection: PublicAgentModelSelectionDefinition;
+  let providerOptions: Record<string, JsonObject> | undefined;
+  let promptCache: ReturnType<typeof normalizeAgentPromptCache> | undefined;
+  try {
+    selection = normalizeDynamicModelSelection(input.selection);
+    validateDynamicModelSelection(selection);
+    providerOptions =
+      selection.modelOptions?.providerOptions === undefined
+        ? undefined
+        : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
+    promptCache =
+      selection.modelOptions?.promptCache === undefined
+        ? undefined
+        : normalizeAgentPromptCache(
+            selection.modelOptions.promptCache,
+            "Dynamic model resolver returned an invalid selection.",
+          );
+  } catch (error) {
+    throw invalidSelectionError(error);
+  }
 
   const selectedModel = selection.model;
   const catalog = input.catalog ?? runtimeModelCatalogForState(input.state);
@@ -201,7 +216,7 @@ export async function resolveRuntimeModelSelection(input: {
 
   validateRuntimeLanguageModel(selectedModel);
   if (input.durability === "durable") {
-    throw new Error(
+    throw new InvalidRuntimeModelSelectionError(
       'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "step.started" model resolver.',
     );
   }
@@ -239,8 +254,16 @@ export async function resolveRuntimeModelSelection(input: {
   };
 }
 
+function invalidSelectionError(error: unknown): InvalidRuntimeModelSelectionError {
+  if (error instanceof InvalidRuntimeModelSelectionError) return error;
+  return new InvalidRuntimeModelSelectionError(
+    error instanceof Error ? error.message : String(error),
+    { cause: error },
+  );
+}
+
 function gatewayPromptCacheError(modelId: string): Error {
-  return new Error(
+  return new InvalidRuntimeModelSelectionError(
     `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies only to models eve calls directly; Gateway manages its own prompt caching through providerOptions.gateway.caching.`,
   );
 }
@@ -281,7 +304,7 @@ async function resolveSelectionMetadata(input: {
 
   const resolved = await input.load(input.catalog);
   if (resolved === null) {
-    throw new Error(
+    throw new InvalidRuntimeModelSelectionError(
       `Cannot select model "${input.modelLabel}" because AI Gateway did not provide context window metadata. Return modelContextWindowTokens with this selection for an unlisted or custom model.`,
     );
   }
@@ -358,7 +381,7 @@ function isModelSelectionDefinition(value: unknown): value is PublicAgentModelSe
 
 function validateRuntimeLanguageModel(model: unknown): asserts model is LanguageModel {
   if (!isRuntimeLanguageModel(model)) {
-    throw new Error(
+    throw new InvalidRuntimeModelSelectionError(
       "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, or { model, modelContextWindowTokens?, modelOptions? }.",
     );
   }

@@ -29,6 +29,13 @@ describe("defineWorkflowTool", () => {
         expectTypeOf(await review.result()).toEqualTypeOf<
           AgentMessageResult<{ findings: string[]; score?: number | undefined }>
         >();
+        void ctx.agent("agent", {
+          model: {
+            model: "anthropic/claude-opus-5.5",
+            modelContextWindowTokens: 200_000,
+            reasoning: "high",
+          },
+        });
         // @ts-expect-error The message is sent with send(), not passed to ctx.agent().
         void ctx.agent("researcher", { message: "Review the deployment." });
         // Token capabilities are available when this context is passed into a step.

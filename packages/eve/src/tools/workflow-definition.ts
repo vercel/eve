@@ -4,6 +4,10 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 import type { ToolApproval } from "#approval/definition.js";
 import type { MessageResult, SendTurnOptions } from "#client/types.js";
+import type {
+  AgentModelOptionsDefinition,
+  AgentReasoningDefinition,
+} from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   stampToolDefinition,
@@ -23,6 +27,22 @@ export type { WorkflowToolEntryPoint };
 
 export interface WorkflowAgentMetadata {
   readonly description: string;
+}
+
+/** A serializable model selection for a local `ctx.agent` session. */
+export type AgentSessionModelSelection =
+  | string
+  | {
+      readonly model: string;
+      readonly modelContextWindowTokens?: number;
+      readonly modelOptions?: AgentModelOptionsDefinition;
+      readonly reasoning?: AgentReasoningDefinition;
+    };
+
+/** Options that bind to a `ctx.agent` session when it opens. */
+export interface AgentSessionOptions {
+  /** Override the model for every turn in this local agent session. */
+  readonly model?: AgentSessionModelSelection;
 }
 
 /** Context capabilities available inside an authored `"use step"` helper. */
@@ -85,7 +105,7 @@ export type WorkflowSharedContext = Pick<
    * Returns a new session with the agent of this invocation name. Nothing
    * starts until the first `send`.
    */
-  agent(name: string): AgentSession;
+  agent(name: string, options?: AgentSessionOptions): AgentSession;
   /** Metadata for agents callable by this workflow, including hidden agents. */
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   /**

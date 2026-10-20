@@ -34,6 +34,8 @@ The copy uses the root's instructions, connections, auth, and sandbox. It receiv
 
 The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
 
+An authored workflow can open the same root-copy target through `ctx.agent("agent")`. To keep the copied configuration but use another model for that child session, pass a [model override to `ctx.agent`](./tools/workflows#delegate-work-ctxagent). The model-facing built-in tool does not accept a model choice.
+
 To prevent the root session from delegating to a fresh copy of itself, set `tool: false` on the root agent:
 
 ```ts title="agent/agent.ts"

@@ -29,6 +29,7 @@ import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecyc
 import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
+import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
@@ -342,6 +343,10 @@ export const SessionDynamicSubagentRuntimeRevisionKey = new ContextKey<string>(
 
 export const DynamicSubagentAgentConfigKey = new ContextKey<DynamicSubagentAgentConfig>(
   "eve.dynamicSubagentAgentConfig",
+);
+
+export const AgentSessionRuntimeOverridesKey = new ContextKey<AgentSessionRuntimeOverrides>(
+  "eve.agentSessionRuntimeOverrides",
 );
 
 // ---------------------------------------------------------------------------

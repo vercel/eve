@@ -729,6 +729,33 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
+  it("serializes a ctx.agent model override for the child workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "owner-run" });
+
+    await createWorkflowRuntime({
+      agentSessionRuntimeOverrides: {
+        model: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5.5" },
+      },
+      compiledArtifactsSource,
+      nodeId: "subagents/researcher",
+    }).createSession({
+      adapter,
+      auth: null,
+      input: { message: "research this" },
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      serializedContext: {
+        "eve.agentSessionRuntimeOverrides": {
+          model: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5.5" },
+        },
+      },
+    });
+  });
+
   it("serializes the channel request id into workflow context", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;

@@ -1,8 +1,9 @@
 import type { ContextReader } from "#context/key.js";
-import { DynamicSubagentAgentConfigKey } from "#context/keys.js";
+import { AgentSessionRuntimeOverridesKey, DynamicSubagentAgentConfigKey } from "#context/keys.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
+import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 interface EffectiveAgentRuntime {
@@ -15,39 +16,57 @@ export function resolveEffectiveAgentRuntime(
   bundle: Pick<CompiledBundle, "resolvedAgent" | "turnAgent">,
   context: ContextReader,
 ): EffectiveAgentRuntime {
-  return resolveEffectiveAgentRuntimeFromConfig(bundle, context.get(DynamicSubagentAgentConfigKey));
+  return resolveEffectiveAgentRuntimeFromConfig(
+    bundle,
+    context.get(DynamicSubagentAgentConfigKey),
+    context.get(AgentSessionRuntimeOverridesKey),
+  );
 }
 
 export function resolveEffectiveAgentRuntimeFromConfig(
   bundle: Pick<CompiledBundle, "resolvedAgent" | "turnAgent">,
   config: DynamicSubagentAgentConfig | undefined,
+  overrides?: AgentSessionRuntimeOverrides,
 ): EffectiveAgentRuntime {
+  let effective: EffectiveAgentRuntime;
   if (config === undefined) {
     if (bundle.turnAgent.configResolver === true) {
       throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
     }
-    return {
+    effective = {
       limits: bundle.resolvedAgent.config?.limits,
       thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
       turnAgent: bundle.turnAgent,
     };
+  } else {
+    const {
+      compactionModel: _compiledCompactionModel,
+      configResolver: _configResolver,
+      dynamicModel: _dynamicModel,
+      model: _compiledModel,
+      ...turnAgent
+    } = bundle.turnAgent;
+    effective = {
+      limits: config.limits,
+      thresholdPercent: config.compaction?.thresholdPercent,
+      turnAgent: {
+        ...turnAgent,
+        compactionModel: config.compaction?.model,
+        model: config.model,
+        reasoning: config.reasoning,
+      },
+    };
   }
 
+  if (overrides === undefined) return effective;
   const {
-    compactionModel: _compiledCompactionModel,
     configResolver: _configResolver,
     dynamicModel: _dynamicModel,
-    model: _compiledModel,
+    model: _configuredModel,
     ...turnAgent
-  } = bundle.turnAgent;
+  } = effective.turnAgent;
   return {
-    limits: config.limits,
-    thresholdPercent: config.compaction?.thresholdPercent,
-    turnAgent: {
-      ...turnAgent,
-      compactionModel: config.compaction?.model,
-      model: config.model,
-      reasoning: config.reasoning,
-    },
+    ...effective,
+    turnAgent: { ...turnAgent, model: overrides.model },
   };
 }
