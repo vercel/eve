@@ -1,3 +1,4 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
@@ -11,7 +12,6 @@ import {
 import type { SessionView, SuspendedStep } from "#harness/session-machine/view.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 import type { Step } from "#harness/step/context.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { bumpSessionRuntimeUsageLimits } from "#harness/turn-tag-state.js";
@@ -155,7 +155,7 @@ export async function acceptHumanInput(
   switch (decision.next) {
     case "park":
       // A held turn's request is still open: a partial answer, or one a policy refused.
-      if (step.view().projection.activeTurnId === undefined) {
+      if (activeTurnIdOf(step.view().projection) === undefined) {
         return stop({ next: null, session: step.session });
       }
       return stop(holdForInput(step));
@@ -276,7 +276,7 @@ export async function dispatchApprovedWorkflows(step: Step, work: ApprovedWork):
  * sign-ins the calls in this batch already took.
  */
 function reportingOnce(view: SessionView, call: ApprovedCall, claimed: Set<string>): ApprovedCall {
-  const { interactions } = publicViewOf(view.projection);
+  const { interactions } = view.projection.view;
   const signIns = (call.signIns ?? []).filter((challenge) => {
     const key = signInAttemptKey(challenge);
     const open = interactions[signInInteractionId(challenge)]?.status === "open";

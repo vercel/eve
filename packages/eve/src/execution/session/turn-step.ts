@@ -1,4 +1,3 @@
-import { publicViewOf } from "#protocol/session-projection.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindSessionParticipants } from "#execution/participants.js";
@@ -344,8 +343,7 @@ async function runSessionStepBody(
       admission = admitDeliveries({
         channelKind: getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
-        admitted: (deliveryId) =>
-          publicViewOf(currentProjection(ctx)).deliveries[deliveryId] !== undefined,
+        admitted: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId] !== undefined,
         payloads: delivered,
       });
     }

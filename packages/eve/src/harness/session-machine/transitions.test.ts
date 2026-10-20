@@ -29,7 +29,6 @@ import { initialSessionProjection } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
 import { withOpenTurn, withPublished } from "#internal/testing/session-machine.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 
 const BASE: HarnessSession = {
   agent: { modelReference: { id: "test" }, system: "", tools: [] },
@@ -272,10 +271,7 @@ describe("closing what a turn leaves open", () => {
 
   it("ends the session with everything it left open, the task too", () => {
     const projection = storedProjection(busyTurn().state);
-    const facts = cascade(
-      publicViewOf(projection),
-      sessionEndedFacts(projection, { outcome: "failed" }),
-    );
+    const facts = cascade(projection.view, sessionEndedFacts(projection, { outcome: "failed" }));
 
     expect(settledBy(facts)).toMatchObject({
       "session.ended:": "failed",
@@ -287,7 +283,7 @@ describe("closing what a turn leaves open", () => {
 
   it("commits each closure as one line the contract accepts", () => {
     const session = busyTurn();
-    const seed = publicViewOf(storedProjection(session.state));
+    const seed = storedProjection(session.state).view;
     for (const events of [
       committed(viewOf(session), (view) => fail(view, { code: "BOOM", message: "It broke." })),
       committed(viewOf(session), (view) => cancel(view)),
@@ -344,7 +340,7 @@ function waitingTurn(): HarnessSession {
 
 /** Whether the contract accepts `events` as the next line after `session`'s. */
 function accepted(session: HarnessSession, events: readonly SessionEvent[]) {
-  const seed = publicViewOf(storedProjection(session.state));
+  const seed = storedProjection(session.state).view;
   return createStreamChecker({ seed }).check(
     { at: "2026-10-10T00:00:00.000Z", facts: events },
     seed!.position,
@@ -645,5 +641,5 @@ function committed(
   view: ReturnType<typeof viewOf>,
   decide: (view: ReturnType<typeof viewOf>) => { readonly events: readonly SessionEvent[] },
 ): SessionEvent[] {
-  return cascade(publicViewOf(view.projection), decide(view).events);
+  return cascade(view.projection.view, decide(view).events);
 }

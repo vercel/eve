@@ -1,6 +1,6 @@
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SignInChallenge } from "#protocol/session-events/families/interaction.js";
-import { publicViewOf, type SessionProjection } from "#protocol/session-projection.js";
+import { activeTurnIdOf, type SessionProjection } from "#protocol/session-projection.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 
@@ -51,9 +51,9 @@ export function terminalSignInFailure(
   projection: SessionProjection,
   challenge: SignInIdentity,
 ): InteractionRow | undefined {
-  const turnId = projection.activeTurnId;
+  const turnId = activeTurnIdOf(projection);
   if (turnId === undefined) return undefined;
-  const view = publicViewOf(projection);
+  const view = projection.view;
   return Object.values(view.interactions).find((row) => {
     const signIn = row.request.signIn;
     return (

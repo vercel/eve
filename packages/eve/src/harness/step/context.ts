@@ -38,7 +38,6 @@ import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { createHistoryViewPreparer } from "#shared/history-view.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 
 type HistoryViewPreparer = ReturnType<typeof createHistoryViewPreparer>;
 
@@ -99,7 +98,7 @@ export function createStep(input: {
     position: () => turnPosition(live.read()),
     async apply(transition, messages) {
       // An owner's end closes what it holds in the same commit.
-      const events = cascade(publicViewOf(live.read()), transition.events);
+      const events = cascade(live.read().view, transition.events);
       step.session = await applyTransition(
         step.session,
         { ...transition, events },

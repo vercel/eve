@@ -31,7 +31,6 @@ import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.j
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { discardAttempt, retryModel } from "#harness/session-machine/transitions.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
 import {
@@ -296,7 +295,7 @@ export class ModelCaller {
         model: this.input.model,
         promptMessages: withClientContext(prompt),
         publish: step.publish,
-        view: () => publicViewOf(step.view().projection),
+        view: () => step.view().projection.view,
         requestEnvelopeTokens: this.requestEnvelopeTokens,
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,

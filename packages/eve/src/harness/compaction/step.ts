@@ -58,7 +58,6 @@ import {
   controlDeliveryFor,
   idle,
 } from "#harness/session-machine/transitions.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 import { openWork } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
@@ -138,7 +137,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       messages: [...step.session.history],
       model: resolvedModel.model,
       publish: step.publish,
-      view: () => publicViewOf(step.view().projection),
+      view: () => step.view().projection.view,
       requestEnvelopeTokens: getRequestEnvelopeTokens(step.session),
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
@@ -151,7 +150,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     if (compacted.failure !== undefined) throw compacted.failure.error;
   } catch (error) {
     outcome = "failed";
-    const facts = summaryFailed(publicViewOf(step.view().projection), { changeId, error });
+    const facts = summaryFailed(step.view().projection.view, { changeId, error });
     if (facts.length > 0) await step.publish(facts);
     logError(log, "manual session compaction failed", error, {
       sessionId: step.session.sessionId,

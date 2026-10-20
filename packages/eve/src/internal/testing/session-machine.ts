@@ -1,6 +1,7 @@
 import { viewOfEvents } from "#protocol/session-projection/fold.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
@@ -25,7 +26,7 @@ import {
   type TurnPosition,
 } from "#harness/session-machine/view.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
-import { initialSessionProjection } from "#protocol/session-projection.js";
+import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
 
@@ -48,15 +49,28 @@ export function withOpenTurn(
   session: HarnessSession,
   position: { readonly sequence: number; readonly turnId: string; readonly stepIndex?: number },
 ): HarnessSession {
-  const projection = storedProjection(session.state);
+  // A real session names each turn by the sequence it mints, so a fixture that opens a later turn
+  // first counts the turns before it.
+  const stored = storedProjection(session.state);
+  const projection =
+    stored.view.session.turnCount < position.sequence && activeTurnIdOf(stored) !== position.turnId
+      ? {
+          ...stored,
+          view: {
+            ...stored.view,
+            session: { ...stored.view.session, turnCount: position.sequence },
+          },
+        }
+      : stored;
+  session = saveProjection(session, projection);
   const events: SessionEvent[] = [];
-  if (projection.started !== true) events.push({ type: "session.started", data: {} });
-  if (projection.activeTurnId !== position.turnId) {
+  if (projection.view.session.status === "new") events.push({ type: "session.started", data: {} });
+  if (activeTurnIdOf(projection) !== position.turnId) {
     events.push({
       type: "turn.started",
       data: {
         turnId: position.turnId,
-        follows: projection.latestTurn?.turnId ?? null,
+        follows: latestTurnIdOf(projection) ?? null,
         cause: { hook: "test" },
       },
     });
@@ -157,12 +171,15 @@ export function positionState(position: {
   if (position.turnId !== "") {
     return withOpenTurn({ state: undefined } as HarnessSession, position).state ?? {};
   }
+  const initial = initialSessionProjection();
   return {
     [SESSION_PROJECTION_STATE_KEY]: {
-      ...initialSessionProjection(),
-      nextSequence: position.sequence,
-      started: true,
-    },
+      ...initial,
+      view: {
+        ...initial.view,
+        session: { status: "open", turnCount: position.sequence },
+      },
+    } satisfies SessionProjection,
   };
 }
 

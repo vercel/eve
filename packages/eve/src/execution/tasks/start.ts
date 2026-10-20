@@ -26,7 +26,6 @@ import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers
 import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import type { TaskCallStart } from "#harness/session-machine/transitions.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { isWorking, tasks } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -61,7 +60,7 @@ type TaskRunEntry = Extract<WorkflowToolRunEntry, { readonly taskId: string }>;
  */
 export async function startTaskRun(
   input: StartWorkflowTaskInput & { readonly entry: TaskRunEntry },
-  admissionView = publicViewOf(storedProjection(input.session.state)),
+  admissionView = storedProjection(input.session.state).view,
 ): Promise<TaskDispatchResult> {
   const { entry, session, task } = input;
   const { taskId } = entry;
@@ -112,7 +111,7 @@ export async function startTaskRun(
  */
 export async function sendToTask(
   input: TaskDispatchInput,
-  admissionView = publicViewOf(storedProjection(input.session.state)),
+  admissionView = storedProjection(input.session.state).view,
 ): Promise<TaskDispatchResult> {
   const { session, task, taskId } = input;
   const table = readTaskTable(session.state);

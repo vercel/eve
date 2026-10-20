@@ -3,7 +3,6 @@ import { openRequests } from "#protocol/session-reader.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
-import { publicViewOf } from "#protocol/session-projection.js";
 
 /**
  * Answering a request does not make the responder the turn's caller. When
@@ -24,7 +23,7 @@ export function attributeAnswers(input: {
     return undefined;
   }
   // The session's own requests; a relayed one belongs to the run that asked.
-  const view = publicViewOf(storedProjection(input.state));
+  const view = storedProjection(input.state).view;
   const requests = new Map(
     openRequests(view).flatMap((row) =>
       row.origin === undefined && interactionOwner(view, row).taskId === undefined
