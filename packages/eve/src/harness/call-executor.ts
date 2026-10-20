@@ -196,8 +196,7 @@ export async function executeToolCall(
     let output: unknown;
     let failed = false;
     let failure = "";
-    /** What the tool threw, which a sign-in it waited on fails with. */
-    let thrown: unknown;
+    let thrown: Error | undefined;
     const telemetry = toolTelemetry(input.telemetry, {
       // A call a person approved runs outside any model call.
       callId: input.modelCallId ?? `approved:${callId}`,
@@ -258,8 +257,8 @@ export async function executeToolCall(
       throwIfTurnAborted(input.abortSignal);
       logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
       failed = true;
-      thrown = error;
-      output = toError(error).message;
+      thrown = toError(error);
+      output = thrown.message;
       failure = modelFacingError(error);
     }
     if (!failed) {
@@ -295,10 +294,15 @@ export async function executeToolCall(
       },
     };
     settled.push(completed);
-    await input.beforeResult?.(failed ? toError(thrown) : undefined);
+    await input.beforeResult?.(failed ? thrown : undefined);
     await input.publish(
       callSettledFrom(
-        createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
+        createRuntimeToolResultFromValue({
+          callId,
+          isError: failed,
+          output: thrown ?? output,
+          toolName,
+        }),
         {
           label: failed
             ? undefined
@@ -314,12 +318,13 @@ export async function executeToolCall(
       if (completed !== undefined) return { settled: [completed], toolResults };
       return { settled: [interruptedResult(callId, toolName)], toolResults };
     }
-    const message = toError(error).message;
+    const failure = toError(error);
+    const message = failure.message;
     logError(log, "tool call failed", error, { toolName, toolCallId: callId });
     await input.beforeResult?.(toError(error));
     await input.publish(
       callSettledFrom(
-        createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
+        createRuntimeToolResultFromValue({ callId, isError: true, output: failure, toolName }),
         {},
       ),
     );

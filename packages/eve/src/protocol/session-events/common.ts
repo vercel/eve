@@ -94,6 +94,7 @@ export const principal = conforming<Principal>()(
 export const errorInfo = conforming<ErrorInfo>()(
   z.object({
     code: z.string(),
+    name: z.string().optional(),
     hint: z.string().optional(),
     id: z.string().optional(),
     message: z.string(),

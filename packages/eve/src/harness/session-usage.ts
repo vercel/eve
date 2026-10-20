@@ -16,7 +16,8 @@ import {
   type SessionUsageLimitViolation,
 } from "#harness/session-usage-limits.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { addTokenUsage, type TokenUsage, usageSince } from "#shared/token-usage.js";
+import { addTokenUsage, usageSince } from "#shared/token-usage-math.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export type { SessionRuntimeUsageLimits, SessionUsageLimitViolation };
 

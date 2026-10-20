@@ -43,7 +43,11 @@ export type SessionOutcome = "completed" | "failed";
 
 export interface SessionEndedData {
   readonly outcome: SessionOutcome;
-  /** What failed, for a failed session, such as `{turnId}`; the error details live there. */
+  /**
+   * What failed, for a failed session, such as the `{turnId}` it failed in. The error is
+   * {@link SessionEndedData.error}: the turn settles `cancelled` without one of its own, and
+   * `failure(view, turnId)` reads this one for it.
+   */
   readonly cause?: Cause;
   readonly error?: ErrorInfo;
 }

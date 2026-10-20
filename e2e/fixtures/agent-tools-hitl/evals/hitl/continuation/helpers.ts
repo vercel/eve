@@ -13,7 +13,7 @@ export const scriptedSession = { headers: { "x-eve-fixture-model": "continuation
 export function requestFrom(turn: EveEvalTurn, toolName: string): AskedInteraction {
   turn.expectOk();
   const matches = turn.interactions.filter(
-    (request) => (request.call!.name ?? request.kind) === toolName,
+    (request) => (request.call?.name ?? request.kind) === toolName,
   );
   if (matches.length !== 1)
     throw new Error(`Expected one ${toolName} request; found ${matches.length}.`);

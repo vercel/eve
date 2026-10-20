@@ -3,6 +3,7 @@ import { answeredInteractionIds } from "#protocol/session-projection/selectors.j
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { signInInteractionId } from "#harness/interaction-facts.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
@@ -55,7 +56,12 @@ export function sessionView(
     projection,
     relayedRequestIds: new Set(hitl.relays.keys()),
     responders: hitl.responders,
-    signIns: hitl.signIns,
+    // A sign-in whose interaction closed, as when its call settles without it, is no longer one
+    // the session waits on.
+    signIns: hitl.signIns.filter(
+      (challenge) =>
+        projection.view.interactions[signInInteractionId(challenge)]?.status !== "settled",
+    ),
     turn: readTurnState(state),
   };
 }

@@ -142,6 +142,38 @@ describe("the shared fold", () => {
     expect(previews.calls.c_0).toBeUndefined();
   });
 
+  it("answers a held turn with its last step's reply, not the text it went on after", () => {
+    const [opening, request, interim] = turnLines(0, { opensSession: true });
+    const scope = { runId: "run_1", turnId: "turn_0" };
+    const resumed = (reply: boolean): StoredLine => ({
+      at,
+      facts: [
+        { data: { owner: { turnId: "turn_0" }, runId: "run_1" }, scope, type: "model.requested" },
+        ...(reply
+          ? [
+              {
+                data: {
+                  kind: "text",
+                  partId: "p_final",
+                  phase: "reply",
+                  runId: "run_1",
+                  value: "Done.",
+                },
+                scope,
+                type: "content.completed",
+              },
+            ]
+          : []),
+        { data: { outcome: "completed", runId: "run_1" }, scope, type: "model.settled" },
+      ],
+    });
+    const answered = folded([opening!, request!, interim!, resumed(true)]);
+    expect(reply(answered, "turn_0").map((part) => part.value)).toEqual(["Done."]);
+    // A step that resumes after the tasks and writes nothing leaves the answer the turn gave.
+    const quiet = folded([opening!, request!, interim!, resumed(false)]);
+    expect(reply(quiet, "turn_0").map((part) => part.value)).toEqual(["Reply 0."]);
+  });
+
   it("records a run's current attempt, each retry's start moving it on", () => {
     const lines = turnLines(0, { opensSession: true });
     const scope = { runId: "run_0", turnId: "turn_0" };

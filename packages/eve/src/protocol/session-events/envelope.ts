@@ -174,6 +174,8 @@ export interface Principal {
 
 /** A failure's code and its human-readable message. Codes are open strings. */
 export interface ErrorInfo {
+  /** The thrown error's class name, when a producer knows it. */
+  readonly name?: string;
   readonly code: string;
   readonly message: string;
   /** An id to quote when asking for support; the server's logs carry the same id. */

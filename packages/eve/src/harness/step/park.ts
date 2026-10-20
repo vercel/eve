@@ -13,8 +13,11 @@ import type { Step } from "./context.js";
  */
 const ANSWER_FIRST_KINDS: ReadonlySet<string> = new Set(["budget"]);
 
-/** Whether the turn waits on a person: a request this session asked, or a sign-in. */
-export function waitsOnPerson(view: SessionView): boolean {
+/**
+ * Whether the session resumes the turn on a person itself: a request it asked, or its own sign-in.
+ * A child's relayed sign-in resumes the turn on its call instead, though readers see a person.
+ */
+export function resumesOnPerson(view: SessionView): boolean {
   return ownOpenRequestIds(view).size > 0 || view.signIns.length > 0;
 }
 
@@ -41,7 +44,7 @@ export function hasQueuedTurnInput(view: SessionView): boolean {
 
 /** Whether anything open stops the turn from calling the model. */
 export function blocked(view: SessionView, state: Step["session"]["state"]): boolean {
-  return waitsOnPerson(view) || runtimeWait(state) !== undefined;
+  return resumesOnPerson(view) || runtimeWait(state) !== undefined;
 }
 
 /**
@@ -53,6 +56,7 @@ export function park(step: Step): StepResult {
   if (hasQueuedTurnInput(view) && !holdsMessages(view)) {
     return { next: step.runStep, session: step.session };
   }
-  if (waitsOnPerson(view)) return { held: { kind: "request" }, next: null, session: step.session };
+  if (resumesOnPerson(view))
+    return { held: { kind: "request" }, next: null, session: step.session };
   return { next: null, session: step.session };
 }

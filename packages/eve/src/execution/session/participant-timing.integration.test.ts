@@ -1,3 +1,4 @@
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
@@ -206,6 +207,7 @@ describe("participant timing", () => {
         await resumeHook(inbox, {
           auth: ALICE,
           kind: "send",
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           payload: { message: "Look up the second thing." },
         });
         await until(log, "capture:turn", 2);

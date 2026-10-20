@@ -1,4 +1,5 @@
-import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
+import { addTokenUsage } from "#shared/token-usage-math.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 // A delegated agent's spend counts against the session that delegated to it.
 // A run tallies what its `ctx.agent` sessions spend, and its replies and

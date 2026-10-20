@@ -8,7 +8,7 @@ export default defineEval({
     turn.eventsSatisfy("the turn reports the resolver exception", (events) =>
       events.some(
         (event) =>
-          event.type === "turn.settled" &&
+          event.type === "session.ended" &&
           event.data.outcome === "failed" &&
           event.data.error?.message.includes("intentional resolver failure"),
       ),

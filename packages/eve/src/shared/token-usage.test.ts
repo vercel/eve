@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { usageSince } from "#shared/token-usage.js";
+import { usageSince } from "#shared/token-usage-math.js";
 
 const counts = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
 

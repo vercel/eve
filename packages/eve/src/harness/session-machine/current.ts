@@ -5,6 +5,7 @@ import { foldSession, type SessionProjection } from "#protocol/session-projectio
 import type { SessionEvent } from "#protocol/session-event.js";
 import { linesOf } from "#protocol/session-lines.js";
 import { eventsOf } from "#harness/publication.js";
+import { cascade } from "#harness/session-machine/cascade.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
@@ -187,7 +188,8 @@ export function stepProjection(
     return {
       read: () => currentProjection(ctx),
       record: (publication) => {
-        for (const line of linesOf(eventsOf(publication), new Date().toISOString())) {
+        const events = cascade(currentProjection(ctx).view, eventsOf(publication));
+        for (const line of linesOf(events, new Date().toISOString())) {
           const events = "facts" in line ? line.facts : [line.progress];
           recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
         }
@@ -198,7 +200,9 @@ export function stepProjection(
   return {
     read: () => projection,
     record(publication) {
-      for (const line of linesOf(eventsOf(publication), new Date().toISOString())) {
+      // No publisher writes this step's lines, so the detached step is its own writer.
+      const events = cascade(projection.view, eventsOf(publication));
+      for (const line of linesOf(events, new Date().toISOString())) {
         const events = "facts" in line ? line.facts : [line.progress];
         projection = advance(projection, line, projection.view.position, events);
       }

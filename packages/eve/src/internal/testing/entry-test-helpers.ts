@@ -41,14 +41,13 @@ export function buildSerializedContext(overrides: {
       principalType: "anonymous",
     };
   }
-  if (overrides.acceptedDeploymentId !== undefined) {
-    context["eve.channelDelivery"] = {
-      acceptedDeploymentId: overrides.acceptedDeploymentId,
-      channelKind: overrides.channelKind,
-      channelName: "test",
-      deliveryId: "delivery-initial",
-    };
-  }
+  // Raw workflow fixtures bypass channel dispatch and supply its initial identity here.
+  context["eve.channelDelivery"] = {
+    acceptedDeploymentId: overrides.acceptedDeploymentId,
+    channelKind: overrides.channelKind,
+    channelName: "test",
+    deliveryId: "delivery-initial",
+  };
   if (overrides.continuationToken !== undefined) {
     context["eve.continuationToken"] = overrides.continuationToken;
   }
