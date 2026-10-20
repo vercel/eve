@@ -104,7 +104,7 @@ part of the authored channel API.
 ## Channel operations and session handles
 
 Channel operations are dynamic: every call targets whichever session currently
-owns the address. Only `send()` can create a session when the address is unowned.
+owns the address. `create()` and `send()` can create a session when the address is unowned.
 Without an [idempotency key](#retried-deliveries), a new session's handle can
 return before it claims the address. If another send wins the address, eve
 forwards the message to that session. Call `resolveSession(address)` after
