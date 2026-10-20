@@ -429,7 +429,8 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   async function showPrompt(channel: EventChannel, request: InputRequest) {
     if (!channel.thread) return false;
     const posted = await channel.thread.post(renderInputRequests([request], inputActionPrefix));
-    if (!posted.id || channel.state.editSupported === false) return;
+    if (!posted.id) return;
+    // Tracked even without edit support, so an answer can name the card it is on.
     channel.state.pendingInputCards = {
       ...channel.state.pendingInputCards,
       [posted.id]: { requests: [request], resolved: {} },
@@ -457,6 +458,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       )
         ? rest
         : { ...rest, [messageId]: { requests: card.requests, resolved } };
+      if (channel.state.editSupported === false) continue;
       try {
         await thread.adapter.editMessage(
           thread.id,
@@ -469,8 +471,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
           continue;
         }
         channel.state.editSupported = false;
-        channel.state.pendingInputCards = {};
-        return;
       }
     }
   }

@@ -1101,6 +1101,66 @@ describe("chatSdkChannel", () => {
     });
   });
 
+  it("tracks posted input cards without edit support, so an answer can name its card", async () => {
+    const adapter = testAdapter();
+    adapter.editError = new NotImplementedError("editMessage");
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      concurrency: "concurrent",
+      state: memoryState(),
+      logger: "warn",
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread() };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+    const request = (requestId: string) => ({
+      action: { callId: `call-${requestId}`, name: "deploy", type: "tool-call" as const },
+      display: "confirmation" as const,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Deploy?",
+      requestId,
+    });
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.requested", {
+        requests: [request("request-1")],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.resolved", {
+        resolutions: [{ optionId: "approve", requestId: "request-1" }],
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(state.editSupported).toBe(false);
+    expect(state.pendingInputCards).toEqual({});
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.requested", {
+        requests: [request("request-2")],
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(Object.keys(state.pendingInputCards ?? {})).toEqual(["posted-2"]);
+  });
+
   it("asks for a typed reply when an input request accepts a freeform answer", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({

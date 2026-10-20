@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createLinqAdapter, directMessage, fetchMessage, markRead, newMessage, send } = vi.hoisted(
-  () => ({
+const { createLinqAdapter, directMessage, fetchMessage, markRead, newMessage, reaction, send } =
+  vi.hoisted(() => ({
     createLinqAdapter: vi.fn((_config: { credentials?: () => unknown | Promise<unknown> }) => ({
       name: "linq",
     })),
@@ -9,9 +9,9 @@ const { createLinqAdapter, directMessage, fetchMessage, markRead, newMessage, se
     fetchMessage: vi.fn(),
     markRead: vi.fn(),
     newMessage: vi.fn(),
+    reaction: vi.fn(),
     send: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
   chatSdkChannel: () => ({
@@ -19,6 +19,7 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
       getAdapter: () => ({ fetchMessage, markRead }),
       onDirectMessage: directMessage,
       onNewMessage: newMessage,
+      onReaction: reaction,
     },
     channel: { routes: [] },
     send,
@@ -34,7 +35,7 @@ vi.mock("#compiled/@linqapp/chat-sdk-adapter/index.js", () => ({
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
 
 import { Message } from "#compiled/chat/index.js";
-import { linqChannel } from "#public/channels/linq/linqChannel.js";
+import { defaultLinqAuth, linqChannel } from "#public/channels/linq/linqChannel.js";
 
 describe("linqChannel", () => {
   beforeEach(() => {
@@ -155,5 +156,30 @@ describe("linqChannel", () => {
 
     expect(markRead).toHaveBeenCalledWith(thread.id, message.id);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("ignores tapbacks unless onTapback accepts them", () => {
+    linqChannel({ credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" } });
+    expect(reaction).not.toHaveBeenCalled();
+
+    linqChannel({
+      credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" },
+      onTapback: (_ctx, tapback) => ({ auth: defaultLinqAuth(tapback) }),
+    });
+    expect(reaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a tapback tool that takes standard tapbacks and emoji", () => {
+    const channel = linqChannel({
+      credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" },
+    });
+
+    expect(channel.tapbackTool().inputSchema).toMatchObject({
+      properties: {
+        tapback: {
+          description: "One of love, like, dislike, laugh, emphasize, question, or a single emoji.",
+        },
+      },
+    });
   });
 });

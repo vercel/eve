@@ -74,8 +74,9 @@ export default photonIMessageChannel({
 ```
 
 The agent reads an accepted tapback as a message in the form iMessage uses when
-it shows a tapback as text, such as `Tapback: Loved “See you at 7”` or
-`Tapback: Removed a like tapback from a message`. The quoted text appears when Photon can return the message the tapback is on. `tapback.tapback` is `love`,
+it shows a tapback as text, such as `Tapback: Loved “See you at 7”`. Photon
+reports only added tapbacks, so `tapback.added` is always `true` and removing a
+tapback never reaches `onTapback`. The quoted text appears when Photon can return the message the tapback is on. `tapback.tapback` is `love`,
 `like`, `dislike`, `laugh`, `emphasize`, or `question`, or the emoji itself for
 an emoji tapback. `tapback.messageId` and `tapback.author` identify the message
 and the person. An accepted tapback starts or steers a turn like any other
@@ -112,7 +113,7 @@ export default photonIMessageChannel({
 });
 ```
 
-`answer` settles only the request posted in that message, and only while it is still waiting and offers that option. A tapback on any other message, or on a prompt that was already answered, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the person who sent the tapback may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids. To replace the text the agent receives for a tapback, return `message`.
+`answer` settles only the request posted in that message, and only while it is still waiting and offers that option. A tapback on any other message, or on a prompt that was already answered, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the person who sent the tapback may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids. To replace the text the agent receives for a tapback, return `message`. Don't set `message` to an option's id, label, or number: eve reads that text like a typed reply, which answers the first waiting approval no matter which message the tapback is on.
 
 ## Other hosts
 

@@ -14,6 +14,7 @@ import type {
   ChatSdkChannelState,
 } from "#public/channels/chat-sdk/index.js";
 import { isChannel } from "#public/channels/index.js";
+import { fetchMessageBestEffort } from "#public/channels/chat-sdk/fetch-message.js";
 import { defineTool, type ToolDefinition } from "#public/tools/index.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -163,7 +164,11 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
     if (event.user.isMe) return;
     const tapback = toIMessageTapback({
       ...event,
-      message: event.message ?? (await fetchMessageBestEffort(event)),
+      // Photon and Linq leave the reacted message out of the event, but both can fetch it by id.
+      message:
+        event.message ??
+        (await fetchMessageBestEffort(event.adapter, event.threadId, event.messageId)) ??
+        undefined,
     });
     const result = await onTapback({ thread: event.thread }, tapback);
     if (result === null) return;
@@ -178,15 +183,6 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
       title: result.title,
     });
   });
-}
-
-// Photon and Linq leave the reacted message out of the event, but both can fetch it by id.
-async function fetchMessageBestEffort(event: ReactionEvent): Promise<Message | undefined> {
-  try {
-    return (await event.adapter.fetchMessage?.(event.threadId, event.messageId)) ?? undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**

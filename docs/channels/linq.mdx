@@ -88,7 +88,7 @@ export default linqChannel({
 });
 ```
 
-`answer` settles only the request posted in that message, and only while it is still waiting and offers that option. A tapback on any other message, or on a prompt that was already answered, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the person who sent the tapback may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids. To replace the text the agent receives for a tapback, return `message`.
+`answer` settles only the request posted in that message, and only while it is still waiting and offers that option. A tapback on any other message, or on a prompt that was already answered, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the person who sent the tapback may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids. To replace the text the agent receives for a tapback, return `message`. Don't set `message` to an option's id, label, or number: eve reads that text like a typed reply, which answers the first waiting approval no matter which message the tapback is on.
 
 ## Other hosts
 
