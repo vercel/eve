@@ -242,8 +242,10 @@ async function runSessionLoop(
         await cancelWorkingTasks(cursor, "turn_cancelled");
         continue;
       }
-      if (next.kind === "expired" && (await sessionTimeout?.handleTimerElapsed()) === "extended") {
-        continue;
+      if (next.kind === "expired" && sessionTimeout !== undefined) {
+        // Input accepted behind the timer's signal would be lost if the session ended now.
+        if (queue.pendingCount > 0 || inbox.hasPending()) sessionTimeout.recordActivity();
+        if ((await sessionTimeout.handleTimerElapsed()) === "extended") continue;
       }
       return next;
     }

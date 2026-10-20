@@ -80,7 +80,7 @@ A reset cannot be undone. A fresh session started by a message can read at most 
 
 #### What a replacement session receives
 
-A replacement session is a new session with its own ID, stream, auth, channel binding, and state. eve starts one at a channel address in place of a stranded session, or in place of a session whose [session timeout](../agent-config#runtime-limits) elapsed while it held that address as its current one. It starts with no history from the earlier session. `ctx.session.predecessor` and the `session.started` event's `data.predecessor` name the session it replaced: `{ sessionId }`.
+A replacement session is a new session with its own ID, stream, auth, channel binding, and state. eve starts one at a channel address in place of a stranded session, or in place of a session that kept its run data and whose [session timeout](../agent-config#runtime-limits) elapsed while it held that address as its current one. It starts with no history from the earlier session. `ctx.session.predecessor` and the `session.started` event's `data.predecessor` name the session it replaced: `{ sessionId }`.
 
 To let the model continue the conversation, read the earlier session's recorded stream with `sessions.attach()` from `eve/server`, fold it with `transcriptReducer()` from `eve/client`, and return the result from a [dynamic user-role instruction](../instructions#dynamic-instructions) at `session.started`:
 

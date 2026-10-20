@@ -290,17 +290,26 @@ to disable the timeout. Session expiration follows
 [run-data retention](#run-data-retention); a zero-retention session loses its
 stored payloads when it ends.
 
-The next channel message at an expired session's current continuation address
-starts a fresh session whose `ctx.session.predecessor` names the expired
-session, so your instructions can read the earlier conversation. See
+When a session that keeps its run data expires, the next channel message at its
+current continuation address starts a fresh session whose
+`ctx.session.predecessor` names the expired session, so your instructions can
+read the earlier conversation. See
 [What a replacement session receives](./concepts/execution-model-and-durability#what-a-replacement-session-receives).
-The link lasts at least 30 days, and only while the expired session's run data is
-still retained. A zero-retention session leaves no link, and neither does a
-reset. The fresh session consumes the link, so a later session at the same
-address starts unlinked. Links need a Workflow world with the `hookForceClaim`
-and `hookRetention` capabilities, the same ones
-[session handoffs](./concepts/execution-model-and-durability#compaction-handoff)
-need.
+
+- Only sessions that keep run data leave this link. A zero-retention session's
+  data is deleted when it ends, so there is nothing to continue. With the
+  default [run-data retention](#run-data-retention), private and
+  unknown-audience sessions outside development use zero retention; set
+  `experimental.workflow.retention: "default"` to keep links for them.
+- The link lasts at least 30 days, and only while the expired session's run data
+  is still retained.
+- The fresh session consumes the link, so a later session at the same address
+  starts unlinked. Resetting a live session leaves no link, but a reset sent
+  after a session expired does not remove the link it left.
+- Links need a Workflow world with the `hookForceClaim` and `hookRetention`
+  capabilities, the same ones
+  [session handoffs](./concepts/execution-model-and-durability#compaction-handoff)
+  need.
 
 Input tokens, output tokens, and model token cost are checked independently.
 The model call that crosses a limit is allowed to finish because exact usage

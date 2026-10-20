@@ -2,7 +2,7 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import { expiredSessionLinkToken } from "#execution/session/expired-session-link.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
-import { createLogger, logError } from "#internal/logging.js";
+import { createLogger } from "#internal/logging.js";
 import { getHookByToken, getWorld } from "#internal/workflow/runtime.js";
 import type { SessionPredecessor } from "#protocol/message.js";
 import { isObject } from "#shared/guards.js";
@@ -16,27 +16,26 @@ export async function supportsExpiredSessionLinksStep(): Promise<boolean> {
   return capabilities?.hookForceClaim === true && capabilities.hookRetention?.active === true;
 }
 
-/** The session that last timed out at a continuation address, while its link remains readable. */
+/**
+ * The session that last timed out at a continuation address, while its link
+ * remains readable. The link only adds context, so a failed read starts the
+ * new session without a predecessor instead of failing it.
+ */
 export async function findExpiredSession(
   continuationToken: string,
 ): Promise<SessionPredecessor | undefined> {
-  let link;
   try {
-    link = await getHookByToken(expiredSessionLinkToken(continuationToken));
+    const link = await getHookByToken(expiredSessionLinkToken(continuationToken));
+    // Metadata is run data, so it is unreadable once the expired run's retention ends.
+    const metadata: unknown = await link.metadata;
+    return isObject(metadata) && typeof metadata.sessionId === "string"
+      ? { sessionId: metadata.sessionId }
+      : undefined;
   } catch (error) {
     // The `eve dev` World hides hooks of runs from a generation it will not execute.
-    if (HookNotFoundError.is(error) || DevelopmentRunUnavailableError.is(error)) return undefined;
-    throw error;
-  }
-  let metadata: unknown;
-  try {
-    metadata = await link.metadata;
-  } catch (error) {
-    // Metadata is run data, so it is unreadable once the expired run's retention ends.
-    logError(log, "expired session link is unreadable", error, { continuationToken });
+    if (!HookNotFoundError.is(error) && !DevelopmentRunUnavailableError.is(error)) {
+      log.warn("could not read expired session link", { continuationToken, error });
+    }
     return undefined;
   }
-  return isObject(metadata) && typeof metadata.sessionId === "string"
-    ? { sessionId: metadata.sessionId }
-    : undefined;
 }

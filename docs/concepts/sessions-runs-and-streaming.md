@@ -26,9 +26,9 @@ A session completes after 30 idle days by default; configure
 timeout. The idle window restarts each time a turn settles. At expiration, eve
 lets an active turn settle, emits `session.completed`, and releases the
 session's continuation addresses. The next qualifying channel message starts a
-fresh session that names the expired one as its predecessor, so your
-instructions can read the earlier conversation. Stored session data is not
-deleted. See [Agent config](../agent-config#runtime-limits).
+fresh session. When the expired session kept its run data, the fresh session
+names it as its predecessor, so your instructions can read the earlier
+conversation. Expiration itself does not delete stored session data. See [Agent config](../agent-config#runtime-limits).
 
 React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
