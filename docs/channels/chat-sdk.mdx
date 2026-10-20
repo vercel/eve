@@ -53,6 +53,11 @@ export default channel;
 
 `adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string or an AI SDK `UserContent` array, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
 
+Pass `idempotencyKey: message.id` to `send` to prevent duplicate agent input
+within the session's [recent-key window](./custom#retried-deliveries). Chat SDK's
+separate duplicate check can mark a message as seen before eve accepts it, so
+a shared state adapter alone does not guarantee delivery.
+
 Deploy once the channel file is in place:
 
 ```bash
@@ -104,7 +109,7 @@ bot.onNewMention(async (thread, message) => {
 });
 ```
 
-`options` accepts `thread` and `adapterName`, plus the channel send options `auth`, `context`, `outputSchema`, `title`, `callback`, and `turnPolicy`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn. `auth` defaults to `null`.
+`options` accepts `thread` and `adapterName`, plus the channel send options `auth`, `context`, `outputSchema`, `title`, `callback`, `turnPolicy`, and `idempotencyKey`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn. `auth` defaults to `null`.
 
 To answer pending input requests from a handler you render yourself, call `respond(inputResponses, { thread, auth?, context? })`. Like a channel's `respond()`, it never creates a session. This example answers a custom button whose `value` carries the eve request id:
 

@@ -3,6 +3,7 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
+import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 
 type DecodedSessionInbox =
   | DeliverHookPayload
@@ -23,6 +24,13 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
     throw new SessionInboxPayloadError("Session inbox payload must be an object with a kind.");
   }
   const payload = value as Record<string, unknown>;
+  if (payload.kind === "send" || payload.kind === "deliver") {
+    try {
+      validateDeliveryIdempotencyKey(payload.idempotencyKey);
+    } catch (error) {
+      throw new SessionInboxPayloadError((error as Error).message);
+    }
+  }
   switch (payload.kind) {
     case "send": {
       if (payload.payload === null || typeof payload.payload !== "object") {
@@ -30,6 +38,7 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
       }
       const command = value as Extract<SessionCommand, { readonly kind: "send" }>;
       return {
+        idempotencyKey: command.idempotencyKey,
         auth: command.auth,
         schedule: command.schedule,
         title: command.title,

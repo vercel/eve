@@ -1,4 +1,5 @@
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { vercelOidc } from "#public/channels/auth.js";
 import {
   chatSdkChannel,
@@ -35,6 +36,8 @@ export interface LinqInboundMessageContext {
 export type LinqInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Prior conversation added as user and assistant turns before this message. */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
@@ -200,6 +203,7 @@ async function dispatchMessage(
       ...(result.context ?? []),
       ...(quoted ? [formatReplyContext(quoted, message.text)] : []),
     ],
+    history: result.history,
     thread,
     title: result.title,
   });

@@ -2,6 +2,7 @@ export {
   DELETE,
   GET,
   HEAD,
+  InvalidSessionHistoryError,
   OPTIONS,
   PATCH,
   POST,

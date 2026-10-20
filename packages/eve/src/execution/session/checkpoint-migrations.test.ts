@@ -13,6 +13,7 @@ describe("migrateSessionCheckpoint", () => {
       kind: "current",
       childRunIdsToStop: ["child-local"],
       checkpoint: {
+        admittedDeliveryKeys: [],
         history: [
           { content: "Alice asks for a report.", kind: "user", role: "user" },
           { content: [{ text: "Started the report.", type: "text" }], role: "assistant" },
@@ -163,6 +164,23 @@ describe("migrateSessionCheckpoint", () => {
       kind: "incompatible",
     });
   });
+
+  it.each([
+    undefined,
+    ["alice", 1],
+    [""],
+    ["x".repeat(257)],
+    Array.from({ length: 1025 }, (_, index) => `delivery-${index}`),
+  ])(
+    "refuses a current checkpoint with an invalid delivery-key window (%#)",
+    (admittedDeliveryKeys) => {
+      const checkpoint = {
+        ...savedCheckpoint(SESSION_CHECKPOINT_VERSION, {}),
+        admittedDeliveryKeys,
+      };
+      expect(migrateSessionCheckpoint(checkpoint)).toMatchObject({ kind: "incompatible" });
+    },
+  );
 
   it.each([12, 13, 14])(
     "loads a saved version %s session's approvals, sign-ins and relays from the requests key",

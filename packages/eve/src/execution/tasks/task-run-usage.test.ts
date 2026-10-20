@@ -87,7 +87,7 @@ function sessionWithTask(input: {
   const execution = new SessionExecution({
     cursor,
     inbox,
-    queue: new SessionInputQueue(),
+    queue: new SessionInputQueue([]),
     sessionId: base.sessionId,
   });
   const from: WorkflowToolRunRef = {

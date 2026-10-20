@@ -129,6 +129,8 @@ export type {
   ConnectionAuthorizationOutcome,
   AuthorizationRequiredStreamEvent,
   HandleMessageStreamEvent,
+  HistoryImportedMessage,
+  HistoryImportedStreamEvent,
   MessageStreamEventMeta,
   InputResolution,
   InputResolutionOutcome,
