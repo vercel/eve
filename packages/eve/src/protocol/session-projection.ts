@@ -3,6 +3,7 @@ import type {
   ApprovalCandidateOutcome,
   AuthorizationOutcome,
   AuthorizationPrincipal,
+  AuthorizationRequiredStreamEvent,
   InputResolutionOutcome,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -140,6 +141,8 @@ export interface SessionProjection {
   /** The session ended with `session.completed` or `session.failed`. */
   readonly ended?: true;
   readonly activeTurnId?: string;
+  /** The most recent turn, open or closed. Pruning keeps it, so the session's end can name it. */
+  readonly latestTurn?: Pick<SessionTurn, "sequence" | "turnId">;
   /** The sequence the next turn takes. */
   readonly nextSequence: number;
   readonly turns: Readonly<Record<string, SessionTurn>>;
@@ -299,6 +302,10 @@ export function foldSession<S extends SessionProjection>(
       return {
         ...state,
         activeTurnId: turnId,
+        latestTurn:
+          state.latestTurn !== undefined && state.latestTurn.sequence > sequence
+            ? state.latestTurn
+            : { turnId, sequence },
         nextSequence: Math.max(state.nextSequence, sequence + 1),
         turns: {
           ...state.turns,
@@ -520,7 +527,7 @@ export function foldSession<S extends SessionProjection>(
       return next;
     }
     case "authorization.required": {
-      const attemptId = typed.data.attemptId ?? typed.data.name;
+      const attemptId = signInAttemptId(typed.data);
       const authorization: Mutable<SessionAuthorization> = {
         attemptId,
         name: typed.data.name,
@@ -538,7 +545,7 @@ export function foldSession<S extends SessionProjection>(
       return { ...state, authorizations: { ...state.authorizations, [attemptId]: authorization } };
     }
     case "authorization.completed": {
-      const attemptId = typed.data.attemptId ?? typed.data.name;
+      const attemptId = signInAttemptId(typed.data);
       const current = state.authorizations[attemptId];
       const completed: Mutable<SessionAuthorization> = {
         ...(current ?? {
@@ -559,6 +566,11 @@ export function foldSession<S extends SessionProjection>(
     default:
       return state;
   }
+}
+
+/** A sign-in's attempt, or its connection name from a writer that sent no attempt. */
+function signInAttemptId(data: { readonly attemptId?: string; readonly name: string }): string {
+  return data.attemptId ?? data.name;
 }
 
 function isRelayed(request: { readonly callId?: string; readonly taskId?: string }): boolean {
@@ -604,6 +616,32 @@ export function openInputs(state: SessionProjection): readonly SessionInput[] {
 /** Sign-ins the session still waits on. */
 export function openSignIns(state: SessionProjection): readonly SessionAuthorization[] {
   return Object.values(state.authorizations).filter((attempt) => attempt.status === "required");
+}
+
+/**
+ * Folds a read of a session's events. `observe` sees each event with the projection as it stood
+ * before the event, for what a reader shows that the projection doesn't keep.
+ */
+export async function foldSessionEvents<E extends UnstampedMessageStreamEvent>(
+  events: AsyncIterable<E>,
+  observe?: (event: E, before: SessionProjection) => void,
+): Promise<{
+  readonly projection: SessionProjection;
+  /** The prompt of each sign-in still open, in the order they were required. */
+  readonly signIns: readonly AuthorizationRequiredStreamEvent["data"][];
+}> {
+  let projection = initialSessionProjection();
+  const prompts = new Map<string, AuthorizationRequiredStreamEvent["data"]>();
+  for await (const event of events) {
+    observe?.(event, projection);
+    projection = foldSession(projection, event);
+    if (event.type === "authorization.required")
+      prompts.set(signInAttemptId(event.data), event.data);
+  }
+  const signIns = openSignIns(projection).flatMap(
+    (attempt) => prompts.get(attempt.attemptId) ?? [],
+  );
+  return { projection, signIns };
 }
 
 /** Task calls whose run hasn't settled them. */
