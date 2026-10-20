@@ -1,0 +1,23 @@
+{
+  "name": "eve-meeting-agent-template",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@vercel/connect": "^2.5.0",
+    "ai": "7.0.128",
+    "eve": "^0.81.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "microsandbox": "^0.5.10",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "pnpm@11.25.0"
+}
