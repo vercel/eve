@@ -20,8 +20,8 @@ const MAX_REPLY_CHARS = 200;
  */
 export function formatReplyContext(quoted: QuotedMessage, reply: string): string {
   const target = quoted.fromAgent === true ? "one of your earlier messages" : "an earlier message";
-  const text = quoted.text?.trim();
-  const replyText = reply.trim();
+  const text = quoted.text === undefined ? undefined : neutralizeTags(quoted.text.trim());
+  const replyText = neutralizeTags(reply.trim());
   const subject = replyText
     ? `The person's message ${JSON.stringify(truncate(replyText, MAX_REPLY_CHARS))}`
     : "The person's next message";
@@ -37,4 +37,10 @@ export function formatReplyContext(quoted: QuotedMessage, reply: string): string
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+// Quoted text is written by people, so it must not be able to close this block
+// and append text that reads as framework context.
+function neutralizeTags(text: string): string {
+  return text.replace(/<(\/?)(reply_context|quoted_message)/giu, "&lt;$1$2");
 }

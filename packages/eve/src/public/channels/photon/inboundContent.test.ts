@@ -73,11 +73,16 @@ describe("photonQuotedMessage", () => {
     const raw = {
       content: {
         content: { text: "yes", type: "text" },
-        target: { content: { text: "Dinner at 7?", type: "text" }, id: "target-id" },
+        target: {
+          content: { text: "Dinner at 7?", type: "text" },
+          direction: "outbound",
+          id: "target-id",
+        },
         type: "reply",
       },
     };
     expect(photonQuotedMessage(message("yes", [], raw))).toEqual({
+      fromAgent: true,
       id: "target-id",
       text: "Dinner at 7?",
     });

@@ -187,10 +187,13 @@ async function dispatchMessage(
   const result = await onMessage({ thread }, message);
   if (result === null) return;
   const adapter = bridge.bot.getAdapter("linq");
-  await markReadBestEffort(adapter, thread, message);
   const content = linqInboundContent(message);
+  // The quote lookup can take seconds, so it runs alongside the read receipt.
+  const [, quoted] = await Promise.all([
+    markReadBestEffort(adapter, thread, message),
+    content === undefined ? undefined : linqQuotedMessage(adapter, message),
+  ]);
   if (content === undefined) return;
-  const quoted = await linqQuotedMessage(adapter, message);
   await bridge.send(content, {
     auth: result.auth,
     context: [

@@ -24,6 +24,7 @@ interface SpectrumReply {
     readonly target?: {
       readonly content?: SpectrumContent;
       readonly contentPreview?: unknown;
+      readonly direction?: unknown;
       readonly id?: unknown;
     };
   };
@@ -38,7 +39,8 @@ interface SpectrumContent {
 
 /**
  * Returns the message a Photon iMessage reply quotes. The adapter flattens a
- * reply to its new text, so this reads the target from the raw message.
+ * reply to its new text, so this reads the target from the raw message. Only a
+ * gateway delivery says who sent the target, through its `direction`.
  */
 export function photonQuotedMessage(message: Message): QuotedMessage | undefined {
   const content = (message.raw as SpectrumReply | null | undefined)?.content;
@@ -49,7 +51,13 @@ export function photonQuotedMessage(message: Message): QuotedMessage | undefined
     typeof target.contentPreview === "string"
       ? target.contentPreview
       : spectrumText(target.content);
-  return text === undefined ? { id: target.id } : { id: target.id, text };
+  const fromAgent =
+    target.direction === "outbound" ? true : target.direction === "inbound" ? false : undefined;
+  return {
+    id: target.id,
+    ...(text === undefined ? {} : { text }),
+    ...(fromAgent === undefined ? {} : { fromAgent }),
+  };
 }
 
 function spectrumText(content: SpectrumContent | undefined): string | undefined {
