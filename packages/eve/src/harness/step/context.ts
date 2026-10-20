@@ -25,6 +25,7 @@ import {
   type TurnPosition,
 } from "#harness/session-machine/view.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import type { TurnLimitReachedError } from "#harness/turn-limits.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -179,6 +180,28 @@ export async function failBoundaryEvent(step: Step, error: unknown): Promise<Ste
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
   if (isDynamicConnectionResolutionError(error)) return failConnectionResolution(step, error);
   throw error;
+}
+
+/**
+ * The turn spent its model request allowance or passed its deadline: the turn fails and the
+ * session waits for the next message, which starts a fresh allowance.
+ */
+export async function failTurnLimit(step: Step, error: TurnLimitReachedError): Promise<StepResult> {
+  if (step.emit === undefined) throw error;
+  log.warn(error.message, {
+    ...error.details,
+    sessionId: step.session.sessionId,
+    turnId: activeTurnId(step.position()),
+  });
+  await step.apply(
+    fail(step.view(), { code: error.code, details: { ...error.details }, message: error.message }),
+  );
+  step.session = { ...step.session, outputSchema: undefined };
+  return {
+    next: null,
+    session: step.session,
+    settledTurn: { isError: true, output: error.message },
+  };
 }
 
 /** A dynamic connection resolver threw: the session parks so the next message can retry. */

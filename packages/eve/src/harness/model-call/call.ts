@@ -68,6 +68,11 @@ import {
   withAccumulatedResponseMessages,
 } from "./response.js";
 import { runModelCallWithRetries } from "./retry.js";
+import {
+  chargeModelRequest,
+  remainingTurnMs,
+  TurnLimitReachedError,
+} from "#harness/turn-limits.js";
 import { logToolExecutionError, prepareModelTools } from "./tools.js";
 import { extractGatewayCostUsd, extractTokenUsageDelta } from "./usage.js";
 
@@ -269,6 +274,7 @@ export class ModelCaller {
         emissionState: step.position(),
         historyProjector: config.historyProjector,
         messages: [...prompt.messages],
+        turnLimits: config.turnLimits,
         model: this.input.model,
         promptMessages: withClientContext(prompt),
         publish: step.publish,
@@ -314,9 +320,21 @@ export class ModelCaller {
       this.requestEnvelopeTokens -
         (estimateTokens(this.request.history) - estimateTokens(this.prompt.messages)),
     );
+    // Charged before the request is sent: one the provider may already have processed stays
+    // counted.
+    const turnLimits = { limits: step.config.turnLimits, turnId: activeTurnId(step.position()) };
+    step.session = chargeModelRequest(step.session, turnLimits);
     generation.begin();
     // Hydrate `eve-sandbox:` file refs for this call only; history keeps the refs.
     this.modelMessages = await hydrateSandboxAttachments(this.request.nonSystemMessages);
+    // Read after hydration, which can spend the turn's remaining time.
+    const turnRemainingMs = remainingTurnMs(step.session, turnLimits);
+    if (turnRemainingMs === 0) {
+      throw new TurnLimitReachedError({
+        kind: "turn-deadline",
+        limit: step.config.turnLimits?.turnTimeoutMs ?? 0,
+      });
+    }
     if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
     }
@@ -350,6 +368,11 @@ export class ModelCaller {
       session: step.session,
       startStep: options.suppressStepStartedEmission === true ? undefined : this.input.startStep,
     });
+    const timeout: { chunkMs: number; firstChunkMs: number; totalMs?: number } = {
+      chunkMs: MODEL_OUTPUT_TIMEOUT_MS,
+      firstChunkMs: MODEL_OUTPUT_TIMEOUT_MS,
+    };
+    if (turnRemainingMs !== undefined) timeout.totalMs = Math.max(1, turnRemainingMs);
     const settings = {
       headers: this.attributionHeaders,
       instructions,
@@ -382,7 +405,9 @@ export class ModelCaller {
       runtimeContext,
       stopWhen: isStepCount(1),
       telemetry: toEntryTelemetry(attempt?.telemetry, catalog.resolve),
-      timeout: { chunkMs: MODEL_OUTPUT_TIMEOUT_MS, firstChunkMs: MODEL_OUTPUT_TIMEOUT_MS },
+      timeout,
+      // A request limit counts eve's attempts, so the AI SDK must not retry beneath it.
+      maxRetries: turnLimits.limits?.maxModelRequestsPerTurn === undefined ? undefined : 0,
       toolApproval: buildToolApproval({
         abortSignal: generation.signal,
         approvedTools: this.input.approvedTools,
@@ -406,8 +431,14 @@ export class ModelCaller {
       if (generation.interrupted || generation.signal.aborted) await attempt?.complete();
       else await attempt?.fail(error);
       generation.check();
-      // Only the output timeout above aborts the stream without aborting our signal.
+      // Only the timeouts above abort the stream without aborting our signal.
       if (isAbortError(error) && !generation.signal.aborted) {
+        if (remainingTurnMs(step.session, turnLimits) === 0) {
+          throw new TurnLimitReachedError({
+            kind: "turn-deadline",
+            limit: step.config.turnLimits?.turnTimeoutMs ?? 0,
+          });
+        }
         throw new ModelStreamStalledError({ cause: error });
       }
       return rethrowNoOutputAsEmptyResponse(error);

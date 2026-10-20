@@ -223,6 +223,31 @@ export interface AgentLimitsDefinition {
    * inherit the parent's remaining token-cost quota when the parent has one.
    */
   readonly maxTokenCostUsdPerSession?: number | false;
+  /**
+   * Maximum provider requests one turn may dispatch.
+   *
+   * eve counts every model request it makes for the turn before sending it:
+   * each step's request, each of eve's retries of a failed request, and
+   * automatic compaction's summary request. The AI SDK's own retries are
+   * turned off so they can't multiply requests beneath the count. Once the
+   * allowance is spent, the turn fails with `TURN_LIMIT_REACHED` and the
+   * session waits for the next message, which starts a fresh allowance.
+   * Delegated subagents count against their own limits.
+   *
+   * `false` or unset leaves the turn uncapped.
+   */
+  readonly maxModelRequestsPerTurn?: number | false;
+  /**
+   * Deadline for one turn, in milliseconds from its first model request.
+   *
+   * eve starts no model request after the deadline and aborts a request still
+   * in flight when it passes. The turn then fails with `TURN_LIMIT_REACHED`
+   * and the session waits for the next message. Time a turn spends waiting
+   * for approval or sign-in counts. Recovery never extends the deadline.
+   *
+   * `false` or unset leaves the turn without a deadline.
+   */
+  readonly turnTimeoutMs?: number | false;
 }
 
 /**

@@ -33,6 +33,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
 import type { ToolLoopHarnessConfig } from "#harness/types.js";
+import { resolveTurnLimits } from "#harness/turn-limits.js";
 
 const log = createLogger("execution.node-step");
 
@@ -121,6 +122,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
     titleAttributeWrite: input.titleAttributeWrite,
+    turnLimits: resolveTurnLimits(input.node.agent.config?.limits),
   });
   if (instrumentation === undefined) return step;
   return async (session, stepInput) => {

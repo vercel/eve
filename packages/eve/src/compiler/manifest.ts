@@ -618,6 +618,7 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
 const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
 const sessionTokenCostLimitSchema = z.union([z.number().finite().positive(), z.literal(false)]);
 const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(false)]);
+const turnLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
 
 const compiledAgentLimitsDefinitionSchema = z
   .object({
@@ -625,6 +626,8 @@ const compiledAgentLimitsDefinitionSchema = z
     maxOutputTokensPerSession: sessionTokenLimitSchema.optional(),
     maxTokenCostUsdPerSession: sessionTokenCostLimitSchema.optional(),
     sessionTimeoutMs: sessionTimeoutSchema.optional(),
+    maxModelRequestsPerTurn: turnLimitSchema.optional(),
+    turnTimeoutMs: turnLimitSchema.optional(),
   })
   .strict();
 
@@ -1259,6 +1262,8 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
             maxOutputTokensPerSession: config.limits.maxOutputTokensPerSession,
             maxTokenCostUsdPerSession: config.limits.maxTokenCostUsdPerSession,
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
+            maxModelRequestsPerTurn: config.limits.maxModelRequestsPerTurn,
+            turnTimeoutMs: config.limits.turnTimeoutMs,
           },
     source: { ...config.source },
     tool: config.tool,

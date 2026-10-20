@@ -1,4 +1,5 @@
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import type { TurnLimits } from "#harness/turn-limits.js";
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
@@ -331,6 +332,8 @@ export interface ToolLoopHarnessConfig {
   readonly instrumentation?: SessionInstrumentation;
   /** Attribute work that must finish before cumulative model usage is persisted. */
   readonly titleAttributeWrite?: Promise<void>;
+  /** The agent's per-turn model request allowance and deadline. */
+  readonly turnLimits?: TurnLimits;
   /**
    * Sign-in callbacks the step's delivery carried. Each completes before anything else runs, and
    * a connection's sign-in resumes the turn that asked for it.

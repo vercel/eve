@@ -41,6 +41,12 @@ import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-life
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
+  chargeModelRequest,
+  remainingTurnMs,
+  TurnLimitReachedError,
+  type TurnLimits,
+} from "#harness/turn-limits.js";
+import {
   extractGatewayCostUsd,
   extractTokenUsageDelta,
   gatewayModelId,
@@ -159,6 +165,8 @@ export async function maybeCompact(input: {
   readonly session: HarnessSession;
   readonly telemetry?: TelemetryOptions;
   readonly traceContextHeaders?: () => Record<string, string> | undefined;
+  /** The turn's request limits, which each summary request is charged against. */
+  readonly turnLimits?: TurnLimits;
 }): Promise<{
   readonly compacted: boolean;
   /** The summary failed; `session` still counts the summary calls that finished. */
@@ -210,7 +218,28 @@ export async function maybeCompact(input: {
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const summarize = async (prompt: CompactionSummaryPrompt) => {
     const summary = await runModelCallWithRetries(
-      () => streamCompactionSummary({ ...call, ...prompt }),
+      async () => {
+        // Between turns no turn is open, so nothing is charged or timed.
+        const turnLimits = input.betweenTurns === true ? undefined : input.turnLimits;
+        const charge = { limits: turnLimits, turnId: emissionState.turnId };
+        session = chargeModelRequest(session, charge);
+        const request: Parameters<typeof streamCompactionSummary>[0] = { ...call, ...prompt };
+        // A request limit counts eve's attempts, so the AI SDK must not retry beneath it.
+        if (turnLimits?.maxModelRequestsPerTurn !== undefined) request.maxRetries = 0;
+        const remainingMs = remainingTurnMs(session, charge);
+        if (remainingMs !== undefined) request.timeout = { totalMs: Math.max(1, remainingMs) };
+        try {
+          return await streamCompactionSummary(request);
+        } catch (error) {
+          if (input.abortSignal?.aborted !== true && remainingTurnMs(session, charge) === 0) {
+            throw new TurnLimitReachedError({
+              kind: "turn-deadline",
+              limit: turnLimits?.turnTimeoutMs ?? 0,
+            });
+          }
+          throw error;
+        }
+      },
       { sessionId: session.sessionId, turnId: emissionState.turnId },
       input.abortSignal,
     );
@@ -356,7 +385,13 @@ async function streamCompactionSummary(
   input: CompactionSummaryPrompt &
     Pick<
       Parameters<typeof streamText>[0],
-      "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
+      | "abortSignal"
+      | "headers"
+      | "maxRetries"
+      | "model"
+      | "providerOptions"
+      | "telemetry"
+      | "timeout"
     >,
 ): Promise<{
   readonly finishReason: string;

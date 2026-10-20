@@ -32,6 +32,7 @@ import {
 } from "#context/keys.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { hydrateSandboxAttachments } from "#harness/attachment-staging.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -98,6 +99,10 @@ import { countRunUsage } from "#execution/agent-sessions/usage.js";
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+vi.mock("#harness/attachment-staging.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#harness/attachment-staging.js")>();
+  return { ...actual, hydrateSandboxAttachments: vi.fn(actual.hydrateSandboxAttachments) };
+});
 
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
@@ -4409,6 +4414,134 @@ describe("createToolLoopHarness", () => {
         message: "model call failed transiently — retrying",
       }),
     );
+  });
+
+  it("commits the turn's model request count with the step", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Done", role: "assistant" }] },
+      text: "Done",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const runStep = createToolLoopHarness(
+      createTestConfig(undefined, { turnLimits: { maxModelRequestsPerTurn: 5 } }),
+    );
+
+    const result = await runStep(createTestSession(), { message: "Hi" });
+
+    expect(result.session.state?.["eve.harness.turnRequests"]).toMatchObject({ requests: 1 });
+  });
+
+  it("charges eve's retries against the turn's model request limit", async () => {
+    vi.useFakeTimers();
+    const timeout = new TypeError("terminated", {
+      cause: Object.assign(new Error("Body Timeout Error"), { code: "UND_ERR_BODY_TIMEOUT" }),
+    });
+    const modelCallMock = vi.fn(async () => {
+      throw timeout;
+    });
+    const settingsSeen: MockAgentSettings[] = [];
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: ToolLoopAgent,
+      settings: MockAgentSettings,
+    ) {
+      settingsSeen.push(settings);
+      this.stream = modelCallMock;
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit, events } = createEventCollector();
+    try {
+      const runStep = createToolLoopHarness(
+        createTestConfig(emit, { turnLimits: { maxModelRequestsPerTurn: 1 } }),
+      );
+      const pending = runStep(createTestSession(), { message: "Hi" });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+
+      expect(result.next).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(modelCallMock).toHaveBeenCalledTimes(1);
+    expect(settingsSeen[0]).toMatchObject({ maxRetries: 0 });
+    expect(events.find((event) => event.type === "turn.failed")?.data).toMatchObject({
+      code: "TURN_LIMIT_REACHED",
+      details: { kind: "model-requests", limit: 1 },
+      terminal: false,
+    });
+    expect(getCompatibilityEventTypes(events).at(-1)).toBe("session.waiting");
+  });
+
+  it("fails the turn when hydrating attachments spends its remaining time", async () => {
+    vi.useFakeTimers({ now: 0 });
+    vi.mocked(hydrateSandboxAttachments).mockImplementationOnce(async (messages) => {
+      vi.setSystemTime(1_000);
+      return [...messages];
+    });
+    const modelCallMock = vi.fn();
+    vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
+      this.stream = modelCallMock;
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit, events } = createEventCollector();
+    try {
+      const runStep = createToolLoopHarness(
+        createTestConfig(emit, { turnLimits: { turnTimeoutMs: 1_000 } }),
+      );
+      await runStep(createTestSession(), { message: "Hi" });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(modelCallMock).not.toHaveBeenCalled();
+    expect(events.find((event) => event.type === "turn.failed")?.data).toMatchObject({
+      code: "TURN_LIMIT_REACHED",
+      details: { kind: "turn-deadline", limit: 1_000 },
+    });
+  });
+
+  it("bounds a compaction summary by the turn's deadline", async () => {
+    vi.useFakeTimers({ now: 0 });
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    mockCompaction([createUserMessage("user", "recent message")]);
+    vi.mocked(streamText).mockReturnValue({
+      finishReason: Promise.resolve("stop"),
+      fullStream: (async function* () {
+        // The summary stalls until its total timeout aborts it at the deadline.
+        vi.setSystemTime(1_000);
+        throw Object.assign(new Error("The operation timed out."), { name: "TimeoutError" });
+      })(),
+      providerMetadata: Promise.resolve(undefined),
+      text: Promise.resolve(""),
+      usage: Promise.resolve(undefined),
+    } as never);
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Got it.", role: "assistant" }] },
+      text: "Got it.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    try {
+      const runStep = createToolLoopHarness(
+        createTestConfig(emit, { turnLimits: { turnTimeoutMs: 1_000 } }),
+      );
+      await runStep(createTestSession(), { message: "Hi" });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(summaryCall()).toMatchObject({ timeout: { totalMs: 1_000 } });
+    expect(events.find((event) => event.type === "turn.failed")?.data).toMatchObject({
+      code: "TURN_LIMIT_REACHED",
+      details: { kind: "turn-deadline", limit: 1_000 },
+      terminal: false,
+    });
   });
 
   it("feeds malformed provider web search input back to the model", async () => {

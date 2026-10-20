@@ -148,6 +148,8 @@ export async function compileAgentConfig(
       maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
       maxTokenCostUsdPerSession: definition.limits.maxTokenCostUsdPerSession,
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
+      maxModelRequestsPerTurn: definition.limits.maxModelRequestsPerTurn,
+      turnTimeoutMs: definition.limits.turnTimeoutMs,
     };
   }
 

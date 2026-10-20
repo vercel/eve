@@ -362,6 +362,43 @@ usage of an `execute` tool whose parent turn is cancelled while it waits; and
 what a cancelled agent task's own subagents spend after the task reports its
 cancelled turn, until the task's next reply.
 
+### Per-turn limits
+
+`maxModelRequestsPerTurn` and `turnTimeoutMs` bound one turn rather than the
+session. Both are unset by default; set either to a positive integer, or
+`false` to leave it uncapped.
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  limits: {
+    maxModelRequestsPerTurn: 20,
+    turnTimeoutMs: 5 * 60 * 1_000,
+  },
+});
+```
+
+- `maxModelRequestsPerTurn` counts every model request eve sends for the
+  turn, charged before the request goes out: each step's request, each of
+  eve's retries of a failed request, and automatic compaction's summary
+  request. With the limit set, the AI SDK's own retries are off, so they can't
+  add requests beneath the count. A request that failed still counts.
+- `turnTimeoutMs` runs from the turn's first model request. eve starts no
+  request after it and aborts a request still in flight when it passes,
+  including tools running inline in that step. Time the turn spends waiting
+  for approval or sign-in counts.
+
+When either limit is reached, the turn fails with `TURN_LIMIT_REACHED`.
+`details.kind` is `"model-requests"` or `"turn-deadline"`, and `details.limit`
+is the configured value. The session is not failed: it waits, and the next
+message starts a new turn with a fresh allowance and deadline. A manual
+compaction between turns isn't counted. Delegated subagents count against
+their own agent's limits, not the parent turn's.
+
+The count and the deadline are saved with each step, so they carry across the
+turn's steps and later deployments. A step that is interrupted and re-run
+resumes from the count its last completed step saved.
+
 ## Workflow world
 
 By default, eve selects the Workflow SDK world for the host: Vercel Workflow on

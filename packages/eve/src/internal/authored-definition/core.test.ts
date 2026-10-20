@@ -136,8 +136,10 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
+          maxModelRequestsPerTurn: 12,
           maxTokenCostUsdPerSession: 1.5,
           sessionTimeoutMs: 86_400_000,
+          turnTimeoutMs: 300_000,
         },
       },
       FAILURE_MESSAGE,
@@ -145,9 +147,11 @@ describe("normalizeAgentDefinition", () => {
 
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: 200_000,
+      maxModelRequestsPerTurn: 12,
       maxOutputTokensPerSession: 20_000,
       maxTokenCostUsdPerSession: 1.5,
       sessionTimeoutMs: 86_400_000,
+      turnTimeoutMs: 300_000,
     });
   });
 
@@ -214,6 +218,10 @@ describe("normalizeAgentDefinition", () => {
     ["sessionTimeoutMs", 1.5],
     ["sessionTimeoutMs", -1],
     ["sessionTimeoutMs", "30d"],
+    ["maxModelRequestsPerTurn", 0],
+    ["maxModelRequestsPerTurn", 2.5],
+    ["turnTimeoutMs", -1],
+    ["turnTimeoutMs", "5m"],
   ])("rejects invalid session runtime limit %s=%j", (key, value) => {
     expect(() =>
       normalizeAgentDefinition(

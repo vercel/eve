@@ -19,7 +19,12 @@ import {
 import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import { startStep } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
-import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
+import {
+  failBoundaryEvent,
+  failModelSelection,
+  failTurnLimit,
+  type Step,
+} from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   buildPrompt,
@@ -30,6 +35,7 @@ import {
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { TurnLimitReachedError } from "#harness/turn-limits.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
 import { ModelCaller } from "./call.js";
@@ -133,6 +139,7 @@ export async function runModelStep(
   try {
     result = await caller.call({ suppressStepStartedEmission: true });
   } catch (error) {
+    if (error instanceof TurnLimitReachedError) return await failTurnLimit(step, error);
     caller.throwIfCompactionFailed();
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
@@ -145,7 +152,12 @@ export async function runModelStep(
     caller.throwIfCompactionFailed();
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
-    if (!("result" in recovery)) return reportModelCallFailure(step, recovery.error);
+    if (!("result" in recovery)) {
+      if (recovery.error instanceof TurnLimitReachedError) {
+        return await failTurnLimit(step, recovery.error);
+      }
+      return reportModelCallFailure(step, recovery.error);
+    }
     result = recovery.result;
   }
 

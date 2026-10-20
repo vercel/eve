@@ -194,8 +194,10 @@ function normalizeAgentLimitsDefinition(
     [
       "maxInputTokensPerSession",
       "maxOutputTokensPerSession",
+      "maxModelRequestsPerTurn",
       "maxTokenCostUsdPerSession",
       "sessionTimeoutMs",
+      "turnTimeoutMs",
     ],
     message,
   );
@@ -224,6 +226,11 @@ function normalizeAgentLimitsDefinition(
       record.maxTokenCostUsdPerSession,
       message,
     );
+  }
+  for (const key of ["maxModelRequestsPerTurn", "turnTimeoutMs"] as const) {
+    if (record[key] !== undefined) {
+      normalizedDefinition[key] = expectPositiveIntegerOrFalse(record[key], message);
+    }
   }
   return normalizedDefinition;
 }
