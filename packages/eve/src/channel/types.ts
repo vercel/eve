@@ -193,6 +193,7 @@ export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
 /** One command accepted by a durable session inbox. */
 export type SessionCommand =
   | {
+      readonly idempotencyKey?: string;
       readonly auth?: SessionAuthContext | null;
       readonly caller?: TurnCaller;
       /** Initial workflow title when delivering to a prewarmed session. */
@@ -262,6 +263,7 @@ export interface DispatchSessionInput<TCommand extends SessionCommand = SessionC
  * metadata so both cross the durable hook boundary outside adapter-owned data.
  */
 export interface DeliverHookPayload {
+  readonly idempotencyKey?: string;
   readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   /** Initial workflow title; ignored once session initialization has run. */
   readonly title?: string;
@@ -442,6 +444,8 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /** Optional stable identity of the initial delivery, scoped to this logical session. */
+  readonly idempotencyKey?: string;
   /**
    * @internal Set by the server after it authorizes tool stubs.
    * Local subagents match rules qualified by their full path, such as researcher/list_tasks.

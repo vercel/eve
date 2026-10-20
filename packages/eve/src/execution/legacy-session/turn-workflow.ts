@@ -44,8 +44,10 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       sessionWritable,
     });
   }
+  const initialDeliveryKey = prepared.input.delivery?.idempotencyKey;
   await runPreparedSession(
     {
+      admittedDeliveryKeys: initialDeliveryKey === undefined ? [] : [initialDeliveryKey],
       anchor: {
         kind: "self",
         notify: (result) =>

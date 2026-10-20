@@ -1,4 +1,5 @@
 import type { ContextAccessor } from "#context/key.js";
+import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
@@ -73,6 +74,8 @@ export interface Session {
 }
 
 interface SessionDeliveryOptions {
+  /** Stable delivery identity, deduplicated within this session's recent-key window. */
+  readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
   /** Public callback destination for a delegated continuation turn. */
   readonly callback?: SessionCallback;
@@ -117,6 +120,7 @@ export function createSession(
   return {
     id,
     async send(message, options) {
+      validateDeliveryIdempotencyKey(options.idempotencyKey);
       const delivery = createDelivery(metadata);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const history = validateSessionHistory(options.history);
@@ -130,6 +134,7 @@ export function createSession(
       if (history !== undefined) payload.history = history;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
+        idempotencyKey: options.idempotencyKey,
         auth: options.auth,
         delivery,
         kind: "send" as const,
@@ -144,6 +149,7 @@ export function createSession(
       });
     },
     async respond(inputResponses, options) {
+      validateDeliveryIdempotencyKey(options.idempotencyKey);
       if (inputResponses.length === 0) {
         throw new Error("respond() requires at least one input response.");
       }
@@ -158,6 +164,7 @@ export function createSession(
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
+        idempotencyKey: options.idempotencyKey,
         auth: options.auth,
         delivery,
         kind: "send" as const,

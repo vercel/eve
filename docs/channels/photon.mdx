@@ -32,6 +32,10 @@ boundary. See [Overlapping messages](./overview#overlapping-messages).
 
 Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
 
+Photon uses inbound message IDs as [delivery idempotency keys](./custom#retried-deliveries).
+Replicas that share a durable Workflow World ignore retries while the ID remains
+in the session's recent-key window.
+
 Images and other files people send reach the agent as file parts. Photon's
 webhook lists each file without its bytes, so eve downloads it from Photon by
 its attachment id with the project's credentials. The webhook omits the id

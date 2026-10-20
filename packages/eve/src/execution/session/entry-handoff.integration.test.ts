@@ -31,6 +31,45 @@ const HANDOFF_LOG = "[eve:execution.handoff]";
 
 describe("workflowEntry integration", () => {
   describe("deployment handoff", () => {
+    it("remembers admitted delivery keys when the logical session changes owners", async () => {
+      const runtime = await createTestRuntime({ agent: { name: "handoff-keyed-delivery" } });
+      await runtime.run(async () => {
+        const { anchor, stream, workflowRuntime } = await openSession({
+          idempotencyKey: "opening",
+        });
+        try {
+          await stream.nextTurn();
+          await waitForParkedTurnStep(anchor.runId);
+          const command = {
+            ...handoffFollowUp("dpl_b", "Bob requests a report.", "keyed-report"),
+            idempotencyKey: "report",
+          };
+          await workflowRuntime.dispatchSession({ command, sessionId: anchor.runId });
+          const successor = await waitForNewOwner(anchor.runId, anchor.runId);
+          await waitForUserMessages(successor.runId, "Bob requests a report.");
+          await waitForParkedTurnStep(successor.runId);
+          await workflowRuntime.dispatchSession({
+            command: {
+              ...handoffFollowUp("dpl_b", "Alice opens a research session.", "opening-retry"),
+              idempotencyKey: "opening",
+            },
+            sessionId: anchor.runId,
+          });
+          await workflowRuntime.dispatchSession({ command, sessionId: anchor.runId });
+          await workflowRuntime.dispatchSession({
+            command: handoffFollowUp("dpl_b", "Alice reviews the report.", "review"),
+            sessionId: anchor.runId,
+          });
+          const history = await waitForUserMessages(successor.runId, "Alice reviews the report.");
+          expect(countOf(history, "Bob requests a report.")).toBe(1);
+          expect(countOf(history, "Alice opens a research session.")).toBe(1);
+        } finally {
+          stream.dispose();
+          await anchor.cancel();
+        }
+      });
+    });
+
     it("processes what the owner accepted during the move on the successor, after the trigger", async () => {
       const runtime = await createTestRuntime({ agent: { name: "handoff-accepted-during-move" } });
       await runtime.run(async () => {
@@ -600,10 +639,13 @@ function rebindCheckpoint(
   };
 }
 
-async function openSession(options: { readonly continuationToken?: string } = {}) {
+async function openSession(
+  options: { readonly continuationToken?: string; readonly idempotencyKey?: string } = {},
+) {
   const anchor = await startSessionOwner(workflowEntry, [
     {
       kind: "initial",
+      idempotencyKey: options.idempotencyKey,
       ownerDeploymentId: "dpl_a",
       sessionTimeoutMs: false,
       input: { message: "Alice opens a research session." },

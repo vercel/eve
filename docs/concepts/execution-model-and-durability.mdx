@@ -260,6 +260,12 @@ the returned handle. That identity lookup does not block workflow resumption.
 ID-addressed delivery already knows the session ID and needs no hook metadata
 lookup. An ambiguous delivery failure does not trigger session creation.
 
+Pass a [delivery idempotency key](../channels/custom#retried-deliveries) to prevent
+retried input from interrupting generation or starting another turn. Each session
+remembers its last 1,024 distinct keys across replay and owner handoffs. Keyed
+cold-start sends wait for the winning session's ID; sends without a key can
+return a candidate ID before ownership is settled.
+
 A handoff never leaves the session's addresses without an owner. The previous
 owner keeps every address until the new run takes all of them over, so a
 delivery during a handoff is accepted immediately and is never reported as an

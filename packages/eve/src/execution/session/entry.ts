@@ -227,6 +227,7 @@ export async function bootInitialOwner(
     return {
       inbox,
       session: {
+        admittedDeliveryKeys: input.idempotencyKey === undefined ? [] : [input.idempotencyKey],
         anchor: { kind: "self" },
         caller,
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
@@ -443,6 +444,7 @@ async function startSuccessor(
     inbox,
     session: {
       anchor: { kind: "successor" },
+      admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,
@@ -469,6 +471,7 @@ function createInitialDelivery(
 ): DeliverHookPayload | undefined {
   if (input.input.message === undefined) return undefined;
   return {
+    idempotencyKey: input.idempotencyKey,
     schedule: readSerializedSessionSchedule(serializedContext),
     deliveryMetadata:
       serializedContext["eve.channelDelivery"] === undefined

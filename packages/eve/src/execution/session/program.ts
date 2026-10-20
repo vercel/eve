@@ -56,6 +56,7 @@ export type SessionStart =
   | { readonly kind: "parked" };
 
 export interface SessionBoot {
+  readonly admittedDeliveryKeys: readonly string[];
   readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
@@ -214,7 +215,7 @@ async function runSessionLoop(
   },
 ): Promise<SessionLoopOutcome> {
   const { cursor, handoff, inbox, progress } = deps;
-  const queue = new SessionInputQueue();
+  const queue = new SessionInputQueue(boot.admittedDeliveryKeys);
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
@@ -269,6 +270,7 @@ async function runSessionLoop(
     return outcome;
   };
   const transferState = () => ({
+    admittedDeliveryKeys: queue.admittedDeliveryKeys,
     history: cursor.history,
     serializedContext: cursor.serializedContext,
     sessionState: cursor.sessionState,

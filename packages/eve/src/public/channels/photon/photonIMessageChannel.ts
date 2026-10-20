@@ -150,6 +150,7 @@ async function dispatchMessage(
   const content = photonInboundContent(message);
   if (content === undefined) return;
   await bridge.send(content, {
+    idempotencyKey: message.id,
     auth: result.auth,
     context: [...(result.context ?? [])],
     history: result.history,
