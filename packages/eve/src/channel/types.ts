@@ -101,11 +101,10 @@ export type SessionTraceRoot =
   | { readonly kind: "inherited"; readonly sessionId: string };
 
 /**
- * Serializable W3C span context identifying a parent's open trace window.
- * Structural rather than an OTel `SpanContext` so the channel surface stays
- * free of tracing dependencies.
+ * Trace coordinates and the inherited policy decision used to seed a session's trace.
+ * Separate from `TraceContext`, which carries only portable W3C coordinates.
  */
-export interface SessionTraceContext {
+export interface SessionTraceSeed {
   readonly decision?: InstrumentationDecision;
   readonly forwardedTracePolicy?: ForwardedTraceAssertion;
   readonly spanId: string;
@@ -120,7 +119,7 @@ export interface ChannelDeliveryMetadata {
   readonly channelName: string;
   readonly deliveryId: string;
   readonly requestId?: string;
-  readonly requestTraceContext?: SessionTraceContext;
+  readonly requestTraceContext?: SessionTraceSeed;
 }
 
 /** Associates delivery metadata with one payload in a durable envelope. */
@@ -535,7 +534,7 @@ export interface RunInput {
    * Dispatching parent's open trace window. Handed down rather than looked up
    * because trace state is scoped to one session's context.
    */
-  readonly parentTraceContext?: SessionTraceContext;
+  readonly parentTraceContext?: SessionTraceSeed;
   /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit

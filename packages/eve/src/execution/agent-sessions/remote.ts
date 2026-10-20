@@ -19,7 +19,7 @@ import type {
   CancelTurnResult,
   SessionAuthContext,
   SessionCapabilities,
-  SessionTraceContext,
+  SessionTraceSeed,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
@@ -214,7 +214,7 @@ async function throwIfRemoteAgentProtocolMismatch(response: Response, name: stri
 function buildForwardedTraceAssertion(input: {
   readonly forwardedPrincipal: ForwardedPrincipal | undefined;
   readonly originAudience: ChannelAudience | undefined;
-  readonly parentTraceContext: SessionTraceContext | undefined;
+  readonly parentTraceContext: SessionTraceSeed | undefined;
   readonly traceparent: string | undefined;
 }) {
   const ceiling = decisionToTraceContentCeiling(input.parentTraceContext?.decision);

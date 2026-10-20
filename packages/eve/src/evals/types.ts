@@ -5,7 +5,7 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import type { ClientAgentSession } from "#client/agent-session.js";
 import type {
   RuntimeIdentity,
-  RuntimeTraceContext,
+  TraceContext,
   MessageStreamEvent,
   AgentStartedStreamEvent,
 } from "#protocol/message.js";
@@ -133,11 +133,11 @@ export interface EveEvalSessionResult {
   readonly sessionId?: string;
   readonly state: ClientSessionState | undefined;
   /** Distinct trace contexts observed for this session, in stream order. */
-  readonly traceContexts: readonly RuntimeTraceContext[];
+  readonly traceContexts: readonly TraceContext[];
 }
 
 /** Trace context attributed to one session involved in an eval. */
-export interface EveEvalTraceContext extends RuntimeTraceContext {
+export interface EveEvalTraceContext extends TraceContext {
   readonly primary: boolean;
   readonly sessionId: string;
 }
