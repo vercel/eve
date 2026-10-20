@@ -79,9 +79,10 @@ export async function acceptHumanInput(
   // A sign-in completes first, at the coordinates of the turn it holds.
   const completions = config.signInCompletions ?? [];
   if (completions.length > 0) await step.apply(completeSignIn(step.view(), { completions }));
-  const delivered = deliver(step.view(), input, options);
+  const typedAnswers = config.typedAnswers !== false;
+  const delivered = deliver(step.view(), input, { ...options, typedAnswers });
   // A typed approval answers like a press, so the approval's response policy decides it.
-  const typed = resolveTypedApproval(step.view(), delivered.input);
+  const typed = typedAnswers ? resolveTypedApproval(step.view(), delivered.input) : delivered.input;
   // A new message reaching the held turn steers it: the sign-ins it waits on end, and its
   // unanswered approvals resolve with the answers below. A typed answer is not a new message.
   const steered =
@@ -151,6 +152,7 @@ export async function acceptHumanInput(
       challengesAtStart,
     },
     takeQueued: delivered.takeQueued,
+    typedAnswers,
   });
   for (const batch of decision.resolved) {
     await step.instrumentation?.publishInputResolutions({

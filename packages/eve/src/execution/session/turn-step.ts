@@ -75,6 +75,7 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
@@ -493,6 +494,7 @@ async function runSessionStepBody(
         handleEvent,
         prepareApprovalTurn: (event) => dynamicConnections.dispatch(turnStartedForResolvers(event)),
         signInCompletions,
+        typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,

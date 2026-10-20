@@ -19,7 +19,7 @@ const ALICE = {
 };
 
 describe("delegated agent approval answers", () => {
-  it.fails("does not accept a parent agent message as an approval response", async () => {
+  it("does not accept a parent agent message as an approval response", async () => {
     const executions: string[] = [];
     const runtime = await createTestRuntime({
       agent: { name: "delegated-answer" },

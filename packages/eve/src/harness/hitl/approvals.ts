@@ -203,6 +203,8 @@ export function answer(
     readonly policy: ResponsePolicyPass;
     /** The delivery merged the queue in, so the queue empties. */
     readonly takeQueued: boolean;
+    /** False when no message answers by text; see `ToolLoopHarnessConfig.typedAnswers`. */
+    readonly typedAnswers?: boolean;
     readonly approvalKey: (request: InputRequest) => string | undefined;
     /**
      * Whether the request's restored step has `eve__search`, which a call whose
@@ -250,7 +252,9 @@ export function answer(
 
   // The approval coordinator already answered a typed approval; see `resolveTypedApproval`.
   const resolved =
-    limit === undefined ? delivery : resolveTextInput({ requests: [limit.request] }, delivery);
+    limit === undefined || input.typedAnswers === false
+      ? delivery
+      : resolveTextInput({ requests: [limit.request] }, delivery);
   const responses = canonicalize(resolved?.inputResponses ?? []);
   const byId = new Map(responses.map((response) => [response.requestId, response]));
   const answered = answerable.filter((step) =>

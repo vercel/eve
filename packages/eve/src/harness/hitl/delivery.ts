@@ -29,7 +29,7 @@ import type { SessionView } from "#harness/session-machine/view.js";
 export function deliver(
   view: SessionView,
   input: StepInput | undefined,
-  options: { readonly takeQueued: boolean },
+  options: { readonly takeQueued: boolean; readonly typedAnswers?: boolean },
 ): {
   readonly input?: StepInput;
   readonly displayMessage?: string | UserContent;
@@ -39,7 +39,7 @@ export function deliver(
   const limit = openInputs(view.projection).find((entry) => entry.request.kind === "session-limit");
   // Match the new typed answer before queued messages join it.
   const incoming =
-    queued !== undefined && limit !== undefined
+    queued !== undefined && limit !== undefined && options.typedAnswers !== false
       ? resolveTextInput({ requests: [limit.request] }, input)
       : input;
   const merged =
