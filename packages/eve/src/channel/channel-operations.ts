@@ -23,6 +23,8 @@ import type { JsonObject } from "#shared/json.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 
 interface BaseChannelSendOptions {
+  /** Stable delivery identity, deduplicated within this session's recent-key window. */
+  readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
@@ -39,6 +41,8 @@ export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined
   : BaseChannelSendOptions & { readonly state: TState };
 
 interface BaseChannelRespondOptions<TState = undefined> {
+  /** Stable delivery identity, with the same scope and retention as `send()`. */
+  readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
   readonly state?: Partial<TState>;

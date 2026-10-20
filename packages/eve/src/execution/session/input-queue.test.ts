@@ -13,6 +13,51 @@ function signInCallback(attemptId: string) {
 }
 
 describe("SessionInputQueue", () => {
+  it("admits a keyed delivery once, even after its turn has consumed it", () => {
+    const queue = new SessionInputQueue();
+    const delivery = {
+      idempotencyKey: "provider-1",
+      kind: "deliver" as const,
+      payloads: [{ message: "Alice asks for a report." }],
+    };
+    expect(queue.enqueueDelivery(delivery)).toBeDefined();
+    expect(queue.takeNext()?.kind).toBe("turn");
+    expect(queue.enqueueDelivery(delivery)).toBeUndefined();
+    expect(queue.takeNext()).toBeUndefined();
+  });
+
+  it("retains the most recent 1024 distinct keys without refreshing duplicates", () => {
+    const queue = new SessionInputQueue();
+    const delivery = (idempotencyKey: string) => ({
+      idempotencyKey,
+      kind: "deliver" as const,
+      payloads: [{ message: idempotencyKey }],
+    });
+    for (let index = 0; index < 1024; index++) {
+      queue.enqueueDelivery(delivery(String(index)));
+      queue.takeNext();
+    }
+    expect(queue.enqueueDelivery(delivery("0"))).toBeUndefined();
+    queue.enqueueDelivery(delivery("1024"));
+    queue.takeNext();
+    expect(queue.enqueueDelivery(delivery("1"))).toBeUndefined();
+    expect(queue.enqueueDelivery(delivery("0"))).toBeDefined();
+  });
+
+  it("keeps unkeyed deliveries independent and scopes keys to each session", () => {
+    const delivery = {
+      kind: "deliver" as const,
+      payloads: [{ message: "Alice asks for a report." }],
+    };
+    const first = new SessionInputQueue();
+    expect(first.enqueueDelivery(delivery)).toBeDefined();
+    expect(first.enqueueDelivery(delivery)).toBeDefined();
+    expect(first.enqueueDelivery({ ...delivery, idempotencyKey: "shared" })).toBeDefined();
+    expect(
+      new SessionInputQueue().enqueueDelivery({ ...delivery, idempotencyKey: "shared" }),
+    ).toBeDefined();
+  });
+
   it("resumes a turn holding several sign-ins only once every one has called back", () => {
     const queue = new SessionInputQueue();
     const held = new Set(["linear-1", "notion-1"]);
@@ -36,7 +81,7 @@ describe("SessionInputQueue", () => {
         kind: "deliver",
         payloads: [{ message }],
         turnPolicy: "queue",
-      }).sequence;
+      })!.sequence;
 
     const before = send("approve");
     const heldSince = queue.nextAdmission;

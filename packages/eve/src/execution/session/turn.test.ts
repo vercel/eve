@@ -228,6 +228,45 @@ describe("SessionExecution checkpoints", () => {
     await createExecution({ inbox, sessionState: state("") }).runTurn(undefined, { caller });
     expect(callers).toEqual([caller, undefined]);
   });
+  it("does not interrupt generation for an already admitted delivery key", async () => {
+    let deliver: (payload: SessionInboxPayload) => void = () => {};
+    const inbox: SessionInbox = {
+      ...idleInbox(),
+      onDelivery(handler) {
+        deliver = handler;
+        return () => {};
+      },
+    };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          deliver({
+            kind: "send",
+            idempotencyKey: "accepted",
+            payload: { message: "Alice's earlier message." },
+          });
+          expect(input.steeringSignal?.aborted).toBe(false);
+          deliver({
+            kind: "send",
+            idempotencyKey: "new",
+            payload: { message: "Alice corrects the report." },
+          });
+          expect(input.steeringSignal?.aborted).toBe(true);
+          return {
+            action: "park",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+    await createExecution({
+      inbox,
+      queue: new SessionInputQueue(["accepted"]),
+      sessionState: state(""),
+    }).runTurn(undefined);
+  });
+
   it.each(["cancel", "reset"] as const)(
     "gives %s precedence over generation steering",
     async (kind) => {

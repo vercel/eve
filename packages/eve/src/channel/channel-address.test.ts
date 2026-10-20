@@ -15,6 +15,24 @@ function createRuntime(): Runtime {
 }
 
 describe("createChannelAddress", () => {
+  it.each(["", "x".repeat(257)])(
+    "rejects an invalid idempotency key before accepting a delivery",
+    async (idempotencyKey) => {
+      const runtime = createRuntime();
+      const address = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "webhook",
+        continuationToken: "thread",
+        runtime,
+      });
+      await expect(
+        address.send("Alice asks for a report.", { auth: null, idempotencyKey }),
+      ).rejects.toThrow("idempotencyKey");
+      expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+      expect(runtime.createSession).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects channel addresses in the framework-reserved session namespace", () => {
     expect(() =>
       createChannelAddress({

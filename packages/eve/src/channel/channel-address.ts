@@ -1,6 +1,7 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
@@ -25,6 +26,7 @@ import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 
 interface BaseChannelAddressDeliveryOptions {
+  readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly initiatorAuth?: SessionAuthContext | null;
@@ -83,6 +85,7 @@ export function createChannelAddress<TState = undefined>(input: {
   return {
     continuationToken: input.continuationToken,
     async deliver(sendInput, options) {
+      validateDeliveryIdempotencyKey(options.idempotencyKey);
       const delivery =
         metadata.channelKind !== undefined && metadata.channelName !== undefined
           ? createChannelDeliveryMetadata(metadata as ChannelDeliverySource)
@@ -90,6 +93,7 @@ export function createChannelAddress<TState = undefined>(input: {
       const payload = normalizeSendInput(sendInput);
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {
+        idempotencyKey: options.idempotencyKey,
         auth: options.auth,
         delivery,
         kind: "send" as const,
@@ -114,6 +118,7 @@ export function createChannelAddress<TState = undefined>(input: {
               state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
             };
       const runInput: RunInput = {
+        idempotencyKey: options.idempotencyKey,
         adapter,
         auth: options.auth,
         capabilities: { requestInput: true },

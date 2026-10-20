@@ -53,6 +53,12 @@ export default channel;
 
 `adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string or an AI SDK `UserContent` array, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
 
+Pass `idempotencyKey: message.id` to `send` when eve should also deduplicate
+the delivery at its durable session boundary. The key uses the session's
+[recent-key window](./custom#retried-deliveries); Chat SDK state alone does not
+make its dedupe claim atomic with eve admission. Avoid suppressing retries in
+your handler before eve has accepted their input.
+
 Deploy once the channel file is in place:
 
 ```bash

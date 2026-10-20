@@ -13,6 +13,7 @@ describe("migrateSessionCheckpoint", () => {
       kind: "current",
       childRunIdsToStop: ["child-local"],
       checkpoint: {
+        admittedDeliveryKeys: [],
         history: [
           { content: "Alice asks for a report.", kind: "user", role: "user" },
           { content: [{ text: "Started the report.", type: "text" }], role: "assistant" },

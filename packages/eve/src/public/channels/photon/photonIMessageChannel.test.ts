@@ -56,6 +56,7 @@ describe("photonIMessageChannel", () => {
     await handler(thread, message);
 
     expect(send).toHaveBeenCalledWith("Steer this response", {
+      idempotencyKey: "message-id",
       auth: null,
       context: [],
       thread,
@@ -84,6 +85,7 @@ describe("photonIMessageChannel", () => {
     await handler(thread, message);
 
     expect(send).toHaveBeenCalledWith("Hello Photon", {
+      idempotencyKey: "message-id",
       auth: {
         attributes: { user_name: "user" },
         authenticator: "photon-imessage",
@@ -145,6 +147,7 @@ describe("photonIMessageChannel", () => {
     await handler(thread, message);
 
     expect(send).toHaveBeenCalledWith("Hello group", {
+      idempotencyKey: "message-id",
       auth: {
         attributes: { user_name: "user" },
         authenticator: "photon-imessage",

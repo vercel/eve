@@ -1,4 +1,5 @@
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
+import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   EntityConflictError,
@@ -141,6 +142,7 @@ export function createWorkflowRuntime(config: {
     input: RunInput,
     predecessor?: SessionPredecessor,
   ): Promise<RunHandle> => {
+    validateDeliveryIdempotencyKey(input.idempotencyKey);
     const bundle = await getCompiledRuntimeAgentBundle({
       compiledArtifactsSource: config.compiledArtifactsSource,
       nodeId: config.nodeId,
@@ -173,6 +175,7 @@ export function createWorkflowRuntime(config: {
     const workflowInput: {
       -readonly [K in keyof InitialWorkflowEntryInput]: InitialWorkflowEntryInput[K];
     } = {
+      idempotencyKey: input.idempotencyKey,
       kind: "initial",
       input: input.input,
       ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
@@ -228,9 +231,23 @@ export function createWorkflowRuntime(config: {
       throw error;
     }
 
+    let sessionId = run.runId;
+    if (input.idempotencyKey !== undefined && input.continuationToken !== undefined) {
+      // Keyed contenders must return the winning session, not their discarded candidate.
+      const owner = await pollUntil(
+        () => resolveContinuation(input.continuationToken!),
+        SESSION_HOOK_HANDOVER_TIMEOUT_MS,
+      );
+      if (owner === undefined) {
+        throw new Error(
+          "Delivery accepted, but its session identity is not ready. Retry with the same idempotencyKey.",
+        );
+      }
+      sessionId = owner.sessionId;
+    }
     let events: ReadableStream<MessageStreamEvent> | undefined;
     const getEvents = () => {
-      events ??= readSessionEventStream(run.runId);
+      events ??= readSessionEventStream(sessionId);
       return events;
     };
 
@@ -238,7 +255,7 @@ export function createWorkflowRuntime(config: {
       get events() {
         return getEvents();
       },
-      sessionId: run.runId,
+      sessionId,
     };
   };
 

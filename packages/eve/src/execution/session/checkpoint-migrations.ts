@@ -110,6 +110,8 @@ const CHECKPOINT_UPGRADES: Readonly<
       sessionState: { ...sessionState, snapshot: { ...snapshot, session: { ...session, state } } },
     };
   },
+  // Older owners have never admitted keyed deliveries.
+  15: (checkpoint) => ({ ...checkpoint, admittedDeliveryKeys: [] }),
 };
 
 /**
