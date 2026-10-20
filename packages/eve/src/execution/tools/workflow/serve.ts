@@ -32,7 +32,7 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TokenUsage } from "#shared/token-usage.js";
+import { FIRST_USAGE_WINDOW } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
   AgentSession,
@@ -101,8 +101,6 @@ class WorkflowServeCalls implements WorkflowBodyControl {
    * stopped, sends it on its own, since no reply would carry it.
    */
   readonly usage: RunUsageTally = createRunUsageTally(() => this.sendUncarriedUsage());
-  /** The latest total a message carried, so a turn that spent nothing sends none. */
-  private carriedUsage: TokenUsage | undefined;
   private readonly toolName: string;
   private readonly seenCallIds: Set<string>;
   private firstReceived = false;
@@ -231,10 +229,10 @@ class WorkflowServeCalls implements WorkflowBodyControl {
     if (this.waiting.length > 0 || this.endedBy !== undefined) return;
     const { from } = this.latest;
     this.replies = this.replies.then(async () => {
-      const usage = this.usage.total();
-      if (usage === undefined || isSameUsage(usage, this.carriedUsage)) return;
-      this.carriedUsage = usage;
-      await this.owner.send({ from, kind: "usage", usage });
+      if (!this.usage.hasUncarried()) return;
+      const carried = this.usage.carry();
+      if (carried === undefined) return;
+      await this.owner.send({ from, kind: "usage", ...carried });
     });
   }
 
@@ -321,27 +319,14 @@ class WorkflowServeCalls implements WorkflowBodyControl {
     const latest = calls.at(-1);
     if (latest === undefined) return;
     const callIds = calls.map((served) => served.from.callId);
-    const usage = this.usage.total();
-    this.carriedUsage = usage;
     await this.owner.send({
       callIds,
       from: latest.from,
       kind: "reply",
       output,
-      ...(usage !== undefined && { usage }),
+      ...this.usage.carry(),
     });
   }
-}
-
-function isSameUsage(total: TokenUsage, carried: TokenUsage | undefined): boolean {
-  return (
-    carried !== undefined &&
-    total.inputTokens === carried.inputTokens &&
-    total.outputTokens === carried.outputTokens &&
-    total.cacheReadTokens === carried.cacheReadTokens &&
-    total.cacheWriteTokens === carried.cacheWriteTokens &&
-    total.costUsd === carried.costUsd
-  );
 }
 
 /** Starts a `serve` body, which runs once for its task and serves every call to it. */
@@ -361,7 +346,11 @@ export function startServeBody(input: WorkflowBodyInput): StartedWorkflowBody {
     },
     owner: input.owner,
   };
-  const agentSessions = createAgentSessions(run, calls.usage);
+  const agentSessions = createAgentSessions(
+    run,
+    calls.usage,
+    input.usageWindow ?? FIRST_USAGE_WINDOW,
+  );
   const ctx = createServeContext(input, calls, agentSessions.open);
   attachWorkflowToolRunContext(ctx, run);
   return {
@@ -369,6 +358,7 @@ export function startServeBody(input: WorkflowBodyInput): StartedWorkflowBody {
     close: agentSessions.close,
     control: calls,
     outcome: executeServeBody(input, calls, ctx),
+    renew: agentSessions.renew,
     usage: calls.usage,
   };
 }

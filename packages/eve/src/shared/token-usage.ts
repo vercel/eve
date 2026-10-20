@@ -28,3 +28,15 @@ export function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
     outputTokens: a.outputTokens + b.outputTokens,
   };
 }
+
+/**
+ * Spend split by the usage window it was spent in. A window is named by the
+ * renewal that started it, the same id in every session of a delegation tree;
+ * a session's first window is {@link FIRST_USAGE_WINDOW}.
+ */
+export type UsageByWindow = Readonly<Record<string, TokenUsage>>;
+
+/** The window a session spends in before any renewal. */
+export const FIRST_USAGE_WINDOW = "";
+
+export const usageByWindowSchema = z.record(z.string(), tokenUsageWithCostSchema);

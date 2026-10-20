@@ -29,6 +29,7 @@ import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 import type { WorkflowToolRunEntry } from "#shared/action-types.js";
 import { parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
+import { FIRST_USAGE_WINDOW } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export interface WorkflowBodyDefinition {
@@ -42,6 +43,8 @@ export interface WorkflowBodyDefinition {
 
   readonly session: SessionContext["session"];
   readonly stepIndex: number;
+  /** The calling session's usage window when it started the run: where the run's sessions start spending. */
+  readonly usageWindow?: string;
   readonly toolName: string;
   readonly workflowId: string;
 }
@@ -74,6 +77,11 @@ export interface StartedWorkflowBody {
   close(): Promise<void>;
   readonly control: WorkflowBodyControl;
   readonly outcome: Promise<WorkflowToolRunOutcome>;
+  /**
+   * Starts a new usage window in the body's `ctx.agent` sessions, after an
+   * approval. Rejects when a live session can't be renewed.
+   */
+  renew(renewalId: string): Promise<void>;
   /** What the body's `ctx.agent` sessions spent, which the run's outcome carries. */
   readonly usage: RunUsageTally;
 }
@@ -156,7 +164,7 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
     owner: input.owner,
   };
   const usage = createRunUsageTally();
-  const agentSessions = createAgentSessions(run, usage);
+  const agentSessions = createAgentSessions(run, usage, input.usageWindow ?? FIRST_USAGE_WINDOW);
   const ctx = createCallContext(input, signals, agentSessions.open);
   attachWorkflowToolRunContext(ctx, run);
   return {
@@ -164,6 +172,7 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
     close: agentSessions.close,
     control: signals,
     outcome: executeCallBody(input, ctx, signals, from),
+    renew: agentSessions.renew,
     usage,
   };
 }

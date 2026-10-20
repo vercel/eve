@@ -13,7 +13,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
-import type { TokenUsage } from "#shared/token-usage.js";
+import type { TokenUsage, UsageByWindow } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -187,6 +187,8 @@ export interface SettledTurn {
    * the answer crosses the park boundary to the delegated caller.
    */
   readonly usage?: TokenUsage;
+  /** The part of `usage` spent before the session's current usage window. */
+  readonly windows?: UsageByWindow;
 }
 
 /**

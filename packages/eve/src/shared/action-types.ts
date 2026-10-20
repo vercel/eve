@@ -253,9 +253,12 @@ const runtimeToolResultActionResultSchema = z
  * projection shown to the model. Every producer states the envelope
  * explicitly, so the parent never infers lifecycle from an absent field.
  * `usage` carries the turn's token spend so the caller can attribute the
- * subagent's tokens.
+ * subagent's tokens. `windows` splits `outcome.usageDelta` by the usage
+ * window the child spent it in, so the caller counts each part against that
+ * window.
  */
 export interface RuntimeSubagentChildResult {
+  readonly windows?: import("#shared/token-usage.js").UsageByWindow;
   readonly callId: string;
   readonly isError?: boolean;
   readonly kind: "subagent-result";

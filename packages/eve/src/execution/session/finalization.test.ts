@@ -153,6 +153,7 @@ describe("session finalization with an unsettled caller", () => {
           isError: true,
           output: result.output,
           usage: expect.objectContaining({ inputTokens: 150 }),
+          windows: { "": expect.objectContaining({ inputTokens: 150 }) },
         },
       });
     },

@@ -1401,8 +1401,8 @@ describe("SessionExecution checkpoints", () => {
     ).resolves.toMatchObject({ kind: "done" });
 
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.delegatedUsage).toEqual([
-      spent(300),
-      spent(500),
+      { usage: spent(300) },
+      { usage: spent(500) },
     ]);
   });
 

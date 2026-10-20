@@ -932,7 +932,7 @@ const DELEGATED_SPEND = {
 
 /** A session whose delegated agents already spent {@link DELEGATED_SPEND}. */
 function withDelegatedSpend(overrides?: Parameters<typeof createTestSession>[0]): HarnessSession {
-  return countRunUsage(createTestSession(overrides), DELEGATED_SPEND);
+  return countRunUsage(createTestSession(overrides), { usage: DELEGATED_SPEND });
 }
 
 function lastSessionEvent<T extends "session.waiting" | "session.failed">(

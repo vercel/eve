@@ -172,14 +172,7 @@ describe("proxied stream hooks", () => {
         payload: { inputResponses: [{ requestId: f.request.requestId, optionId: "continue" }] },
         resolved: {
           event: { sequence: 7, stepIndex: 2, turnId: "child-turn" },
-          resolutions: [
-            {
-              kind: "session-limit",
-              outcome: "answered",
-              requestId: f.request.requestId,
-              response: { requestId: f.request.requestId, optionId: "continue" },
-            },
-          ],
+          resolutions: [],
         },
       },
     ]);

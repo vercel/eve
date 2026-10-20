@@ -15,6 +15,7 @@ type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly kind: "cancel" }
   | { readonly kind: "consumed" }
+  | { readonly kind: "renew-window"; readonly renewalId: string }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
@@ -30,6 +31,7 @@ export async function admitSessionInboxPayload(
   },
 ): Promise<SessionAdmission> {
   if (value.kind === "session-failure") throw new Error(value.error);
+  if (value.kind === "renew-window") return { kind: "renew-window", renewalId: value.renewalId };
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };

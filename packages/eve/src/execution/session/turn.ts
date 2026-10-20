@@ -1,3 +1,6 @@
+import { renewDescendantWindowsStep } from "#execution/renew-window-step.js";
+import { readDurableSession } from "#execution/durable-session-read.js";
+import { latestSessionUsageRenewal } from "#harness/turn-tag-state.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -48,7 +51,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
-import type { TokenUsage } from "#shared/token-usage.js";
+import type { RunUsage } from "#execution/agent-sessions/usage.js";
 import {
   startTaskToolCallsStep,
   traceTaskToolCallStep,
@@ -186,6 +189,7 @@ export class SessionExecution {
       const { cursor } = this.input;
       const caller = bindCaller;
       bindCaller = undefined;
+      const renewedBefore = latestSessionUsageRenewal(readDurableSession(cursor.sessionState));
       const result = await cursor.advanceWithHistory((state) =>
         turnStep({
           ...state,
@@ -196,6 +200,14 @@ export class SessionExecution {
         }),
       );
       if (result.compacted === true) turn.compacted = true;
+      // Approving this session's own prompt renewed its window in the step; its runs renew too.
+      const renewedInStep = latestSessionUsageRenewal(readDurableSession(cursor.sessionState));
+      if (renewedInStep !== undefined && renewedInStep !== renewedBefore) {
+        await renewDescendantWindowsStep({
+          renewalId: renewedInStep,
+          sessionState: cursor.sessionState,
+        });
+      }
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;
@@ -224,6 +236,9 @@ export class SessionExecution {
           output: result.output ?? "",
           usage: result.usage,
           usageDelta: result.usageDelta,
+          ...(result.usageWindows !== undefined && {
+            usageWindows: result.usageWindows,
+          }),
         };
       }
 
@@ -408,7 +423,7 @@ export class SessionExecution {
     let interrupted = false;
     const acceptedAtMsByCallId = new Map<string, number>();
     // By call id, so an outcome delivered twice counts once.
-    const delegatedUsageByCallId = new Map<string, TokenUsage>();
+    const delegatedUsageByCallId = new Map<string, RunUsage>();
     if (input.initialAcceptedAtMs !== undefined) {
       for (const result of results)
         acceptedAtMsByCallId.set(result.callId, input.initialAcceptedAtMs);
@@ -474,7 +489,12 @@ export class SessionExecution {
         if (result === undefined) continue;
         accept(result);
         if (next.message.kind === "outcome" && next.message.usage !== undefined) {
-          delegatedUsageByCallId.set(result.callId, next.message.usage);
+          delegatedUsageByCallId.set(result.callId, {
+            usage: next.message.usage,
+            ...(next.message.windows !== undefined && {
+              windows: next.message.windows,
+            }),
+          });
         }
       }
     } finally {

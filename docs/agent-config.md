@@ -345,6 +345,13 @@ way; those of an `execute` or `task` tool count when the tool finishes. Remote
 agents' reported usage counts the same way, cost included. Approving a
 continuation starts a new window without erasing `total`.
 
+One approval starts a new window in every session of the delegation tree: the
+sessions the prompt came through, and the running subagents beside and below
+them. What a child spent before the approval stays out of its parent's new
+window, even when the child reports it later. A model call already running when
+the approval arrives counts in the new window. Remote agents keep their own
+windows.
+
 Some delegated usage doesn't count against the parent: a `ctx.agent` turn
 still running when its workflow tool finishes or is cancelled; the `ctx.agent`
 usage of an `execute` tool whose parent turn is cancelled while it waits; and

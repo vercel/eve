@@ -15,7 +15,7 @@ import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
   getSessionUsage,
   getSessionUsageWindow,
-  resetSessionUsageWindow,
+  renewSessionUsageWindow,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
@@ -60,9 +60,10 @@ function sessionWithTask(input: { readonly name: string; readonly ownInputTokens
     runId,
   });
   const snapshot = writeTaskTable(
-    resetSessionUsageWindow(
+    renewSessionUsageWindow(
       setTurnUsageState(base.snapshot.session, { ...own, session: own, turnId: "turn_1" }),
-    ),
+      "approval",
+    ).session,
     table,
   );
   const inbox = {
@@ -144,5 +145,35 @@ describe("delegated agent usage", () => {
 
     expect(spent(alice.cursor)).toEqual(usage(1_000, 0.75));
     expect(getSessionUsageWindow(committed(alice.cursor))).toEqual(usage(900, 0.75));
+  });
+
+  it("keeps a task's spend from before its window out of the session's window", async () => {
+    const alice = sessionWithTask({ name: "surveyor", ownInputTokens: 100 });
+    const { from } = alice;
+    // The surveyor spent 45M before Alice approved its session-limit prompt, and 1M after.
+    const reply = {
+      windows: { "": usage(45_000_000), approval: usage(1_000_000) },
+      callIds: [from.callId],
+      from,
+      kind: "reply" as const,
+      output: "Survey done.",
+      usage: usage(46_000_000),
+    };
+    await alice.execution.handleWorkflowMessage(reply);
+    await alice.execution.handleWorkflowMessage(reply);
+
+    expect(spent(alice.cursor)).toEqual(usage(46_000_100));
+    expect(getSessionUsageWindow(committed(alice.cursor))).toEqual(usage(1_000_000));
+
+    await alice.execution.handleWorkflowMessage({
+      windows: { "": usage(45_000_000), approval: usage(2_000_000) },
+      from,
+      kind: "outcome",
+      result: { output: "Survey done.", status: "completed" },
+      usage: usage(47_000_000),
+    });
+
+    expect(spent(alice.cursor)).toEqual(usage(47_000_100));
+    expect(getSessionUsageWindow(committed(alice.cursor))).toEqual(usage(2_000_000));
   });
 });

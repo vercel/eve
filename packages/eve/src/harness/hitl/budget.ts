@@ -6,7 +6,7 @@
  * limit, a session that can request input asks whether to continue (the
  * machine's `requestLimit`); one nobody can answer fails with
  * `SESSION_USAGE_LIMIT_REACHED`. The answer is the machine's `answer`: a
- * grant starts a new usage window with `resetSessionUsageWindow`; a
+ * grant starts a new usage window with `renewSessionUsageWindow`; a
  * decline cancels the turn tree.
  */
 import {

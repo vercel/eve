@@ -14,7 +14,7 @@ import type { SessionView, SuspendedStep } from "#harness/session-machine/view.j
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Step } from "#harness/step/context.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { resetSessionUsageWindow } from "#harness/turn-tag-state.js";
+import { renewSessionUsageWindow } from "#harness/turn-tag-state.js";
 import type { HarnessToolLookup, StepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
@@ -60,7 +60,7 @@ export type HumanInputIntake =
  * The calls themselves wait in their suspended steps until the turn's next model step.
  */
 export interface ApprovedWork {
-  readonly limit?: { readonly granted: boolean };
+  readonly limit?: { readonly granted: boolean; readonly requestId: string };
   /** The entries a parked step's calls run with: those of the step that asked. */
   readonly toolsOf: (step: SuspendedStep | undefined) => HarnessToolLookup;
 }
@@ -219,7 +219,8 @@ export async function acceptHumanInput(
 export async function admitApprovedWork(step: Step, work: ApprovedWork): Promise<void> {
   if (work.limit !== undefined) {
     if (!work.limit.granted) throw new SessionLimitDeclinedError();
-    step.session = resetSessionUsageWindow(step.session);
+    // Named by its request, so the same approval relayed back down from a parent is a no-op.
+    step.session = renewSessionUsageWindow(step.session, work.limit.requestId).session;
   }
   await step.apply(settle(step.view(), { results: [] }));
 }

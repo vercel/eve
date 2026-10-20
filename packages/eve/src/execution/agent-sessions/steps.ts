@@ -1,3 +1,4 @@
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -9,6 +10,7 @@ import {
   type SubagentStartTarget,
 } from "#execution/agent-sessions/target.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -195,6 +197,35 @@ export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Pro
       sessionId: address.sessionId,
     });
   }
+}
+
+/**
+ * Starts a new usage window in each local session a run opened, after an
+ * approval. A session opens without waiting for its run to claim its inbox, so
+ * a renewal it can't take yet waits for it; one that ended takes nothing. Any
+ * other failure fails the step, so the runtime retries it.
+ */
+export async function renewAgentSessionsStep(input: {
+  readonly renewalId: string;
+  readonly sessions: readonly OpenedAgentSession[];
+}): Promise<void> {
+  "use step";
+
+  const renewal = { kind: "renew-window", renewalId: input.renewalId } as const;
+  await Promise.all(
+    input.sessions.map(async (opened) => {
+      const { address } = opened;
+      // Remote agents keep their own windows.
+      if (address.kind === "remote") return;
+      try {
+        await resumeSessionInbox(address.continuationToken, renewal);
+      } catch (error) {
+        if (!isTaskWorkflowTargetGone(error)) throw error;
+        if (!(await waitForSessionInbox(address.sessionId))) return;
+        await resumeSessionInbox(address.continuationToken, renewal);
+      }
+    }),
+  );
 }
 
 /** Ends a run's sessions when the run finishes, cancelling any turn still running. */

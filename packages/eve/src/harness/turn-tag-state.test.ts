@@ -11,11 +11,16 @@ import {
   getSessionUsage,
   getSessionUsageWindow,
   getTurnUsageState,
-  resetSessionUsageWindow,
+  countUsageByWindow,
+  renewSessionUsageWindow,
   setTurnUsageState,
+  takeSessionUsageDelta,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionUsageLimit } from "#shared/agent-definition.js";
+
+const renew = (session: HarnessSession, renewalId = "approval-1") =>
+  renewSessionUsageWindow(session, renewalId).session;
 
 const ZERO_SESSION_USAGE = {
   cacheReadTokens: 0,
@@ -294,6 +299,87 @@ describe("session state round-trip", () => {
 });
 
 describe("session usage limit", () => {
+  describe("spend by window", () => {
+    const input = (inputTokens: number) => ({
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: undefined,
+      inputTokens,
+      outputTokens: 0,
+    });
+    const spend = (session: HarnessSession, inputTokens: number) =>
+      addTurnUsage(session, "turn_0", { inputTokens });
+
+    it("reports the unreported part spent before an approval in the earlier window", () => {
+      // 30M reported earlier, 15M more, then an approval, then 1M.
+      const reported = takeSessionUsageDelta(spend(makeSession(), 30_000_000)).session;
+      const approved = renew(spend(reported, 15_000_000), "R");
+      const report = takeSessionUsageDelta(spend(approved, 1_000_000));
+
+      expect(report.delta).toEqual(input(16_000_000));
+      expect(report.windows).toEqual({ "": input(15_000_000), R: input(1_000_000) });
+      expect(takeSessionUsageDelta(spend(report.session, 2)).windows).toEqual({ R: input(2) });
+    });
+
+    it("keeps a child's spend from an earlier window out of the caller's window", () => {
+      const caller = renew(spend(makeSession(), 5), "R");
+      const counted = countUsageByWindow(caller, { "": input(44_000_000), R: input(1_000_000) });
+
+      expect(getSessionUsageWindow(counted)).toEqual(input(1_000_000));
+      expect(getSessionUsage(counted)).toEqual(input(45_000_005));
+    });
+
+    it("passes a child's earlier-window spend up whole after the session reported new-window spend", () => {
+      // A middle session renews, reports 3 tokens of its new window, then counts a child turn of
+      // 46 tokens, 45 of them spent before the child's window.
+      const renewed = renew(spend(makeSession(), 10), "R");
+      const reported = takeSessionUsageDelta(spend(renewed, 3));
+      expect(reported.windows).toEqual({ "": input(10), R: input(3) });
+      const counted = countUsageByWindow(reported.session, { "": input(45), R: input(1) });
+
+      const report = takeSessionUsageDelta(counted);
+
+      expect(report.delta).toEqual(input(46));
+      expect(report.windows).toEqual({ "": input(45), R: input(1) });
+    });
+
+    it("keeps a report formed before the renewal out of the new window when it arrives after it", () => {
+      // The child reported 30M before it heard of R; the caller applied R before the report arrived.
+      const caller = renew(spend(makeSession(), 5), "R");
+      const counted = countUsageByWindow(caller, { "": input(30_000_000) });
+
+      expect(getSessionUsageWindow(counted)).toEqual(input(0));
+      expect(getSessionUsage(counted)).toEqual(input(30_000_005));
+    });
+
+    it("keeps a settling step's report in its window when the boundary applies a renewal after it", () => {
+      // The child's last step reports 30M, then the renewal that arrived during the step applies.
+      const settled = takeSessionUsageDelta(spend(makeSession(), 30_000_000));
+      const child = renew(settled.session, "R");
+      expect(settled.windows).toEqual({ "": input(30_000_000) });
+
+      // The caller applied R before the report reached it.
+      const caller = countUsageByWindow(renew(makeSession(), "R"), settled.windows);
+      expect(getSessionUsageWindow(caller)).toEqual(input(0));
+      // The child's next report has only what it spent in R.
+      expect(takeSessionUsageDelta(spend(child, 4)).windows).toEqual({ R: input(4) });
+    });
+
+    it("counts spend from a renewal a child applied first once the session applies it", () => {
+      const caller = spend(makeSession(), 7);
+      const counted = countUsageByWindow(caller, { "": input(2), R: input(5) });
+      // Still in its first window, the session sees only the part spent there.
+      expect(getSessionUsageWindow(counted)).toEqual(input(9));
+      // Its own report tells its caller which window each part was in.
+      const report = takeSessionUsageDelta(counted);
+      expect(report.windows).toEqual({ "": input(9), R: input(5) });
+
+      const renewed = renew(report.session, "R");
+      expect(getSessionUsageWindow(renewed)).toEqual(input(5));
+      expect(takeSessionUsageDelta(spend(renewed, 1)).windows).toEqual({ R: input(1) });
+    });
+  });
+
   it("reads zero session usage before token state exists", () => {
     expect(getSessionTokenUsage(makeSession())).toEqual(ZERO_SESSION_USAGE);
     expect(getSessionUsageWindow(makeSession())).toEqual({
@@ -385,7 +471,7 @@ describe("session usage limit", () => {
       checkSessionUsageLimit({ canAsk: false, limit, session, turnSequence: 0 }),
     ).toMatchObject({ kind: "fail" });
 
-    const reset = resetSessionUsageWindow(session);
+    const reset = renew(session);
     expect(getSessionUsage(reset)).toMatchObject({ inputTokens: 10, outputTokens: 3 });
     expect(getSessionUsageWindow(reset)).toMatchObject({ inputTokens: 0, outputTokens: 0 });
     expect(
@@ -412,11 +498,7 @@ describe("session usage limit", () => {
   it("passes the total and the window to the limit", () => {
     const limit = vi.fn<SessionUsageLimit>(() => false);
     const session = sessionAfterStep({ inputTokens: 4, outputTokens: 2 }, undefined, "turn_0");
-    const later = sessionAfterStep(
-      { inputTokens: 5, outputTokens: 1 },
-      resetSessionUsageWindow(session),
-      "turn_1",
-    );
+    const later = sessionAfterStep({ inputTokens: 5, outputTokens: 1 }, renew(session), "turn_1");
 
     expect(
       checkSessionUsageLimit({ canAsk: true, limit, session: later, turnSequence: 1 }),
@@ -447,7 +529,7 @@ describe("session usage limit", () => {
       checkSessionUsageLimit({ canAsk: false, limit, session: makeSession(), turnSequence: 0 }),
     ).toEqual({ kind: "within" });
     // A fresh window after a grant is empty too, even though the total is not.
-    const reset = resetSessionUsageWindow(sessionAfterStep({ inputTokens: 10, outputTokens: 3 }));
+    const reset = renew(sessionAfterStep({ inputTokens: 10, outputTokens: 3 }));
     expect(
       checkSessionUsageLimit({ canAsk: false, limit, session: reset, turnSequence: 1 }),
     ).toEqual({ kind: "within" });
@@ -490,7 +572,7 @@ describe("session usage limit", () => {
     const firstId = ask(first);
     expect(ask(first)).toBe(firstId);
 
-    const approved = resetSessionUsageWindow(first);
+    const approved = renew(first);
     expect(
       checkSessionUsageLimit({ canAsk: true, limit, session: approved, turnSequence: 0 }),
     ).toEqual({

@@ -6,7 +6,7 @@ import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { TokenUsage } from "#shared/token-usage.js";
+import type { TokenUsage, UsageByWindow } from "#shared/token-usage.js";
 import type {
   ToolInputRequest,
   ToolInputResponse,
@@ -92,6 +92,8 @@ export interface WorkflowToolRunOutcomeMessage {
   readonly result: WorkflowToolRunOutcome;
   /** What the run's `ctx.agent` sessions spent in all, once any of their turns ended. */
   readonly usage?: TokenUsage;
+  /** The part of `usage` its sessions spent before their current usage windows. */
+  readonly windows?: UsageByWindow;
 }
 
 /**
@@ -128,6 +130,8 @@ export interface WorkflowToolRunReplyMessage {
    * last one it counted, and a redelivered reply adds nothing.
    */
   readonly usage?: TokenUsage;
+  /** The part of `usage` its sessions spent before their current usage windows. */
+  readonly windows?: UsageByWindow;
 }
 
 /**
@@ -138,6 +142,8 @@ export interface WorkflowToolRunReplyMessage {
 export interface WorkflowToolRunUsageMessage {
   readonly from: WorkflowToolRunRef;
   readonly usage: TokenUsage;
+  /** The part of `usage` its sessions spent before their current usage windows. */
+  readonly windows?: UsageByWindow;
 }
 
 /** A task's run can take commands: its control hook is registered. */
@@ -256,13 +262,22 @@ export type WorkflowBodyCommand =
  * inbox. Only the session writes to it, so the run receives commands and
  * decisions in the order the session made them.
  */
-export type WorkflowToolRunControlMessage = WorkflowBodyCommand | WorkflowToolRunAskDecision;
+export type WorkflowToolRunControlMessage =
+  | WorkflowBodyCommand
+  | WorkflowToolRunAskDecision
+  | WorkflowToolRunRenewal;
+
+/** A session-limit approval started a new usage window; the run's sessions start one too. */
+export interface WorkflowToolRunRenewal {
+  readonly kind: "renew-window";
+  readonly renewalId: string;
+}
 
 export function isWorkflowToolRunControlMessage(
   value: unknown,
 ): value is WorkflowToolRunControlMessage {
   if (typeof value !== "object" || value === null) return false;
-  const { call, kind, reason, requestId, response } = value as Record<string, unknown>;
+  const { call, kind, reason, renewalId, requestId, response } = value as Record<string, unknown>;
   switch (kind) {
     case "interrupt":
       return true;
@@ -275,6 +290,8 @@ export function isWorkflowToolRunControlMessage(
       return typeof requestId === "string" && isWorkflowToolRunAnswer(response);
     case "withdrawn":
       return typeof requestId === "string";
+    case "renew-window":
+      return typeof renewalId === "string";
     default:
       return false;
   }

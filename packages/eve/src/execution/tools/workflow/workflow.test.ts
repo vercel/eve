@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   deliver: vi.fn(),
   runBody: vi.fn(),
   applyCommand: vi.fn(),
+  renew: vi.fn(),
   usageTotal: vi.fn(),
   body: { runSignal: new AbortController().signal },
   openWorkflowToolRunOwnerInbox: vi.fn(),
@@ -51,7 +52,16 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
       },
     },
     outcome: mocks.runBody(input),
-    usage: { record: () => {}, total: mocks.usageTotal },
+    renew: mocks.renew,
+    usage: {
+      carry: () => {
+        const usage = mocks.usageTotal();
+        return usage === undefined ? undefined : { usage };
+      },
+      hasUncarried: () => true,
+      record: () => {},
+      renew: () => {},
+    },
   }),
 }));
 vi.mock("#execution/tools/workflow/owner.js", () => ({
@@ -497,4 +507,44 @@ it("propagates terminal delivery failure instead of replacing the invocation out
   mocks.deliver.mockRejectedValue(new Error("delivery failed"));
   await expect(workflowToolRunWorkflow(input)).rejects.toThrow("delivery failed");
   expect(mocks.deliver).toHaveBeenCalledOnce();
+});
+
+it("fails the run when a renewal can't reach the body's agent sessions", async () => {
+  mocks.owner.mockReturnValue({
+    commands: createChannelReader(
+      "control",
+      (async function* (): AsyncGenerator<WorkflowToolRunControlMessage> {
+        yield { kind: "renew-window", renewalId: "R" };
+        await new Promise<void>(() => {});
+      })(),
+    ),
+    handleMessage: mocks.deliver,
+    register: async () => true,
+    relay: relayThrough(mocks.deliver),
+  });
+  mocks.body.runSignal = new AbortController().signal;
+  // The body awaits a child's result and sends nothing more.
+  mocks.runBody.mockReturnValue(new Promise(() => {}));
+  mocks.renew.mockRejectedValue(new Error("inbox unavailable"));
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { send: vi.fn(), sent: 0 },
+    reader: createChannelReader("workflow", {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+      }),
+    }),
+  });
+
+  await workflowToolRunWorkflow(input);
+
+  expect(mocks.renew).toHaveBeenCalledExactlyOnceWith("R");
+  expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      kind: "outcome",
+      result: {
+        status: "failed",
+        error: expect.objectContaining({ message: "inbox unavailable" }),
+      },
+    }),
+  );
 });

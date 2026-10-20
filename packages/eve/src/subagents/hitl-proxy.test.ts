@@ -177,20 +177,37 @@ describe("routeDeliverPayload", () => {
       {
         childContinuationToken: "child-a",
         payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
-        resolved: {
-          event: REQUEST_EVENT,
-          resolutions: [
-            {
-              kind: "session-limit",
-              outcome: "answered",
-              requestId: "req-limit",
-              response: { optionId: "stop", requestId: "req-limit" },
-            },
-          ],
-        },
+        // The child closes its own prompt: a renewal may have settled it first.
+        resolved: { event: REQUEST_EVENT, resolutions: [] },
       },
     ]);
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
+    expect(routed.renewalId).toBeUndefined();
+  });
+
+  it.each([
+    { renews: true, response: { optionId: "continue", requestId: "req-limit" } },
+    { renews: false, response: { optionId: "maybe", requestId: "req-limit" } },
+    { renews: false, response: { requestId: "req-limit", text: "Approve" } },
+  ])("renews the tree only for a real Continue: $response", ({ renews, response }) => {
+    const session = withRelays(createSession(), {
+      entries: [
+        [
+          "req-limit",
+          { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "session-limit" },
+        ],
+      ],
+      forChildContinuationToken: "child-a",
+    });
+
+    const routed = routeDeliverPayload({
+      payload: { inputResponses: [response] },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toMatchObject([{ childContinuationToken: "child-a" }]);
+    expect(routed.renewalId).toBe(renews ? "req-limit" : undefined);
+    expect(routed.parentAction).toBeUndefined();
   });
 });
 

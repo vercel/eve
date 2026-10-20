@@ -6,6 +6,7 @@ import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
+import { usageByWindowSchema } from "#shared/token-usage.js";
 
 // The callback token grants access to the pending turn. Validate remote input
 // before handing it to the parent; the child session ID is not authority.
@@ -137,6 +138,7 @@ const sessionAuthorizationCallbackSchema = z.object({
 /** A settled remote turn must state its outcome; callers do not infer its lifecycle. */
 const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
   z.object({
+    windows: usageByWindowSchema.optional(),
     callId: z.string().min(1),
     kind: z.literal("turn.completed"),
     outcome: agentTurnOutcomeWithCostSchema,
@@ -144,6 +146,7 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     subagentName: z.string().min(1),
   }),
   z.object({
+    windows: usageByWindowSchema.optional(),
     callId: z.string().min(1),
     error: jsonValueSchema,
     kind: z.literal("turn.failed"),
@@ -216,6 +219,7 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
 
   if (payload.kind === "turn.completed") {
     return {
+      ...(payload.windows !== undefined && { windows: payload.windows }),
       callId: payload.callId,
       kind: "subagent-result",
       origin: "child",
@@ -229,6 +233,7 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
   }
 
   return {
+    ...(payload.windows !== undefined && { windows: payload.windows }),
     callId: payload.callId,
     isError: true,
     kind: "subagent-result",

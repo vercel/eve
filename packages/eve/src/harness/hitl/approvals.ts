@@ -186,7 +186,7 @@ export interface Answered extends Transition {
   /** The batches the delivery resolved, in order. */
   readonly resolved: readonly ResolvedInputBatch[];
   /** A decision on the session-limit prompt. */
-  readonly limit?: { readonly granted: boolean };
+  readonly limit?: { readonly granted: boolean; readonly requestId: string };
 }
 
 /**

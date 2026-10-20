@@ -17,12 +17,13 @@ import {
   type TaskCall,
   type TaskOutcome,
   type TaskRecord,
+  type TaskRunAddress,
   type TaskRunCommand,
   type TaskRunCommands,
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { countRunUsage } from "#execution/agent-sessions/usage.js";
+import { countRunUsage, type RunUsage } from "#execution/agent-sessions/usage.js";
 import type {
   PublishedSessionEvents,
   SessionStepState,
@@ -42,6 +43,7 @@ import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
+import { latestSessionUsageRenewal } from "#harness/turn-tag-state.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { TaskCancelReason } from "#protocol/message.js";
 
@@ -73,6 +75,7 @@ export async function applyTaskRunMessage(
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
       table = started.table;
+      await renewStartedTaskRun(session, findTask(table, taskId)?.run);
       if (started.held !== undefined) await sendTaskRunCommands(started.held);
       break;
     }
@@ -188,6 +191,21 @@ function taskSettled(
 }
 
 /**
+ * Renewals skip a run that hasn't started, so one that starts in a later
+ * usage window than the run's start hears of it now. A run ignores a renewal
+ * it already has.
+ */
+async function renewStartedTaskRun(
+  session: DurableSession,
+  run: TaskRunAddress | undefined,
+): Promise<void> {
+  const renewalId = latestSessionUsageRenewal(session);
+  if (run === undefined || renewalId === undefined) return;
+  const message: WorkflowToolRunControlMessage = { kind: "renew-window", renewalId };
+  await ignoreGoneTarget(resumeHook(run.hookToken, message));
+}
+
+/**
  * Sends commands to a task's run, in order. A run that already finished takes
  * none; its outcome settles any call still waiting.
  */
@@ -239,9 +257,17 @@ function countTaskRunUsage(
 ): { readonly session: DurableSession; readonly table: TaskTable } {
   const run = findTask(table, taskId)?.run;
   if (message.usage === undefined || run?.runId !== message.from.runId) return { session, table };
+  const counted: RunUsage = {
+    usage: message.usage,
+    ...(message.windows !== undefined && { windows: message.windows }),
+  };
   return {
-    session: countRunUsage(session, message.usage, run.usage),
-    table: recordTaskRunUsage(table, taskId, message.usage),
+    session: countRunUsage(
+      session,
+      counted,
+      run.usage === undefined ? undefined : { windows: run.windows, usage: run.usage },
+    ),
+    table: recordTaskRunUsage(table, taskId, counted),
   };
 }
 

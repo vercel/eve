@@ -3,10 +3,11 @@ import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
-import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import { AuthKey, ContinuationTokenKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
   publishSessionEvents,
   type PublishedSessionEvents,
@@ -84,6 +85,7 @@ async function routeProxiedDeliver(
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
+  let renewalId: string | undefined;
   // Only a person's own message may answer a pending prompt by text.
   const resolveMessage =
     !hasDelegatedSessionContext(serializedContext) && sourceDelivery.caller === undefined;
@@ -104,6 +106,7 @@ async function routeProxiedDeliver(
       state: durableSession.state,
     });
     parentAction ??= routed.parentAction;
+    renewalId ??= routed.renewalId;
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
@@ -233,6 +236,15 @@ async function routeProxiedDeliver(
     parentAction === undefined &&
     [...requests.keys()].some((id) => !retired.has(id) && !forwarded.has(id));
 
+  // An approval anywhere in the tree starts a new window in every session. This session takes
+  // it as any renewal: through its inbox, so a turn waiting on its own prompt wakes to it.
+  if (renewalId !== undefined && !published.cancelled) {
+    const ctx = await deserializeContext(published.serializedContext);
+    await resumeSessionInbox(
+      ctx.get(ContinuationTokenKey) ?? sessionCommandHookToken(durableSession.sessionId),
+      { kind: "renew-window", renewalId },
+    );
+  }
   const context = await commitSessionStep(
     { ...published, sessionWritable: input.sessionWritable },
     (view) => [routeAnswer(view, { children: answered, holds })],

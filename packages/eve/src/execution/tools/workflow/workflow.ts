@@ -50,6 +50,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
     "body",
     awaitBodyOutcome(started.outcome),
   );
+  const renewals = createRenewalFailures();
   let commandsOpen = true;
   let relayedMessages = 0;
   let bodyOutcome: WorkflowToolRunOutcome | undefined;
@@ -84,9 +85,10 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
           | typeof owner.commands
           | typeof inbox.reader
           | ChannelReader<"body", WorkflowToolRunOutcome>
+          | typeof renewals.reader
         > = [];
         if (commandsOpen) readers.push(owner.commands);
-        readers.push(inbox.reader);
+        readers.push(inbox.reader, renewals.reader);
         if (bodyOutcome === undefined) readers.push(body);
         read = await raceChannelReads(readers, cleanupDeadline);
       } catch (error) {
@@ -116,7 +118,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       if (read.channel === "control") {
         // The deadline counts from the cancel the body is unwinding now.
         if (!started.control.unwinding) cleanupDeadline = undefined;
-        applyControlMessage(started, read.next.value);
+        applyControlMessage(started, read.next.value, renewals);
         continue;
       }
       if (read.channel === "body") {
@@ -140,12 +142,11 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
     };
   }
   if (outcome !== undefined) {
-    const usage = started.usage.total();
     await owner.handleMessage({
       from: createWorkflowBodyRef(input),
       kind: "outcome",
       result: outcome,
-      ...(usage !== undefined && { usage }),
+      ...started.usage.carry(),
     });
   }
 }
@@ -167,13 +168,45 @@ async function reportTaskStarted(input: WorkflowToolRunInput): Promise<void> {
  * commands share the hook, so the body sees them in the order the session
  * made them.
  */
-function applyControlMessage(started: StartedWorkflowBody, message: unknown): void {
+function applyControlMessage(
+  started: StartedWorkflowBody,
+  message: unknown,
+  renewals: RenewalFailures,
+): void {
   if (!isWorkflowToolRunControlMessage(message)) return;
   if (isWorkflowToolRunAskDecision(message)) {
     started.asks.settle(message);
     return;
   }
+  if (message.kind === "renew-window") {
+    started.renew(message.renewalId).catch(renewals.fail);
+    return;
+  }
   started.control.apply(message);
+}
+
+/**
+ * A channel that never yields and fails once a renewal can't reach the body's
+ * agent sessions, which fails the run: a session left in the old window would
+ * spend outside its caller's budget, and the body may never send it another
+ * message that could carry the renewal.
+ */
+interface RenewalFailures {
+  readonly fail: (error: unknown) => void;
+  readonly reader: ChannelReader<"renewal", never>;
+}
+
+function createRenewalFailures(): RenewalFailures {
+  let fail: (error: unknown) => void = () => {};
+  const failed = new Promise<never>((_, reject) => {
+    fail = reject;
+  });
+  return {
+    fail,
+    reader: createChannelReader("renewal", {
+      [Symbol.asyncIterator]: () => ({ next: () => failed }),
+    }),
+  };
 }
 
 /**

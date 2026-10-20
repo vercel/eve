@@ -1,6 +1,7 @@
 import type { SessionAuth, SessionParent } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import { getSessionUsageWindowId } from "#harness/turn-tag-state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
@@ -101,6 +102,7 @@ export async function startWorkflowToolCallRun(
     },
     stepIndex: batchEvent.stepIndex,
     toolName: task.toolName,
+    usageWindow: getSessionUsageWindowId(session),
     workflowId: task.workflowId,
   });
 }

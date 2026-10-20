@@ -22,8 +22,18 @@ export interface SessionFailurePayload {
   readonly error: string;
 }
 
+/**
+ * The runtime sends this command, like a session failure: an approval
+ * elsewhere in the delegation tree started a new usage window.
+ */
+export interface SessionUsageRenewalPayload {
+  readonly kind: "renew-window";
+  readonly renewalId: string;
+}
+
 export type SessionInboxPayload =
   | SessionFailurePayload
+  | SessionUsageRenewalPayload
   | HookPayload
   | SessionCommand
   | WorkflowToolRunMessage
