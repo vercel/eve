@@ -1,5 +1,5 @@
 import { type ChannelCors } from "#channel/cors.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
@@ -41,7 +41,7 @@ export type FetchFileFunction = (
  * schedule proactively routes a message to it.
  */
 export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
-  readonly message: string | UserContent;
+  readonly message: MessageContent;
   readonly target: Readonly<TReceiveTarget>;
   readonly auth: SessionAuthContext | null;
 }

@@ -72,7 +72,7 @@ await response.result();
 
 ## Send attachments
 
-`send()` accepts AI SDK `UserContent`, so a message can mix text and file parts:
+`send()` accepts `MessageContent`, so a message can mix text and file parts. A file part's `data` is the file inline (bytes, base64, or a `data:` URL) or a URL:
 
 ```ts
 const response = await session.send([

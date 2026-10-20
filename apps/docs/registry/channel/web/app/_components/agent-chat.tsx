@@ -1,6 +1,6 @@
 "use client";
 
-import type { UserContent } from "ai";
+import type { MessagePart } from "eve/client";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useRef, useState } from "react";
@@ -112,7 +112,7 @@ export function AgentChat({
       return;
     }
 
-    const parts: UserContent = [];
+    const parts: MessagePart[] = [];
     if (text.length > 0) {
       parts.push({ text, type: "text" });
     }

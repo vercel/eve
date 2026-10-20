@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
@@ -47,7 +47,7 @@ export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOption
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
   /** Starts or resumes a turn with a user message. May create a session. */
-  send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
+  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Session>;
   /** Answers pending input requests. Never creates a session. */
   respond<const TResponses extends readonly Answer[]>(
     answers: StrictAnswers<TResponses>,

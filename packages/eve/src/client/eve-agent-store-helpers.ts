@@ -4,7 +4,7 @@ import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
 import { endsTurn, ResponseSegment } from "#client/session-utils.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 export function activeTurnForOptimisticFollowUp(
   events: readonly SessionStreamEvent[],
@@ -119,7 +119,7 @@ export function createAbortSignal(
   return first ? AbortSignal.any([first, second]) : second;
 }
 
-export function summarizeUserContent(message: string | UserContent): string {
+export function summarizeMessage(message: MessageContent): string {
   if (typeof message === "string") return message;
 
   const parts: string[] = [];

@@ -1,3 +1,4 @@
+import type { MessageContent } from "#shared/message-content.js";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
@@ -71,7 +72,7 @@ export interface AgentSession {
    * running turn ends before the agent reads it.
    */
   send<TOutput = unknown>(
-    message: string,
+    message: MessageContent<string | URL>,
     options?: AgentSendOptions<TOutput>,
   ): Promise<AgentResponse<TOutput>>;
 }

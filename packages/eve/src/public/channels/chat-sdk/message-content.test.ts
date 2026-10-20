@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { Message, parseMarkdown } from "#compiled/chat/index.js";
-import { messageToUserContent } from "#public/channels/chat-sdk/messageToUserContent.js";
+import { messageContentOf } from "#public/channels/chat-sdk/message-content.js";
 
-describe("messageToUserContent", () => {
+describe("messageContentOf", () => {
   it("notes an attachment without a download in place, keeping the other parts", () => {
     const mixed = new Message({
       attachments: [
@@ -31,7 +31,7 @@ describe("messageToUserContent", () => {
       threadId: "test:C01:1700000000.000001",
     });
 
-    expect(messageToUserContent(mixed)).toEqual([
+    expect(messageContentOf(mixed)).toEqual([
       { text: "see both", type: "text" },
       {
         text: "Attachment pasted was not retrieved: the platform did not provide a download for it.",

@@ -1,3 +1,5 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
@@ -101,7 +103,7 @@ export async function startRemoteAgentSession(input: {
       url: string;
     };
     forwardedPrincipal?: ForwardedPrincipal;
-    message: string;
+    message: MessageContent<string | URL>;
     operationId?: string;
     outputSchema?: object;
     protocolVersion: number;
@@ -274,7 +276,7 @@ export async function continueRemoteAgentSession(input: {
     readonly token: string;
     readonly url: string;
   };
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
@@ -283,7 +285,7 @@ export async function continueRemoteAgentSession(input: {
   const requestBody: {
     callback: typeof input.callback;
     forwardedPrincipal?: ForwardedPrincipal;
-    message: string;
+    message: MessageContent<string | URL>;
     outputSchema?: JsonObject;
   } = {
     callback: input.callback,
@@ -601,8 +603,8 @@ async function resolveRemoteAgentRequestHeaders(
 function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
-}): string {
-  const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
+}): MessageContent<string | URL> {
+  const message = normalizeAgentMessage(input.action.input.message as MessageContent<string | URL>);
   return formatSubagentInput({
     description: input.remote.description,
     message,

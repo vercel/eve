@@ -1,4 +1,6 @@
-import type { ModelMessage, TextPart, UserContent } from "ai";
+import type { ModelMessage, UserContent } from "ai";
+
+import type { MessageContent, MessagePart } from "#shared/message-content.js";
 
 import type {
   ChannelDeliveryMetadataEntry,
@@ -163,7 +165,7 @@ export function coalesceTurnInputs<T extends TurnInput>(a: T, b: T): T {
   const result: {
     deliveries?: HarnessStepInput["deliveries"];
     answers?: readonly Answer[];
-    message?: string | UserContent;
+    message?: MessageContent;
     context?: readonly string[];
     outputSchema?: HarnessStepInput["outputSchema"];
   } = {};
@@ -187,9 +189,9 @@ export function coalesceTurnInputs<T extends TurnInput>(a: T, b: T): T {
 
   // Typed text describes one message, so it survives only when the other input has none.
   const inputText =
-    normalizeUserContent(a.message) === undefined
+    normalizeMessage(a.message) === undefined
       ? readInputText(b)
-      : normalizeUserContent(b.message) === undefined
+      : normalizeMessage(b.message) === undefined
         ? readInputText(a)
         : undefined;
   return attachClientContext(
@@ -209,9 +211,7 @@ export function coalesceTurnInputs<T extends TurnInput>(a: T, b: T): T {
  * Returns `undefined` when no parts remain, allowing callers to omit the user
  * turn entirely rather than create an empty model prompt block.
  */
-export function normalizeUserContent(
-  content: string | UserContent | undefined,
-): string | UserContent | undefined {
+export function normalizeMessage(content: MessageContent | undefined): MessageContent | undefined {
   if (content === undefined) {
     return undefined;
   }
@@ -244,8 +244,9 @@ export function createTurnInputMessages(input: HarnessStepInput | undefined): Us
   const messages = [...(readClientContext(input) ?? []), ...(input?.context ?? [])].map((content) =>
     createFrameworkUserMessage("context.instruction", content),
   );
-  const content = normalizeUserContent(input?.message);
-  if (content === undefined) return messages;
+  const message = normalizeMessage(input?.message);
+  if (message === undefined) return messages;
+  const content = userContentOf(message);
   const kind = frameworkMessageKindForStepInput(input);
   return [
     ...messages,
@@ -368,11 +369,11 @@ function coalesceFrameworkMessageKind(input: {
  * Merges two optional turn messages into one after removing blank content.
  */
 function coalesceMessage(input: {
-  readonly a?: string | UserContent;
-  readonly b?: string | UserContent;
-}): string | UserContent | undefined {
-  const a = normalizeUserContent(input.a);
-  const b = normalizeUserContent(input.b);
+  readonly a?: MessageContent;
+  readonly b?: MessageContent;
+}): MessageContent | undefined {
+  const a = normalizeMessage(input.a);
+  const b = normalizeMessage(input.b);
 
   if (a === undefined) {
     return b;
@@ -382,37 +383,30 @@ function coalesceMessage(input: {
     return a;
   }
 
-  return appendUserContent({ appended: b, existing: a });
+  return appendMessage({ appended: b, existing: a });
 }
 
 /**
  * Appends user content while preserving structured attachment parts.
  */
-export function appendUserContent(input: {
-  readonly appended: string | UserContent;
-  readonly existing: string | UserContent;
-}): string | UserContent {
+export function appendMessage(input: {
+  readonly appended: MessageContent;
+  readonly existing: MessageContent;
+}): MessageContent {
   if (typeof input.existing === "string" && typeof input.appended === "string") {
     return `${input.existing}\n\n${input.appended}`;
   }
-
-  const merged: UserContentArray = [
-    ...toUserContentArray(input.existing),
-    ...toUserContentArray(input.appended),
-  ];
-  return merged;
+  return [...partsOf(input.existing), ...partsOf(input.appended)];
 }
 
-type UserContentArray = Exclude<UserContent, string>;
+function partsOf(value: MessageContent): readonly MessagePart[] {
+  if (typeof value !== "string") return value;
+  return value.length > 0 ? [{ text: value, type: "text" }] : [];
+}
 
-function toUserContentArray(value: string | UserContent): UserContentArray {
-  if (typeof value === "string") {
-    return value.length > 0 ? [{ type: "text", text: value } satisfies TextPart] : [];
-  }
-  if (Array.isArray(value)) {
-    return [...value];
-  }
-  return [];
+/** A person's message as the model reads it. */
+export function userContentOf(message: MessageContent): string | UserContent {
+  return typeof message === "string" ? message : [...message];
 }
 
 /**

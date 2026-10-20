@@ -1,7 +1,7 @@
 import { interactionJson } from "#protocol/interaction-json.js";
 import { failureOf } from "#client/session-utils.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -40,7 +40,7 @@ export class WorkflowAgentInvocationExecution {
 
   async create(input: {
     readonly auth: SessionAuthContext | null;
-    readonly message: string | UserContent;
+    readonly message: MessageContent;
   }): Promise<AgentInvocation> {
     const continuationToken = `invocation:${crypto.randomUUID()}`;
     const handle = await this.#createSession({

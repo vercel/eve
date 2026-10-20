@@ -2,7 +2,7 @@ import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/ch
 import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type {
   ChannelFrom,
   ChannelResolveSession,
@@ -362,7 +362,7 @@ export interface SlackEventRespondOptions {
  * one, or many times; each invocation returns the resulting session.
  */
 export type SlackEventSendFn = (
-  message: string | UserContent,
+  message: MessageContent,
   options: SlackEventSendOptions,
 ) => Promise<Session>;
 
@@ -954,7 +954,7 @@ function defaultOnAnswers(ctx: SlackAnswerContext): SlackAnswerResult {
 async function receiveOnSlack(
   input: {
     readonly auth: SessionAuthContext | null;
-    readonly message: string | UserContent;
+    readonly message: MessageContent;
     readonly target: SlackReceiveTarget;
     readonly title?: string;
   },

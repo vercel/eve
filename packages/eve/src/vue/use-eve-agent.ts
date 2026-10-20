@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import {
   attachEveAgentStore,
@@ -61,7 +61,7 @@ export interface UseEveAgentReturn {
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
   readonly send: <TOutput = unknown>(
-    message: string | UserContent,
+    message: MessageContent,
     options?: SendTurnOptions<TOutput>,
   ) => Promise<void>;
   /** Answer pending HITL input requests. */
@@ -209,7 +209,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       options?: RespondTurnOptions<TOutput>,
     ) => store.send({ ...options, answers }),
     resume: () => store.resume(),
-    send: <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) =>
+    send: <TOutput = unknown>(message: MessageContent, options?: SendTurnOptions<TOutput>) =>
       store.send({ ...options, message }),
     session: computed(() => snapshot.value.session),
     status: computed(() => snapshot.value.status),
