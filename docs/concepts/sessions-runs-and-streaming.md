@@ -343,7 +343,7 @@ Every stream event runs four steps, in this order:
 3. **Hooks**: authored [hooks](../guides/hooks) subscribed to the event fire.
 4. **Dynamic resolvers**: [dynamic](../guides/dynamic-capabilities) tool, skill, and instruction resolvers fire, and `ctx.channel.metadata` already holds the freshly projected metadata from step 2.
 
-The order is structural, not incidental. By the time a resolver or hook reads channel metadata, the channel has already updated its state and the projection is current.
+The order is structural, not incidental. By the time a dynamic resolver reads `ctx.channel.metadata`, the channel has already updated its state and the projection is current.
 
 ## What to read next
 
