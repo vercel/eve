@@ -121,6 +121,8 @@ class RunAgentSession implements AgentSession {
         message,
         outputSchema,
         replyTo: reply.hook.token,
+        // The run's current call: a serving run forwards each call it receives.
+        servedCallId: this.#run.from.callId,
       });
     } catch (error) {
       this.#awaited.splice(this.#awaited.indexOf(reply), 1);

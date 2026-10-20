@@ -14,16 +14,11 @@ export {
   type TranscriptMessage,
   type TranscriptOptions,
 } from "#client/transcript.js";
-export { openConversationInteractions } from "#client/conversation-state.js";
 
 export type {
   AgentObservation,
   ConversationAgentSession,
-  ConversationInteraction,
   ConversationState,
-  ConversationTask,
-  ConversationTaskCall,
-  ConversationTurn,
 } from "#client/conversation-state.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export type {
@@ -46,6 +41,7 @@ export {
 // ---------------------------------------------------------------------------
 
 export type {
+  AcceptedDelivery,
   EveAgentStoreCallbacks,
   EveAgentStoreInit,
   EveAgentStoreSnapshot,
@@ -119,6 +115,7 @@ export type {
 export type * from "#protocol/session-events/index.js";
 export { endsTurn, failureOf } from "#client/session-utils.js";
 
+export type { SessionView, SessionPreviews } from "#protocol/session-projection/tables.js";
 export type { Answer } from "#shared/input.js";
 export type { Interaction, AskedCall } from "#protocol/session-reader.js";
 export { signInEnding } from "#protocol/session-reader.js";

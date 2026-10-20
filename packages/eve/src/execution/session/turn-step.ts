@@ -304,6 +304,8 @@ async function runSessionStepBody(
         throw error;
       }
       admission = admitDeliveries({
+        parent: ctx.get(ParentSessionKey),
+        sessionStarted: turnPosition(currentProjection(ctx)).sessionStarted,
         channelKind: getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
         admitted: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId] !== undefined,

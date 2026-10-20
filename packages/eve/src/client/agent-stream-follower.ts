@@ -89,7 +89,7 @@ export class AgentStreamFollower {
           if (controller.signal.aborted) return;
           cursors.set(sessionId, cursor);
           this.#options.onEvent(sessionId, event);
-          this.reconcile();
+          if (event.meta.endOfLine !== false) this.reconcile();
         }
       } catch {
         // Reported below unless the subscription was deliberately aborted.

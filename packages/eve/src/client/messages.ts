@@ -1,4 +1,5 @@
-import type { ConversationInteraction } from "#client/conversation-state.js";
+import { callState } from "#protocol/session-projection/selectors.js";
+import type { Interaction } from "#protocol/session-reader.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import type { EveMessage, EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { UserPart } from "#protocol/session-events/envelope.js";
@@ -19,7 +20,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 export interface MessageSources {
   readonly view: SessionView;
   readonly previews: SessionPreviews;
-  readonly interactions: Readonly<Record<string, ConversationInteraction>>;
+  readonly interactions: Readonly<Record<string, Interaction>>;
 }
 
 /** A part and where it sorts in its turn: by the line that introduced it, previews last. */
@@ -50,7 +51,7 @@ export function assistantMessages(
   };
 
   // An approval or a question about one of the session's calls shows on that call.
-  const onCall = new Map<string, ConversationInteraction>();
+  const onCall = new Map<string, Interaction>();
   for (const interaction of Object.values(interactions)) {
     const row = view.interactions[interaction.interactionId];
     const callId = row !== undefined && "callId" in row.subject ? row.subject.callId : undefined;
@@ -88,7 +89,13 @@ export function assistantMessages(
     if (row.outcome === "abandoned") continue;
     const at = callPlace(view, row.callId);
     if (!shows(at?.turnId)) continue;
-    const part = toolPart(view, row, previews.calls[row.callId], onCall.get(row.callId));
+    const part = toolPart(
+      view,
+      row,
+      previews.calls[row.callId],
+      onCall.get(row.callId),
+      at.stepIndex,
+    );
     place(at.turnId, { at: row.introducedAt, part: { ...part, stepIndex: at.stepIndex }, rank: 1 });
   }
 
@@ -110,7 +117,12 @@ export function assistantMessages(
   }
   for (const preview of Object.values(previews.calls)) {
     const at = runPlace(view, preview.runId);
-    if (!shows(at?.turnId) || view.calls[preview.callId] !== undefined) continue;
+    if (
+      !shows(at?.turnId) ||
+      preview.kind === undefined ||
+      view.calls[preview.callId] !== undefined
+    )
+      continue;
     place(at.turnId, {
       at: Infinity,
       part: {
@@ -119,7 +131,7 @@ export function assistantMessages(
         kind: preview.kind,
         label: displayTitle(preview.name),
         name: preview.name,
-        status: "streaming",
+        state: "streaming",
         stepIndex: at.stepIndex,
         type: "tool",
       },
@@ -162,20 +174,21 @@ function toolPart(
   view: SessionView,
   row: CallRow,
   preview: CallPreview | undefined,
-  interaction: ConversationInteraction | undefined,
+  interaction: Interaction | undefined,
+  stepIndex: number,
 ): EveToolPart {
   const { kind, name } = row.capability;
   const running = row.status !== "settled";
-  const part: Mutable<EveToolPart> = {
+  const part: Mutable<Exclude<EveToolPart, { state: "streaming" }>> = {
     callId: row.callId,
     kind,
     label: callLabel(row, preview),
     name,
-    status: row.status,
+    state: callState(view, row.callId)!,
+    stepIndex,
     type: "tool",
   };
   if (row.input !== undefined) part.input = row.input;
-  if (row.outcome !== undefined) part.outcome = row.outcome;
   const output = running
     ? preview?.output
     : row.outcome === "completed"
@@ -184,8 +197,6 @@ function toolPart(
   if (output !== undefined) part.output = output;
   const error = row.error ?? row.inputError;
   if (error !== undefined) part.error = error;
-  if (row.reason !== undefined) part.reason = row.reason;
-  if (row.taskId !== undefined) part.taskId = row.taskId;
   if (interaction !== undefined) part.interaction = interaction;
   return part;
 }

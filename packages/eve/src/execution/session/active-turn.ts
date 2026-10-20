@@ -27,7 +27,7 @@ import {
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
-import { coalesceDeliveries } from "#harness/messages.js";
+import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -366,15 +366,15 @@ function splitAnswers(delivery: DeliverHookPayload): {
   readonly answers: DeliverHookPayload;
   readonly rest: DeliverHookPayload | undefined;
 } {
-  const answers = delivery.payloads.flatMap((payload) =>
-    payload.answers === undefined ? [] : [{ answers: payload.answers }],
+  const answers = delivery.payloads.flatMap((payload, index) =>
+    payload.answers === undefined ? [] : [{ index, payload: { answers: payload.answers } }],
   );
-  const rest = delivery.payloads.flatMap((payload) => {
+  const rest = delivery.payloads.flatMap((payload, index) => {
     const { answers: _answers, ...other } = payload;
-    return Object.keys(other).length === 0 ? [] : [other];
+    return Object.keys(other).length === 0 ? [] : [{ index, payload: other }];
   });
   return {
-    answers: { ...delivery, payloads: answers },
-    rest: rest.length === 0 ? undefined : { ...delivery, payloads: rest },
+    answers: selectDeliveryPayloads(delivery, answers),
+    rest: rest.length === 0 ? undefined : selectDeliveryPayloads(delivery, rest),
   };
 }

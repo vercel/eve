@@ -158,7 +158,13 @@ export interface SessionAuthContext {
 
 /** Framework-internal caller waiting for one delegated conversation turn. */
 export interface TurnCaller {
+  /** The call that opened the session, whose lineage its messages keep. */
   readonly callId: string;
+  /**
+   * The call this message serves, when it is not the one that opened the session: a later call
+   * a workflow run forwards to the session it opened.
+   */
+  readonly servedCallId?: string;
   readonly subagentName: string;
   readonly replyTo:
     | { readonly kind: "hook"; readonly token: string }
@@ -291,6 +297,8 @@ export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
   /** Delegated caller waiting for this turn's settled result. */
   readonly caller?: TurnCaller;
+  /** Serving call id for each batched payload; null means no caller. Separate from reply routing. */
+  readonly payloadCallers?: readonly (string | null)[];
   /** Additive durable metadata. Absent on envelopes written by older deployments. */
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   /** Inbound channel request id used only for workflow attributes. */

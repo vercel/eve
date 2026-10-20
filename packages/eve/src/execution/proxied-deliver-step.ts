@@ -1,4 +1,5 @@
 import { userPartsOf } from "#harness/user-parts.js";
+import { selectDeliveryPayloads } from "#harness/messages.js";
 import { routeAnswer } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { principalOf } from "#execution/session/delivery-facts.js";
@@ -54,6 +55,7 @@ interface ChildBucket {
   readonly childSessionInbox?: SessionInboxAddress;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
+  readonly payloadCallers: (string | null)[];
 }
 
 /**
@@ -172,9 +174,11 @@ async function routeProxiedDeliver(
         childSessionInbox: forChild.childSessionInbox,
         metadata: [],
         payloads: [],
+        payloadCallers: [],
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
+      child.payloadCallers.push(sourceDelivery.payloadCallers?.[sourcePayloadIndex] ?? null);
       if (routed.forSelf === undefined && childIndex === 0) {
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
           if (metadata.payloadIndex === sourcePayloadIndex) {
@@ -198,6 +202,8 @@ async function routeProxiedDeliver(
         ...sourceDelivery,
         deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
         payloads: child.payloads,
+        payloadCallers:
+          sourceDelivery.payloadCallers === undefined ? undefined : child.payloadCallers,
       };
       const remote = child.remote;
       if (remote !== undefined) {
@@ -245,19 +251,13 @@ async function routeProxiedDeliver(
   );
   if (parentAction !== undefined) return { ...context, kind: parentAction.kind };
   const orderedParentPayloads = [...parentPayloads].sort(([a], [b]) => a - b);
-  const parentMetadata = orderedParentPayloads.flatMap(([sourcePayloadIndex], payloadIndex) =>
-    (sourceDelivery.deliveryMetadata ?? [])
-      .filter((metadata) => metadata.payloadIndex === sourcePayloadIndex)
-      .map((metadata) => ({ ...metadata, payloadIndex })),
-  );
   const remainder =
     orderedParentPayloads.length === 0
       ? undefined
-      : {
-          ...sourceDelivery,
-          deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
-          payloads: orderedParentPayloads.map(([, payload]) => payload),
-        };
+      : selectDeliveryPayloads(
+          sourceDelivery,
+          orderedParentPayloads.map(([index, payload]) => ({ index, payload })),
+        );
   return { ...context, kind: "continue", remainder };
 }
 

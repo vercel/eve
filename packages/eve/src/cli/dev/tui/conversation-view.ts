@@ -1,5 +1,4 @@
 import type { ConversationState } from "#client/conversation-state.js";
-import { conversationTables } from "#client/conversation.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import type { EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
@@ -14,19 +13,26 @@ export interface TokenUsage {
 
 /** What the terminal shows beyond the conversation's messages, read from the same tables. */
 export interface TuiSessionData {
+  readonly view: SessionView;
   /** Usage summed across the session; the renderer subtracts a turn baseline. */
   readonly usage: TokenUsage;
   /** The latest step's usage, whose input restates the context size. */
   readonly lastStepUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
   /** The model the latest turn ran. */
   readonly modelId?: string;
-  /** Each distinct turn or session failure, in order. */
-  readonly failures: readonly ErrorInfo[];
+  /** Each distinct turn or session failure, in order, with the turn it ended. */
+  readonly failures: readonly TuiFailure[];
   readonly sessionFailed: boolean;
   /** The tool's authored copy for a call, which the conversation's one `label` doesn't separate. */
   readonly toolLabels: (callId: string) => ToolLabels | undefined;
   /** Calls the session refused for the model to retry; people only see the retry. */
   readonly withdrawn: (callId: string) => boolean;
+}
+
+/** A failure, and the turn it ended when it ended one. */
+export interface TuiFailure {
+  readonly error: ErrorInfo;
+  readonly turnId?: string;
 }
 
 export interface ToolLabels {
@@ -35,7 +41,7 @@ export interface ToolLabels {
 }
 
 export function tuiSessionData(conversation: ConversationState): TuiSessionData {
-  const { previews, view } = conversationTables(conversation);
+  const { previews, view } = conversation;
   const turnRuns = Object.values(view.runs).filter((run) => "turnId" in run.owner);
   const latestTurnId = view.session.latestTurnId;
   const modelId = turnRuns
@@ -43,6 +49,7 @@ export function tuiSessionData(conversation: ConversationState): TuiSessionData 
     ?.modelId?.slice(0, 256);
   const { total } = view.usage;
   return {
+    view,
     failures: failuresOf(view),
     lastStepUsage: turnRuns.findLast((run) => run.usage !== undefined)?.usage,
     // The model id is printed in the status line, so it must not carry terminal controls.
@@ -61,17 +68,28 @@ function runTurnId(run: SessionView["runs"][string]): string | undefined {
   return "turnId" in run.owner ? run.owner.turnId : undefined;
 }
 
-/** Each failed turn's failure, then the session's unless it repeats the turn that failed it. */
-function failuresOf(view: SessionView): readonly ErrorInfo[] {
-  const failures = Object.values(view.turns).flatMap((turn) => turnFailure(turn) ?? []);
+/**
+ * Each failed turn's failure, then the session's. A failed session cancels the turn it ended, so
+ * its failure is that turn's, unless the turn failed itself: then it is dropped when it repeats
+ * the turn's, and otherwise belongs to no turn.
+ */
+function failuresOf(view: SessionView): readonly TuiFailure[] {
+  const failures = Object.values(view.turns).flatMap((turn): TuiFailure[] => {
+    const error = turnFailure(turn);
+    return error === undefined ? [] : [{ error, turnId: turn.turnId }];
+  });
   const { cause, error, latestTurnId, outcome } = view.session;
   if (outcome !== "failed") return failures;
   const failure = error ?? { code: "SESSION_FAILED", message: "The session failed." };
-  const turnId = cause !== undefined && "turnId" in cause ? cause.turnId : latestTurnId;
-  const repeats = turnFailure(turnId === undefined ? undefined : view.turns[turnId]);
-  return repeats !== undefined && failureKey(repeats) === failureKey(failure)
-    ? failures
-    : [...failures, failure];
+  const causeTurnId = cause !== undefined && "turnId" in cause ? cause.turnId : undefined;
+  const turnId = causeTurnId ?? latestTurnId;
+  const own = turnFailure(turnId === undefined ? undefined : view.turns[turnId]);
+  if (own === undefined)
+    return [
+      ...failures,
+      { error: failure, ...(causeTurnId !== undefined && { turnId: causeTurnId }) },
+    ];
+  return failureKey(own) === failureKey(failure) ? failures : [...failures, { error: failure }];
 }
 
 function turnFailure(turn: SessionView["turns"][string] | undefined): ErrorInfo | undefined {
@@ -97,6 +115,8 @@ export interface AgentTUIFailure {
   readonly hint?: string;
   /** Diagnostic dump for unrecognized failures. */
   readonly detail?: string;
+  /** The turn the failure ended; a failure of none renders after the conversation. */
+  readonly turnId?: string;
 }
 
 /** Everything the renderer draws for the session, derived from one store snapshot. */
@@ -115,12 +135,13 @@ export function conversationView(
   failureHint?: (error: ErrorInfo) => string | undefined,
 ): AgentTUIConversationView {
   return {
-    conversation: snapshot.data,
+    conversation: snapshot,
     working: isWorking(snapshot.status),
     data,
-    failures: data.failures.map((error) => {
-      const failure: { message: string; hint?: string; detail?: string } = {
+    failures: data.failures.map(({ error, turnId }) => {
+      const failure: { message: string; hint?: string; detail?: string; turnId?: string } = {
         message: formatFailureMessage(error),
+        ...(turnId !== undefined && { turnId }),
       };
       const hint = failureHint?.(error) ?? error.hint;
       if (hint !== undefined) failure.hint = hint;
@@ -132,5 +153,5 @@ export function conversationView(
 }
 
 export function isWorking(status: EveAgentStoreSnapshot["status"]): boolean {
-  return status === "submitted" || status === "streaming" || status === "resuming";
+  return status === "busy" || status === "resuming";
 }

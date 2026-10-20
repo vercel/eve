@@ -6,6 +6,7 @@ import {
   attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
+  type AcceptedDelivery,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
@@ -13,7 +14,6 @@ import {
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { ClientSession } from "#client/session.js";
-import type { ConversationState } from "#client/conversation-state.js";
 import type {
   CancelSessionResult,
   ClientAuth,
@@ -47,28 +47,31 @@ export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
 export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
-  /** The conversation: messages, turns, interactions, tasks, and followed agent sessions. */
-  readonly data: ComputedRef<ConversationState>;
+  /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
+  readonly previews: ComputedRef<EveAgentStoreSnapshot["previews"]>;
+  readonly messages: ComputedRef<EveAgentStoreSnapshot["messages"]>;
+  readonly agents: ComputedRef<EveAgentStoreSnapshot["agents"]>;
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: ComputedRef<Error | undefined>;
+  readonly view: ComputedRef<EveAgentStoreSnapshot["view"]>;
   /** Raw server events from this session (authoritative stream). */
   readonly events: ComputedRef<readonly SessionStreamEvent[]>;
-  /** Replay the attached durable session and follow its in-flight turn, if any. */
+  /** Resolves at the durable tail; the session stream keeps following afterward. */
   readonly resume: () => Promise<void>;
   /** Create the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
-  /** Send a message with optional turn settings. */
+  /** Submits a message and resolves on acceptance, not execution. */
   readonly send: <TOutput = unknown>(
     message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ) => Promise<void>;
-  /** Answer pending HITL input requests. */
+  ) => Promise<AcceptedDelivery>;
+  /** Submits answers and resolves on acceptance, not execution. */
   readonly respond: <TOutput = unknown>(
     answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ) => Promise<void>;
+  ) => Promise<AcceptedDelivery>;
   /** Current session identity and stream cursor. */
   readonly session: ComputedRef<ClientSessionState | undefined>;
   /**
@@ -189,7 +192,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       snapshot.value = store.snapshot;
     });
     attachEveAgentStore(store);
-    if (options.resume) void store.resume();
+    if (options.resume) void store.resume().catch(() => {});
 
     onScopeDispose(() => {
       unsubscribe();
@@ -199,7 +202,10 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
 
   return {
     cancel: () => store.cancel(),
-    data: computed(() => snapshot.value.data),
+    previews: computed(() => snapshot.value.previews),
+    messages: computed(() => snapshot.value.messages),
+    agents: computed(() => snapshot.value.agents),
+    view: computed(() => snapshot.value.view),
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
     prewarm: () => store.prewarm(),
