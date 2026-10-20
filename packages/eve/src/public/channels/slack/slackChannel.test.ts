@@ -110,16 +110,16 @@ function parseSlackRequestBody(init: RequestInit | undefined): Record<string, un
 }
 
 // Wraps a recording `fetch` mock so the final-reply root check
-// (`conversations.replies`) finds a live thread root without being recorded.
+// (`chat.getPermalink`) finds a live thread root without being recorded.
 // Tests of that check supply their own `lookup` and read the lookups made.
 function withLiveThreadRoot(
   fetchMock: ReturnType<typeof vi.fn>,
-  lookup: () => Record<string, unknown> = () => ({ ok: true, messages: [{ ts: "1" }] }),
+  lookup: () => Record<string, unknown> = () => ({ ok: true, permalink: "https://slack.test/p1" }),
   lookups: string[] = [],
 ): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
-    if (String(input) === "https://slack.com/api/conversations.replies") {
-      lookups.push(String(parseSlackRequestBody(init).ts));
+    if (String(input) === "https://slack.com/api/chat.getPermalink") {
+      lookups.push(String(parseSlackRequestBody(init).message_ts));
       return new Response(JSON.stringify(lookup()), {
         headers: { "content-type": "application/json" },
       });
@@ -1977,7 +1977,7 @@ describe("slackChannel() final reply delivery", () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
-    rootLookup = () => ({ ok: true, messages: [{ ts: "1700000000.000001" }] });
+    rootLookup = () => ({ ok: true, permalink: "https://slack.test/p1700000000000001" });
     rootLookups = [];
     vi.stubGlobal(
       "fetch",
@@ -2091,11 +2091,10 @@ describe("slackChannel() final reply delivery", () => {
   describe("deleted thread root", () => {
     const rootGoneLog = "Slack thread root was deleted; dropping the final reply";
 
-    // Slack posts a reply to a deleted root that had no replies as a
-    // top-level channel message.
-    it("drops the reply when Slack reports the root as thread_not_found", async () => {
+    // Slack posts a reply to a deleted root as a top-level channel message.
+    it("drops the reply when Slack reports the root as message_not_found", async () => {
       const logs = captureLogRecords();
-      rootLookup = () => ({ ok: false, error: "thread_not_found" });
+      rootLookup = () => ({ ok: false, error: "message_not_found" });
       const { adapter, ctx } = adapterWith();
 
       await callCompletionHandler(adapter, finalReply("hello"), ctx);
@@ -2105,22 +2104,8 @@ describe("slackChannel() final reply delivery", () => {
       expect(logs.records.some((entry) => entry.message === rootGoneLog)).toBe(true);
     });
 
-    // A deleted root with replies stays as a tombstone and keeps its thread,
-    // which every eve thread has once eve answers.
-    it("posts the reply when the root is a tombstone that still has replies", async () => {
-      rootLookup = () => ({
-        ok: true,
-        messages: [{ reply_count: 2, subtype: "tombstone", ts: "1700000000.000001" }],
-      });
-      const { adapter, ctx } = adapterWith();
-
-      await callCompletionHandler(adapter, finalReply("hello"), ctx);
-
-      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
-    });
-
     it("drops a reply sent through postCompletedSlackReply", async () => {
-      rootLookup = () => ({ ok: false, error: "thread_not_found" });
+      rootLookup = () => ({ ok: false, error: "message_not_found" });
       const { adapter, ctx } = adapterWith([helperReplies()]);
 
       await callCompletionHandler(adapter, finalReply(shortAnswer), ctx);
@@ -2139,7 +2124,7 @@ describe("slackChannel() final reply delivery", () => {
 
     it.each([
       ["a Slack error", () => ({ ok: false, error: "ratelimited" })],
-      ["a missing history scope", () => ({ ok: false, error: "missing_scope" })],
+      ["an unreadable channel", () => ({ ok: false, error: "channel_not_found" })],
       [
         "a thrown lookup",
         () => {
