@@ -323,6 +323,12 @@
       "import": "./dist/src/internal/mount-state.js",
       "default": "./dist/src/internal/mount-state.js"
     },
+    "./internal/sandbox-network-credentials": {
+      "eve-source": "./src/internal/sandbox-network-credentials.ts",
+      "types": "./dist/src/internal/sandbox-network-credentials.d.ts",
+      "import": "./dist/src/internal/sandbox-network-credentials.js",
+      "default": "./dist/src/internal/sandbox-network-credentials.js"
+    },
     "./local-dev": {
       "types": "./dist/src/public/local-dev.d.ts",
       "import": "./dist/src/public/local-dev.js",

@@ -45,10 +45,6 @@ export function defineDeployedSelfModificationSandbox(
       });
       if (session.parent === undefined)
         throw new Error("Production self-modification requires a child session.");
-      if (sandbox.setNetworkPolicy === undefined) {
-        throw new Error("Production self-modification requires mutable sandbox network policy.");
-      }
-      const capableSandbox = { ...sandbox, setNetworkPolicy: sandbox.setNetworkPolicy };
       const token = await createGitHubCredentialProvider(deployed.credentials).resolve({
         capability: "checkout",
         repository: deployed.repository,
@@ -56,7 +52,7 @@ export function defineDeployedSelfModificationSandbox(
       await prepareSelfModificationWorkspace({
         directory: deployed.directory,
         repository: deployed.repository,
-        sandbox: capableSandbox,
+        sandbox,
         targetBranch: deployed.targetBranch,
         token,
       });

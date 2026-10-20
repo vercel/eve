@@ -1,15 +1,11 @@
 import type { SandboxSession } from "eve/sandbox";
 
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
-
-import { gitHubRemoteUrl } from "#shared/git.js";
+import { withSandboxNetworkCredentials } from "#execution/sandbox/network-policy.js";
+import { gitHubGitCredentials, gitHubRemoteUrl } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
 import type { GitHubRepository } from "./remote/config.js";
-import { gitOutput, runGitCommand, withBrokeredGitHubCredential } from "./git.js";
+import { gitOutput, runGitCommand } from "./git.js";
 import { assertFullSha, assertGitRef } from "./identifiers.js";
 
 const WORKSPACE_PATH = "/workspace";
@@ -26,7 +22,7 @@ export interface PreparedSelfModificationWorkspace {
   readonly targetBranch: string;
 }
 
-type CheckoutSandbox = Pick<NetworkPolicySandboxSession, "run" | "setNetworkPolicy">;
+type CheckoutSandbox = Pick<SandboxSession, "run">;
 
 /** Prepares a token-free remote and immutable target-branch checkout for one child session. */
 export async function prepareSelfModificationWorkspace(input: {
@@ -38,20 +34,30 @@ export async function prepareSelfModificationWorkspace(input: {
 }): Promise<PreparedSelfModificationWorkspace> {
   assertGitRef(input.targetBranch, "target branch");
   const remote = gitHubRemoteUrl(input.repository);
-  await withBrokeredGitHubCredential(input.sandbox, input.token, async () => {
-    await run(
-      input.sandbox,
-      `rm -rf ${quote(REPOSITORY_PATH)} && mkdir -p ${quote(REPOSITORY_PATH)}`,
-    );
-    await run(input.sandbox, `git -C ${quote(REPOSITORY_PATH)} init`);
-    await run(input.sandbox, `git -C ${quote(REPOSITORY_PATH)} remote add origin ${quote(remote)}`);
-    await run(
-      input.sandbox,
-      `${GIT_FETCH_ENV} git -C ${quote(REPOSITORY_PATH)} fetch --no-tags origin ${quote(`refs/heads/${input.targetBranch}`)}`,
-    );
-    await run(input.sandbox, `git -C ${quote(REPOSITORY_PATH)} update-ref ${BASE_REF} FETCH_HEAD`);
-    await run(input.sandbox, `git -C ${quote(REPOSITORY_PATH)} checkout --detach ${BASE_REF}`);
-  });
+  await withSandboxNetworkCredentials(
+    input.sandbox,
+    gitHubGitCredentials(input.token),
+    async () => {
+      await run(
+        input.sandbox,
+        `rm -rf ${quote(REPOSITORY_PATH)} && mkdir -p ${quote(REPOSITORY_PATH)}`,
+      );
+      await run(input.sandbox, `git -C ${quote(REPOSITORY_PATH)} init`);
+      await run(
+        input.sandbox,
+        `git -C ${quote(REPOSITORY_PATH)} remote add origin ${quote(remote)}`,
+      );
+      await run(
+        input.sandbox,
+        `${GIT_FETCH_ENV} git -C ${quote(REPOSITORY_PATH)} fetch --no-tags origin ${quote(`refs/heads/${input.targetBranch}`)}`,
+      );
+      await run(
+        input.sandbox,
+        `git -C ${quote(REPOSITORY_PATH)} update-ref ${BASE_REF} FETCH_HEAD`,
+      );
+      await run(input.sandbox, `git -C ${quote(REPOSITORY_PATH)} checkout --detach ${BASE_REF}`);
+    },
+  );
   const baseSha = await gitOutput(
     input.sandbox,
     `git -C ${quote(REPOSITORY_PATH)} rev-parse ${BASE_REF}`,

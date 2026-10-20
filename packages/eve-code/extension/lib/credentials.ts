@@ -1,4 +1,5 @@
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
+import { addSandboxNetworkCredentials } from "eve/internal/sandbox-network-credentials";
 
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
@@ -22,7 +23,6 @@ export interface BrokeredCredentialOptions {
 
 // Keyed by session object because eve sessions expose no sandbox identity.
 const headersBySandbox = new WeakMap<SandboxSession, Map<string, Record<string, string>>>();
-const policyQueues = new WeakMap<SandboxSession, Promise<void>>();
 const environmentQueues = new WeakMap<SandboxSession, Promise<void>>();
 
 export async function authenticateGitHub(
@@ -82,22 +82,12 @@ async function brokerRules(
     byHost.set(host, { ...byHost.get(host), ...headers });
   }
   headersBySandbox.set(sandbox, byHost);
-  const previous = policyQueues.get(sandbox) ?? Promise.resolve();
-  const next = previous.then(async () => {
-    const allow: Record<string, { transform: { headers: Record<string, string> }[] }[]> = {
-      "*": [],
-    };
-    for (const [host, headers] of byHost) {
-      allow[host] = [{ transform: [{ headers }] }];
-    }
-    await sandbox.setNetworkPolicy({ allow });
-  });
-  policyQueues.set(sandbox, next);
-  try {
-    await next;
-  } finally {
-    if (policyQueues.get(sandbox) === next) policyQueues.delete(sandbox);
-  }
+  await addSandboxNetworkCredentials(
+    sandbox,
+    Object.fromEntries(
+      Object.keys(rules).map((host) => [host, [{ transform: [{ headers: byHost.get(host) }] }]]),
+    ),
+  );
 }
 
 async function writeToolEnvironment(

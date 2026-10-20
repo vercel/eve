@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { ConnectError, type ConnectTokenParams } from "@vercel/connect";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
+import { createSandboxNetworkPolicyControl } from "eve/internal/sandbox-network-credentials";
 
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
@@ -77,10 +78,12 @@ test("Connect errors fail with the connector UID", async () => {
 });
 
 function fakeSandbox(policies: { allow: Record<string, unknown> }[]): NetworkPolicySandboxSession {
-  const sandbox: Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> = {
-    async setNetworkPolicy(policy) {
-      policies.push(policy as { allow: Record<string, unknown> });
-    },
-  };
+  const sandbox: Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> =
+    createSandboxNetworkPolicyControl({
+      async apply(policy) {
+        policies.push(policy as { allow: Record<string, unknown> });
+      },
+      readUserPolicy: async () => "allow-all",
+    });
   return sandbox as NetworkPolicySandboxSession;
 }

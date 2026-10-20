@@ -140,6 +140,17 @@ export async function withSandboxNetworkCredentials<T>(
   return outcome.value;
 }
 
+/**
+ * Attaches `credentials` for the rest of the session handle. Throws, without
+ * writing a policy, when a host is outside the user's policy.
+ */
+export async function addSandboxNetworkCredentials(
+  sandbox: object,
+  credentials: SandboxNetworkCredentials,
+): Promise<void> {
+  await getSandboxNetworkCredentialControl(sandbox).add(credentials);
+}
+
 export function getSandboxNetworkCredentialControl(
   sandbox: object,
 ): SandboxNetworkCredentialControl {

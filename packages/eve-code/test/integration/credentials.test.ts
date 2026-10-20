@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
+import { createSandboxNetworkPolicyControl } from "eve/internal/sandbox-network-credentials";
 
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
@@ -27,6 +28,20 @@ test("default firewall authentication merges GitHub and Vercel hosts", async () 
   assert.deepEqual(final.allow["api.vercel.com"], [
     { transform: [{ headers: { authorization: "Bearer vercel-token" } }] },
   ]);
+});
+
+test("firewall authentication leaves a deny-all policy in force", async () => {
+  const policies: unknown[] = [];
+  const sandbox = fakeSandbox({
+    networkPolicy: "deny-all",
+    setPolicy: (policy) => policies.push(policy),
+  });
+
+  await assert.rejects(
+    authenticateGitHub(sandbox, { token: "github-token" }),
+    /does not allow github\.com, api\.github\.com/u,
+  );
+  assert.deepEqual(policies, []);
 });
 
 test("custom broker receives complete rules for each credential", async () => {
@@ -75,12 +90,12 @@ test("command delivery configures git and writes both CLI tokens", async () => {
 
 function fakeSandbox(input: {
   commands?: string[];
+  networkPolicy?: SandboxNetworkPolicy;
   writes?: Map<string, string>;
   setPolicy?: (policy: unknown) => void;
 }): SandboxSession {
   const writes = input.writes ?? new Map<string, string>();
-  const sandbox: Pick<SandboxSession, "resolvePath" | "readTextFile" | "writeTextFile" | "run"> &
-    Partial<Pick<NetworkPolicySandboxSession, "setNetworkPolicy">> = {
+  const sandbox: Pick<SandboxSession, "resolvePath" | "readTextFile" | "writeTextFile" | "run"> = {
     resolvePath(path: string) {
       return `/workspace/${path}`.replace(/\/$/u, "");
     },
@@ -95,8 +110,16 @@ function fakeSandbox(input: {
       return { exitCode: 0, stdout: "", stderr: "" };
     },
   };
-  if (input.setPolicy !== undefined) {
-    sandbox.setNetworkPolicy = async (policy) => input.setPolicy?.(policy);
-  }
-  return sandbox as SandboxSession;
+  if (input.setPolicy === undefined) return sandbox as SandboxSession;
+  const { setPolicy } = input;
+  const capable: typeof sandbox = {
+    ...sandbox,
+    ...createSandboxNetworkPolicyControl({
+      async apply(policy) {
+        setPolicy(policy);
+      },
+      readUserPolicy: async () => input.networkPolicy ?? "allow-all",
+    }),
+  };
+  return capable as SandboxSession;
 }

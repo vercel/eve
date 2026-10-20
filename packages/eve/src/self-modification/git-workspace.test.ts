@@ -1,15 +1,24 @@
 import type { SandboxNetworkPolicy } from "eve/sandbox";
 import { describe, expect, it } from "vitest";
 
+import { createSandboxNetworkPolicyControl } from "#execution/sandbox/network-policy.js";
+
 import { prepareSelfModificationWorkspace } from "./git-workspace.js";
 
 function sandbox(
-  input: { readonly failPolicyAt?: number; readonly failRun?: (command: string) => boolean } = {},
+  input: {
+    readonly failPolicyAt?: number;
+    readonly failRun?: (command: string) => boolean;
+    readonly networkPolicy?: SandboxNetworkPolicy;
+  } = {},
 ) {
+  const opened = input.networkPolicy ?? "allow-all";
   const commands: string[] = [];
   const policies: SandboxNetworkPolicy[] = [];
+  let inForce = opened;
   return {
     commands,
+    inForce: () => inForce,
     policies,
     run: async ({ command }: { command: string }) => {
       commands.push(command);
@@ -17,10 +26,14 @@ function sandbox(
       if (command.includes("rev-parse")) return { exitCode: 0, stderr: "", stdout: "a".repeat(40) };
       return { exitCode: 0, stderr: "", stdout: "" };
     },
-    setNetworkPolicy: async (policy: SandboxNetworkPolicy) => {
-      policies.push(policy);
-      if (policies.length === input.failPolicyAt) throw new Error("policy update failed");
-    },
+    ...createSandboxNetworkPolicyControl({
+      async apply(policy) {
+        policies.push(policy);
+        if (policies.length === input.failPolicyAt) throw new Error("policy update failed");
+        inForce = policy;
+      },
+      readUserPolicy: async () => opened,
+    }),
   };
 }
 
@@ -54,6 +67,16 @@ describe("prepareSelfModificationWorkspace", () => {
     ]);
   });
 
+  it("leaves a deny-all policy in force and runs no git", async () => {
+    const session = sandbox({ networkPolicy: "deny-all" });
+    await expect(prepareSelfModificationWorkspace({ ...input, sandbox: session })).rejects.toThrow(
+      "does not allow github.com, codeload.github.com",
+    );
+    expect(session.inForce()).toBe("deny-all");
+    expect(session.policies).toEqual([]);
+    expect(session.commands).toEqual([]);
+  });
+
   it("revokes credentials after a failed checkout", async () => {
     const session = sandbox({ failRun: (command) => command.includes(" fetch ") });
     await expect(prepareSelfModificationWorkspace({ ...input, sandbox: session })).rejects.toThrow(
@@ -62,19 +85,20 @@ describe("prepareSelfModificationWorkspace", () => {
     expect(session.policies.at(-1)).toBe("allow-all");
   });
 
-  it("attempts revocation when installing the broker policy fails", async () => {
+  it("runs no git when the credential cannot be installed", async () => {
     const session = sandbox({ failPolicyAt: 1 });
     await expect(prepareSelfModificationWorkspace({ ...input, sandbox: session })).rejects.toThrow(
       "policy update failed",
     );
-    expect(session.policies).toHaveLength(2);
-    expect(session.policies.at(-1)).toBe("allow-all");
+    expect(session.policies).toHaveLength(1);
+    expect(session.inForce()).toBe("allow-all");
+    expect(session.commands).toEqual([]);
   });
 
   it("reports credential revocation failures", async () => {
     const session = sandbox({ failPolicyAt: 2 });
     await expect(prepareSelfModificationWorkspace({ ...input, sandbox: session })).rejects.toThrow(
-      "Could not revoke the brokered GitHub credential",
+      "Could not remove brokered credentials for github.com, codeload.github.com",
     );
   });
 

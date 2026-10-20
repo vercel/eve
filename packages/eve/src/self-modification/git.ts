@@ -1,45 +1,7 @@
 import type { SandboxSession } from "eve/sandbox";
 
-import { mergeSandboxNetworkCredentials } from "#execution/sandbox/network-policy.js";
-import { gitHubGitCredentials } from "#shared/git.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
-
-import { SELF_MODIFICATION_BASELINE_NETWORK_POLICY } from "./network-policy.js";
-
 const MAX_ERROR_OUTPUT = 2_000;
 type CommandSandbox = Pick<SandboxSession, "run">;
-
-export async function withBrokeredGitHubCredential<T>(
-  sandbox: Pick<NetworkPolicySandboxSession, "setNetworkPolicy">,
-  token: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  let outcome:
-    | { readonly ok: true; readonly value: T }
-    | { readonly error: unknown; readonly ok: false };
-  try {
-    await sandbox.setNetworkPolicy(
-      mergeSandboxNetworkCredentials("allow-all", gitHubGitCredentials(token)),
-    );
-    outcome = { ok: true, value: await operation() };
-  } catch (error) {
-    outcome = { error, ok: false };
-  }
-
-  try {
-    await sandbox.setNetworkPolicy(SELF_MODIFICATION_BASELINE_NETWORK_POLICY);
-  } catch (revocationError) {
-    throw new Error("Could not revoke the brokered GitHub credential from the sandbox.", {
-      cause: outcome.ok ? revocationError : new AggregateError([outcome.error, revocationError]),
-    });
-  }
-
-  if (!outcome.ok) throw outcome.error;
-  return outcome.value;
-}
 
 export async function gitOutput(
   sandbox: CommandSandbox,
