@@ -9,6 +9,7 @@ import {
   loadAuthoredModuleNamespace,
   type AuthoredModuleLoadOptions,
 } from "#internal/authored-module-loader.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 
 export type CompiledBindingNamespaceLoader = (
   sourceId: string,
@@ -38,6 +39,7 @@ export function createCompiledBindingNamespaceLoader(input: {
    */
   readonly appRoot: string | undefined;
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
+  readonly graph?: AuthoredModuleGraph;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
   readonly mountSourceId?: (binding: AgentModuleBinding) => string | undefined;
@@ -73,6 +75,7 @@ export function createCompiledBindingNamespaceLoader(input: {
       return await loadCompiledBindingNamespace({
         appRoot: input.appRoot,
         binding,
+        graph: input.graph,
         loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
         registries: input.registries,
         mounts: input.mounts,
@@ -89,6 +92,7 @@ export function createCompiledBindingNamespaceLoader(input: {
 async function loadCompiledBindingNamespace(input: {
   readonly appRoot: string | undefined;
   readonly binding: AgentModuleBinding;
+  readonly graph?: AuthoredModuleGraph;
   readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
@@ -115,6 +119,7 @@ async function loadCompiledBindingNamespace(input: {
       appRoot: input.binding.owner.kind === "application" ? input.appRoot : undefined,
       externalDependencies: input.binding.backing.externalDependencies,
       extension,
+      graph: input.graph,
     });
   }
   const dependencyNamespaces = Object.fromEntries(

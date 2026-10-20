@@ -21,9 +21,11 @@ export class NodeModuleEvaluationContext {
     mounts?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["mounts"],
     evaluationId?: string,
     appRoot?: string,
+    graph?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["graph"],
   ) {
     this.loadNamespace = createCompiledBindingNamespaceLoader({
       appRoot,
+      graph,
       mountSourceId,
       mounts,
       evaluationId,
