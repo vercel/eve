@@ -118,9 +118,9 @@ describe("prepareSuccessorStep", () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
-        "eve.workflowTool": {
-          version: 4,
-          runs: [
+        "eve.work": {
+          version: 1,
+          calls: [
             {
               callId: "call",
               toolName: "research",
