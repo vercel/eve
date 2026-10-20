@@ -6,6 +6,7 @@ import {
 } from "#public/channels/slack/limits.js";
 import type {
   SlackChannelInternalEvents,
+  SlackChannelContext,
   SlackChannelState,
   SlackContext,
   SlackEventContext,
@@ -65,9 +66,10 @@ export type SlackCompletedReply =
  *    This requires the `files:write` bot scope. In a session without a
  *    thread yet, the note posts first and anchors the thread.
  *
- * Before any of that, eve checks that the bound thread's root still exists.
- * Slack posts a reply to a deleted root as a top-level channel message, so
- * eve drops the reply instead of posting it unthreaded.
+ * Before any of that, while eve has not yet posted in the thread, it checks
+ * that the bound thread's root still exists. Slack posts a reply to a
+ * deleted root as a top-level channel message, so eve drops the reply
+ * instead of posting it unthreaded.
  *
  * Any other error, and a failed upload, is thrown so your renderer sees it.
  * eve logs each fallback it takes with Slack's error code, never the reply.
@@ -140,10 +142,15 @@ export async function deliverCompletedSlackReply(
  * the check works with the minimal `app_mentions:read` + `chat:write` app.
  * Only `message_not_found` counts as gone. Any other failure to look it up
  * counts as "not gone", so a lookup problem never swallows a reply.
+ *
+ * Once eve has posted in the thread, deleting the root leaves a tombstone
+ * that keeps the thread, and `chat.getPermalink` may not tell a tombstone
+ * from a missing message, so the check is skipped.
  */
 async function threadRootIsGone(channel: SlackContext): Promise<boolean> {
   const { channelId, threadTs } = channel.slack;
   if (!channelId || !threadTs) return false;
+  if ((channel as Partial<SlackChannelContext>).state?.postedInThread === true) return false;
   try {
     const response = await channel.slack.request("chat.getPermalink", {
       channel: channelId,

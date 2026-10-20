@@ -281,6 +281,12 @@ export interface SlackChannelState {
    * message tells the model the reply was not seen, then clears it.
    */
   undeliveredReplyErrorId?: string | null;
+  /**
+   * Whether eve has posted in this thread. Once it has, deleting the root
+   * leaves a tombstone that keeps the thread, so the final reply skips the
+   * deleted-root check.
+   */
+  postedInThread?: boolean;
 }
 
 /**
@@ -813,6 +819,9 @@ function rebuildSlackContext(
       if (state.channelId) {
         session.continuation?.alias(slackContinuationToken(state.channelId, ts));
       }
+    },
+    onPosted() {
+      state.postedInThread = true;
     },
   });
   return { thread, slack, state };

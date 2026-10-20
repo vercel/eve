@@ -2122,6 +2122,63 @@ describe("slackChannel() final reply delivery", () => {
       expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
     });
 
+    // Once eve has posted, deleting the root leaves a tombstone that keeps the
+    // thread, which chat.getPermalink may report as message_not_found.
+    it("skips the check once eve has posted in the thread", async () => {
+      rootLookup = () => ({ ok: false, error: "message_not_found" });
+      const { adapter, ctx } = adapterWith();
+      ctx.state.postedInThread = true;
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(rootLookups).toEqual([]);
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
+    });
+
+    it("checks the root only until eve's first post in the thread", async () => {
+      const { adapter, ctx } = adapterWith();
+
+      await callCompletionHandler(adapter, finalReply("first"), ctx);
+      await callCompletionHandler(adapter, finalReply("second"), ctx);
+
+      expect(ctx.state.postedInThread).toBe(true);
+      expect(rootLookups).toEqual(["1700000000.000001"]);
+      expect(urls()).toEqual([
+        "https://slack.com/api/chat.postMessage",
+        "https://slack.com/api/chat.postMessage",
+      ]);
+    });
+
+    it("counts a raw chat.postMessage into the thread as eve's post", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "1700000000.000009" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const { ctx } = adapterWith();
+
+      await ctx.slack.request("chat.postMessage", {
+        channel: "C01",
+        text: "task card",
+        thread_ts: "1700000000.000001",
+      });
+
+      expect(ctx.state.postedInThread).toBe(true);
+    });
+
+    it("does not count a raw chat.postMessage to another thread", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "1700000000.000009" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const { ctx } = adapterWith();
+
+      await ctx.slack.request("chat.postMessage", { channel: "C02", text: "elsewhere" });
+
+      expect(ctx.state.postedInThread).toBeUndefined();
+    });
+
     it.each([
       ["a Slack error", () => ({ ok: false, error: "ratelimited" })],
       ["an unreadable channel", () => ({ ok: false, error: "channel_not_found" })],
