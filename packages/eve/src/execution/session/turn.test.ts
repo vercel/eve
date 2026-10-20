@@ -42,7 +42,10 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
   getWorkflowMetadata: () => ({ url: "https://parent.example" }),
 }));
-vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
+vi.mock("#execution/coordination-dispatch-step.js", () => ({
+  dispatchCoordinationStep: vi.fn(),
+  publishTaskStartedStep: vi.fn(),
+}));
 
 vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
@@ -99,10 +102,17 @@ type TurnStepWorkResult = DurableStepResult extends infer R
     : never
   : never;
 const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
-const dispatchWork = stepWork<
-  Parameters<typeof dispatchCoordinationStep>[0],
-  CoordinationDispatchResult
->;
+/** These dispatches start no task, so their work omits `started`. */
+function dispatchWork(
+  work: (
+    input: Parameters<typeof dispatchCoordinationStep>[0],
+  ) => Promise<Omit<CoordinationDispatchResult, "started">>,
+) {
+  return stepWork(async (input: Parameters<typeof dispatchCoordinationStep>[0]) => ({
+    ...(await work(input)),
+    started: [],
+  }));
+}
 const routeWork = stepWork<Parameters<typeof routeDeliverToChildren>[0], RoutedDeliverResult>;
 
 describe("SessionExecution checkpoints", () => {

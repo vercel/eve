@@ -28,6 +28,7 @@ import {
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
+import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -55,6 +56,8 @@ export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** The tasks the dispatch started or sent to, for the step that publishes `task.started`. */
+  readonly started: readonly TaskStartedStreamEvent["data"][];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */
