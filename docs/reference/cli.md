@@ -449,6 +449,8 @@ eve eval [evalId...] [--url <url>] [options]
 
 Runs all discovered evals when no eval ids are given; ids match exactly or by directory prefix (`eve eval weather` runs everything under `evals/weather/`). Exits `0` when every eval passed its checks, `1` when any eval failed (a failed check, an execution error, or a `--strict` threshold miss), `2` on configuration errors.
 
+Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed when the run ends. It runs beside an `eve dev` session for the same agent without attaching to it or changing it.
+
 | Flag                     | Type   | Default | Description                                                   |
 | ------------------------ | ------ | ------- | ------------------------------------------------------------- |
 | `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                    |

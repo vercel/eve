@@ -42,7 +42,7 @@ export interface CompiledRuntimeAgentBundle {
 const isCacheDisabled = process.env.EVE_DISABLE_AGENT_CACHE === "1";
 
 function isDevelopmentRuntimeSnapshotRoot(appRoot: string): boolean {
-  return appRoot.replaceAll("\\", "/").includes("/.eve/dev-runtime/snapshots/");
+  return appRoot.replaceAll("\\", "/").includes("/dev-runtime/snapshots/");
 }
 
 function normalizeCompiledArtifactsSource(
