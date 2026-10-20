@@ -2179,6 +2179,25 @@ describe("slackChannel() final reply delivery", () => {
       expect(ctx.state.postedInThread).toBeUndefined();
     });
 
+    // The anchor is the thread's root, not a reply under it.
+    it("does not count a post that anchors a new thread", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "1700000000.000042" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const adapter = withState(
+        getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+        { ...THREAD_STATE, threadTs: null },
+      );
+      const ctx = buildAdapterContext(adapter, stubAccessor());
+
+      await ctx.thread.post("proactive update");
+
+      expect(ctx.state.threadTs).toBe("1700000000.000042");
+      expect(ctx.state.postedInThread).toBeUndefined();
+    });
+
     it.each([
       ["a Slack error", () => ({ ok: false, error: "ratelimited" })],
       ["an unreadable channel", () => ({ ok: false, error: "channel_not_found" })],

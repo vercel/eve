@@ -431,9 +431,10 @@ export async function fetchSlackThreadWindow(
  * persist the anchor. Ephemerals and upload-only file posts do not
  * anchor.
  *
- * `onPosted` fires after each message or file this binding posts into its
- * own thread, through `thread.post`, `uploadFiles`, or
- * `request("chat.postMessage")`.
+ * `onPosted` fires after each reply this binding posts into its existing
+ * thread, through `thread.post`, `uploadFiles`, or
+ * `request("chat.postMessage")`. A post that anchors a new thread is its
+ * root, not a reply, so it does not fire.
  */
 export function buildSlackBinding(input: {
   /** Slack app id used to identify this app's fetched thread replies. */
@@ -464,7 +465,11 @@ export function buildSlackBinding(input: {
     const response = await send(operation, body);
     if (operation === "chat.postMessage" && response.ok === true) {
       const target = body as { readonly channel?: unknown; readonly thread_ts?: unknown };
-      if (target.channel === input.channelId && target.thread_ts === currentThreadTs) {
+      if (
+        currentThreadTs &&
+        target.channel === input.channelId &&
+        target.thread_ts === currentThreadTs
+      ) {
         input.onPosted?.();
       }
     }
@@ -494,7 +499,9 @@ export function buildSlackBinding(input: {
       initialComment: options?.initialComment,
       threadTs: threadTs || undefined,
     });
-    if (channelId === input.channelId && threadTs === currentThreadTs) input.onPosted?.();
+    if (threadTs && channelId === input.channelId && threadTs === currentThreadTs) {
+      input.onPosted?.();
+    }
     return result;
   }
 
@@ -599,11 +606,12 @@ export function buildSlackBinding(input: {
         return { id, raw: result.raw };
       }
 
+      const replyTo = currentThreadTs;
       const response = await postSlackMessage(
-        buildPostMessageOptions(message, input.channelId, currentThreadTs, apiOptions),
+        buildPostMessageOptions(message, input.channelId, replyTo, apiOptions),
       );
       const id = response.id;
-      input.onPosted?.();
+      if (replyTo) input.onPosted?.();
       if (currentThreadTs) threadHasReplies = true;
       handleMessageTs(id);
 
