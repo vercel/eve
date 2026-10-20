@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { AnyEventRequest } from "@workflow/world";
 import { hydrateStepReturnValue } from "@workflow/core/serialization";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -30,9 +31,9 @@ async function deadline(runId: string): Promise<Date> {
 }
 
 describe("idle session prewarm handoff", () => {
-  it("delivers a message exactly once when Send arrives after ownership release", async () => {
+  it("delivers a message exactly once when Send arrives while the successor starts", async () => {
     const output = captureConsoleOutput();
-    const runtime = await createTestRuntime({ agent: { name: "typing-release-race" } });
+    const runtime = await createTestRuntime({ agent: { name: "typing-successor-race" } });
     await runtime.run(async () => {
       const anchor = await startSessionOwner(workflowEntry, [
         {
@@ -57,20 +58,21 @@ describe("idle session prewarm handoff", () => {
       const createEvent = world.events.create.bind(world.events);
       let sending: Promise<unknown> | undefined;
       const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-        const [runId, event] = args;
-        const result = await createEvent(...args);
+        const [runId] = args;
+        const event = args[1] as AnyEventRequest;
         if (
           sending === undefined &&
-          runId === anchor.runId &&
-          event.eventType === "hook_disposed" &&
-          event.eventData?.token === token
+          runId !== anchor.runId &&
+          event.eventType === "run_created" &&
+          event.eventData.deploymentId === "dpl_b"
         ) {
           sending = workflowRuntime.dispatchSession({
             sessionId: anchor.runId,
             command: handoffFollowUp("dpl_b", "Alice writes during preparation.", "typing-race"),
           });
+          await sending;
         }
-        return result;
+        return await createEvent(...args);
       });
       try {
         await waitForCommandHookOwner(token);
