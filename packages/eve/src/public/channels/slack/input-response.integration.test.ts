@@ -8,7 +8,7 @@ const REPLY = "Mostly the billing migration";
 
 describe("slackChannel onInputResponse", () => {
   // https://github.com/vercel/eve/issues/5074
-  it.fails("keeps a typed thread reply from answering a question the hook would refuse", async () => {
+  it("keeps a typed thread reply from answering a question the hook would refuse", async () => {
     const driver = slackDriver("shared", { onInputResponse: () => null });
     await withChannelConversation(driver, async (conversation) => {
       await conversation.say(`Use ask_question and set question to: "${PROMPT}"`);
