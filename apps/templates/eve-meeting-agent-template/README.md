@@ -24,11 +24,13 @@ You need a [Recall.ai](https://www.recall.ai) API key and [workspace verificatio
 
 ```bash
 vercel link
-vercel connect create linear --connection-method api-key --name linear --data @linear-key.json
+read -rs LINEAR_API_KEY   # paste your lin_api_... key
+printf '[{"value":"%s"}]' "$LINEAR_API_KEY" |
+  vercel connect create linear --connection-method api-key --name linear --data @-
 vercel connect attach <connector-uid>
 ```
 
-`linear-key.json` holds `[{ "value": "lin_api_..." }]`. Then set:
+Reading the key from stdin keeps it out of your shell history and off disk, so it can't be deployed or committed. Then set:
 
 ```bash
 LINEAR_CONNECTOR=<connector-uid>   # defaults to "linear"
