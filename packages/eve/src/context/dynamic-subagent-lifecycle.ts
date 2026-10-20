@@ -220,13 +220,6 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
   return tools;
 }
 
-export function getDynamicSubagentSelection(
-  input: ContextReader,
-  nodeId: string,
-): Exclude<DurableDynamicSubagentSelection, null> | undefined {
-  return readDynamicSubagentSelections(input)[nodeId] ?? undefined;
-}
-
 /**
  * The dynamic subagents selected for the current turn, by node id. A turn
  * selection overrides the session's, and `null` withdraws one.

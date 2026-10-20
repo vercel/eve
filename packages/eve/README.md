@@ -69,11 +69,7 @@ Every authored directory has a typed helper. Import each from the matching subpa
 | `defineSchedule(...)`                                           | `eve/schedules`                       | `schedules/<name>.ts` (or `schedules/<name>.md`) |
 | `defineEval(...)`, `defineEvalConfig(...)`                      | `eve/evals`                           | `evals/<name>.eval.ts`, `evals/evals.config.ts`  |
 
-Runtime accessors live on the subpath that owns the concern:
-
-- `getSession()` — current session, turn, auth, parent lineage (`eve/context`)
-- `getSandbox()` — live sandbox handle for the current agent (`eve/sandbox`)
-- `getContext(key)`, `requireContext(key)`, `hasContext(key)`, `setContext(key)`, `ensureContext(key, factory)` — unified context helpers (`eve/context`)
+Tools, hooks, and other eve-invoked callbacks reach the runtime through `ctx`: `ctx.session` for the current session, turn, auth, and parent lineage, and `ctx.getSandbox()` for the agent's sandbox. Durable state is `defineState` (`eve/context`).
 
 The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api).
 

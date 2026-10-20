@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/session-http.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import {

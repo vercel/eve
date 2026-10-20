@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { HandleMessageRequestBody } from "#protocol/message.js";
+
 import { countCurrentTurnBoundaryEvents, extractCurrentTurnBoundaryEvent } from "./stream.js";
 
 /**
@@ -45,7 +45,7 @@ export function createDevelopmentSessionState(
 export function createDevelopmentMessageRequest(input: {
   readonly message: string;
   readonly session: DevelopmentSessionState;
-}): HandleMessageRequestBody {
+}) {
   return {
     message: input.message,
   };

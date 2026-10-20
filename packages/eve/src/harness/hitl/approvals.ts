@@ -48,15 +48,17 @@ import type {
 } from "#harness/session-machine/view.js";
 import {
   awaitSignIns,
-  ownOpenRequestIds,
   runnableCalls,
   settle,
-  stepCallIds,
-  suspend,
   withoutApproved,
-  withResult,
 } from "#harness/session-machine/transitions.js";
-import { runningTasks, turnPosition, type SessionView } from "#harness/session-machine/view.js";
+import { stepCallIds, suspend, withResult } from "#harness/session-machine/suspended-steps.js";
+import {
+  ownOpenRequestIds,
+  runningTasks,
+  turnPosition,
+  type SessionView,
+} from "#harness/session-machine/view.js";
 
 // The session's human-in-the-loop rules. Each reads the session and returns what changed; the
 // step runs them in order and parks once, when none of them leaves anything to run.
@@ -133,15 +135,6 @@ export function pendingApprovals(view: SessionView, step: SuspendedStep): readon
     const row = tables.interactions[request.interactionId];
     return row === undefined || row.status === "open";
   });
-}
-
-/** Every approval a suspended step still waits on, by request id. */
-export function pendingApprovalIds(view: SessionView): ReadonlySet<string> {
-  return new Set(
-    view.turn.suspended.flatMap((step) =>
-      pendingApprovals(view, step).map((request) => request.interactionId),
-    ),
-  );
 }
 
 /** Approved workflow and agent calls join the runs their requesting steps wait on. */

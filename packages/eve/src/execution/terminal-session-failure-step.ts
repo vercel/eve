@@ -1,4 +1,4 @@
-import { errorInfoOf } from "#harness/session-machine/transitions.js";
+import { errorInfoOf } from "#harness/facts.js";
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";

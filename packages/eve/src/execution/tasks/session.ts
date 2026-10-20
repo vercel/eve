@@ -10,7 +10,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import type { TaskCancelReason } from "#protocol/message.js";
+import type { TaskCancelReason } from "#execution/tasks/table.js";
 import { TASK_CANCEL_TOOL_NAME, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { DurableSession } from "#execution/durable-session-store.js";
+import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
+import type { SessionView } from "#harness/session-machine/view.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -12,26 +14,42 @@ import {
   writeTaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
-import {
-  getSessionTokenUsage,
-  getSessionUsageLimitViolation,
-  setTurnUsageState,
-  toUsage,
-} from "#harness/turn-tag-state.js";
+import { getSessionUsageLimitViolation, sessionUsage } from "#harness/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
+import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-// The settled calls' stream events are not under test; the committed session is.
-vi.mock("#execution/publish-session-events.js", () => ({
-  commitSessionStep: async ({
-    serializedContext,
-    sessionState,
-  }: {
-    readonly serializedContext: Record<string, unknown>;
-    readonly sessionState: unknown;
-  }) => ({ serializedContext, sessionState }),
-}));
+// A task step's commit folds what it decides into the session's saved view, as the writer does.
+vi.mock("#execution/publish-session-events.js", async () => {
+  const { readDurableSession, replaceDurableSessionSnapshot } =
+    await import("#execution/durable-session-store.js");
+  const { sessionView } = await import("#harness/session-machine/commit.js");
+  const { SESSION_PROJECTION_STATE_KEY, storedProjection } =
+    await import("#harness/session-machine/view.js");
+  const { copyView, foldReceivedEvent } = await import("#protocol/session-projection/fold.js");
+  return {
+    commitSessionStep: async (
+      target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
+      decide: (view: SessionView) => readonly { readonly events: readonly SessionEvent[] }[],
+    ) => {
+      const session = readDurableSession(target.sessionState);
+      const projection = storedProjection(session.state);
+      const view = copyView(projection.view);
+      for (const transition of decide(sessionView(projection, session.state)))
+        for (const event of transition.events)
+          foldReceivedEvent(view, { ...event, meta: { endOfLine: false } });
+      const state = { ...session.state, [SESSION_PROJECTION_STATE_KEY]: { ...projection, view } };
+      return {
+        serializedContext: target.serializedContext,
+        sessionState: replaceDurableSessionSnapshot({
+          session: { ...session, state },
+          state: target.sessionState,
+        }),
+      };
+    },
+  };
+});
 
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };
@@ -51,7 +69,6 @@ function sessionWithTask(input: {
   readonly from: WorkflowToolRunRef;
 } {
   const base = createTestSessionState({ sessionId: `${input.name}-parent` });
-  const own = { ...usage(input.ownInputTokens), costUsd: 0, sawCost: false };
   const created = createTask(readTaskTable(undefined), {
     callId: `${input.name}-call`,
     kind: "agent",
@@ -65,9 +82,9 @@ function sessionWithTask(input: {
     runId,
   });
   const snapshot = writeTaskTable(
-    setTurnUsageState(
+    withSessionUsage(
       { ...base.snapshot.session, limits: input.limits },
-      { ...own, session: own, turnId: "turn_1" },
+      usage(input.ownInputTokens),
     ),
     table,
   );
@@ -108,7 +125,7 @@ function committed(cursor: SessionStateCursor): DurableSession {
 }
 
 function spent(cursor: SessionStateCursor): TokenUsage {
-  return toUsage(getSessionTokenUsage(committed(cursor)));
+  return sessionUsage(committed(cursor));
 }
 
 describe("delegated agent usage", () => {

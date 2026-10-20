@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import { encodeTestLine, testTurnFacts } from "#internal/testing/events.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
 afterEach(() => vi.restoreAllMocks());

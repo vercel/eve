@@ -193,7 +193,7 @@ export function createStreamChecker(
     fail: (rule: ViolationRule, message: string) => void,
   ): Ref | "session" | undefined {
     const descriptor = FACT_CATALOG[fact.type];
-    const data = fact.data as unknown as Readonly<Record<string, unknown>>;
+    const data = fact.data as Readonly<Record<string, unknown>>;
     if (isTerminalType(fact.type) && !isKnownOutcome(fact.type, data.outcome)) {
       fail(
         "closed-outcome",

@@ -9,7 +9,7 @@ import type {
   DurableStepResult,
   DurableStepResultFields,
 } from "#execution/session/turn-step-types.js";
-import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
+import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessSession, SettledTurn, StepResult } from "#harness/types.js";
 
 export function resolveSessionStepResult(
@@ -28,13 +28,12 @@ export function resolveSessionStepResult(
     typeof stepResult.next === "object" &&
     "done" in stepResult.next
   ) {
-    const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
     return {
       action: "done",
       output: stepResult.next.output,
       isError: stepResult.next.isError,
       ...values,
-      usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
+      usage: sessionUsage(stepResult.session),
       usageDelta: takeSessionUsageDelta(stepResult.session).delta,
     };
   }

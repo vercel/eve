@@ -1,4 +1,4 @@
-import type { TraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type {
   EveEval,
   EveEvalResult,

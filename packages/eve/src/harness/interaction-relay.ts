@@ -5,7 +5,7 @@
 import type { RelayedInteractionEvent } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { askedCall } from "#protocol/session-reader.js";
-import type { InteractionOpenedData } from "#protocol/session-events/families/interaction.js";
+import { defined, fact } from "#harness/facts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { interactionBatches } from "#protocol/session-projection/selectors.js";
 
@@ -29,14 +29,13 @@ export function relayedInteractionEvents(
   return (batch ?? []).map((entry) => {
     const call = askedCall(view, entry);
     const origin = { interactionId: entry.interactionId, sessionId };
-    const data: { -readonly [K in keyof InteractionOpenedData]: InteractionOpenedData[K] } = {
+    return fact("interaction.opened", {
+      audience: entry.audience,
       interactionId: entry.interactionId,
       origin: call === undefined ? origin : { ...origin, call },
       request: entry.request,
       subject: entry.subject,
-    };
-    if (entry.audience !== undefined) data.audience = entry.audience;
-    return { data, type: "interaction.opened" };
+    });
   });
 }
 
@@ -57,14 +56,11 @@ function relayedFact(view: SessionView, event: SessionEvent): RelayedInteraction
       const row = view.responses[responseId];
       // A deciding answer settles with its interaction.
       if (row === undefined || outcome === "applied") return undefined;
-      const data: {
-        interactionId: string;
-        deliveryId: string;
-        outcome: typeof outcome;
-        reason?: string;
-      } = { deliveryId: row.deliveryId, interactionId: row.interactionId, outcome };
-      if (reason !== undefined) data.reason = reason;
-      return { data, type: "response.settled" };
+      const { deliveryId, interactionId } = row;
+      return {
+        data: defined({ deliveryId, interactionId, outcome, reason }),
+        type: "response.settled",
+      };
     }
     default:
       return undefined;

@@ -23,7 +23,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { countRunUsage, usageSince } from "#execution/agent-sessions/usage.js";
+import { usageSince } from "#shared/token-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   PublishedSessionEvents,
@@ -42,16 +42,12 @@ import type {
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
-import {
-  delegatedUsageFact,
-  endTask,
-  finishRun,
-  settleTask,
-} from "#harness/session-machine/transitions.js";
+import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
+import { delegatedUsageFact } from "#harness/facts.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { TaskCancelReason } from "#protocol/message.js";
+import type { TaskCancelReason } from "#execution/tasks/table.js";
 
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
@@ -71,7 +67,7 @@ export async function applyTaskRunMessage(
 ): Promise<PublishedSessionEvents> {
   const { message } = input;
   const taskId = message.from.taskId;
-  let session = readDurableSession(input.sessionState);
+  const session = readDurableSession(input.sessionState);
   if (taskId === undefined) {
     return { serializedContext: input.serializedContext, sessionState: input.sessionState };
   }
@@ -88,7 +84,7 @@ export async function applyTaskRunMessage(
     }
     case "reply": {
       if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
-      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
+      ({ table, spend } = countTaskRunUsage(table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
       const record = findTask(table, taskId);
       const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
@@ -97,11 +93,11 @@ export async function applyTaskRunMessage(
       break;
     }
     case "usage":
-      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
+      ({ table, spend } = countTaskRunUsage(table, taskId, message));
       break;
     case "outcome": {
       if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
-      ({ session, table, spend } = countTaskRunUsage(session, table, taskId, message));
+      ({ table, spend } = countTaskRunUsage(table, taskId, message));
       const outcome = toOutcome(message);
       const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
@@ -144,11 +140,7 @@ function spendFact(
   const settled = events.filter((event) => event.type === "call.settled");
   const call = settled.find((event) => event.data.callId === sourceCallId) ?? settled[0];
   if (call !== undefined) return delegatedUsageFact(call.data.callId, spend);
-  return {
-    type: "usage.recorded",
-    data: { kind: "delegated-late", usage: spend },
-    scope: { taskId },
-  };
+  return { ...delegatedUsageFact(undefined, spend), scope: { taskId } };
 }
 
 /**
@@ -327,19 +319,18 @@ function failureMessage(message: WorkflowToolRunOutcomeMessage): string {
 }
 
 /**
- * Counts what the delegated spend a reply, usage report, or outcome carries
- * adds to what the session counted from its run. Only while that run is the
- * task's run: a redelivered outcome arrives after the run finished, and adds
- * nothing.
+ * The new spend the cumulative total a reply, usage report, or outcome carries adds to what was
+ * recorded from its run, which the caller records as a fact; the task remembers the total. Only
+ * while that run is the task's run: a redelivered outcome arrives after the run finished, and
+ * adds nothing.
  */
 function countTaskRunUsage(
-  session: DurableSession,
   table: TaskTable,
   taskId: string,
   message: Extract<TaskRunMessage, { readonly kind: "outcome" | "reply" | "usage" }>,
-): { readonly session: DurableSession; readonly table: TaskTable; readonly spend?: TokenUsage } {
+): { readonly table: TaskTable; readonly spend?: TokenUsage } {
   const run = findTask(table, taskId)?.run;
-  if (message.usage === undefined || run?.runId !== message.from.runId) return { session, table };
+  if (message.usage === undefined || run?.runId !== message.from.runId) return { table };
   const delta = usageSince(message.usage, run.usage);
   const changed =
     delta.inputTokens !== 0 ||
@@ -348,7 +339,6 @@ function countTaskRunUsage(
     delta.cacheWriteTokens !== 0 ||
     (delta.costUsd !== undefined && (delta.costUsd !== 0 || run.usage?.costUsd === undefined));
   return {
-    session: countRunUsage(session, message.usage, run.usage),
     table: recordTaskRunUsage(table, taskId, message.usage),
     spend: changed ? delta : undefined,
   };

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { readMessageStreamVersion } from "#client/stream-version.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 
 describe("readMessageStreamVersion", () => {
   it("accepts the one stream version this client reads", () => {

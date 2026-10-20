@@ -5,7 +5,7 @@ import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
-} from "#protocol/message.js";
+} from "#protocol/session-http.js";
 
 /** What one fake model run spends, recorded with its terminal facts. */
 const FAKE_USAGE = {

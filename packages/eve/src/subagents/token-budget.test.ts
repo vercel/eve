@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
-import { bumpSessionRuntimeUsageLimits, setTurnUsageState } from "#harness/turn-tag-state.js";
+import { bumpSessionRuntimeUsageLimits } from "#harness/session-usage.js";
+import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { HarnessSession, SessionLimits } from "#harness/types.js";
 
 function createSessionWithUsage(input: {
@@ -31,15 +32,11 @@ function createSessionWithUsage(input: {
     return base;
   }
 
-  const usage = {
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    costUsd: input.usedCostUsd ?? 0,
+  return withSessionUsage(base, {
+    costUsd: input.usedCostUsd,
     inputTokens: input.usedInputTokens ?? 0,
     outputTokens: input.usedOutputTokens ?? 0,
-    sawCost: input.usedCostUsd !== undefined,
-  };
-  return setTurnUsageState(base, { ...usage, session: usage, turnId: "turn_0" });
+  });
 }
 
 describe("resolveRemainingSessionTokenLimits", () => {

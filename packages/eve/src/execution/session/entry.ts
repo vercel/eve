@@ -33,7 +33,6 @@ import {
 import {
   prepareSuccessorStep,
   signalSessionOwnerActivationStep,
-  stopUntrackedChildSessionsStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
 import {
@@ -260,7 +259,6 @@ export async function bootInitialOwner(
 /** A successor that may continue the session, before it owns any of its hooks. */
 interface PreparedSuccessor {
   readonly checkpoint: SessionCheckpoint;
-  readonly childRunIdsToStop: readonly string[];
   readonly serializedContext: Record<string, unknown>;
 }
 
@@ -296,10 +294,9 @@ async function prepareSuccessor(
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
   }
-  const { checkpoint, childRunIdsToStop } = migration;
+  const { checkpoint } = migration;
   return {
     checkpoint,
-    childRunIdsToStop,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
 }
@@ -434,10 +431,7 @@ async function startSuccessor(
   prepared: PreparedSuccessor,
 ): Promise<BootOutcome> {
   const { sessionId } = input;
-  const { checkpoint, childRunIdsToStop, serializedContext } = prepared;
-  if (childRunIdsToStop.length > 0) {
-    await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
-  }
+  const { checkpoint, serializedContext } = prepared;
   const deadline =
     input.reason === "compaction"
       ? input.sessionTimeoutDeadline

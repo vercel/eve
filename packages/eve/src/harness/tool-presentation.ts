@@ -1,4 +1,4 @@
-import type { ActionPresentationByCallId } from "#protocol/message.js";
+import type { ActionPresentationByCallId } from "#shared/action-label.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { normalizePresentationText } from "#shared/presentation-text.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";

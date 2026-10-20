@@ -14,12 +14,14 @@ import {
 import {
   admitHumanInput,
   applyHumanDecisions,
+  compactInput,
   discardClearedHumanInput,
   openDeferredApprovals,
   queueInput,
   settleHumanInput,
+  turnInputOnly,
+  withoutTurnInput,
 } from "#harness/hitl/index.js";
-import { compactInput, turnInputOnly, withoutTurnInput } from "#harness/hitl/delivery.js";
 import { blocked, park } from "#harness/step/park.js";
 import {
   clear,

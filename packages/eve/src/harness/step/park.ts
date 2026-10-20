@@ -1,5 +1,4 @@
-import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
-import { runtimeWait, type SessionView } from "#harness/session-machine/view.js";
+import { runtimeWait, type SessionView, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { HarnessStepInput, StepResult } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { Step } from "./context.js";

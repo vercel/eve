@@ -6,7 +6,6 @@ import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { TaskCancelReason } from "#protocol/message.js";
 import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
 
 // The session's task table: the tasks part of its record of running work
@@ -533,3 +532,6 @@ function isTaskRun(value: unknown): value is TaskRun {
 function isTaskCall(value: unknown): value is TaskCall {
   return isObject(value) && isNonEmptyString(value.callId) && typeof value.turnId === "string";
 }
+
+/** Why a task's current work was cancelled. */
+export type TaskCancelReason = "task-cancel" | "turn-cancelled" | "turn-ended";

@@ -10,17 +10,10 @@ import { parseRelay, type Relay } from "./relays.js";
 // people act, i.e. who gave each answer a response policy weighs, the sign-ins it waits on, and
 // the requests it relays for a workflow run or a child session. Nothing else names their
 // session-state key; `responders.ts` and `relays.ts` model the records it stores. Machine
-// transitions write them; checkpoint upgrades migrate legacy storage outside the machine.
+// transitions write them.
 
 /** The session-state key of the human-in-the-loop requests. */
 const REQUESTS_KEY = "eve.runtime.hitl.requests";
-
-/** Where builds before checkpoint version 15 kept the requests. Only checkpoint upgrades read them. */
-export const LEGACY_HITL_STATE_KEYS = {
-  approvals: "eve.runtime.hitl.approvalState",
-  signIns: "eve.runtime.pendingAuthorization",
-  relays: "eve.runtime.proxyInputRequests",
-} as const;
 
 /**
  * A read-only snapshot of the human-in-the-loop records, the one way code outside `harness/hitl/`
@@ -75,18 +68,18 @@ export interface HitlStateChange {
   readonly responders?: ResponderChange;
 }
 
-/** Responder records a transition writes or retires. */
+/** Responder records a transition writes. Each retires once its response closes. */
 export interface ResponderChange {
   readonly upsert?: Readonly<Record<string, PendingResponder>>;
-  /** Responses that closed, or every record when `"all"`. */
-  readonly retire?: readonly string[] | "all";
+  /** Responses whose record goes now: `dropClosedRecords` retires closed ones. */
+  readonly retire?: readonly string[];
 }
 
-/** Relay routes a transition records or retires. */
+/** Relay routes a transition records. Each retires once its request closes or is answered. */
 export interface RelayChange {
   /** Routes of requests that opened, by interaction id. */
   readonly upsert?: Readonly<Record<string, Relay>>;
-  /** Routes whose request closed. */
+  /** Routes whose record goes now: `dropClosedRecords` retires closed ones. */
   readonly retire?: readonly string[];
 }
 
@@ -139,33 +132,6 @@ function writeRequests(
   return Object.keys(rest).length > 0 ? rest : undefined;
 }
 
-/**
- * Moves the records builds before checkpoint version 15 kept under
- * {@link LEGACY_HITL_STATE_KEYS} into the requests record as they were stored; each reader is as
- * lenient as its old one. Only the checkpoint upgrade calls it.
- */
-export function upgradeLegacyHitlState(
-  state: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  const {
-    [LEGACY_HITL_STATE_KEYS.approvals]: approvals,
-    [LEGACY_HITL_STATE_KEYS.signIns]: signIns,
-    [LEGACY_HITL_STATE_KEYS.relays]: relays,
-    ...rest
-  } = state;
-  // Responders' approval progress isn't carried forward: the answers it weighed are asked again.
-  void approvals;
-  let next: SessionStateMap | undefined = rest;
-  next = writeRequests(
-    next,
-    "signIns",
-    isObject(signIns) && signIns.challenges !== undefined ? signIns.challenges : signIns,
-  );
-  const noRelays = isObject(relays) && Object.keys(relays).length === 0;
-  next = writeRequests(next, "relays", noRelays ? undefined : relays);
-  return next ?? {};
-}
-
 // ---------------------------------------------------------------------------
 // Responders
 // ---------------------------------------------------------------------------
@@ -184,12 +150,9 @@ function changeResponders(
   change: ResponderChange,
 ): SessionStateMap | undefined {
   const current = readResponders(state);
-  const retired =
-    change.retire === "all"
-      ? {}
-      : Object.fromEntries(
-          Object.entries(current).filter(([id]) => !(change.retire ?? []).includes(id)),
-        );
+  const retired = Object.fromEntries(
+    Object.entries(current).filter(([id]) => !(change.retire ?? []).includes(id)),
+  );
   const next = { ...retired, ...change.upsert };
   return writeRequests(state, "responders", Object.keys(next).length > 0 ? next : undefined);
 }

@@ -12,20 +12,20 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import { callOutcomeOf } from "#harness/call-outcome.js";
+import { defined, fact } from "#harness/facts.js";
 
 // The facts for one call, built where the call streams and runs: what the model asked for, that
 // it started, and how it settled. Calls never reach the wire any other way.
 
 /** What a call invokes: a tool, an agent, the skill it loads, or a task control, with its label. */
 export function capabilityOf(action: RuntimeActionRequest, label?: string): Capability {
-  const capability: { -readonly [K in keyof Capability]: Capability[K] } =
+  const capability: Capability =
     action.kind === "load-skill"
       ? { kind: "skill", name: action.name }
       : action.kind === "subagent-call" || action.kind === "remote-agent-call"
         ? { kind: "agent", name: action.name }
         : { kind: toolKind(action.toolName), name: action.toolName };
-  if (label !== undefined) capability.label = label;
-  return capability;
+  return label === undefined ? capability : { ...capability, label };
 }
 
 /** What a call to an entry invokes, as its input starts streaming. */
@@ -51,17 +51,14 @@ export function callRequested(input: {
   readonly label?: string;
   readonly inputError?: ErrorInfo;
 }): FactOf<"call.requested"> {
-  const { action } = input;
-  const data: {
-    -readonly [K in keyof FactOf<"call.requested">["data"]]: FactOf<"call.requested">["data"][K];
-  } = {
+  const { action, inputError } = input;
+  return fact("call.requested", {
     callId: action.callId,
     capability: capabilityOf(action, input.label),
+    input: inputError === undefined ? toJsonValue(action.input) : undefined,
+    inputError,
     owner: input.owner,
-  };
-  if (input.inputError === undefined) data.input = toJsonValue(action.input);
-  else data.inputError = input.inputError;
-  return { data, type: "call.requested" };
+  });
 }
 
 /** A call was cleared and began running. */
@@ -69,11 +66,7 @@ export function callStarted(
   callId: string,
   options: { readonly clearedBy?: ClearedBy } = {},
 ): FactOf<"call.started"> {
-  const data: {
-    -readonly [K in keyof FactOf<"call.started">["data"]]: FactOf<"call.started">["data"][K];
-  } = { callId };
-  if (options.clearedBy !== undefined) data.clearedBy = options.clearedBy;
-  return { data, type: "call.started" };
+  return fact("call.started", { callId, clearedBy: options.clearedBy });
 }
 
 /** A call settled from its runtime result: failed if the result says so, otherwise completed. */
@@ -89,28 +82,19 @@ export function callSettledFrom(
   // Rejection is an explicit adjudication, never inferred from an output's error code.
   // Fresh policy denials and failures inside a tool remain failed unless the caller says otherwise.
   const rejected = options.rejected === true;
-  const data: {
-    -readonly [K in keyof FactOf<"call.settled">["data"]]: FactOf<"call.settled">["data"][K];
-  } = {
+  return fact("call.settled", {
     callId: result.callId,
+    cause: options.cause ?? (rejected ? { policy: "approval" } : undefined),
+    error,
     outcome: rejected ? "rejected" : outcome,
-  };
-  if (result.output !== undefined) data.output = toJsonValue(result.output);
-  if (error !== undefined) data.error = error;
-  if (options.cause !== undefined) data.cause = options.cause;
-  else if (rejected) data.cause = { policy: "approval" };
-  if (options.label !== undefined) data.label = options.label;
-  return { data, type: "call.settled" };
+    output: result.output === undefined ? undefined : toJsonValue(result.output),
+    label: options.label,
+  });
 }
 
 /** A call's partial output, as progress. */
 export function callProgress(callId: string, output: unknown, label?: string): SessionEvent {
-  const data: { callId: string; output: JsonValue; label?: string } = {
-    callId,
-    output: toJsonValue(output),
-  };
-  if (label !== undefined) data.label = label;
-  return { data, type: "call.progress" };
+  return { data: defined({ callId, output: toJsonValue(output), label }), type: "call.progress" };
 }
 
 /** A value as the wire carries it: JSON, with anything else as its string form. */

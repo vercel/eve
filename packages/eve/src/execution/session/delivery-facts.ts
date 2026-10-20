@@ -1,10 +1,11 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { HarnessStepInput, StepInput } from "#harness/types.js";
+import { defined, fact } from "#harness/facts.js";
 import { userPartsOf } from "#harness/user-parts.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { JsonValue, Principal } from "#protocol/session-events/envelope.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
 
 // A delivery's facts at the step that admits it: every payload is admitted, a payload the
@@ -44,32 +45,26 @@ export function admitDeliveries(input: {
         "Session delivery has no identity. Assign delivery metadata at dispatch before admission.",
       );
     const deliveryId = metadata.deliveryId;
-    const source: {
-      -readonly [K in keyof Extract<DeliverySource, { channel: string }>]: Extract<
-        DeliverySource,
-        { channel: string }
-      >[K];
-    } = {
+    const source: DeliverySource = defined({
       channel: metadata?.channelKind ?? input.channelKind,
-    };
-    if (delivery.schedule?.definition !== undefined)
-      source.scheduleId = delivery.schedule.definition;
-    const data: {
-      deliveryId: string;
-      principal?: Principal;
-      source: DeliverySource;
-      clientContext?: JsonValue;
-    } = {
-      deliveryId,
-      source,
-    };
-    if (principal !== undefined) data.principal = principal;
+      scheduleId: delivery.schedule?.definition,
+    });
     const clientContext = readClientContext(payload);
-    if (clientContext !== undefined && clientContext.length > 0)
-      data.clientContext = [...clientContext];
-    if (input.admitted?.(deliveryId) !== true) facts.push({ data, type: "delivery.admitted" });
+    if (input.admitted?.(deliveryId) !== true) {
+      facts.push(
+        fact("delivery.admitted", {
+          clientContext:
+            clientContext !== undefined && clientContext.length > 0
+              ? [...clientContext]
+              : undefined,
+          deliveryId,
+          principal,
+          source,
+        }),
+      );
+    }
     if (stepInput === undefined) {
-      facts.push({ data: { deliveryId, outcome: "ignored" }, type: "delivery.settled" });
+      facts.push(fact("delivery.settled", { deliveryId, outcome: "ignored" }));
       continue;
     }
     const consumed: ConsumedDelivery = {
@@ -97,10 +92,5 @@ export function admitDeliveries(input: {
 /** Who sent a delivery, as the wire names them. */
 export function principalOf(auth: SessionAuthContext | null | undefined): Principal | undefined {
   if (auth === undefined || auth === null) return undefined;
-  const principal: { -readonly [K in keyof Principal]: Principal[K] } = {
-    id: auth.principalId,
-    type: auth.principalType,
-  };
-  if (auth.issuer !== undefined) principal.issuer = auth.issuer;
-  return principal;
+  return defined({ id: auth.principalId, issuer: auth.issuer, type: auth.principalType });
 }

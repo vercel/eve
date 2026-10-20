@@ -3,7 +3,8 @@ import { finalizeSession } from "#execution/session/finalization.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { writeTaskTable } from "#execution/tasks/table.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { takeSessionUsageDelta } from "#harness/session-usage.js";
+import { withSessionUsage } from "#internal/testing/session-usage.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
@@ -32,15 +33,7 @@ vi.mock("#subagents/parent-notification.js", () => ({
 }));
 
 function withUsage(session: HarnessSession, inputTokens: number): HarnessSession {
-  const totals = {
-    inputTokens,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    costUsd: 0,
-    sawCost: false,
-  };
-  return setTurnUsageState(session, { ...totals, session: totals, turnId: "current" });
+  return withSessionUsage(session, { inputTokens });
 }
 
 function baseSession(): HarnessSession {

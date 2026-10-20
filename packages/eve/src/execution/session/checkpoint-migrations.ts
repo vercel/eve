@@ -9,19 +9,10 @@ import { isObject } from "#shared/guards.js";
 export const MIN_SESSION_CHECKPOINT_VERSION = 17;
 
 export type SessionCheckpointMigration =
-  | {
-      readonly kind: "current";
-      readonly checkpoint: SessionCheckpoint;
-      /** Idle child sessions the current build no longer tracks; the successor stops them. */
-      readonly childRunIdsToStop: readonly string[];
-    }
+  | { readonly kind: "current"; readonly checkpoint: SessionCheckpoint }
   | { readonly kind: "incompatible"; readonly detail: string };
 
 type CheckpointRecord = Record<string, unknown>;
-
-interface UpgradeEffects {
-  readonly childRunIdsToStop: string[];
-}
 
 /**
  * One pure upgrade per checkpoint version, keyed by the version it reads. Bumping
@@ -31,7 +22,7 @@ interface UpgradeEffects {
  * keeps the session.
  */
 const CHECKPOINT_UPGRADES: Readonly<
-  Record<number, (checkpoint: CheckpointRecord, effects: UpgradeEffects) => CheckpointRecord>
+  Record<number, (checkpoint: CheckpointRecord) => CheckpointRecord>
 > = {};
 
 /**
@@ -59,13 +50,12 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
       detail: `checkpoint version ${JSON.stringify(version)} is outside the supported range ${MIN_SESSION_CHECKPOINT_VERSION}-${SESSION_CHECKPOINT_VERSION}`,
     };
   }
-  const effects: UpgradeEffects = { childRunIdsToStop: [] };
   let current: CheckpointRecord = checkpoint;
   try {
     for (let from = version; from < SESSION_CHECKPOINT_VERSION; from++) {
       const upgrade = CHECKPOINT_UPGRADES[from];
       if (upgrade === undefined) refuse(`no upgrade from checkpoint version ${from}`);
-      current = { ...upgrade(current, effects), version: from + 1 };
+      current = { ...upgrade(current), version: from + 1 };
     }
   } catch (error) {
     if (!(error instanceof CheckpointRefusal)) throw error;
@@ -74,7 +64,7 @@ export function migrateSessionCheckpoint(checkpoint: unknown): SessionCheckpoint
   if (!isCurrentCheckpoint(current)) {
     return { kind: "incompatible", detail: `checkpoint version ${version} is incomplete` };
   }
-  return { kind: "current", checkpoint: current, childRunIdsToStop: effects.childRunIdsToStop };
+  return { kind: "current", checkpoint: current };
 }
 
 function isCurrentCheckpoint(value: unknown): value is SessionCheckpoint {

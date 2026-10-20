@@ -23,7 +23,7 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-} from "#protocol/message.js";
+} from "#protocol/session-http.js";
 import type { ClientContextValue } from "#eve-channel/types.js";
 import {
   HEARTBEAT_RECORD,

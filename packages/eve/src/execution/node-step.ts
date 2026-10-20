@@ -8,7 +8,7 @@ import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn, StepParticipants } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
-import type { RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import {
   resolveRuntimeModelReference,

@@ -17,8 +17,8 @@ import {
   relay,
   routeAnswer,
   runnableCalls,
-  sessionEndedFacts,
 } from "#harness/session-machine/transitions.js";
+import { sessionEndedFacts } from "#harness/facts.js";
 import type { SuspendedStep } from "#harness/session-machine/state.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
