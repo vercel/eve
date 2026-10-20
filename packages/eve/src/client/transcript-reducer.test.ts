@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { transcriptReducer } from "#client/transcript-reducer.js";
 import {
   createContextClearedEvent,
+  createHistoryImportedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -51,6 +52,27 @@ describe("transcriptReducer", () => {
     ).toEqual([
       { role: "user", text: "Alice shares the venue list." },
       { role: "assistant", text: "The second venue seats everyone." },
+    ]);
+  });
+
+  it("keeps imported history in order, ahead of its turn's message", () => {
+    expect(
+      reduce([
+        createHistoryImportedEvent({
+          ...TURN,
+          messages: [
+            { id: "m1", role: "user", text: "Alice asks for the venue list." },
+            { role: "assistant", text: "Here are three venues." },
+          ],
+        }),
+        received("Which one seats everyone?"),
+        completed("The second venue."),
+      ]).messages,
+    ).toEqual([
+      { role: "user", text: "Alice asks for the venue list." },
+      { role: "assistant", text: "Here are three venues." },
+      { role: "user", text: "Which one seats everyone?" },
+      { role: "assistant", text: "The second venue." },
     ]);
   });
 

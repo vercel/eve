@@ -368,6 +368,52 @@ export default eveChannel({
 - eve labels client-supplied entries `Client context:` for the model. Returned context is sent without the label.
 - `onMessage` runs only for requests with a message. An input response keeps the context its request sent.
 
+### Start from prior history
+
+Pass `history` to bring in conversation eve did not produce, such as a transcript your app stored, a conversation moving from another system, or a branch of an earlier exchange. The model sees each entry as a real user or assistant turn, not as a transcript inside one message.
+
+Create a session that starts from stored history and waits for its first message with `create()` on a channel address. No turn runs until a message arrives:
+
+```ts title="agent/channels/app.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/conversations/:id/session", async (req, { from, params }) => {
+      const auth = await authenticate(req);
+      // Load only conversations this caller may read.
+      const conversation = await db.conversations.findForUser(params.id!, auth);
+      const { created, session } = await from(`conversation:${conversation.id}`).create({
+        auth,
+        history: conversation.messages.map((message) => ({
+          id: message.id,
+          role: message.role, // "user" | "assistant"
+          text: message.body,
+        })),
+      });
+      if (!created) {
+        return Response.json({ error: "Conversation already has a session." }, { status: 409 });
+      }
+      return Response.json({ sessionId: session.id });
+    }),
+  ],
+});
+```
+
+The client then resumes that session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when a session already owned the address, or another `create()` or `send()` claimed it first. That session comes back unchanged and your `history` was not added, so check `created` before treating the session as seeded. Use a new address for each new conversation or branch.
+
+When the session at the address is [stranded](../concepts/execution-model-and-durability#stranded-sessions), `create()` throws `SessionStrandedError` instead of replacing it, because that session may hold the conversation you meant to import. Call `reset()` on the address, then `create()` again.
+
+`create()` returns once the new session claims its address, so a `send()` right after it reaches that session. It throws if no session claims the address within 15 seconds.
+
+`send()` accepts the same `history` option. The entries are added right before that message and its `context`, whether the send creates the session or continues it. The eve channel's `onMessage` can return `history` the same way. It applies to every message it is returned for, so return it only when the message should carry those turns.
+
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique within the call. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, that names the entry and the rule it broke. eve doesn't cap how many entries or how much text one call carries. Your route decides how much stored conversation to load, so trim long conversations there, for example to the newest messages. Tool calls, files, and reasoning are not supported.
+
+eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
+
+The stream publishes added entries in `history.imported`, right before the `message.received` of the turn they join. Each event message has the same `role`, `text`, and `id` you passed. `transcriptReducer()` from `eve/client` includes them, so its `{ role, text }` messages can be passed straight back as `history` to branch a session. The default client reducer renders them ahead of that turn's message with `metadata.imported` set and your `id` in `metadata.historyId`, so you can rejoin your own annotations. Message ids stay unique even when a later call reuses an `id`. After that, the entries are ordinary history: compaction, `clear()`, and handoffs treat them like any other turn.
+
 ## Clients
 
 The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the eve channel from React UI.

@@ -186,6 +186,8 @@ export async function bootInitialOwner(
       dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
         | DynamicSubagentAgentConfig
         | undefined,
+      // With a first message, its delivery carries the history instead.
+      history: input.input.message === undefined ? input.input.history : undefined,
       inheritedLimits: input.limits,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
@@ -483,6 +485,7 @@ function createInitialDelivery(
         {
           message: input.input.message,
           context: input.input.context,
+          history: input.input.history,
           outputSchema: input.input.outputSchema,
           state: input.input.state,
         },
