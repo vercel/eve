@@ -3,8 +3,6 @@ export {
   GET,
   HEAD,
   InvalidSessionHistoryError,
-  MAX_SESSION_HISTORY_TEXT_BYTES,
-  MAX_SESSION_HISTORY_MESSAGES,
   OPTIONS,
   PATCH,
   POST,

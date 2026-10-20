@@ -68,12 +68,7 @@ export type {
   FetchFileFunction,
   FetchFileResult,
 } from "#shared/channel-definition.js";
-export {
-  InvalidSessionHistoryError,
-  MAX_SESSION_HISTORY_TEXT_BYTES,
-  MAX_SESSION_HISTORY_MESSAGES,
-  type SessionHistoryMessage,
-} from "#shared/session-history.js";
+export { InvalidSessionHistoryError, type SessionHistoryMessage } from "#shared/session-history.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

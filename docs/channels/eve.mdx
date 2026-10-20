@@ -408,7 +408,7 @@ When the session at the address is [stranded](../concepts/execution-model-and-du
 
 `send()` accepts the same `history` option. The entries are added right before that message and its `context`, whether the send creates the session or continues it. The eve channel's `onMessage` can return `history` the same way. It applies to every message it is returned for, so return it only when the message should carry those turns.
 
-Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique within the call. One call accepts at most 500 messages and 512 KiB of text. Invalid history throws an `InvalidSessionHistoryError` that names the entry and the rule it broke. Import it, and the `MAX_SESSION_HISTORY_MESSAGES` and `MAX_SESSION_HISTORY_TEXT_BYTES` limits, from `eve/channels` to check or catch it in your route. Tool calls, files, and reasoning are not supported.
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique within the call. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, that names the entry and the rule it broke. eve doesn't cap how many entries or how much text one call carries. Your route decides how much stored conversation to load, so trim long conversations there, for example to the newest messages. Tool calls, files, and reasoning are not supported.
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 

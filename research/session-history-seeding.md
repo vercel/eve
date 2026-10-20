@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/91
 status: in-progress
-last_updated: "2026-10-13"
+last_updated: "2026-10-20"
 ---
 
 # Adding prior history to sessions
@@ -89,9 +89,9 @@ accept it, and no client SDK option sets it. Code that loads stored history must
 caller against that conversation.
 
 **Validation.** `send()` and `create()` throw `InvalidSessionHistoryError`, exported from
-`eve/channels` with the caps, before anything is enqueued. The error names the offending entry and rule: unknown role, empty text, an overlong
-or duplicate id, or exceeding 500 messages or 512 KiB of text per call. These caps are
-placeholders until measured against Workflow payload limits.
+`eve/channels`, before anything is enqueued. The error names the offending entry and rule: unknown
+role, empty text, or an empty or duplicate id. eve sets no count or size caps; history comes from
+authored code, so the app decides how much prior conversation to load and trims it there.
 
 **Model history.** User entries become `kind: "user"` messages with
 `metadata: { "eve.imported": true }`. Assistant entries become plain assistant text. No tool
@@ -183,8 +183,6 @@ approximate it.
 
 1. **Imported user message kind.** `"user"` plus metadata treats imported text like typed input. A
    dedicated kind would let compaction, memory, and filters tell them apart.
-2. **Cap values.** 500 messages and 512 KiB per call need checking against Workflow payload and
-   event limits.
-3. **`history.imported` content.** Full text duplicates the inbox payload in the stream.
-4. **Tool calls and results.** A validated tool tier would reuse the legacy import's
+2. **`history.imported` content.** Full text duplicates the inbox payload in the stream.
+3. **Tool calls and results.** A validated tool tier would reuse the legacy import's
    `normalizeHistory` and state its trust and approval semantics.
