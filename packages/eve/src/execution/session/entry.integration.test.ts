@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
-import { hydrateWorkflowArguments } from "@workflow/core/serialization";
+import { cancelRun, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -690,15 +690,26 @@ describe("workflowEntry integration", () => {
       const stream = captureTurnEvents(run);
       try {
         expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-        await vi.waitFor(async () => expect(await countSessionTimers(run.runId)).toBe(1));
+        let armedAtCreation: SessionTimer | undefined;
+        await vi.waitFor(async () => {
+          [armedAtCreation] = await readSessionTimers(run.runId);
+          expect(armedAtCreation).toBeDefined();
+        });
 
-        // The timer armed at creation fires after the first turn moved the deadline.
+        // Stand in for the creation timer firing early: end its run, then deliver its signal.
+        await cancelRun(await getWorld(), armedAtCreation!.runId);
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "session-timeout",
           ownerRunId: run.runId,
         });
 
-        await vi.waitFor(async () => expect(await countSessionTimers(run.runId)).toBe(2));
+        let timers: SessionTimer[] = [];
+        await vi.waitFor(async () => {
+          timers = await readSessionTimers(run.runId);
+          expect(timers).toHaveLength(2);
+        });
+        // The first turn moved the deadline, so the replacement timer targets a later one.
+        expect(timers[1]!.deadline.getTime()).toBeGreaterThan(armedAtCreation!.deadline.getTime());
         await expect(run.status).resolves.toBe("running");
       } finally {
         stream.dispose();
@@ -1839,9 +1850,26 @@ async function resetAndRelease(run: HeldApprovalRun["run"]): Promise<void> {
   await withTimeout(run.returnValue, "session release");
 }
 
-async function countSessionTimers(ownerRunId: string): Promise<number> {
-  const steps = await (await getWorld()).steps.list({ runId: ownerRunId });
-  return steps.data.filter(
-    (step) => step.stepName.endsWith("//startSessionTimeoutStep") && step.status === "completed",
-  ).length;
+interface SessionTimer {
+  readonly deadline: Date;
+  readonly runId: string;
+}
+
+/** Timers an owner armed, oldest first, with the deadline each one sleeps until. */
+async function readSessionTimers(ownerRunId: string): Promise<SessionTimer[]> {
+  const world = await getWorld();
+  const steps = await world.steps.list({ runId: ownerRunId, resolveData: "all" });
+  const timers: SessionTimer[] = [];
+  for (const step of steps.data) {
+    if (!step.stepName.endsWith("//startSessionTimeoutStep") || step.output === undefined) continue;
+    const { runId } = (await hydrateStepReturnValue(step.output, ownerRunId, undefined)) as {
+      runId: string;
+    };
+    const run = await world.runs.get(runId);
+    const [input] = (await hydrateWorkflowArguments(run.input, runId, undefined)) as [
+      { deadline: Date },
+    ];
+    timers.push({ deadline: input.deadline, runId });
+  }
+  return timers.sort((a, b) => a.deadline.getTime() - b.deadline.getTime());
 }

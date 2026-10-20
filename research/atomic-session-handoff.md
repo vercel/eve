@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: in-progress
-last_updated: "2026-10-19"
+last_updated: "2026-10-20"
 ---
 
 # Atomic session handoff
@@ -234,8 +234,9 @@ and B, watching A, stops waiting and exits without writing to the stream.
    it cannot deadlock on B; if A ends first, the counterpart watch opens the gate with nothing
    restored. Once no hook
    remains the gate can never open, so it is ignored and leftovers stay drainable.
-5. **Session timeout.** Unchanged: a deployment handoff renews the deadline, a compaction handoff
-   keeps it, and the timer starts concurrently with the first turn.
+5. **Session timeout.** The timeout is idle-based: B starts its idle window at boot, right after
+   the delivery or compacting turn that moved the session, and arms its timer concurrently with
+   the first turn.
 
 `handover` is a runtime-only inbox payload, like `session-failure`. A sends it through the stable
 session address, so the SDK's redirect delivers it to B. Channel request bodies cannot construct
