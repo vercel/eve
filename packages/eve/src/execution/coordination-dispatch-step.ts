@@ -5,8 +5,8 @@ import {
   type CoordinationDispatchInput,
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
-import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
+import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type SessionStateTransition,
@@ -29,9 +29,7 @@ import {
   resolveStepAgentLimits,
 } from "#execution/agent-sessions/context.js";
 import type { TaskStartedStreamEvent } from "#protocol/message.js";
-import { sessionView } from "#harness/session-machine/commit.js";
 import { startTask } from "#harness/session-machine/transitions.js";
-import { storedProjection } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 
@@ -40,10 +38,10 @@ type CoordinationDispatchStepInput = CoordinationDispatchInput & {
 };
 
 /**
- * Starts the runs of the pending calls and records them on the session. It
- * publishes nothing: a retry of this step starts runs again unless the
- * session already records them, so the step commits before anything slow,
- * such as a `task.started` hook, can run. See {@link publishTaskStartedStep}.
+ * Starts the runs of the pending calls and records them on the session. A
+ * retry starts its runs again, since a Workflow start has no idempotency key,
+ * so this step publishes nothing and commits as soon as the runs are
+ * recorded. See {@link publishTaskStartedStep}.
  */
 export async function dispatchCoordinationStep(
   input: CoordinationDispatchStepInput,
@@ -60,14 +58,11 @@ export async function publishTaskStartedStep(
   input: SessionStepState & { readonly started: readonly TaskStartedStreamEvent["data"][] },
 ): Promise<SessionStateTransition> {
   "use step";
-  return await withSessionStateDelta(input, async ({ started, ...target }) => {
-    const { state } = readDurableSession(target.sessionState);
-    const view = sessionView(storedProjection(state), state);
-    return await publishSessionEvents(
-      target,
-      started.flatMap((task) => startTask(view, task).events),
-    );
-  });
+  return await withSessionStateDelta(input, ({ started, ...target }) =>
+    commitSessionStep(target, (view) => started.map((task) => startTask(view, task)), {
+      origin: "own",
+    }),
+  );
 }
 
 async function dispatchCoordination(

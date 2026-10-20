@@ -46,7 +46,6 @@ import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
-  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -90,10 +89,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
 
 /**
  * Runs every dispatch precondition that may throw — durable reads, context
- * deserialization, handle-store validation, and batch planning — before
- * the caller acquires the parent stream writer, so a preflight failure
- * never leaks the writer lock. Returns undefined when no actions are
- * pending.
+ * deserialization, handle-store validation, and batch planning — before any
+ * run starts. Returns undefined when no actions are pending.
  */
 export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;

@@ -284,13 +284,14 @@ export class SessionExecution {
    */
   private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
     const { cursor } = this.input;
-    const dispatched = await cursor.advance((state) =>
+    const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
       dispatchCoordinationStep({
         action: "park",
+        serializedContext,
+        sessionState,
         workflowToolRunOwner: {
           inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
         },
-        ...state,
       }),
     );
     // Published in a step of its own, so a retry while it runs cannot start the runs again.

@@ -53,6 +53,7 @@ describe("coordination dispatch", () => {
       let interrupted = false;
       // The step that ran the `task.started` hook loses its completion once, as
       // when its process exits before the step commits, so the step runs again.
+      // With batching off, every event goes through `create`, so none can skip the fault.
       const createBatch = world.events.createBatch;
       world.events.createBatch = undefined;
       const createEvent = world.events.create.bind(world.events);
@@ -101,10 +102,16 @@ describe("coordination dispatch", () => {
 
 async function listWorkflowToolRunIds(): Promise<Set<string>> {
   const world = await getWorld();
-  const page = await world.runs.list({ pagination: { limit: 100 } });
-  return new Set(
-    page.data
-      .filter((entry) => entry.workflowName === workflowToolRunWorkflowReference.workflowId)
-      .map((entry) => entry.runId),
-  );
+  const ids = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await world.runs.list({
+      pagination: { cursor, limit: 100 },
+      resolveData: "none",
+      workflowName: workflowToolRunWorkflowReference.workflowId,
+    });
+    for (const run of page.data) ids.add(run.runId);
+    cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
+  } while (cursor !== undefined);
+  return ids;
 }
