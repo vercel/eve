@@ -1,17 +1,18 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createConnection, createServer } from "node:net";
+import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import type { ListenReport } from "#internal/nitro/host/listen-report-preload.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
 
 const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
 const DEFAULT_PRODUCTION_SERVER_PORT = 3000;
-const HEALTH_POLL_INTERVAL_MS = 250;
-const HEALTH_TIMEOUT_MS = 60_000;
-const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+)?/;
+const READY_TIMEOUT_MS = 60_000;
 // Must exceed the server's bounded sandbox shutdown (15s in
 // sandbox-shutdown-plugin.ts) so stopping sandboxes on SIGTERM is not
 // cut short by SIGKILL.
@@ -40,16 +41,6 @@ function readEnvironmentPort(): number | undefined {
   return parsed;
 }
 
-function normalizeServerClientUrl(serverUrl: string): string {
-  const url = new URL(serverUrl);
-
-  if (WILDCARD_LISTEN_HOSTNAMES.has(url.hostname)) {
-    url.hostname = "127.0.0.1";
-  }
-
-  return url.toString();
-}
-
 function formatClientHost(host: string): string {
   if (WILDCARD_LISTEN_HOSTNAMES.has(host)) {
     return "127.0.0.1";
@@ -62,8 +53,9 @@ function formatClientHost(host: string): string {
   return host;
 }
 
-function createKnownPortUrl(input: { host: string; port: number }): string | undefined {
-  return `http://${formatClientHost(input.host)}:${String(input.port)}/`;
+/** Mirrors the node-server preset, which serves TLS when both are set. */
+function serverProtocol(): "http" | "https" {
+  return process.env.NITRO_SSL_CERT && process.env.NITRO_SSL_KEY ? "https" : "http";
 }
 
 async function resolveListenPort(input: { host: string; port: number }): Promise<number> {
@@ -95,68 +87,75 @@ async function resolveListenPort(input: { host: string; port: number }): Promise
   });
 }
 
-function parseServerUrlFromOutput(output: string): string | undefined {
-  const match = LOCAL_SERVER_URL_PATTERN.exec(output);
-
-  if (match === null) {
-    return undefined;
-  }
-
-  return normalizeServerClientUrl(match[0]);
-}
-
-async function isListening(url: string): Promise<boolean> {
-  const target = new URL(url);
-  const port = Number(target.port || (target.protocol === "https:" ? 443 : 80));
-  return await new Promise((resolveReady) => {
-    const socket = createConnection({ host: target.hostname, port });
-    const finish = (ready: boolean) => {
-      socket.destroy();
-      resolveReady(ready);
-    };
-    socket.setTimeout(2_000, () => finish(false));
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
-}
-
-async function waitForReady(input: {
+/**
+ * Resolves when the built server reports, through the listen-report preload,
+ * that it bound the requested port. Its own report is the only signal another
+ * process on that port cannot produce.
+ */
+function waitForReady(input: {
   child: ChildProcess;
-  getStartError(): unknown;
   getOutput(): string;
-  knownUrl?: string;
+  host: string;
+  port: number;
 }): Promise<string> {
-  const deadline = Date.now() + HEALTH_TIMEOUT_MS;
+  const { child, host, port } = input;
 
-  while (Date.now() < deadline) {
-    const startError = input.getStartError();
-    if (startError !== undefined) {
-      throw startError;
-    }
-
-    const parsedUrl = parseServerUrlFromOutput(input.getOutput());
-    const url = parsedUrl ?? input.knownUrl;
-
-    if (url !== undefined && (parsedUrl !== undefined || (await isListening(url)))) {
-      return new URL(url).toString();
-    }
-
-    if (input.child.exitCode !== null || input.child.signalCode !== null) {
-      throw new Error(
-        `Built server process exited (code=${String(input.child.exitCode)}, signal=${String(input.child.signalCode)}) before printing its URL.`,
+  return new Promise((resolveReady, rejectReady) => {
+    const timer = setTimeout(() => {
+      fail(
+        new Error(
+          [
+            `Built server did not start listening on port ${String(port)} within ${READY_TIMEOUT_MS / 1000}s.`,
+            "Output:",
+            input.getOutput(),
+          ].join("\n"),
+        ),
       );
+    }, READY_TIMEOUT_MS);
+
+    const onMessage = (message: ListenReport) => {
+      if (message.port !== port) return;
+      if (message.type === "listening") {
+        cleanup();
+        resolveReady(`${serverProtocol()}://${formatClientHost(message.address)}:${String(port)}/`);
+      } else {
+        fail(
+          new Error(
+            message.code === "EADDRINUSE"
+              ? `Port ${String(port)} on ${host} is already in use.`
+              : `Built server failed to listen on ${host}:${String(port)} (${String(message.code)}).`,
+          ),
+        );
+      }
+    };
+    const onError = (error: Error) => fail(error);
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      fail(
+        new Error(
+          [
+            `Built server process exited (code=${String(code)}, signal=${String(signal)}) before listening.`,
+            input.getOutput(),
+          ].join("\n"),
+        ),
+      );
+    };
+
+    function cleanup(): void {
+      clearTimeout(timer);
+      child.off("message", onMessage);
+      child.off("error", onError);
+      child.off("exit", onExit);
     }
 
-    await sleep(HEALTH_POLL_INTERVAL_MS);
-  }
+    function fail(error: Error): void {
+      cleanup();
+      rejectReady(error);
+    }
 
-  throw new Error(
-    [
-      `Built server did not become ready within ${HEALTH_TIMEOUT_MS / 1000}s.`,
-      `Output:`,
-      input.getOutput(),
-    ].join("\n"),
-  );
+    child.on("message", onMessage);
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
 }
 
 async function terminate(child: ChildProcess): Promise<void> {
@@ -210,18 +209,16 @@ export async function startProductionServer(
     host,
     port: options.port ?? readEnvironmentPort() ?? DEFAULT_PRODUCTION_SERVER_PORT,
   });
-  const knownUrl = createKnownPortUrl({
-    host,
-    port,
-  });
-  // Startup output is kept only for URL detection and startup diagnostics.
-  // After readiness it is dropped so a long-running server does not grow it.
+  const listenReportPreload = pathToFileURL(
+    resolvePackageSourceFilePath("src/internal/nitro/host/listen-report-preload.ts"),
+  ).href;
+  // Startup output is kept only for startup diagnostics. After readiness it
+  // is dropped so a long-running server does not grow it.
   let output = "";
   let ready = false;
   let closing = false;
-  let startError: unknown;
 
-  const child = spawn(process.execPath, [serverEntry], {
+  const child = spawn(process.execPath, ["--import", listenReportPreload, serverEntry], {
     cwd: appRoot,
     env: {
       ...process.env,
@@ -230,7 +227,7 @@ export async function startProductionServer(
       NITRO_PORT: String(port),
       PORT: String(port),
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
 
   child.stdout?.on("data", (chunk: Buffer) => {
@@ -243,10 +240,7 @@ export async function startProductionServer(
   });
 
   const wait = new Promise<void>((resolveWait, rejectWait) => {
-    child.once("error", (error) => {
-      startError = error;
-      rejectWait(error);
-    });
+    child.once("error", rejectWait);
     child.once("exit", (code, signal) => {
       if (closing || code === 0) {
         resolveWait();
@@ -266,12 +260,7 @@ export async function startProductionServer(
   void wait.catch(() => undefined);
 
   try {
-    const url = await waitForReady({
-      child,
-      getStartError: () => startError,
-      getOutput: () => output,
-      knownUrl,
-    });
+    const url = await waitForReady({ child, getOutput: () => output, host, port });
     ready = true;
     output = "";
 
@@ -288,11 +277,6 @@ export async function startProductionServer(
   } catch (error) {
     closing = true;
     await terminate(child);
-
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("Timed out waiting for built eve server to respond.", { cause: error });
-    }
-
     throw error;
   }
 }
