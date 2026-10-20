@@ -118,7 +118,7 @@ describe("routeDeliverPayload", () => {
       { limit: { childContinuationToken: "child" } },
     );
     const routed = routeDeliverPayload({
-      payload: { answers: [{ interactionId: "limit", optionId: "stop" }] },
+      payload: { answers: [{ interactionId: "limit", optionId: "deny" }] },
       state: session.state,
     });
     expect(routed.parentAction).toMatchObject({ kind: "cancel-turn" });

@@ -8,20 +8,12 @@ import {
 } from "#execution/catalog/step-catalog.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import {
-  type ApprovedWork,
-  dispatchApprovedWorkflows,
-  enforceBudget,
-  hasApprovedWork,
-  humanInputContext,
-  runApprovedLocalCalls,
-} from "#harness/hitl/index.js";
+import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
 import { requestModel, startModel } from "#harness/session-machine/transitions.js";
 import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   buildPrompt,
-  previewPrompt,
   projectPrompt,
   type Prompt,
   withClientContext,
@@ -53,36 +45,22 @@ export interface ModelResponse {
  * One model step of the open turn: the prompt it reads, the model that serves it, and the call
  * with its retries and recoveries. `onResponse` decides what the session does with the response.
  *
- * Approved work runs before the run is requested: approved workflow calls join their runs, the
- * budget gate passes, then approved local calls run and the model reads their results. Then the
- * turn requests a model run, whose participants choose its model and tools, and the run starts
- * as its provider call begins.
+ * The budget gate passes first, then the turn requests a model run, whose participants choose
+ * its model and tools, and the run starts as its provider call begins.
  */
 export async function runModelStep(
   step: Step,
   input: {
     readonly onResponse: (response: ModelResponse) => Promise<StepResult>;
     readonly turn: TurnInput;
-    readonly approved: ApprovedWork;
     readonly generation: GenerationSteering;
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const approves = hasApprovedWork(step);
-  let prompt = approves ? previewPrompt(step, input.turn) : await buildPrompt(step, input.turn);
-  // The turn waits on the runtime for the runs approved calls joined.
-  if (approves && (await dispatchApprovedWorkflows(step, input.approved))) {
-    return { next: null, session: step.session };
-  }
-  // Over budget, neither approved calls nor the model run: the step's messages park with the
-  // prompt.
+  const prompt = await buildPrompt(step, input.turn);
+  // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
-  if (approves) {
-    const held = await runApprovedLocalCalls(step, input.approved);
-    if (held !== undefined) return held;
-    prompt = await buildPrompt(step, input.turn);
-  }
 
   const run = await requestRun(step, prompt);
   if ("failed" in run) return run.failed;

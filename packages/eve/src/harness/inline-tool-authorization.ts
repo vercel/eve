@@ -4,10 +4,11 @@ import { resolveActiveAuthorizationChallenges } from "#harness/hitl/sign-ins.js"
 import type { ApprovedCall } from "#harness/session-machine/view.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 
-/** A call a sign-in stopped, and the connections it needs. */
+/** A call a sign-in stopped, the connections it needs, and the approval it ran on, if any. */
 export interface StoppedCall {
   readonly call: ApprovedCall["call"];
   readonly connections: readonly string[];
+  readonly approval?: Pick<ApprovedCall, "interactionId" | "responder">;
 }
 
 /** Resolves the sign-ins that stopped calls. */

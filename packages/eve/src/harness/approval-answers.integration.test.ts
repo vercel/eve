@@ -94,7 +94,14 @@ describe("approval answers (real AI SDK)", () => {
     const fixture = setup([deploy]);
     const parked = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
     const approve = {
-      answers: [{ interactionId: fixture.approvalOf("deploy"), optionId: "approve" }],
+      answers: [
+        {
+          deliveryId: "d-approve",
+          interactionId: fixture.approvalOf("deploy"),
+          optionId: "approve",
+          responseId: "r-approve",
+        },
+      ],
     };
 
     const first = await fixture.step(parked.session, approve);
@@ -114,17 +121,70 @@ describe("approval answers (real AI SDK)", () => {
     const parked = await fixture.step(fixture.session, { message: "Deploy, then tell the team." });
 
     const first = await fixture.step(parked.session, {
-      answers: [{ interactionId: fixture.approvalOf("deploy"), optionId: "approve" }],
+      answers: [
+        {
+          deliveryId: "d-deploy",
+          interactionId: fixture.approvalOf("deploy"),
+          optionId: "approve",
+          responseId: "r-deploy",
+        },
+      ],
     });
     expect(typeof first.next).toBe("function");
     const result = await fixture.step(first.session, {
-      answers: [{ interactionId: fixture.approvalOf("notify"), optionId: "approve" }],
+      answers: [
+        {
+          deliveryId: "d-notify",
+          interactionId: fixture.approvalOf("notify"),
+          optionId: "approve",
+          responseId: "r-notify",
+        },
+      ],
     });
 
     expect(response).toHaveBeenCalledOnce();
     expect(deploy.execute).toHaveBeenCalledOnce();
     expect(notify.execute).toHaveBeenCalledOnce();
     expect(parkedSteps(result.session)).toEqual([]);
+  });
+
+  // #4817: an answer the approval can't take is refused with why, and the approval stays open.
+  it.each([
+    {
+      answer: { optionId: "bogus" },
+      feedback: "Respond to this approval with Approve or Cancel.",
+      label: "an answer that is neither Approve nor Cancel",
+    },
+    {
+      answer: { optionId: "approve", responder: null },
+      feedback: "Authentication is required to respond to this approval.",
+      label: "an unauthenticated Approve of the requester's call",
+    },
+  ])("refuses $label and keeps the approval open", async ({ answer, feedback }) => {
+    const deploy = gated("deploy");
+    const fixture = setup([deploy]);
+    const parked = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+
+    const result = await fixture.step(parked.session, {
+      answers: [
+        {
+          deliveryId: "d-answer",
+          interactionId: fixture.approvalOf("deploy"),
+          responseId: "r-answer",
+          ...answer,
+        },
+      ],
+    });
+
+    expect(deploy.execute).not.toHaveBeenCalled();
+    expect(fixture.events).toContainEqual(
+      expect.objectContaining({
+        data: { outcome: "refused", reason: feedback, responseId: "r-answer" },
+        type: "response.settled",
+      }),
+    );
+    expect(fixture.events.filter((event) => event.type === "interaction.settled")).toEqual([]);
+    expect(parkedSteps(result.session)).toHaveLength(1);
   });
 
   it.each([
@@ -138,8 +198,10 @@ describe("approval answers (real AI SDK)", () => {
     let result = await fixture.step(parked.session, {
       answers: [
         {
+          deliveryId: "d-deny",
           interactionId: fixture.approvalOf("deploy"),
           optionId: "deny",
+          responseId: "r-deny",
           text: "use 900 instead of 1250",
         },
       ],

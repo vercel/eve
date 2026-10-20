@@ -20,7 +20,6 @@ import type {
   TaskCancelReason,
 } from "#protocol/message.js";
 import {
-  approvalOpened,
   interactionSettled,
   responseSettled,
   responseAdmitted,
@@ -58,14 +57,9 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Transition } from "./commit.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
+import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
-import {
-  activeTurnId,
-  answeredCallIds,
-  runningTasks,
-  turnPosition,
-  type SessionView,
-} from "./view.js";
+import { activeTurnId, answeredCallIds, turnPosition, type SessionView } from "./view.js";
 
 // The session's lifecycle. Every transition reads a `SessionView` and returns the facts that
 // report what changed with the execution state that follows; `applyTransition` publishes them as
@@ -375,7 +369,7 @@ export function fail(
     readonly terminal?: { readonly sessionId: string };
   },
 ): Transition {
-  // The calls the turn approved but hadn't run never run: the model reads that they stopped.
+  // The calls a sign-in stopped never run: the model reads that they stopped.
   const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
   const error = errorInfoOf(failure);
   const turnId = activeTurnIdOf(view.projection);
@@ -514,15 +508,6 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage, scope));
     }
   }
-  // A step that parked approvals beside its tasks asks for them once the tasks finish.
-  for (const step of steps) {
-    if (step.tasks.length === 0 || step.requests.length === 0) continue;
-    if (runningTasks(step).length > 0) continue;
-    const tables = view.projection.view;
-    if (step.requests.some((request) => tables.interactions[request.interactionId] !== undefined))
-      continue;
-    events.push(...step.requests.map((ask) => approvalOpened(ask, step.event.turnId)));
-  }
   const complete = steps.filter(isComplete);
   return {
     commit: complete.flatMap((step) => step.messages),
@@ -584,19 +569,14 @@ export function withoutApproved(step: SuspendedStep, callIds: ReadonlySet<string
 }
 
 /**
- * The approved calls of `step` that can run. A call a sign-in stopped is approved too, but waits
- * until every sign-in it stopped on has called back.
+ * The calls of `step` a sign-in stopped that can run: every sign-in each stopped on has called
+ * back.
  */
 export function runnableCalls(view: SessionView, step: SuspendedStep): readonly ApprovedCall[] {
   const waiting = new Set(view.signIns.map(signInAttemptKey));
   return (step.approved ?? []).filter((call) =>
     (call.signIns ?? []).every((challenge) => !waiting.has(signInAttemptKey(challenge))),
   );
-}
-
-/** Approved calls of suspended steps that can run and haven't. */
-export function approvedCalls(view: SessionView): readonly ApprovedCall[] {
-  return view.turn.suspended.flatMap((step) => runnableCalls(view, step));
 }
 
 export function suspend(turn: TurnState, step: SuspendedStep): TurnState {
@@ -615,8 +595,8 @@ export function stepCallIds(step: Pick<SuspendedStep, "messages">): ReadonlySet<
   return ids;
 }
 
+/** Every call the step made has a result: a pending approval's call has none yet. */
 function isComplete(step: SuspendedStep): boolean {
-  if (step.requests.length > 0) return false;
   const answered = answeredCallIds(step.messages);
   return [...stepCallIds(step)].every((callId) => answered.has(callId));
 }
@@ -1127,23 +1107,23 @@ export function callSignIns(turn: TurnState): readonly AuthorizationChallenge[] 
 export function awaitSignIns(
   step: SuspendedStep,
   input: {
-    readonly stopped: readonly {
-      readonly call: ApprovedCall["call"];
-      readonly connections: readonly string[];
-    }[];
+    readonly stopped: readonly StoppedCall[];
     readonly challenges: readonly AuthorizationChallenge[];
   },
 ): SuspendedStep {
   const ids = stepCallIds(step);
   const stopped = input.stopped.filter(({ call }) => ids.has(call.callId));
   if (stopped.length === 0) return step;
-  const calls = stopped.map(({ call, connections }): ApprovedCall => {
+  const calls = stopped.map(({ approval, call, connections }): ApprovedCall => {
     // A call approved before keeps its approval, and the sign-ins it already waited on report
     // with it, beside the ones it waits on now.
     const earlier = step.approved?.find((approved) => approved.call.callId === call.callId);
+    const interactionId = approval?.interactionId ?? earlier?.interactionId;
+    const responder = approval?.responder ?? earlier?.responder;
     return {
       call,
-      ...(earlier?.interactionId !== undefined && { interactionId: earlier.interactionId }),
+      ...(interactionId !== undefined && { interactionId }),
+      ...(responder !== undefined && { responder }),
       signIns: [
         ...(earlier?.signIns ?? []),
         ...input.challenges.filter((challenge) => connections.includes(challenge.name)),

@@ -102,8 +102,10 @@ describe("approved call recheck (real AI SDK)", () => {
     const approved = await fixture.step(initial.session, {
       answers: [
         {
+          deliveryId: "delivery-approve",
           optionId: "approve",
           interactionId: request?.type === "interaction.opened" ? request.data.interactionId : "",
+          responseId: "response-approve",
         },
       ],
     });

@@ -17,7 +17,7 @@ import {
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import type { HarnessSession, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import { defineMemory } from "#public/memory/index.js";
@@ -218,7 +218,7 @@ describe("memory recalled after a compaction", () => {
   async function runWithNotes(options: {
     readonly compactOnly?: boolean;
     readonly history: HarnessSession["history"];
-    readonly input: StepInput;
+    readonly input: HarnessStepInput;
     readonly steps?: readonly (() => StreamResult)[];
   }) {
     const stepPrompts: string[][] = [];

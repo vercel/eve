@@ -5,7 +5,7 @@ import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js"
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
-import { grantedApprovalKeys, parkOnApprovals } from "#harness/hitl/approvals.js";
+import { grantedApprovalKeys, askApprovals } from "#harness/hitl/approvals.js";
 import { suspendStep } from "#harness/session-machine/transitions.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
@@ -25,7 +25,12 @@ import {
   type SuspendedStep,
   type TurnPosition,
 } from "#harness/session-machine/view.js";
-import type { HarnessEmitFn, HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
+import type {
+  HarnessEmitFn,
+  HarnessSession,
+  HarnessStepInput,
+  SessionStateMap,
+} from "#harness/types.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -112,7 +117,7 @@ export function withParkedStep(
   const transition =
     (step.requests ?? []).length === 0
       ? suspendStep(view, parkedStep)
-      : parkOnApprovals(view, {
+      : askApprovals(view, {
           ...parkedStep,
           requester: step.requester,
           requests: step.requests ?? [],
@@ -186,7 +191,7 @@ export function positionState(position: {
 /** The session holding `input` until it can run. */
 export function withQueuedInput<T extends Pick<HarnessSession, "state">>(
   session: T,
-  input: StepInput,
+  input: HarnessStepInput,
 ): T {
   return writeTurnState(session, { ...readTurnState(session.state), queued: input });
 }

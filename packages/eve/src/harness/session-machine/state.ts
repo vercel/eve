@@ -28,8 +28,8 @@ export interface ApprovalAsk {
 }
 
 /**
- * A call that runs on the turn's next model call, whatever asked for it: a person approved it, or
- * the sign-ins it waited on called back.
+ * A call cleared to run: a person approved it, or nothing asked them to. One a sign-in stopped
+ * waits in its step until the sign-ins it lists call back, then runs as the call that asked.
  */
 export interface ApprovedCall {
   readonly call: ApprovalAsk["call"];
@@ -37,6 +37,11 @@ export interface ApprovedCall {
   readonly interactionId?: string;
   /** The sign-ins the call stopped on: its outcome settles them. */
   readonly signIns?: readonly AuthorizationChallenge[];
+  /**
+   * Who approved it, when a response policy allowed their answer. The call reads it when it
+   * runs, after the answer, and the responder's record with it, has settled.
+   */
+  readonly responder?: SessionAuthContext;
 }
 
 /**
@@ -49,13 +54,14 @@ export interface SuspendedStep {
   readonly event: StepCoordinates;
   /** The withheld response. Results join it as they arrive. */
   readonly messages: readonly ModelMessage[];
-  /** Approvals the step still waits on. */
+  /**
+   * The approvals the response's calls asked for. How each was answered is the session's
+   * interaction and response tables'; this only remembers what was asked.
+   */
   readonly requests: readonly ApprovalAsk[];
   /**
-   * Calls a person approved that haven't run. They run when the turn next calls the model, after
-   * its step starts and its budget allows it, as calls the model makes do. A call a sign-in
-   * stopped is one of them, once the sign-ins it lists have called back, so the call that asked
-   * runs, rather than the model deciding again.
+   * Calls a sign-in stopped. Each stays open, without a result, until the sign-ins it lists have
+   * called back, then runs as the call that asked, rather than the model deciding again.
    */
   readonly approved?: readonly ApprovedCall[];
   /** Workflow and agent calls the runtime runs for the step. */
@@ -66,7 +72,10 @@ export interface SuspendedStep {
 }
 
 export interface TurnState {
-  /** Input that arrived before it could run: a partial answer, or input behind a policy pass. */
+  /**
+   * Turn input that arrived before the turn could take it: behind a question a message can't
+   * steer past, such as the budget prompt, or behind approved calls the model reads first.
+   */
   readonly queued?: HarnessStepInput;
   readonly suspended: readonly SuspendedStep[];
   /** Approval keys a `once()` approval granted for the rest of the session. */
