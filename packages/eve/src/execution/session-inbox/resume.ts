@@ -37,9 +37,10 @@ export interface ResumedSessionInboxHook {
 }
 
 /**
- * Resumes the current owner with the current command shape. During a
- * deployment handoff the address is briefly unowned; the releasing owner
- * leaves a marker for that interval, so delivery retries instead of
+ * Resumes the current owner with the current command shape. Owners on
+ * handoff version 3 never leave an address unowned. An older owner releases
+ * its hooks before its successor claims them and leaves a marker for that
+ * interval, so delivery retries instead of
  * reporting the session gone and letting a channel start a replacement.
  * The retry window bounds this request, not the handoff: a marker that
  * outlives it throws {@link SessionHandoffPendingError}.

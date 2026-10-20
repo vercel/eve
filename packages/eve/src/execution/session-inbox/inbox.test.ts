@@ -304,6 +304,202 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("holds every payload behind the handover while interrupts still fire", async () => {
+    const handover = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        reads: [
+          Promise.resolve(resolved(send("direct"))),
+          Promise.resolve(resolved(runtimeResult)),
+          Promise.resolve(resolved(cancel)),
+        ],
+        token: "stable",
+      }),
+      createMockHook({
+        reads: [handover.promise, Promise.resolve(resolved(finalPart("owner-a:1", 1)))],
+        token: "channel",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    const delivered = vi.fn();
+    inbox.onDelivery(delivered);
+    const interrupted = nextInterrupt(inbox);
+    const arrived = inbox.whenArrival();
+    await inbox.claimSessionHooks(["stable", "channel"], { handover: "owner-a:1" });
+
+    await expect(interrupted).resolves.toEqual(cancel);
+    // Arrivals count even while nothing is readable.
+    await arrived;
+    expect(inbox.awaitingHandover).toBe(true);
+    expect(inbox.drain()).toEqual([]);
+    expect(inbox.hasPending()).toBe(false);
+    expect(delivered).not.toHaveBeenCalled();
+
+    const next = inbox.next();
+    handover.resolve(resolved(part("owner-a:1", 0, send("accepted by a"))));
+    await expect(next).resolves.toEqual(send("accepted by a"));
+    expect(inbox.awaitingHandover).toBe(false);
+    expect(inbox.drain()).toEqual([send("direct"), runtimeResult, cancel]);
+    expect(delivered.mock.calls).toEqual([[send("accepted by a")], [send("direct")]]);
+    await inbox.dispose();
+  });
+
+  it("opens on a handover that is the first payload its hook delivers and drops other attempts'", async () => {
+    installHooks(
+      createMockHook({
+        reads: [
+          Promise.resolve(resolved(part("owner-a:0", 0, send("stale")))),
+          Promise.resolve(resolved(finalPart("owner-a:0", 1))),
+          Promise.resolve(resolved(part("owner-a:1", 0, send("accepted by a")))),
+          Promise.resolve(resolved(finalPart("owner-a:1", 1))),
+          Promise.resolve(resolved(send("direct"))),
+        ],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
+
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("accepted by a")));
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("direct")));
+    expect(inbox.hasPending()).toBe(false);
+    await inbox.dispose();
+  });
+
+  it("applies handover parts in index order, once each, and opens only after every part", async () => {
+    const first = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        reads: [
+          Promise.resolve(resolved(send("direct"))),
+          Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
+          // A retried send step repeats its index.
+          Promise.resolve(resolved(part("owner-a:1", 1, send("b")))),
+          Promise.resolve(resolved(finalPart("owner-a:1", 2))),
+          Promise.resolve(resolved(cancel)),
+          first.promise,
+        ],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    const pumped = nextInterrupt(inbox);
+    await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
+    await pumped;
+    // The final part has arrived, but part 0 has not.
+    expect(inbox.awaitingHandover).toBe(true);
+    expect(inbox.drain()).toEqual([]);
+
+    first.resolve(resolved(part("owner-a:1", 0, send("a"))));
+
+    await vi.waitFor(() => expect(inbox.awaitingHandover).toBe(false));
+    expect(inbox.drain()).toEqual([send("a"), send("b"), send("direct"), cancel]);
+    await inbox.dispose();
+  });
+
+  it("stops waiting for an abandoned handover, ignoring other attempts", async () => {
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("direct"))), Promise.resolve(resolved(cancel))],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    const pumped = nextInterrupt(inbox);
+    await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
+    await pumped;
+    const settled = inbox.whenHandoverSettled();
+
+    inbox.abandonHandover("owner-a:0");
+    expect(inbox.awaitingHandover).toBe(true);
+    inbox.abandonHandover("owner-a:1");
+
+    await settled;
+    expect(inbox.drain()).toEqual([send("direct"), cancel]);
+    await inbox.dispose();
+  });
+
+  it("takes back a held address on a fresh hook and places the handover after what it had queued", async () => {
+    const replaced = createDeferred<IteratorResult<SessionInboxPayload>>();
+    const handover = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("queued before"))), replaced.promise],
+        token: "stable",
+      }),
+      createMockHook({
+        reads: [
+          Promise.resolve(resolved(send("after"))),
+          handover.promise,
+          Promise.resolve(resolved(finalPart("owner-a:1", 1))),
+        ],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
+
+    await inbox.claimSessionHooks(["stable"], { force: true, handover: "owner-a:1" });
+    replaced.reject(forceClaimed("owner-1"));
+    handover.resolve(resolved(part("owner-a:1", 0, send("accepted by b"))));
+
+    await vi.waitFor(() => expect(inbox.awaitingHandover).toBe(false));
+    expect(inbox.claimedTokens).toEqual(["stable"]);
+    expect(inbox.drain()).toEqual([send("queued before"), send("accepted by b"), send("after")]);
+    await inbox.dispose();
+  });
+
+  it.each([
+    {
+      name: "every hook taken: resolves, and the gate no longer hides what was queued",
+      reads: [forceClaimed("owner-b"), forceClaimed("owner-b")],
+      takenOver: "resolved",
+    },
+    {
+      name: "one hook taken: stays pending",
+      reads: [forceClaimed("owner-b"), undefined],
+      takenOver: "pending",
+    },
+    {
+      name: "a reader failure: rejects as a failure, not a takeover",
+      reads: [new Error("reader failed"), undefined],
+      takenOver: "rejected",
+    },
+  ] as const)("reports a takeover once $name", async ({ reads, takenOver }) => {
+    const outcomes = reads.map(() => createDeferred<IteratorResult<SessionInboxPayload>>());
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("accepted before"))), outcomes[0]!.promise],
+        token: "stable",
+      }),
+      createMockHook({ reads: [outcomes[1]!.promise], token: "channel" }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHooks(["stable", "channel"], { handover: "owner-a:1" });
+    const settled = inbox.whenTakenOver().then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : "rejected"),
+    );
+    reads.forEach((error, index) => {
+      if (error !== undefined) outcomes[index]!.reject(error);
+    });
+
+    if (takenOver === "pending") {
+      await vi.waitFor(() => expect(inbox.claimedTokens).toEqual(["channel"]));
+      expect(inbox.takenOver).toBe(false);
+      await inbox.dispose();
+      await expect(settled).resolves.toBe("The session inbox was released before a takeover.");
+      return;
+    }
+    await expect(settled).resolves.toBe(takenOver === "rejected" ? "reader failed" : takenOver);
+    if (takenOver === "resolved") {
+      expect(inbox.takenOver).toBe(true);
+      expect(inbox.drain()).toEqual([send("accepted before")]);
+    }
+    await inbox.dispose();
+  });
+
   it("keeps every continuation alias active after later claims", async () => {
     const oldRead = createDeferred<IteratorResult<SessionInboxPayload>>();
     const replacementRead = createDeferred<IteratorResult<SessionInboxPayload>>();
@@ -519,6 +715,24 @@ function installHooks(...hooks: readonly MockHook[]): void {
       throw new Error(`Unexpected hook token "${options.token}".`);
     }
     return hook.hook;
+  });
+}
+
+const cancel: SessionInboxPayload = { kind: "cancel" };
+const runtimeResult: SessionInboxPayload = { kind: "runtime-action-result", results: [] };
+
+function part(attemptKey: string, index: number, ...payloads: SessionInboxPayload[]) {
+  return { attemptKey, index, kind: "handover", payloads } as SessionInboxPayload;
+}
+
+function finalPart(attemptKey: string, index: number): SessionInboxPayload {
+  return { attemptKey, final: true, index, kind: "handover", payloads: [] };
+}
+
+function forceClaimed(claimedByRunId: string): Error {
+  return Object.assign(new Error("Hook token was force-claimed."), {
+    claimedByRunId,
+    name: "HookForceClaimedError",
   });
 }
 

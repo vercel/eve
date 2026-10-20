@@ -93,7 +93,17 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
 
 const fileValidationExemptCatalogSlugs = new Set(["chat-sdk-gmail"]);
 
-const nonStreamingCatalogSlugs = new Set(["chat-sdk-sendblue"]);
+// Adapters that can't edit a sent message; their templates must post each reply once.
+const nonStreamingCatalogSlugs = new Set([
+  "chat-sdk-agentphone",
+  "chat-sdk-dial",
+  "chat-sdk-kapso",
+  "chat-sdk-messenger",
+  "chat-sdk-resend",
+  "chat-sdk-sendblue",
+  "chat-sdk-whatsapp",
+  "chat-sdk-x",
+]);
 
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;

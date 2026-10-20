@@ -2787,7 +2787,9 @@
         }
       ],
       "envVars": {
-        "GOOGLE_CHAT_CREDENTIALS": ""
+        "GOOGLE_CHAT_CREDENTIALS": "",
+        "GOOGLE_CHAT_PROJECT_NUMBER": "",
+        "GOOGLE_CHAT_BOT_USER_ID": ""
       },
       "meta": {
         "eve": {

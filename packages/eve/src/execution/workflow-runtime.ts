@@ -49,13 +49,7 @@ import {
   readSessionEventStream,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
-import {
-  SESSION_HANDOFF_VERSION,
-  type HandoffWorkflowEntryInput,
-  type InitialWorkflowEntryInput,
-  type SessionHandoffStart,
-} from "#execution/session/entry-input.js";
-import type { SessionCheckpoint } from "#execution/session/handoff.js";
+import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
@@ -311,42 +305,6 @@ export function createWorkflowRuntime(config: {
   };
 }
 
-export type SessionOwnerStartInput = SessionHandoffStart & {
-  readonly activationToken: string;
-  /** Original run whose stream stays the public session stream. */
-  readonly anchorRunId: string;
-  readonly checkpoint: SessionCheckpoint;
-  readonly targetDeploymentId: string;
-};
-
-/** Starts a successor owner and binds its output to the original session stream. */
-export async function startSessionOwnerStep(input: SessionOwnerStartInput): Promise<void> {
-  "use step";
-  const { activationToken, anchorRunId, checkpoint, targetDeploymentId, ...start } = input;
-  const workflowInput: HandoffWorkflowEntryInput = {
-    ...start,
-    activationToken,
-    checkpoint,
-    handoffVersion: SESSION_HANDOFF_VERSION,
-    kind: "handoff",
-    ownerDeploymentId: targetDeploymentId,
-    sessionWritable: getRun(anchorRunId).getWritable<Uint8Array>(),
-    sessionId: anchorRunId,
-  };
-  // The successor is stamped with this eve version at start, because the
-  // queue guard runs before it boots. Single-build Worlds share this version;
-  // deployment-affine Worlds bypass the guard and the successor records its
-  // own version at boot.
-  await startWorkflowOnDeployment(
-    workflowEntryReference,
-    [workflowInput],
-    targetDeploymentId,
-    checkpoint.retention === undefined
-      ? undefined
-      : { experimental_retention: checkpoint.retention },
-  );
-}
-
 async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   token: string | SessionInboxAddress,
   command: TCommand,
@@ -383,7 +341,7 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   if (command.kind === "reset") {
     await waitForSessionHooksRelease(
       [sessionCommandHookToken(hook.sessionId), logicalSessionToken(token)],
-      hook.runId,
+      { ownerRunId: hook.runId, sessionId: hook.sessionId },
     );
   }
 
@@ -593,7 +551,7 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
  * version that started it: ingress and the stranded replay guard read it to
  * decide whether this build can still execute the run.
  */
-async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
+export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
   deploymentId: string,

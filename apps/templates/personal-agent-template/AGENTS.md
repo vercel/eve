@@ -10,6 +10,7 @@ Durable personal AI assistant built with Eve and Nuxt.
 | `pnpm dev`         | Start the Nuxt web app               |
 | `pnpm dev:all`     | Start the local Vercel service graph |
 | `pnpm build`       | Production build                     |
+| `pnpm test:smoke`  | Sign up against the production build |
 | `pnpm typecheck`   | TypeScript check                     |
 | `pnpm db:generate` | Generate Drizzle migrations          |
 | `pnpm db:migrate`  | Apply migrations                     |
