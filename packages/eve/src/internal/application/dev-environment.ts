@@ -3,7 +3,10 @@ import { join, resolve } from "node:path";
 /** Environment flag set for processes that belong to an `eve dev` session. */
 export const EVE_DEV_ENV_FLAG = "EVE_DEV";
 
-/** Overrides the directory a development server keeps its own state in. */
+/**
+ * Internal handoff from `eve eval` to the development server it starts; not a
+ * user-facing setting.
+ */
 export const EVE_DEV_STATE_DIR_ENV = "EVE_DEV_STATE_DIR";
 
 /**
@@ -15,9 +18,13 @@ export const EVE_DEV_STATE_DIR_ENV = "EVE_DEV_STATE_DIR";
  */
 export function resolveDevelopmentStateDirectory(appRoot: string): string {
   const override = process.env[EVE_DEV_STATE_DIR_ENV];
-  return override === undefined || override.length === 0
-    ? join(appRoot, ".eve")
-    : resolve(override);
+  // Production servers (`eve start`) also read the local Workflow store
+  // through here; a stray override must never move their durable runs away
+  // from the mounted `.eve/.workflow-data`.
+  if (!isEveDevEnvironment() || override === undefined || override.length === 0) {
+    return join(appRoot, ".eve");
+  }
+  return resolve(appRoot, override);
 }
 
 type InstrumentationEnvironment = "development" | "preview" | "production";

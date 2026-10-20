@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
@@ -12,6 +12,10 @@ import {
 import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
+import {
+  createEvalStateDirectory,
+  removeEvalStateDirectory,
+} from "#evals/cli/eval-state-directory.js";
 import { filterEvalsByTags } from "#evals/cli/filter.js";
 import {
   discoverAndImportEvals,
@@ -158,7 +162,7 @@ export async function runEvalCommand(
       // The eval server owns its runtime generations, Workflow data, and
       // server record, so it runs beside an `eve dev` session for the same
       // agent instead of refusing to start or swapping that session's state.
-      devStateDirectory = join(appRoot, ".eve", "eval-servers", evaluationRunId);
+      devStateDirectory = await createEvalStateDirectory(appRoot, evaluationRunId);
       process.env[EVE_DEV_STATE_DIR_ENV] = devStateDirectory;
       devServer = createDevelopmentServer(appRoot, {
         developmentExtensions: noDevelopmentExtensions(),
@@ -213,7 +217,7 @@ export async function runEvalCommand(
     for (const cleanup of [
       () => devServer?.close(),
       () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
-      () => devStateDirectory && rm(devStateDirectory, { force: true, recursive: true }),
+      () => devStateDirectory && removeEvalStateDirectory(devStateDirectory),
       () => config.teardown?.(setupContext),
     ]) {
       try {

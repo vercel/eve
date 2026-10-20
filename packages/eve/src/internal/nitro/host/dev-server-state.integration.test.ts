@@ -61,6 +61,7 @@ describe("DevelopmentServerState", () => {
     const state = await createState();
     await state.write("http://127.0.0.1:2000/");
     const stateDirectory = join(state.appRoot, ".eve", "eval-servers", "run-1");
+    vi.stubEnv("EVE_DEV", "1");
     vi.stubEnv("EVE_DEV_STATE_DIR", stateDirectory);
     const isolated = new DevelopmentServerState({ appRoot: state.appRoot });
 

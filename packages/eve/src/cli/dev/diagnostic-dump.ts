@@ -3,7 +3,10 @@ import { constants } from "node:fs";
 import { delimiter, join, relative, sep } from "node:path";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH } from "#internal/workflow/local-world-data-directory.js";
+import {
+  displayLocalWorkflowWorldDataDirectory,
+  resolveLocalWorkflowWorldDataDirectory,
+} from "#internal/workflow/local-world-data-directory.js";
 import { captureVercel, resolveVercelInvocation } from "#setup/primitives/run-vercel.js";
 
 const VERCEL_VERSION_TIMEOUT_MS = 5_000;
@@ -205,7 +208,7 @@ async function findOnPath(executable: string): Promise<string | undefined> {
 export async function measureSessionsDirectory(
   appRoot: string,
 ): Promise<DevEnvironmentInfo["sessionsDirectory"]> {
-  const directory = join(appRoot, LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH);
+  const directory = resolveLocalWorkflowWorldDataDirectory(appRoot);
   let entries;
   try {
     entries = await readdir(directory, { recursive: true, withFileTypes: true });
@@ -224,5 +227,5 @@ export async function measureSessionsDirectory(
       // Entries can vanish while a live session compacts; count what remains.
     }
   }
-  return { path: LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH, files, bytes };
+  return { path: displayLocalWorkflowWorldDataDirectory(appRoot), files, bytes };
 }

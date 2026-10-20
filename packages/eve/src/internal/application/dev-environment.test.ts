@@ -22,6 +22,7 @@ describe("resolveDevelopmentStateDirectory", () => {
 
   it("moves every single-owner dev server path under the override", () => {
     const stateDirectory = join(appRoot, ".eve", "eval-servers", "run-1");
+    vi.stubEnv("EVE_DEV", "1");
     vi.stubEnv("EVE_DEV_STATE_DIR", stateDirectory);
 
     expect(resolveDevelopmentStateDirectory(appRoot)).toBe(stateDirectory);
@@ -33,6 +34,15 @@ describe("resolveDevelopmentStateDirectory", () => {
     );
     expect(resolveLocalWorkflowWorldDataDirectory(appRoot)).toBe(
       join(stateDirectory, ".workflow-data"),
+    );
+  });
+
+  it("keeps a production server's Workflow store in .eve when the override leaks in", () => {
+    vi.stubEnv("EVE_DEV", "");
+    vi.stubEnv("EVE_DEV_STATE_DIR", join(appRoot, ".eve", "eval-servers", "run-1"));
+
+    expect(resolveLocalWorkflowWorldDataDirectory(appRoot)).toBe(
+      join(appRoot, ".eve", ".workflow-data"),
     );
   });
 });
