@@ -6,6 +6,11 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createLogger } from "#internal/logging.js";
+import { areSchedulesDisabled, EVE_SCHEDULES_DISABLED_ENV } from "#internal/schedules/disabled.js";
+
+const log = createLogger("schedule.dispatch");
+let loggedSchedulesDisabled = false;
 
 /**
  * Dispatches one eve authored schedule via the execution engine.
@@ -17,7 +22,20 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 export async function dispatchScheduleTask(
   taskName: string,
   config: NitroArtifactsConfig,
-): Promise<{ scheduleId: string; sessionIds: readonly string[] }> {
+): Promise<
+  | { scheduleId: string; sessionIds: readonly string[] }
+  | { skipped: "schedules-disabled"; taskName: string }
+> {
+  if (areSchedulesDisabled()) {
+    if (!loggedSchedulesDisabled) {
+      loggedSchedulesDisabled = true;
+      log.info(
+        `Schedules are disabled in this process (${EVE_SCHEDULES_DISABLED_ENV}); skipping "${taskName}"`,
+      );
+    }
+    return { skipped: "schedules-disabled", taskName };
+  }
+
   return await dispatchScheduleTaskFromArtifacts(
     taskName,
     resolveNitroCompiledArtifactsSource(config),

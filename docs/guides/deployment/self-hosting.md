@@ -105,6 +105,8 @@ You can instead use [`eve/next`](../frontend/nextjs#dev-vs-deploy-topology) if y
 
 The standard `eve build && eve start` path starts Nitro’s schedule runner. If you adapt the output to a custom HTTP-only host or preset, run Nitro scheduled tasks or invoke the same work from your scheduler.
 
+Each `eve start` process runs every authored schedule. When you run several replicas, start one normally and start the others with `eve start --no-schedules`, or set `EVE_SCHEDULES_DISABLED=1` in their environment. See [`eve start`](../../reference/cli#eve-start).
+
 ## Verify the service
 
 Check the health route after your proxy and authentication configuration are active:

@@ -1136,36 +1136,35 @@ describe("messageToUserContent", () => {
     expect((parts[1] as { data: URL }).data.href).toBe("https://example.com/a.pdf");
   });
 
-  it("skips attachments without a URL, keeping the text part", () => {
-    const withUrllessAttachment = new Message({
-      attachments: [{ name: "pasted", type: "image" }],
+  it("notes an attachment without a download in place, keeping the other parts", () => {
+    const mixed = new Message({
+      attachments: [
+        { name: "pasted", type: "image" },
+        {
+          mimeType: "application/pdf",
+          name: "a.pdf",
+          type: "file",
+          url: "https://example.com/a.pdf",
+        },
+      ],
       author: author(),
-      formatted: parseMarkdown("no url"),
+      formatted: parseMarkdown("see both"),
       id: "message-3",
       isMention: true,
       metadata: metadata(),
-      raw: { text: "no url" },
-      text: "no url",
+      raw: { text: "see both" },
+      text: "see both",
       threadId: THREAD_ID,
     });
 
-    expect(messageToUserContent(withUrllessAttachment)).toEqual([{ text: "no url", type: "text" }]);
-  });
-
-  it("falls back to text when there are no usable parts", () => {
-    const emptyWithUrllessAttachment = new Message({
-      attachments: [{ name: "pasted", type: "image" }],
-      author: author(),
-      formatted: parseMarkdown(""),
-      id: "message-4",
-      isMention: true,
-      metadata: metadata(),
-      raw: { text: "" },
-      text: "",
-      threadId: THREAD_ID,
-    });
-
-    expect(messageToUserContent(emptyWithUrllessAttachment)).toBe("");
+    expect(messageToUserContent(mixed)).toEqual([
+      { text: "see both", type: "text" },
+      {
+        text: "Attachment pasted was not retrieved: the platform did not provide a download for it.",
+        type: "text",
+      },
+      expect.objectContaining({ filename: "a.pdf", type: "file" }),
+    ]);
   });
 });
 

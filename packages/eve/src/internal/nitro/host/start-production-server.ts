@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
+import { EVE_SCHEDULES_DISABLED_ENV } from "#internal/schedules/disabled.js";
 
 const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
 const DEFAULT_PRODUCTION_SERVER_PORT = 3000;
@@ -192,6 +193,7 @@ export async function startProductionServer(
   options: {
     host?: string;
     port?: number;
+    schedules?: boolean;
   } = {},
 ): Promise<ProductionServerHandle> {
   const appRoot = resolve(rootDir);
@@ -221,15 +223,20 @@ export async function startProductionServer(
   let closing = false;
   let startError: unknown;
 
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOST: host,
+    NITRO_HOST: host,
+    NITRO_PORT: String(port),
+    PORT: String(port),
+  };
+  if (options.schedules === false) {
+    env[EVE_SCHEDULES_DISABLED_ENV] = "1";
+  }
+
   const child = spawn(process.execPath, [serverEntry], {
     cwd: appRoot,
-    env: {
-      ...process.env,
-      HOST: host,
-      NITRO_HOST: host,
-      NITRO_PORT: String(port),
-      PORT: String(port),
-    },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
 

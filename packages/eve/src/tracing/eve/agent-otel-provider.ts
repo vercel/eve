@@ -29,7 +29,7 @@ import type {
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import { createEveTracing } from "#tracing/eve/operation-input.js";
-import { gatewayCostAttributes } from "#tracing/eve/gateway.js";
+import { gatewayCostAttributes, gatewayRoutingAttributes } from "#tracing/eve/gateway.js";
 import type {
   AgentSpanIdGenerator,
   AgentTelemetry,
@@ -222,10 +222,12 @@ export function createAgentOtelInstrumentation(
   const onStepMetadata = (event: InstrumentationStepAttemptMetadataEvent): void => {
     const attempt = steps.get(event.scope.attemptId);
     if (attempt === undefined) return;
-    // Vercel AI Gateway reports per-call cost in providerMetadata.gateway;
+    // Vercel AI Gateway reports per-call cost and session affinity routing in providerMetadata.gateway;
     // attributes exist only when it was actually the gateway serving the call.
     const cost = readGatewayCostData(event.providerMetadata);
     if (cost !== undefined) attempt.attributes(gatewayCostAttributes(cost));
+    const routing = gatewayRoutingAttributes(event.providerMetadata);
+    if (routing !== undefined) attempt.attributes(routing);
   };
 
   return {

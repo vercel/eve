@@ -5,12 +5,17 @@ import { basename, join } from "node:path";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import {
+  EVE_DEV_STATE_DIR_ENV,
   EVE_EVALUATION_ENV_FLAG,
   EVE_EVALUATION_RUN_ID_ENV,
 } from "#internal/application/dev-environment.js";
 import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
+import {
+  createEvalStateDirectory,
+  removeEvalStateDirectory,
+} from "#evals/cli/eval-state-directory.js";
 import { filterEvalsByTags } from "#evals/cli/filter.js";
 import {
   discoverAndImportEvals,
@@ -129,6 +134,7 @@ export async function runEvalCommand(
 
   // Resolve target
   let devServer: DevelopmentServer | undefined;
+  let devStateDirectory: string | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
   let setupContext: unknown;
@@ -150,8 +156,14 @@ export async function runEvalCommand(
     } else {
       // Set before the server boots, because a provider's `setup` reads it
       // once at startup and never again.
+      const evaluationRunId = randomUUID();
       process.env[EVE_EVALUATION_ENV_FLAG] = "1";
-      process.env[EVE_EVALUATION_RUN_ID_ENV] = randomUUID();
+      process.env[EVE_EVALUATION_RUN_ID_ENV] = evaluationRunId;
+      // The eval server owns its runtime generations, Workflow data, and
+      // server record, so it runs beside an `eve dev` session for the same
+      // agent instead of refusing to start or swapping that session's state.
+      devStateDirectory = await createEvalStateDirectory(appRoot, evaluationRunId);
+      process.env[EVE_DEV_STATE_DIR_ENV] = devStateDirectory;
       devServer = createDevelopmentServer(appRoot, {
         developmentExtensions: noDevelopmentExtensions(),
         host: "127.0.0.1",
@@ -205,6 +217,7 @@ export async function runEvalCommand(
     for (const cleanup of [
       () => devServer?.close(),
       () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
+      () => devStateDirectory && removeEvalStateDirectory(devStateDirectory),
       () => config.teardown?.(setupContext),
     ]) {
       try {

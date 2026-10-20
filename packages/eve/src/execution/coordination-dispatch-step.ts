@@ -1,4 +1,4 @@
-/** Starts workflow-tool runs for pending coordination. */
+/** Starts workflow-tool runs for pending coordination, then reports the tasks it started. */
 
 import {
   prepareCoordinationDispatch,
@@ -6,9 +6,10 @@ import {
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { publishSessionEvents } from "#execution/publish-session-events.js";
+import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
+  type SessionStateTransition,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
 import {
@@ -28,9 +29,7 @@ import {
   resolveStepAgentLimits,
 } from "#execution/agent-sessions/context.js";
 import type { TaskStartedStreamEvent } from "#protocol/message.js";
-import { sessionView } from "#harness/session-machine/commit.js";
 import { startTask } from "#harness/session-machine/transitions.js";
-import { storedProjection } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 
@@ -38,11 +37,32 @@ type CoordinationDispatchStepInput = CoordinationDispatchInput & {
   readonly action: "park";
 };
 
+/**
+ * Starts the runs of the pending calls and records them on the session. A
+ * retry starts its runs again, since a Workflow start has no idempotency key,
+ * so this step publishes nothing and commits as soon as the runs are
+ * recorded. See {@link publishTaskStartedStep}.
+ */
 export async function dispatchCoordinationStep(
   input: CoordinationDispatchStepInput,
 ): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   "use step";
   return await withSessionStateDelta(input, dispatchCoordination);
+}
+
+/**
+ * Publishes `task.started` for the tasks {@link dispatchCoordinationStep}
+ * started, before their receipts reach the turn. A retry only publishes again.
+ */
+export async function publishTaskStartedStep(
+  input: SessionStepState & { readonly started: readonly TaskStartedStreamEvent["data"][] },
+): Promise<SessionStateTransition> {
+  "use step";
+  return await withSessionStateDelta(input, ({ started, ...target }) =>
+    commitSessionStep(target, (view) => started.map((task) => startTask(view, task)), {
+      origin: "own",
+    }),
+  );
 }
 
 async function dispatchCoordination(
@@ -57,6 +77,7 @@ async function dispatchCoordination(
       results: [],
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
+      started: [],
     };
   }
 
@@ -89,21 +110,15 @@ async function dispatchCoordination(
     if (dispatched.started !== undefined) started.push(dispatched.started);
   }
 
-  const published = await publishSessionEvents(
-    {
-      serializedContext: input.serializedContext,
-      sessionState:
-        nextSession === session
-          ? prepared.sessionState
-          : createDurableSessionState({ session: nextSession }),
-      sessionWritable: input.sessionWritable,
-    },
-    started.flatMap(
-      (task) =>
-        startTask(sessionView(storedProjection(nextSession.state), nextSession.state), task).events,
-    ),
-  );
-  return { results, ...published };
+  return {
+    results,
+    serializedContext: input.serializedContext,
+    sessionState:
+      nextSession === session
+        ? prepared.sessionState
+        : createDurableSessionState({ session: nextSession }),
+    started,
+  };
 }
 
 /**

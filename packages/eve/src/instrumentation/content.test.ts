@@ -135,7 +135,16 @@ describe("withInstrumentationDecision", () => {
       {
         idempotencyKey: "attempt-1",
         providerMetadata: {
-          gateway: { cost: "0.01", generationId: "gen-1", secret: "hidden" },
+          gateway: {
+            cost: "0.01",
+            generationId: "gen-1",
+            routing: {
+              affinity: { outcome: "confirmed", pinnedProvider: "anthropic", secret: "hidden" },
+              clientSessionId: "conversation-1",
+              secret: "hidden",
+            },
+            secret: "hidden",
+          },
           secret: "hidden",
         },
         scope,
@@ -146,7 +155,16 @@ describe("withInstrumentationDecision", () => {
 
     expect(projected).toEqual(
       expect.objectContaining({
-        providerMetadata: { gateway: { cost: "0.01", generationId: "gen-1" } },
+        providerMetadata: {
+          gateway: {
+            cost: "0.01",
+            generationId: "gen-1",
+            routing: {
+              affinity: { outcome: "confirmed", pinnedProvider: "anthropic" },
+              clientSessionId: "conversation-1",
+            },
+          },
+        },
       }),
     );
   });

@@ -1,5 +1,18 @@
 # eve
 
+## 0.81.1
+
+### Patch Changes
+
+- e4e0cd1: Fix activation trace-content markers to respect the resolved session policy, provider capture settings, and live audience ceiling. Metadata-only sessions now report withheld content accurately without removing content allowed by an explicit trace policy.
+- 54d63fd: A session keeps accepting messages during a deployment or compaction handoff, so the first message after a handoff reaches the model sooner and messages sent mid-handoff no longer retry or return `409 session_not_ready`; messages already waiting when a compaction finishes now run before the session moves. Sessions started on an earlier eve release still move to this release: their first move uses the previous handoff, and every move after it uses the new one. On Workflow worlds without hook force-claim support, sessions no longer move between runs, so their run history keeps growing for as long as the session lives.
+- fc4dbd0: Cancelling a turn while the model is responding no longer marks its `agent.step` span as an error, so user-initiated stops stop showing up as failures in error tracking.
+- 299db19: Connections now accept the documented `auth.displayName` field instead of failing validation with `Unknown key "displayName"`.
+- 09b423a: `agent.step` spans for AI Gateway model calls now record the Gateway's session affinity report: the session ID, where that ID came from, the affinity outcome, and the pinned and displaced providers. Use these attributes to match a step to its session in the AI Gateway logs Sessions view.
+- f9ea546: The eve channel's `onMessage` can now read the request's `clientContext` as `ctx.eve.clientContext` and return its own `clientContext` to replace it for that turn, so the model sees server-checked context without it being kept in session history.
+- 4d9fc9f: iMessage voice notes now reach Photon agents. Photon's webhook leaves out a voice note's attachment id, so eve refetches the message by id to download it. Across Chat SDK channels, an attachment the platform gives no way to download now reaches the agent as a short note instead of being dropped, so an attachment-only message still gets a reply.
+- 02bb7c4: `ctx.thread.postEphemeral()` on a fresh top-level Slack message now posts to the channel instead of an empty thread, where Slack hid it. Replies inside an existing thread stay threaded.
+
 ## 0.81.0
 
 ### Minor Changes
