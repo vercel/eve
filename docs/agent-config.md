@@ -3,7 +3,7 @@ title: "Agent Configuration"
 description: "Configure an eve agent's model, reasoning effort, compaction, limits, and runtime behavior in agent.ts."
 ---
 
-An eve app has one root agent assembled from the files under `agent/`. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
+An eve app's root agent uses files under `agent/` by default; a [flat layout](./reference/agent-files#flat-layout) places them directly in the app root instead. Its optional `agent.ts` calls `defineAgent` (from `eve`) when you need to configure the model or other runtime behavior. Declared [subagents](./subagents) have their own `agent.ts` and capabilities; this page covers the configuration shared by root agents and subagents.
 
 ## Set the model
 
