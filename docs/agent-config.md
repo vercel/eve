@@ -282,10 +282,11 @@ export default defineAgent({
 for every session, including delegated sessions. It defaults to 30 days. The
 idle window starts at creation and restarts each time a turn settles, including
 turns that answer a message, clear or compact the context, or end in
-cancellation. Work that runs while no turn is active, such as a working
-[task](./tools/tasks), does not restart it, and process restarts do not change
-it. When the window elapses, eve lets an active turn settle, then emits
-`session.completed` and releases every continuation address. Set it to `false`
+cancellation. A session never expires while a turn is open, including a turn
+held open while its [tasks](./tools/tasks) work or while it waits for a person
+to answer; the window restarts when that turn settles. Process restarts do not
+change the window. When the window elapses, eve emits `session.completed` and
+releases every continuation address. Set it to `false`
 to disable the timeout. Session expiration follows
 [run-data retention](#run-data-retention); a zero-retention session loses its
 stored payloads when it ends.

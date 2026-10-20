@@ -54,12 +54,14 @@ import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
+  expiredSessionLinkToken,
   sessionCommandHookToken,
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";
-import { findExpiredSession } from "#execution/session/expired-session-link-steps.js";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
+import { isObject } from "#shared/guards.js";
 import {
   SESSION_HOOK_HANDOVER_TIMEOUT_MS,
   waitForSessionHooksRelease,
@@ -152,10 +154,10 @@ export function createWorkflowRuntime(config: {
         nodeId: config.nodeId,
       }),
       stranded === undefined && input.continuationToken !== undefined
-        ? findExpiredSession(input.continuationToken)
+        ? readExpiredSessionLink(input.continuationToken)
         : undefined,
     ]);
-    const predecessor = stranded ?? expired;
+    const predecessor = stranded ?? expired?.predecessor;
     if (input.toolStubs !== undefined && input.toolStubs.rootSessionId === undefined) {
       validateToolStubTargets(input.toolStubs.rules, bundle.graph);
     }
@@ -193,7 +195,7 @@ export function createWorkflowRuntime(config: {
     if (input.continuationConflictCommand !== undefined) {
       workflowInput.continuationConflictCommand = input.continuationConflictCommand;
     }
-    if (expired !== undefined) workflowInput.continuesExpiredSession = true;
+    if (expired?.release === true) workflowInput.releaseExpiredSessionLink = true;
     if (sessionTimeoutMs !== undefined) {
       workflowInput.sessionTimeoutMs = sessionTimeoutMs;
     }
@@ -458,6 +460,32 @@ function isInactiveCommandTarget(error: unknown): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Reads the link a session that timed out at a continuation address left.
+ * The link only adds context, so a failed read starts the new session without
+ * a predecessor instead of failing it. `release` is false only when no link
+ * exists, so the new owner also clears a link it could not read.
+ */
+async function readExpiredSessionLink(
+  continuationToken: string,
+): Promise<{ readonly predecessor?: SessionPredecessor; readonly release: boolean }> {
+  try {
+    const link = await getHookByToken(expiredSessionLinkToken(continuationToken));
+    // Metadata is run data, so it is unreadable once the expired run's retention ends.
+    const metadata: unknown = await link.metadata;
+    return isObject(metadata) && typeof metadata.sessionId === "string"
+      ? { predecessor: { sessionId: metadata.sessionId }, release: true }
+      : { release: true };
+  } catch (error) {
+    // The `eve dev` World hides hooks of runs from a generation it will not execute.
+    if (HookNotFoundError.is(error) || DevelopmentRunUnavailableError.is(error)) {
+      return { release: false };
+    }
+    log.warn("could not read expired session link", { continuationToken, error });
+    return { release: true };
+  }
 }
 
 /** The session holding a continuation token's inbox, if any does. */

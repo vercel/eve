@@ -9,6 +9,7 @@ import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
+  expiredSessionLinkToken,
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
@@ -18,7 +19,6 @@ import {
 } from "#execution/eve-workflow-attributes.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { readSessionEventStream } from "#execution/session-event-stream.js";
-import { expiredSessionLinkToken } from "#execution/session/expired-session-link.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#dynamic/definition.js";

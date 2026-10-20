@@ -53,6 +53,11 @@ export function logicalSessionInboxToken(token: string): string | undefined {
     : undefined;
 }
 
+/** Token of the retained hook naming the session that last timed out at a continuation address. */
+export function expiredSessionLinkToken(continuationToken: string): string {
+  return `eve:expired:${continuationToken}`;
+}
+
 /**
  * Marker an owner older than handoff version 3 leaves while it releases its
  * hooks, so ingress can tell "handoff in progress" from "no session".

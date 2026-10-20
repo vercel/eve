@@ -10,7 +10,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
+import { ChannelRequestIdKey, SessionPredecessorKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
@@ -23,10 +23,10 @@ import {
   workflowToolRunWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import {
+  expiredSessionLinkToken,
   sessionCommandHookToken,
   sessionHandoffMarkerToken,
 } from "#execution/session-inbox/address.js";
-import { expiredSessionLinkToken } from "#execution/session/expired-session-link.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -662,6 +662,27 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
       continuationConflictCommand,
     });
+  });
+
+  it("starts without a predecessor but releases an expired-session link it could not read", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "owner-run" });
+    getHookByTokenMock.mockRejectedValueOnce(new Error("world unavailable"));
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        continuationToken: "slack:thread",
+        input: { message: "hello" },
+      }),
+    ).resolves.toMatchObject({ sessionId: "owner-run" });
+
+    expect(getHookByTokenMock).toHaveBeenCalledWith(expiredSessionLinkToken("slack:thread"));
+    const [workflowInput] = startMock.mock.calls[0]![1];
+    expect(workflowInput.releaseExpiredSessionLink).toBe(true);
+    expect(workflowInput.serializedContext[SessionPredecessorKey.name]).toBeUndefined();
   });
 
   it("stores an explicit title alongside the trace-content policy", async () => {

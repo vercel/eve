@@ -1,6 +1,7 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import { disposeHook } from "#execution/hook-ownership.js";
+import { expiredSessionLinkToken } from "#execution/session-inbox/address.js";
 import { supportsExpiredSessionLinksStep } from "#execution/session/expired-session-link-steps.js";
 
 /**
@@ -8,11 +9,6 @@ import { supportsExpiredSessionLinksStep } from "#execution/session/expired-sess
  * link whose session's run data is already gone links nothing.
  */
 const EXPIRED_SESSION_LINK_RETENTION = "30d";
-
-/** Token of the retained hook that names the session last timed out at an address. */
-export function expiredSessionLinkToken(continuationToken: string): string {
-  return `eve:expired:${continuationToken}`;
-}
 
 /**
  * Links a session that timed out to its current continuation address, so the
@@ -36,11 +32,12 @@ export async function linkExpiredSession(input: {
 }
 
 /**
- * Releases the link a new session continued from. Without this, a session
- * started at the address after this one is reset would still name the older
+ * Releases the link at an address a new session now holds. Without this, a
+ * session started there after this one is reset would still name the older
  * timed-out session.
  */
 export async function releaseExpiredSessionLink(continuationToken: string): Promise<void> {
+  if (!(await supportsExpiredSessionLinksStep())) return;
   const link = createHook<never>({
     experimental_force: true,
     token: expiredSessionLinkToken(continuationToken),

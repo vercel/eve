@@ -18,10 +18,10 @@ export const SESSION_HANDOFF_VERSION = 3;
 export interface InitialWorkflowEntryInput {
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   /**
-   * The continuation address linked this session's predecessor, a session that
-   * timed out there. The owner releases that link once it holds the address.
+   * The continuation address may hold a link to a session that timed out
+   * there. The owner releases it once it holds the address.
    */
-  readonly continuesExpiredSession?: true;
+  readonly releaseExpiredSessionLink?: true;
   readonly input: RunInput["input"];
   readonly kind: "initial";
   readonly limits?: RunInput["limits"];

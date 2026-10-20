@@ -108,7 +108,7 @@ async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
     readonly continuationToken: string;
-    readonly continuesExpiredSession: boolean;
+    readonly releaseExpiredSessionLink: boolean;
     readonly sessionId: string;
     readonly sessionTimeoutMs: number | false;
   },
@@ -125,7 +125,7 @@ async function prepareInitialOwner(
     throw aliasClaim.reason;
   }
   // Only the run that won the address may release its link.
-  if (input.continuesExpiredSession) await releaseExpiredSessionLink(input.continuationToken);
+  if (input.releaseExpiredSessionLink) await releaseExpiredSessionLink(input.continuationToken);
 
   const turnControl = createTurnControl();
   const timeoutControl = createSessionTimeoutControl({
@@ -196,7 +196,7 @@ export async function bootInitialOwner(
     });
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
       continuationToken,
-      continuesExpiredSession: input.continuesExpiredSession === true,
+      releaseExpiredSessionLink: input.releaseExpiredSessionLink === true,
       sessionId,
       sessionTimeoutMs,
     });

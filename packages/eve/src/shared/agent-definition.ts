@@ -175,9 +175,8 @@ export interface AgentLimitsDefinition {
    * How long a session may sit idle before eve completes it, in milliseconds.
    *
    * The idle window starts at creation and restarts each time a turn settles.
-   * Work that runs while no turn is active, such as a working task, does not
-   * restart it. If it elapses during an active turn, eve lets that turn settle
-   * before completing the session normally. When the expired session kept its
+   * A session never expires while a turn is open, including a turn held open
+   * for working tasks or human input. When the expired session kept its
    * run data, the next channel message at its current continuation address
    * starts a fresh session that names it as `ctx.session.predecessor`.
    *
