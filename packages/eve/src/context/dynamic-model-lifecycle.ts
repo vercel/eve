@@ -9,7 +9,6 @@ import {
   SessionDynamicModelReferenceKey,
   TurnDynamicModelReferenceKey,
 } from "#context/keys.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   RuntimeDynamicModelReference,
   RuntimeModelReference,
@@ -21,14 +20,8 @@ import {
   type ResolvedRuntimeModelSelection,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
-import type { DynamicToolEventName } from "#dynamic/definition.js";
+import type { DynamicScopeEvent, DynamicToolEventName } from "#dynamic/definition.js";
 import { toErrorMessage } from "#shared/errors.js";
-
-const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-  "step.started",
-]);
 
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
 
@@ -50,10 +43,6 @@ export function isDynamicModelSelectionError(error: unknown): error is DynamicMo
   );
 }
 
-function isDynamicModelEventName(value: string): value is DynamicToolEventName {
-  return ALLOWED_DYNAMIC_MODEL_EVENTS.has(value as DynamicToolEventName);
-}
-
 function durableKeyForEvent(
   eventType: DynamicToolEventName,
 ): ContextKey<RuntimeModelReference | null> | undefined {
@@ -67,16 +56,16 @@ function durableKeyForEvent(
   }
 }
 
-export async function dispatchDynamicModelEvent(input: {
+/** Runs the dynamic model resolver for a session, a turn, or one model call. */
+export async function resolveDynamicModel(input: {
   readonly abortSignal?: AbortSignal;
   readonly ctx: AlsContext;
   readonly dynamicModel: RuntimeDynamicModelReference | undefined;
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicScopeEvent;
   readonly messages: readonly ModelMessage[];
   readonly scope: RuntimeModelResolutionScope;
 }): Promise<void> {
   if (input.dynamicModel === undefined) return;
-  if (!isDynamicModelEventName(input.event.type)) return;
   if (!input.dynamicModel.eventNames.includes(input.event.type)) return;
 
   setSelectionForEvent(input.ctx, input.event.type, null);
