@@ -612,7 +612,7 @@ describe("SessionExecution checkpoints", () => {
 
   it("consumes the cancelling command while retaining accepted follow-ups", async () => {
     const sessionState = state("");
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const followUp: DeliverHookPayload = {
       kind: "deliver",
       payloads: [{ message: "Continue after cancellation." }],
@@ -735,7 +735,7 @@ describe("SessionExecution checkpoints", () => {
       kind: "deliver",
       payloads: [{ message: "One more thing." }],
     };
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
       takeLeading: () => [],
@@ -845,7 +845,7 @@ describe("SessionExecution checkpoints", () => {
     };
     const cancel = { kind: "cancel", turnId: "turn_0" } as const;
     let interrupt: (payload: SessionInboxPayload) => void = () => {};
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
       takeLeading: () => [],
@@ -895,7 +895,7 @@ describe("SessionExecution checkpoints", () => {
       payloads: [{ inputResponses: [{ requestId: "child-request", text: "blue" }] }],
     };
     const runtimePayloads = [answer, { kind: "cancel" as const }];
-    const queue = new SessionInputQueue();
+    const queue = new SessionInputQueue([]);
     const inbox: SessionInbox = {
       claimedTokens: [],
       takeLeading: () => [],
@@ -1186,7 +1186,7 @@ describe("SessionExecution checkpoints", () => {
     const execution = new SessionExecution({
       cursor,
       inbox,
-      queue: new SessionInputQueue(),
+      queue: new SessionInputQueue([]),
       sessionId: sessionState.sessionId,
     });
 
@@ -1748,7 +1748,7 @@ function createExecution(input: {
     capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,
-    queue: input.queue ?? new SessionInputQueue(),
+    queue: input.queue ?? new SessionInputQueue([]),
     sessionId: input.sessionState.sessionId,
   });
 }

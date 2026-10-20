@@ -1,4 +1,8 @@
 import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import {
+  DELIVERY_IDEMPOTENCY_WINDOW,
+  MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH,
+} from "#channel/delivery-idempotency.js";
 import { isObject } from "#shared/guards.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
@@ -237,6 +241,14 @@ function isCurrentCheckpoint(value: unknown): value is SessionCheckpoint {
   return (
     isObject(value) &&
     value.version === SESSION_CHECKPOINT_VERSION &&
+    Array.isArray(value.admittedDeliveryKeys) &&
+    value.admittedDeliveryKeys.length <= DELIVERY_IDEMPOTENCY_WINDOW &&
+    value.admittedDeliveryKeys.every(
+      (key) =>
+        typeof key === "string" &&
+        key.length > 0 &&
+        key.length <= MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH,
+    ) &&
     Array.isArray(value.history) &&
     isObject(value.serializedContext) &&
     isObject(value.sessionState)

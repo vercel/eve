@@ -26,7 +26,7 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
   const payload = value as Record<string, unknown>;
   if (payload.kind === "send" || payload.kind === "deliver") {
     try {
-      validateDeliveryIdempotencyKey(payload.idempotencyKey as string | undefined);
+      validateDeliveryIdempotencyKey(payload.idempotencyKey);
     } catch (error) {
       throw new SessionInboxPayloadError((error as Error).message);
     }

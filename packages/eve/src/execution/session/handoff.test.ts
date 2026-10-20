@@ -501,6 +501,7 @@ function selection(acceptedDeploymentId: string): TurnSelection {
 
 function state() {
   return {
+    admittedDeliveryKeys: [],
     history: [],
     serializedContext: {},
     sessionState: {

@@ -45,7 +45,7 @@ export const SESSION_CHECKPOINT_VERSION = 16;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
-  readonly admittedDeliveryKeys?: readonly string[];
+  readonly admittedDeliveryKeys: readonly string[];
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
   readonly capabilities?: SessionCapabilities;
   readonly history: HarnessModelMessage[];

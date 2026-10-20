@@ -10,7 +10,8 @@ export default defineEval({
       message: "Alice opens a conversation about preparing a report. Acknowledge her request.",
       idempotencyKey: "alice-report",
     };
-    const send = (body: typeof first) => postChannel<{ sessionId: string }>(t.target, path, body);
+    const send = (body: { message: string; idempotencyKey?: string }) =>
+      postChannel<{ sessionId: string }>(t.target, path, body);
     const [accepted, retry] = await Promise.all([send(first), send(first)]);
     await t.require(retry.sessionId, equals(accepted.sessionId));
     const initial = await t.target.watchTurn(accepted.sessionId).result();
@@ -24,6 +25,29 @@ export default defineEval({
     await Promise.all([send(first), send(followup), send(followup)]);
     const reply = await next.result();
     reply.succeeded();
+    await t.require(
+      reply.events
+        .filter((event) => event.type === "message.received")
+        .map((event) => event.data.message),
+      equals([followup.message]),
+    );
+
+    const barrier = t.target.watchTurn(accepted.sessionId, {
+      startIndex: initial.events.length + reply.events.length,
+    });
+    const sentinel = {
+      message:
+        "Alice and Bob finish reviewing the outline. Acknowledge that the review is complete.",
+    };
+    await send(sentinel);
+    const drained = await barrier.result();
+    drained.succeeded();
+    await t.require(
+      drained.events
+        .filter((event) => event.type === "message.received")
+        .map((event) => event.data.message),
+      equals([sentinel.message]),
+    );
     const response = await t.target.fetch(
       `/eve/v1/session/${accepted.sessionId}/stream?follow=false`,
     );
@@ -33,6 +57,6 @@ export default defineEval({
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line) as { type: string });
-    await t.require(events.filter((event) => event.type === "turn.started").length, equals(2));
+    await t.require(events.filter((event) => event.type === "turn.started").length, equals(3));
   },
 });

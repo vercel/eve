@@ -56,8 +56,8 @@ export class SessionInputQueue {
   private readonly admittedKeys: Set<string>;
   private nextSequence = 0;
 
-  constructor(admittedDeliveryKeys: readonly string[] = []) {
-    this.admittedKeys = new Set(admittedDeliveryKeys.slice(-DELIVERY_IDEMPOTENCY_WINDOW));
+  constructor(admittedDeliveryKeys: readonly string[]) {
+    this.admittedKeys = new Set(admittedDeliveryKeys);
   }
 
   get admittedDeliveryKeys(): readonly string[] {

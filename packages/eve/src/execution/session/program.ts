@@ -59,7 +59,7 @@ export type SessionStart =
   | { readonly kind: "parked" };
 
 export interface SessionBoot {
-  readonly admittedDeliveryKeys?: readonly string[];
+  readonly admittedDeliveryKeys: readonly string[];
   readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
