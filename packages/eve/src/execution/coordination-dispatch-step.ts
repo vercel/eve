@@ -33,10 +33,6 @@ import { startTask } from "#harness/session-machine/transitions.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 
-type CoordinationDispatchStepInput = CoordinationDispatchInput & {
-  readonly action: "park";
-};
-
 /**
  * Starts the runs of the pending calls and records them on the session. A
  * retry starts its runs again, since a Workflow start has no idempotency key,
@@ -44,7 +40,7 @@ type CoordinationDispatchStepInput = CoordinationDispatchInput & {
  * recorded. See {@link publishTaskStartedStep}.
  */
 export async function dispatchCoordinationStep(
-  input: CoordinationDispatchStepInput,
+  input: CoordinationDispatchInput,
 ): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   "use step";
   return await withSessionStateDelta(input, dispatchCoordination);
@@ -66,7 +62,7 @@ export async function publishTaskStartedStep(
 }
 
 async function dispatchCoordination(
-  input: CoordinationDispatchStepInput,
+  input: CoordinationDispatchInput,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,

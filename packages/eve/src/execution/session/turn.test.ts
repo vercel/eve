@@ -1,3 +1,4 @@
+import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -182,7 +183,7 @@ describe("SessionExecution checkpoints", () => {
       )
       .mockImplementationOnce(
         turnStepWork(async (input) => ({
-          action: "park",
+          action: "parked",
           serializedContext: input.serializedContext,
           sessionState: input.sessionState,
           settled: { output: "Alice's plan is ready." },
@@ -265,7 +266,7 @@ describe("SessionExecution checkpoints", () => {
             expect(input.steeringSignal?.aborted).toBe(true);
             expect(input.abortSignal?.aborted).toBe(true);
             return {
-              action: "steered",
+              action: "continue",
               serializedContext: input.serializedContext,
               sessionState: input.sessionState,
             };
@@ -323,7 +324,7 @@ describe("SessionExecution checkpoints", () => {
           pending.push(first);
           notify(first);
           return {
-            action: "steered",
+            action: "continue",
             serializedContext: input.serializedContext,
             sessionState: input.sessionState,
           };
@@ -334,7 +335,7 @@ describe("SessionExecution checkpoints", () => {
           expect(input.input?.delivery?.payloads).toEqual(first.payloads);
           expect(input.steeringSignal?.aborted).toBe(true);
           return {
-            action: "steered",
+            action: "continue",
             serializedContext: input.serializedContext,
             sessionState: input.sessionState,
           };
@@ -386,7 +387,7 @@ describe("SessionExecution checkpoints", () => {
           expect(input.steeringSignal?.aborted).toBe(true);
           expect(input.abortSignal?.aborted).toBe(false);
           return {
-            action: "steered",
+            action: "continue",
             serializedContext: input.serializedContext,
             sessionState: input.sessionState,
           };
@@ -453,7 +454,7 @@ describe("SessionExecution checkpoints", () => {
           notify(correction);
           expect(input.steeringSignal?.aborted).toBe(true);
           return {
-            action: "steered",
+            action: "continue",
             serializedContext: input.serializedContext,
             sessionState: input.sessionState,
           };
@@ -545,8 +546,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementation(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["hold-call"],
+          action: "paused",
+          ...callsPause({ callIds: ["hold-call"] }),
           serializedContext: {},
           sessionState,
         })),
@@ -652,8 +653,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementationOnce(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["hold-call"],
+          action: "paused",
+          ...callsPause({ callIds: ["hold-call"] }),
           serializedContext: {},
           sessionState,
         })),
@@ -715,7 +716,7 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementation(
         turnStepWork(async (input) => ({
-          action: "park",
+          action: "parked",
           serializedContext: input.serializedContext,
           sessionState: input.sessionState,
           settled: { output: "Done." },
@@ -769,11 +770,8 @@ describe("SessionExecution checkpoints", () => {
         .mockReset()
         .mockImplementation(
           turnStepWork(async (input) => ({
-            action: "held",
-            authorizationAttemptIds: [],
-            hasPendingInputBatch: true,
-            hold: "request",
-            inputRequestIds: ["request_1"],
+            action: "paused",
+            ...({ attemptIds: [], on: "person", requestIds: ["request_1"] } satisfies TurnPause),
             serializedContext: input.serializedContext,
             sessionState: input.sessionState,
           })),
@@ -833,7 +831,7 @@ describe("SessionExecution checkpoints", () => {
           interrupt(cancel);
           expect(input.abortSignal?.aborted).toBe(true);
           return {
-            action: "park",
+            action: "parked",
             serializedContext: input.serializedContext,
             sessionState: completedState,
             settled,
@@ -873,8 +871,8 @@ describe("SessionExecution checkpoints", () => {
     const execution = createExecution({ inbox, queue, sessionState });
     vi.mocked(turnStep).mockImplementation(
       turnStepWork(async () => ({
-        action: "park",
-        pendingCoordinationCallIds: ["child-call"],
+        action: "paused",
+        ...callsPause({ callIds: ["child-call"] }),
         serializedContext: {},
         sessionState,
       })),
@@ -949,8 +947,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementation(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["deploy-call"],
+          action: "paused",
+          ...callsPause({ callIds: ["deploy-call"] }),
           serializedContext: {},
           sessionState,
         })),
@@ -1033,10 +1031,12 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementation(
         turnStepWork(async () => ({
-          action: "park",
-          hasRunsToDispatch: false,
-          pendingCoordinationCallIds: ["wait-call"],
-          pendingTaskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
+          action: "paused",
+          ...callsPause({
+            callIds: ["wait-call"],
+            dispatch: false,
+            taskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
+          }),
           serializedContext: {},
           sessionState,
         })),
@@ -1126,8 +1126,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementation(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["hold-call"],
+          action: "paused",
+          ...callsPause({ callIds: ["hold-call"] }),
           serializedContext: {},
           sessionState,
         })),
@@ -1221,8 +1221,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementation(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["triage-call"],
+          action: "paused",
+          ...callsPause({ callIds: ["triage-call"] }),
           serializedContext: {},
           sessionState,
         })),
@@ -1290,8 +1290,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementationOnce(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["hold-call"],
+          action: "paused",
+          ...callsPause({ callIds: ["hold-call"] }),
           serializedContext: {},
           sessionState,
         })),
@@ -1384,8 +1384,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementationOnce(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: tools.map((name) => `${name}-call`),
+          action: "paused",
+          ...callsPause({ callIds: tools.map((name) => `${name}-call`) }),
           serializedContext: {},
           sessionState,
         })),
@@ -1468,10 +1468,12 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementationOnce(
         turnStepWork(async () => ({
-          action: "park",
-          hasRunsToDispatch: false,
-          pendingCoordinationCallIds: ["wait-call"],
-          pendingTaskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
+          action: "paused",
+          ...callsPause({
+            callIds: ["wait-call"],
+            dispatch: false,
+            taskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait" }],
+          }),
           serializedContext: {},
           sessionState,
         })),
@@ -1503,7 +1505,7 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementationOnce(
         turnStepWork(async (input) => ({
-          action: "park",
+          action: "parked",
           serializedContext: input.serializedContext,
           sessionState: input.sessionState,
           settled: { output: "Done." },
@@ -1561,8 +1563,8 @@ describe("SessionExecution checkpoints", () => {
       .mockReset()
       .mockImplementation(
         turnStepWork(async () => ({
-          action: "park",
-          pendingCoordinationCallIds: ["hold-call"],
+          action: "paused",
+          ...callsPause({ callIds: ["hold-call"] }),
           serializedContext: {},
           sessionState,
         })),
@@ -1736,4 +1738,18 @@ function state(continuationToken: string): DurableSessionState {
     hasProxyInputRequests: false,
     sessionId: "session-1",
   });
+}
+
+/** A paused step's fields: what it awaits, and whether it has runs to start. */
+function callsPause(input: {
+  readonly callIds: readonly string[];
+  readonly dispatch?: boolean;
+  readonly taskToolCalls?: Extract<TurnPause, { on: "calls" }>["taskToolCalls"];
+}): TurnPause {
+  return {
+    callIds: input.callIds,
+    dispatch: input.dispatch ?? true,
+    on: "calls",
+    taskToolCalls: input.taskToolCalls ?? [],
+  };
 }
