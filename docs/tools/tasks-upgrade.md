@@ -164,9 +164,12 @@ reports each wait with the new `turn.waiting` event, which carries the open turn
   the turn has ended.
 
 The TypeScript client's `send(...).result()` reads past `turn.waiting` and returns the final reply
-of a held turn, not the text written before the wait. It stops at `turn.waiting` only while a
-question is pending or the turn waits on a sign-in or approval, and returns `status: "waiting"`; `respond()` then reads the
-same turn to its end. A custom client that ends a response at `turn.completed` or
+of a held turn, not the text written before the wait. At `turn.waiting`, an unanswered input
+request (a question, approval, or `session-limit` prompt) makes `result()` return
+`status: "waiting"`; use `respond()` to answer it and continue reading the same turn.
+A sign-in keeps the response attached while its authorization callback is pending. Render the
+sign-in prompt from the live `authorization.required` event rather than waiting for `result()`.
+A custom client that ends a response at `turn.completed` or
 `session.waiting` mid-turn, or that shows the first completed message as the reply, should follow
 the same rule. See [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
 
