@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import {
@@ -862,7 +862,11 @@ export async function createProductionApplicationNitro(
     plugins: nitroPlugins,
     publicAssets: [],
     scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
-    rolldownConfig: bundler.nitroRolldownConfig,
+    rolldownConfig: {
+      ...bundler.nitroRolldownConfig,
+      // Region comments contain invocation-random scratch paths, not runtime inputs.
+      experimental: { attachDebugInfo: "none" },
+    },
     rollupConfig: bundler.nitroRollupConfig,
     rootDir: preparedHost.appRoot,
     serverAssets: skillServerAssets,

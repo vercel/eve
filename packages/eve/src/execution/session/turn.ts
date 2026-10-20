@@ -3,7 +3,10 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
+import {
+  dispatchCoordinationStep,
+  publishTaskStartedStep,
+} from "#execution/coordination-dispatch-step.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -280,15 +283,23 @@ export class SessionExecution {
    * session answers them itself.
    */
   private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
-    const dispatched = await this.input.cursor.advance((state) =>
+    const { cursor } = this.input;
+    const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
       dispatchCoordinationStep({
         action: "park",
+        serializedContext,
+        sessionState,
         workflowToolRunOwner: {
           inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
         },
-        ...state,
       }),
     );
+    // Published in a step of its own, so a retry while it runs cannot start the runs again.
+    if (dispatched.started.length > 0) {
+      await cursor.advance((state) =>
+        publishTaskStartedStep({ ...state, started: dispatched.started }),
+      );
+    }
     return dispatched.results;
   }
 

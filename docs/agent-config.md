@@ -67,6 +67,28 @@ Gateway, share that ID so their Gateway generations can be found together.
 Direct-provider calls do not receive the option. An authored `gateway.sessionId`
 takes precedence; AI Gateway hashes IDs longer than 256 characters.
 
+AI Gateway also uses this ID for
+[session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity),
+which tries the provider that served the session's previous call first, among
+the providers your routing settings allow, so that provider can read the prompt
+from its cache. The conversation
+appears as one session in the AI Gateway logs Sessions view. Affinity can move
+the pinned provider ahead of your `order`. To keep `order` exactly, set
+`sessionAffinity: false`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  modelOptions: {
+    providerOptions: {
+      gateway: { order: ["bedrock", "anthropic"], sessionAffinity: false },
+    },
+  },
+});
+```
+
 For direct OpenAI and `chatgpt()` model calls, eve sets
 `providerOptions.openai.promptCacheKey` to a SHA-256 hash of the session ID,
 which helps OpenAI route a session's calls to the cache that holds its prompt

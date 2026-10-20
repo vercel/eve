@@ -26,6 +26,7 @@ import {
 import { type InstrumentationLayout } from "#internal/instrumentation-layout.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import { BUILD_DEPLOYMENT_ID_PLACEHOLDER } from "#internal/nitro/host/build-deployment-id.js";
 
 export type BuiltInWorkflowWorldTarget = "local" | "vercel";
 
@@ -391,7 +392,9 @@ export function createWorkflowWorldPluginSource(input: {
     `import * as workflowWorldModule from ${stringifyEsmImportSpecifier(wiring.moduleImportSpecifier)};`,
     ...wiring.extraImportLines,
     `import { installWorkflowWorld } from ${stringifyEsmImportSpecifier(resolveInstallWorldImportSpecifier())};`,
+    `import { installWorkflowDeploymentId } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/execution/install-workflow-deployment-id.ts"))};`,
     "",
+    `installWorkflowDeploymentId(${JSON.stringify(BUILD_DEPLOYMENT_ID_PLACEHOLDER)});`,
     wiring.createWorldSource,
     `await installWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
     "",

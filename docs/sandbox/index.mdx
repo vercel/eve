@@ -162,6 +162,8 @@ Before every model call, eve reads the referenced files back from the sandbox. E
 
 Other files, such as CSV, HEIC, audio, and video, reach the model as the label alone. eve checks image and PDF media types against the file's bytes when it stages the file. A file whose bytes don't match its declared image or PDF type is staged as `application/octet-stream`, so a provider never receives bytes it would reject.
 
+To let the agent answer voice notes and other audio, add a tool that transcribes the staged file. See [Voice notes](/docs/patterns/voice-notes).
+
 If a referenced file is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.
 
 A file that eve can't stage never enters session history. When a channel's `fetchFile` fails, or a file part's `data` is not bytes, base64, a `data:` URL, or a URL, the model receives a note that names the file instead.

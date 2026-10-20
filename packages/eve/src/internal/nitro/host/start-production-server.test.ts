@@ -68,6 +68,7 @@ describe("startProductionServer", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     globalThis.fetch = originalFetch;
     if (originalPort === undefined) {
       delete process.env.PORT;
@@ -119,6 +120,28 @@ describe("startProductionServer", () => {
 
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
+
+  it.each([
+    { schedules: undefined, inherited: undefined, expected: undefined },
+    { schedules: false, inherited: undefined, expected: "1" },
+    { schedules: undefined, inherited: "true", expected: "true" },
+    { schedules: false, inherited: "false", expected: "1" },
+  ])(
+    "passes EVE_SCHEDULES_DISABLED=$expected for schedules=$schedules over $inherited",
+    async ({ schedules, inherited, expected }) => {
+      vi.stubEnv("EVE_SCHEDULES_DISABLED", inherited);
+      const { startProductionServer } = await import("./start-production-server.js");
+      const child = createChildProcess();
+      (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
+      mocks.spawn.mockReturnValueOnce(child);
+
+      const server = await startProductionServer("/tmp/app", { schedules });
+      const spawnOptions = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv };
+      expect(spawnOptions.env.EVE_SCHEDULES_DISABLED).toBe(expected);
+      expect(process.env.EVE_SCHEDULES_DISABLED).toBe(inherited);
+      await server.close();
+    },
+  );
 
   it("uses PORT when no explicit port is provided", async () => {
     const { startProductionServer } = await import("./start-production-server.js");

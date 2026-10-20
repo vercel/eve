@@ -45,6 +45,8 @@ interface SpectrumApp {
 /** The adapter that owns the spectrum-ts app eve downloads attachments through. */
 interface PhotonAdapter {
   readonly app: unknown;
+  /** Asks Photon for the message by id; webhook deliveries are never cached, so this refetches. */
+  fetchMessage(threadId: string, messageId: string): Promise<Message | null>;
   rehydrateAttachment?(attachment: Attachment): Attachment;
 }
 
@@ -53,14 +55,24 @@ interface PhotonAdapter {
  * webhook lists an attachment's name and type but never its bytes, so this
  * records each attachment's id in its `fetchMetadata` and gives it a
  * `fetchData`; the channel downloads it later, in the step, through
- * {@link addPhotonAttachmentRehydration}.
+ * {@link addPhotonAttachmentRehydration}. The webhook omits the id for some
+ * files, such as voice notes, so those come from the message refetched by id.
  */
-export function addPhotonAttachmentDownloads(message: Message, adapter: PhotonAdapter): void {
+export async function addPhotonAttachmentDownloads(
+  message: Message,
+  adapter: PhotonAdapter,
+): Promise<void> {
   const attachments = message.attachments ?? [];
   if (attachments.length === 0) return;
   const raw = message.raw as { readonly content?: SpectrumContent; readonly space?: unknown };
   // The adapter lists attachments in the order it walks the content, so their ids line up.
   const ids = contentAttachmentIds(raw.content);
+  if (attachments.some((_, index) => ids[index] === undefined)) {
+    const refetched = await refetchedAttachmentIds(adapter, message);
+    attachments.forEach((_, index) => {
+      ids[index] ??= refetched[index];
+    });
+  }
   const phone = spacePhone(raw.space);
   attachments.forEach((attachment: Attachment, index) => {
     const id = ids[index];
@@ -81,6 +93,21 @@ export function addPhotonAttachmentRehydration(adapter: PhotonAdapter): void {
     if (id === undefined) return attachment;
     return { ...attachment, fetchData: () => downloadAttachment(adapter.app, id, phone) };
   };
+}
+
+/** Attachment ids from the message as Photon serves it by id; empty when it can't. */
+async function refetchedAttachmentIds(
+  adapter: PhotonAdapter,
+  message: Message,
+): Promise<(string | undefined)[]> {
+  try {
+    const refetched = await adapter.fetchMessage(message.threadId, message.id);
+    const raw = refetched?.raw as { readonly content?: SpectrumContent } | undefined;
+    return contentAttachmentIds(raw?.content);
+  } catch {
+    // An attachment without an id reaches the agent as a note.
+    return [];
+  }
 }
 
 async function downloadAttachment(app: unknown, id: string, phone?: string): Promise<Buffer> {

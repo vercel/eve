@@ -8,6 +8,8 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import { stripEveTraceBaggage } from "#protocol/baggage.js";
+import { readGatewayRouting } from "#shared/gateway-routing.js";
+import { isObject } from "#shared/guards.js";
 
 const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
 const traceContextSetter: TextMapSetter<Record<string, string>> = {
@@ -63,6 +65,25 @@ export function readGatewayCostData(
       typeof data.generationId === "string" && data.generationId.length > 0
         ? data.generationId
         : undefined,
+  };
+}
+
+/**
+ * Converts Gateway session affinity metadata to span attributes, so a step can
+ * be matched to its session in the Gateway logs Sessions view.
+ */
+export function gatewayRoutingAttributes(
+  providerMetadata: Readonly<Record<string, unknown>> | undefined,
+): Attributes | undefined {
+  const gateway = providerMetadata?.gateway;
+  const routing = readGatewayRouting(isObject(gateway) ? gateway.routing : undefined);
+  if (routing === undefined) return undefined;
+  return {
+    "vercel.ai_gateway.client_session_id": routing.clientSessionId,
+    "vercel.ai_gateway.client_session_id_source": routing.clientSessionIdSource,
+    "vercel.ai_gateway.affinity.outcome": routing.affinity?.outcome,
+    "vercel.ai_gateway.affinity.pinned_provider": routing.affinity?.pinnedProvider,
+    "vercel.ai_gateway.affinity.displaced_provider": routing.affinity?.displacedProvider,
   };
 }
 

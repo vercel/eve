@@ -1,4 +1,5 @@
 import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
+import { readGatewayRouting } from "#shared/gateway-routing.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
 /** Returns an immutable event projection with conversation content removed. */
@@ -68,7 +69,7 @@ export function withInstrumentationDecision(
   }
 }
 
-/** Provider metadata fields that describe cost/identity rather than content. */
+/** Provider metadata fields that describe cost, identity, or routing rather than content. */
 export function structuralProviderMetadata(
   metadata: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
@@ -77,11 +78,13 @@ export function structuralProviderMetadata(
     return Object.freeze({});
   }
   const source = gateway as Readonly<Record<string, unknown>>;
-  const structural: Record<string, string | number> = {};
+  const structural: Record<string, unknown> = {};
   for (const key of ["cost", "generationId"] as const) {
     const value = source[key];
     if (typeof value === "string" || typeof value === "number") structural[key] = value;
   }
+  const routing = readGatewayRouting(source["routing"]);
+  if (routing !== undefined) structural["routing"] = routing;
   return Object.freeze(
     Object.keys(structural).length === 0 ? {} : { gateway: Object.freeze(structural) },
   );

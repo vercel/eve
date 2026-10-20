@@ -32,19 +32,17 @@ describe("photonInboundContent", () => {
     expect(photonInboundContent(message("  \n"))).toBeUndefined();
   });
 
-  it("drops attachment-only messages when Photon provides no attachment URL", () => {
+  it("notes an attachment-only message Photon sends without a download", () => {
     expect(
       photonInboundContent(
-        message("", [
-          {
-            mimeType: "image/jpeg",
-            name: "photo.jpg",
-            size: 10,
-            type: "image",
-          },
-        ]),
+        message("", [{ mimeType: "audio/x-caf", name: "voice", size: 10, type: "audio" }]),
       ),
-    ).toBeUndefined();
+    ).toEqual([
+      {
+        text: "Attachment voice was not retrieved: the platform did not provide a download for it.",
+        type: "text",
+      },
+    ]);
   });
 });
 
