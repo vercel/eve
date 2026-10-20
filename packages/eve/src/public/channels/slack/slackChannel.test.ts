@@ -2091,7 +2091,8 @@ describe("slackChannel() final reply delivery", () => {
   describe("deleted thread root", () => {
     const rootGoneLog = "Slack thread root was deleted; dropping the final reply";
 
-    // Slack posts a reply to a deleted root as a top-level channel message.
+    // Slack posts a reply to a deleted root that had no replies as a
+    // top-level channel message.
     it("drops the reply when Slack reports the root as thread_not_found", async () => {
       const logs = captureLogRecords();
       rootLookup = () => ({ ok: false, error: "thread_not_found" });
@@ -2104,16 +2105,18 @@ describe("slackChannel() final reply delivery", () => {
       expect(logs.records.some((entry) => entry.message === rootGoneLog)).toBe(true);
     });
 
-    it("drops the reply when the root is a tombstone", async () => {
+    // A deleted root with replies stays as a tombstone and keeps its thread,
+    // which every eve thread has once eve answers.
+    it("posts the reply when the root is a tombstone that still has replies", async () => {
       rootLookup = () => ({
         ok: true,
-        messages: [{ subtype: "tombstone", ts: "1700000000.000001" }],
+        messages: [{ reply_count: 2, subtype: "tombstone", ts: "1700000000.000001" }],
       });
       const { adapter, ctx } = adapterWith();
 
       await callCompletionHandler(adapter, finalReply("hello"), ctx);
 
-      expect(urls()).toEqual([]);
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
     });
 
     it("drops a reply sent through postCompletedSlackReply", async () => {
@@ -2136,6 +2139,7 @@ describe("slackChannel() final reply delivery", () => {
 
     it.each([
       ["a Slack error", () => ({ ok: false, error: "ratelimited" })],
+      ["a missing history scope", () => ({ ok: false, error: "missing_scope" })],
       [
         "a thrown lookup",
         () => {
