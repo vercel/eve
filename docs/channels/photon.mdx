@@ -32,10 +32,9 @@ boundary. See [Overlapping messages](./overview#overlapping-messages).
 
 Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
 
-Photon passes each inbound message ID as a [delivery idempotency key](./custom#retried-deliveries).
-Retries reaching another instance do not repeat agent input while that key
-remains in the same session's recent-key window. This requires a shared durable
-Workflow World, not separate stores for each deployment.
+Photon uses inbound message IDs as [delivery idempotency keys](./custom#retried-deliveries).
+Replicas that share a durable Workflow World ignore retries while the ID remains
+in the session's recent-key window.
 
 Images and other files people send reach the agent as file parts. Photon's
 webhook lists each file without its bytes, so eve downloads it from Photon by

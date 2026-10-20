@@ -105,10 +105,10 @@ part of the authored channel API.
 
 Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
-Unkeyed cold-start sends return their accepted candidate without waiting for address
-ownership. If simultaneous sends race, eve forwards the losing candidate's
-message to the winner; resolve the address after startup when you need a fixed
-handle to the canonical owner.
+Without an [idempotency key](#retried-deliveries), a new session's handle can
+return before it claims the address. If another send wins the address, eve
+forwards the message to that session. Call `resolveSession(address)` after
+startup to get the winning session's handle.
 
 ```ts
 const source = from(threadId);
@@ -208,8 +208,8 @@ address's current owner as a fixed handle.
 
 ## Retried deliveries
 
-Pass the verified provider event's stable ID as `idempotencyKey` when retries
-must not repeat agent input:
+After verifying a webhook, pass its stable event ID as `idempotencyKey`. Reuse the key
+when retrying a failed or timed-out send:
 
 ```ts
 const session = await from(conversationId).send(message, {
@@ -218,28 +218,25 @@ const session = await from(conversationId).send(message, {
 });
 ```
 
-`from(address).send()` and `respond()`, fixed `Session.send()` and `respond()`,
-and the Chat SDK bridge accept this option. Keys must contain 1–256 characters.
-Choose a key unique to one logical delivery, including its provider or event
-kind when those IDs can overlap. The first admitted input wins; changing the
-message while reusing its key does not replace that input.
+Channel and fixed-session `send()` and `respond()` calls accept this option,
+as does the Chat SDK bridge. Keys must contain 1–256 characters and identify one
+delivery. Prefix IDs with the provider or event type if they can overlap.
+Reusing a retained key ignores the new input, even if the message changed.
 
-Each session remembers its last 1024 distinct keys in admission order. Retries
-do not refresh that window. A retry after eviction can run again. Aliases share
-the same window, and it survives workflow replay and owner handoffs. Other
-sessions can reuse the key. Reset, expiration, and session replacement start a
-new window. Replicas must share the same durable Workflow World.
+Each session remembers its last 1,024 distinct keys. Retries do not extend
+retention and can run again after eviction. Aliases share this window; replay
+and owner handoffs preserve it. Other sessions have separate windows, including
+those created after reset, expiration, or replacement. Replicas must share the
+same durable Workflow World.
 
-Keyed cold-start sends wait up to 30 seconds for ownership and return the
-winning session's handle. If a send fails after acceptance or times out, retry
-with the same key. Existing-session sends acknowledge durable inbox acceptance;
-they do not wait for a turn or report whether the input was a duplicate. A known
-duplicate does not steer generation, call your `deliver` hook, or start a turn.
+A known duplicate does not interrupt generation, call `deliver`, or start a
+turn. A keyed send that creates a session waits up to 30 seconds for the winning
+session's handle. Sends to existing sessions return after eve stores the
+delivery, without waiting for a turn or reporting whether it was a duplicate.
 
-Await `send()` before acknowledging a webhook when the provider permits it.
-Returning a successful HTTP response before durable acceptance can lose work.
-The key does not deduplicate work your channel does before calling `send()`,
-and it does not make tool side effects or outbound posts exactly once.
+Await `send()` before acknowledging a webhook when the provider allows it.
+Acknowledging sooner can lose work. This does not make tool calls, outbound
+posts, or work done before `send()` exactly once.
 
 ## Wrap an existing channel's routes
 
@@ -409,7 +406,7 @@ Before sending:
 
 - Verify the provider's signature and validate the payload, including size limits. Derive `event.source` from the verified sender, not an untrusted payload field.
 - Filter out events that should not reach the agent.
-- Use a stable [delivery idempotency key](#retried-deliveries) on the destination's `from(address).send()` when retries must not repeat agent input. Unkeyed sends do not deduplicate events. Provider posts outside eve still need application-level idempotency.
+- Deduplicate retries in your application unless the destination's `receive` hook passes a [delivery key](#retried-deliveries) to `from(address).send()`.
 
 The supplied `auth` identifies who started the session, available to tools and event handlers as `session.auth.initiator`.
 
