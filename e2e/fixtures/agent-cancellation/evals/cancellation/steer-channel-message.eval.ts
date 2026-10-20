@@ -46,12 +46,7 @@ export default defineEval({
     const sessionId = started.sessionId!;
     const activeTurn = t.target.watchTurn(sessionId);
 
-    await activeTurn.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-      },
-    });
+    await activeTurn.waitForEvent("call.requested", { data: { capability: { name: TOOL_NAME } } });
 
     const replacement = await postMessage(
       t.target,
@@ -69,10 +64,10 @@ export default defineEval({
 
     const replacementTurn = await activeTurn.result();
     replacementTurn.event("turn.started", { count: 1 });
-    replacementTurn.event("message.received", { count: 2 });
-    replacementTurn.notEvent("turn.cancelled");
-    replacementTurn.notEvent("turn.failed");
-    replacementTurn.notEvent("session.failed");
+    replacementTurn.event("delivery.consumed", { count: 2 });
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     replacementTurn.messageIncludes(/CHANNEL-STEERING-REPLACEMENT-OK/i);
 
     t.succeeded();

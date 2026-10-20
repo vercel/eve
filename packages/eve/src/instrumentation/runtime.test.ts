@@ -426,7 +426,6 @@ describe("bindInstrumentationRuntime", () => {
             turnId: "turn_0",
           });
           expect(attempt.scope.traceSessionId).toBe(boundSession.sessionId);
-          await attempt.complete();
         },
       );
     });

@@ -23,10 +23,10 @@ export async function dispatchSessionTurn<TOutput>(input: {
   }
 
   beforeSend?.();
-  if (turn.inputResponses === undefined) {
+  if (turn.answers === undefined) {
     const { message, ...options } = turn;
     return { session, response: await session.send(message, options), created: false };
   }
-  const { inputResponses, ...options } = turn;
-  return { session, response: await session.respond(inputResponses, options), created: false };
+  const { answers, ...options } = turn;
+  return { session, response: await session.respond(answers, options), created: false };
 }

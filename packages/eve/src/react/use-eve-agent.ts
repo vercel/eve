@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
@@ -10,11 +11,7 @@ import {
   type PrepareSend,
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
-import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
-import { conversationReducer } from "#client/conversation-reducer.js";
-import type { ConversationState } from "#client/conversation-state.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
   CancelSessionResult,
@@ -39,16 +36,15 @@ export type { PrepareSend };
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
- * Snapshot of an eve agent session: `conversation` (canonical state), `data`
- * (the selected view), `events` (the authoritative server stream), `session`
- * (resumable cursor), `status`, and `error`.
+ * Snapshot of an eve agent session: `data` (the conversation), `events` (the authoritative
+ * server stream), `session` (resumable cursor), `status`, and `error`.
  */
-export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
+export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
 
 /**
  * Snapshot plus commands returned by `useEveAgent`.
  */
-export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
+export interface UseEveAgentHelpers extends UseEveAgentSnapshot {
   /** Requests durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
   /** Replays the attached durable session and follows its in-flight turn, if any. */
@@ -64,7 +60,7 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   ) => Promise<void>;
   /** Answers pending HITL input requests. Rejects if a turn is already in flight. */
   readonly respond: <TOutput = unknown>(
-    inputResponses: Parameters<ClientSession["respond"]>[0],
+    answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
   ) => Promise<void>;
 }
@@ -73,13 +69,13 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
  * Configuration for creating or binding a React eve agent session.
  *
  * Session configuration is read when the hook creates its internal store;
- * remount the component to point at a different host, reducer, or session.
+ * remount the component to point at a different host or session.
  * Lifecycle callbacks update on every render.
  *
  * For credentials or headers that must change without remounting, pass function
  * values to `auth` or `headers`; the client resolves those before each request.
  */
-export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
@@ -100,19 +96,19 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
-   * `message.received` stream event.
+   * `delivery.consumed` fact.
    *
-   * Optimistic events are reducer-facing projection events only. They are not
-   * exposed through `events`, which remains the authoritative eve stream.
+   * Such a message shows in `data.messages` only; `events` remains the
+   * authoritative eve stream.
    *
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Follow each subagent call's session into `conversation.agents` while mounted. @default false */
+  /** Follow each subagent call's session into `data.agents` while mounted. @default false */
   readonly followSubagents?: boolean;
   /**
    * Keep the session stream open between turns to show events that arrive from schedules,
@@ -131,7 +127,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default false
    */
   readonly prewarm?: boolean;
-  readonly reducer?: EveAgentReducer<TData>;
   /**
    * Replay the attached durable session after mount and follow its in-flight
    * turn, if any. Requires `initialSession` or `session`.
@@ -142,33 +137,22 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly session?: ClientSession;
 }
 
-export function useEveAgent(
-  options?: UseEveAgentOptions<ConversationState>,
-): UseEveAgentHelpers<ConversationState>;
-
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> & { readonly reducer: EveAgentReducer<TData> },
-): UseEveAgentHelpers<TData>;
-
 /**
  * React hook that drives an eve session and projects its event stream into UI data.
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
- * plus the commands `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. With no reducer, `data` is the
- * built-in conversation projection (including UIMessage-compatible `messages`);
- * pass a reducer to project into your own shape and
- * infer `TData`.
+ * plus the commands `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. `data` is the
+ * conversation (`messages`, `turns`, `interactions`, `tasks`, `agents`); derive anything else
+ * from `events`.
  *
- * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
+ * Session-shaping options (`host`, `session`, `initialEvents`,
  * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are read once
  * when the store is created; remount to change them. `prewarm` and lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
  * refresh on every render.
  */
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> = {},
-): UseEveAgentHelpers<TData> {
-  const storeRef = useRef<EveAgentStore<TData> | undefined>(undefined);
+export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelpers {
+  const storeRef = useRef<EveAgentStore | undefined>(undefined);
   const mountedRef = useRef(false);
   const resumeOnMountRef = useRef(options.resume ?? false);
   const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
@@ -183,7 +167,6 @@ export function useEveAgent<TData>(
     ) {
       throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
     }
-    const reducer = options.reducer ?? (conversationReducer as EveAgentReducer<TData>);
     storeRef.current = new EveAgentStore({
       auth: options.auth,
       headers: options.headers,
@@ -193,7 +176,6 @@ export function useEveAgent<TData>(
       optimistic: options.optimistic,
       followSubagents: options.followSubagents,
       followIdle: options.followIdle,
-      reducer,
       session: options.session,
     });
   }
@@ -262,9 +244,9 @@ export function useEveAgent<TData>(
   );
   const respond = useCallback(
     <TOutput = unknown>(
-      inputResponses: Parameters<ClientSession["respond"]>[0],
+      answers: Parameters<ClientSession["respond"]>[0],
       options?: RespondTurnOptions<TOutput>,
-    ) => store.send({ ...options, inputResponses }),
+    ) => store.send({ ...options, answers }),
     [store],
   );
   const visibleSnapshot =

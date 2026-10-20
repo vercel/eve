@@ -1,30 +1,23 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const TOOL_NAME = "web_search";
 
-function providerRequestsPrecedeResults(events: readonly MessageStreamEvent[]): boolean {
+function providerRequestsPrecedeResults(events: readonly SessionStreamEvent[]): boolean {
   const requestIndexByCallId = new Map<string, number>();
   const resultIndexByCallId = new Map<string, number>();
   let requestCount = 0;
   let resultCount = 0;
 
   for (const [eventIndex, event] of events.entries()) {
-    if (event.type === "actions.requested") {
-      for (const action of event.data.actions) {
-        if (action.kind !== "tool-call" || action.toolName !== TOOL_NAME) continue;
-        requestCount += 1;
-        requestIndexByCallId.set(action.callId, eventIndex);
-      }
+    if (event.type === "call.requested" && event.data.capability.name === TOOL_NAME) {
+      requestCount += 1;
+      requestIndexByCallId.set(event.data.callId, eventIndex);
     }
 
-    if (
-      event.type === "action.result" &&
-      event.data.result.kind === "tool-result" &&
-      event.data.result.toolName === TOOL_NAME
-    ) {
+    if (event.type === "call.settled" && requestIndexByCallId.has(event.data.callId)) {
       resultCount += 1;
-      resultIndexByCallId.set(event.data.result.callId, eventIndex);
+      resultIndexByCallId.set(event.data.callId, eventIndex);
     }
   }
 

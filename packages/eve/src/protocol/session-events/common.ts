@@ -15,21 +15,33 @@ import type {
 } from "./envelope.js";
 
 /**
- * A schema whose parsed output is a `T` with exactly `T`'s fields. Checked at compile time, so a
- * field added to a public type without its schema, or the reverse, fails the build.
+ * A schema that parses to exactly `T`. Checked at compile time both ways, so the build fails when
+ * the two drift apart: a field one has and the other lacks, a field one requires and the other
+ * leaves optional, or a value one accepts and the other doesn't.
  */
 export function conforming<T>() {
   return <TSchema extends z.ZodType>(
     schema: TSchema &
       ([z.output<TSchema>] extends [T]
-        ? [Exclude<KeysOf<T>, KeysOf<z.output<TSchema>>>] extends [never]
-          ? unknown
-          : { readonly missingFromSchema: Exclude<KeysOf<T>, KeysOf<z.output<TSchema>>> }
+        ? [T] extends [DeepReadonly<z.output<TSchema>>]
+          ? [Exclude<KeysOf<T>, KeysOf<z.output<TSchema>>>] extends [never]
+            ? [Exclude<KeysOf<z.output<TSchema>>, KeysOf<T>>] extends [never]
+              ? unknown
+              : { readonly missingFromType: Exclude<KeysOf<z.output<TSchema>>, KeysOf<T>> }
+            : { readonly missingFromSchema: Exclude<KeysOf<T>, KeysOf<z.output<TSchema>>> }
+          : { readonly schemaRejectsSome: T }
         : { readonly schemaDoesNotParseTo: T }),
   ): TSchema => schema;
 }
 
 type KeysOf<T> = T extends unknown ? keyof T : never;
+
+/** Public types are read-only and parsed values aren't; only the shapes are compared. */
+type DeepReadonly<T> = T extends readonly (infer U)[]
+  ? readonly DeepReadonly<U>[]
+  : T extends object
+    ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+    : T;
 
 /**
  * A string whose values the stream names: it parses open, so a reader keeps what a newer writer

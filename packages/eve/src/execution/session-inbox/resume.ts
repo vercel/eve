@@ -23,6 +23,7 @@ import {
   lookupSessionOwnerHook,
   resumeRunnableHook,
 } from "#execution/session-inbox/owner.js";
+import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
 import { getHookByToken, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
@@ -49,6 +50,7 @@ export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | SessionFailurePayload,
 ): Promise<ResumedSessionInboxHook> {
+  command = withPreV27Answers(command);
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
   const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;

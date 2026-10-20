@@ -6,11 +6,11 @@ import type {
   ChannelSendOptions,
   ChannelSource,
 } from "#channel/channel-operations.js";
-import { type InputResponse, inputResponseSchema } from "#shared/input.js";
+import { type Answer, answerSchema } from "#shared/input.js";
 
 export type ObservedChannelDelivery<TState> =
   | (ChannelSendOptions<TState> & { readonly message: string | UserContent })
-  | (ChannelRespondOptions<TState> & { readonly inputResponses: readonly InputResponse[] });
+  | (ChannelRespondOptions<TState> & { readonly answers: readonly Answer[] });
 
 type DeliveryObserver<TState> = (
   continuationToken: string,
@@ -27,10 +27,10 @@ export function mockChannelContext<TState = undefined>(
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },
-        async respond(inputResponses, options) {
+        async respond(answers, options) {
           return (await observeDelivery(continuationToken, {
             ...options,
-            inputResponses: inputResponseSchema.array().parse(inputResponses),
+            answers: answerSchema.array().parse(answers),
           })) as never;
         },
         async cancel() {

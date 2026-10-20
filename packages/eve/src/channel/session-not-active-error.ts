@@ -8,9 +8,7 @@ import { SessionStrandedError } from "#channel/session-stranded-error.js";
  */
 export class SessionNotActiveError extends Error {
   constructor() {
-    super(
-      "Cannot deliver inputResponses — the target session was not found via continuation token.",
-    );
+    super("Cannot deliver answers — the target session was not found via continuation token.");
     this.name = "SessionNotActiveError";
   }
 

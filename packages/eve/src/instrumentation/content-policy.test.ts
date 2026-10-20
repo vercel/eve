@@ -38,11 +38,11 @@ describe("instrumentationEventForTraceDecision", () => {
     expect(
       instrumentationEventForTraceDecision(
         {
-          action: { callId: "call-1", name: "weather" },
+          call: { callId: "call-1", name: "weather" },
           idempotencyKey: "input-1",
-          kind: "tool-approval",
+          kind: "approval",
           request: { prompt: "Approve weather?" },
-          requestId: "request-1",
+          interactionId: "request-1",
           scope: event.scope,
           type: "input.requested",
         },
@@ -54,17 +54,17 @@ describe("instrumentationEventForTraceDecision", () => {
       instrumentationEventForTraceDecision(
         {
           idempotencyKey: "input-1",
-          kind: "tool-approval",
-          outcome: "approved",
-          requestId: "request-1",
-          response: { optionId: "approve" },
+          kind: "approval",
+          outcome: "accepted",
+          interactionId: "request-1",
+          answer: { optionId: "approve" },
           scope: event.scope,
           type: "input.resolved",
         },
         decision,
         contentContext("public"),
       ),
-    ).toMatchObject({ response: undefined });
+    ).toMatchObject({ answer: undefined });
   });
 
   it("applies the OTel audience ceiling", () => {

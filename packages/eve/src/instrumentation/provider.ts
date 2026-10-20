@@ -29,7 +29,7 @@ export type {
   InstrumentationInputRequest,
   InstrumentationInputRequestedEvent,
   InstrumentationInputResolvedEvent,
-  InstrumentationInputResponse,
+  InstrumentationAnswer,
   InstrumentationModelCallCompletedEvent,
   InstrumentationModelCallFailedEvent,
   InstrumentationModelCallStartedEvent,

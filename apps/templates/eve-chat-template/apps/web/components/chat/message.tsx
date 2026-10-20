@@ -1,6 +1,6 @@
 "use client";
 
-import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
+import type { EveToolPart, EveMessage, EveMessagePart } from "eve/react";
 import { ChevronDownIcon, ChevronRightIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
@@ -13,9 +13,9 @@ const STREAM_TEXT_TICK_MS = 60;
 const STREAM_TEXT_CACHE_LIMIT = 40;
 const streamingTextCache = new Map<string, string>();
 
-export type AgentInputResponse = {
+export type AgentAnswer = {
   readonly optionId?: string;
-  readonly requestId: string;
+  readonly interactionId: string;
   readonly text?: string;
 };
 
@@ -23,12 +23,12 @@ export function AgentMessage({
   canRespond,
   isStreaming,
   message,
-  onInputResponses,
+  onAnswers,
 }: {
   readonly canRespond: boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
 }) {
   const lastTextIndex = message.parts.reduce(
     (last, part, index) => (part.type === "text" ? index : last),
@@ -57,7 +57,7 @@ export function AgentMessage({
           isUser={isUser}
           lastTextIndex={lastTextIndex}
           messageId={message.id}
-          onInputResponses={onInputResponses}
+          onAnswers={onAnswers}
           parts={message.parts}
           showCaret={isStreaming && message.role === "assistant"}
         />
@@ -71,7 +71,7 @@ function AgentMessageParts({
   isUser,
   lastTextIndex,
   messageId,
-  onInputResponses,
+  onAnswers,
   parts,
   showCaret,
 }: {
@@ -79,12 +79,12 @@ function AgentMessageParts({
   readonly isUser: boolean;
   readonly lastTextIndex: number;
   readonly messageId: string;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly parts: readonly EveMessagePart[];
   readonly showCaret: boolean;
 }) {
   const elements: ReactNode[] = [];
-  let pendingTools: EveDynamicToolPart[] = [];
+  let pendingTools: EveToolPart[] = [];
 
   const flushTools = (isSettled: boolean) => {
     if (pendingTools.length === 0) {
@@ -97,8 +97,8 @@ function AgentMessageParts({
       <ToolGroup
         canRespond={canRespond}
         isSettled={isSettled}
-        key={`tools:${partsForGroup.map((part) => part.toolCallId).join(":")}`}
-        onInputResponses={onInputResponses}
+        key={`tools:${partsForGroup.map((part) => part.callId).join(":")}`}
+        onAnswers={onAnswers}
         parts={partsForGroup}
       />,
     );
@@ -106,7 +106,7 @@ function AgentMessageParts({
   };
 
   parts.forEach((part, index) => {
-    if (part.type === "dynamic-tool") {
+    if (part.type === "tool") {
       pendingTools.push(part);
       return;
     }
@@ -119,7 +119,7 @@ function AgentMessageParts({
         canRespond={canRespond}
         isUser={isUser}
         key={key}
-        onInputResponses={onInputResponses}
+        onAnswers={onAnswers}
         part={part}
         showCaret={showCaret && index === lastTextIndex}
         streamKey={`${messageId}:${key}`}
@@ -135,21 +135,19 @@ function AgentMessageParts({
 function AgentMessagePart({
   canRespond,
   isUser,
-  onInputResponses,
+  onAnswers,
   part,
   showCaret,
   streamKey,
 }: {
   readonly canRespond: boolean;
   readonly isUser: boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
   readonly streamKey: string;
 }) {
   switch (part.type) {
-    case "step-start":
-      return null;
     case "text":
       return isUser ? (
         <UserTextPart text={part.text} />
@@ -158,7 +156,7 @@ function AgentMessagePart({
       );
     case "reasoning":
       return <ReasoningPart isStreaming={part.state === "streaming"} text={part.text} />;
-    case "dynamic-tool":
+    case "tool":
       return null;
   }
 }
@@ -351,15 +349,15 @@ function ReasoningPart({
 function ToolGroup({
   canRespond,
   isSettled,
-  onInputResponses,
+  onAnswers,
   parts,
 }: {
   readonly canRespond: boolean;
   readonly isSettled: boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly parts: readonly EveDynamicToolPart[];
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly parts: readonly EveToolPart[];
 }) {
-  const shouldOpen = parts.some(needsInputResponse);
+  const shouldOpen = parts.some(needsAnswer);
   const [open, setOpen] = useState(shouldOpen);
   const status = getSettledToolStatus(getToolGroupStatus(parts), isSettled && !shouldOpen);
   const label = summarizeToolGroup(parts);
@@ -399,18 +397,14 @@ function ToolGroup({
       {canExpand ? (
         <CollapsibleContent className="ml-2 border-l border-border/40 pl-3 pt-0.5 pb-1">
           {parts.length === 1 ? (
-            <ToolDetails
-              canRespond={canRespond}
-              onInputResponses={onInputResponses}
-              part={parts[0]!}
-            />
+            <ToolDetails canRespond={canRespond} onAnswers={onAnswers} part={parts[0]!} />
           ) : (
             parts.map((part) => (
               <ToolCallItem
                 canRespond={canRespond}
                 isSettled={isSettled}
-                key={part.toolCallId}
-                onInputResponses={onInputResponses}
+                key={part.callId}
+                onAnswers={onAnswers}
                 part={part}
               />
             ))
@@ -424,15 +418,15 @@ function ToolGroup({
 function ToolCallItem({
   canRespond,
   isSettled,
-  onInputResponses,
+  onAnswers,
   part,
 }: {
   readonly canRespond: boolean;
   readonly isSettled: boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly part: EveDynamicToolPart;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly part: EveToolPart;
 }) {
-  const shouldOpen = needsInputResponse(part);
+  const shouldOpen = needsAnswer(part);
   const [open, setOpen] = useState(shouldOpen);
   const status = getSettledToolStatus(getToolStatus(part), isSettled && !shouldOpen);
   const canExpand = hasToolDetails(part);
@@ -473,7 +467,7 @@ function ToolCallItem({
     <Collapsible className="py-0.5" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger asChild>{button}</CollapsibleTrigger>
       <CollapsibleContent className="mt-1 ml-5">
-        <ToolDetails canRespond={canRespond} onInputResponses={onInputResponses} part={part} />
+        <ToolDetails canRespond={canRespond} onAnswers={onAnswers} part={part} />
       </CollapsibleContent>
     </Collapsible>
   );
@@ -481,28 +475,24 @@ function ToolCallItem({
 
 function ToolDetails({
   canRespond,
-  onInputResponses,
+  onAnswers,
   part,
 }: {
   readonly canRespond: boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly part: EveDynamicToolPart;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly part: EveToolPart;
 }) {
-  const hasOutput = part.state === "output-available" || part.state === "output-error";
+  const failed = part.status === "settled" && part.outcome !== "completed";
 
   return (
     <div className="space-y-1.5">
-      <InputRequestActions
-        canRespond={canRespond}
-        onInputResponses={onInputResponses}
-        part={part}
-      />
+      <InteractionActions canRespond={canRespond} onAnswers={onAnswers} part={part} />
       <ToolPayload label="input" value={part.input} />
-      {hasOutput ? (
+      {part.status === "settled" ? (
         <ToolPayload
-          label={part.state === "output-error" ? "error" : "result"}
-          tone={part.state === "output-error" ? "destructive" : "default"}
-          value={part.state === "output-error" ? part.errorText : part.output}
+          label={failed ? "error" : "result"}
+          tone={failed ? "destructive" : "default"}
+          value={failed ? part.error?.message : part.output}
         />
       ) : null}
     </div>
@@ -535,7 +525,7 @@ function ToolStatusIcon({ status }: { readonly status: ToolStatus }) {
   );
 }
 
-function ToolNameLabel({ part }: { readonly part: EveDynamicToolPart }) {
+function ToolNameLabel({ part }: { readonly part: EveToolPart }) {
   return (
     <span className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
       {formatToolName(resolveToolName(part))}
@@ -571,33 +561,31 @@ function ToolPayload({
   );
 }
 
-function InputRequestActions({
+function InteractionActions({
   canRespond,
-  onInputResponses,
+  onAnswers,
   part,
 }: {
   readonly canRespond: boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly part: EveDynamicToolPart;
+  readonly onAnswers: (responses: readonly AgentAnswer[]) => void | Promise<void>;
+  readonly part: EveToolPart;
 }) {
   const [freeformText, setFreeformText] = useState("");
-  const inputRequest = part.toolMetadata?.eve?.inputRequest;
+  const interaction = part.interaction?.request;
 
-  if (!inputRequest) {
+  if (!interaction) {
     return null;
   }
 
-  const inputResponse = part.toolMetadata?.eve?.inputResponse;
-  const selectedOption = inputRequest.options?.find(
-    (option) => option.id === inputResponse?.optionId,
-  );
+  const answer = part.interaction?.answer;
+  const selectedOption = interaction.options?.find((option) => option.id === answer?.optionId);
 
-  if (inputResponse) {
+  if (answer) {
     return (
       <div className="rounded-md border border-border bg-background px-3 py-2 text-sm">
         <span className="text-muted-foreground">Responded: </span>
         <span className="font-medium">
-          {selectedOption?.label ?? inputResponse.text ?? inputResponse.optionId}
+          {selectedOption?.label ?? answer.text ?? answer.optionId}
         </span>
       </div>
     );
@@ -608,24 +596,24 @@ function InputRequestActions({
     if (!text) {
       return;
     }
-    void onInputResponses([{ requestId: inputRequest.requestId, text }]);
+    void onAnswers([{ interactionId: interaction.interactionId, text }]);
     setFreeformText("");
   };
 
   return (
     <div className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-      <p className="text-sm text-muted-foreground">{inputRequest.prompt}</p>
-      {inputRequest.options?.length ? (
+      <p className="text-sm text-muted-foreground">{interaction.prompt}</p>
+      {interaction.options?.length ? (
         <div className="flex flex-wrap gap-2">
-          {inputRequest.options.map((option) => (
+          {interaction.options.map((option) => (
             <Button
               disabled={!canRespond}
               key={option.id}
               onClick={() => {
-                void onInputResponses([
+                void onAnswers([
                   {
                     optionId: option.id,
-                    requestId: inputRequest.requestId,
+                    interactionId: interaction.interactionId,
                   },
                 ]);
               }}
@@ -638,7 +626,7 @@ function InputRequestActions({
           ))}
         </div>
       ) : null}
-      {inputRequest.allowFreeform || inputRequest.display === "text" ? (
+      {interaction.allowFreeform || interaction.display === "text" ? (
         <div className="flex gap-2">
           <Input
             disabled={!canRespond}
@@ -667,31 +655,26 @@ function InputRequestActions({
 
 type ToolStatus = "completed" | "denied" | "error" | "running";
 
-function needsInputResponse(part: EveDynamicToolPart) {
-  return Boolean(part.toolMetadata?.eve?.inputRequest && !part.toolMetadata.eve.inputResponse);
+function needsAnswer(part: EveToolPart) {
+  return part.interaction?.status === "open";
 }
 
-function hasToolDetails(part: EveDynamicToolPart) {
+function hasToolDetails(part: EveToolPart) {
   const hasInput = part.input !== undefined && formatPayload(part.input).trim().length > 0;
-  const hasOutput =
-    part.state === "output-available" && formatPayload(part.output).trim().length > 0;
-  const hasError = part.state === "output-error" && part.errorText.trim().length > 0;
+  const hasOutput = part.output !== undefined && formatPayload(part.output).trim().length > 0;
+  const hasError = (part.error?.message.trim().length ?? 0) > 0;
 
-  return hasInput || hasOutput || hasError || Boolean(part.toolMetadata?.eve?.inputRequest);
+  return hasInput || hasOutput || hasError || part.interaction !== undefined;
 }
 
-function getToolStatus(part: EveDynamicToolPart): ToolStatus {
-  switch (part.state) {
-    case "input-streaming":
-    case "input-available":
-    case "approval-requested":
-    case "approval-responded":
-      return "running";
-    case "output-available":
+function getToolStatus(part: EveToolPart): ToolStatus {
+  if (part.status !== "settled") return "running";
+  switch (part.outcome) {
+    case "completed":
       return "completed";
-    case "output-denied":
+    case "rejected":
       return "denied";
-    case "output-error":
+    default:
       return "error";
   }
 }
@@ -700,7 +683,7 @@ function getSettledToolStatus(status: ToolStatus, isSettled: boolean): ToolStatu
   return isSettled && status === "running" ? "completed" : status;
 }
 
-function getToolGroupStatus(parts: readonly EveDynamicToolPart[]): ToolStatus {
+function getToolGroupStatus(parts: readonly EveToolPart[]): ToolStatus {
   const statuses = parts.map(getToolStatus);
 
   if (statuses.includes("error")) {
@@ -731,7 +714,7 @@ function toolStatusLabel(status: ToolStatus) {
   }
 }
 
-function summarizeToolGroup(parts: readonly EveDynamicToolPart[]) {
+function summarizeToolGroup(parts: readonly EveToolPart[]) {
   if (parts.length === 1) {
     return describeToolAction(parts[0]!);
   }
@@ -780,7 +763,7 @@ function toolCategory(name: string) {
   return "ran";
 }
 
-function describeToolAction(part: EveDynamicToolPart) {
+function describeToolAction(part: EveToolPart) {
   const label = toolLabel(part);
   if (label) {
     return label;
@@ -825,15 +808,13 @@ function describeToolAction(part: EveDynamicToolPart) {
   return `Used ${formatToolName(name)}`;
 }
 
-/** eve versions that set `toolMetadata.eve.label` say how a call reads; older ones fall back to its name. */
-function toolLabel(part: EveDynamicToolPart): string | undefined {
-  const eve: Readonly<Record<string, unknown>> | undefined = part.toolMetadata?.eve;
-  return typeof eve?.label === "string" ? eve.label : undefined;
+/** How the call reads to people, as eve's channels show it. */
+function toolLabel(part: EveToolPart): string | undefined {
+  return part.label;
 }
 
-function resolveToolName(part: EveDynamicToolPart) {
-  const metadataName = part.toolMetadata?.eve?.name;
-  return metadataName && metadataName !== "unknown" ? metadataName : part.toolName;
+function resolveToolName(part: EveToolPart) {
+  return part.name;
 }
 
 function formatToolName(name: string) {
@@ -910,8 +891,8 @@ function truncateText(text: string, maxLength: number) {
 
 function partKey(part: EveMessagePart, index: number): string {
   switch (part.type) {
-    case "dynamic-tool":
-      return part.toolCallId;
+    case "tool":
+      return part.callId;
     default:
       return `${part.type}:${index}`;
   }

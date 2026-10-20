@@ -21,7 +21,7 @@ export default defineEval({
     );
     followUp.expectOk();
 
-    t.event("agent.started", { count: 1, data: { name: "researcher" } });
+    t.event("child.opened", { count: 1, data: { name: "researcher" } });
     t.eventsSatisfy("both turns reach one researcher task", (events) => {
       const calls = taskStarts(events, "researcher");
       return (

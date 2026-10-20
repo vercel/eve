@@ -1,5 +1,4 @@
-import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
-import { extractCompletedResult } from "#client/output-schema.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
 import type { CancelSessionResult, MessageResult } from "#client/types.js";
 
@@ -9,11 +8,9 @@ import type { CancelSessionResult, MessageResult } from "#client/types.js";
 interface MessageResponseInput {
   readonly cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
   readonly createStream: (
-    source?: AsyncIterable<MessageStreamEvent>,
-  ) => AsyncGenerator<MessageStreamEvent>;
+    source?: AsyncIterable<SessionStreamEvent>,
+  ) => AsyncGenerator<SessionStreamEvent>;
   readonly deliveryId?: string;
-  /** Answers resume a turn that started before their stream, so its `input.resolved` names it. */
-  readonly resumesTurn?: boolean;
   readonly sessionId: string;
 }
 
@@ -27,7 +24,7 @@ const acceptedDeliveryId = Symbol("acceptedDeliveryId");
  * completes. Collect the event stream via
  * {@link result} or iterate it with `for await...of`.
  */
-export class MessageResponse<TOutput = unknown> implements AsyncIterable<MessageStreamEvent> {
+export class MessageResponse<TOutput = unknown> implements AsyncIterable<SessionStreamEvent> {
   /**
    * Session ID assigned by the server.
    */
@@ -38,7 +35,6 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   #cancellation: Promise<CancelSessionResult> | undefined;
   #consumed = false;
   readonly #createStream: MessageResponseInput["createStream"];
-  readonly #resumesTurn: boolean;
   #settled = false;
   readonly #turnId = Promise.withResolvers<string | undefined>();
 
@@ -48,7 +44,6 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
     this.sessionId = input.sessionId;
     this[acceptedDeliveryId] = input.deliveryId;
     this.#createStream = input.createStream;
-    this.#resumesTurn = input.resumesTurn ?? false;
   }
 
   /**
@@ -76,7 +71,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
    * {@link MessageResult}.
    */
   async result(): Promise<MessageResult<TOutput>> {
-    const events: MessageStreamEvent[] = [];
+    const events: SessionStreamEvent[] = [];
 
     for await (const event of this) {
       events.push(event);
@@ -84,9 +79,9 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
 
     const summary = summarizeTurnEvents(events);
     return {
-      data: extractCompletedResult<TOutput>(events),
+      data: summary.result as TOutput | undefined,
       events,
-      inputRequests: summary.inputRequests,
+      interactions: summary.interactions,
       message: summary.message,
       sessionId: this.sessionId,
       status: summary.status,
@@ -98,13 +93,13 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
    *
    * Each response can only be consumed once.
    */
-  [Symbol.asyncIterator](): AsyncIterator<MessageStreamEvent> {
+  [Symbol.asyncIterator](): AsyncIterator<SessionStreamEvent> {
     return this[consumeResponse]();
   }
 
   [consumeResponse](
-    source?: AsyncIterable<MessageStreamEvent>,
-  ): AsyncGenerator<MessageStreamEvent> {
+    source?: AsyncIterable<SessionStreamEvent>,
+  ): AsyncGenerator<SessionStreamEvent> {
     if (this.#consumed) {
       throw new Error("MessageResponse has already been consumed.");
     }
@@ -114,16 +109,30 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   }
 
   async *#observeStream(
-    source?: AsyncIterable<MessageStreamEvent>,
-  ): AsyncGenerator<MessageStreamEvent> {
+    source?: AsyncIterable<SessionStreamEvent>,
+  ): AsyncGenerator<SessionStreamEvent> {
     try {
+      const deliveryId = this[acceptedDeliveryId];
       for await (const event of this.#createStream(source)) {
+        // The turn that consumed the message, whether it started it or joined it; answers are
+        // no turn's input, so they name the turn of what they answer.
         if (
-          event.type === "turn.started" ||
-          (this.#resumesTurn && event.type === "input.resolved")
+          event.type === "delivery.consumed" &&
+          (deliveryId === undefined || event.data.deliveryId === deliveryId)
         ) {
           this.#turnId.resolve(event.data.turnId);
-        } else if (isCurrentTurnBoundaryEvent(event)) {
+        } else if (
+          event.type === "response.submitted" &&
+          deliveryId !== undefined &&
+          event.data.deliveryId === deliveryId &&
+          event.scope?.turnId !== undefined
+        ) {
+          this.#turnId.resolve(event.scope.turnId);
+        } else if (
+          event.type === "session.ended" ||
+          (event.type === "delivery.settled" &&
+            (deliveryId === undefined || event.data.deliveryId === deliveryId))
+        ) {
           this.#settled = true;
           this.#turnId.resolve(undefined);
         }
@@ -143,7 +152,7 @@ export function getMessageResponseDeliveryId(response: MessageResponse): string 
 /** @internal Observe a turn through the frontend's existing session stream. */
 export function consumeMessageResponse(
   response: MessageResponse,
-  source: AsyncIterable<MessageStreamEvent>,
-): AsyncIterable<MessageStreamEvent> {
+  source: AsyncIterable<SessionStreamEvent>,
+): AsyncIterable<SessionStreamEvent> {
   return response[consumeResponse](source);
 }

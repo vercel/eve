@@ -25,7 +25,7 @@ export {
   type TeamsInboundMessageContext,
   type TeamsInboundResult,
   type TeamsInboundResultOrPromise,
-  type TeamsInputResponseResult,
+  type TeamsAnswerResult,
   type TeamsInvokeResult,
   type TeamsInvokeResultOrPromise,
   type TeamsReceiveTarget,
@@ -80,13 +80,13 @@ export {
 } from "#public/channels/teams/inbound.js";
 
 export {
-  deriveTeamsInputResponses,
-  isTeamsInputResponseActivity,
+  deriveTeamsAnswers,
+  isTeamsAnswerActivity,
   isTeamsToolApprovalResponseActivity,
   readTeamsToolApprovalPrompt,
-  renderAnsweredInputRequestMessage,
-  renderInputRequestAttachment,
-  renderInputRequestMessage,
+  renderAnsweredInteractionMessage,
+  renderInteractionAttachment,
+  renderInteractionMessage,
   teamsInvokeResponse,
   TEAMS_ADAPTIVE_CARD_CONTENT_TYPE,
   TEAMS_HITL_CHOICE_INPUT_ID,

@@ -16,18 +16,22 @@ export default defineEval({
     );
     turn.expectOk();
 
-    const started = turn.events.find((event) => event.type === "agent.started");
-    if (started?.type !== "agent.started") throw new Error("The sleeper agent never started.");
+    const started = turn.events.find((event) => event.type === "child.opened");
+    if (started?.type !== "child.opened") throw new Error("The sleeper agent never started.");
     const cancelledTurn = await t.target.watchTurn(started.data.sessionId).result();
-    cancelledTurn.event("turn.cancelled", { count: 1 });
+    cancelledTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
 
-    t.event("agent.started", { count: 1, data: { name: "sleeper" } });
-    t.event("task.settled", { count: 1, data: { status: "cancelled" } });
-    // The continued sleeper's own reply, not the parent's retelling of it.
-    t.event("task.settled", {
+    t.event("child.opened", { count: 1, data: { name: "sleeper" } });
+    t.event("call.settled", {
       count: 1,
-      data: { output: /SLEEPER-REMEMBERS=true/u, status: "completed" },
+      data: { outcome: "interrupted" },
+      scope: { taskId: /./u },
     });
-    t.notEvent("turn.failed");
+    // The continued sleeper's own reply, not the parent's retelling of it.
+    t.event("call.settled", {
+      count: 1,
+      data: { output: /SLEEPER-REMEMBERS=true/u, outcome: "completed" },
+    });
+    t.notEvent("turn.settled", { data: { outcome: "failed" } });
   },
 });

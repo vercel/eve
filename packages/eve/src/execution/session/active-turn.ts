@@ -1,5 +1,6 @@
+import type { ControlOrigin } from "#execution/session/input-queue.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
-import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
+import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
@@ -55,6 +56,8 @@ export class ActiveTurn {
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  #cancelledBy: ControlOrigin | undefined;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
@@ -220,22 +223,20 @@ export class ActiveTurn {
    * responder: an approver need not be the turn's own person. Returns
    * `undefined` when no admitted delivery answers one.
    */
-  async takeInputResponses(
-    requestIds: ReadonlySet<string>,
-  ): Promise<DeliverHookPayload | undefined> {
+  async takeAnswers(requestIds: ReadonlySet<string>): Promise<DeliverHookPayload | undefined> {
     for (const sequence of this.admitted) {
       let delivery = this.input.queue.delivery(sequence);
       if (delivery === undefined) continue;
-      const responses = delivery.payloads.flatMap((payload) => payload.inputResponses ?? []);
+      const responses = delivery.payloads.flatMap((payload) => payload.answers ?? []);
       if (responses.length === 0) continue;
-      if (!responses.some((response) => requestIds.has(response.requestId))) {
+      if (!responses.some((response) => requestIds.has(response.interactionId))) {
         // Some channels answer with ids only their `deliver` hook resolves,
         // such as Telegram's compact button callbacks.
         if (this.mappedForHeldRequest.has(sequence)) continue;
         this.mappedForHeldRequest.add(sequence);
         const target = delivery;
         const mapped = await this.input.cursor.advance((state) =>
-          mapHeldInputResponsesStep({ delivery: target, requestIds: [...requestIds], ...state }),
+          mapHeldAnswersStep({ delivery: target, requestIds: [...requestIds], ...state }),
         );
         if (mapped.delivery === undefined) continue;
         delivery = mapped.delivery;
@@ -284,7 +285,10 @@ export class ActiveTurn {
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return false;
       case "cancel":
-        if (this.cancelsThisTurn(value)) this.abort();
+        if (this.cancelsThisTurn(value)) {
+          this.#cancelledBy ??= admitted.origin;
+          this.abort();
+        }
         return false;
       case "consumed":
         return value.kind === "authorization-callback";
@@ -325,8 +329,12 @@ export class ActiveTurn {
     return steered;
   }
 
-  /** Stops the turn, as `session.cancel()` does; a hook's `ctx.cancel()` uses it too. */
-  abort(): void {
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  get cancelledBy(): ControlOrigin | undefined {
+    return this.#cancelledBy;
+  }
+
+  private abort(): void {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
   }
@@ -348,10 +356,10 @@ function splitAnswers(delivery: DeliverHookPayload): {
   readonly rest: DeliverHookPayload | undefined;
 } {
   const answers = delivery.payloads.flatMap((payload) =>
-    payload.inputResponses === undefined ? [] : [{ inputResponses: payload.inputResponses }],
+    payload.answers === undefined ? [] : [{ answers: payload.answers }],
   );
   const rest = delivery.payloads.flatMap((payload) => {
-    const { inputResponses: _answers, ...other } = payload;
+    const { answers: _answers, ...other } = payload;
     return Object.keys(other).length === 0 ? [] : [other];
   });
   return {

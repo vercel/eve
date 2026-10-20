@@ -1,13 +1,15 @@
-import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#protocol/session-reader.js";
 import type { JsonValue } from "#shared/json.js";
 
-export interface AgentInvocationAuthorizationRequest {
-  readonly authorization?: ConnectionAuthorizationChallenge;
-  readonly description: string;
-  readonly name: string;
-  readonly webhookUrl?: string;
-}
+/** An interaction projected for JSON, without a sign-in's private callback URL. */
+export type AgentInvocationInteraction = Omit<Interaction, "request"> & {
+  readonly request: Omit<Interaction["request"], "signIn"> & {
+    readonly signIn?: Omit<NonNullable<Interaction["request"]["signIn"]>, "callbackUrl">;
+  };
+};
+
+/** Open interactions by `interactionId`. */
+export type AgentInvocationInteractions = Readonly<Record<string, AgentInvocationInteraction>>;
 
 interface AgentInvocationBase {
   readonly invocationId: string;
@@ -23,15 +25,13 @@ export type AgentInvocation =
     })
   | (AgentInvocationBase & {
       readonly status: "input_required";
-      readonly inputRequests: Readonly<Record<string, InputRequest>>;
+      readonly interactions: AgentInvocationInteractions;
       readonly result?: JsonValue;
     })
   | (AgentInvocationBase & {
       readonly status: "authorization_required";
-      readonly authorizations: readonly [
-        AgentInvocationAuthorizationRequest,
-        ...AgentInvocationAuthorizationRequest[],
-      ];
+      /** The sign-ins the task waits on, which complete elsewhere: polling sees them end. */
+      readonly interactions: AgentInvocationInteractions;
       readonly pollAfterMs: number;
       readonly result?: JsonValue;
     })

@@ -1,3 +1,6 @@
+import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import { readRemoteChildBinding } from "#execution/child-binding.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
@@ -36,7 +39,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent, SessionPredecessor } from "#protocol/message.js";
+import type { SessionPredecessor } from "#protocol/message.js";
 import { SessionPredecessorKey } from "#context/keys.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
@@ -47,6 +50,8 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import {
   readSessionEventHistory,
   readSessionEventStream,
+  readSessionRecordHistory,
+  readSessionRecords,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
@@ -141,6 +146,16 @@ export function createWorkflowRuntime(config: {
     input: RunInput,
     predecessor?: SessionPredecessor,
   ): Promise<RunHandle> => {
+    if (input.input.message !== undefined && input.delivery === undefined) {
+      input = {
+        ...input,
+        delivery: createChannelDeliveryMetadata({
+          channelKind: input.adapter.kind,
+          channelName: input.channelName ?? input.adapter.kind,
+          requestId: input.requestId,
+        }),
+      };
+    }
     const bundle = await getCompiledRuntimeAgentBundle({
       compiledArtifactsSource: config.compiledArtifactsSource,
       nodeId: config.nodeId,
@@ -228,7 +243,7 @@ export function createWorkflowRuntime(config: {
       throw error;
     }
 
-    let events: ReadableStream<MessageStreamEvent> | undefined;
+    let events: ReadableStream<SessionStreamEvent> | undefined;
     const getEvents = () => {
       events ??= readSessionEventStream(run.runId);
       return events;
@@ -239,6 +254,7 @@ export function createWorkflowRuntime(config: {
         return getEvents();
       },
       sessionId: run.runId,
+      ...(input.delivery !== undefined && { deliveryId: input.delivery.deliveryId }),
     };
   };
 
@@ -250,7 +266,8 @@ export function createWorkflowRuntime(config: {
     async dispatchContinuation<TCommand extends SessionCommand>(
       input: DispatchContinuationInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {
-      const { command, continuationToken, successor } = input;
+      const { continuationToken, successor } = input;
+      const command = identifyCommand(input.command);
       try {
         return await dispatchWorkflowCommand(continuationToken, command);
       } catch (error) {
@@ -259,16 +276,20 @@ export function createWorkflowRuntime(config: {
           return await settleStrandedCommand(continuationToken, command, error);
         }
         // A successor has no request for these answers, so they cannot be delivered anywhere.
-        if ((command.payload.inputResponses?.length ?? 0) > 0) {
+        if ((command.payload.answers?.length ?? 0) > 0) {
           throw sessionStrandedError(
             error,
             "Its pending requests can no longer be answered; send a new message to start a fresh session.",
           );
         }
         const previousSessionId = await endStrandedSession(error, continuationToken, "message");
-        const started = await startSession(successor, { sessionId: previousSessionId });
+        const started = await startSession(
+          { ...successor, delivery: command.delivery },
+          { sessionId: previousSessionId },
+        );
         return {
           sessionId: started.sessionId,
+          deliveryId: command.delivery?.deliveryId,
           status: "accepted",
         } as SessionCommandResult<TCommand>;
       }
@@ -283,22 +304,28 @@ export function createWorkflowRuntime(config: {
     async getEventStream(
       sessionId: string,
       options?: GetEventStreamOptions,
-    ): Promise<ReadableStream<MessageStreamEvent>> {
+    ): Promise<ReadableStream<SessionStreamEvent>> {
       // Recorded history needs no owner, so reading it never inspects the session's lifecycle.
       if (options?.follow === false) return readSessionEventHistory(sessionId, options.startIndex);
-      // An ended session has no inbox, and a dormant `eve dev` run may resume;
-      // either recorded stream stays readable. Only a stranded owner refuses.
-      try {
-        await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
-      } catch (error) {
-        if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
-        throw error;
-      }
+      await assertFollowableSession(sessionId);
       return readSessionEventStream(sessionId, options?.startIndex);
+    },
+
+    async getLineStream(
+      sessionId: string,
+      options?: GetEventStreamOptions,
+    ): Promise<ReadableStream<unknown>> {
+      if (options?.follow === false) return readSessionRecordHistory(sessionId, options.startIndex);
+      await assertFollowableSession(sessionId);
+      return readSessionRecords(sessionId, options?.startIndex);
     },
 
     async getStreamTailIndex(sessionId: string): Promise<number> {
       return await readSessionStreamTailIndex(sessionId);
+    },
+
+    async readChildBinding(sessionId: string, childSessionId: string) {
+      return await readRemoteChildBinding(sessionId, childSessionId);
     },
 
     resolveContinuation,
@@ -361,7 +388,7 @@ async function settleStrandedCommand<TCommand extends SessionCommand>(
 ): Promise<SessionCommandResult<TCommand>> {
   switch (command.kind) {
     case "reset": {
-      const previousSessionId = await endStrandedSession(stranded, address, "reset");
+      const previousSessionId = await endStrandedSession(stranded, address, "reset", command);
       return { previousSessionId, status: "reset" } as SessionCommandResult<TCommand>;
     }
     case "send":
@@ -369,6 +396,19 @@ async function settleStrandedCommand<TCommand extends SessionCommand>(
       throw sessionStrandedError(stranded);
     default:
       return inactiveCommandResult(command);
+  }
+}
+
+/**
+ * An ended session has no inbox, and a dormant `eve dev` run may resume; either recorded stream
+ * stays readable. Only a stranded owner refuses a follow.
+ */
+async function assertFollowableSession(sessionId: string): Promise<void> {
+  try {
+    await assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
+  } catch (error) {
+    if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error);
+    throw error;
   }
 }
 
@@ -415,11 +455,12 @@ export async function dispatchWorkflowSessionCommand<TCommand extends SessionCom
   input: DispatchSessionInput<TCommand>,
 ): Promise<SessionCommandResult<TCommand>> {
   const address = { sessionId: input.sessionId };
+  const command = identifyCommand(input.command);
   try {
-    return await dispatchWorkflowCommand(address, input.command);
+    return await dispatchWorkflowCommand(address, command);
   } catch (error) {
     if (!(error instanceof StrandedSessionOwnerError)) throw error;
-    return await settleStrandedCommand(address, input.command, error);
+    return await settleStrandedCommand(address, command, error);
   }
 }
 
@@ -602,5 +643,24 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
 
   return {
     runId,
+  };
+}
+
+/** Assign the delivery before accepting it, so replay and the sender name the same facts. */
+function identifyCommand<T extends SessionCommand>(command: T): T {
+  if (command.kind !== "send" || command.delivery !== undefined) return command;
+  const channel =
+    command.caller === undefined
+      ? command.schedule === undefined
+        ? "http"
+        : "schedule"
+      : "subagent";
+  return {
+    ...command,
+    delivery: createChannelDeliveryMetadata({
+      channelKind: channel,
+      channelName: channel,
+      requestId: command.requestId,
+    }),
   };
 }

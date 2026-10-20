@@ -20,7 +20,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
-  getStepMetadata: () => ({ attempt: mocks.attempt }),
+  getStepMetadata: () => ({ attempt: mocks.attempt, stepId: "step_0" }),
+  getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
 }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/workflow-runtime.js")>()),

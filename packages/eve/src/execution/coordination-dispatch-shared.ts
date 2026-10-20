@@ -28,7 +28,8 @@ import {
   storedProjection,
   turnPosition,
 } from "#harness/session-machine/view.js";
-import type { TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskCallStart } from "#harness/session-machine/transitions.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
 import type { ContextReader } from "#context/key.js";
@@ -55,8 +56,18 @@ export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  /** The tasks the dispatch started or sent to, for the step that publishes `task.started`. */
-  readonly started: readonly TaskStartedStreamEvent["data"][];
+  /** What the dispatch leaves for the step that publishes it; the dispatch itself publishes nothing. */
+  readonly pending: PendingDispatchFacts;
+}
+
+/** The calls a dispatch started or refused, recorded on the session but not yet published. */
+export interface PendingDispatchFacts {
+  /** Calls the turn waits on, each running from now in a run of its own. */
+  readonly executing: readonly string[];
+  /** Tasks the dispatch started or sent a call to. */
+  readonly started: readonly TaskCallStart[];
+  /** Calls a dispatch admission refused before any run started. */
+  readonly refused: readonly FactOf<"call.settled">[];
 }
 
 /** Everything preflight produces before either step's dispatch loop runs. */

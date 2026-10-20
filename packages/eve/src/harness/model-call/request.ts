@@ -31,7 +31,6 @@ export function requestMessages(
     readonly projectedMessages: readonly HarnessModelMessage[];
     readonly turnMessages: readonly UserModelMessage[];
     readonly catalog: StepCatalog;
-    readonly hidesHeldText: boolean;
     readonly pendingApprovalsNote: string | undefined;
   },
 ): RequestMessages {
@@ -42,9 +41,7 @@ export function requestMessages(
     projectedMessages: input.projectedMessages,
   });
   if (ctx !== undefined) messages.addSystem(buildDynamicInstructionMessages(ctx));
-  messages.addSystem(
-    taskSystemMessages(input.catalog.offersTasks, { finalReplyOnly: input.hidesHeldText }),
-  );
+  messages.addSystem(taskSystemMessages(input.catalog.offersTasks));
   const announced = ctx?.get(HistoryStateKey)?.announcements;
   messages.addAnnouncements({
     ...catalogAnnouncements(input.catalog, announced),

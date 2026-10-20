@@ -1,6 +1,12 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { CALL_TOOL, SEARCH_TOOL, SKILL_TOOL } from "@eve-e2e/config/catalog-tools";
-import { latestTaskResult, outputOf, playScript } from "@eve-e2e/config/mock-script";
+import {
+  latestTaskResult,
+  outputOf,
+  playScript,
+  resultOf,
+  scriptedCallId,
+} from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
@@ -24,23 +30,27 @@ const HOOK_SCENARIO_CALLS = {
  * sign in and resumes once they have.
  */
 function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
+  // The protected call is made again after its sign-in, under a new id.
   const call = (id: string, tool: string) => ({
-    id,
+    id: scriptedCallId(request, id),
     name: CALL_TOOL,
     input: { name: `public-catalog__${tool}`, input: {} },
   });
-  const byId = new Map(request.toolResults.map((entry) => [entry.id, entry]));
-  if (!byId.has("public-catalog-connect")) {
+  if (resultOf(request, "public-catalog-connect") === undefined) {
     return {
       toolCalls: [
-        { id: "public-catalog-connect", name: CALL_TOOL, input: { name: "public-catalog" } },
+        {
+          id: scriptedCallId(request, "public-catalog-connect"),
+          name: CALL_TOOL,
+          input: { name: "public-catalog" },
+        },
       ],
     };
   }
-  if (!byId.has("public-catalog-items")) {
+  if (resultOf(request, "public-catalog-items") === undefined) {
     return { toolCalls: [call("public-catalog-items", "list_items")] };
   }
-  const orders = byId.get("public-catalog-orders");
+  const orders = resultOf(request, "public-catalog-orders");
   if (orders === undefined) {
     return { toolCalls: [call("public-catalog-orders", "list_orders")] };
   }

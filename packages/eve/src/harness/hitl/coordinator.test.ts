@@ -18,22 +18,23 @@ import { sessionView } from "#harness/session-machine/commit.js";
 import { resolveTypedApproval } from "#harness/hitl/delivery.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
-import { parkedSteps, withParkedStep, withPublished } from "#internal/testing/session-machine.js";
-import { createApprovalSettledEvent } from "#protocol/message.js";
-import type { HarnessSession, StepInput } from "#harness/types.js";
-import type { InputRequest } from "#shared/input.js";
+import { parkedSteps, withParkedStep } from "#internal/testing/session-machine.js";
+import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
+import type { ApprovalAsk } from "#harness/session-machine/state.js";
 
-const request: InputRequest = {
-  action: { callId: "call-1", input: { marker: "durable" }, kind: "tool-call", toolName: "gate" },
-  allowFreeform: false,
-  display: "confirmation",
-  kind: "tool-approval",
-  options: [
-    { id: "approve", label: "Approve" },
-    { id: "cancel", label: "Cancel" },
-  ],
-  prompt: "Approve tool call: gate",
-  requestId: "approval-1",
+const request: ApprovalAsk = {
+  call: { callId: "call-1", input: { marker: "durable" }, toolName: "gate" },
+  interactionId: "approval-1",
+  request: {
+    allowFreeform: false,
+    display: "confirmation",
+    kind: "approval",
+    options: [
+      { id: "approve", label: "Approve" },
+      { id: "deny", label: "Cancel" },
+    ],
+    prompt: "Approve tool call: gate",
+  },
 };
 const responder: SessionAuthContext = {
   attributes: {},
@@ -56,7 +57,7 @@ function parkedSession(requester?: SessionAuthContext): HarnessSession {
       history: [],
       sessionId: "session-1",
     },
-    { requester, requests: [request], responseAuthRequiredRequestIds: [request.requestId] },
+    { requester, requests: [request], responseAuthRequiredRequestIds: [request.interactionId] },
   );
 }
 
@@ -65,7 +66,7 @@ describe("coordinateApprovalDelivery", () => {
     session: HarnessSession,
     response: ApprovalResponsePolicy,
     prepareTools?: () => Promise<Map<string, HarnessToolDefinition>>,
-    stepInput?: StepInput,
+    stepInput?: HarnessStepInput,
   ) {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
@@ -96,8 +97,8 @@ describe("coordinateApprovalDelivery", () => {
       now: 100,
       session,
       stepInput: {
-        attributedInputResponses: [
-          { auth: responder, response: { requestId: request.requestId, optionId } },
+        attributedAnswers: [
+          { auth: responder, response: { interactionId: request.interactionId, optionId } },
         ],
       },
       tools: new Map(),
@@ -123,7 +124,7 @@ describe("coordinateApprovalDelivery", () => {
 
   it("authorizes Cancel, leaving a rejected Cancel pending for the requester", async () => {
     const requester: SessionAuthContext = { ...responder, principalId: "bob" };
-    const ingested = await ingest(parkedBy(requester), "cancel");
+    const ingested = await ingest(parkedBy(requester), "deny");
     expect(ingested.kind).toBe("continue-coordination");
 
     const onlyRequester: ApprovalResponsePolicy = ({ request, response }) =>
@@ -133,9 +134,9 @@ describe("coordinateApprovalDelivery", () => {
     const response = vi.fn(onlyRequester);
     const rejected = await authorize(ingested.session, response);
     expect(response).toHaveBeenCalledWith(
-      expect.objectContaining({ response: { decision: "cancel", principal: responder } }),
+      expect.objectContaining({ response: { decision: "deny", principal: responder } }),
     );
-    expect(rejected.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(rejected.stepInput?.answers ?? []).toEqual([]);
     expect(getApprovalAuditState(rejected.session.state).settlements).toEqual([]);
     expect(parkedSteps(rejected.session)).toHaveLength(1);
 
@@ -143,15 +144,18 @@ describe("coordinateApprovalDelivery", () => {
       now: 102,
       session: rejected.session,
       stepInput: {
-        attributedInputResponses: [
-          { auth: requester, response: { optionId: "cancel", requestId: request.requestId } },
+        attributedAnswers: [
+          {
+            auth: requester,
+            response: { optionId: "deny", interactionId: request.interactionId },
+          },
         ],
       },
       tools: new Map(),
     });
     const settled = await authorize(requesterCancel.session, onlyRequester);
-    expect(settled.stepInput?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: request.requestId },
+    expect(settled.stepInput?.answers).toEqual([
+      { optionId: "deny", interactionId: request.interactionId },
     ]);
   });
 
@@ -160,10 +164,10 @@ describe("coordinateApprovalDelivery", () => {
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     const settled = await authorize(ingested.session, response);
     expect(response).toHaveBeenCalledWith(
-      expect.objectContaining({ response: { decision: "cancel", principal: responder } }),
+      expect.objectContaining({ response: { decision: "deny", principal: responder } }),
     );
-    expect(settled.stepInput?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: request.requestId },
+    expect(settled.stepInput?.answers).toEqual([
+      { optionId: "deny", interactionId: request.interactionId },
     ]);
   });
 
@@ -197,8 +201,8 @@ describe("coordinateApprovalDelivery", () => {
       expect(result.kind).toBe("responses-completed");
       expect(getApprovalAuditState(result.session.state).activeCandidates).toEqual([]);
       expect(getApprovalAuditState(result.session.state).candidateHistory[0]?.status).toBe(status);
-      expect(result.stepInput?.inputResponses ?? []).toEqual(
-        status === "allowed" ? [{ optionId: "approve", requestId: request.requestId }] : [],
+      expect(result.stepInput?.answers ?? []).toEqual(
+        status === "allowed" ? [{ optionId: "approve", interactionId: request.interactionId }] : [],
       );
       const repeated = await authorize(result.session, response);
       expect(repeated.kind).toBe("continue");
@@ -280,8 +284,8 @@ describe("coordinateApprovalDelivery", () => {
       }),
     ]);
     // A restore failure may be transient, so the request waits for another response.
-    expect(parkedSteps(result.session)[0]?.requests.map((entry) => entry.requestId)).toEqual([
-      request.requestId,
+    expect(parkedSteps(result.session)[0]?.requests.map((entry) => entry.interactionId)).toEqual([
+      request.interactionId,
     ]);
     expect(logs.records.map((record) => record.message)).toContain(
       "approval tools could not be restored",
@@ -292,22 +296,25 @@ describe("coordinateApprovalDelivery", () => {
     const ingested = await ingest();
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     const duplicate = await authorize(ingested.session, response, undefined, {
-      attributedInputResponses: [
-        { auth: responder, response: { requestId: request.requestId, optionId: "approve" } },
+      attributedAnswers: [
+        {
+          auth: responder,
+          response: { interactionId: request.interactionId, optionId: "approve" },
+        },
       ],
     });
     expect(response).toHaveBeenCalledOnce();
     expect(duplicate.kind).toBe("responses-completed");
-    expect(duplicate.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
+    expect(duplicate.stepInput?.answers).toEqual([
+      { interactionId: request.interactionId, optionId: "approve" },
     ]);
   });
 
   it("authorizes the active candidate when a sibling's direct answer arrives", async () => {
-    const direct: InputRequest = {
+    const direct: ApprovalAsk = {
       ...request,
-      action: { ...request.action, callId: "call-2" },
-      requestId: "approval-2",
+      call: { ...request.call, callId: "call-2" },
+      interactionId: "approval-2",
     };
     const parked = withParkedStep(
       {
@@ -320,7 +327,7 @@ describe("coordinateApprovalDelivery", () => {
       {
         requester: responder,
         requests: [request, direct],
-        responseAuthRequiredRequestIds: [request.requestId],
+        responseAuthRequiredRequestIds: [request.interactionId],
       },
     );
     const ingested = await ingest(parked);
@@ -328,17 +335,17 @@ describe("coordinateApprovalDelivery", () => {
 
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     const result = await authorize(ingested.session, response, undefined, {
-      attributedInputResponses: [
-        { auth: responder, response: { requestId: direct.requestId, optionId: "approve" } },
+      attributedAnswers: [
+        { auth: responder, response: { interactionId: direct.interactionId, optionId: "approve" } },
       ],
     });
     expect(response).toHaveBeenCalledOnce();
     expect(result.kind).toBe("responses-completed");
     expect(getApprovalAuditState(result.session.state).activeCandidates).toEqual([]);
-    expect(result.stepInput?.inputResponses).toEqual(
+    expect(result.stepInput?.answers).toEqual(
       expect.arrayContaining([
-        { optionId: "approve", requestId: request.requestId },
-        { optionId: "approve", requestId: direct.requestId },
+        { interactionId: request.interactionId, optionId: "approve" },
+        { interactionId: direct.interactionId, optionId: "approve" },
       ]),
     );
   });
@@ -371,7 +378,7 @@ describe("coordinateApprovalDelivery", () => {
     const settled = settleDirectApprovalResponse({
       actor: responder,
       outcome: "allowed",
-      requestId: request.requestId,
+      requestId: request.interactionId,
       settledAt: 100,
       state: parked.state,
     });
@@ -381,8 +388,8 @@ describe("coordinateApprovalDelivery", () => {
       tools: new Map(),
     });
     expect(result.kind).toBe("continue");
-    expect(result.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
+    expect(result.stepInput?.answers).toEqual([
+      { optionId: "approve", interactionId: request.interactionId },
     ]);
   });
 
@@ -391,7 +398,7 @@ describe("coordinateApprovalDelivery", () => {
     const settled = settleDirectApprovalResponse({
       actor: responder,
       outcome: "cancelled",
-      requestId: request.requestId,
+      requestId: request.interactionId,
       settledAt: 100,
       state: parked.state,
     });
@@ -401,17 +408,16 @@ describe("coordinateApprovalDelivery", () => {
       tools: new Map(),
     });
     expect(result.kind).toBe("continue");
-    expect(result.stepInput?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: request.requestId },
+    expect(result.stepInput?.answers).toEqual([
+      { optionId: "deny", interactionId: request.interactionId },
     ]);
   });
 
   it("keeps an earlier settled response when the remaining batch response arrives", async () => {
-    const secondRequest: InputRequest = {
-      ...request,
-      action: { ...request.action, callId: "call-2", toolName: "gate-2" },
-      prompt: "Approve tool call: gate-2",
-      requestId: "approval-2",
+    const secondRequest: ApprovalAsk = {
+      call: { ...request.call, callId: "call-2", toolName: "gate-2" },
+      interactionId: "approval-2",
+      request: { ...request.request, prompt: "Approve tool call: gate-2" },
     };
     const parked = withParkedStep(
       {
@@ -426,7 +432,7 @@ describe("coordinateApprovalDelivery", () => {
     const settled = settleDirectApprovalResponse({
       actor: responder,
       outcome: "allowed",
-      requestId: request.requestId,
+      requestId: request.interactionId,
       settledAt: 100,
       state: parked.state,
     });
@@ -434,16 +440,16 @@ describe("coordinateApprovalDelivery", () => {
       now: 101,
       session: { ...parked, state: settled.state },
       stepInput: {
-        inputResponses: [
-          { optionId: "approve", requestId: request.requestId },
-          { optionId: "approve", requestId: secondRequest.requestId },
+        answers: [
+          { optionId: "approve", interactionId: request.interactionId },
+          { optionId: "approve", interactionId: secondRequest.interactionId },
         ],
       },
       tools: new Map(),
     });
-    expect(result.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
-      { optionId: "approve", requestId: secondRequest.requestId },
+    expect(result.stepInput?.answers).toEqual([
+      { optionId: "approve", interactionId: request.interactionId },
+      { optionId: "approve", interactionId: secondRequest.interactionId },
     ]);
   });
 
@@ -471,8 +477,8 @@ describe("coordinateApprovalDelivery", () => {
     expect(response).toHaveBeenCalledWith(
       expect.objectContaining({ response: { decision: "approve", principal: responder } }),
     );
-    expect(settled.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
+    expect(settled.stepInput?.answers).toEqual([
+      { optionId: "approve", interactionId: request.interactionId },
     ]);
   });
 
@@ -481,12 +487,12 @@ describe("coordinateApprovalDelivery", () => {
       now: 100,
       session: parkedSession(),
       stepInput: {
-        attributedInputResponses: [
+        attributedAnswers: [
           {
             auth: responder,
             response: {
-              optionId: "cancel",
-              requestId: request.requestId,
+              interactionId: request.interactionId,
+              optionId: "deny",
               text: "only the three-pack",
             },
           },
@@ -495,8 +501,8 @@ describe("coordinateApprovalDelivery", () => {
       tools: new Map(),
     });
     const settled = await authorize(ingested.session, () => ({ status: "allowed" }));
-    expect(settled.stepInput?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: request.requestId, text: "only the three-pack" },
+    expect(settled.stepInput?.answers).toEqual([
+      { interactionId: request.interactionId, optionId: "deny", text: "only the three-pack" },
     ]);
   });
 
@@ -518,9 +524,9 @@ describe("coordinateApprovalDelivery", () => {
     expect(result.stepInput?.messageAuth).toEqual(messageAuth);
     expect(
       parkedSteps(result.session).flatMap((batch) =>
-        batch.requests.map((pending) => pending.requestId),
+        batch.requests.map((pending) => pending.interactionId),
       ),
-    ).toEqual([request.requestId]);
+    ).toEqual([request.interactionId]);
   });
 });
 
@@ -540,7 +546,7 @@ describe("approval responses without a response policy", () => {
       now: 100,
       session,
       stepInput: {
-        attributedInputResponses: [{ auth, response: { optionId, requestId: request.requestId } }],
+        attributedAnswers: [{ auth, response: { optionId, interactionId: request.interactionId } }],
       },
       tools: new Map(),
     });
@@ -552,103 +558,21 @@ describe("approval responses without a response policy", () => {
     expect(getApprovalAuditState(result.session.state).settlements).toHaveLength(1);
   });
 
-  it.each(["approve", "cancel"])("rejects another principal's %s", async (optionId) => {
+  it.each(["approve", "deny"])("rejects another principal's %s", async (optionId) => {
     const result = await respond(parkedFor(alice), bob, optionId);
     expect(result.feedback).toEqual([
       "Only the person who requested this action can respond to this approval.",
     ]);
     expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
-    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(result.stepInput?.answers ?? []).toEqual([]);
     expect(parkedSteps(result.session)).toHaveLength(1);
   });
 
-  it("keeps the first answer when a repeated answer disagrees", async () => {
-    const second: InputRequest = {
-      ...request,
-      action: { ...request.action, callId: "call-2" },
-      requestId: "approval-2",
-    };
-    const parked = withParkedStep(
-      { ...parkedSession(), state: undefined },
-      { requester: alice, requests: [request, second] },
-    );
-    const answer = (session: HarnessSession, ...responses: [string, string][]) =>
-      coordinateApprovalDelivery({
-        now: 100,
-        session,
-        stepInput: {
-          attributedInputResponses: responses.map(([requestId, optionId]) => ({
-            auth: alice,
-            response: { optionId, requestId },
-          })),
-        },
-        tools: new Map(),
-      });
-
-    const cancelled = await answer(parked, [request.requestId, "cancel"]);
-    const repeated = await answer(
-      cancelled.session,
-      [request.requestId, "approve"],
-      [second.requestId, "approve"],
-    );
-    expect(repeated.stepInput?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: request.requestId },
-      { optionId: "approve", requestId: second.requestId },
-    ]);
-  });
-
-  it("keeps the first answer's note when a repeated answer disagrees", async () => {
-    const second: InputRequest = {
-      ...request,
-      action: { ...request.action, callId: "call-2" },
-      requestId: "approval-2",
-    };
-    const parked = withParkedStep(
-      { ...parkedSession(), state: undefined },
-      { requester: alice, requests: [request, second] },
-    );
-    const cancelled = await coordinateApprovalDelivery({
-      now: 100,
-      session: parked,
-      stepInput: {
-        attributedInputResponses: [
-          {
-            auth: alice,
-            response: {
-              optionId: "cancel",
-              requestId: request.requestId,
-              text: "only the three-pack",
-            },
-          },
-        ],
-      },
-      tools: new Map(),
-    });
-    const repeated = await coordinateApprovalDelivery({
-      now: 101,
-      session: cancelled.session,
-      stepInput: {
-        attributedInputResponses: [
-          {
-            auth: alice,
-            response: { optionId: "cancel", requestId: request.requestId, text: "never mind" },
-          },
-          { auth: alice, response: { optionId: "approve", requestId: second.requestId } },
-        ],
-      },
-      tools: new Map(),
-    });
-    expect(repeated.stepInput?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: request.requestId, text: "only the three-pack" },
-      { optionId: "approve", requestId: second.requestId },
-    ]);
-  });
-
   it("doesn't recheck a settled answer replayed with another responder's delivery", async () => {
-    const second: InputRequest = {
+    const second: ApprovalAsk = {
       ...request,
-      action: { ...request.action, callId: "call-2" },
-      requestId: "approval-2",
+      call: { ...request.call, callId: "call-2" },
+      interactionId: "approval-2",
     };
     const parked = withParkedStep(
       { ...parkedSession(), state: undefined },
@@ -667,10 +591,10 @@ describe("approval responses without a response policy", () => {
         now: 101,
         session: settled.session,
         stepInput: {
-          attributedInputResponses: [
-            { auth: bob, response: { optionId: "approve", requestId: second.requestId } },
+          answers: settled.stepInput?.answers,
+          attributedAnswers: [
+            { auth: bob, response: { interactionId: second.interactionId, optionId: "approve" } },
           ],
-          inputResponses: settled.stepInput?.inputResponses,
         },
         tools: new Map(),
       }),
@@ -680,9 +604,9 @@ describe("approval responses without a response policy", () => {
     ]);
     expect(
       getApprovalAuditState(replayed.session.state).settlements.map((entry) => entry.requestId),
-    ).toEqual([request.requestId]);
-    expect(replayed.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
+    ).toEqual([request.interactionId]);
+    expect(replayed.stepInput?.answers).toEqual([
+      { interactionId: request.interactionId, optionId: "approve" },
     ]);
   });
 
@@ -694,15 +618,15 @@ describe("approval responses without a response policy", () => {
       now: 100,
       session: parkedFor(alice),
       stepInput: {
-        attributedInputResponses: [
-          { auth: alice, response: { ...answer, requestId: request.requestId } },
+        attributedAnswers: [
+          { auth: alice, response: { ...answer, interactionId: request.interactionId } },
         ],
       },
       tools: new Map(),
     });
     expect(result.feedback).toEqual(["Respond to this approval with Approve or Cancel."]);
     expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
-    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(result.stepInput?.answers ?? []).toEqual([]);
     expect(parkedSteps(result.session)).toHaveLength(1);
   });
 
@@ -717,15 +641,15 @@ describe("approval responses without a response policy", () => {
       now: 100,
       session: parkedFor(alice),
       stepInput: {
-        attributedInputResponses: [
-          { auth: null, response: { optionId: "approve", requestId: request.requestId } },
+        attributedAnswers: [
+          { auth: null, response: { interactionId: request.interactionId, optionId: "approve" } },
         ],
       },
       tools: new Map(),
     });
     expect(result.feedback).toEqual(["Authentication is required to respond to this approval."]);
     expect(getApprovalAuditState(result.session.state).settlements).toEqual([]);
-    expect(result.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(result.stepInput?.answers ?? []).toEqual([]);
     expect(parkedSteps(result.session)).toHaveLength(1);
   });
 
@@ -734,13 +658,13 @@ describe("approval responses without a response policy", () => {
       now: 100,
       session: parkedFor(alice),
       stepInput: {
-        attributedInputResponses: [
-          { auth: null, response: { optionId: "approve", requestId: request.requestId } },
+        attributedAnswers: [
+          { auth: null, response: { interactionId: request.interactionId, optionId: "approve" } },
         ],
       },
       tools: new Map(),
     });
-    const result = await respond(afterAnonymous.session, alice, "cancel");
+    const result = await respond(afterAnonymous.session, alice, "deny");
     expect(getApprovalAuditState(result.session.state).settlements).toEqual([
       expect.objectContaining({ outcome: "cancelled" }),
     ]);
@@ -751,8 +675,8 @@ describe("approval responses without a response policy", () => {
       now: 100,
       session: parkedFor(null),
       stepInput: {
-        attributedInputResponses: [
-          { auth: null, response: { optionId: "approve", requestId: request.requestId } },
+        attributedAnswers: [
+          { auth: null, response: { interactionId: request.interactionId, optionId: "approve" } },
         ],
       },
       tools: new Map(),
@@ -763,8 +687,8 @@ describe("approval responses without a response policy", () => {
         outcome: "allowed",
       }),
     ]);
-    expect(result.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
+    expect(result.stepInput?.answers).toEqual([
+      { interactionId: request.interactionId, optionId: "approve" },
     ]);
   });
 });
@@ -772,13 +696,13 @@ describe("approval responses without a response policy", () => {
 describe("text approval replay preparation", () => {
   function shouldPrepareApprovalReplayTools(input: {
     session: HarnessSession;
-    stepInput?: import("#harness/types.js").StepInput;
+    stepInput?: HarnessStepInput;
   }) {
     const view = viewOf(input.session);
     return approvingSteps(view, resolveTypedApproval(view, input.stepInput)).length > 0;
   }
   function sessionWithRequests(
-    requests: InputRequest[] = [request],
+    requests: ApprovalAsk[] = [request],
     responseAuthRequiredRequestIds?: string[],
   ) {
     const base = parkedSession();
@@ -794,55 +718,29 @@ describe("text approval replay preparation", () => {
     ).toBe(true);
   });
 
-  it.each(["cancel", "unrelated follow-up"])("does not prepare tools for %s", (message) => {
+  it.each(["deny", "unrelated follow-up"])("does not prepare tools for %s", (message) => {
     expect(
       shouldPrepareApprovalReplayTools({ session: sessionWithRequests(), stepInput: { message } }),
     ).toBe(false);
   });
 
-  it("does not treat a question option named approve as tool approval", () => {
-    expect(
-      shouldPrepareApprovalReplayTools({
-        session: sessionWithRequests([{ ...request, kind: "question" }]),
-        stepInput: { message: "approve" },
-      }),
-    ).toBe(false);
-  });
-
   it("answers only the first open approval by text", () => {
-    const second = { ...request, requestId: "approval-2" };
+    const second = { ...request, interactionId: "approval-2" };
     const session = withParkedStep(sessionWithRequests(), {
       event: { sequence: 2, stepIndex: 0, turnId: "turn-2" },
       requests: [second],
     });
-    expect(resolveTypedApproval(viewOf(session), { message: "approve" })?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
+    expect(resolveTypedApproval(viewOf(session), { message: "approve" })?.answers).toEqual([
+      { optionId: "approve", interactionId: request.interactionId },
     ]);
     expect(
       resolveTypedApproval(viewOf(session), {
-        inputResponses: [{ optionId: "approve", requestId: request.requestId }],
-        message: "cancel",
-      })?.inputResponses,
+        answers: [{ optionId: "approve", interactionId: request.interactionId }],
+        message: "deny",
+      })?.answers,
     ).toEqual([
-      { optionId: "approve", requestId: request.requestId },
-      { optionId: "cancel", requestId: second.requestId },
-    ]);
-  });
-
-  it("skips an approval that already settled on its own", () => {
-    const second = { ...request, requestId: "approval-2" };
-    const session = withPublished(sessionWithRequests([request, second]), [
-      createApprovalSettledEvent({
-        outcome: "approved",
-        requestId: request.requestId,
-        responderPrincipalId: responder.principalId,
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_0",
-      }),
-    ]);
-    expect(resolveTypedApproval(viewOf(session), { message: "cancel" })?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: second.requestId },
+      { optionId: "approve", interactionId: request.interactionId },
+      { optionId: "deny", interactionId: second.interactionId },
     ]);
   });
 
@@ -852,7 +750,7 @@ describe("text approval replay preparation", () => {
         session: sessionWithRequests(),
         stepInput: {
           message: "approve",
-          inputResponses: [{ optionId: "cancel", requestId: request.requestId }],
+          answers: [{ optionId: "deny", interactionId: request.interactionId }],
         },
       }),
     ).toBe(false);

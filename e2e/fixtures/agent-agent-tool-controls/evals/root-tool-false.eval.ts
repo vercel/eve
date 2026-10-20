@@ -9,7 +9,7 @@ export default defineEval({
     turn.expectOk();
     turn.messageIncludes("INTERNAL-ROOT-COPY-OK");
     turn.calledTool("invoke-self", { count: 1 });
-    turn.event("agent.started", { count: 1, data: { name: "agent" } });
+    turn.event("child.opened", { count: 1, data: { name: "agent" } });
     t.succeeded();
     t.noFailedActions();
   },

@@ -15,7 +15,7 @@ import {
 } from "#execution/session/end-sandbox-step.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
-  terminateChildSessionsStep: vi.fn(),
+  terminateChildSessionsStep: vi.fn(async () => {}),
 }));
 vi.mock("#execution/session/end-sandbox-step.js", () => ({
   endSessionSandboxStep: vi.fn(),

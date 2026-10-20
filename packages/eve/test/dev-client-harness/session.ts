@@ -1,4 +1,5 @@
-import type { HandleMessageRequestBody, MessageStreamEvent } from "#protocol/message.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { HandleMessageRequestBody } from "#protocol/message.js";
 import { countCurrentTurnBoundaryEvents, extractCurrentTurnBoundaryEvent } from "./stream.js";
 
 /**
@@ -55,15 +56,18 @@ export function createDevelopmentMessageRequest(input: {
  * observed.
  */
 export function updateDevelopmentSessionState(input: {
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly sessionId: string;
   readonly session: DevelopmentSessionState;
 }): DevelopmentSessionState {
   const boundaryEvent = extractCurrentTurnBoundaryEvent(input.events);
   const boundaryCount = input.session.boundaryCount + countCurrentTurnBoundaryEvents(input.events);
-  const streamIndex = input.session.streamIndex + input.events.length;
+  const streamIndex = input.events.reduce(
+    (next, event) => Math.max(next, event.meta.position.line + 1),
+    input.session.streamIndex,
+  );
 
-  if (boundaryEvent?.type === "session.waiting") {
+  if (boundaryEvent !== undefined && boundaryEvent.type !== "session.ended") {
     return createDevelopmentSessionState({
       boundaryCount,
       sessionId: input.sessionId,

@@ -30,12 +30,7 @@ describe("resolveInlineAuthorizationInterrupt", () => {
     expect(interrupt?.challenges).toMatchObject([{ attemptId: "attempt-1" }]);
     expect(interrupt?.calls).toEqual([
       {
-        action: {
-          callId: "call-auth",
-          input: { action: "authorize" },
-          kind: "tool-call",
-          toolName: "protected_action",
-        },
+        call: { callId: "call-auth", input: { action: "authorize" }, toolName: "protected_action" },
         connections: ["protected_action"],
       },
     ]);

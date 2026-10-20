@@ -2,7 +2,6 @@
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import { ChevronRightIcon, TerminalIcon, WrenchIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
@@ -18,47 +17,29 @@ export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible className={cn("group not-prose w-full", className)} {...props} />
 );
 
-export type ToolPart = ToolUIPart | DynamicToolUIPart;
-
 export type ToolHeaderProps = {
   title?: string;
   className?: string;
-} & (
-  | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
-  | {
-      type: DynamicToolUIPart["type"];
-      state: DynamicToolUIPart["state"];
-      toolName: string;
-    }
-);
-
-const statusLabels: Record<ToolPart["state"], string> = {
-  "approval-requested": "Awaiting Approval",
-  "approval-responded": "Responded",
-  "input-available": "Running",
-  "input-streaming": "Pending",
-  "output-available": "Completed",
-  "output-denied": "Denied",
-  "output-error": "Error",
+  toolName: string;
+  /** How the call stands, such as "Running"; absent once it completed. */
+  status?: string;
+  failed?: boolean;
 };
 
-export const getStatusIndicator = (status: ToolPart["state"]) =>
-  status === "output-available" ? null : (
-    <span className={cn("text-sm", status === "output-error" && "text-destructive")}>
-      {statusLabels[status]}
-    </span>
+export const getStatusIndicator = (status: string | undefined, failed?: boolean) =>
+  status === undefined ? null : (
+    <span className={cn("text-sm", failed && "text-destructive")}>{status}</span>
   );
 
 export const ToolHeader = ({
   className,
   title,
-  type,
-  state,
+  status,
+  failed,
   toolName,
   ...props
 }: ToolHeaderProps) => {
-  const derivedName = type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
-  const displayName = title ?? derivedName;
+  const displayName = title ?? toolName;
 
   return (
     <CollapsibleTrigger
@@ -74,7 +55,7 @@ export const ToolHeader = ({
         <WrenchIcon className="size-4 shrink-0" />
       )}
       <span className="text-sm">{displayName}</span>
-      {getStatusIndicator(state)}
+      {getStatusIndicator(status, failed)}
       <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
     </CollapsibleTrigger>
   );
@@ -93,9 +74,9 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
 );
 
 export type BashToolContentProps = ComponentProps<"div"> & {
-  input: ToolPart["input"];
-  output: ToolPart["output"];
-  errorText: ToolPart["errorText"];
+  input: unknown;
+  output: unknown;
+  errorText: string | undefined;
 };
 
 export const BashToolContent = ({
@@ -149,7 +130,7 @@ const getRecordValue = (value: unknown, key: string): string | number | undefine
 };
 
 export type ToolInputProps = ComponentProps<"div"> & {
-  input: ToolPart["input"];
+  input: unknown;
 };
 
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
@@ -168,8 +149,8 @@ export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
 );
 
 export type ToolOutputProps = ComponentProps<"div"> & {
-  output: ToolPart["output"];
-  errorText: ToolPart["errorText"];
+  output: unknown;
+  errorText: string | undefined;
 };
 
 export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {

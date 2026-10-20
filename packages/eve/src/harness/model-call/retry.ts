@@ -24,21 +24,22 @@ const MODEL_CALL_RETRY_BASE_DELAY_MS = 500;
  * Retries `fn` with exponential backoff while the thrown error is
  * classified as `"retry"`. Rethrows the last error once attempts are
  * exhausted or the error is classified as something other than
- * transient.
+ * transient. `onRetry` hears each decision to retry, before the backoff.
  */
 export async function runModelCallWithRetries<T>(
-  fn: (attempt: number) => Promise<T>,
+  fn: () => Promise<T>,
   diag: {
     readonly sessionId: string;
     readonly turnId: string;
     readonly canRetry?: () => boolean;
+    readonly onRetry?: (error: unknown) => Promise<void>;
   },
   signal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     signal?.throwIfAborted();
     try {
-      return await fn(attempt);
+      return await fn();
     } catch (error) {
       signal?.throwIfAborted();
       if (
@@ -57,6 +58,7 @@ export async function runModelCallWithRetries<T>(
         turnId: diag.turnId,
         error,
       });
+      await diag.onRetry?.(error);
       await delay(delayMs, undefined, { signal });
     }
   }

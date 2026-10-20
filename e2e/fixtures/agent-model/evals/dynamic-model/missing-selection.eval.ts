@@ -8,8 +8,9 @@ export default defineEval({
     turn.eventsSatisfy("the turn reports a missing dynamic model selection", (events) =>
       events.some(
         (event) =>
-          event.type === "turn.failed" &&
-          event.data.message.includes("Dynamic model resolver returned no model"),
+          event.type === "turn.settled" &&
+          event.data.outcome === "failed" &&
+          event.data.error?.message.includes("Dynamic model resolver returned no model"),
       ),
     );
     turn.usedNoTools();

@@ -40,11 +40,11 @@ describe("withInstrumentationDecision", () => {
   it("treats input requests as outputs and user responses as inputs", () => {
     const requested = withInstrumentationDecision(
       {
-        action: { callId: "call-1", name: "approve" },
+        call: { callId: "call-1", name: "approve" },
         idempotencyKey: "request-1",
-        kind: "tool-approval",
+        kind: "approval",
         request: { prompt: "Approve?" },
-        requestId: "request-1",
+        interactionId: "request-1",
         scope,
         type: "input.requested",
       } satisfies InstrumentationInputRequestedEvent,
@@ -54,10 +54,10 @@ describe("withInstrumentationDecision", () => {
       {
         error: new Error("failed"),
         idempotencyKey: "request-1",
-        kind: "tool-approval",
-        outcome: "approved",
-        requestId: "request-1",
-        response: { text: "yes" },
+        kind: "approval",
+        outcome: "accepted",
+        interactionId: "request-1",
+        answer: { text: "yes" },
         scope,
         type: "input.resolved",
       } satisfies InstrumentationInputResolvedEvent,
@@ -66,17 +66,17 @@ describe("withInstrumentationDecision", () => {
 
     expect(requested).toEqual(expect.objectContaining({ request: undefined }));
     expect(resolved).toEqual(
-      expect.objectContaining({ error: undefined, response: { text: "yes" } }),
+      expect.objectContaining({ error: undefined, answer: { text: "yes" } }),
     );
   });
 
   it("keeps output-side requests and errors while removing user responses", () => {
     const requested = {
-      action: { callId: "call-1", name: "approve" },
+      call: { callId: "call-1", name: "approve" },
       idempotencyKey: "request-1",
-      kind: "tool-approval",
+      kind: "approval",
       request: { prompt: "Approve?" },
-      requestId: "request-1",
+      interactionId: "request-1",
       scope,
       type: "input.requested",
     } satisfies InstrumentationInputRequestedEvent;
@@ -84,10 +84,10 @@ describe("withInstrumentationDecision", () => {
     const resolved = {
       error,
       idempotencyKey: "request-1",
-      kind: "tool-approval",
+      kind: "approval",
       outcome: "failed",
-      requestId: "request-1",
-      response: { text: "no" },
+      interactionId: "request-1",
+      answer: { text: "no" },
       scope,
       type: "input.resolved",
     } satisfies InstrumentationInputResolvedEvent;
@@ -95,7 +95,7 @@ describe("withInstrumentationDecision", () => {
 
     expect(withInstrumentationDecision(requested, decision)).toBe(requested);
     expect(withInstrumentationDecision(resolved, decision)).toEqual(
-      expect.objectContaining({ error, response: undefined }),
+      expect.objectContaining({ error, answer: undefined }),
     );
   });
 

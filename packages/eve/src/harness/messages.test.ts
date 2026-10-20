@@ -99,12 +99,12 @@ describe("coalesceTurnInputs", () => {
       principalId: "bob",
       principalType: "user",
     };
-    const saved = { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] };
-    const answer = { auth: bob, response: { optionId: "cancel", requestId: "approval-2" } };
+    const saved = { answers: [{ optionId: "approve", interactionId: "approval-1" }] };
+    const answer = { auth: bob, response: { optionId: "cancel", interactionId: "approval-2" } };
 
-    expect(coalesceTurnInputs(saved, { attributedInputResponses: [answer] })).toEqual({
+    expect(coalesceTurnInputs(saved, { attributedAnswers: [answer] })).toEqual({
       ...saved,
-      attributedInputResponses: [answer],
+      attributedAnswers: [answer],
     });
   });
 
@@ -141,16 +141,16 @@ describe("coalesceTurnInputs", () => {
     ).toEqual({ message: "first\n\nsecond" });
   });
 
-  it("merges inputResponses from both payloads", () => {
+  it("merges answers from both payloads", () => {
     const result = coalesceTurnInputs(
-      { inputResponses: [{ requestId: "r1", optionId: "approve" }] },
-      { inputResponses: [{ requestId: "r2", text: "yes" }] },
+      { answers: [{ interactionId: "r1", optionId: "approve" }] },
+      { answers: [{ interactionId: "r2", text: "yes" }] },
     );
 
     expect(result).toEqual({
-      inputResponses: [
-        { requestId: "r1", optionId: "approve" },
-        { requestId: "r2", text: "yes" },
+      answers: [
+        { interactionId: "r1", optionId: "approve" },
+        { interactionId: "r2", text: "yes" },
       ],
     });
   });
@@ -165,14 +165,14 @@ describe("coalesceTurnInputs", () => {
     expect(result.context).toBeUndefined();
   });
 
-  it("combines messages and inputResponses", () => {
+  it("combines messages and answers", () => {
     const result = coalesceTurnInputs(
-      { message: "hello", inputResponses: [{ requestId: "r1", optionId: "approve" }] },
+      { message: "hello", answers: [{ interactionId: "r1", optionId: "approve" }] },
       { message: "world" },
     );
 
     expect(result).toEqual({
-      inputResponses: [{ requestId: "r1", optionId: "approve" }],
+      answers: [{ interactionId: "r1", optionId: "approve" }],
       message: "hello\n\nworld",
     });
   });
@@ -184,13 +184,13 @@ describe("coalesceTurnInputs", () => {
         context: ["from-channel"],
       },
       {
-        inputResponses: [{ requestId: "r1", text: "yes" }],
+        answers: [{ interactionId: "r1", text: "yes" }],
         context: ["from-hook"],
       },
     );
 
     expect(result).toEqual({
-      inputResponses: [{ requestId: "r1", text: "yes" }],
+      answers: [{ interactionId: "r1", text: "yes" }],
       message: "hello",
       context: ["from-channel", "from-hook"],
     });

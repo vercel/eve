@@ -37,7 +37,7 @@ export default defineEval({
       started.map((call) => call.callId),
     );
     t.check(
-      settled.map((settlement) => settlement.status),
+      settled.map((settlement) => settlement.outcome),
       equals(["completed"]),
     ).label("the report task completes");
     const reportIds = settled.flatMap((settlement) => reportIdOf(settlement) ?? []);

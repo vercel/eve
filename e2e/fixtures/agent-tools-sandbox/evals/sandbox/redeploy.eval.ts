@@ -88,7 +88,7 @@ export default defineEval({
       // the dynamic callback in the new process before the model calls it.
       const dynamicParked = await t.send("DYNAMIC-TURN-REPLAY-START");
       const dynamicSession = dynamicParked.session;
-      dynamicSession.requireInputRequest({
+      dynamicSession.requireInteraction({
         display: "confirmation",
         optionIds: ["approve", "cancel"],
         toolName: "dynamic-turn-replay-gate",

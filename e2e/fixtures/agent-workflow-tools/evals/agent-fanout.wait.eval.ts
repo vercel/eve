@@ -1,5 +1,4 @@
 import { defineEval } from "eve/evals";
-import { isCurrentTurnBoundaryEvent } from "eve/client";
 
 import { readHookAudit, recordsEveryAgentStart } from "./subagent-hook-audit.shared";
 
@@ -13,14 +12,15 @@ export default defineEval({
     );
     turn.expectOk();
     turn.calledTool("fanout_agents", { count: 1, status: "completed" });
-    turn.event("agent.started", { data: { name: "workflow-marker" }, count: 2 });
+    turn.event("child.opened", { data: { name: "workflow-marker" }, count: 2 });
     turn.eventsSatisfy("parallel sessions are distinct children of one tool call", (events) => {
       const started = events.flatMap((event) =>
-        event.type === "agent.started" && event.data.name === "workflow-marker" ? [event.data] : [],
+        event.type === "child.opened" && event.data.name === "workflow-marker" ? [event.data] : [],
       );
       return (
         started.length === 2 &&
-        new Set(started.map((session) => session.callId)).size === 1 &&
+        new Set(started.map(({ owner }) => ("callId" in owner ? owner.callId : undefined))).size ===
+          1 &&
         new Set(started.map((session) => session.sessionId)).size === 2
       );
     });
@@ -29,11 +29,11 @@ export default defineEval({
     const parentTrace = turn.events.find((event) => event.type === "turn.started")?.data.trace;
     const childTraces = await Promise.all(
       turn.events
-        .filter((event) => event.type === "agent.started")
+        .filter((event) => event.type === "child.opened")
         .map(async (started) => {
           for await (const event of turn.session.agent(started).stream()) {
             if (event.type === "turn.started") return event.data.trace;
-            if (isCurrentTurnBoundaryEvent(event)) break;
+            if (event.type === "turn.settled" || event.type === "session.ended") break;
           }
           return undefined;
         }),
@@ -53,13 +53,11 @@ export default defineEval({
     );
     turn.eventsSatisfy("both children start before the waiting tool resolves", (events) => {
       const called = events.flatMap((event, index) =>
-        event.type === "agent.started" && event.data.name === "workflow-marker" ? [index] : [],
+        event.type === "child.opened" && event.data.name === "workflow-marker" ? [index] : [],
       );
+      const fanout = turn.toolCalls.find((call) => call.name === "fanout_agents");
       const toolResult = events.findIndex(
-        (event) =>
-          event.type === "action.result" &&
-          event.data.result.kind === "tool-result" &&
-          event.data.result.toolName === "fanout_agents",
+        (event) => event.type === "call.settled" && event.data.callId === fanout?.callId,
       );
       return called.length === 2 && toolResult >= 0 && Math.max(...called) < toolResult;
     });

@@ -10,6 +10,7 @@ import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.j
 import { ParentSessionKey, SessionCallbackKey, SessionPredecessorKey } from "#context/keys.js";
 import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
+import { cascade } from "#harness/session-machine/cascade.js";
 import {
   applyTransition,
   type Publish,
@@ -29,7 +30,7 @@ import type {
   HarnessEmitFn,
   HarnessSession,
   StepFn,
-  StepInput,
+  HarnessStepInput,
   StepResult,
   ToolLoopHarnessConfig,
 } from "#harness/types.js";
@@ -37,6 +38,7 @@ import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { createHistoryViewPreparer } from "#shared/history-view.js";
+import { publicViewOf } from "#protocol/session-projection.js";
 
 type HistoryViewPreparer = ReturnType<typeof createHistoryViewPreparer>;
 
@@ -96,7 +98,14 @@ export function createStep(input: {
     view: () => sessionView(live.read(), step.session.state),
     position: () => turnPosition(live.read()),
     async apply(transition, messages) {
-      step.session = await applyTransition(step.session, transition, input.publish, messages);
+      // An owner's end closes what it holds in the same commit.
+      const events = cascade(publicViewOf(live.read()), transition.events);
+      step.session = await applyTransition(
+        step.session,
+        { ...transition, events },
+        input.publish,
+        messages,
+      );
       if (ctx !== undefined) recordAppliedSession(ctx, step.session);
     },
     projectHistory: (messages, state = step.session.state) =>
@@ -114,7 +123,9 @@ export async function openTurn(
   step: Step,
   opened: {
     readonly input: readonly HarnessModelMessage[];
-    readonly message?: StepInput["message"];
+    readonly message?: HarnessStepInput["message"];
+    /** The deliveries the turn consumes. */
+    readonly deliveries?: HarnessStepInput["deliveries"];
   },
 ): Promise<StepResult | undefined> {
   const { config, ctx } = step;
@@ -138,7 +149,7 @@ export async function openTurn(
     });
     await step.apply(
       receive(step.view(), {
-        message: opened.message,
+        deliveries: opened.deliveries,
         predecessor: ctx?.get(SessionPredecessorKey),
         runtime: config.runtimeIdentity,
         trace,

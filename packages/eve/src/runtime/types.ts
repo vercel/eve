@@ -1,11 +1,11 @@
 import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
@@ -227,7 +227,7 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
    * wildcard if declared. Unknown keys are accepted at resolve time
    * and ignored at dispatch time.
    */
-  readonly events: Readonly<Record<string, StreamEventHook<MessageStreamEvent>>>;
+  readonly events: Readonly<Record<string, StreamEventHook<SessionEvent>>>;
 }
 
 /**

@@ -11,7 +11,7 @@ export default defineEval({
     const { session } = await t.send(
       'Alice is planning a release. Call the ask_question tool exactly once with question "Where should Alice ship first?" and exactly two options labeled "Staging" and "Production". Wait for my answer before you continue.',
     );
-    const choice = session.requireInputRequest({
+    const choice = session.requireInteraction({
       display: "select",
       optionIds: (ids) => ids.length === 2,
       prompt: (prompt) => /Alice ship first/i.test(prompt),
@@ -24,7 +24,7 @@ export default defineEval({
     if (production === undefined) throw new Error("ask_question did not offer Production.");
 
     const chosen = await session.respond([
-      { optionId: production.id, requestId: choice.requestId },
+      { optionId: production.id, interactionId: choice.interactionId },
     ]);
     chosen.expectOk();
     chosen.calledTool("ask_question", {
@@ -36,12 +36,12 @@ export default defineEval({
     const second = await session.send(
       'Bob wants a second opinion. Call the ask_question tool exactly once with question "Where should Bob ship first?" and no options. Wait for my answer before you continue.',
     );
-    const typed = second.session.requireInputRequest({
+    const typed = second.session.requireInteraction({
       prompt: (prompt) => /Bob ship first/i.test(prompt),
       toolName: "ask_question",
     });
     const answered = await session.respond([
-      { requestId: typed.requestId, text: "Canary pool in us-east" },
+      { interactionId: typed.interactionId, text: "Canary pool in us-east" },
     ]);
     answered.expectOk();
     answered.calledTool("ask_question", {

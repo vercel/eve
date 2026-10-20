@@ -1,12 +1,12 @@
 import type { AuthorizationSignal } from "#harness/authorization.js";
 import type { ToolSignIn } from "#harness/call-executor.js";
 import { resolveActiveAuthorizationChallenges } from "#harness/hitl/sign-ins.js";
+import type { ApprovedCall } from "#harness/session-machine/view.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
-import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 
-/** A call a sign-in stopped, as the entry it ran, and the connections it needs. */
+/** A call a sign-in stopped, and the connections it needs. */
 export interface StoppedCall {
-  readonly action: RuntimeToolCallActionRequest;
+  readonly call: ApprovedCall["call"];
   readonly connections: readonly string[];
 }
 
@@ -22,12 +22,15 @@ export function resolveInlineAuthorizationInterrupt(input: {
   | undefined {
   if (input.signIns.length === 0) return undefined;
   return {
-    calls: input.signIns.map(({ callId, input: args, signal, toolName }) => ({
-      action: createRuntimeToolCallActionFromToolCall({
+    calls: input.signIns.map(({ callId, input: args, signal, toolName }) => {
+      const action = createRuntimeToolCallActionFromToolCall({
         toolCall: { input: args, toolCallId: callId, toolName },
-      }),
-      connections: signal.challenges.map((challenge) => challenge.name),
-    })),
+      });
+      return {
+        call: { callId: action.callId, input: action.input, toolName: action.toolName },
+        connections: signal.challenges.map((challenge) => challenge.name),
+      };
+    }),
     challenges: resolveActiveAuthorizationChallenges(
       input.signIns.flatMap(({ signal }) => signal.challenges),
     ),

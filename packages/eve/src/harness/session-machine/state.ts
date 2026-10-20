@@ -2,9 +2,10 @@ import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import type { SessionStateMap, StepInput } from "#harness/types.js";
+import type { SessionStateMap, HarnessStepInput } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
+import type { JsonObject } from "#shared/json.js";
 
 // Execution state the session machine keeps between steps. Lifecycle facts (whether a turn is
 // open, whether a request is answered, how a call ended) are the projection's; this holds only
@@ -19,14 +20,24 @@ export interface StepCoordinates {
   readonly turnId: string;
 }
 
+/** A call that needs a person's approval, and what they're asked. */
+export interface ApprovalAsk {
+  readonly interactionId: string;
+  readonly call: { readonly callId: string; readonly toolName: string; readonly input: JsonObject };
+  readonly request: InteractionRequest;
+}
+
 /**
  * A call that runs on the turn's next model call, whatever asked for it: a person approved it, or
  * the sign-ins it waited on called back.
  */
-export type ApprovedCall = Pick<InputRequest, "action" | "requestId"> & {
+export interface ApprovedCall {
+  readonly call: ApprovalAsk["call"];
+  /** The approval that cleared the call; absent for a call only sign-ins stopped. */
+  readonly interactionId?: string;
   /** The sign-ins the call stopped on: its outcome settles them. */
   readonly signIns?: readonly AuthorizationChallenge[];
-};
+}
 
 /**
  * A model step whose calls can't all settle yet: some await an approval or a sign-in, others the
@@ -39,7 +50,7 @@ export interface SuspendedStep {
   /** The withheld response. Results join it as they arrive. */
   readonly messages: readonly ModelMessage[];
   /** Approvals the step still waits on. */
-  readonly requests: readonly InputRequest[];
+  readonly requests: readonly ApprovalAsk[];
   /**
    * Calls a person approved that haven't run. They run when the turn next calls the model, after
    * its step starts and its budget allows it, as calls the model makes do. A call a sign-in
@@ -56,7 +67,7 @@ export interface SuspendedStep {
 
 export interface TurnState {
   /** Input that arrived before it could run: a partial answer, or input behind a policy pass. */
-  readonly queued?: StepInput;
+  readonly queued?: HarnessStepInput;
   readonly suspended: readonly SuspendedStep[];
   /** Approval keys a `once()` approval granted for the rest of the session. */
   readonly grants: readonly string[];

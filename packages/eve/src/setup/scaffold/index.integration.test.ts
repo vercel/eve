@@ -278,7 +278,7 @@ describe("ensureChannel", () => {
       "if (agent.session !== undefined) replaceSessionRoute(agent.session.sessionId)",
     );
     expect(agentChatSource).toContain(
-      '!isResuming && agent.data.inputs[requestId]?.status === "open"',
+      '!isResuming && agent.data.interactions[interactionId]?.status === "open"',
     );
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
@@ -563,9 +563,9 @@ describe("ensureChannel", () => {
       "utf8",
     );
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
-    expect(agentMessageSource).toContain("questionsFor(part.toolCallId)");
+    expect(agentMessageSource).toContain("questionsFor(part.callId)");
     expect(agentMessageSource).toContain("<QuestionRequest");
-    expect(agentMessageSource).toContain("onInputResponses");
+    expect(agentMessageSource).toContain("onAnswers");
     expect(questionnaireSource).toContain('from "@shadcn/react/questionnaire"');
     expect(packageJson.dependencies).toHaveProperty("@shadcn/react");
     await expect(

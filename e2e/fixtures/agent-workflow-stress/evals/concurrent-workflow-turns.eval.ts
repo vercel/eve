@@ -84,8 +84,8 @@ export default defineEval({
     t.succeeded();
     t.event("session.started", { count: SESSION_COUNT });
     t.event("turn.started", { count: TURN_COUNT });
-    t.event("turn.completed", { count: TURN_COUNT });
-    t.notEvent("turn.failed");
+    t.event("turn.settled", { count: TURN_COUNT, data: { outcome: "completed" } });
+    t.notEvent("turn.settled", { data: { outcome: "failed" } });
   },
 });
 

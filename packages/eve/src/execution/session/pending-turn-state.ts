@@ -4,11 +4,12 @@ import { ownOpenRequestIds } from "#harness/session-machine/transitions.js";
 import { runtimeWait } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
-import { openSignIns, type SessionProjection } from "#protocol/session-projection.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
+import { openSignIns } from "#protocol/session-reader.js";
 
 /**
  * What a paused turn waits on, which is one kind of thing at a time. The turn keeps it to resume;
- * the stream reports the pause as `turn.waiting`.
+ * the stream reports the pause as `turn.paused`.
  */
 export type TurnPause =
   /** Sign-ins whose callbacks resume the turn, and questions and approvals a person answers. */
@@ -59,10 +60,18 @@ export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
   };
 }
 
+/** Whether the turn waits on a person: a sign-in, or a request the session asked itself. */
+export function waitsOnPerson(session: HarnessSession, projection: SessionProjection): boolean {
+  return (
+    openSignIns(projection.view).length > 0 ||
+    ownOpenRequestIds(sessionView(projection, session.state)).size > 0
+  );
+}
+
 /** Whether the turn waits on a sign-in, an answer, or a call, which ends a batch of model calls. */
 export function waitsOnAnything(session: HarnessSession, projection: SessionProjection): boolean {
   return (
-    openSignIns(projection).length > 0 ||
+    openSignIns(projection.view).length > 0 ||
     ownOpenRequestIds(sessionView(projection, session.state)).size > 0 ||
     (runtimeWait(session.state)?.callIds.length ?? 0) > 0
   );

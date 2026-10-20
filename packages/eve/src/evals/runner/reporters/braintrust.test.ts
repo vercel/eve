@@ -46,6 +46,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
       derived: {
         toolCalls: [
           {
+            callId: "call-1",
             name: "search",
             input: { query: "test" },
             output: null,
@@ -58,7 +59,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
         skillLoads: [],
         subagentCalls: [],
         subagentCallCount: 0,
-        inputRequests: [],
+        interactions: [],
         parked: false,
         messageCount: 1,
         reasoningBlockCount: 0,

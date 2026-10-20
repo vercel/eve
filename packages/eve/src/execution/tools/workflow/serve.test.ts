@@ -14,7 +14,7 @@ import type {
 import { startServeBody } from "#execution/tools/workflow/serve.js";
 import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
 import type { JsonValue } from "#shared/json.js";
-import type { ToolInputResponse } from "#tools/definition.js";
+import type { ToolAnswer } from "#tools/definition.js";
 import type {
   WorkflowServeCall,
   WorkflowServeContext,
@@ -265,7 +265,7 @@ it("withdraws a question once its call has a reply, without aborting the stretch
   mocks.deliver.mockResolvedValue(undefined);
   const replyNow = Promise.withResolvers<void>();
   let stretch: AbortSignal | undefined;
-  let answer: PromiseLike<ToolInputResponse> | undefined;
+  let answer: PromiseLike<ToolAnswer> | undefined;
   mocks.serve.mockImplementation(
     async (receive: WorkflowServeReceive<JsonValue>, ctx: WorkflowServeContext<JsonValue>) => {
       stretch = (await receive()).abortSignal;

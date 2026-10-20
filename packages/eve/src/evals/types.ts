@@ -1,14 +1,11 @@
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ClientAgentSession } from "#client/agent-session.js";
-import type {
-  RuntimeIdentity,
-  TraceContext,
-  MessageStreamEvent,
-  AgentStartedStreamEvent,
-} from "#protocol/message.js";
+import type { RuntimeIdentity, TraceContext } from "#protocol/message.js";
 import type {
   CancelSessionResult,
   ClientSessionState,
@@ -16,33 +13,42 @@ import type {
   SendTurnInput,
   SendTurnOptions,
 } from "#client/types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
+import type { Interaction } from "#protocol/session-reader.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type {
   EveEvalEventMatch,
-  EveEvalInputRequestMatchOptions,
+  EveEvalInteractionMatchOptions,
   EveEvalSkillLoadMatchOptions,
   EveEvalSubagentCallMatchOptions,
   EveEvalToolCallMatchOptions,
 } from "#evals/match.js";
 
 /** Lifecycle outcome of an eval-observed tool action. */
-export type EveEvalActionStatus = "pending" | "completed" | "failed" | "rejected";
+export type EveEvalActionStatus =
+  | "pending"
+  | "completed"
+  | "failed"
+  | "rejected"
+  | "interrupted"
+  | "abandoned";
 
 /**
  * One tool call extracted from the captured stream, pairing the
- * `actions.requested` request with its matching `action.result`.
+ * `call.requested` request with its matching `call.settled`.
  */
 export interface EveEvalToolCall {
+  /** The call's id, as its `call.*` facts name it. */
+  readonly callId: string;
   /** Authored tool name (e.g. `"get_weather"`). */
   readonly name: string;
   /** Tool input as requested by the model. */
   readonly input: JsonObject;
-  /** Tool output from the matching `action.result`; `undefined` when the call never resolved. */
+  /** Inline output from `call.settled`; absent when unresolved or only a reference was recorded. */
   readonly output: JsonValue | undefined;
-  /** Whether the request is unresolved, completed, failed, or user-rejected. */
+  /** Pending until settled, then the call's explicit outcome. */
   readonly status: EveEvalActionStatus;
   /** Zero-based index of the turn the call happened in. */
   readonly turnIndex: number;
@@ -51,8 +57,8 @@ export interface EveEvalToolCall {
 }
 
 /**
- * One skill load extracted from the captured stream, pairing the `load-skill`
- * request with its matching `load-skill-result`.
+ * One skill call extracted from the captured stream, pairing its `call.requested`
+ * capability with its matching `call.settled`.
  */
 export interface EveEvalSkillLoad {
   /** The loaded skill's name. */
@@ -67,23 +73,20 @@ export interface EveEvalSkillLoad {
 }
 
 /**
- * One call to an agent task extracted from the captured stream: its
- * `task.started`, joined with its `task.settled` and the task's
- * `agent.started`.
+ * One call served by an agent task: its `call.started {taskId}`, joined with
+ * `call.settled`, the task's single `task.started`, and its child-session link.
  */
 export interface EveEvalSubagentCall {
-  /** The agent tool call's id, as on its task events. */
+  /** The agent tool call's id. */
   readonly callId?: string;
   /** The agent's session id, shared by every call to one task; absent if it never opened. */
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
-  readonly remoteUrl?: string;
-  /** Output from the call's `task.settled`; `undefined` until the call completes. */
+  /** Output from `call.settled`, resolving shared replies; absent until it completes. */
   readonly output?: JsonValue;
-  /** The call's task status: `working` until its `task.settled` arrives. */
-  readonly status: "working" | "completed" | "failed" | "cancelled";
+  /** Pending until this call settles, then the call's explicit outcome. */
+  readonly status: EveEvalActionStatus;
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */
@@ -99,25 +102,25 @@ export interface EveEvalDerivedFacts {
   readonly skillLoads: readonly EveEvalSkillLoad[];
   readonly subagentCalls: readonly EveEvalSubagentCall[];
   readonly subagentCallCount: number;
-  /** Every HITL input request raised during the run (`input.requested`). */
-  readonly inputRequests: readonly InputRequest[];
+  /** Every HITL input request raised during the run (`interaction.opened`). */
+  readonly interactions: readonly Interaction[];
   /** True when the run ended parked on unanswered HITL input requests. */
   readonly parked: boolean;
   readonly messageCount: number;
   readonly reasoningBlockCount: number;
   /**
-   * Distinct ids of the models the steps started with (`step.started`): in first-use order for one
-   * session, and in session order for an eval. Covers only the sessions the eval created or
-   * attached: a delegated subagent runs in its own session, so its models appear only when the eval
-   * attaches that session. Compaction and `auto` routing calls are not included.
+   * Distinct model ids from `model.started`: in first-use order for one session, and in session
+   * order for an eval. Includes compaction summaries. Covers only captured sessions; a delegated
+   * agent's models appear only when the eval captures its session. Provider-internal routing
+   * calls without an eve model lifecycle are not included.
    */
   readonly models: readonly string[];
   /**
-   * Token usage from the latest `session.waiting`, `turn.waiting`, `session.failed`, or
-   * `session.completed`: the
-   * session's own model calls plus what the agents it delegated to spent, so on a turn it is the
-   * session's total so far. For an eval, each captured session counts once, by its latest usage,
-   * except sessions another captured session opened. Absent when a counted session reported none.
+   * Sum of the captured session's `usage.recorded` facts through this turn: its own model calls,
+   * compaction summaries, and delegated spend recorded on calls. A turn reports the session's
+   * total so far, not only that turn's spend. For an eval, each captured session counts once,
+   * except sessions another captured session opened, whose spend is attributed to that parent's
+   * calls. Absent when a counted session reported no usage.
    */
   readonly usage?: TokenUsage;
   readonly failureCode?: string;
@@ -128,7 +131,7 @@ export interface EveEvalDerivedFacts {
  */
 export interface EveEvalSessionResult {
   readonly derived: EveEvalDerivedFacts;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly primary: boolean;
   readonly sessionId?: string;
   readonly state: ClientSessionState | undefined;
@@ -161,7 +164,7 @@ export interface EveEvalTaskResult {
    */
   readonly status: "completed" | "failed" | "waiting";
   /** The captured stream events from the run. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   /** Lines written through `t.log` while the eval ran. */
   readonly logs?: readonly string[];
   /** Facts extracted from the stream (tool calls, message counts, etc.). */
@@ -281,18 +284,18 @@ export interface EveEvalAssertions {
   maxToolCalls(max: number): AssertionHandle;
   calledSubagent(name: string, options?: EveEvalSubagentCallMatchOptions): AssertionHandle;
   noFailedActions(): AssertionHandle;
-  event<TType extends MessageStreamEvent["type"]>(
+  event<TType extends SessionStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type">,
   ): AssertionHandle;
-  notEvent<TType extends MessageStreamEvent["type"]>(
+  notEvent<TType extends SessionStreamEvent["type"]>(
     type: TType,
     options?: Omit<Extract<EveEvalEventMatch, { type: TType }>, "type" | "count">,
   ): AssertionHandle;
   eventOrder(matchers: readonly EveEvalEventMatch[]): AssertionHandle;
   eventsSatisfy(
     label: string,
-    predicate: (events: readonly MessageStreamEvent[]) => boolean,
+    predicate: (events: readonly SessionStreamEvent[]) => boolean,
   ): AssertionHandle;
 }
 
@@ -304,11 +307,11 @@ export interface EveEvalOutputAssertions {
 
 /** Typed stream event returned by {@link EveEvalLiveTurn.waitForEvent}. */
 export type EveEvalStreamEvent<
-  TType extends MessageStreamEvent["type"] = MessageStreamEvent["type"],
-> = Extract<MessageStreamEvent, { type: TType }>;
+  TType extends SessionStreamEvent["type"] = SessionStreamEvent["type"],
+> = Extract<SessionStreamEvent, { type: TType }>;
 
 /** Matcher options for waiting until one live turn emits a specific event. */
-export type EveEvalWaitForEventOptions<TType extends MessageStreamEvent["type"]> = Omit<
+export type EveEvalWaitForEventOptions<TType extends SessionStreamEvent["type"]> = Omit<
   Extract<EveEvalEventMatch, { type: TType }>,
   "count" | "type"
 >;
@@ -321,7 +324,7 @@ export type EveEvalWaitForEventOptions<TType extends MessageStreamEvent["type"]>
  */
 export interface EveEvalLiveTurn {
   /** Events observed on this turn so far. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   /** Session driver that started or owns this turn. */
   readonly session: EveEvalSession;
   /** Durable session id available as soon as the turn is accepted or attached. */
@@ -331,23 +334,31 @@ export interface EveEvalLiveTurn {
   /** Wait for the turn boundary and return the recorded immutable result. */
   result(): Promise<EveEvalTurn>;
   /** Wait until the live stream emits one typed event matching `options`. */
-  waitForEvent<TType extends MessageStreamEvent["type"]>(
+  waitForEvent<TType extends SessionStreamEvent["type"]>(
     type: TType,
     options?: EveEvalWaitForEventOptions<TType>,
   ): Promise<EveEvalStreamEvent<TType>>;
+  /**
+   * Wait until a call to the tool named `name` settles, matching `options`. Without a `status`,
+   * any settled outcome matches.
+   */
+  waitForToolCall(
+    name: string,
+    options?: Omit<EveEvalToolCallMatchOptions, "count">,
+  ): Promise<EveEvalToolCall>;
 }
 
 /** Operations and state belonging to one accepted session. */
 interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   /**
    * User and assistant messages observed on this session in turn order. Pass
    * this to a judge's `on` option to grade the complete conversation.
    */
   readonly transcript: string;
   /** Input requests left pending by the last parked turn. */
-  readonly pendingInputRequests: readonly InputRequest[];
+  readonly pendingInteractions: readonly Interaction[];
   /** Serializable cursor for resuming this session. */
   readonly state: ClientSessionState;
   /** Durable session id, available when the session is returned. */
@@ -356,19 +367,16 @@ interface EveEvalSessionDriver {
   cancel(): Promise<CancelSessionResult>;
   /**
    * Compact this session's history between turns and wait for it to finish.
-   * Returns the compaction events through `session.waiting`; throws when the
+   * Returns the compaction's events through its `context.settled`; throws when the
    * session is no longer active.
    */
   compact(): Promise<EveEvalTurn>;
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
-  requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
+  requireInteraction(filter?: EveEvalInteractionMatchOptions): Interaction;
   /** Resolve specific pending requests and run the resumed turn. */
-  respond(responses: readonly InputResponse[], options?: SendTurnOptions): Promise<EveEvalTurn>;
+  respond(responses: readonly Answer[], options?: SendTurnOptions): Promise<EveEvalTurn>;
   /** Start a response turn without waiting for its boundary. */
-  startRespond(
-    responses: readonly InputResponse[],
-    options?: SendTurnOptions,
-  ): Promise<EveEvalLiveTurn>;
+  startRespond(responses: readonly Answer[], options?: SendTurnOptions): Promise<EveEvalLiveTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
   /** Send one turn through this session. */
@@ -379,10 +387,10 @@ interface EveEvalSessionDriver {
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
   /**
    * The session an agent run opened, as this session's stream announced it with
-   * `agent.started`. Its `stream()` follows the child through this parent session
+   * `child.opened`. Its `stream()` follows the child through this parent session
    * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
-  agent(started: AgentStartedStreamEvent): EveEvalAgentSession;
+  agent(opened: ChildOpened): EveEvalAgentSession;
 }
 
 /** A session an agent run opened, reached through the parent eval session. */
@@ -400,8 +408,8 @@ export interface EveEvalSession
  */
 export interface EveEvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {
   readonly data: unknown;
-  readonly events: readonly MessageStreamEvent[];
-  readonly inputRequests: readonly InputRequest[];
+  readonly events: readonly SessionStreamEvent[];
+  readonly interactions: readonly Interaction[];
   readonly message: string | undefined;
   /** Session that owns this turn; use it for follow-up messages. */
   readonly session: EveEvalSession;
@@ -561,7 +569,7 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   /**
    * Attach to a pre-existing session and consume one turn boundary.
    *
-   * When that boundary is `session.waiting`, the attached session recovers
+   * When that boundary leaves the session open, the attached session recovers
    * the exact session ID, so `session.send(...)` and `session.respond(...)`
    * continue the same durable session.
    */
@@ -572,9 +580,19 @@ export interface EveEvalTargetHandle extends EveEvalTarget {
   /**
    * Observe one in-progress turn from a session created outside the eval.
    * The returned live-turn handle starts consuming immediately and owns the
-   * stream through its next turn boundary.
+   * stream through its next turn boundary, or, with `until`, through the line
+   * holding the first event `until` matches: a read that ends no turn, such as
+   * a context change between turns, ends at `context.settled`.
    */
-  watchTurn(sessionId: string, opts?: { readonly startIndex?: number }): EveEvalLiveTurn;
+  watchTurn(sessionId: string, opts?: EveEvalWatchOptions): EveEvalLiveTurn;
+}
+
+/** Where a watched read starts, and what ends it when no turn boundary does. */
+export interface EveEvalWatchOptions {
+  /** The stream line to start from. */
+  readonly startIndex?: number;
+  /** Ends the read with the line holding the first matching event, instead of a turn boundary. */
+  readonly until?: (event: SessionStreamEvent) => boolean;
 }
 
 // ---------------------------------------------------------------------------

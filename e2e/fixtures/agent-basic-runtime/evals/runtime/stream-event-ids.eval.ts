@@ -1,29 +1,39 @@
 import { defineEval } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
+import type { SessionEventMeta } from "eve/client";
 
-/** `evt_` followed by a 26-character Crockford base32 ULID. */
-const EVENT_ID = /^evt_[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
+/** Whether each position follows the one before it: a later line, or a later index in its line. */
+function ascending(positions: readonly SessionEventMeta["position"][]): boolean {
+  return positions.every((position, index) => {
+    const previous = positions[index - 1];
+    if (previous === undefined) return true;
+    return (
+      position.line > previous.line ||
+      (position.line === previous.line && position.index > previous.index)
+    );
+  });
+}
 
 /**
- * Core session-route runtime behavior: durable stream event ids.
+ * Core session-route runtime behavior: durable stream positions.
  *
- * Module tests cover the stamping seam in process; this is the only check
- * that the id survives the wire and a rewind.
+ * Module tests cover line positions in process; this is the only check that
+ * they survive the wire and a rewind.
  */
 export default defineEval({
-  description: "Session runtime smoke: stream event ids are stamped and stable across a rewind.",
+  description: "Session runtime smoke: stream positions are ordered and stable across a rewind.",
 
   async test(t) {
     const turn = await t.send('Reply with exactly the text "id smoke" and nothing else.');
     t.succeeded();
 
-    const ids = turn.events.map((event) => event.meta.id);
+    const positions = turn.events.map((event) => event.meta.position);
 
     await t.require(
-      ids,
-      satisfies<readonly string[]>(
-        (value) => value.length > 0 && value.every((id) => EVENT_ID.test(id)),
-        "every event carries a well-formed evt_ id",
+      positions,
+      satisfies<readonly SessionEventMeta["position"][]>(
+        (value) => value.length > 0 && ascending(value),
+        "every event carries a position after the one before it",
       ),
     );
 
@@ -31,8 +41,8 @@ export default defineEval({
     const replay = await t.target.watchTurn(turn.sessionId, { startIndex: 0 }).result();
 
     await t.require(
-      replay.events.map((event) => event.meta.id),
-      equals(ids),
+      replay.events.map((event) => event.meta.position),
+      equals(positions),
     );
   },
 });

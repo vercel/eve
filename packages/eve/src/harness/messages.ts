@@ -6,8 +6,8 @@ import type {
   SessionAuthContext,
   TurnCaller,
 } from "#channel/types.js";
-import type { InputResponse } from "#shared/input.js";
-import type { StepInput } from "#harness/types.js";
+import type { Answer } from "#shared/input.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 
@@ -115,18 +115,21 @@ export function isFrameworkMessageKind(value: unknown): value is FrameworkMessag
   );
 }
 
-type FrameworkStepInput = StepInput & {
+type FrameworkStepInput = HarnessStepInput & {
   readonly frameworkMessageKind?: FrameworkMessageKind;
 };
 
 /** Marks an execution-owned delivery so its model message retains provenance. */
-export function markFrameworkStepInput(input: StepInput, kind: FrameworkMessageKind): StepInput {
+export function markFrameworkStepInput(
+  input: HarnessStepInput,
+  kind: FrameworkMessageKind,
+): HarnessStepInput {
   return { ...input, frameworkMessageKind: kind } as FrameworkStepInput;
 }
 
 /** Returns the framework reason for an execution-owned user message, when present. */
 export function frameworkMessageKindForStepInput(
-  input: StepInput | undefined,
+  input: HarnessStepInput | undefined,
 ): FrameworkMessageKind | undefined {
   if (input === undefined) return undefined;
   const { frameworkMessageKind } = input as FrameworkStepInput;
@@ -134,16 +137,16 @@ export function frameworkMessageKindForStepInput(
 }
 
 /**
- * Merges two {@link StepInput} values into one.
+ * Merges two {@link HarnessStepInput} values into one.
  *
  * Used by the harness to coalesce deferred step input with the current
  * turn's input, and by the execution layer after calling `onDeliver`
  * for each queued delivery payload.
  */
-export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
-  const inputResponses = coalesceInputResponses({
-    a: a.inputResponses,
-    b: b.inputResponses,
+export function coalesceTurnInputs(a: HarnessStepInput, b: HarnessStepInput): HarnessStepInput {
+  const answers = coalesceAnswers({
+    a: a.answers,
+    b: b.answers,
   });
   const message = coalesceMessage({
     a: a.message,
@@ -160,25 +163,28 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
-  const attributedInputResponses = [
-    ...(a.attributedInputResponses ?? []),
-    ...(b.attributedInputResponses ?? []),
-  ];
+  const attributedAnswers = [...(a.attributedAnswers ?? []), ...(b.attributedAnswers ?? [])];
 
   const result: {
-    attributedInputResponses?: StepInput["attributedInputResponses"];
-    inputResponses?: readonly InputResponse[];
+    attributedAnswers?: HarnessStepInput["attributedAnswers"];
+    deliveries?: HarnessStepInput["deliveries"];
+    responseBindings?: HarnessStepInput["responseBindings"];
+    answers?: readonly Answer[];
     message?: string | UserContent;
     context?: readonly string[];
-    outputSchema?: StepInput["outputSchema"];
+    outputSchema?: HarnessStepInput["outputSchema"];
   } = {};
+  const deliveries = [...(a.deliveries ?? []), ...(b.deliveries ?? [])];
+  if (deliveries.length > 0) result.deliveries = deliveries;
+  const bindings = [...(a.responseBindings ?? []), ...(b.responseBindings ?? [])];
+  if (bindings.length > 0) result.responseBindings = bindings;
 
-  if (inputResponses !== undefined) {
-    result.inputResponses = inputResponses;
+  if (answers !== undefined) {
+    result.answers = answers;
   }
 
-  if (attributedInputResponses.length > 0) {
-    result.attributedInputResponses = attributedInputResponses;
+  if (attributedAnswers.length > 0) {
+    result.attributedAnswers = attributedAnswers;
   }
 
   if (message !== undefined) {
@@ -248,7 +254,7 @@ export function followsToolResults(messages: readonly ModelMessage[]): boolean {
   return messages.findLast((message) => message.role !== "user")?.role === "tool";
 }
 
-export function createTurnInputMessages(input: StepInput | undefined): UserModelMessage[] {
+export function createTurnInputMessages(input: HarnessStepInput | undefined): UserModelMessage[] {
   const messages = [...(readClientContext(input) ?? []), ...(input?.context ?? [])].map((content) =>
     createFrameworkUserMessage("context.instruction", content),
   );
@@ -333,10 +339,10 @@ function extractMessageText(message: ModelMessage): string {
     .join("");
 }
 
-function coalesceInputResponses(input: {
-  readonly a?: readonly InputResponse[];
-  readonly b?: readonly InputResponse[];
-}): readonly InputResponse[] | undefined {
+function coalesceAnswers(input: {
+  readonly a?: readonly Answer[];
+  readonly b?: readonly Answer[];
+}): readonly Answer[] | undefined {
   const a = input.a ?? [];
   const b = input.b ?? [];
 
@@ -362,8 +368,8 @@ function coalesceContext(input: {
 }
 
 function coalesceFrameworkMessageKind(input: {
-  readonly a: StepInput;
-  readonly b: StepInput;
+  readonly a: HarnessStepInput;
+  readonly b: HarnessStepInput;
 }): FrameworkMessageKind | undefined {
   const a = frameworkMessageKindForStepInput(input.a);
   const b = frameworkMessageKindForStepInput(input.b);

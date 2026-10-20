@@ -5,13 +5,12 @@ import {
   renderPendingApprovalsInstruction,
   renderPendingApprovalsSnippet,
 } from "#harness/hitl/approval-prompt.js";
-import type { InputRequest } from "#shared/input.js";
+import type { ApprovalAsk } from "#harness/session-machine/state.js";
 
 describe("renderPendingApprovalsSnippet", () => {
   it("projects approval identity without exposing tool input", () => {
     const content = renderPendingApprovalsSnippet([
-      request("tool-approval", "approval-1", "bash", { secret: "do-not-project" }),
-      request("question", "question-1", "ask_question", { prompt: "Continue?" }),
+      request("approval-1", "bash", { secret: "do-not-project" }),
     ]);
 
     expect(content).toBe(
@@ -22,12 +21,11 @@ describe("renderPendingApprovalsSnippet", () => {
       ].join("\n"),
     );
     expect(content).not.toContain("do-not-project");
-    expect(content).not.toContain("question-1");
   });
 
   it("renders the same redacted identity as trusted runtime guidance", () => {
     const content = renderPendingApprovalsInstruction([
-      request("tool-approval", "approval-1", "bash", { secret: "do-not-project" }),
+      request("approval-1", "bash", { secret: "do-not-project" }),
     ]);
 
     expect(content).toContain("Trusted eve runtime state");
@@ -38,24 +36,18 @@ describe("renderPendingApprovalsSnippet", () => {
   });
 
   it("omits the notice when no approval is pending", () => {
-    expect(
-      renderPendingApprovalsSnippet([
-        request("question", "question-1", "ask_question", { prompt: "Continue?" }),
-      ]),
-    ).toBeUndefined();
+    expect(renderPendingApprovalsSnippet([])).toBeUndefined();
   });
 });
 
 function request(
-  kind: InputRequest["kind"],
-  requestId: string,
+  interactionId: string,
   toolName: string,
-  input: InputRequest["action"]["input"],
-): InputRequest {
+  input: ApprovalAsk["call"]["input"],
+): ApprovalAsk {
   return {
-    action: { callId: `${requestId}-call`, input, kind: "tool-call", toolName },
-    kind,
-    prompt: requestId,
-    requestId,
+    call: { callId: `${interactionId}-call`, input, toolName },
+    interactionId,
+    request: { kind: "approval", prompt: interactionId },
   };
 }

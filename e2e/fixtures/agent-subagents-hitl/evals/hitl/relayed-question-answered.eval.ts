@@ -18,18 +18,14 @@ export default defineEval({
     if (production === undefined) throw new Error("Expected a Production option.");
 
     const answered = await session.respond([
-      { optionId: production.id, requestId: request.requestId },
+      { optionId: production.id, interactionId: request.interactionId },
     ]);
-    answered.event("input.resolved", {
+    answered.event("interaction.settled", {
       count: 1,
       data: {
-        resolutions: [
-          {
-            outcome: "answered",
-            requestId: request.requestId,
-            response: { optionId: production.id },
-          },
-        ],
+        interactionId: request.interactionId,
+        outcome: "accepted",
+        response: { optionId: production.id },
       },
     });
     const reply = answered.message?.includes("RELAY-RESULT")

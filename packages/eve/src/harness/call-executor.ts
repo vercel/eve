@@ -1,3 +1,5 @@
+import type { SessionAuthContext } from "#channel/types.js";
+import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
   asSchema,
   generateId,
@@ -10,19 +12,14 @@ import {
   type TypedToolResult,
 } from "ai";
 
-import type { SessionAuthContext } from "#channel/types.js";
-import {
-  createRuntimeToolResultFromMessagePart,
-  createRuntimeToolResultFromValue,
-  toActionResult,
-} from "#harness/action-result-helpers.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import {
   type AuthorizationSignal,
   isAuthorizationSignal,
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/input-request-resolution.js";
+import { TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/approval-outcome.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
@@ -37,10 +34,10 @@ import {
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { createActionPartialEvent, createActionResultEvent } from "#protocol/message.js";
+import { callProgress, callSettledFrom, callStarted } from "#harness/call-facts.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
-import type { InputRequest } from "#shared/input.js";
+import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import { parseJsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";
 import { projectToolStartLabel } from "#harness/action-presentation.js";
@@ -85,6 +82,20 @@ export interface CallOutcome {
   readonly signIn?: ToolSignIn;
 }
 
+/** Where a call's facts belong: its turn, and the run that made it when it's open. */
+export interface CallPosition {
+  readonly turnId: string;
+  readonly runId?: string;
+  readonly sequence?: number;
+  readonly stepIndex?: number;
+}
+
+export function scopeOf(position: CallPosition): { turnId: string; runId?: string } {
+  return position.runId === undefined
+    ? { turnId: position.turnId }
+    : { runId: position.runId, turnId: position.turnId };
+}
+
 /**
  * Runs one local call: it decides the approval, streams the call's progress and result, and
  * returns the result the model reads. A call a person approved revalidates its input first.
@@ -96,17 +107,15 @@ export async function executeToolCall(
     readonly approvedTools?: ReadonlySet<string>;
     readonly definition: RunnableTool;
     readonly messages: readonly ModelMessage[];
-    readonly position: {
-      readonly sequence: number;
-      readonly stepIndex: number;
-      readonly turnId: string;
-    };
+    readonly position: CallPosition;
     readonly publish: HandleEventFn;
     readonly telemetry?: TelemetryOptions;
     /** The AI SDK's ID for the model call that made a fresh call. */
     readonly modelCallId?: string;
     /** Runs just before the tool does, as the step's steering protection. */
     readonly beforeExecute?: () => void;
+    /** What cleared a call a person approved: the interaction that asked them. */
+    readonly clearedBy?: ClearedBy;
     /** Who approved the call, which it reads as `ctx.approval`; it still runs as the requester. */
     readonly responder?: SessionAuthContext;
     /**
@@ -119,11 +128,7 @@ export async function executeToolCall(
 ): Promise<CallOutcome> {
   const { callId, toolName, input: args } = call;
   const { definition } = input;
-  const at = {
-    sequence: input.position.sequence,
-    stepIndex: input.position.stepIndex,
-    turnId: input.position.turnId,
-  };
+  const at = scopeOf(input.position);
   const settled: CallResult[] = [];
   const toolResults: TypedToolResult<ToolSet>[] = [];
   // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
@@ -142,18 +147,10 @@ export async function executeToolCall(
       const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
       await input.beforeResult?.(message);
       await input.publish(
-        createActionResultEvent({
-          ...at,
-          result: toActionResult(
-            createRuntimeToolResultFromValue({
-              callId,
-              isError: true,
-              output: message,
-              toolName,
-            }),
-            args,
-          ),
-        }),
+        callSettledFrom(
+          createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
+          { scope: at },
+        ),
       );
       return {
         settled: [
@@ -215,6 +212,16 @@ export async function executeToolCall(
         try {
           input.beforeExecute?.();
           started = true;
+          // A call a person approved starts when it runs, after the recheck: the approval cleared
+          // it, and the policy could still have refused it.
+          await input.publish(
+            callStarted(
+              callId,
+              input.clearedBy === undefined
+                ? { scope: at }
+                : { clearedBy: input.clearedBy, scope: at },
+            ),
+          );
           const executed = invokeTool(definition, args, {
             ...(input.responder !== undefined && { approval: { responder: input.responder } }),
             abortSignal: input.abortSignal,
@@ -229,20 +236,13 @@ export async function executeToolCall(
               output = partial;
               const visible = withoutSignInSecrets(partial);
               await input.publish(
-                createActionPartialEvent({
-                  ...at,
-                  presentation: projectDeltaPresentation(
-                    definition,
-                    callId,
-                    parseJsonObject(args),
-                    visible,
-                  ),
-                  result: createRuntimeToolResultFromValue({
-                    callId,
-                    output: visible,
-                    toolName,
-                  }),
-                }),
+                callProgress(
+                  callId,
+                  visible,
+                  projectDeltaPresentation(definition, callId, parseJsonObject(args), visible)?.[
+                    callId
+                  ]?.label,
+                ),
               );
             }
           } else {
@@ -299,16 +299,16 @@ export async function executeToolCall(
     settled.push(completed);
     await input.beforeResult?.(failed ? toError(thrown) : undefined);
     await input.publish(
-      createActionResultEvent({
-        ...at,
-        presentation: failed
-          ? undefined
-          : projectResultPresentation(definition, callId, parseJsonObject(args), output),
-        result: toActionResult(
-          createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
-          args,
-        ),
-      }),
+      callSettledFrom(
+        createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
+        {
+          scope: at,
+          label: failed
+            ? undefined
+            : projectResultPresentation(definition, callId, parseJsonObject(args), output)?.[callId]
+                ?.label,
+        },
+      ),
     );
     return { settled, toolResults };
   } catch (error) {
@@ -321,18 +321,10 @@ export async function executeToolCall(
     logError(log, "tool call failed", error, { toolName, toolCallId: callId });
     await input.beforeResult?.(toError(error));
     await input.publish(
-      createActionResultEvent({
-        ...at,
-        result: toActionResult(
-          createRuntimeToolResultFromValue({
-            callId,
-            isError: true,
-            output: message,
-            toolName,
-          }),
-          args,
-        ),
-      }),
+      callSettledFrom(
+        createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
+        { scope: at },
+      ),
     );
     return {
       settled: [
@@ -476,7 +468,7 @@ export interface InlineCallResults {
   /** What each call's `execute` returned, for `endsTurn`. */
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   /** The calls that wait on a person's approval. */
-  readonly approvals: readonly InputRequest[];
+  readonly approvals: readonly ApprovalAsk[];
   /** The calls that stopped for a sign-in. */
   readonly signIns: readonly ToolSignIn[];
 }
@@ -503,11 +495,7 @@ export async function executeInlineCalls(input: {
   readonly approvedTools: ReadonlySet<string>;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
-  readonly position: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
+  readonly position: CallPosition;
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
   readonly telemetry?: TelemetryOptions;
@@ -557,11 +545,7 @@ async function decideDeferredCall(
   input: {
     readonly abortSignal: AbortSignal | undefined;
     readonly approvedTools: ReadonlySet<string>;
-    readonly position: {
-      readonly sequence: number;
-      readonly stepIndex: number;
-      readonly turnId: string;
-    };
+    readonly position: CallPosition;
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
@@ -590,11 +574,7 @@ async function publishDenial(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
     readonly approval: "evaluate" | "recheck";
-    readonly position: {
-      readonly sequence: number;
-      readonly stepIndex: number;
-      readonly turnId: string;
-    };
+    readonly position: CallPosition;
     readonly publish: HandleEventFn;
     readonly reason: string | undefined;
   },
@@ -605,16 +585,20 @@ async function publishDenial(
     toolName: call.toolName,
     type: "tool-result",
   } satisfies ToolResultPart;
+  const scope = scopeOf(input.position);
   await input.publish(
     input.approval === "evaluate"
-      ? createActionResultEvent({
-          ...input.position,
-          result: createRuntimeToolResultFromMessagePart(part, call.toolName),
-        })
-      : createActionResultEvent({
-          ...input.position,
-          rejected: true,
-          result: {
+      ? callSettledFrom(
+          createRuntimeToolResultFromValue({
+            callId: call.callId,
+            isError: true,
+            output: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+            toolName: call.toolName,
+          }),
+          { scope },
+        )
+      : callSettledFrom(
+          {
             callId: call.callId,
             isError: true,
             kind: "tool-result",
@@ -625,7 +609,8 @@ async function publishDenial(
             },
             toolName: call.toolName,
           },
-        }),
+          { rejected: true, scope },
+        ),
   );
   return { settled: [{ part }], toolResults: [] };
 }
@@ -637,21 +622,23 @@ async function publishDenial(
 function approvalRequest(
   call: TypedToolCall<ToolSet>,
   definition: HarnessToolDefinition | undefined,
-): InputRequest {
-  const action = createRuntimeToolCallActionFromToolCall({ toolCall: call });
-  const label = projectToolStartLabel(definition, action.input) ?? displayTitle(action.toolName);
+): ApprovalAsk {
+  const { callId, input, toolName } = createRuntimeToolCallActionFromToolCall({ toolCall: call });
+  const label = projectToolStartLabel(definition, input) ?? displayTitle(toolName);
   const prompt = authoredApprovalPrompt(call, definition);
   return {
-    action,
-    allowFreeform: false,
-    display: "confirmation",
-    kind: "tool-approval",
-    options: [
-      { id: "approve", label: "Approve" },
-      { id: "cancel", label: "Cancel" },
-    ],
-    prompt: prompt ?? `Approve ${label}?`,
-    requestId: generateId(),
+    call: { callId, input, toolName },
+    interactionId: generateId(),
+    request: {
+      allowFreeform: false,
+      display: "confirmation",
+      kind: "approval",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "deny", label: "Deny" },
+      ],
+      prompt: prompt ?? `Approve ${label}?`,
+    },
   };
 }
 

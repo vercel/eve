@@ -9,7 +9,7 @@ export default defineEval({
     turn.expectOk();
     turn.messageIncludes("DISABLED-SUBAGENT-OK");
     turn.calledTool("invoke-hidden", { count: 1 });
-    turn.event("agent.started", { count: 1, data: { name: "disabled-hidden" } });
+    turn.event("child.opened", { count: 1, data: { name: "disabled-hidden" } });
     t.succeeded();
     t.noFailedActions();
   },

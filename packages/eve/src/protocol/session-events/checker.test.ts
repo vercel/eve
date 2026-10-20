@@ -192,6 +192,72 @@ describe("createStreamChecker", () => {
     expect(rulesOf([...repliedTurn(), stray])).toEqual(["progress"]);
   });
 
+  it("refuses a pause on someone the turn doesn't wait on", () => {
+    const lines = repliedTurn().slice(0, 4);
+    lines.push(
+      ...commits([
+        {
+          data: { awaiting: [{ interactionId: "i_0" }], turnId: "turn_0" },
+          scope: turn,
+          type: "turn.paused",
+        },
+      ]),
+    );
+    expect(rulesOf(lines)).toEqual(["paused-on-person", "paused-on-person"]);
+  });
+
+  it("refuses a call served by a task that ended", () => {
+    const lines = repliedTurn().slice(0, 4);
+    lines.push(
+      ...commits(
+        [
+          {
+            data: {
+              callId: "c_0",
+              capability: { kind: "agent", name: "a" },
+              owner: { runId: "run_0" },
+            },
+            scope: run,
+            type: "call.requested",
+          },
+          {
+            data: { kind: "agent", name: "a", startedBy: { callId: "c_0" }, taskId: "t_0" },
+            type: "task.started",
+          },
+          { data: { outcome: "completed", taskId: "t_0" }, type: "task.ended" },
+        ],
+        [{ data: { callId: "c_0", taskId: "t_0" }, type: "call.started" }],
+      ),
+    );
+    expect(rulesOf(lines)).toEqual(["serves-running-task"]);
+  });
+
+  it("refuses an approval decided apart from the rest of its batch", () => {
+    const approval = (callId: string, interactionId: string) => [
+      {
+        data: { callId, capability: { kind: "tool", name: "deploy" }, owner: { runId: "run_0" } },
+        scope: run,
+        type: "call.requested",
+      },
+      {
+        data: {
+          interactionId,
+          request: { kind: "approval", prompt: "Deploy?" },
+          subject: { callId },
+        },
+        type: "interaction.opened",
+      },
+    ];
+    const lines = repliedTurn().slice(0, 4);
+    lines.push(
+      ...commits(
+        [...approval("c_0", "i_0"), ...approval("c_1", "i_1")],
+        [{ data: { interactionId: "i_0", outcome: "accepted" }, type: "interaction.settled" }],
+      ),
+    );
+    expect(rulesOf(lines)).toEqual(["batch-settles-together"]);
+  });
+
   it("skips a line at a position it already checked", () => {
     const checker = createStreamChecker();
     const lines = repliedTurn();

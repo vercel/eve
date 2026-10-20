@@ -9,7 +9,7 @@ export default defineEval({
     const first = await t.send(`Call the ${TOOL_NAME} tool exactly once with scope "repo-a".`);
     const session = first.session;
     first.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    session.requireInputRequest({ toolName: TOOL_NAME });
+    session.requireInteraction({ toolName: TOOL_NAME });
     const approved = await session.respondAll("approve");
     approved.expectOk();
     approved.calledTool(TOOL_NAME, { status: "completed", count: 1 });
@@ -24,7 +24,7 @@ export default defineEval({
       `Call the ${TOOL_NAME} tool exactly once with scope "repo-b".`,
     );
     other.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    session.requireInputRequest({ toolName: TOOL_NAME });
+    session.requireInteraction({ toolName: TOOL_NAME });
     const approvedOther = await session.respondAll("approve");
     approvedOther.expectOk();
     t.succeeded();

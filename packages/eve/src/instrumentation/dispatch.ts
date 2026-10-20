@@ -5,7 +5,6 @@ import {
   releaseAllInstrumentationAttemptState,
   releaseAllInstrumentationState,
   releaseAllInstrumentationTurnState,
-  takeInstrumentationActionScopes,
   type InstrumentationStateOwner,
 } from "#instrumentation/state.js";
 import {
@@ -18,17 +17,12 @@ import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
 import type {
   CreateInstrumentationHooksOptions,
-  InstrumentationToolCallFailedEvent,
   InstrumentationDispatchGroups,
   InstrumentationEvent,
   InstrumentationEventHandler,
   InstrumentationHooks,
   InstrumentationHooksInput,
   InstrumentationProviderDefinition,
-  InstrumentationSessionFailedEvent,
-  InstrumentationSessionSettledEvent,
-  InstrumentationTurnFailedEvent,
-  InstrumentationTurnSettledEvent,
 } from "#instrumentation/lifecycle.js";
 
 const log = createLogger("harness.instrumentation-dispatch");
@@ -76,25 +70,6 @@ export function createInstrumentationDispatcher(
         snapshots,
         event,
       );
-      const cleanupSession =
-        snapshot.type === "session.completed" || snapshot.type === "session.failed";
-      const cleanupTurn = snapshot.type === "turn.cancelled" || snapshot.type === "turn.failed";
-      if (cleanupSession || cleanupTurn) {
-        const pendingActions = takeInstrumentationActionScopes(
-          snapshot.sessionId,
-          cleanupTurn ? snapshot.turnId : undefined,
-        );
-        const failure = terminalActionFailure(snapshot);
-        for (const action of pendingActions) {
-          await publish({
-            ...failure,
-            idempotencyKey: action.idempotencyKey,
-            scope: action.scope,
-            type: "tool.call.failed",
-          });
-        }
-      }
-
       const projections = new Map<string, InstrumentationEvent>();
       const visibleEvent = (provider: InstrumentationProviderDefinition): InstrumentationEvent => {
         const decision = decisions.get(provider);
@@ -350,30 +325,6 @@ function releaseTerminalState(event: InstrumentationEvent): void {
   if (event.type === "turn.cancelled" || event.type === "turn.failed") {
     releaseAllInstrumentationTurnState(event.sessionId, event.turnId);
   }
-}
-
-function terminalActionFailure(
-  event:
-    | InstrumentationSessionFailedEvent
-    | InstrumentationSessionSettledEvent
-    | InstrumentationTurnFailedEvent
-    | InstrumentationTurnSettledEvent,
-): Pick<InstrumentationToolCallFailedEvent, "error" | "errorCode" | "outcome"> {
-  if (event.type === "session.failed" || event.type === "turn.failed") {
-    return { error: event.error, outcome: "failed" };
-  }
-  if (event.type === "turn.cancelled") {
-    return {
-      error: new Error("The action was cancelled with its turn."),
-      errorCode: "ACTION_CANCELLED",
-      outcome: "cancelled",
-    };
-  }
-  return {
-    error: new Error("The session completed before the action settled."),
-    errorCode: "ACTION_ABANDONED",
-    outcome: "abandoned",
-  };
 }
 
 function isTerminal(type: InstrumentationEvent["type"]): boolean {

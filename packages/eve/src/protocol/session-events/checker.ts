@@ -18,8 +18,13 @@ import {
 import type { StoredLine } from "./envelope.js";
 import type { Fact, Progress } from "./facts.js";
 import { copyView, emptySessionView, foldReceivedEvent } from "../session-projection/fold.js";
-import type { SessionView } from "../session-projection/tables.js";
-import { activeTurn } from "../session-projection/selectors.js";
+import type { InteractionRow, SessionView } from "../session-projection/tables.js";
+import {
+  activeTurn,
+  interactionOwner,
+  subjectTurn,
+  waiting,
+} from "../session-projection/selectors.js";
 import {
   type Family as TreeFamily,
   isOpen,
@@ -49,7 +54,10 @@ export type ViolationRule =
   | "after-session-end"
   | "one-open-turn"
   | "attempts"
-  | "progress";
+  | "progress"
+  | "paused-on-person"
+  | "serves-running-task"
+  | "batch-settles-together";
 
 export interface StreamChecker {
   /** Checks the next line. Positions must increase; a repeated position is a duplicate, skipped. */
@@ -166,6 +174,7 @@ export function createStreamChecker(
         });
       });
 
+      checkWaitPromises(line.facts as readonly Fact[], report);
       for (const { index, ref } of closed) {
         const owner = ref === "session" ? "the session" : `${ref.family} "${ref.id}"`;
         for (const open of openUnder(view, ref)) {
@@ -214,6 +223,27 @@ export function createStreamChecker(
           `turn ${String(data.turnId)} started while turn ${open.turnId} is open.`,
         );
     }
+    if (fact.type === "turn.paused") {
+      for (const { interactionId } of fact.data.awaiting) {
+        const row = view.interactions[interactionId];
+        const under =
+          row !== undefined &&
+          (interactionOwner(view, row).turnId === fact.data.turnId ||
+            subjectTurn(view, row) === fact.data.turnId);
+        if (row?.status !== "open" || !under)
+          fail(
+            "paused-on-person",
+            `turn.paused awaits "${interactionId}", not open under its turn.`,
+          );
+      }
+    }
+    if (fact.type === "call.started" && fact.data.taskId !== undefined) {
+      if (view.tasks[fact.data.taskId]?.status === "ended")
+        fail(
+          "serves-running-task",
+          `call.started names task "${fact.data.taskId}" after it ended.`,
+        );
+    }
     const family = TREE_FAMILY[descriptor.family];
     const id = data[descriptor.idField];
     if (family === undefined || typeof id !== "string") return undefined;
@@ -257,6 +287,41 @@ export function createStreamChecker(
       default:
         return undefined;
     }
+  }
+
+  /**
+   * What a line that announces a wait or decides approvals promises, checked once it folds: an
+   * announced turn waits on a person, and a person's decision settles its whole batch.
+   */
+  function checkWaitPromises(
+    facts: readonly Fact[],
+    report: (rule: ViolationRule, message: string, at: { readonly index: number }) => void,
+  ): void {
+    facts.forEach((fact, index) => {
+      const turnId =
+        fact?.type === "turn.paused" ||
+        (fact?.type === "delivery.settled" && fact.data.outcome === "awaiting-input")
+          ? fact.data.turnId
+          : undefined;
+      if (turnId !== undefined && waiting(view, turnId)?.on !== "person")
+        report("paused-on-person", `${fact.type} announces a wait turn ${turnId} doesn't have.`, {
+          index,
+        });
+      if (fact?.type !== "interaction.settled") return;
+      if (fact.data.outcome !== "accepted" && fact.data.outcome !== "declined") return;
+      const own = (row: InteractionRow | undefined) =>
+        row?.request.kind === "approval" && row.origin === undefined;
+      const row = view.interactions[fact.data.interactionId];
+      if (!own(row)) return;
+      const open = Object.values(view.interactions).filter(
+        (other) =>
+          own(other) && other.introducedAt === row!.introducedAt && other.status === "open",
+      );
+      if (open.length > 0)
+        report("batch-settles-together", `"${row!.interactionId}" settled apart from its batch.`, {
+          index,
+        });
+    });
   }
 
   /** A run's attempts go up, one `model.started` each; `model.retried` names the current one. */

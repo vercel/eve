@@ -1,6 +1,7 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
-import { TurnSegment } from "#client/session-utils.js";
-import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import { ResponseSegment } from "#client/session-utils.js";
+import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   EVE_SESSION_ROUTE_PATH,
@@ -10,7 +11,7 @@ import {
 import { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError, createClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
-import { followStreamIterable, sleep } from "#client/open-stream.js";
+import { followStreamIterable, sleep, type FollowedEvent } from "#client/open-stream.js";
 import {
   cancelClientSession,
   clearClientSession,
@@ -19,7 +20,7 @@ import {
 } from "#client/session-controls.js";
 import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type {
   CancelSessionResult,
   ClearResult,
@@ -102,21 +103,20 @@ export class ClientSession {
   /** Reads a finite prefix through the durable tail without advancing this handle. */
   async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
     throwIfAborted(options?.signal);
-    const events: MessageStreamEvent[] = [];
+    const events: SessionStreamEvent[] = [];
+    let streamIndex = 0;
 
-    for await (const event of this.#readStream({
+    for await (const { cursor, event } of this.#readStream({
       follow: false,
       signal: options?.signal,
       startIndex: 0,
     })) {
       events.push(event);
+      streamIndex = cursor;
     }
 
     throwIfAborted(options?.signal);
-    return {
-      events,
-      session: { sessionId: this.#state.sessionId, streamIndex: events.length },
-    };
+    return { events, session: { sessionId: this.#state.sessionId, streamIndex } };
   }
 
   /** Sends a message to this exact session ID. */
@@ -129,13 +129,13 @@ export class ClientSession {
 
   /** Answers pending input requests on this exact session ID. */
   async respond<TOutput = unknown>(
-    inputResponses: readonly InputResponse[],
+    answers: readonly Answer[],
     options: RespondTurnOptions<TOutput> = {},
   ): Promise<MessageResponse<TOutput>> {
-    if (inputResponses.length === 0) {
-      throw new Error("ClientSession.respond() requires at least one input response.");
+    if (answers.length === 0) {
+      throw new Error("ClientSession.respond() requires at least one answer.");
     }
-    return await this.#send({ ...options, inputResponses }, false);
+    return await this.#send({ ...options, answers }, false);
   }
 
   async #send<TOutput = unknown>(
@@ -154,19 +154,12 @@ export class ClientSession {
     if (responseSessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
     }
-    if (input.message !== undefined && deliveryId === undefined) {
+    if (deliveryId === undefined) {
       throw new Error(
         "Message route did not return a delivery id. Update the server before sending with this client.",
       );
     }
-    // A message's response ends at the boundary that lists its delivery. An answer's ends at its
-    // first turn boundary: not every path that publishes an answer's events attributes them.
-    return this.#messageResponse<TOutput>(
-      response,
-      input,
-      initialStreamIndex,
-      input.message === undefined ? undefined : deliveryId,
-    );
+    return this.#messageResponse<TOutput>(response, input, initialStreamIndex, deliveryId);
   }
 
   /** Requests cooperative cancellation of this session's active turn. */
@@ -204,27 +197,22 @@ export class ClientSession {
   }
 
   /** Opens this session's durable event stream from its stored cursor. */
-  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
-    if (options?.follow === false && (options.startIndex ?? this.#state.streamIndex) < 0) {
-      throw new Error(
-        "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-      );
-    }
+  stream(options?: StreamOptions): AsyncIterable<SessionStreamEvent> {
     return this.#streamAndAdvance(options);
   }
 
   /**
-   * The session an agent run opened, as this session's stream announced it.
-   * Pass an `agent.started` event from this session, then follow the child
+   * The session an agent run opened, as this session's stream linked it.
+   * Pass a `child.opened` event from this session, then follow the child
    * with `stream()`; reads use this session's host and credentials, for local
    * and remote agents alike.
    */
-  agent(started: AgentStartedStreamEvent): ClientAgentSession {
-    return new ClientAgentSession(this.#context, started);
+  agent(opened: ChildOpened): ClientAgentSession {
+    return new ClientAgentSession(this.#context, opened);
   }
 
-  [followSession](options: FollowSessionOptions): AsyncIterable<MessageStreamEvent> {
-    return this.#streamAndAdvance({ ...options, keepAlive: true });
+  [followSession](options: FollowSessionOptions): AsyncIterable<SessionStreamEvent> {
+    return this.#streamAndAdvance(options);
   }
 
   #messageResponse<TOutput>(
@@ -239,7 +227,6 @@ export class ClientSession {
       createStream: (source) =>
         this.#createEventStream(initialStreamIndex, input, deliveryId, source),
       deliveryId,
-      resumesTurn: input.inputResponses !== undefined,
       sessionId: this.#state.sessionId,
     });
   }
@@ -248,60 +235,65 @@ export class ClientSession {
     initialStreamIndex: number,
     input: SendTurnPayload,
     deliveryId?: string,
-    source?: AsyncIterable<MessageStreamEvent>,
-  ): AsyncGenerator<MessageStreamEvent> {
-    let eventCount = 0;
+    source?: AsyncIterable<SessionStreamEvent>,
+  ): AsyncGenerator<SessionStreamEvent> {
+    // A caller's own source advances the cursor as it reads; only this read's own lines move it.
+    let cursor = initialStreamIndex;
+    // The response starts with the line that admits its delivery, and ends when it settles. A
+    // prewarmed session starts in that same line, before the admission.
     let started = deliveryId === undefined;
+    let admittingLine: SessionStreamEvent[] = [];
     let reachedBoundary = false;
-    const segment = new TurnSegment({ followCallbacks: true });
+    const segment = new ResponseSegment({ deliveryId });
+    const events: AsyncIterable<{ readonly event: SessionStreamEvent; readonly cursor?: number }> =
+      source === undefined
+        ? this.#readStream({
+            headers: input.headers,
+            signal: input.signal,
+            startIndex: initialStreamIndex,
+            streamReconnectPolicy: input.streamReconnectPolicy,
+          })
+        : withoutCursor(source);
     try {
-      for await (const event of source ??
-        this.#readStream({
-          headers: input.headers,
-          keepAlive: true,
-          signal: input.signal,
-          startIndex: initialStreamIndex,
-          streamReconnectPolicy: input.streamReconnectPolicy,
-        })) {
-        eventCount += 1;
-        if (deliveryId !== undefined) {
-          const matches = event.meta?.deliveryIds?.includes(deliveryId) === true;
-          const terminal = event.type === "session.failed" || event.type === "session.completed";
-          if (!matches && terminal && (!started || event.type === "session.completed")) {
-            throw new Error(
-              "The session ended before the accepted message reached its turn boundary.",
-            );
+      for await (const { event, cursor: next } of events) {
+        if (next !== undefined) cursor = next;
+        if (!started) {
+          if (event.type === "session.ended") {
+            throw new Error("The session ended before it admitted the accepted message.");
           }
-          if (!started && !matches) continue;
-          const attributed = event.meta?.deliveryIds !== undefined;
-          if (!terminal && attributed && !matches) continue;
+          if (admittingLine[0]?.meta.position.line !== event.meta.position.line) {
+            admittingLine = [];
+          }
+          admittingLine.push(event);
+          if (event.type !== "delivery.admitted" || event.data.deliveryId !== deliveryId) continue;
           started = true;
         }
-        reachedBoundary = segment.observe(event);
-        yield event;
+        const ready = admittingLine.length > 0 ? admittingLine : [event];
+        admittingLine = [];
+        for (const next of ready) {
+          reachedBoundary = segment.observe(next);
+          yield next;
+          if (reachedBoundary) break;
+        }
         if (reachedBoundary) {
           break;
         }
       }
       if (deliveryId !== undefined && !reachedBoundary && !input.signal?.aborted) {
         throw new Error(
-          "The response stream ended before the accepted message reached its turn boundary.",
+          "The response stream ended before the accepted message's response settled.",
         );
       }
     } finally {
-      this.#advanceStreamIndex(initialStreamIndex + eventCount);
+      if (source === undefined) this.#advanceStreamIndex(cursor);
     }
   }
 
-  async *#streamAndAdvance(
-    options?: FollowSessionOptions & { readonly keepAlive?: boolean },
-  ): AsyncGenerator<MessageStreamEvent> {
+  async *#streamAndAdvance(options?: FollowSessionOptions): AsyncGenerator<SessionStreamEvent> {
     const startIndex = options?.startIndex ?? this.#state.streamIndex;
-    let eventCount = 0;
-    for await (const event of this.#readStream({
+    for await (const { cursor, event } of this.#readStream({
       follow: options?.follow,
       headers: options?.headers,
-      keepAlive: options?.keepAlive,
       onCaughtUp: options?.onCaughtUp,
       resolveHeaders: options?.resolveHeaders,
       resolveReconnectPolicy: options?.resolveReconnectPolicy,
@@ -309,8 +301,7 @@ export class ClientSession {
       startIndex,
       streamReconnectPolicy: options?.streamReconnectPolicy,
     })) {
-      eventCount += 1;
-      if (startIndex >= 0) this.#advanceStreamIndex(startIndex + eventCount);
+      this.#advanceStreamIndex(cursor);
       yield event;
     }
   }
@@ -327,17 +318,15 @@ export class ClientSession {
     readonly resolveReconnectPolicy?: () => StreamOptions["streamReconnectPolicy"];
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
-    readonly keepAlive?: boolean;
     readonly signal?: AbortSignal;
     readonly startIndex: number;
     readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
     readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
-  }): AsyncIterable<MessageStreamEvent> {
+  }): AsyncIterable<FollowedEvent> {
     return followStreamIterable({
       onCaughtUp: input.onCaughtUp,
       follow: input.follow,
       host: this.#context.host,
-      keepAlive: input.keepAlive,
       resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
       path: createEveSessionStreamRoutePath(this.#state.sessionId),
       redirect: this.#context.redirect,
@@ -353,8 +342,14 @@ export class ClientSession {
 export function followClientSession(
   session: ClientSession,
   options: FollowSessionOptions,
-): AsyncIterable<MessageStreamEvent> {
+): AsyncIterable<SessionStreamEvent> {
   return session[followSession](options);
+}
+
+async function* withoutCursor(
+  source: AsyncIterable<SessionStreamEvent>,
+): AsyncGenerator<{ readonly event: SessionStreamEvent }> {
+  for await (const event of source) yield { event };
 }
 
 async function postSessionSend(
@@ -416,7 +411,7 @@ async function postTurn(
     throw new Error(
       requireMessage
         ? "Creating a session requires a non-empty message."
-        : "A session turn requires a non-empty message or inputResponses.",
+        : "A session turn requires a non-empty message or answers.",
     );
   }
   if (stubs !== undefined) body.stubs = stubs;
@@ -465,8 +460,8 @@ function createMessageBody(
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
   if (input.message !== undefined) body.message = input.message;
-  if (input.inputResponses !== undefined && input.inputResponses.length > 0) {
-    body.inputResponses = input.inputResponses;
+  if (input.answers !== undefined && input.answers.length > 0) {
+    body.answers = input.answers;
   }
   if (!requireMessage && input.message !== undefined && input.turnPolicy !== undefined) {
     body.turnPolicy = input.turnPolicy;
@@ -476,6 +471,6 @@ function createMessageBody(
   if (outputSchema !== undefined) body.outputSchema = outputSchema;
 
   if (requireMessage && body.message === undefined) return null;
-  if (body.message === undefined && body.inputResponses === undefined) return null;
+  if (body.message === undefined && body.answers === undefined) return null;
   return body;
 }

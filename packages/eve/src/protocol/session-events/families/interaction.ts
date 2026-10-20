@@ -55,6 +55,13 @@ export interface SignInChallenge {
   readonly expiresAt?: string;
   readonly instructions?: string;
   readonly callbackUrl?: string;
+  /** The credential the sign-in grants, shared by every connection or tool that uses it. */
+  readonly grant?: string;
+  /**
+   * The connection principal the sign-in is for, without its attributes. `type` is open:
+   * `"user"`, which has an `id`, and `"app"` today.
+   */
+  readonly principal?: { readonly type: string; readonly id?: string; readonly issuer?: string };
 }
 
 /** Where a relayed request was asked: the child session's request, and the call it asks about. */
@@ -113,7 +120,7 @@ const subject = conforming<InteractionSubject>()(
 );
 
 /** Zod schema for what a person is asked. */
-const interactionRequestSchema = conforming<InteractionRequest>()(
+export const interactionRequestSchema = conforming<InteractionRequest>()(
   z.object({
     allowFreeform: z.boolean().optional(),
     display: known<InteractionDisplay>().optional(),
@@ -135,8 +142,12 @@ const interactionRequestSchema = conforming<InteractionRequest>()(
         callbackUrl: z.string().optional(),
         displayName: z.string().optional(),
         expiresAt: z.string().optional(),
+        grant: z.string().optional(),
         instructions: z.string().optional(),
         name: z.string(),
+        principal: z
+          .object({ id: z.string().optional(), issuer: z.string().optional(), type: z.string() })
+          .optional(),
         url: z.string().optional(),
         userCode: z.string().optional(),
       })

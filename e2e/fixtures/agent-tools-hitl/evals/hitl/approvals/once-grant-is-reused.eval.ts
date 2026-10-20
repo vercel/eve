@@ -18,12 +18,12 @@ export default defineEval({
       .calledTool("guarded-echo", { status: "completed", count: 1 });
 
     const second = (await session.send(SAY.secondEcho, asAlice)).expectOk();
-    second.notEvent("input.requested");
+    second.notEvent("interaction.opened");
     second.calledTool("guarded-echo", {
       status: "completed",
       output: { echoed: "second" },
       count: 1,
     });
-    second.event("message.completed", { data: { message: /^Second echo: done / } });
+    second.event("content.completed", { data: { phase: "reply", value: /^Second echo: done / } });
   },
 });

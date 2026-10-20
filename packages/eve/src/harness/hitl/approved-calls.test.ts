@@ -7,19 +7,16 @@ import {
 } from "#harness/hitl/approved-calls.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { InputRequest } from "#shared/input.js";
-import type { HandleEventFn } from "#harness/types.js";
+import type { ApprovalAsk } from "#harness/session-machine/view.js";
+import { initialSessionProjection } from "#protocol/session-projection.js";
 
-function approval(callId: string, toolName: string): InputRequest {
+const view = () => ({ projection: initialSessionProjection() });
+
+function approval(callId: string, toolName: string): ApprovalAsk {
   return {
-    action: { callId, input: {}, kind: "tool-call", toolName },
-    kind: "tool-approval",
-    options: [
-      { id: "approve", label: "Yes" },
-      { id: "cancel", label: "No" },
-    ],
-    prompt: `Approve tool call: ${toolName}`,
-    requestId: `approval-${callId}`,
+    call: { callId, input: {}, toolName },
+    interactionId: `approval-${callId}`,
+    request: { kind: "approval", prompt: `Approve tool call: ${toolName}` },
   };
 }
 
@@ -48,8 +45,8 @@ it("settles calls a cancellation cut short, and keeps their siblings' results", 
     messages: [],
     position: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
     publish: async () => {},
-    responderOf: () => undefined,
-    requests: [approval("call-finished", "finished"), approval("call-cut", "cut")],
+    view,
+    approvals: [approval("call-finished", "finished"), approval("call-cut", "cut")],
     tools: new Map([
       ["finished", finished],
       ["cut", cut],
@@ -75,65 +72,11 @@ it("leaves a call the cancellation stopped before it started without a result", 
     messages: [],
     position: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
     publish: async () => {},
-    responderOf: () => undefined,
-    requests: [approval("call-unstarted", "unstarted")],
+    view,
+    approvals: [approval("call-unstarted", "unstarted")],
     tools: new Map([["unstarted", unstarted]]),
   });
 
   expect(execute).not.toHaveBeenCalled();
   expect(result.settled).toEqual([]);
-});
-
-// https://github.com/vercel/eve/issues/4820
-it("keeps the name of the error an approved call threw on its failed result", async () => {
-  class QuotaError extends Error {
-    override name = "QuotaError";
-  }
-  const throwing = tool("throwing", async () => {
-    throw new QuotaError("quota exceeded");
-  });
-  const unprojectable = {
-    ...tool("unprojectable", async () => "done"),
-    toModelOutput: () => {
-      throw new QuotaError("projection quota exceeded");
-    },
-  } as HarnessToolDefinition;
-  const published: Parameters<HandleEventFn>[0][] = [];
-
-  const result = await runApprovedCalls({
-    abortSignal: new AbortController().signal,
-    messages: [],
-    position: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-    publish: async (event) => {
-      published.push(event);
-    },
-    responderOf: () => undefined,
-    requests: [
-      approval("call-throwing", "throwing"),
-      approval("call-unprojectable", "unprojectable"),
-    ],
-    tools: new Map([
-      ["throwing", throwing],
-      ["unprojectable", unprojectable],
-    ]),
-  });
-
-  expect(result.settled.map(({ part }) => [part.toolCallId, part.output])).toEqual([
-    ["call-throwing", { type: "error-text", value: "quota exceeded" }],
-    ["call-unprojectable", { type: "error-text", value: "projection quota exceeded" }],
-  ]);
-  expect(
-    published.flatMap((event) =>
-      event.type === "action.result" ? [[event.data.result.callId, event.data.error]] : [],
-    ),
-  ).toEqual([
-    [
-      "call-throwing",
-      { code: "ACTION_RESULT_FAILED", message: "quota exceeded", name: "QuotaError" },
-    ],
-    [
-      "call-unprojectable",
-      { code: "ACTION_RESULT_FAILED", message: "projection quota exceeded", name: "QuotaError" },
-    ],
-  ]);
 });

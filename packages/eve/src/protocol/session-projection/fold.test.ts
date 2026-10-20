@@ -193,7 +193,7 @@ describe("the shared fold", () => {
     // Only what the latest line touched survives; the session's usage still counts every turn.
     expect(Object.keys(view.turns)).toEqual(["turn_20"]);
     expect(Object.keys(view.runs).length).toBeLessThanOrEqual(1);
-    expect(Object.keys(view.parts)).toEqual([]);
+    expect(Object.keys(view.parts)).toEqual(["p_20"]);
     expect(view.usage.total.inputTokens).toBe(21 * spent.inputTokens);
   });
 
@@ -256,11 +256,80 @@ describe("the shared fold", () => {
           { data: { outcome: "completed", turnId: "turn_0" }, type: "turn.settled" },
         ],
       },
-      { at, facts: [{ data: { deliveryId: "d_1" }, type: "delivery.admitted" }] },
+      ...turnLines(1).slice(0, 2),
+      { at, facts: [{ data: { deliveryId: "d_2" }, type: "delivery.admitted" }] },
     ];
     const view = folded(lines, "operational");
     expect(view.tasks.t_0?.status).toBe("running");
     expect(view.calls.c_0).toBeUndefined();
+  });
+
+  it("keeps the latest turn's rows until the next turn starts, withholding large values", () => {
+    const scope = { runId: "run_0", turnId: "turn_0" };
+    const call = (callId: string, output: unknown): unknown[] => [
+      {
+        data: {
+          callId,
+          capability: { kind: "tool", name: "read" },
+          input: {},
+          owner: { runId: "run_0" },
+        },
+        scope,
+        type: "call.requested",
+      },
+      { data: { callId, outcome: "completed", output }, scope, type: "call.settled" },
+    ];
+    const settledTurn: StoredLine[] = [
+      ...turnLines(0, { opensSession: true }).slice(0, 2),
+      { at, facts: [...call("small", "done"), ...call("large", "x".repeat(20_000))] },
+      {
+        at,
+        facts: [{ data: { outcome: "completed", runId: "run_0" }, scope, type: "model.settled" }],
+      },
+      { at, facts: [{ data: { outcome: "completed", turnId: "turn_0" }, type: "turn.settled" }] },
+      { at, facts: [{ data: { deliveryId: "d_1" }, type: "delivery.admitted" }] },
+    ];
+    const kept = folded(settledTurn, "operational");
+    expect(kept.calls.small?.output).toBe("done");
+    expect(kept.calls.large?.output).toBeUndefined();
+    expect(kept.calls.large?.outputRef).toEqual({ mediaType: "application/json", size: 20_002 });
+    expect(kept.runs.run_0?.status).toBe("settled");
+
+    const next = folded(
+      [...settledTurn, ...turnLines(1).slice(1, 2), { at, facts: [] }],
+      "operational",
+    );
+    expect(next.calls.small).toBeUndefined();
+    expect(next.runs.run_0).toBeUndefined();
+  });
+
+  it("keeps the latest turn's reply readable, with every reply part its run completed", () => {
+    const scope = { runId: "run_0", turnId: "turn_0" };
+    const part = (partId: string, kind: string): StoredLine => ({
+      at,
+      facts: [
+        {
+          data: { kind, partId, phase: "reply", runId: "run_0", value: partId },
+          scope,
+          type: "content.completed",
+        },
+      ],
+    });
+    const [admitted, started] = turnLines(0, { opensSession: true });
+    const lines: StoredLine[] = [
+      admitted!,
+      started!,
+      // A run's reply can span commits, as text and then a file the agent sends would.
+      part("p_text", "text"),
+      part("p_file", "file"),
+      {
+        at,
+        facts: [{ data: { outcome: "completed", runId: "run_0" }, scope, type: "model.settled" }],
+      },
+    ];
+    const operational = folded(lines, "operational");
+    expect(operational.turns.turn_0?.reply).toEqual(folded(lines).turns.turn_0?.reply);
+    expect(reply(operational, "turn_0").map((row) => row.partId)).toEqual(["p_text", "p_file"]);
   });
 
   it("folds a reader's events by line, holding back a line still arriving", () => {

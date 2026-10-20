@@ -3,6 +3,7 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
+import { withoutPreV27Answers } from "#execution/session-inbox/pre-v27.js";
 
 type DecodedSessionInbox =
   | DeliverHookPayload
@@ -37,7 +38,7 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
         deliveryMetadata:
           command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
         kind: "deliver",
-        payloads: [command.payload],
+        payloads: [withoutPreV27Answers(command.payload)],
         requestId: command.requestId,
         turnPolicy: command.turnPolicy,
       };
@@ -46,12 +47,17 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
       if (!Array.isArray(payload.payloads)) {
         throw new SessionInboxPayloadError("Session delivery payloads must be an array.");
       }
-      return value as DeliverHookPayload;
+      const delivery = value as DeliverHookPayload;
+      return { ...delivery, payloads: delivery.payloads.map(withoutPreV27Answers) };
     }
     case "cancel":
     case "clear":
     case "compact":
     case "reset":
+      if (typeof payload.deliveryId !== "string" || payload.deliveryId.length === 0) {
+        throw new SessionInboxPayloadError("Session controls require a nonempty deliveryId.");
+      }
+      return value as DecodedSessionInbox;
     case "session-timeout":
       return value as DecodedSessionInbox;
     default:

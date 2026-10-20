@@ -76,7 +76,10 @@ describe("coordination dispatch", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({ channelKind: "http" }),
+          serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
+            channelKind: "http",
+          }),
         },
       ]);
       sessionId = run.runId;
@@ -85,9 +88,9 @@ describe("coordination dispatch", () => {
         const events = await stream.nextTurn();
         expect(interrupted).toBe(true);
         expect(reported).toBeGreaterThan(1);
-        expect(
-          filterEventsByType(events, "task.settled").map((event) => event.data.status),
-        ).toEqual(["completed"]);
+        expect(filterEventsByType(events, "task.ended").map((event) => event.data.outcome)).toEqual(
+          ["completed"],
+        );
         const started = [...(await listWorkflowToolRunIds())].filter((id) => !before.has(id));
         expect(started).toHaveLength(1);
       } finally {

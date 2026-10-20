@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { slackChannel } from "#public/channels/slack/index.js";
-import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
+import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import {
   type ChannelDriver,
   type Person,
@@ -270,7 +270,7 @@ function hitlOptions(
       (block as { readonly actions?: readonly SlackElement[] }).actions ??
       []
     )
-      .filter((element) => element.action_id?.startsWith(HITL_ACTION_PREFIX) === true)
+      .filter((element) => element.action_id?.startsWith(ANSWER_ACTION_PREFIX) === true)
       .flatMap((element) => renderedOptions(element, messageBlocks, messageTs)),
   );
 }

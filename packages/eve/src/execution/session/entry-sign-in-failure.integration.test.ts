@@ -18,6 +18,7 @@ import { filterEventsByType } from "#internal/testing/events.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
 
@@ -124,21 +125,20 @@ describe("workflowEntry sign-in failure", () => {
       const stream = captureEvents(run);
 
       try {
-        const asked = await stream.nextUntil(
-          "first sign-in",
-          (event) => event.type === "authorization.required",
-        );
-        const required = filterEventsByType(asked, "authorization.required")[0]!.data;
-        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.waiting");
+        const asked = await stream.nextUntil("first sign-in", isSignInOpened);
+        const required = filterEventsByType(asked, "interaction.opened").find(
+          (event) => event.data.request.kind === "sign-in",
+        )!.data;
+        await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
               authorizationCallback: {
-                attemptId: required.attemptId,
+                attemptId: required.interactionId,
                 callback: { method: "GET", params: { code: "oauth-code" } },
-                connectionName: required.name,
+                connectionName: required.request.signIn!.name,
               },
             },
           ],
@@ -148,33 +148,38 @@ describe("workflowEntry sign-in failure", () => {
         // instead of a fresh sign-in, and the turn ends.
         const resumed = await stream.nextUntil(
           "turn after the failed sign-in",
-          (event) => event.type === "session.waiting" || event.type === "authorization.required",
+          (event) => event.type === "turn.settled" || isSignInOpened(event),
         );
         expect(completes).toBe(1);
-        expect(filterEventsByType(resumed, "authorization.required")).toEqual([]);
+        expect(resumed.filter(isSignInOpened)).toEqual([]);
         expect(starts).toBe(1);
-        expect(resumed.at(-1)?.type).toBe("session.waiting");
-        // The model reads why create_issue didn't run.
-        expect(
-          filterEventsByType(resumed, "action.result").map(({ data }) => data.result),
-        ).toContainEqual(
+        expect(resumed.at(-1)?.type).toBe("turn.settled");
+        // The failed sign-in says it is terminal, and the model reads why create_issue didn't run.
+        expect(filterEventsByType(resumed, "interaction.settled")).toContainEqual(
           expect.objectContaining({
-            isError: true,
-            output: expect.stringContaining("already failed in this turn"),
-            toolName: "create_issue",
+            data: expect.objectContaining({
+              interactionId: required.interactionId,
+              outcome: "failed",
+              response: { retryable: false },
+            }),
           }),
         );
+        const createIssue = filterEventsByType([...asked, ...resumed], "call.requested").find(
+          (event) => event.data.capability.name === "create_issue",
+        )?.data.callId;
+        const refused = filterEventsByType(resumed, "call.settled").find(
+          (event) => event.data.callId === createIssue,
+        );
+        expect(refused?.data.outcome).toBe("failed");
+        expect(JSON.stringify(refused?.data)).toContain("already failed in this turn");
 
         // The refusal lasts the turn: the next one asks for the sign-in again.
         await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "send",
           payload: { message: "Create one more." },
         });
-        const nextTurn = await stream.nextUntil(
-          "next turn's sign-in",
-          (event) => event.type === "authorization.required",
-        );
-        expect(filterEventsByType(nextTurn, "authorization.required")).toHaveLength(1);
+        const nextTurn = await stream.nextUntil("next turn's sign-in", isSignInOpened);
+        expect(nextTurn.filter(isSignInOpened)).toHaveLength(1);
         expect(starts).toBe(2);
       } finally {
         stream.dispose();
@@ -183,3 +188,7 @@ describe("workflowEntry sign-in failure", () => {
     });
   });
 });
+
+function isSignInOpened(event: SessionStreamEvent): boolean {
+  return event.type === "interaction.opened" && event.data.request.kind === "sign-in";
+}

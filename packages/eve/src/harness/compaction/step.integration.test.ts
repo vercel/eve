@@ -9,6 +9,11 @@ import {
   dispatchMemoryCompactionRequested,
   dispatchMemoryTurnStarted,
 } from "#context/memory-lifecycle.js";
+import {
+  compactionCompletedPoint,
+  compactionRequestedPoint,
+  turnStartedForResolvers,
+} from "#harness/session-machine/change-points.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -257,13 +262,45 @@ describe("memory recalled after a compaction", () => {
         compactOnly: options.compactOnly,
         // What the session's memory participant does with the events these steps publish.
         handleEvent: foldingHandler(async (event, messages) => {
-          const memory = { appRoot: "", ctx, memories: [notes], nodeId: "__root__" };
+          const memory = { ctx, memories: [notes] };
           if (event.type === "turn.started") {
-            await dispatchMemoryTurnStarted({ ...memory, event });
-          } else if (event.type === "compaction.requested") {
-            await dispatchMemoryCompactionRequested({ ...memory, event, messages: messages ?? [] });
-          } else if (event.type === "compaction.completed") {
-            await dispatchMemoryCompactionCompleted({ ...memory, event, messages: messages ?? [] });
+            await dispatchMemoryTurnStarted({
+              ...memory,
+              appRoot: "",
+              event: turnStartedForResolvers({ sequence: 0, turnId: event.data.turnId }, event),
+              nodeId: "__root__",
+            });
+          } else if (event.type === "context.started" && event.data.kind === "compaction") {
+            await dispatchMemoryCompactionRequested({
+              ...memory,
+              appRoot: "",
+              event: compactionRequestedPoint({
+                modelId: "step-model",
+                sequence: 0,
+                sessionId: "memory-compaction-session",
+                stepIndex: 0,
+                turnId: event.data.turnId ?? "",
+                usageInputTokens: event.data.trigger?.inputTokens ?? null,
+              }),
+              messages: messages ?? [],
+              nodeId: "__root__",
+            });
+          } else if (
+            event.type === "context.settled" &&
+            event.data.kind === "compaction" &&
+            event.data.outcome === "completed"
+          ) {
+            await dispatchMemoryCompactionCompleted({
+              ...memory,
+              event: compactionCompletedPoint({
+                modelId: "step-model",
+                sequence: 0,
+                sessionId: "memory-compaction-session",
+                stepIndex: 0,
+                turnId: "turn_0",
+              }),
+              messages: messages ?? [],
+            });
           }
         }),
         historyProjector: projectMemoryHistoryFromSessionState,

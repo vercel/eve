@@ -85,14 +85,15 @@ it("attributes a failure to the running turn after a compaction hands the sessio
     try {
       await stream.nextTurn();
       await session.compact();
-      await stream.nextTurn();
+      // A compaction between turns settles its context change; no turn ends.
+      await stream.nextUntil((event) => event.type === "context.settled");
 
       await session.send("Bob asks for the summary again.", { auth: null });
       const failed = await stream.nextTurn();
       expect(filterEventsByType(failed, "turn.started")).toMatchObject([
         { data: { turnId: "turn_1" } },
       ]);
-      expect(failed.at(-1)?.type).toBe("session.failed");
+      expect(failed.at(-1)).toMatchObject({ data: { outcome: "failed" }, type: "session.ended" });
     } finally {
       stream.dispose();
     }

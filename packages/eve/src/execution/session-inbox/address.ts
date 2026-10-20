@@ -4,6 +4,15 @@ export const SESSION_INBOX_CONTEXT_KEY = "eve.sessionInbox";
 /** Hook metadata key that keeps public identity separate from hook ownership. */
 export const SESSION_INBOX_SESSION_ID_METADATA_KEY = "sessionId";
 
+/**
+ * Hook metadata key for the payload version the owner reads, so a producer can encode for an
+ * older owner. Owners from before v27 don't set it.
+ */
+export const SESSION_INBOX_VERSION_METADATA_KEY = "inboxVersion";
+
+/** The payload version this owner reads: v27's (`answers` by `interactionId`). */
+export const SESSION_INBOX_VERSION = 27;
+
 /** Stable inbox coordinates. The owner and deployment are intentionally absent. */
 export interface SessionInboxAddress {
   readonly sessionId: string;

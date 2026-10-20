@@ -1,4 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
+import { toolCallsOf } from "eve/evals";
 
 export const TOOL_NAME = "render-stripes";
 
@@ -14,11 +15,10 @@ export function isRenderStripesOutput(value: unknown): boolean {
   );
 }
 
-export function renderedColors(events: readonly MessageStreamEvent[]): readonly string[] {
-  for (const event of events) {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") continue;
-    if (event.data.result.toolName !== TOOL_NAME) continue;
-    const output = event.data.result.output as { readonly colors?: unknown };
+export function renderedColors(events: readonly SessionStreamEvent[]): readonly string[] {
+  for (const call of toolCallsOf(events)) {
+    if (call.name !== TOOL_NAME || call.status !== "completed") continue;
+    const output = call.output as { readonly colors?: unknown };
     if (Array.isArray(output?.colors) && output.colors.every((c) => typeof c === "string")) {
       return output.colors as string[];
     }
@@ -27,17 +27,18 @@ export function renderedColors(events: readonly MessageStreamEvent[]): readonly 
 }
 
 /** Final (non-tool-call) assistant messages, in turn order. */
-export function assistantAnswers(events: readonly MessageStreamEvent[]): readonly string[] {
+export function assistantAnswers(events: readonly SessionStreamEvent[]): readonly string[] {
   return events.flatMap((event) =>
-    event.type === "message.completed" &&
-    event.data.finishReason !== "tool-calls" &&
-    event.data.message.trim().length > 0
-      ? [event.data.message]
+    event.type === "content.completed" &&
+    event.data.phase === "reply" &&
+    typeof event.data.value === "string" &&
+    event.data.value.trim().length > 0
+      ? [event.data.value]
       : [],
   );
 }
 
-export function namesColorsInOrder(events: readonly MessageStreamEvent[], answer: string): boolean {
+export function namesColorsInOrder(events: readonly SessionStreamEvent[], answer: string): boolean {
   const colors = renderedColors(events);
   if (colors.length === 0) return false;
   const pattern = new RegExp(colors.map((color) => `\\b${color}\\b`).join("[\\s\\S]*"), "iu");

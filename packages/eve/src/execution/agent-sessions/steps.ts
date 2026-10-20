@@ -61,11 +61,15 @@ export type AgentSessionAddress =
       readonly forwardPrincipal?: boolean;
       readonly name: string;
       readonly nodeId: string;
-      /** Keys the authored credential functions, as on `agent.started`. */
+      /** Keys the authored credential functions, as on `child.opened`. */
       readonly resolverId?: string;
       readonly sessionId: string;
       readonly url: string;
+      /** The child's remote agent protocol, when it speaks an earlier one than this deployment. */
+      readonly earlierProtocol?: number;
     };
+
+type RemoteAgentSessionAddress = Extract<AgentSessionAddress, { readonly kind: "remote" }>;
 
 /** A session a run opened, with the context of the call that opened it: its lineage. */
 export interface OpenedAgentSession {
@@ -164,6 +168,11 @@ export async function sendAgentSessionMessageStep(
         subagentName: address.name,
       },
       kind: "send",
+      delivery: {
+        channelKind: "subagent",
+        channelName: "subagent",
+        deliveryId: agentDeliveryId("send", address.sessionId),
+      },
       payload: { message: input.message, outputSchema: input.outputSchema },
     },
   ).catch((error: unknown) => {
@@ -188,7 +197,10 @@ export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Pro
       await cancelRemoteAgentTurn({ remote, sessionId: address.sessionId });
       return;
     }
-    await commandLocalSession({ ...input, address }, { kind: "cancel" });
+    await commandLocalSession(
+      { ...input, address },
+      { kind: "cancel", deliveryId: agentDeliveryId("cancel", address.sessionId) },
+    );
   } catch (error) {
     logError(log, "failed to cancel an agent session turn", error, {
       name: address.name,
@@ -220,7 +232,11 @@ async function endAgentSession(opened: OpenedAgentSession): Promise<void> {
     }
     await commandLocalSession(
       { ...opened, address },
-      { kind: "reset", reason: RUN_FINISHED_REASON },
+      {
+        kind: "reset",
+        reason: RUN_FINISHED_REASON,
+        deliveryId: agentDeliveryId("reset", address.sessionId),
+      },
     );
   } catch (error) {
     logError(log, "failed to end an agent session", error, {
@@ -306,6 +322,11 @@ async function startLocalSession(
     () =>
       childRuntime.createSession({
         ...runInput,
+        delivery: {
+          channelKind: "subagent",
+          channelName: "subagent",
+          deliveryId: `agent-session:${input.key}:initial`,
+        },
         toolStubs: childToolStubs,
       }),
   );
@@ -351,7 +372,9 @@ async function startRemoteSession(
     remote,
     session: { continuationToken: input.replyTo },
   });
-  return {
+  const address: {
+    -readonly [K in keyof RemoteAgentSessionAddress]: RemoteAgentSessionAddress[K];
+  } = {
     callbackBaseUrl,
     kind: "remote",
     forwardPrincipal: remote.forwardPrincipal,
@@ -361,6 +384,8 @@ async function startRemoteSession(
     sessionId: child.sessionId,
     url: remote.url,
   };
+  if (child.earlierProtocol !== undefined) address.earlierProtocol = child.earlierProtocol;
+  return address;
 }
 
 function createParentContext(context: AgentSessionContext, replyTo: string): SubagentParentContext {
@@ -396,4 +421,8 @@ async function loadAgentSessionBundle(context: AgentSessionContext): Promise<Com
     compiledArtifactsSource: resolveDurableCompiledArtifactsSource(context.bundle.source),
     nodeId: context.bundle.nodeId,
   });
+}
+
+function agentDeliveryId(kind: string, sessionId: string): string {
+  return `agent-session:${getWorkflowMetadata().workflowRunId}:${getStepMetadata().stepId}:${sessionId}:${kind}`;
 }

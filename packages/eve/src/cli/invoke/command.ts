@@ -175,6 +175,6 @@ function invokeExitCode(result: InvokeResult): number {
   ) {
     return 1;
   }
-  if (result.status === "input-required" || result.status === "authorization-required") return 3;
+  if (result.status === "input-required") return 3;
   return 0;
 }

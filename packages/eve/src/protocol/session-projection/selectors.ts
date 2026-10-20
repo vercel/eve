@@ -63,6 +63,33 @@ export function reply(view: SessionView, turnId: string): readonly PartRow[] {
   });
 }
 
+/** A turn's reply as text: its text parts, one per line. */
+export function replyText(view: SessionView, turnId: string): string | undefined {
+  const text = reply(view, turnId).flatMap((part) =>
+    part.kind === "text" && typeof part.value === "string" ? [part.value] : [],
+  );
+  return text.length === 0 ? undefined : text.join("\n");
+}
+
+/**
+ * The interactions each commit opened, oldest first: one batch is asked, and answered, together.
+ * Sign-ins are connection work, not questions, and stay out unless asked for.
+ */
+export function interactionBatches(
+  view: SessionView,
+  options: { readonly signIns?: boolean } = {},
+): readonly (readonly InteractionRow[])[] {
+  const batches = new Map<number, InteractionRow[]>();
+  const rows = Object.values(view.interactions).sort((a, b) => a.introducedAt - b.introducedAt);
+  for (const row of rows) {
+    if (row.request.kind === "sign-in" && options.signIns !== true) continue;
+    const batch = batches.get(row.introducedAt);
+    if (batch === undefined) batches.set(row.introducedAt, [row]);
+    else batch.push(row);
+  }
+  return [...batches.values()];
+}
+
 /** Why a turn failed, or why the session did. */
 export function failure(view: SessionView, turnId?: string): ErrorInfo | undefined {
   const row = turnId === undefined ? undefined : view.turns[turnId];
@@ -221,7 +248,13 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   const about = (outcome: (row: InteractionRow) => boolean) =>
     new Set(
       interactions.flatMap((row) =>
-        "callId" in row.subject && outcome(row) ? [row.subject.callId] : [],
+        !outcome(row)
+          ? []
+          : [
+              ...("callId" in row.subject ? [row.subject.callId] : []),
+              // A question a call's run relayed names the call it came from.
+              ...(row.origin?.call === undefined ? [] : [row.origin.call.callId]),
+            ],
       ),
     );
   const asked = about((row) => row.status === "open");
@@ -235,8 +268,10 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   // A running call stays in flight while someone is asked about it, as a child's relayed
   // question is; only a requested call can wait on its approval.
   const calls = turnCalls.filter((entry) => entry.status === "running");
-  // A running call no task serves runs in the session itself, which commits again once it ends.
-  if (calls.some((entry) => entry.taskId === undefined)) return undefined;
+  // A running call no task serves runs in the session itself, which commits again once it ends,
+  // unless it asked someone: then it waits on that person, as a blocking run's question does.
+  if (calls.some((entry) => entry.taskId === undefined && !asked.has(entry.callId)))
+    return undefined;
   const pending = turnCalls.filter(
     (entry) => entry.status === "requested" && !asked.has(entry.callId),
   );
