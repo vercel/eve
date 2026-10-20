@@ -29,6 +29,8 @@
     "guides/deployment",
     "evals",
     "guides/instrumentation",
+    "---Experimental---",
+    "...experimental",
     "---Reference---",
     "guides/dev-tui",
     "guides/self-modification",
