@@ -118,7 +118,6 @@ export function turnStartedFact(view: SessionView, turnId: string): FactOf<"turn
   if (row === undefined) throw new Error(`Turn ${turnId} is missing from the session view.`);
   return {
     data: { cause: row.cause, follows: row.follows, turnId },
-    scope: { turnId },
     type: "turn.started",
   };
 }
@@ -144,5 +143,5 @@ export function compactionCompletedPoint(
 
 /** A turn's request for a model run, rebuilt when a restored step needs it again. */
 export function modelRequestedFact(turnId: string, runId: string): FactOf<"model.requested"> {
-  return { data: { owner: { turnId }, runId }, scope: { runId, turnId }, type: "model.requested" };
+  return { data: { owner: { turnId }, runId }, type: "model.requested" };
 }

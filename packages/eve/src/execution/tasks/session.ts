@@ -41,7 +41,7 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
  */
 export async function cancelWorkingTasks(
   cursor: SessionStateCursor,
-  reason: Exclude<TaskCancelReason, "task_cancel">,
+  reason: Exclude<TaskCancelReason, "task-cancel">,
   options: { readonly turnCalls?: boolean } = {},
 ): Promise<void> {
   const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
@@ -73,7 +73,7 @@ export async function answerTaskCancel(
   }
   if (result.status === "cancelled") {
     await cursor.advance((state) =>
-      cancelTasksStep({ ...state, reason: "task_cancel", taskIds: [call.taskId] }),
+      cancelTasksStep({ ...state, reason: "task-cancel", taskIds: [call.taskId] }),
     );
   }
   return taskToolResult(

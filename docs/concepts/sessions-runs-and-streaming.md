@@ -180,7 +180,10 @@ A turn doesn't end while its tasks are working. When the model ends its text ear
 
 ### Failures and cancellation
 
-A failed model run, turn, or session carries `error: { code, message, id?, hint? }`: `id` is a support id that eve's server logs carry too, and `hint` a remedy when eve recognizes the failure on its `model.settled`, `turn.settled`, or `session.ended`. A turn that ends closes everything it left open in the same commit: running calls settle `interrupted`, open interactions settle `interrupted`, and their pending answers settle `withdrawn`. A task can outlive its turn and stays open.
+A failed model run, turn, or session carries `error: { code, message, id?, hint? }`: `id` is a support id that eve's server logs carry too, and `hint` a remedy when eve recognizes the failure on its `model.settled`, `turn.settled`, or `session.ended`. A turn that ends closes everything it left open in the same commit: running calls settle `interrupted`, open interactions settle `interrupted`, and their pending answers settle `withdrawn`. A task can outlive its turn and stays open. A
+session that fails ends the turn it held `cancelled`, since the session failed, not the turn: the
+error is on `session.ended`, and `failure(view, turnId)` reads it for that turn. Built-in channels
+post one notice for it.
 
 A cancelled turn is not a failure: it settles with `outcome: "cancelled"` and `cause` naming the cancel delivery, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, and discards incomplete assistant output. Tool calls the cancellation stopped stay in history, each answered as cancelled, so the model sees that the work started and stopped instead of a request left unanswered. When a model call fails transiently before it published anything, the run records `model.retried` and tries again; once it has published output, its run settles `abandoned`, with its unfinished calls, and a new run tries again.
 

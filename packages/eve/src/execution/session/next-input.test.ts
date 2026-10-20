@@ -116,6 +116,18 @@ function queueOf(...deliveries: DeliverHookPayload[]): SessionInputQueue {
 }
 
 describe("nextTurnDelivery", () => {
+  it("retains an accepted cancel's identity when background tasks must stop", async () => {
+    const inbox = createMockInbox([
+      { result: { done: false, value: { kind: "cancel", deliveryId: "cancel-tasks" } } },
+    ]);
+    const input = waitInput(inbox);
+    input.hasWorkingTasks = () => true;
+    expect(await nextTurnDelivery(input)).toEqual({
+      kind: "cancel-working-tasks",
+      origin: { deliveryId: "cancel-tasks" },
+    });
+  });
+
   it("batches one principal's adjacent queued deliveries with their latest claims", async () => {
     const auth: SessionAuthContext = {
       attributes: { scopes: ["read"], team: "support" },

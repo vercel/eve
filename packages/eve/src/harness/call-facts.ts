@@ -1,5 +1,5 @@
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { Cause, ErrorInfo, JsonValue, Scope } from "#protocol/session-events/envelope.js";
+import type { Cause, ErrorInfo, JsonValue } from "#protocol/session-events/envelope.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
 import type {
   Capability,
@@ -48,7 +48,6 @@ function toolKind(name: string): CapabilityKind {
 export function callRequested(input: {
   readonly action: RuntimeActionRequest;
   readonly owner: CallOwner;
-  readonly scope?: Scope;
   readonly label?: string;
   readonly inputError?: ErrorInfo;
 }): FactOf<"call.requested"> {
@@ -62,30 +61,25 @@ export function callRequested(input: {
   };
   if (input.inputError === undefined) data.input = toJsonValue(action.input);
   else data.inputError = input.inputError;
-  return input.scope === undefined
-    ? { data, type: "call.requested" }
-    : { data, scope: input.scope, type: "call.requested" };
+  return { data, type: "call.requested" };
 }
 
 /** A call was cleared and began running. */
 export function callStarted(
   callId: string,
-  options: { readonly clearedBy?: ClearedBy; readonly scope?: Scope } = {},
+  options: { readonly clearedBy?: ClearedBy } = {},
 ): FactOf<"call.started"> {
   const data: {
     -readonly [K in keyof FactOf<"call.started">["data"]]: FactOf<"call.started">["data"][K];
   } = { callId };
   if (options.clearedBy !== undefined) data.clearedBy = options.clearedBy;
-  return options.scope === undefined
-    ? { data, type: "call.started" }
-    : { data, scope: options.scope, type: "call.started" };
+  return { data, type: "call.started" };
 }
 
 /** A call settled from its runtime result: failed if the result says so, otherwise completed. */
 export function callSettledFrom(
   result: RuntimeActionResult,
   options: {
-    readonly scope?: Scope;
     readonly label?: string;
     readonly rejected?: boolean;
     readonly cause?: Cause;
@@ -106,9 +100,7 @@ export function callSettledFrom(
   if (options.cause !== undefined) data.cause = options.cause;
   else if (rejected) data.cause = { policy: "approval" };
   if (options.label !== undefined) data.label = options.label;
-  return options.scope === undefined
-    ? { data, type: "call.settled" }
-    : { data, scope: options.scope, type: "call.settled" };
+  return { data, type: "call.settled" };
 }
 
 /** A call's partial output, as progress. */

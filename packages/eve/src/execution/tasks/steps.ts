@@ -143,10 +143,7 @@ function spendFact(
 ): SessionEvent {
   const settled = events.filter((event) => event.type === "call.settled");
   const call = settled.find((event) => event.data.callId === sourceCallId) ?? settled[0];
-  const turnId = call?.scope?.turnId;
-  if (call !== undefined && turnId !== undefined) {
-    return delegatedUsageFact(call.data.callId, spend, { turnId });
-  }
+  if (call !== undefined) return delegatedUsageFact(call.data.callId, spend);
   return {
     type: "usage.recorded",
     data: { kind: "delegated-late", usage: spend },

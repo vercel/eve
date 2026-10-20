@@ -149,7 +149,7 @@ export async function executeToolCall(
       await input.publish(
         callSettledFrom(
           createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
-          { scope: at },
+          {},
         ),
       );
       return {
@@ -217,9 +217,7 @@ export async function executeToolCall(
           await input.publish(
             callStarted(
               callId,
-              input.clearedBy === undefined
-                ? { scope: at }
-                : { clearedBy: input.clearedBy, scope: at },
+              input.clearedBy === undefined ? {} : { clearedBy: input.clearedBy },
             ),
           );
           const executed = invokeTool(definition, args, {
@@ -302,7 +300,6 @@ export async function executeToolCall(
       callSettledFrom(
         createRuntimeToolResultFromValue({ callId, isError: failed, output, toolName }),
         {
-          scope: at,
           label: failed
             ? undefined
             : projectResultPresentation(definition, callId, parseJsonObject(args), output)?.[callId]
@@ -323,7 +320,7 @@ export async function executeToolCall(
     await input.publish(
       callSettledFrom(
         createRuntimeToolResultFromValue({ callId, isError: true, output: message, toolName }),
-        { scope: at },
+        {},
       ),
     );
     return {
@@ -585,7 +582,6 @@ async function publishDenial(
     toolName: call.toolName,
     type: "tool-result",
   } satisfies ToolResultPart;
-  const scope = scopeOf(input.position);
   await input.publish(
     input.approval === "evaluate"
       ? callSettledFrom(
@@ -595,7 +591,7 @@ async function publishDenial(
             output: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
             toolName: call.toolName,
           }),
-          { scope },
+          {},
         )
       : callSettledFrom(
           {
@@ -609,7 +605,7 @@ async function publishDenial(
             },
             toolName: call.toolName,
           },
-          { rejected: true, scope },
+          { rejected: true },
         ),
   );
   return { settled: [{ part }], toolResults: [] };

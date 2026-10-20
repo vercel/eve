@@ -152,7 +152,6 @@ async function dispatchCoordination(
         callSettledFrom(dispatched.result, {
           rejected: true,
           cause: { policy: dispatched.refusal },
-          scope: { turnId: batch.event.turnId },
         }),
       );
   }
