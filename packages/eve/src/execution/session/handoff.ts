@@ -41,10 +41,11 @@ import { isObject } from "#shared/guards.js";
  * A newer successor must always accept older checkpoints: every bump adds the
  * upgrade from the previous version in `checkpoint-migrations.ts`.
  */
-export const SESSION_CHECKPOINT_VERSION = 15;
+export const SESSION_CHECKPOINT_VERSION = 16;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
+  readonly admittedDeliveryKeys: readonly string[];
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
   readonly capabilities?: SessionCapabilities;
   readonly history: HarnessModelMessage[];
@@ -83,7 +84,7 @@ export type SessionOwnerActivation =
 interface SessionHandoffInput {
   readonly checkpoint: Omit<
     SessionCheckpoint,
-    "history" | "serializedContext" | "sessionState" | "version"
+    "admittedDeliveryKeys" | "history" | "serializedContext" | "sessionState" | "version"
   >;
   readonly deploymentId: string;
   readonly inbox: SessionInboxHandle;
@@ -127,7 +128,7 @@ export interface CompactionHandoff {
 
 type SessionTransferState = Pick<
   SessionCheckpoint,
-  "history" | "serializedContext" | "sessionState"
+  "admittedDeliveryKeys" | "history" | "serializedContext" | "sessionState"
 >;
 
 type AttemptSettlement =

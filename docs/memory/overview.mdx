@@ -87,7 +87,8 @@ automatically or only through explicit tool calls.
 `fileMemory()` from `eve/memory/file` keeps one bounded document per scope and
 gives the model `save_memory` and `remove_memory` tools. It does not extract
 facts automatically; the model decides what to save. It needs no external
-service in `eve dev` and stores to Vercel Blob when deployed to Vercel, which
+service in `eve dev` and stores to Vercel Blob when deployed to Vercel with Blob
+configured, which
 makes it the shortest path to a working slot.
 
 Read [File memory](/docs/memory/file) for size limits, storage backends, and options.

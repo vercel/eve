@@ -36,6 +36,7 @@ import type {
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { createHistoryViewPreparer } from "#shared/history-view.js";
 
 type HistoryViewPreparer = ReturnType<typeof createHistoryViewPreparer>;
@@ -113,6 +114,8 @@ export function createStep(input: {
 export async function openTurn(
   step: Step,
   opened: {
+    /** Prior conversation the delivery added, published before the message. */
+    readonly imported?: readonly SessionHistoryMessage[];
     readonly input: readonly HarnessModelMessage[];
     readonly message?: StepInput["message"];
   },
@@ -138,6 +141,7 @@ export async function openTurn(
     });
     await step.apply(
       receive(step.view(), {
+        imported: opened.imported,
         message: opened.message,
         predecessor: ctx?.get(SessionPredecessorKey),
         runtime: config.runtimeIdentity,

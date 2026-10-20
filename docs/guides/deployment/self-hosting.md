@@ -34,6 +34,7 @@ You can instead select an installed Workflow world package in the root `agent.ts
 import { defineAgent } from "eve";
 
 export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
   experimental: {
     workflow: {
       world: "@acme/eve-workflow-world",

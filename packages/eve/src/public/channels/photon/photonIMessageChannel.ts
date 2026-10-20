@@ -1,4 +1,5 @@
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { vercelOidc } from "#public/channels/auth.js";
 import {
   chatSdkChannel,
@@ -46,6 +47,8 @@ export interface PhotonInboundMessageContext {
 export type PhotonInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Prior conversation added as user and assistant turns before this message. */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
@@ -205,11 +208,13 @@ async function dispatchMessage(
   if (content === undefined) return;
   const quoted = photonQuotedMessage(message);
   await bridge.send(content, {
+    idempotencyKey: message.id,
     auth: result.auth,
     context: [
       ...(result.context ?? []),
       ...(quoted ? [formatReplyContext(quoted, message.text)] : []),
     ],
+    history: result.history,
     thread,
     title: result.title,
   });

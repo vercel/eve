@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 
 import { createLogger, logError } from "#internal/logging.js";
@@ -250,6 +251,7 @@ async function dispatchWebhookEventTurn(input: {
       hook: result.context,
     }),
     from: input.from,
+    history: result.history,
     state: input.state,
     title: result.title,
   });
@@ -289,6 +291,7 @@ async function dispatchCommentTurn(input: {
       hook: result.context,
     }),
     from: input.from,
+    history: result.history,
     state: input.state,
     title: result.title,
   });
@@ -318,6 +321,7 @@ async function sendGitHubTurn(input: {
   readonly message: string;
   readonly context: readonly string[] | undefined;
   readonly from: ChannelFrom<GitHubChannelState>;
+  readonly history?: readonly SessionHistoryMessage[];
   readonly state: GitHubChannelState;
   readonly title: string | undefined;
 }): Promise<void> {
@@ -337,6 +341,7 @@ async function sendGitHubTurn(input: {
     await input.from(continuationTokenFromState(input.state)).send(input.message, {
       auth: input.auth,
       context: [contextBlock, ...(input.context ?? [])],
+      history: input.history,
       state: input.state,
       title: input.title,
     });

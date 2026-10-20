@@ -12,6 +12,7 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createContextClearedEvent,
+  createHistoryImportedEvent,
   createInputRequestedEvent,
   createInputResolvedEvent,
   createMessageReceivedEvent,
@@ -46,6 +47,7 @@ import {
 } from "#protocol/session-projection.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Transition } from "./commit.js";
 import { inputWithdrawn, signInWithdrawn } from "./events.js";
@@ -93,11 +95,12 @@ function at(projection: SessionProjection) {
 
 /**
  * Input arrives: the session starts once, a turn opens unless one is open (steering joins it),
- * and a message is received.
+ * any history the delivery added is published, and a message is received.
  */
 export function receive(
   view: SessionView,
   input: {
+    readonly imported?: readonly SessionHistoryMessage[];
     readonly message?: string | UserContent;
     /** The session this one replaced, when eve started it in place of a stranded one. */
     readonly predecessor?: SessionPredecessor;
@@ -122,6 +125,15 @@ export function receive(
       createTurnStartedEvent({
         sequence: position.sequence,
         trace: input.trace,
+        turnId,
+      }),
+    );
+  }
+  if (input.imported !== undefined && input.imported.length > 0) {
+    events.push(
+      createHistoryImportedEvent({
+        messages: input.imported,
+        sequence: position.sequence,
         turnId,
       }),
     );

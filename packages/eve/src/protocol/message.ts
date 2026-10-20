@@ -199,6 +199,28 @@ export interface SessionStartedStreamEvent {
   type: "session.started";
 }
 
+/** One message a delivery added with `history`, as `history.imported` publishes it. */
+export interface HistoryImportedMessage {
+  /** App-owned id the history entry carried, when one was supplied. */
+  readonly id?: string;
+  readonly role: "user" | "assistant";
+  readonly text: string;
+}
+
+/**
+ * Stream event emitted when a delivery adds prior conversation with `history`.
+ * It precedes that delivery's `message.received` in the same turn; the
+ * messages sit in model history just before that turn's input.
+ */
+export interface HistoryImportedStreamEvent {
+  data: {
+    messages: readonly HistoryImportedMessage[];
+    sequence: number;
+    turnId: string;
+  };
+  type: "history.imported";
+}
+
 /**
  * Stream event emitted when one runtime turn starts.
  */
@@ -899,6 +921,7 @@ export type UnstampedMessageStreamEvent =
   | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
   | CompactionCompletedStreamEvent
+  | HistoryImportedStreamEvent
   | CompactionRequestedStreamEvent
   | AuthorizationCompletedStreamEvent
   | AuthorizationRequiredStreamEvent
@@ -976,6 +999,18 @@ export function isTurnFailureEvent<TEvent extends UnstampedMessageStreamEvent>(
   return (
     event.type === "session.failed" || event.type === "step.failed" || event.type === "turn.failed"
   );
+}
+
+/** Creates the `history.imported` event for the messages one delivery added. */
+export function createHistoryImportedEvent(input: {
+  readonly messages: readonly HistoryImportedMessage[];
+  readonly sequence: number;
+  readonly turnId: string;
+}): HistoryImportedStreamEvent {
+  return {
+    data: { messages: input.messages, sequence: input.sequence, turnId: input.turnId },
+    type: "history.imported",
+  };
 }
 
 /**

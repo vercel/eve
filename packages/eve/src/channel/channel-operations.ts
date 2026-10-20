@@ -2,7 +2,9 @@ import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
-import { createChannelAddressFn } from "#channel/channel-address.js";
+import { type ChannelCreateResult, createChannelAddressFn } from "#channel/channel-address.js";
+
+export type { ChannelCreateResult } from "#channel/channel-address.js";
 import type { Session } from "#channel/session.js";
 import type {
   CancelTurnResult,
@@ -20,12 +22,21 @@ import {
   type StrictInputResponses,
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 
 interface BaseChannelSendOptions {
+  /** Stable delivery identity, deduplicated within this session's recent-key window. */
+  readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
+  /**
+   * Prior conversation added as user and assistant turns before this
+   * message and its `context`. Seeds a session this send creates, or
+   * extends the history of the session that owns the address.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   readonly initiatorAuth?: SessionAuthContext | null;
   /** JSON Schema for a structured final answer, as on `Session.send()`. */
   readonly outputSchema?: JsonObject;
@@ -39,6 +50,8 @@ export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined
   : BaseChannelSendOptions & { readonly state: TState };
 
 interface BaseChannelRespondOptions<TState = undefined> {
+  /** Stable delivery identity, with the same scope and retention as `send()`. */
+  readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
   readonly state?: Partial<TState>;
@@ -47,10 +60,31 @@ interface BaseChannelRespondOptions<TState = undefined> {
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
+interface BaseChannelCreateOptions {
+  readonly auth: SessionAuthContext | null;
+  /** Prior conversation the session starts with; it joins history with the first message. */
+  readonly history?: readonly SessionHistoryMessage[];
+  readonly initiatorAuth?: SessionAuthContext | null;
+  readonly title?: string;
+}
+
+/** Options for creating a session at a channel-local address without running a turn. */
+export type ChannelCreateOptions<TState = undefined> = [TState] extends [undefined]
+  ? BaseChannelCreateOptions
+  : BaseChannelCreateOptions & { readonly state: TState };
+
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
   /** Starts or resumes a turn with a user message. May create a session. */
   send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
+  /**
+   * Creates a session that waits for its first message, without running a
+   * turn. When another session owns the address, or claims it concurrently,
+   * returns that session unchanged with `created: false`; its `history` was not
+   * added. Throws `SessionStrandedError` when the owner is stranded; reset the
+   * address, then create again.
+   */
+  create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
   /** Answers pending input requests. Never creates a session. */
   respond<const TResponses extends readonly InputResponse[]>(
     inputResponses: StrictInputResponses<TResponses>,
@@ -99,6 +133,7 @@ export function createChannelOperations<TState = undefined>(input: {
             attachInputText(
               {
                 context: options.context,
+                history: options.history,
                 message,
                 outputSchema: options.outputSchema,
                 state: (options as { readonly state?: TState }).state,
@@ -107,6 +142,9 @@ export function createChannelOperations<TState = undefined>(input: {
             ),
             options,
           );
+        },
+        async create(options) {
+          return await bound.create(options);
         },
         async respond(inputResponses, options) {
           if (inputResponses.length === 0) {

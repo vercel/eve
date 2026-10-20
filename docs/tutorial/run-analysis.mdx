@@ -217,7 +217,7 @@ This example caps charts at 1 MiB because tool outputs are persisted with sessio
 
 ## Secrets stay out of the sandbox
 
-The sandbox has no `process.env` and no access to your app's secrets. The `run_sql` tool and sample database run in your app. You pass only the query results to the chart tool; the sandbox does not need database credentials.
+The sandbox doesn't inherit your app's `process.env`. Secrets you pass explicitly through an environment or per-call `env` option are available inside the sandbox. The `run_sql` tool and sample database run in your app. You pass only the query results to the chart tool; the sandbox does not need database credentials.
 
 The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
 

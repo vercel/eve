@@ -46,8 +46,10 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
     });
   }
   const timeoutDeadline = sessionTimeoutDeadline(prepared.sessionTimeoutMs, Date.now());
+  const initialDeliveryKey = prepared.input.delivery?.idempotencyKey;
   await runPreparedSession(
     {
+      admittedDeliveryKeys: initialDeliveryKey === undefined ? [] : [initialDeliveryKey],
       anchor: {
         kind: "self",
         notify: (result) =>

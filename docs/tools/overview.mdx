@@ -174,7 +174,8 @@ export default defineTool({
 });
 ```
 
-eve publishes every earlier yield as an `action.partial` stream event. The
+eve publishes earlier yields as `action.partial` stream events. When the durable
+writer is busy, eve may keep only the newest adjacent snapshot for a call. The
 snapshot is visible to channels, hooks, and clients but never enters model
 history or `toModelOutput`; only the final yield does. Treat snapshots as
 last-write-wins by tool call id, not append-only progress. The durable runtime
