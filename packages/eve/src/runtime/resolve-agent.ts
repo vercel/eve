@@ -288,12 +288,14 @@ function createResolvedAgentConfig(
             id: model.id,
             contextWindowTokens: model.contextWindowTokens,
             maxOutputTokens: model.maxOutputTokens,
+            outputTokenLimit: model.outputTokenLimit,
             providerOptions: model.providerOptions,
           }
         : {
             contextWindowTokens: model.contextWindowTokens,
             id: model.id,
             maxOutputTokens: model.maxOutputTokens,
+            outputTokenLimit: model.outputTokenLimit,
             promptCache: model.promptCache,
             providerOptions: model.providerOptions,
             source: {

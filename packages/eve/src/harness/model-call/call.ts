@@ -379,6 +379,9 @@ export class ModelCaller {
       onStepStart: hooks.onStepStart,
       prepareStep: hooks.prepareStep,
       reasoning: step.session.agent.modelReference?.reasoning ?? step.session.agent.reasoning,
+      ...(step.session.agent.modelReference?.outputTokenLimit !== undefined && {
+        maxOutputTokens: step.session.agent.modelReference.outputTokenLimit,
+      }),
       runtimeContext,
       stopWhen: isStepCount(1),
       telemetry: toEntryTelemetry(attempt?.telemetry, catalog.resolve),

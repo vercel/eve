@@ -325,8 +325,15 @@ function normalizeAgentModelOptions(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["modelOptions"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["promptCache", "providerOptions"], message);
+  expectOnlyKnownKeys(record, ["promptCache", "providerOptions", "maxOutputTokens"], message);
   const options: Mutable<NonNullable<NormalizedAgentDefinition["modelOptions"]>> = {};
+
+  if (record.maxOutputTokens !== undefined) {
+    options.maxOutputTokens = expectPositiveInteger(
+      record.maxOutputTokens,
+      `${message} "modelOptions.maxOutputTokens" must be a positive integer.`,
+    );
+  }
 
   if (record.providerOptions !== undefined) {
     options.providerOptions = expectProviderOptions(record.providerOptions, message);

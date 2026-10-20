@@ -577,6 +577,7 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
+    outputTokenLimit: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
     promptCache: z
       .object({
@@ -1365,6 +1366,7 @@ function cloneCompiledRuntimeModelReference(
   if (model.maxOutputTokens !== undefined) {
     clone.maxOutputTokens = model.maxOutputTokens;
   }
+  if (model.outputTokenLimit !== undefined) clone.outputTokenLimit = model.outputTokenLimit;
   if (model.providerOptions !== undefined) {
     clone.providerOptions = { ...model.providerOptions };
   }

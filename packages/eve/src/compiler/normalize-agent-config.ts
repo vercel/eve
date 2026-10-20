@@ -71,6 +71,7 @@ export async function compileAgentConfig(
           contextWindowTokens: definition.modelContextWindowTokens,
           promptCache: definition.modelOptions?.promptCache,
           providerOptions: definition.modelOptions?.providerOptions,
+          outputTokenLimit: definition.modelOptions?.maxOutputTokens,
           source: configModule,
           sourcePath: configModulePath,
           value: definition.model as PublicAgentStaticModelDefinition,
@@ -204,6 +205,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly contextWindowTokens?: number;
   readonly promptCache?: AgentPromptCacheDefinition;
   readonly providerOptions?: Record<string, JsonObject>;
+  readonly outputTokenLimit?: number;
   readonly source?: ModuleSourceRef;
   readonly sourcePath?: string;
   readonly value: PublicAgentStaticModelDefinition;
@@ -215,6 +217,8 @@ async function normalizeAuthoredModelReference(input: {
       {
         id: formatLanguageModelGatewayId(input.value),
         providerOptions: parseProviderOptionsRecord(input.providerOptions),
+        ...(input.outputTokenLimit !== undefined && { outputTokenLimit: input.outputTokenLimit }),
+        ...(input.outputTokenLimit !== undefined && { outputTokenLimit: input.outputTokenLimit }),
         routing,
       },
       input,

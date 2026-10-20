@@ -22,10 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 96,
+    current: 97,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 76, 77, 78, 80, 81, 82, 84,
-      85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
+      85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -89,11 +89,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 88,
+    current: 89,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
       60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
-      85, 86, 87, 88,
+      85, 86, 87, 88, 89,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -172,10 +172,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 40,
+    current: 41,
     supported: [
       3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
-      34, 35, 36, 37, 38, 39, 40,
+      34, 35, 36, 37, 38, 39, 40, 41,
     ],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",

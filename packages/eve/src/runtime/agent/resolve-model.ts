@@ -171,10 +171,17 @@ export async function resolveRuntimeModelSelection(input: {
 
   let selection: PublicAgentModelSelectionDefinition;
   let providerOptions: Record<string, JsonObject> | undefined;
+  let outputTokenLimit: number | undefined;
   let promptCache: ReturnType<typeof normalizeAgentPromptCache> | undefined;
   try {
     selection = normalizeDynamicModelSelection(input.selection);
     validateDynamicModelSelection(selection);
+    outputTokenLimit = selection.modelOptions?.maxOutputTokens;
+    if (
+      outputTokenLimit !== undefined &&
+      (!Number.isInteger(outputTokenLimit) || outputTokenLimit <= 0)
+    )
+      throw new Error("modelOptions.maxOutputTokens must be a positive integer.");
     providerOptions =
       selection.modelOptions?.providerOptions === undefined
         ? undefined
@@ -208,6 +215,7 @@ export async function resolveRuntimeModelSelection(input: {
         id: metadata.resolvedModelId,
         contextWindowTokens: metadata.contextWindowTokens,
         maxOutputTokens: metadata.maxOutputTokens,
+        outputTokenLimit,
         providerOptions,
         reasoning: selection.reasoning,
       },
@@ -247,6 +255,7 @@ export async function resolveRuntimeModelSelection(input: {
       id: metadata.resolvedModelId,
       contextWindowTokens: metadata.contextWindowTokens,
       maxOutputTokens: metadata.maxOutputTokens,
+      outputTokenLimit,
       promptCache,
       providerOptions,
       reasoning: selection.reasoning,

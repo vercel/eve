@@ -1397,6 +1397,30 @@ describe("createToolLoopHarness", () => {
     },
   );
 
+  it.each([undefined, 512])(
+    "passes the authored static output cap to the model call (%s)",
+    async (outputTokenLimit) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const runStep = createToolLoopHarness(createTestConfig());
+      const modelReference: { id: string; outputTokenLimit?: number } = { id: "static-model" };
+      if (outputTokenLimit !== undefined) modelReference.outputTokenLimit = outputTokenLimit;
+      const session = createTestSession({
+        agent: { ...createTestSession().agent, modelReference },
+      });
+      await runStep(session, { message: "Hi" });
+      const options = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+      expect(options).toBeDefined();
+      if (outputTokenLimit === undefined) expect(options).not.toHaveProperty("maxOutputTokens");
+      else expect(options?.maxOutputTokens).toBe(outputTokenLimit);
+    },
+  );
+
   it("uses session-scoped dynamic model selection for the model call", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -1410,6 +1434,7 @@ describe("createToolLoopHarness", () => {
       expect(reference).toEqual({
         contextWindowTokens: 200_000,
         id: "selected-model",
+        outputTokenLimit: 777,
         providerOptions: { gateway: { order: ["openai"] } },
       });
       return "selected-model" as LanguageModel;
@@ -1422,6 +1447,7 @@ describe("createToolLoopHarness", () => {
     ctx.set(SessionDynamicModelReferenceKey, {
       contextWindowTokens: 200_000,
       id: "selected-model",
+      outputTokenLimit: 777,
       providerOptions: { gateway: { order: ["openai"] } },
     });
     const session = createTestSession({
@@ -1438,9 +1464,11 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.model).toBe("selected-model");
+    expect(agentCall!.maxOutputTokens).toBe(777);
     expect(result.session.agent.modelReference).toEqual({
       contextWindowTokens: 200_000,
       id: "selected-model",
+      outputTokenLimit: 777,
       providerOptions: { gateway: { order: ["openai"] } },
     });
     expect(result.session.compaction.threshold).toBe(180_000);
@@ -3772,6 +3800,48 @@ describe("createToolLoopHarness", () => {
     expect(events.find((e) => e.type === "action.result")?.data.presentation).toEqual({
       "call-1": { label: "step complete" },
     });
+  });
+
+  it("does not execute a partial tool call when the model stream ends with length", async () => {
+    const partialInput = '{"a": 1, "b":';
+    setupMockAgent({
+      finishReason: "length",
+      response: {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call-truncated",
+                toolName: "add",
+                input: partialInput,
+              },
+            ],
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          dynamic: true,
+          error: new Error("Unexpected end of JSON input"),
+          input: partialInput,
+          invalid: true,
+          toolCallId: "call-truncated",
+          toolName: "add",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+    await expect(
+      runStep(createTestSession(), { message: "Add the numbers" }),
+    ).resolves.toBeDefined();
+    expect(events.some((event) => event.type === "actions.requested")).toBe(false);
+    expect(events.some((event) => event.type === "turn.failed")).toBe(false);
   });
 
   it("skips AI-SDK-marked invalid tool calls so a malformed JSON payload does not crash the harness", async () => {
