@@ -41,7 +41,7 @@ import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import { parseJsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";
 import { projectToolStartLabel } from "#harness/action-presentation.js";
-import { displayTitle } from "#shared/display-name.js";
+import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 // eve runs every local call itself: the AI SDK only calls the model. The calls a model response
 // makes run here as soon as the response ends, and so do the calls a person approved later.

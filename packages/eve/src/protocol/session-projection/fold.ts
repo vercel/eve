@@ -261,7 +261,15 @@ function foldFact(
     case "session.ended": {
       const { cause, error, outcome } = fact.data;
       if (typeof outcome !== "string") return;
-      view.session = { ...view.session, cause, endedAt: at.at, error, outcome, status: "ended" };
+      view.session = {
+        ...view.session,
+        cause,
+        closedAt: at.position,
+        endedAt: at.at,
+        error,
+        outcome,
+        status: "ended",
+      };
       return;
     }
     case "usage.recorded": {
@@ -344,7 +352,10 @@ function foldLifecycle(
   );
   const id = data[idField];
   if (typeof id !== "string") return false;
-  const rows = view[rule.table] as Record<string, { readonly status?: unknown; endedAt?: string }>;
+  const rows = view[rule.table] as Record<
+    string,
+    { readonly status?: unknown; closedAt?: number; endedAt?: string }
+  >;
   const row = rows[id];
   const status = rule.status === undefined ? {} : { status: rule.status };
   const closed = (entry: { readonly status?: unknown }) =>
@@ -363,7 +374,7 @@ function foldLifecycle(
     case "terminal":
       // An outcome a newer writer added still ends the row.
       if (row === undefined || closed(row) || typeof data.outcome !== "string") return false;
-      rows[id] = { ...row, ...data, endedAt: at.at, ...status };
+      rows[id] = { ...row, ...data, closedAt: at.position, endedAt: at.at, ...status };
       return true;
     default:
       return false;
@@ -451,13 +462,14 @@ function foldProgress(view: SessionView, previews: MutablePreviews, raw: unknown
       return;
     }
     case "call.input": {
-      const { callId, delta, name } = progress.data;
+      const { callId, delta, kind, name } = progress.data;
       if (view.calls[callId] !== undefined || typeof delta !== "string") return;
       const preview: CallPreview | undefined = previews.calls[callId];
       if (preview !== undefined) {
         previews.calls[callId] = { ...preview, input: preview.input + delta };
       } else if (name !== undefined) {
-        previews.calls[callId] = { callId, input: delta, name, runId: progress.scope?.runId };
+        const announced: CallPreview = { callId, input: delta, name, runId: progress.scope?.runId };
+        previews.calls[callId] = kind === undefined ? announced : { ...announced, kind };
       }
       return;
     }

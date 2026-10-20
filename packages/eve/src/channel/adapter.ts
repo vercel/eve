@@ -93,7 +93,16 @@ type EventHandler<
 export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext> =
   {
     [K in SessionEvent["type"]]?: EventHandler<K, TCtx>;
+  } & {
+    /** Runs once per committed line, after the line's event handlers. */
+    committed?: (line: CommittedLine, ctx: TCtx) => void | Promise<void>;
   };
+
+/** A line the session committed: the facts its channel heard, in order, and its position. */
+export interface CommittedLine {
+  readonly facts: readonly SessionEvent[];
+  readonly position: number;
+}
 
 // ---------------------------------------------------------------------------
 // File fetch
@@ -271,11 +280,12 @@ export function getAdapterKind(adapter: ChannelAdapter): string {
  */
 export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
-  event: SessionEvent,
+  event: SessionEvent | CommittedLine,
   ctx: ChannelAdapterContext,
 ): Promise<void> {
-  const handler = adapter[event.type] as
-    | ((event: SessionEvent, ctx: ChannelAdapterContext) => void | Promise<void>)
+  const type = "facts" in event ? "committed" : event.type;
+  const handler = adapter[type] as
+    | ((event: SessionEvent | CommittedLine, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
   if (handler === undefined) return;
   try {
@@ -283,7 +293,7 @@ export async function callAdapterEventHandler(
   } catch (error) {
     log.error("adapter event handler threw — event swallowed", {
       adapterKind: getAdapterKind(adapter),
-      eventType: event.type,
+      eventType: type,
       error,
     });
   }

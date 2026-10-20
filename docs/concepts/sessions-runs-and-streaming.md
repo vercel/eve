@@ -132,7 +132,7 @@ When a streamed tool input becomes a validated call, its `call.input` records pr
 
 `call.progress` carries one complete preliminary output snapshot from an authored async-generator tool. A later snapshot for the same `callId` replaces it, and `call.settled` carries the final output. Treat snapshots as last-write-wins. Provider-executed tool progress and MCP progress notifications are not projected as `call.progress`.
 
-A call the model makes through [`eve__tool` or `eve__skill`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported as a call to the entry it names. Its `call.requested` carries that entry's name and input, such as `linear__list_issues`, never the catalog tool's. An `eve__skill` call has `capability: { kind: "skill", name }`. Calls through either tool publish no `call.input`, because their entry is known only once their input is complete.
+A call the model makes through [`eve__tool` or `eve__skill`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) is reported as a call to the entry it names. Its `call.requested` carries that entry's name and input, such as `linear__list_issues`, never the catalog tool's. An `eve__skill` call has `capability: { kind: "skill", name }`. The model's own task controls, `eve__task_wait` and `eve__task_cancel`, have `kind: "control"`; activity views usually leave them out. A `call.input` that announces a call carries the same `kind` beside its `name`. Calls through either tool publish no `call.input`, because their entry is known only once their input is complete.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning content in your application.
 

@@ -97,6 +97,8 @@ export interface DiscordChannelState {
   conversationId: string | null;
   /** Discord guild id, when the interaction was invoked in a guild. */
   guildId: string | null;
+  /** The Discord channel type the interaction came from, such as 1 for a DM. */
+  channelType?: number;
   /** Discord application id from the inbound interaction. */
   applicationId: string | null;
   /** Latest interaction token available to the channel. */
@@ -107,6 +109,8 @@ export interface DiscordChannelState {
   hasMessageAnchor: boolean;
   /** Posted prompts with components, keyed by requestId, until eve resolves them. */
   hitlPrompts?: Record<string, DiscordHitlPrompt>;
+  /** The sign-ins the default flow posted for, by connection name. */
+  pendingSignIns?: Record<string, string>;
 }
 
 /** What a posted prompt needs so its message can be edited once eve resolves it. */
@@ -778,6 +782,7 @@ function stateFromInteraction(
   return {
     audience: discordAudience(interaction.channelType),
     applicationId: interaction.applicationId,
+    ...(interaction.channelType !== undefined && { channelType: interaction.channelType }),
     channelId: interaction.channelId,
     conversationId: options.conversationId,
     guildId: interaction.guildId ?? null,

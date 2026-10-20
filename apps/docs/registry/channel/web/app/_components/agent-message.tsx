@@ -127,6 +127,8 @@ function AgentMessagePart({
     case "interaction":
       return <InteractionPrompt canRespond={canRespond} onAnswers={onAnswers} part={part} />;
     case "tool": {
+      // The model waiting on or cancelling its own tasks isn't activity to show.
+      if (part.kind === "control") return null;
       const questions = questionsFor(part.callId);
       if (questions.length > 0) {
         return (

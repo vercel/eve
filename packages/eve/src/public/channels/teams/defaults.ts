@@ -1,20 +1,9 @@
-import { signInEnding } from "#channel/interaction-prompts.js";
-import {
-  requestBatchOf,
-  requestSettlementOf,
-  signInPromptOf,
-  signInSettlementOf,
-  type RequestBatch,
-  type RequestSettlement,
-  type SignInPrompt,
-  type SignInSettlement,
-} from "#channel/interaction-prompts.js";
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
+import type { Interaction, RequestSettlement } from "#channel/interaction-prompts.js";
+import { postedIn, signInEndedText, type SignIn, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { resolvedPromptAnswer } from "#channel/resolved-prompt.js";
-import { formatErrorHint } from "#internal/logging.js";
-import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
 import {
   renderAnsweredInteractionMessage,
@@ -26,7 +15,7 @@ import type {
   TeamsContext,
   TeamsInboundResult,
 } from "#public/channels/teams/teamsChannel.js";
-import { displayProperName } from "#shared/display-name.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
 import { parseJsonObject } from "#shared/json.js";
 
 /** Default auth projection for Teams message actors. */
@@ -75,84 +64,73 @@ type TeamsHandlerChannel = Parameters<
   NonNullable<TeamsChannelEvents["turn.started"]>
 >[1]["channel"];
 
-async function showTeamsRequests(event: RequestBatch, channel: TeamsHandlerChannel): Promise<void> {
-  for (const request of event.requests) {
-    const posted = await channel.thread.post(
-      renderInteractionMessage(request, {
-        adaptiveCardVersion: channel.adaptiveCardVersion,
-        replyToActivityId: channel.teams.replyToActivityId,
-      }),
-    );
-    if (!posted.id) continue;
-    const card = { activityId: posted.id, prompt: request.request.prompt };
-    channel.state.pendingPromptCards = {
-      ...channel.state.pendingPromptCards,
-      [request.interactionId]:
-        request.request.kind === "question"
-          ? {
-              ...card,
-              options: (request.request.options ?? []).map(({ id, label }) => ({ id, label })),
-            }
-          : card,
-    };
-  }
-}
-
-/** A pressed approval retires its card with the person who pressed it. */
-async function settleTeamsApproval(
-  event: {
-    readonly requestId: string;
-    readonly outcome: "approved" | "cancelled";
-    readonly responderPrincipalId: string;
-  },
-  channel: TeamsHandlerChannel,
-): Promise<void> {
-  const cards = channel.state.pendingPromptCards ?? {};
-  const card = cards[event.requestId];
-  if (card === undefined) return;
-  const account = channel.state.approvalResponderAccounts?.[event.responderPrincipalId];
-  const label = event.outcome === "approved" ? "Approved" : "Cancelled";
-  const actor = account?.name ?? account?.id;
-  await channel.thread.update(
-    card.activityId,
-    renderAnsweredInteractionMessage({
-      includeText: false,
-      label: actor === undefined ? label : `${label} by ${actor}`,
-      prompt: card.prompt,
+async function showTeamsRequest(channel: TeamsHandlerChannel, request: Interaction): Promise<void> {
+  const posted = await channel.thread.post(
+    renderInteractionMessage(request, {
+      adaptiveCardVersion: channel.adaptiveCardVersion,
+      replyToActivityId: channel.teams.replyToActivityId,
     }),
   );
-  const next = { ...cards };
-  delete next[event.requestId];
-  channel.state.pendingPromptCards = next;
+  if (!posted.id) return;
+  const card = { activityId: posted.id, prompt: request.request.prompt };
+  channel.state.pendingPromptCards = {
+    ...channel.state.pendingPromptCards,
+    [request.interactionId]:
+      request.request.kind === "question"
+        ? {
+            ...card,
+            options: (request.request.options ?? []).map(({ id, label }) => ({ id, label })),
+          }
+        : card,
+  };
 }
 
-// A card that ends any other way (a typed answer, any question, or a withdrawal) retires here.
-async function settleTeamsRequests(
-  event: { readonly resolutions: readonly RequestSettlement[] },
+/** Retires a request's card with its answer; a pressed approval's names who pressed it. */
+async function settleTeamsRequest(
   channel: TeamsHandlerChannel,
+  settlement: RequestSettlement,
 ): Promise<void> {
-  for (const resolution of event.resolutions) {
-    const cards = channel.state.pendingPromptCards ?? {};
-    const card = cards[resolution.interactionId];
-    if (card === undefined) continue;
-    await channel.thread.update(
-      card.activityId,
-      renderAnsweredInteractionMessage({
-        includeText: false,
-        label: resolvedPromptAnswer(resolution, card.options),
-        prompt: card.prompt,
-      }),
-    );
-    const { [resolution.interactionId]: _, ...rest } = cards;
-    channel.state.pendingPromptCards = rest;
+  const { [settlement.interactionId]: card, ...rest } = channel.state.pendingPromptCards ?? {};
+  if (card === undefined) return;
+  const { kind, outcome, responder } = settlement;
+  const pressed =
+    kind === "approval" &&
+    responder !== undefined &&
+    (outcome === "accepted" || outcome === "declined");
+  let label = resolvedPromptAnswer(settlement, card.options);
+  if (pressed) {
+    const account = channel.state.approvalResponderAccounts?.[responder.id];
+    const actor = account?.name ?? account?.id;
+    const decided = outcome === "accepted" ? "Approved" : "Cancelled";
+    label = actor === undefined ? decided : `${decided} by ${actor}`;
   }
+  await channel.thread.update(
+    card.activityId,
+    renderAnsweredInteractionMessage({ includeText: false, label, prompt: card.prompt }),
+  );
+  channel.state.pendingPromptCards = rest;
 }
 
-async function showTeamsSignIn(event: SignInPrompt, channel: TeamsHandlerChannel): Promise<void> {
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-  const url = event.authorization?.url;
-  const instructions = event.authorization?.instructions;
-  const userCode = event.authorization?.userCode;
+/**
+ * A Teams conversation as a sign-in shows on it: a personal chat gets the card with the sign-in
+ * link; a group or channel, which can't be messaged privately here, a link-free status.
+ */
+function teamsSignIns(channel: TeamsHandlerChannel): SignInSurface {
+  return {
+    private: channel.state.conversationType === "personal",
+    postChallenge: async (signIn) =>
+      (await channel.thread.post(teamsSignInCard(signIn, channel))).id,
+    post: async (text) => (await channel.thread.post({ text })).id,
+    async edit(activityId, text) {
+      await channel.thread.update(activityId, renderAnsweredInteractionMessage({ prompt: text }));
+    },
+    typing: () => channel.thread.startTyping(),
+    posted: postedIn(channel.state, "pendingAuthActivityIds"),
+  };
+}
+
+function teamsSignInCard(signIn: SignIn, channel: TeamsHandlerChannel) {
+  const { displayName, instructions, url, userCode } = signIn;
   const codeHint = userCode
     ? `If ${displayName} asks for a confirmation code, enter ${userCode}.`
     : undefined;
@@ -165,32 +143,19 @@ async function showTeamsSignIn(event: SignInPrompt, channel: TeamsHandlerChannel
   ]
     .filter(Boolean)
     .join(" ");
-  const posted = await channel.thread.post({
+  return {
     attachments: [
       {
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
           actions: url
-            ? [
-                {
-                  title: `Sign in with ${displayName}`,
-                  type: "Action.OpenUrl",
-                  url,
-                },
-              ]
+            ? [{ title: `Sign in with ${displayName}`, type: "Action.OpenUrl", url }]
             : [],
           body: [
             {
               text: `Authorization required for ${displayName}`,
               type: "TextBlock",
               weight: "Bolder",
-              wrap: true,
-            },
-            {
-              text: channel.state.triggeringUser
-                ? `Requested by ${channel.state.triggeringUser.name ?? channel.state.triggeringUser.id}.`
-                : "No triggering user is available for a private prompt.",
-              type: "TextBlock",
               wrap: true,
             },
             ...[instructions, codeHint]
@@ -204,116 +169,19 @@ async function showTeamsSignIn(event: SignInPrompt, channel: TeamsHandlerChannel
       },
     ],
     text,
-  });
-  if (posted.id) {
-    channel.state.pendingAuthActivityId = posted.id;
-  }
-}
-
-async function settleTeamsSignIn(
-  event: SignInSettlement,
-  channel: TeamsHandlerChannel,
-): Promise<void> {
-  if (event.outcome === "accepted") {
-    await channel.thread.startTyping();
-  }
-
-  const activityId = channel.state.pendingAuthActivityId;
-  if (!activityId) return;
-  const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-  const text = buildAuthCompletedText({
-    displayName,
-    outcome: event.outcome,
-    reason: event.reason,
-  });
-  await channel.thread.update(activityId, renderAnsweredInteractionMessage({ prompt: text }));
-  channel.state.pendingAuthActivityId = null;
+  };
 }
 
 /** Built-in Teams event handlers for typing, replies, HITL, auth cards, and terminal errors. */
-export const defaultEvents: TeamsChannelEvents = {
-  async "turn.started"(_event, { channel }) {
-    await channel.thread.startTyping();
+export const defaultEvents: TeamsChannelEvents = surfaceEvents<TeamsHandlerChannel>({
+  typing: (channel) => channel.thread.startTyping(),
+  async post(channel, text) {
+    for (const chunk of splitTeamsMessageText(text)) await channel.thread.post(chunk);
   },
-
-  async "call.requested"(_event, { channel }) {
-    await channel.thread.startTyping();
-  },
-
-  async "interaction.opened"(event, ctx) {
-    const { data } = event;
-    const { channel } = ctx;
-    const batch = requestBatchOf(ctx.view, data);
-    if (batch !== undefined) {
-      await showTeamsRequests(batch, channel);
-      return;
-    }
-    const prompt = signInPromptOf(data, event.scope);
-    if (prompt !== undefined) await showTeamsSignIn(prompt, channel);
-  },
-
-  async "interaction.settled"({ data }, ctx) {
-    const { channel } = ctx;
-    const signIn = signInSettlementOf(ctx.view, data);
-    if (signIn !== undefined) {
-      await settleTeamsSignIn(signIn, channel);
-      return;
-    }
-    const resolution = requestSettlementOf(ctx.view, data);
-    if (resolution === undefined) return;
-    const pressed =
-      resolution.kind === "approval" &&
-      resolution.responder !== undefined &&
-      (resolution.outcome === "accepted" || resolution.outcome === "declined");
-    if (pressed && resolution.responder !== undefined) {
-      await settleTeamsApproval(
-        {
-          outcome: resolution.outcome === "accepted" ? "approved" : "cancelled",
-          requestId: resolution.interactionId,
-          responderPrincipalId: resolution.responder.id,
-        },
-        channel,
-      );
-    }
-    await settleTeamsRequests({ resolutions: [resolution] }, channel);
-  },
-
-  async "content.completed"({ data }, { channel }) {
-    const text = replyTextOf(data);
-    if (text === undefined) return;
-    for (const chunk of splitTeamsMessageText(text)) {
-      await channel.thread.post(chunk);
-    }
-  },
-
-  async "session.ended"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.thread.post(
-      [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new Teams conversation to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
-  },
-
-  async "turn.settled"({ data }, { channel }) {
-    if (data.outcome !== "failed") return;
-    const hint = formatErrorHint(errorHintOf(data.error));
-    const errorId = data.error?.id;
-    await channel.thread.post(
-      [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
-  },
-};
+  restart: "Teams conversation",
+  requests: { show: showTeamsRequest, settle: settleTeamsRequest },
+  signIns: teamsSignIns,
+});
 
 /** A connection name for the Teams auth card (`linear` → `Linear`). */
 export function formatConnectionDisplayName(connectionName: string): string {
@@ -321,15 +189,7 @@ export function formatConnectionDisplayName(connectionName: string): string {
 }
 
 /** Builds final-state text for a completed connection authorization attempt. */
-export function buildAuthCompletedText(input: {
-  readonly displayName: string;
-  readonly outcome: InteractionOutcome;
-  readonly reason?: string;
-}): string {
-  if (input.outcome === "accepted") return `${input.displayName} connected.`;
-  const tail = input.reason !== undefined ? ` (${input.reason})` : "";
-  return `${input.displayName} authorization ${signInEnding(input.outcome)}${tail}.`;
-}
+export const buildAuthCompletedText = signInEndedText;
 
 /** Builds a Teams mention entity and matching text for one channel account. */
 export function teamsMentionUser(user: {

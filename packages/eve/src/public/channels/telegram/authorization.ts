@@ -1,17 +1,12 @@
-import { signInEnding } from "#channel/interaction-prompts.js";
-import type { SignInPrompt } from "#channel/interaction-prompts.js";
-import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
+import type { SignIn } from "#channel/sign-in.js";
 
 export const TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX = "eve_auth:";
 
+/** The sign-in prompt for its person: what to do, and a button that opens the sign-in link. */
 export function renderTelegramAuthorizationPrompt(
-  authorization: Pick<SignInPrompt, "authorization" | "name">,
+  signIn: Pick<SignIn, "displayName" | "instructions" | "url" | "userCode">,
 ): { readonly reply_markup?: Readonly<Record<string, unknown>>; readonly text: string } {
-  const displayName = formatTelegramAuthorizationDisplayName(
-    authorization.name,
-    authorization.authorization?.displayName,
-  );
-  const url = authorization.authorization?.url;
+  const { displayName, url } = signIn;
   return {
     reply_markup:
       url === undefined
@@ -19,16 +14,15 @@ export function renderTelegramAuthorizationPrompt(
         : { inline_keyboard: [[{ text: `Sign in with ${displayName}`, url }]] },
     text: [
       `Authorization required for ${displayName}.`,
-      authorization.authorization?.instructions,
-      authorization.authorization?.userCode === undefined
-        ? undefined
-        : `Code: ${authorization.authorization.userCode}`,
+      signIn.instructions,
+      signIn.userCode === undefined ? undefined : `Code: ${signIn.userCode}`,
     ]
       .filter((part): part is string => part !== undefined && part.length > 0)
       .join("\n\n"),
   };
 }
 
+/** A group's link-free status, whose button sends the requester the prompt privately. */
 export function renderTelegramAuthorizationStatus(input: {
   readonly displayName: string;
   readonly requesterUserId?: string | null;
@@ -41,29 +35,7 @@ export function renderTelegramAuthorizationStatus(input: {
     reply_markup:
       callbackData === undefined
         ? undefined
-        : {
-            inline_keyboard: [[{ callback_data: callbackData, text: "Authorize" }]],
-          },
+        : { inline_keyboard: [[{ callback_data: callbackData, text: "Authorize" }]] },
     text: `Authorization required for ${input.displayName}. The requester must sign in to resume.`,
   };
-}
-
-export function formatTelegramAuthorizationDisplayName(
-  name: string,
-  displayName: string | undefined,
-): string {
-  if (displayName !== undefined) return displayName;
-  if (name.length === 0) return name;
-  return name.charAt(0).toUpperCase() + name.slice(1);
-}
-
-export function renderTelegramAuthorizationCompleted(input: {
-  readonly displayName: string;
-  readonly outcome: InteractionOutcome;
-  readonly reason?: string;
-}): string {
-  if (input.outcome === "accepted") return `${input.displayName} connected.`;
-  const reason = input.reason === undefined ? "" : ` (${input.reason})`;
-  const outcome = signInEnding(input.outcome);
-  return `${input.displayName} authorization ${outcome}${reason}.`;
 }

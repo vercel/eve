@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { displayName, displayProperName, displayTitle } from "#shared/display-name.js";
+import {
+  displayName,
+  displayProperName,
+  displayTitle,
+} from "#protocol/session-projection/display-name.js";
 
 describe("displayName", () => {
   it.each([

@@ -1,4 +1,4 @@
-import type { TaskCardView } from "#channel/task-card.js";
+import type { TaskCard } from "#channel/task-card.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
@@ -91,15 +91,16 @@ export interface SlackRenderer {
   /** Handlers for session events, such as posting replies and questions. */
   readonly events?: SlackRendererEvents;
   /**
-   * Returns the message for a turn's task card, or `null` for none. Runs for
-   * every turn that calls a tool; the view carries the turn's tasks and its
-   * other tool calls with their input. Pure and synchronous: eve posts the
-   * card, updates it as the turn changes, and handles Slack's rate limits.
-   * `next` returns eve's default card, which is `null` for a turn without tasks.
+   * Returns the message for one of a turn's task cards, or `null` for none. Runs
+   * for every turn that calls a tool; the card holds the turn's calls as rows,
+   * with the tables to read them by (`callState`, `callLabel`, `waiting` from
+   * `eve/events`). Pure and synchronous: eve posts the card, updates it as the
+   * turn changes, and handles Slack's rate limits. `next` returns eve's default
+   * card, which is `null` for a card without tasks.
    */
   readonly taskCard?: (
-    view: TaskCardView,
-    next: (view: TaskCardView) => SlackTaskCard | null,
+    card: TaskCard,
+    next: (card: TaskCard) => SlackTaskCard | null,
   ) => SlackTaskCard | null;
 }
 
@@ -115,7 +116,7 @@ export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
 export interface SlackRenderChain {
   readonly events: SlackChannelInternalEvents;
   readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
-  readonly taskCard: (view: TaskCardView) => SlackTaskCard | null;
+  readonly taskCard: (card: TaskCard) => SlackTaskCard | null;
 }
 
 type AnyHandler = (...args: unknown[]) => void | Promise<void>;
@@ -235,7 +236,7 @@ async function composeReceived(
 function composeTaskCard(
   renderers: readonly SlackRenderer[],
   defaults: SlackRenderChain,
-  view: TaskCardView,
+  view: TaskCard,
   index: number,
 ): SlackTaskCard | null {
   if (index === renderers.length) return defaults.taskCard(view);

@@ -1,14 +1,14 @@
-import { errorHintOf, replyTextOf } from "#public/channels/reply.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
-import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { postedIn, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, formatErrorHint, logError } from "#internal/logging.js";
+import { createLogger, logError } from "#internal/logging.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
 import type {
   GitHubBotNameResolver,
@@ -102,6 +102,14 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
   }
 
   return {
+    ...surfaceEvents<GitHubEventContext>({
+      post: postCommentChunks,
+      restart: "comment",
+      // A comment can only answer the prompt it sees, so prompts post one at a time.
+      requests: { showOne: showPrompt },
+      signIns: gitHubSignIns,
+    }),
+
     async "turn.started"(_event, ctx) {
       const { channel } = ctx;
       if (options.progress?.reactions !== false) {
@@ -113,41 +121,6 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       }
 
       await checkoutRepositoryForTurn(channel, ctx, options);
-    },
-
-    async "content.completed"({ data }, { channel }) {
-      const text = replyTextOf(data);
-      if (text === undefined) return;
-      await postCommentChunks(channel, text);
-    },
-
-    // A comment can only answer the prompt it sees, so prompts post one at a time.
-    ...promptQueueEvents(showPrompt),
-
-    async "session.ended"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
-      const message = [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new comment to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n");
-      await postFailure(channel, message);
-    },
-
-    async "turn.settled"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
-      const message = [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n");
-      await postFailure(channel, message);
     },
   };
 }
@@ -207,6 +180,27 @@ async function checkoutRepositoryForTurn(
   }
 }
 
+/**
+ * A GitHub conversation as a sign-in shows on it: comments are public and can't reach one person,
+ * so it shows only a link-free status saying the person who asked must sign in.
+ */
+function gitHubSignIns(channel: GitHubEventContext): SignInSurface {
+  const post = async (text: string) => {
+    await postCommentChunks(channel, text);
+    return undefined;
+  };
+  return {
+    private: false,
+    postChallenge: async () => undefined,
+    post,
+    postStatus: (signIn) =>
+      post(
+        `Authorization required for ${signIn.displayName}. The person who asked must sign in before I can continue.`,
+      ),
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
+}
+
 async function postCommentChunks(
   channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
   body: string,
@@ -214,11 +208,4 @@ async function postCommentChunks(
   for (const chunk of splitGitHubCommentBody(body)) {
     await channel.thread.post(chunk);
   }
-}
-
-async function postFailure(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
-  message: string,
-): Promise<void> {
-  await postCommentChunks(channel, message);
 }

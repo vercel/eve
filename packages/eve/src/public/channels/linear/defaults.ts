@@ -1,18 +1,15 @@
-import { signInEnding } from "#channel/interaction-prompts.js";
-import { errorHintOf } from "#public/channels/reply.js";
+import { signInEndedText, signInOf } from "#channel/sign-in.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
+import { failureNotice } from "#public/channels/reply.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
-import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { signInPromptOf, signInSettlementOf } from "#channel/interaction-prompts.js";
+import { promptQueue } from "#channel/prompt-queue.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import { linearInteractionSignal, renderLinearInteractions } from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { isTaskControlTool } from "#protocol/task-tools.js";
-import { displayTitle } from "#shared/display-name.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import type {
   LinearChannelEvents,
@@ -80,7 +77,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
   }
 
   // A reply can only answer the elicitation it sees, so they post one at a time.
-  const prompts = promptQueueEvents(showPrompt);
+  const prompts = promptQueue(showPrompt);
 
   return {
     async "turn.started"(_event, { channel }) {
@@ -116,12 +113,12 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
       // eve's own task controls stay out of view.
-      if (isTaskControlTool(data.capability.name)) return;
+      if (data.capability.kind === "control") return;
       await postActivity(
         channel,
         options,
         {
-          action: data.capability.label ?? displayTitle(data.capability.name),
+          action: callLabel(data),
           parameter: actionParameter({ input: data.input }),
           type: "action",
         },
@@ -134,11 +131,9 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     async "interaction.opened"(fact, ctx) {
       const { data } = fact;
       const { channel } = ctx;
-      await prompts["interaction.opened"](fact, ctx);
-      const event = signInPromptOf(data, fact.scope);
+      const event = signInOf(ctx.view, data.interactionId);
       if (event === undefined) return;
-      const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
-      const url = event.authorization?.url;
+      const { displayName, url } = event;
       const userId = linearUserId(ctx);
       let authSignal: Parameters<typeof postActivity>[3];
       if (url !== undefined) {
@@ -152,8 +147,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         {
           body: authorizationRequiredBody({
             displayName,
-            instructions: event.authorization?.instructions,
-            userCode: event.authorization?.userCode,
+            instructions: event.instructions,
+            userCode: event.userCode,
           }),
           type: "elicitation",
         },
@@ -161,16 +156,15 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       );
     },
 
-    "response.admitted": prompts["response.admitted"],
+    committed: prompts,
 
     async "interaction.settled"(fact, ctx) {
       const { data } = fact;
       const { channel } = ctx;
-      await prompts["interaction.settled"](fact, ctx);
-      const event = signInSettlementOf(ctx.view, data);
+      const event = signInOf(ctx.view, data.interactionId);
       if (event === undefined) return;
-      const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
-      if (event.outcome === "accepted") {
+      const { displayName } = event;
+      if (data.outcome === "accepted") {
         await postActivity(
           channel,
           options,
@@ -183,9 +177,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
         return;
       }
 
-      const reason = event.reason === undefined ? "" : ` (${event.reason})`;
       await postActivity(channel, options, {
-        body: `${displayName} authorization ${signInEnding(event.outcome)}${reason}.`,
+        body: signInEndedText({ displayName, outcome: data.outcome, reason: data.reason }),
         type: "thought",
       });
     },
@@ -208,31 +201,19 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "session.ended"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
+      const notice = failureNotice(data, { restart: "Linear agent session" });
+      if (notice === undefined) return;
       await postActivity(channel, options, {
-        body: [
-          `This session could not recover from an error${hint}.`,
-          "",
-          "Start a new Linear agent session to continue.",
-          ...(errorId ? ["", `Error id: ${errorId}`] : []),
-        ].join("\n"),
+        body: notice,
         type: "error",
       });
     },
 
     async "turn.settled"({ data }, { channel }) {
-      if (data.outcome !== "failed") return;
-      const hint = formatErrorHint(errorHintOf(data.error));
-      const errorId = data.error?.id;
+      const notice = failureNotice(data, "turn");
+      if (notice === undefined) return;
       await postActivity(channel, options, {
-        body: [
-          `I hit an error while handling your request${hint}.`,
-          "",
-          "Please try again, rephrase, or reach out if it keeps failing.",
-          ...(errorId ? ["", `Error id: ${errorId}`] : []),
-        ].join("\n"),
+        body: notice,
         type: "error",
       });
     },
@@ -273,12 +254,6 @@ function requireAgentSessionId(agentSessionId: string | null): string {
 
 function linearUserLabel(user: LinearUser): string | undefined {
   return user.displayName ?? user.name ?? user.email;
-}
-
-function authorizationDisplayName(name: string, displayName: string | undefined): string {
-  if (displayName !== undefined) return displayName;
-  if (name.length === 0) return name;
-  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 function authorizationRequiredBody(input: {

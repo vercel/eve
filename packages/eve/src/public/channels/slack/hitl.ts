@@ -22,6 +22,7 @@ import {
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import { type Answer, parseAnswer, type ValidatedAnswer } from "#shared/input.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
+import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -537,12 +538,6 @@ function formatToolInputDetails(request: Interaction): string | undefined {
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
   const body = truncateWithEllipsis(json, bodyBudget);
   return `${TOOL_INPUT_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
-}
-
-function truncateWithEllipsis(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
 }
 
 function isBlockType(value: unknown, type: string): boolean {

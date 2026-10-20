@@ -3,7 +3,12 @@ import {
   type AuthoringEventType,
 } from "#protocol/session-events/authoring.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type { ChannelAdapter, ChannelInstrumentationMetadata } from "#channel/adapter.js";
+import type {
+  ChannelAdapter,
+  ChannelInstrumentationMetadata,
+  CommittedLine,
+} from "#channel/adapter.js";
+export type { CommittedLine } from "#channel/adapter.js";
 import {
   createMetadataAudienceProjector,
   type ChannelAudienceProjector,
@@ -217,14 +222,26 @@ export type ChannelEventHandler<T extends SessionEvent["type"], TCtx = void> = (
 ) => void | Promise<void>;
 
 /**
+ * Handles one committed line, once its events' handlers ran: the facts the channel heard, and the
+ * {@link ChannelEventContext} with the session's tables as of the line. For what a channel keeps
+ * in step with the tables, such as a status, a card, or the prompts still open, so it renders
+ * once per change rather than once per event.
+ */
+export type ChannelCommitHandler<TCtx = void> = (
+  line: CommittedLine,
+  ctx: ChannelEventContext<ChannelContext<TCtx>>,
+) => void | Promise<void>;
+
+/**
  * Optional handlers keyed by session event type: the session's facts and the progress records a
  * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the
  * event and a {@link ChannelEventContext} whose `channel` is the channel's own context. Handlers
- * run after the event is written, so they observe it and never shape it.
+ * run after the event is written, so they observe it and never shape it. `committed` runs once
+ * per committed line, after them.
  */
 export type ChannelEvents<TCtx = void> = {
   readonly [T in AuthoringEventType]?: ChannelEventHandler<T, TCtx>;
-};
+} & { readonly committed?: ChannelCommitHandler<TCtx> };
 
 /**
  * Input passed to a channel's `receive` callback when another channel or
@@ -309,7 +326,7 @@ export function defineChannel<
   return compiled;
 }
 
-const eventTypes = authoringEventTypes;
+const eventTypes = [...authoringEventTypes, "committed"] as const;
 
 function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<string, unknown>>(
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,

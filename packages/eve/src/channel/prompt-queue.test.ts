@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { firstOpenRequest } from "#channel/interaction-prompts.js";
-import { promptQueueEvents } from "#channel/prompt-queue.js";
+import { promptQueue } from "#channel/prompt-queue.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
 import type { Interaction } from "#protocol/session-reader.js";
@@ -83,19 +83,31 @@ describe("showing one request at a time", () => {
     expect(firstOpenRequest(viewWith(answerA))?.interactionId).toBe("approval-b");
   });
 
-  it("moves a channel's shown request on when an answer is admitted", async () => {
+  it("moves a channel's shown request on when an answer is admitted, once per change", async () => {
     const shown: string[] = [];
-    const events = promptQueueEvents(async (_channel, request: Interaction) => {
+    const committed = promptQueue(async (_channel: unknown, request: Interaction) => {
       shown.push(request.interactionId);
     });
     const channel = { state: {} };
-    const opened = { data: viewWith().interactions["approval-b"]! } as const;
-    await events["interaction.opened"](opened, { channel, view: viewWith() });
-    await events["response.admitted"](
-      { data: { responseId: "r_a" } },
-      { channel, view: viewWith(answerA) },
-    );
+    await committed(undefined, { channel, view: viewWith() });
+    await committed(undefined, { channel, view: viewWith() });
+    await committed(undefined, { channel, view: viewWith(answerA) });
 
     expect(shown).toEqual(["approval-a", "approval-b"]);
+  });
+
+  it("tries a request it failed to show again at the next commit", async () => {
+    let fails = true;
+    const shown: string[] = [];
+    const committed = promptQueue(async (_channel: unknown, request: Interaction) => {
+      if (fails) return false;
+      shown.push(request.interactionId);
+    });
+    const channel = { state: {} };
+    await committed(undefined, { channel, view: viewWith() });
+    fails = false;
+    await committed(undefined, { channel, view: viewWith() });
+
+    expect(shown).toEqual(["approval-a"]);
   });
 });

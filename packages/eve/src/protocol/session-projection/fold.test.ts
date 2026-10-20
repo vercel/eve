@@ -75,6 +75,9 @@ describe("the shared fold", () => {
     const view = folded(lines);
     expect(view.turns.turn_0).toMatchObject({ outcome: "completed", status: "settled" });
     expect(view.deliveries.d_0).toMatchObject({ outcome: "handled", status: "settled" });
+    // Rows say where they began and ended, so a reader can order a close against an opening.
+    expect(view.turns.turn_0).toMatchObject({ closedAt: 3, endedAt: at, introducedAt: 1 });
+    expect(view.runs.run_0).toMatchObject({ closedAt: 2, introducedAt: 1 });
     expect(reply(view, "turn_0").map((part) => part.value)).toEqual(["Reply 0."]);
     expect(activeTurn(view)).toBeUndefined();
     expect(idle(view)).toBe(true);

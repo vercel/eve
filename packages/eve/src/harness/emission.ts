@@ -11,7 +11,7 @@ type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][numbe
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
 import type { AssistantStepFinishReason } from "#harness/finish-reason.js";
-import { callRequested, callSettledFrom } from "#harness/call-facts.js";
+import { announcedKind, callRequested, callSettledFrom } from "#harness/call-facts.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { JsonObject } from "#shared/json.js";
 import {
@@ -158,7 +158,16 @@ async function consumeStreamContent(
     if (input === undefined) return;
     const event: SessionEvent = input.announced
       ? { data: { callId, delta }, type: "call.input" }
-      : { data: { callId, delta, name: input.toolName }, scope, type: "call.input" };
+      : {
+          data: {
+            callId,
+            delta,
+            kind: announcedKind(input.toolName, options?.tools.get(input.toolName)),
+            name: input.toolName,
+          },
+          scope,
+          type: "call.input",
+        };
     input.announced = true;
     await emitFn(event);
   };

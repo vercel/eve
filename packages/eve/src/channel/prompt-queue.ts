@@ -1,10 +1,5 @@
 import { firstOpenRequest } from "#channel/interaction-prompts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import type {
-  InteractionOpenedData,
-  InteractionSettledData,
-} from "#protocol/session-events/families/interaction.js";
-import type { ResponseAdmittedData } from "#protocol/session-events/families/response.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 
 /**
@@ -18,16 +13,18 @@ export interface PromptQueueState {
 }
 
 /**
- * Event handlers that call `show` with the request a typed reply answers now,
- * each time that request changes. They read which requests are open from the
- * tables as of the event's commit, so a request that closed never shows, and
- * one the channel failed to show is tried again on the next event. `show`
- * returns `false` when it could not show the request.
+ * A `committed` handler that calls `show` with the request a typed reply answers now, each time
+ * that request changes. It reads which requests are open from the tables as of the commit, so a
+ * request that closed never shows, and one the channel failed to show is tried again at the next
+ * commit. `show` returns `false` when it could not show the request.
  */
-export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
+export function promptQueue<TChannel extends { state: PromptQueueState }>(
   show: (channel: TChannel, request: Interaction) => Promise<boolean | void>,
 ) {
-  async function refresh(channel: TChannel, view: SessionView) {
+  return async (
+    _line: unknown,
+    { channel, view }: { readonly channel: TChannel; readonly view: SessionView },
+  ): Promise<void> => {
     const first = firstOpenRequest(view);
     if (first === undefined) {
       delete channel.state.shownPromptId;
@@ -36,27 +33,5 @@ export function promptQueueEvents<TChannel extends { state: PromptQueueState }>(
     if (first.interactionId === channel.state.shownPromptId) return;
     if ((await show(channel, first)) === false) return;
     channel.state.shownPromptId = first.interactionId;
-  }
-
-  return {
-    async "interaction.opened"(
-      _event: { readonly data: InteractionOpenedData },
-      ctx: { readonly channel: TChannel; readonly view: SessionView },
-    ): Promise<void> {
-      await refresh(ctx.channel, ctx.view);
-    },
-    async "interaction.settled"(
-      _event: { readonly data: InteractionSettledData },
-      ctx: { readonly channel: TChannel; readonly view: SessionView },
-    ): Promise<void> {
-      await refresh(ctx.channel, ctx.view);
-    },
-    /** An answer that waits for the rest of its batch moves the channel to the next request. */
-    async "response.admitted"(
-      _event: { readonly data: ResponseAdmittedData },
-      ctx: { readonly channel: TChannel; readonly view: SessionView },
-    ): Promise<void> {
-      await refresh(ctx.channel, ctx.view);
-    },
   };
 }
