@@ -32,8 +32,8 @@ it("attributes a failure to the running turn after a compaction hands the sessio
     slot: "capture",
     value: defineInstrumentation({
       events: {
-        "session.failed": (event) => {
-          failedTurnIds.push(event.turnId);
+        "session.ended": (event) => {
+          if (event.outcome === "failed") failedTurnIds.push(event.turnId);
         },
       },
     }),

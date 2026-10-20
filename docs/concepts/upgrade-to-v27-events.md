@@ -12,17 +12,17 @@ This page covers what to change. Work through the sections that apply to your ag
 
 ## What changes for whom
 
-| You author…                               | What changes                                                                                            |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Hooks (`agent/hooks/`)                    | Event keys and payloads. Handlers keep `(event, ctx)`; `ctx` adds `position` and `view`.                |
-| Channel `events` handlers                 | Event keys and payloads, and the handler signature: `(event, ctx)`, with your context on `ctx.channel`. |
-| Slack renderers                           | Event keys and payloads; handlers take `(event, ctx, next)`.                                            |
-| Clients, frontends, and evals             | Event types, cursors (line positions), event identity (`meta.position`), and interaction names.         |
-| Channel config, workflow tools, policies  | Names: `onAnswers`, `ToolQuestion`, `request.interactionId`. See [Renamed APIs](#renamed-apis).         |
-| MCP clients and `eve invoke` scripts      | Pending questions and sign-ins are `interactions`, keyed by `interactionId`.                            |
-| `defineDynamic` resolvers                 | Nothing in this release. The keys stay; the event argument is now the matching v27 fact.                |
-| Memory providers                          | Nothing in this release.                                                                                |
-| Instrumentation (`defineInstrumentation`) | Input events name their interaction (`interactionId`, `call`, `answer`); the event types stay.          |
+| You author…                               | What changes                                                                                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hooks (`agent/hooks/`)                    | Event keys and payloads. Handlers keep `(event, ctx)`; `ctx` adds `position` and `view`.                                                   |
+| Channel `events` handlers                 | Event keys and payloads, and the handler signature: `(event, ctx)`, with your context on `ctx.channel`.                                    |
+| Slack renderers                           | Event keys and payloads; handlers take `(event, ctx, next)`.                                                                               |
+| Clients, frontends, and evals             | Event types, cursors (line positions), event identity (`meta.position`), and interaction names.                                            |
+| Channel config, workflow tools, policies  | Names: `onAnswers`, `ToolQuestion`, `request.interactionId`. See [Renamed APIs](#renamed-apis).                                            |
+| MCP clients and `eve invoke` scripts      | Pending questions and sign-ins are `interactions`, keyed by `interactionId`.                                                               |
+| `defineDynamic` resolvers                 | Nothing in this release. The keys stay; the event argument is now the matching v27 fact.                                                   |
+| Memory providers                          | Nothing in this release.                                                                                                                   |
+| Instrumentation (`defineInstrumentation`) | Session, turn, call and input events take the stream's names; see [Instrumentation](/docs/observability/instrumentation#lifecycle-events). |
 
 A hook or channel keyed on a removed v26 event fails as eve loads it, with the key to use instead,
 rather than silently never firing. Hook, channel, and schedule extensions built for earlier
@@ -206,6 +206,30 @@ Read a row's `taskId` for a task, `callState(card.view, callId)` for its status,
 
 A channel that keeps something in step with the session can handle `committed`, once per
 committed line with the line's facts and `ctx.view`, instead of several facts.
+
+## Instrumentation
+
+Instrumentation events about what a session's stream records take the stream's names, and an
+operation's endings become one event with the fact's `outcome`: `session.ended`,
+`turn.settled`, `call.requested` and `call.settled`, `interaction.opened` and
+`interaction.settled`. `session.waiting` is gone; a turn's end is `turn.settled`. See the table
+in [Instrumentation](/docs/observability/instrumentation#lifecycle-events).
+
+- Replace `channel.delivery.*` with `delivery.consumed` and `delivery.settled`. A pause settles
+  the delivery `awaiting-input`; an answer owns the resumed work's delivery.
+- Replace `step.attempt.*` with `model.started`, `model.retried`, and `model.settled`. Provider
+  metadata moves to `model.call.settled`, not the run's terminal.
+- Provider calls and memory operations each use one `.settled` event with `outcome`.
+- Scopes use `runId` and `attempt`, not step indices or an encoded attempt id. `turnId` is
+  optional for compaction and direct tool calls.
+- Type handlers with `InstrumentationEvent<"call.settled">`; per-event type exports are gone.
+  Model input content is `unknown`, not AI SDK message types.
+- Read `capability` instead of `kind` or `isWorkflowTool` on `call.requested`. Keep `frameworkTool`.
+  Import channel metadata types and `isChannel` from `eve/channels`.
+- A runtime-context resolver receives `run: { id, attempt }` in place of `step.index`.
+  Its input type is `InstrumentationModelStartedInput`.
+
+The OpenTelemetry trace schema remains version 4, with the same span names and attributes.
 
 ## Clients and frontends
 

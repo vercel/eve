@@ -3,6 +3,7 @@ import {
   hasInternalRefScheme,
   isSerializedUrlFilePart,
 } from "#internal/attachments/url-refs.js";
+import { getKnownByteLength } from "#internal/attachments/data.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import type { UserPart } from "#protocol/session-events/envelope.js";
 import type { MessageContent } from "#shared/message-content.js";
@@ -84,9 +85,9 @@ function isTaggedFileData(
   return type === "data" || type === "reference" || type === "text" || type === "url";
 }
 
+/** What an inline payload weighs, read without decoding it: bytes, a `data:` URL, or base64. */
 function byteLengthOf(data: unknown): number | undefined {
-  if (data instanceof Uint8Array || data instanceof ArrayBuffer) return data.byteLength;
-  return undefined;
+  return getKnownByteLength(data) ?? undefined;
 }
 
 /** A URL a client can fetch over http(s); never a `data:` URL, which would put bytes on the stream. */

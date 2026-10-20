@@ -27,7 +27,6 @@ import {
   EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME,
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 } from "#context/key-names.js";
-import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
 import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
@@ -140,20 +139,6 @@ export interface OfferedCatalogTools {
 }
 export const OfferedCatalogToolsKey = new ContextKey<OfferedCatalogTools>(
   "eve.offeredCatalogTools",
-);
-export interface ActiveChannelDelivery {
-  readonly traceSessionId: string;
-  readonly agentName?: string;
-  readonly channelType?: string;
-  readonly delivery: InstrumentationChannelDeliveryRef;
-  readonly policyAgentName?: string;
-  readonly rootSessionId: string;
-  readonly sequence: number;
-  readonly sessionId: string;
-  readonly turnId: string;
-}
-export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelDelivery[]>(
-  "eve.activeChannelDeliveries",
 );
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",

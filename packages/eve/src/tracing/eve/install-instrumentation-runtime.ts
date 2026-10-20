@@ -120,8 +120,7 @@ export function installInstrumentationRuntime(input: {
 function hasMemoryOperationHandler(provider: InstrumentationProviderDefinition): boolean {
   return (
     provider.events?.["memory.operation.started"] !== undefined ||
-    provider.events?.["memory.operation.completed"] !== undefined ||
-    provider.events?.["memory.operation.failed"] !== undefined
+    provider.events?.["memory.operation.settled"] !== undefined
   );
 }
 
@@ -139,7 +138,7 @@ function sessionReleaseProvider(
     await Promise.all(processors.map((processor) => processor.releaseConversation(conversationId)));
   };
   return {
-    events: { "session.completed": release, "session.failed": release },
+    events: { "session.ended": release },
     name: "eve.conversation-release",
     stateNamespace: "internal:conversation-release",
   };

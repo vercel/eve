@@ -15,60 +15,13 @@ import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 export type { JsonValue } from "#shared/json.js";
 
 export type {
-  InstrumentationAttemptScope,
-  InstrumentationChannelDeliveryInput,
-  InstrumentationChannelDeliveryOutcome,
-  InstrumentationChannelDeliveryRef,
-  InstrumentationChannelDeliveryStartedEvent,
-  InstrumentationChannelDeliveryTerminalEvent,
-  InstrumentationContentPart,
+  InstrumentationScope,
   InstrumentationEvent,
-  InstrumentationInputKind,
-  InstrumentationInputOption,
-  InstrumentationInputOutcome,
-  InstrumentationInputRequest,
-  InstrumentationInputRequestedEvent,
-  InstrumentationInputResolvedEvent,
-  InstrumentationAnswer,
-  InstrumentationModelCallCompletedEvent,
-  InstrumentationModelCallFailedEvent,
-  InstrumentationModelCallStartedEvent,
-  InstrumentationModelRef,
-  InstrumentationOperationRef,
+  InstrumentationModelInput,
   InstrumentationParentLineage,
-  InstrumentationSessionFailedEvent,
-  InstrumentationSessionSettledEvent,
-  InstrumentationSessionStartedEvent,
-  InstrumentationSessionTransitionEvent,
-  InstrumentationStepAttemptMetadataEvent,
-  InstrumentationStepAttemptCompletedEvent,
-  InstrumentationStepAttemptFailedEvent,
-  InstrumentationStepAttemptStartedEvent,
-  InstrumentationStepAttemptTerminalEvent,
-  InstrumentationToolCallCompletedEvent,
-  InstrumentationToolCallFailedEvent,
-  InstrumentationToolCallStartedEvent,
-  InstrumentationToolCallKind,
-  InstrumentationToolCallOutcome,
-  InstrumentationToolOutput,
-  InstrumentationTraceContext,
-  InstrumentationTurnFailedEvent,
-  InstrumentationTurnSettledEvent,
-  InstrumentationTurnStartedEvent,
-  InstrumentationTurnTerminalEvent,
   InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 
-export type {
-  InstrumentationMemoryOperation,
-  InstrumentationMemoryOperationCompletedEvent,
-  InstrumentationMemoryOperationEvent,
-  InstrumentationMemoryOperationFailedEvent,
-  InstrumentationMemoryOperationName,
-  InstrumentationMemoryOperationStartedEvent,
-  InstrumentationMemoryOperationTerminalEvent,
-  InstrumentationMemoryRecord,
-} from "#instrumentation/memory.js";
 export type {
   TraceCaptureContext,
   TraceCapturePolicy,
@@ -126,12 +79,6 @@ export interface ProviderContext {
  */
 export type Handler<TEvent> = (event: TEvent, ctx: ProviderContext) => void | PromiseLike<void>;
 
-type EventForType<TEvent, TType> = TEvent extends { readonly type: infer TEventType }
-  ? TType extends TEventType
-    ? TEvent & { readonly type: TType }
-    : never
-  : never;
-
 /**
  * The events a provider may handle, one optional handler per event type.
  *
@@ -139,9 +86,7 @@ type EventForType<TEvent, TType> = TEvent extends { readonly type: infer TEventT
  * providers the moment the bus can publish it.
  */
 export type ProviderEvents = {
-  readonly [TType in InstrumentationEvent["type"]]?: Handler<
-    EventForType<InstrumentationEvent, TType>
-  >;
+  readonly [TType in InstrumentationEvent["type"]]?: Handler<InstrumentationEvent<TType>>;
 };
 
 /**

@@ -1,10 +1,11 @@
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
-  InstrumentationAttemptScope,
+  InstrumentationScope,
   InstrumentationContextRunner,
   InstrumentationHooks,
   InstrumentationSessionStartedEvent,
@@ -29,11 +30,6 @@ import {
   type CreateInstrumentationHandleEventInput,
 } from "#instrumentation/native-events.js";
 import type { HandleEventFn } from "#harness/types.js";
-import {
-  instrumentChannelDelivery,
-  type ChannelDeliveryStartInstrumentation,
-  type ChannelDeliveryTerminalInstrumentation,
-} from "#instrumentation/channel-delivery.js";
 import { recordErrorOnSpan } from "#internal/logging.js";
 import {
   prepareTurnTraceContext,
@@ -120,7 +116,7 @@ export interface InstrumentationStepScope<TSession> {
 }
 
 export interface PreparedInstrumentationAttempt {
-  readonly scope: InstrumentationAttemptScope;
+  readonly scope: InstrumentationScope;
   readonly telemetry: TelemetryOptions | undefined;
 }
 
@@ -167,15 +163,11 @@ export interface SessionInstrumentation {
 }
 
 export interface ExecutionInstrumentation {
+  readonly prepareDelivery: (delivery: DeliverHookPayload) => void;
   readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
   }) => HandleEventFn | undefined;
   readonly flush: () => Promise<void>;
-  readonly instrumentChannelDelivery: (
-    input:
-      | Omit<ChannelDeliveryStartInstrumentation, "hooks" | "policyAgentName" | "traceSessionId">
-      | Omit<ChannelDeliveryTerminalInstrumentation, "hooks">,
-  ) => Promise<void>;
   readonly memory?: MemoryInstrumentation;
   readonly prepareExecution: () => SessionInstrumentation;
   readonly preparePreamble: InstrumentationStepScope<never>["preparePreamble"];
@@ -197,6 +189,7 @@ export function bindInstrumentationRuntime(
     );
   }
   if (runtime === undefined) return undefined;
+  let deliveryInput: DeliverHookPayload | undefined;
   const baseHooks = runtime.hooks;
   const traceSessionId = boundSession.traceSessionId;
   const readSessionContext = () => {
@@ -408,6 +401,7 @@ export function bindInstrumentationRuntime(
               createInstrumentationHandleEvent({
                 ...eventInput,
                 ...attemptSession,
+                deliveryInput,
                 agentName: boundSession.agentName,
                 channelKind: conversation.channel.kind,
                 hooks,
@@ -474,6 +468,9 @@ export function bindInstrumentationRuntime(
     };
   };
   return {
+    prepareDelivery: (delivery) => {
+      deliveryInput = delivery;
+    },
     createHandleEvent: (input) => {
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({
@@ -482,6 +479,7 @@ export function bindInstrumentationRuntime(
         channelKind: sessionContext.conversation.channel.kind,
         functionId: captureExecutionRuntime().otelSettings?.functionId ?? boundSession.agentName,
         handleEvent: input.handleEvent,
+        deliveryInput,
         hooks: bindHooks(sessionContext),
         rootSessionId: sessionContext.rootSessionId,
         traceSessionId: sessionContext.traceSessionId,
@@ -493,18 +491,6 @@ export function bindInstrumentationRuntime(
       });
     },
     flush: runtime.forceFlush,
-    instrumentChannelDelivery: (input) => {
-      const sessionContext = readSessionContext();
-      if ("delivery" in input) {
-        return instrumentChannelDelivery({
-          ...input,
-          hooks: baseHooks,
-          policyAgentName: boundSession.agentName,
-          traceSessionId: sessionContext.traceSessionId,
-        });
-      }
-      return instrumentChannelDelivery({ ...input, hooks: baseHooks });
-    },
     memory,
     prepareExecution,
     preparePreamble: (input) => preparePreamble(input, readSessionContext()),

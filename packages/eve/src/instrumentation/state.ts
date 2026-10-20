@@ -30,8 +30,8 @@ type InstrumentationStateMap = Readonly<Record<string, InstrumentationStateRecor
 
 /**
  * Provider state lives in serialized Workflow context, not in the harness, so a
- * value staged by `tool.call.started` in one process is still there when
- * `tool.call.completed` runs in another.
+ * value staged by `call.requested` in one process is still there when
+ * `call.settled` runs in another.
  */
 const InstrumentationStateKey = new ContextKey<InstrumentationStateMap>(
   SERIALIZED_INSTRUMENTATION_STATE_KEYS.providerState,

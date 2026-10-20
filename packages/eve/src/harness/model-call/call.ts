@@ -284,7 +284,12 @@ export class ModelCaller {
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
-        telemetry: step.instrumentation?.telemetry(),
+        prepareTelemetry: (runId) =>
+          step.instrumentation?.prepareAttempt({
+            runId,
+            attempt: 0,
+            turnId: activeTurnId(step.position()),
+          }).telemetry,
         traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
       step.session = compaction.session;
@@ -331,6 +336,7 @@ export class ModelCaller {
     const instructions = this.instructions(options.extraSystemNote);
     const runtimeContext =
       step.instrumentation?.resolveRuntimeContext({
+        attempt: attemptIndex,
         emissionState: step.position(),
         environment,
         modelInput: { instructions, messages: this.modelMessages },
@@ -345,7 +351,8 @@ export class ModelCaller {
     const position = step.position();
     const attempt = step.instrumentation?.prepareAttempt({
       isFrameworkTool: (name) => step.frameworkToolNames.has(name),
-      attemptIndex,
+      runId: position.runId!,
+      attempt: attemptIndex,
       runtimeContext,
       stepIndex: position.stepIndex,
       turnId: activeTurnId(position),

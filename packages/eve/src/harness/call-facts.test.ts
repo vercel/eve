@@ -18,6 +18,23 @@ describe("what a call invokes", () => {
     );
   });
 
+  it("marks an agent another deployment serves as remote", () => {
+    const common = {
+      callId: "c",
+      description: "Research",
+      input: { message: "hi" },
+      name: "research",
+      nodeId: "n",
+    };
+    expect(
+      capabilityOf({ ...common, kind: "remote-agent-call", remoteAgentName: "research" }),
+    ).toEqual({ kind: "agent", name: "research", remote: true });
+    expect(capabilityOf({ ...common, kind: "subagent-call", subagentName: "research" })).toEqual({
+      kind: "agent",
+      name: "research",
+    });
+  });
+
   it("announces the kind a call's row will name", () => {
     expect(announcedKind("deploy", undefined)).toBe("tool");
     expect(announcedKind(SKILL_ENTRY_NAME, undefined)).toBe("skill");

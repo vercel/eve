@@ -27,6 +27,8 @@ export interface Capability {
   readonly kind: CapabilityKind;
   readonly name: string;
   readonly label?: string;
+  /** An `agent` another deployment serves: a remote agent, not a subagent of this one. */
+  readonly remote?: true;
 }
 
 /** A preview of a call's input as the model writes it. The first record announces the call. */
@@ -114,6 +116,7 @@ export const callSchemas = {
         capability: z.object({
           kind: known<CapabilityKind>(),
           name: z.string(),
+          remote: z.literal(true).optional(),
           label: z.string().optional(),
         }),
         input: jsonValue.optional(),

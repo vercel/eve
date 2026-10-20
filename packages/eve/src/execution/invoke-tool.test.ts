@@ -1,3 +1,8 @@
+import {
+  createInstrumentationHooks,
+  type InstrumentationEvent,
+} from "#instrumentation/lifecycle.js";
+import { requestAuthorization } from "#harness/authorization.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApprovalPolicy } from "#approval/definition.js";
@@ -19,7 +24,10 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
 }));
 
-afterEach(() => shutdownActiveSandboxHandles());
+afterEach(async () => {
+  await shutdownActiveSandboxHandles();
+  vi.unstubAllGlobals();
+});
 
 const alice: SessionAuthContext = {
   attributes: {},
@@ -199,6 +207,66 @@ function runtimeWith(
 }
 
 describe("invokeTool", () => {
+  it.each([
+    ["missing", {}, "failed", undefined],
+    ["echo", { text: 7 }, "rejected", "invalid-input"],
+    ["approve", {}, "rejected", "approval-required"],
+    ["sign-in", {}, "rejected", "authorization-required"],
+    ["echo", { text: "Alice's report" }, "completed", undefined],
+  ] as const)(
+    "publishes the caller's actual outcome for %s",
+    async (name, input, outcome, reason) => {
+      const events: InstrumentationEvent[] = [];
+      const forceFlush = vi.fn(async () => {});
+      const hooks = createInstrumentationHooks([
+        {
+          name: "observer",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+          events: {
+            "call.requested": (event) => {
+              events.push(event);
+            },
+            "call.settled": (event) => {
+              events.push(event);
+            },
+          },
+        },
+      ]);
+      vi.stubGlobal(Symbol.for("eve.instrumentation-runtime"), {
+        hooks,
+        forceFlush,
+        otelSettings: undefined,
+      });
+      const runtime = runtimeWith([
+        tool("echo", (value) => value),
+        tool("approve", () => "not executed", { approval: () => "user-approval" }),
+        tool("sign-in", () =>
+          requestAuthorization([
+            {
+              name: "reports",
+              hookUrl: "https://agent.example/callback",
+              challenge: { url: "https://reports.example/sign-in" },
+            },
+          ]),
+        ),
+      ]);
+      await invokeTool(runtime, name, input, { auth: alice });
+      expect(events).toHaveLength(2);
+      expect(events[1]).toMatchObject({
+        type: "call.settled",
+        outcome,
+        reason,
+        idempotencyKey: events[0]!.idempotencyKey,
+      });
+      expect(events[0]).toMatchObject({
+        type: "call.requested",
+        capability: { kind: "tool", name },
+      });
+      expect((events[0] as InstrumentationEvent<"call.requested">).scope.turnId).toBeUndefined();
+      expect(forceFlush).toHaveBeenCalledOnce();
+    },
+  );
+
   it("runs as auth, with initiator defaulting to auth", async () => {
     const bob: SessionAuthContext = { ...alice, principalId: "bob" };
     const seen: unknown[] = [];

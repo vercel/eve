@@ -1,3 +1,5 @@
+import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { instrumentationScope, traceStepIndex } from "#instrumentation/scope.js";
 import {
   abandonInstrumentationState,
   instrumentationStateSlot,
@@ -161,6 +163,9 @@ function snapshotInstrumentationEvent(
   const existing = snapshots.get(source);
   if (existing !== undefined) return existing as InstrumentationEvent;
   const snapshot = snapshotPlainValue(event, snapshots) as InstrumentationEvent;
+  if ("scope" in source && "scope" in snapshot) {
+    instrumentationScope(snapshot.scope, traceStepIndex(source.scope));
+  }
   snapshots.set(source, snapshot);
   return snapshot;
 }
@@ -222,7 +227,11 @@ async function dispatchToProvider(
   handlerTimeoutMs: number,
   visibleEvent: () => InstrumentationEvent,
 ): Promise<void> {
-  const startedBoundary = event.type.endsWith(".started") || event.type === "input.requested";
+  const startedBoundary =
+    event.type.endsWith(".started") ||
+    event.type === "delivery.consumed" ||
+    event.type === "call.requested" ||
+    event.type === "interaction.opened";
   const owner = stateOwner(event);
   const providerName = provider.name;
   const stateNamespace = provider.stateNamespace ?? providerName;
@@ -291,38 +300,36 @@ async function withTimeout(
 /** Model calls are attempt-scoped; tool calls and input waits can outlive an attempt. */
 function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
   if (
-    event.type === "channel.delivery.started" ||
-    event.type === "channel.delivery.cancelled" ||
-    event.type === "channel.delivery.completed" ||
-    event.type === "channel.delivery.failed"
+    event.type === "delivery.consumed" ||
+    (event.type === "delivery.settled" && event.outcome === "ignored") ||
+    (event.type === "delivery.settled" && event.outcome === "handled") ||
+    (event.type === "delivery.settled" && event.outcome === "failed")
   ) {
     return { sessionId: event.sessionId, turnId: event.turnId };
   }
   if (
     event.type === "memory.operation.started" ||
-    event.type === "memory.operation.completed" ||
-    event.type === "memory.operation.failed"
+    (event.type === "memory.operation.settled" && event.outcome === "completed") ||
+    (event.type === "memory.operation.settled" && event.outcome === "failed")
   ) {
     return { sessionId: event.sessionId, turnId: event.turnId };
   }
   if (!("scope" in event)) return {};
-  if (event.type.startsWith("tool.call.") || event.type.startsWith("input.")) {
+  if (event.type.startsWith("call.") || event.type.startsWith("interaction.")) {
     return { sessionId: event.scope.sessionId, turnId: event.scope.turnId };
   }
-  return event.type.startsWith("model.call.") || event.type.startsWith("step.attempt.")
-    ? { attemptId: event.scope.attemptId }
+  return event.type.startsWith("model.call.") || event.type.startsWith("model.")
+    ? { attemptId: attemptIdempotencyKey(event.scope) }
     : {};
 }
 
 function releaseTerminalState(event: InstrumentationEvent): void {
   if (isTerminal(event.type)) releaseAllInstrumentationState(event.idempotencyKey);
-  if (event.type === "step.attempt.completed" || event.type === "step.attempt.failed") {
-    releaseAllInstrumentationAttemptState(event.scope.attemptId);
+  if (event.type === "model.settled" || event.type === "model.retried") {
+    releaseAllInstrumentationAttemptState(attemptIdempotencyKey(event.scope));
   }
-  if (event.type === "session.completed" || event.type === "session.failed") {
-    releaseAllInstrumentationTurnState(event.sessionId);
-  }
-  if (event.type === "turn.cancelled" || event.type === "turn.failed") {
+  if (event.type === "session.ended") releaseAllInstrumentationTurnState(event.sessionId);
+  if (event.type === "turn.settled" && event.outcome !== "completed") {
     releaseAllInstrumentationTurnState(event.sessionId, event.turnId);
   }
 }
@@ -332,6 +339,8 @@ function isTerminal(type: InstrumentationEvent["type"]): boolean {
     type.endsWith(".completed") ||
     type.endsWith(".failed") ||
     type.endsWith(".cancelled") ||
-    type === "input.resolved"
+    type.endsWith(".settled") ||
+    type === "session.ended" ||
+    type === "model.retried"
   );
 }
