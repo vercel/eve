@@ -73,8 +73,13 @@ function createMockSandbox(input: {
         command.cmd === "realpath"
           ? {
               ...createMockCommandResult(),
-              // `realpath -m -- <paths...>` prints one line per path.
-              stdout: vi.fn().mockResolvedValue(`${(command.args ?? []).slice(2).join("\n")}\n`),
+              // `realpath -m -z -- <paths...>` ends each path with NUL.
+              stdout: vi.fn().mockResolvedValue(
+                (command.args ?? [])
+                  .slice(3)
+                  .map((path) => `${path}\0`)
+                  .join(""),
+              ),
             }
           : createMockCommandResult(),
       ),
@@ -457,7 +462,7 @@ describe("createVercelSandbox", () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     vi.mocked(sessionSandbox.runCommand).mockResolvedValueOnce({
       ...createMockCommandResult(),
-      stdout: vi.fn().mockResolvedValue("/workspace/repository/agent/instructions.md\n"),
+      stdout: vi.fn().mockResolvedValue("/workspace/repository/agent/instructions.md\0"),
     });
 
     await handle.sandbox.writeTextFile({
@@ -466,7 +471,7 @@ describe("createVercelSandbox", () => {
     });
 
     expect(sessionSandbox.runCommand).toHaveBeenLastCalledWith({
-      args: ["-m", "--", "/source/instructions.md"],
+      args: ["-m", "-z", "--", "/source/instructions.md"],
       cmd: "realpath",
       signal: undefined,
     });
@@ -488,20 +493,26 @@ describe("createVercelSandbox", () => {
     await writeSandboxFiles(handle.sandbox, {
       files: [
         { content: Buffer.from("A"), path: "/home/agent/.agents/skills/policy/a.md" },
-        { content: Buffer.from("B"), path: "skills/policy/b.md" },
+        { content: Buffer.from("B"), path: "skills/policy/b notes.md " },
       ],
     });
 
     expect(sessionSandbox.runCommand).toHaveBeenCalledOnce();
     expect(sessionSandbox.runCommand).toHaveBeenCalledWith({
-      args: ["-m", "--", "/home/agent/.agents/skills/policy/a.md", "/workspace/skills/policy/b.md"],
+      args: [
+        "-m",
+        "-z",
+        "--",
+        "/home/agent/.agents/skills/policy/a.md",
+        "/workspace/skills/policy/b notes.md ",
+      ],
       cmd: "realpath",
       signal: undefined,
     });
     expect(sessionSandbox.writeFiles).toHaveBeenLastCalledWith(
       [
         { content: Buffer.from("A"), path: "/home/agent/.agents/skills/policy/a.md" },
-        { content: Buffer.from("B"), path: "/workspace/skills/policy/b.md" },
+        { content: Buffer.from("B"), path: "/workspace/skills/policy/b notes.md " },
       ],
       { signal: undefined },
     );

@@ -6,7 +6,9 @@ import type {
   SandboxCommandResult,
   SandboxProcess,
   SandboxSession,
+  SandboxWriteFilesOptions,
 } from "#shared/sandbox-session.js";
+import { SANDBOX_WRITE_FILES, writeSandboxFiles } from "#shared/sandbox-write-files.js";
 import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.js";
 
 interface RecordedCall {
@@ -89,6 +91,23 @@ describe("bindSandboxAbortSignal", () => {
       expect(call.abortSignal?.aborted).toBe(false);
     }
     expect(new Set(calls.map((call) => call.abortSignal)).size).toBe(calls.length);
+  });
+
+  it("injects the bound signal into a provider's batch write", async () => {
+    const calls: RecordedCall[] = [];
+    const session = Object.assign(createRecordingSession(calls), {
+      [SANDBOX_WRITE_FILES]: async (options: SandboxWriteFilesOptions) => {
+        calls.push({ abortSignal: options.abortSignal, method: "writeFiles" });
+      },
+    });
+    const controller = new AbortController();
+    const bound = bindSandboxAbortSignal(session, controller.signal);
+
+    await writeSandboxFiles(bound, { files: [{ content: new Uint8Array(), path: "a.bin" }] });
+    controller.abort();
+
+    expect(calls.map((call) => call.method)).toEqual(["writeFiles"]);
+    expect(calls[0]?.abortSignal?.aborted).toBe(true);
   });
 
   it("does not accumulate provider listeners on the bound signal", async () => {

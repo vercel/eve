@@ -6,13 +6,17 @@ const FALLBACK_WRITE_CONCURRENCY = 16;
 /**
  * Where `buildSandboxSession` puts a provider's batch write. A symbol keeps it
  * off the public session type while session wrappers, which spread or proxy
- * the session, still carry it.
+ * the session, still carry it. A wrapper that changes calls, such as
+ * `bindSandboxAbortSignal`, must wrap it too.
  */
 export const SANDBOX_WRITE_FILES = Symbol("eve.sandbox.writeFiles");
 
-type BatchWriteSession = SandboxSession & {
-  readonly [SANDBOX_WRITE_FILES]?: (options: SandboxWriteFilesOptions) => Promise<void>;
-};
+type SandboxWriteFiles = (options: SandboxWriteFilesOptions) => Promise<void>;
+
+/** The session's batch write, when its provider has one. */
+export function getSandboxWriteFiles(session: SandboxSession): SandboxWriteFiles | undefined {
+  return (session as { readonly [SANDBOX_WRITE_FILES]?: SandboxWriteFiles })[SANDBOX_WRITE_FILES];
+}
 
 /**
  * Writes `files` in one provider call when the provider supports it, and one
@@ -22,7 +26,7 @@ export async function writeSandboxFiles(
   session: SandboxSession,
   options: SandboxWriteFilesOptions,
 ): Promise<void> {
-  const writeFiles = (session as BatchWriteSession)[SANDBOX_WRITE_FILES];
+  const writeFiles = getSandboxWriteFiles(session);
   if (writeFiles !== undefined) {
     await writeFiles(options);
     return;

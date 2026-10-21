@@ -711,7 +711,8 @@ function resolveVercelSandboxPath(path: string): string {
 /**
  * The SDK writes by unpacking a tar archive, which replaces a symlinked
  * destination instead of writing through it. Resolve every path first, with
- * one `realpath` call that prints one line per path.
+ * one `realpath` call. `-z` ends each path with NUL, so names with whitespace
+ * or newlines come back intact.
  */
 async function resolveVercelWriteFiles(
   sandbox: VercelSandbox,
@@ -719,20 +720,27 @@ async function resolveVercelWriteFiles(
   signal?: AbortSignal,
 ): Promise<{ content: Uint8Array; path: string }[]> {
   const result = await sandbox.runCommand({
-    args: ["-m", "--", ...files.map((file) => file.path)],
+    args: ["-m", "-z", "--", ...files.map((file) => file.path)],
     cmd: "realpath",
     signal,
   });
-  const paths = (await result.stdout()).trim().split("\n");
-  const resolved = files.flatMap((file, index) => {
-    const path = paths[index];
-    return path?.startsWith("/") === true ? [{ content: file.content, path }] : [];
-  });
-  if (result.exitCode !== 0 || paths.length !== files.length || resolved.length !== files.length) {
-    const requested = files.map((file) => file.path).join(", ");
-    throw new Error(`Failed to resolve Vercel Sandbox write path: ${requested}`);
+  if (result.exitCode !== 0) {
+    const stderr = (await result.stderr()).trim();
+    throw new Error(`Failed to resolve Vercel Sandbox write paths with realpath: ${stderr}`);
   }
-  return resolved;
+  const paths = (await result.stdout()).split("\0").slice(0, -1);
+  if (paths.length !== files.length) {
+    throw new Error(
+      `Failed to resolve Vercel Sandbox write paths: realpath printed ${paths.length} paths for ${files.length} files.`,
+    );
+  }
+  return files.map((file, index) => {
+    const path = paths[index];
+    if (path === undefined || !path.startsWith("/")) {
+      throw new Error(`Failed to resolve Vercel Sandbox write path: ${file.path}`);
+    }
+    return { content: file.content, path };
+  });
 }
 
 /**
