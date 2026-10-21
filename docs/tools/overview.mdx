@@ -257,7 +257,7 @@ examples.
 
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
-eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
+eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent. Approval decides whether a call may start; it does not stop an approved call from running again when its step re-runs.
 
 ## When a tool throws
 
@@ -270,6 +270,19 @@ Protect non-idempotent operations with the strongest mechanism the service suppo
 1. Pass a stable idempotency key to the upstream API.
 2. Otherwise, record a unique application operation before writing and check it on every attempt.
 3. Use human approval when a person must authorize each execution, not as a substitute for deduplication after an ambiguous network result.
+
+When a tool can't be made idempotent, set `replay: "never"`. eve then refuses to run it in a step that is running again: the call fails with `TOOL_RECOVERY_REQUIRED`, and the model is told an earlier attempt may already have taken effect, so it can check or ask before retrying. The next step runs the tool normally. Workflow tools don't take `replay`; their own steps already record each result.
+
+```ts title="tools/send-invoice.ts"
+export default defineTool({
+  description: "Email an invoice to a customer.",
+  inputSchema: z.object({ invoiceId: z.string() }),
+  replay: "never",
+  async execute({ invoiceId }) {
+    return await sendInvoice(invoiceId);
+  },
+});
+```
 
 See [Execution model and durability](/docs/concepts/execution-model-and-durability#resuming-after-a-crash) for step replay semantics. For one-way provider notifications, see [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications).
 

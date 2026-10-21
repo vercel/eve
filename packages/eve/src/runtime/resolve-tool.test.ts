@@ -81,6 +81,20 @@ describe("resolveToolDefinition", () => {
       "Uploading",
     );
   });
+
+  it("carries the authored replay policy", async () => {
+    const authored = defineTool({
+      description: definition.description,
+      execute: () => null,
+      inputSchema: { type: "object" },
+      replay: "never",
+    });
+    expect(normalizeToolDefinition(authored, "Invalid tool").kind).toBe("tool");
+    const resolved = await resolveToolDefinition(definition, moduleMap(authored), undefined, {
+      kind: "application",
+    });
+    expect(resolved.replay).toBe("never");
+  });
 });
 
 describe("authored tool approval keys", () => {

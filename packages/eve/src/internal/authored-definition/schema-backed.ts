@@ -163,7 +163,8 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "approvalKey",
       "outputSchema",
       "toModelOutput",
-      ...(workflow === undefined ? [] : [workflow.entryPoint]),
+      // A workflow tool already runs in its own durable steps.
+      ...(workflow === undefined ? ["replay"] : [workflow.entryPoint]),
     ],
     message,
   );
@@ -173,6 +174,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
   if (workflow?.entryPoint === "serve") assertNoOwnTaskIdInput(inputSchema, message);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
+  if (record.replay !== undefined) expectOneOf(record.replay, ["safe", "never"], "replay", message);
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);
   // A workflow tool's entry point is its executor; the runtime loads the module for its hooks.

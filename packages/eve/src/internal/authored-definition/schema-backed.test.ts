@@ -367,6 +367,21 @@ describe("normalizeToolDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("rejects an unknown replay policy", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          description: "Echo.",
+          execute(input: unknown) {
+            return input;
+          },
+          replay: "once",
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("rejects authored tools whose `toModelOutput` is not a function", () => {
     expect(() =>
       normalizeToolDefinition(

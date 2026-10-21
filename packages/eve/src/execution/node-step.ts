@@ -7,6 +7,7 @@ import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-l
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { refuseOnReplay } from "#execution/tool-replay.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
@@ -274,6 +275,7 @@ function createRegisteredHarnessToolDefinition(input: {
     executeInput: def.executeInput,
     execute: resolveAuthoredExecute({
       rawExecute,
+      replay: def.replay,
       scope: def.name,
     }),
     frameworkTool: isFrameworkTool(def) || def.owner.kind === "framework",
@@ -294,9 +296,11 @@ function createRegisteredHarnessToolDefinition(input: {
  *   which builds a token-aware context. Providers passed to
  *   `ctx.getToken(provider)` use tool-qualified auth scopes.
  * - Tools without `execute` (provider-managed) stay `undefined`.
+ * - `replay: "never"` tools refuse to run when their durable step re-runs.
  */
 function resolveAuthoredExecute(input: {
   readonly rawExecute: ResolvedToolDefinition["execute"];
+  readonly replay: ResolvedToolDefinition["replay"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
   const { rawExecute, scope } = input;
@@ -304,5 +308,6 @@ function resolveAuthoredExecute(input: {
     return undefined;
   }
   const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
-  return createToolExecuteWithAuth({ execute: authored, scope });
+  const execute = createToolExecuteWithAuth({ execute: authored, scope });
+  return input.replay === "never" ? refuseOnReplay(scope, execute) : execute;
 }

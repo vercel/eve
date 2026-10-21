@@ -122,7 +122,7 @@ export async function resolveToolDefinition(
  */
 type OptionalResolvedFields = {
   -readonly [
-    K in "label" | "approval" | "approvalKey" | "endsTurn" | "toModelOutput"
+    K in "label" | "approval" | "approvalKey" | "endsTurn" | "replay" | "toModelOutput"
   ]?: ResolvedToolDefinition[K];
 };
 
@@ -187,6 +187,8 @@ function extractOptionalHooks(
             describe(definition, "to provide endsTurn as a boolean or a function"),
           ) as ResolvedToolDefinition["endsTurn"]);
   }
+
+  if (record.replay === "safe" || record.replay === "never") optional.replay = record.replay;
 
   if (record.toModelOutput !== undefined) {
     optional.toModelOutput = expectFunction(

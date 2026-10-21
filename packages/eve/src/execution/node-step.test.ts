@@ -38,6 +38,13 @@ import {
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
 
+const mocks = vi.hoisted(() => ({ stepAttempt: 1 }));
+
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
+  getStepMetadata: () => ({ attempt: mocks.stepAttempt }),
+}));
+
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
@@ -185,6 +192,7 @@ async function createNodeWithSourceOwnedTools(input: {
   readonly owner?:
     | { readonly kind: "application" }
     | { readonly feature: string; readonly kind: "framework" };
+  readonly replay?: "never";
   readonly turnTools?: StaticRuntimeTurnAgent["tools"];
 }): Promise<ResolvedRuntimeAgentNode> {
   const toolRegistry = await createRuntimeToolRegistry(
@@ -204,6 +212,7 @@ async function createNodeWithSourceOwnedTools(input: {
           logicalPath: `tools/${name}.ts`,
           name,
           owner: input.owner ?? { feature: "test", kind: "framework" },
+          replay: input.replay,
           sourceId: `framework:tools/${name}.ts`,
           sourceKind: "module",
         };
@@ -261,6 +270,23 @@ describe("createNodeHarnessTools", () => {
     });
 
     expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
+  });
+
+  it("refuses a replay: never tool when its durable step runs again", async () => {
+    const node = await createNodeWithSourceOwnedTools({
+      names: ["send_email"],
+      owner: { kind: "application" },
+      replay: "never",
+    });
+    const execute = createNodeHarnessTools({ node }).get("send_email")?.execute;
+    const options = { abortSignal: new AbortController().signal, messages: [], toolCallId: "call-1" };
+
+    mocks.stepAttempt = 2;
+    try {
+      expect(() => execute?.({}, options as never)).toThrow(/TOOL_RECOVERY_REQUIRED/);
+    } finally {
+      mocks.stepAttempt = 1;
+    }
   });
 
   it("lowers the compiled framework agent tool as a workflow tool", async () => {

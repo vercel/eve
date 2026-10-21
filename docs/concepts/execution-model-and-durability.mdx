@@ -208,7 +208,7 @@ Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay i
 
 ## Resuming after a crash
 
-Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
+Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or mark the tool [`replay: "never"`](../tools#when-a-tool-throws) so a re-run step refuses it instead. Approval decides whether a call may start; it does not stop an approved call from running again when its step re-runs. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
 
 With `experimental.workflow.modelCallsPerStep` greater than `1`, an
 interrupted Workflow step can also repeat earlier model calls and inline tool

@@ -102,7 +102,7 @@ For compatibility with the previous predicate shape, policies may return boolean
 
 Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
-Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
+Approval is not a replay guard. Once a call is approved, the decision is durable, so if the step running it is interrupted, the re-run executes the call again without asking. Protect charges, emails, and other non-idempotent side effects with an idempotency key such as `ctx.callId`.
 
 ### Authorizing approval responses
 

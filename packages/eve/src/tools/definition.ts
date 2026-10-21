@@ -67,8 +67,12 @@ export interface InternalToolLabelDefinition {
   readonly start?: (input: unknown) => string;
 }
 
+/** Whether an interrupted call may run again when its durable step re-runs. */
+export type ToolReplay = "safe" | "never";
+
 export interface InternalToolDefinition extends ToolDefinitionBase {
   readonly endsTurn?: ToolDefinition["endsTurn"];
+  readonly replay?: ToolReplay;
   label?: InternalToolLabelDefinition;
   name: string;
   inputSchema: JsonObject | null;
@@ -297,6 +301,16 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    */
   approval?: ToolApproval<ApprovalContextInput<TInput>>;
   /**
+   * Whether eve may run this tool again when the durable step around it re-runs.
+   *
+   * - `"safe"` (default): a re-run step can run the call again. Make side
+   *   effects idempotent, for example with `ctx.callId`.
+   * - `"never"`: a re-run step doesn't run the tool. The call fails with
+   *   `TOOL_RECOVERY_REQUIRED`, and the model is told an earlier attempt may
+   *   already have taken effect. The next step runs it normally.
+   */
+  replay?: ToolReplay;
+  /**
    * Optional projection controlling what the model sees as the tool result.
    * Receives the full `TOutput` from {@link execute} and returns the
    * model-facing {@link ToolModelOutput}.
@@ -345,6 +359,7 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
+  replay?: ToolReplay;
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
@@ -369,6 +384,7 @@ export function defineTool<
     ToolOutputFromExecuteReturn<TReturn>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
+  replay?: ToolReplay;
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
@@ -393,6 +409,7 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
+  replay?: ToolReplay;
   approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
@@ -411,6 +428,7 @@ export function defineTool<TReturn>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
+  replay?: ToolReplay;
   approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
