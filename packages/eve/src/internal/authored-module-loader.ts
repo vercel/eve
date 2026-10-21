@@ -225,7 +225,7 @@ export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
-  const code = await buildAuthoredModuleBundle(modulePath, options, {
+  return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
@@ -233,8 +233,6 @@ export async function bundleAuthoredModuleForGeneration(
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
   });
-
-  return removeRolldownModuleRegionComments(code);
 }
 
 /** One path-preserving entry in an extension distribution graph. */
@@ -298,7 +296,7 @@ export async function bundleExtensionDistributionGraph(input: {
     const imports = new Set<string>();
     for (const item of result.output) {
       if (item.type === "chunk") {
-        files.set(item.fileName, removeRolldownModuleRegionComments(item.code));
+        files.set(item.fileName, item.code);
         for (const specifier of [...item.imports, ...item.dynamicImports]) imports.add(specifier);
       }
     }
@@ -411,7 +409,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     });
     return {
       authoredWorkflowModules: workflowSources.modules(),
-      code: removeRolldownModuleRegionComments(chunk.code),
+      code: chunk.code,
       sourceModules: workflowSources.sourceModules().filter((id) => id !== input.moduleMapPath),
       workflowSourceFingerprint: workflowSources.fingerprint(),
     };
@@ -614,13 +612,6 @@ export function createAuthoredWorkflowDirectivePlugin(input: {
       return transformed.code === source ? undefined : { code: transformed.code, map: null };
     },
   };
-}
-
-function removeRolldownModuleRegionComments(code: string): string {
-  return code
-    .split("\n")
-    .filter((line) => !line.startsWith("//#region ") && line !== "//#endregion")
-    .join("\n");
 }
 
 async function loadBundledAuthoredModule(

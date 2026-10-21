@@ -107,11 +107,16 @@ export async function parseWithNitroRolldownAst(
  * unresolved imports.
  */
 export async function buildWithNitroRolldown(
-  options: Record<string, unknown>,
+  options: Record<string, unknown> & { readonly experimental?: Record<string, unknown> },
 ): Promise<RolldownOutput> {
   assertCustomRolldownConditionNames(options);
   const { build } = await loadNitroRolldown();
-  return await build({ onLog: onRolldownBuildLog, ...options });
+  return await build({
+    onLog: onRolldownBuildLog,
+    ...options,
+    // Debug module IDs contain temporary workspace paths and destabilize runtime fingerprints.
+    experimental: { ...options.experimental, attachDebugInfo: "none" },
+  });
 }
 
 // Unlike the Nitro host build, whose dependency graph deliberately leaves
