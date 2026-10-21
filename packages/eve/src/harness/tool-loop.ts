@@ -1577,7 +1577,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // cached prompt prefix valid, and handleStepResult rebuilds history
       // from the step's prompt messages, so the note exists only on this
       // call's wire request.
-      const callMessages = withTrailingUserNote(modelMessages, opts.trailingUserNote);
+      const callMessages = withTrailingUserNote(
+        stitchUnansweredToolCalls(modelMessages),
+        opts.trailingUserNote,
+      );
 
       const instrumentationTurnId = activeTurnId(emissionState);
       const attempt = stepInstrumentation?.prepareAttempt({
@@ -1677,6 +1680,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ) {
             throw new EmptyModelResponseError();
           }
+          if (
+            stepResult.finishReason === "other" &&
+            hasUnansweredToolCall(accumulatedResponseMessages) &&
+            inlineAuthorizationResults.length === 0 &&
+            trailingInlineToolResultParts.length === 0
+          ) {
+            throw new EmptyModelResponseError();
+          }
           await emitStepActions(emit, emissionState, stepResult, {
             emittedActionCallIds,
             excludedActionCallIds: invalidInputToolCallIds,
@@ -1716,6 +1727,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         if (
           isEmptyModelResponse(stepResult) &&
           extractToolResultCallIds(generateResult.responseMessages).size === 0
+        ) {
+          throw new EmptyModelResponseError();
+        }
+        if (
+          stepResult.finishReason === "other" &&
+          hasUnansweredToolCall(generateResult.responseMessages)
         ) {
           throw new EmptyModelResponseError();
         }
@@ -2437,6 +2454,56 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
     `has been removed: ${list}. Proceed using the remaining tools or your ` +
     `training knowledge.`
   );
+}
+
+const ORPHANED_TOOL_CALL_RESULT = "interrupted: upstream incident, re-run if still needed";
+
+function unansweredToolCalls(message: ModelMessage, answered: ReadonlySet<string>) {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return [];
+  return message.content.filter(
+    (part) => part.type === "tool-call" && !answered.has(part.toolCallId),
+  );
+}
+
+/** Calls and approval parts that settle a call: an approved call runs inside the next model call. */
+function settledToolCallIds(messages: readonly ModelMessage[]): Set<string> {
+  const ids = new Set(extractToolResultCallIds(messages));
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (typeof part !== "object" || part === null) continue;
+      if (part.type === "tool-approval-request" || part.type === "tool-approval-response") {
+        const id = (part as { toolCallId?: string }).toolCallId;
+        if (id !== undefined) ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Inserts an error result right after any assistant tool call that has no
+ * result anywhere in history, so a session saved with an orphaned call (a model
+ * stream cut after the call) still produces a valid prompt on its next call.
+ */
+export function stitchUnansweredToolCalls(messages: readonly ModelMessage[]): ModelMessage[] {
+  const answered = settledToolCallIds(messages);
+  const out: ModelMessage[] = [];
+  for (const message of messages) {
+    out.push(message);
+    const orphans = unansweredToolCalls(message, answered);
+    if (orphans.length === 0) continue;
+    out.push({
+      role: "tool",
+      content: orphans.map((call) => ({
+        type: "tool-result" as const,
+        toolCallId: (call as { toolCallId: string }).toolCallId,
+        toolName: (call as { toolName: string }).toolName,
+        output: { type: "error-text" as const, value: ORPHANED_TOOL_CALL_RESULT },
+      })),
+    });
+  }
+  return out;
 }
 
 /**
