@@ -27,6 +27,7 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type {
   VercelSandboxMountOptions,
   VercelSandboxRuntimeOptions,
@@ -265,7 +266,9 @@ export function createVercelSandbox(
         sandboxName: state.sandboxName,
       });
       if (sandbox === null) {
-        throw new Error(`Vercel sandbox session "${state.sandboxName}" no longer exists.`);
+        throw new SandboxSessionGoneError(
+          `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
+        );
       }
       await ensureVercelSandboxBaseRuntime(sandbox);
       return createHandle({ createOptions, loadDeleteSandboxModule, sandbox });

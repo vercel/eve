@@ -69,6 +69,7 @@ import {
   type SandboxProviderPrepareContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type { InternalSandboxSession } from "#shared/sandbox-session.js";
 
 type LiveMicrosandboxOptions = ResolvedMicrosandboxOptions & MicrosandboxSandboxRuntimeOptions;
@@ -297,7 +298,9 @@ async function openMicrosandboxHandle(input: {
   }
 
   if (!input.createIfMissing) {
-    throw new Error(`microsandbox session "${sessionIdentity}" is no longer available to resume.`);
+    throw new SandboxSessionGoneError(
+      `microsandbox session "${sessionIdentity}" is no longer available to resume.`,
+    );
   }
 
   if (

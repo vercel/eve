@@ -11,6 +11,7 @@ import {
   defineSandboxProvider,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
@@ -197,6 +198,42 @@ describe("ensureSandboxAccess", () => {
     });
     expect(setup).not.toHaveBeenCalled();
     expect(value.create).toHaveBeenCalledOnce();
+  });
+
+  // https://github.com/vercel/eve/issues/5113
+  it("starts a fresh sandbox when the persisted one is gone", async () => {
+    const setup = vi.fn();
+    const value = fixture(setup);
+    value.create.mockRejectedValueOnce(
+      new SandboxSessionGoneError('microsandbox session "ses_1" is no longer available to resume.'),
+    );
+    const { access, sandbox } = await open(value.registry, "session-1", {
+      session: { providerName: "test", state: null, stateProtocolVersion: 1 },
+    });
+    expect(sandbox).toBeTruthy();
+    expect(setup).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
+    await expect(access.captureState()).resolves.toEqual({
+      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+    });
+  });
+
+  it("keeps the persisted sandbox when resume fails for another reason", async () => {
+    const value = fixture();
+    value.create.mockRejectedValueOnce(new Error("daemon unavailable"));
+    const state = {
+      session: { providerName: "test", state: { key: "old" }, stateProtocolVersion: 1 },
+    };
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state,
+    });
+    await expect(access.get()).rejects.toThrow("daemon unavailable");
+    expect(value.start).not.toHaveBeenCalled();
+    await expect(access.captureState()).resolves.toEqual(state);
   });
 
   it("starts a fresh sandbox for a session imported from eve 0.54", async () => {

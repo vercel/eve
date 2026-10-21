@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-09-16"
+last_updated: "2026-10-21"
 ---
 
 # Sandbox environments and provider sessions
@@ -113,7 +113,7 @@ Core evaluates `defineSandbox()` and calls `start()` when no serialized provider
 
 `start()` receives provider-owned open options and the exact artifact. `resume()` receives only the current session context, the target deployment's exact artifact, and persisted provider state. Open options and callbacks are never serialized or reconstructed by core. Credentials, clients, fetch implementations, and signals needed for lookup belong to environment/provider configuration rather than start-only open options. A provider must include any immutable option-derived data needed for reconnection in its own JSON-compatible state.
 
-Provider state is immutable after `start()` in this contract. `resume()` reconnects or restarts persisted native state but does not recreate missing native compute from unavailable callbacks. If native state is gone, resume fails. Deletion clears provider state; the next access evaluates the selector and starts again.
+Provider state is immutable after `start()` in this contract. `resume()` reconnects or restarts persisted native state but does not recreate missing native compute from unavailable callbacks. If native state is gone, resume reports it and core treats it like deletion: it clears provider state and evaluates the selector to start again.
 
 During deployment handoff, the target provider validates state against its current implementation and artifact. Incompatibility rejects activation, leaving the existing owner on its current deployment. Core does not persist old artifacts or migrate provider state.
 

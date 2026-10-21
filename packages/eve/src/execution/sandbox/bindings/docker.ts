@@ -51,6 +51,7 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type {
   DockerSandboxEnvironmentOptions,
   DockerSandboxRuntimeOptions,
@@ -118,7 +119,13 @@ export function createDockerSandboxProvider(
       "{{.State.Running}}",
       containerName,
     ]);
-    return inspect.exitCode === 0 ? inspect.stdout.trim() === "true" : undefined;
+    if (inspect.exitCode === 0) return inspect.stdout.trim() === "true";
+    if (/no such (?:container|object)/iu.test(inspect.stderr)) return undefined;
+    // Any other failure, such as a daemon that stopped after the cached check, must not
+    // read as a missing container: resume would discard the session's sandbox.
+    daemonCheck = undefined;
+    expectDockerSuccess(inspect, `inspect sandbox session container "${containerName}"`);
+    return undefined;
   }
 
   async function openDockerSession(
@@ -132,7 +139,9 @@ export function createDockerSandboxProvider(
     let running = await inspectContainerRunning(containerName);
     if (running === undefined) {
       if (!createIfMissing) {
-        throw new Error(`Docker sandbox session container "${containerName}" no longer exists.`);
+        throw new SandboxSessionGoneError(
+          `Docker sandbox session container "${containerName}" no longer exists.`,
+        );
       }
       const artifact = requirePreparedDockerArtifact(artifactValue);
       if (!(await dockerImageExists(cli, artifact.imageReference))) {

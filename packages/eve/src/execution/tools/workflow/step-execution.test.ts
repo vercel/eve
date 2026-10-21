@@ -23,6 +23,7 @@ import {
   createDiskRuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import {
   defineSandboxProvider,
   type SandboxProviderSessionContext,
@@ -106,7 +107,9 @@ function upsertSandboxes() {
       prepare: async () => null,
       resume: async (_context: unknown, _artifact: unknown, state: { readonly key: string }) => {
         resumes.push(state.key);
-        if (!live.has(state.key)) throw new Error(`Sandbox "${state.key}" no longer exists.`);
+        if (!live.has(state.key)) {
+          throw new SandboxSessionGoneError(`Sandbox "${state.key}" no longer exists.`);
+        }
         return handleFor(state.key);
       },
       start: async (context: SandboxProviderSessionContext) => {
