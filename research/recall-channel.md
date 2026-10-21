@@ -33,7 +33,7 @@ recallChannel({
   region?: string,
   route?: string,               // default "/eve/v1/recall"
   botName?: string,             // default "eve": addressing + own-message filter
-  webhookUrl?: string,          // for bots `receive` creates
+  webhookUrl?: string,          // for bots `receive` creates; default RECALL_WEBHOOK_URL, then this deployment
   turnPolicy?: TurnPolicy,      // default "queue"
   onMeetingEvent?(ctx, event),  // route: -> { auth, message?, title? } | null
   shouldRespond?(input),        // session: does this line start a turn?
@@ -122,7 +122,8 @@ session, so another channel can hand a request into a meeting.
   posted for everyone.
 - **Webhooks:** Recall retries any non-2xx every second for a minute, so the
   route verifies, caps the body at 256 KiB, and acknowledges before dispatch.
-  It also acknowledges a signed body it can't parse.
+  It also acknowledges a signed body it can't parse. Each delivery passes the
+  `webhook-id` as its idempotency key, so the session drops a retried event.
 
 ## Decided
 
@@ -175,12 +176,11 @@ characters on Meet. Open questions:
 ## Open questions
 
 1. **Own-message detection.** Recall documents no bot participant id or
-   `is_bot` flag, nor whether the bot's chat echoes back. The spike matches the
-   display name, which drops a human with the same name.
-2. **Webhook deduplication.** Retries carry the same `webhook-id`. Ack-first
-   handling makes retries rare, but deduplication would need a store the route
-   doesn't have.
-3. **Session end.** Status webhooks arrive at the same route, but they're
+   `is_bot` flag, nor whether the bot's chat echoes back. The channel drops
+   chat under the configured name, under the bot name Recall reports, and chat
+   repeating one of the bot's recent messages. A human with the bot's name is
+   dropped too.
+2. **Session end.** Status webhooks arrive at the same route, but they're
    configured in the Recall dashboard and the default hook drops them. A
    `call_ended` could reset the session or prompt a post-meeting summary;
    `transcript.done` enables a full-transcript recap.
