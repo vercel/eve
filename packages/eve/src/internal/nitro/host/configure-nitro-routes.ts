@@ -10,6 +10,7 @@ import {
   normalizeEsmImportSpecifier,
   stringifyEsmImportSpecifier,
 } from "#internal/application/import-specifier.js";
+import { isVercelBuildEnvironment } from "#internal/application/paths.js";
 import {
   resolvePackageRoot,
   resolvePackageSourceFilePath,
