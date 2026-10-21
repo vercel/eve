@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
+import { resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
 /**
  * Each sandbox write is a remote round trip (Vercel Sandbox also resolves the
@@ -112,23 +112,6 @@ export async function writeSkillPackageToSandbox(input: {
         sandbox: input.sandbox,
       }),
     });
-  });
-}
-
-/**
- * Removes a skill package from the live sandbox.
- */
-export async function removeSkillPackageFromSandbox(input: {
-  readonly sandbox: SandboxSession;
-  readonly name: string;
-}): Promise<void> {
-  assertSafeSkillPackageName(input.name);
-  const root = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
-
-  await input.sandbox.removePath({
-    force: true,
-    path: `${root}/${input.name}`,
-    recursive: true,
   });
 }
 

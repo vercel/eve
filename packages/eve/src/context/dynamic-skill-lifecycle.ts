@@ -6,7 +6,6 @@ import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-
 import {
   type MaterializableSkillPackage,
   normalizeSkillPackage,
-  removeSkillPackageFromSandbox,
   skillPackageRevision,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
@@ -94,6 +93,10 @@ function sandboxIdentity(state: SandboxState): string | null {
  * Writes only packages with supporting files. Markdown-only skills are served
  * from durable context, so they never need a sandbox. A package is skipped when
  * its revision is unchanged and was written to the same persisted sandbox.
+ *
+ * Never deletes: a skill that is withdrawn looks the same as one that stopped
+ * shipping files because the sandbox already has them (for example, baked into
+ * a snapshot), so files from earlier revisions stay in place.
  */
 async function syncDynamicSkillFiles(input: {
   readonly ctx: ContextContainer;
@@ -101,18 +104,17 @@ async function syncDynamicSkillFiles(input: {
   readonly next: ReadonlyMap<string, SandboxSkillPackage>;
 }): Promise<void> {
   const { ctx, previous, next } = input;
-  if (previous.size === 0 && next.size === 0) return;
+  if (next.size === 0) return;
 
   const access = ctx.require(SandboxKey);
   const written = ctx.get(DynamicSkillSandboxKey) ?? {};
   const identity = sandboxIdentity(await access.captureState());
   const isWritten = (name: string) => identity !== null && written[name] === identity;
 
-  const stale = [...previous.keys()].filter((name) => !next.has(name) && isWritten(name));
   const pending = [...next.values()].filter(
     ({ revision, skill }) => previous.get(skill.name) !== revision || !isWritten(skill.name),
   );
-  if (stale.length === 0 && pending.length === 0) return;
+  if (pending.length === 0) return;
 
   const sandbox = await access.get();
   if (sandbox === null) return;
@@ -125,13 +127,8 @@ async function syncDynamicSkillFiles(input: {
   for (const { skill } of pending) delete nextWritten[skill.name];
   ctx.set(DynamicSkillSandboxKey, { ...nextWritten });
 
-  for (const name of stale) {
-    await removeSkillPackageFromSandbox({ name, sandbox });
-  }
   const current = sandboxIdentity(await access.captureState());
   for (const { skill } of pending) {
-    // Replace the directory so files omitted from the new revision disappear.
-    await removeSkillPackageFromSandbox({ name: skill.name, sandbox });
     await writeSkillPackageToSandbox({ sandbox, skill });
     if (current !== null) nextWritten[skill.name] = current;
   }
@@ -144,7 +141,7 @@ async function syncDynamicSkillFiles(input: {
 
 /**
  * Dispatches a stream event to dynamic skill resolvers. On a matching
- * event: runs handlers, stores instructions in durable context, and syncs
+ * event: runs handlers, stores instructions in durable context, and writes
  * changed supporting files to the sandbox.
  */
 export async function dispatchDynamicSkillEvent(input: {
@@ -227,8 +224,8 @@ export async function dispatchDynamicSkillEvent(input: {
   }
 
   // A dynamic skill whose name matches an authored skill overrides it:
-  // loading prefers the dynamic body, and supporting files replace the
-  // authored package at the same sandbox path. Two dynamic resolvers
+  // loading prefers the dynamic body, and supporting files are written over
+  // the authored package at the same sandbox path. Two dynamic resolvers
   // emitting the same name is a genuine ambiguity and still throws.
   const dynamicSkillOwners = new Map<string, string>();
   for (const [resolverSlug, skills] of Object.entries(newManifest)) {
