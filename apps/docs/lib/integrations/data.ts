@@ -2746,25 +2746,34 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
   };
 }
 
+/** Gallery entries are listed alphabetically by name, case-insensitively. */
+const byName = (left: Integration, right: Integration): number =>
+  left.name.localeCompare(right.name, "en", { sensitivity: "base" });
+
 const channels: Integration[] = channelEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildChannel);
+  .map(buildChannel)
+  .sort(byName);
 
 const connections: Integration[] = connectionEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildConnection);
+  .map(buildConnection)
+  .sort(byName);
 
 const extensions: Integration[] = extensionEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildExtension);
+  .map(buildExtension)
+  .sort(byName);
 
 const memory: Integration[] = memoryEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildMemory);
+  .map(buildMemory)
+  .sort(byName);
 
 const instrumentation: Integration[] = instrumentationEntries()
   .filter((entry) => entry.surfaces.gallery)
-  .map(buildInstrumentation);
+  .map(buildInstrumentation)
+  .sort(byName);
 
 /** Display label for each connection protocol. */
 export const protocolLabel: Record<ConnectionProtocol, string> = {
