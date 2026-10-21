@@ -84,6 +84,8 @@ describe("caller-reserved session ids", () => {
     await runtime.run(async () => {
       const world = await getWorld();
       const queue = vi.spyOn(world, "queue");
+      const runMessages = () =>
+        queue.mock.calls.filter((call) => !(call[1] as { __healthCheck?: boolean }).__healthCheck);
       const sessionId = reservedRunId();
 
       const first = await create("alice", {
@@ -96,7 +98,7 @@ describe("caller-reserved session ids", () => {
       const stream = captureTurnEvents(run);
       try {
         expectSingleTurn(await stream.nextTurn(), "turn_0");
-        const startsBefore = queue.mock.calls.length;
+        const startsBefore = runMessages().length;
 
         const second = await create("mallory", {
           message: "mallory's request",
@@ -112,7 +114,7 @@ describe("caller-reserved session ids", () => {
         });
         // The losing create publishes nothing: no queue message can carry its
         // input or auth into the owner's run.
-        expect(queue.mock.calls.length).toBe(startsBefore);
+        expect(runMessages().length).toBe(startsBefore);
         const stored = await storedRun(sessionId);
         expect(stored.input).toMatchObject({ input: { message: "alice's request" } });
         expect(stored.events).not.toContain("mallory");
@@ -124,9 +126,9 @@ describe("caller-reserved session ids", () => {
   });
 
   it.each([
-    { case: "the queue rejects the first publication", lands: false },
-    { case: "the first publication lands but its response is lost", lands: true },
-  ])("a same-id retry recovers the original turn when $case", async ({ lands }) => {
+    { case: "the queue rejects the first publication", lands: false, retryAs: "mallory" },
+    { case: "the first publication lands but its response is lost", lands: true, retryAs: "alice" },
+  ])("a same-id retry recovers the original turn when $case", async ({ lands, retryAs }) => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await runtimeFor(`reserved-session-recovery-${String(lands)}`);
     await runtime.run(async () => {
@@ -156,7 +158,7 @@ describe("caller-reserved session ids", () => {
       });
       expect(first.status).toBeGreaterThanOrEqual(500);
 
-      const retry = await create("alice", {
+      const retry = await create(retryAs, {
         message: "alice's retry",
         sessionId,
         deliveryId: "dlv_retry",
@@ -179,10 +181,13 @@ describe("caller-reserved session ids", () => {
         expect(published).toContainEqual({ runId: sessionId });
         expect(JSON.stringify(published.slice(1))).not.toContain("alice's retry");
         expect(JSON.stringify(published.slice(1))).not.toContain("dlv_retry");
+        expect(JSON.stringify(published)).not.toContain("mallory");
         const stored = await storedRun(sessionId);
         expect(stored.input).toMatchObject({ input: { message: "alice's request" } });
         expect(stored.events).not.toContain("alice's retry");
         expect(stored.events).not.toContain("dlv_retry");
+        expect(JSON.stringify(stored.input)).not.toContain("mallory");
+        expect(stored.events).not.toContain("mallory");
         // A duplicate delivery replays the run; it never re-creates a step or
         // hook, so the turn's work happens once.
         const created = (
