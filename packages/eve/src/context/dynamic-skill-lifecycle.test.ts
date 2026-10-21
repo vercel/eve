@@ -340,6 +340,20 @@ describe("dynamic skill supporting files", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it("replaces a changed package so omitted files disappear", async () => {
+    const { ctx, sandbox } = createCtx();
+    let files: Record<string, string> = { "a.md": "A", "b.md": "B" };
+    const resolver = createResolver("policy", () => makeSkill("Policy", "# Policy", files));
+
+    await dispatch(ctx, resolver);
+    files = { "a.md": "A2" };
+    await dispatch(ctx, resolver);
+
+    expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`, `${SKILL_ROOT}/policy`]);
+    expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("A2");
+    expect(sandbox.files.has(`${SKILL_ROOT}/policy/b.md`)).toBe(false);
+  });
+
   it("rewrites unchanged packages for a different sandbox or after the sandbox is deleted", async () => {
     const { ctx, sandbox, state } = createCtx();
     const resolver = createResolver("policy", () =>
@@ -356,18 +370,48 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.writes).toHaveLength(6);
   });
 
-  it("leaves files in the sandbox when a skill becomes markdown-only", async () => {
-    const { ctx, get, sandbox } = createCtx();
-    let files: Record<string, string> | undefined = { "a.md": "A" };
-    const resolver = createResolver("policy", () => makeSkill("Policy", "# Policy", files));
+  it("removes files when a package is withdrawn", async () => {
+    const { ctx, sandbox } = createCtx();
+    let result: SkillPackageDefinition | null = makeSkill("Policy", "# Policy", { "a.md": "A" });
+    const resolver = createResolver("policy", () => result);
 
     await dispatch(ctx, resolver);
-    files = undefined;
+    result = null;
+    await dispatch(ctx, resolver);
+
+    expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`, `${SKILL_ROOT}/policy`]);
+    expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(false);
+    expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+  });
+
+  it("keeps files when a package loses its supporting files", async () => {
+    const { ctx, get, sandbox } = createCtx();
+    let result = makeSkill("Policy", "# Policy", { "a.md": "A" });
+    const resolver = createResolver("policy", () => result);
+
+    await dispatch(ctx, resolver);
+    result = makeSkill("Policy", "# Inline policy");
     await dispatch(ctx, resolver);
 
     expect(get).toHaveBeenCalledOnce();
-    expect(sandbox.removedPaths).toEqual([]);
+    expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
     expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("A");
+  });
+
+  it("does not remove withdrawn files from a sandbox that never received them", async () => {
+    const { ctx, get, sandbox, state } = createCtx();
+    let enabled = true;
+    const resolver = createResolver("policy", () =>
+      enabled ? makeSkill("Policy", "# Policy", { "a.md": "A" }) : null,
+    );
+
+    await dispatch(ctx, resolver);
+    state.session = persistedSandbox("replacement");
+    enabled = false;
+    await dispatch(ctx, resolver);
+
+    expect(get).toHaveBeenCalledOnce();
+    expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
   });
 
   it("keeps the previous manifest and rewrites a package after a failed write", async () => {

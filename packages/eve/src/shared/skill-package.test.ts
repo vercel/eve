@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { normalizeSkillPackage, writeSkillPackageToSandbox } from "#shared/skill-package.js";
+import {
+  normalizeSkillPackage,
+  removeSkillPackageFromSandbox,
+  writeSkillPackageToSandbox,
+} from "#shared/skill-package.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
@@ -125,5 +129,57 @@ describe("writeSkillPackageToSandbox", () => {
     await writeSkillPackageToSandbox({ sandbox: sandbox.session, skill });
 
     expect(sandbox.files.get("/workspace/skills/tenant/SKILL.md")).toBe("Follow tenant policy.");
+  });
+});
+
+describe("removeSkillPackageFromSandbox", () => {
+  it("removes only the resolved HOME package directory", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+      initialFiles: {
+        "/home/agent/.agents/skills/tenant_policy-1/SKILL.md": "Tenant policy",
+        "/home/agent/.agents/skills/tenant_policy-1/references/policy.md": "Policy",
+        "/workspace/skills/tenant_policy-1/SKILL.md": "Tenant policy",
+        "/workspace/skills/tenant_policy-1/references/policy.md": "Policy",
+      },
+    });
+
+    await removeSkillPackageFromSandbox({ sandbox: sandbox.session, name: "tenant_policy-1" });
+
+    expect(sandbox.removedPaths).toEqual(["/home/agent/.agents/skills/tenant_policy-1"]);
+    expect(sandbox.files.has("/home/agent/.agents/skills/tenant_policy-1/SKILL.md")).toBe(false);
+    expect(
+      sandbox.files.has("/home/agent/.agents/skills/tenant_policy-1/references/policy.md"),
+    ).toBe(false);
+    expect(sandbox.files.get("/workspace/skills/tenant_policy-1/SKILL.md")).toBe("Tenant policy");
+    expect(sandbox.files.get("/workspace/skills/tenant_policy-1/references/policy.md")).toBe(
+      "Policy",
+    );
+  });
+
+  it("removes /workspace/skills only when HOME is unavailable", async () => {
+    const sandbox = mockSandbox({
+      initialFiles: {
+        "/workspace/skills/tenant_policy-1/SKILL.md": "Tenant policy",
+        "/workspace/skills/tenant_policy-1/references/policy.md": "Policy",
+      },
+    });
+
+    await removeSkillPackageFromSandbox({ sandbox: sandbox.session, name: "tenant_policy-1" });
+
+    expect(sandbox.removedPaths).toEqual(["/workspace/skills/tenant_policy-1"]);
+    expect(sandbox.files.has("/workspace/skills/tenant_policy-1/SKILL.md")).toBe(false);
+    expect(sandbox.files.has("/workspace/skills/tenant_policy-1/references/policy.md")).toBe(false);
+  });
+
+  it("rejects names that are unsafe as skill package path segments", async () => {
+    const sandbox = mockSandbox();
+
+    await expect(
+      removeSkillPackageFromSandbox({ sandbox: sandbox.session, name: "tenant;touch-x" }),
+    ).rejects.toThrow("Expected skill name");
+    expect(sandbox.removedPaths).toEqual([]);
   });
 });
