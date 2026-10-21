@@ -1,4 +1,11 @@
+import {
+  createWorkflowCallbackUrl,
+  resolveWorkflowCallbackBaseUrl,
+} from "#execution/workflow-callback-url.js";
 import { RECALL_REALTIME_EVENTS } from "#public/channels/recall/inbound.js";
+
+/** The channel's default webhook route. */
+export const DEFAULT_RECALL_ROUTE = "/eve/v1/recall";
 
 /** `fetch`-compatible function used for Recall API calls. */
 export type RecallFetch = typeof globalThis.fetch;
@@ -163,6 +170,28 @@ export async function leaveRecallCall(
   });
 }
 
+/**
+ * The public URL Recall posts a bot's webhooks to. Uses `url`, then
+ * `RECALL_WEBHOOK_URL`, then `route` on the current Vercel deployment: the
+ * production URL in production and the deployment's own URL on previews,
+ * including the agent's route prefix and the Protection Bypass for Automation
+ * secret. Locally, set `RECALL_WEBHOOK_URL` to a tunnel to `eve dev`.
+ */
+export function resolveRecallWebhookUrl(url?: string, route = DEFAULT_RECALL_ROUTE): string {
+  const explicit = (url ?? process.env.RECALL_WEBHOOK_URL)?.trim();
+  if (explicit) return explicit;
+  const host = process.env.VERCEL_URL?.trim();
+  const env = process.env.VERCEL_ENV;
+  // Previews post back to themselves: a production URL would hand the bot's
+  // webhooks to a different deployment than the one holding the session.
+  if (host && (env === "production" || env === "preview")) {
+    return createWorkflowCallbackUrl(resolveWorkflowCallbackBaseUrl(`https://${host}`), route);
+  }
+  throw new Error(
+    "recallChannel: set RECALL_WEBHOOK_URL to the public HTTPS URL of the Recall route, such as a tunnel to `eve dev`, so Recall can reach the bot.",
+  );
+}
+
 /** Options for {@link recallBotConfig}. */
 export interface RecallBotConfigInput {
   readonly meetingUrl: string;
@@ -212,14 +241,16 @@ export function recallBotConfig(input: RecallBotConfigInput): Record<string, unk
   return config;
 }
 
-/** A Recall bot: its id and meeting platform, such as `zoom` or `google_meet`. */
+/** A Recall bot: its id, display name, and meeting platform, such as `zoom` or `google_meet`. */
 export interface RecallBot {
   readonly id: string;
+  readonly name?: string;
   readonly platform?: string;
 }
 
 interface RecallBotResponse {
   readonly id: string;
+  readonly bot_name?: unknown;
   readonly meeting_url?: { readonly platform?: unknown } | null;
 }
 
@@ -246,7 +277,10 @@ export async function getRecallBot(
 // "dial_in"), not the meeting platform.
 function toRecallBot(bot: RecallBotResponse): RecallBot {
   const platform = bot.meeting_url?.platform;
-  return typeof platform === "string" ? { id: bot.id, platform } : { id: bot.id };
+  const result: { id: string; name?: string; platform?: string } = { id: bot.id };
+  if (typeof bot.bot_name === "string") result.name = bot.bot_name;
+  if (typeof platform === "string") result.platform = platform;
+  return result;
 }
 
 function chunkText(text: string, size: number): string[] {

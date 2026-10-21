@@ -29,6 +29,7 @@ export {
   recallBotConfig,
   RecallApiError,
   recallSupportsDirectMessages,
+  resolveRecallWebhookUrl,
   sendRecallChatMessage,
   startRecallOutputMedia,
   stopRecallOutputMedia,

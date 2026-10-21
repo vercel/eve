@@ -28,6 +28,7 @@ export default recallChannel();
 RECALL_API_KEY=...                         # required to create bots and post to chat
 RECALL_WORKSPACE_VERIFICATION_SECRET=whsec_... # required to verify webhooks
 RECALL_REGION=us-east-1                    # optional; your Recall workspace region
+RECALL_WEBHOOK_URL=https://...             # local development only; see below
 ```
 
 Create the API key in the Recall dashboard, and copy the workspace verification secret from **Developers > Webhooks**. To skip env vars, pass the same values through `credentials: { apiKey, verificationSecret }` and `region`.
@@ -60,7 +61,7 @@ export default defineSchedule({
 });
 ```
 
-Bots created this way send webhooks to `webhookUrl`, which defaults to the route on `VERCEL_PROJECT_PRODUCTION_URL`. Set `webhookUrl` explicitly on preview deployments, behind a proxy, or in local development.
+Bots created this way send webhooks to `webhookUrl`. It defaults to `RECALL_WEBHOOK_URL`, then to the channel's route on the current Vercel deployment: the production URL in production, and the deployment's own URL on previews, so a preview's bots report to the preview. The default includes the agent's route prefix when the agent is mounted under one, and adds the [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation) secret when the project has one. Outside Vercel, such as in local development through a tunnel, set `RECALL_WEBHOOK_URL`.
 
 A new bot can't post to the chat until the meeting admits it, which can take minutes when the meeting has a waiting room. Until then, the channel holds the agent's chat messages and posts them once the session receives its first meeting event, such as someone speaking or joining. If nobody speaks, chats, or joins after the bot is admitted, the held messages wait until someone does. While a message is held, `sendChatMessage` returns `true`, and a later failure to post it is only logged.
 
@@ -69,12 +70,12 @@ A new bot can't post to the chat until the meeting admits it, which can take min
 To create bots elsewhere, such as in a tool or for Recall's calendar auto-join, build the request body with `recallBotConfig` and send it with `createRecallBot`. The config subscribes the bot to every real-time event the channel understands and turns on Recall's low-latency streaming transcription.
 
 ```ts
-import { createRecallBot, recallBotConfig } from "eve/channels/recall";
+import { createRecallBot, recallBotConfig, resolveRecallWebhookUrl } from "eve/channels/recall";
 
 const bot = await createRecallBot({
   body: recallBotConfig({
     meetingUrl: "https://meet.google.com/abc-defg-hij",
-    webhookUrl: "https://your-agent.example.com/eve/v1/recall",
+    webhookUrl: resolveRecallWebhookUrl(),
     greeting: "Hi, I'm taking notes. Type in the chat or say my name to ask me something.",
   }),
 });
@@ -135,7 +136,7 @@ export default recallChannel({
 });
 ```
 
-`botName` sets the bot's display name, which defaults to `eve`. The channel matches it to find speech addressed to the bot and to ignore the bot's own chat messages. A participant with the same display name as the bot is ignored too.
+`botName` sets the bot's display name, which defaults to `eve`. The channel matches it to find speech addressed to the bot. To ignore the bot's own chat messages, the channel drops chat under `botName`, under the name Recall reports for the bot, and chat that repeats one of the bot's last 10 messages word for word. A participant with the same display name as the bot is ignored too. Pass the same `botName` to `recallBotConfig` for bots you create yourself.
 
 ### Replies
 

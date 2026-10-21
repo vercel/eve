@@ -17,11 +17,13 @@ import {
 import {
   callRecallApi,
   createRecallBot,
+  DEFAULT_RECALL_ROUTE,
   getRecallBot,
   leaveRecallCall,
   outputRecallAudio,
   recallBotConfig,
   recallSupportsDirectMessages,
+  resolveRecallWebhookUrl,
   sendRecallChatMessage,
   startRecallOutputMedia,
   stopRecallOutputMedia,
@@ -52,6 +54,9 @@ const MAX_WEBHOOK_BYTES = 256 * 1024;
  */
 const PostedOutboxKey = new ContextKey<number>("recall.posted-outbox");
 
+/** How many of the bot's own chat messages are remembered, to drop them when they echo back. */
+const MAX_SENT_CHAT = 10;
+
 /** How many lines the agent didn't answer stay in state for the next turn it takes. */
 const MAX_TRANSCRIPT_LINES = 60;
 
@@ -63,6 +68,10 @@ export interface RecallChannelState extends PromptQueueState {
   botId: string | null;
   /** Meeting platform, such as `zoom`, from the bot. `null` until it's known. */
   platform: string | null;
+  /** The bot's display name, from Recall. Its chat messages echo back under this name. */
+  botName?: string;
+  /** The bot's recent chat messages, newest last, to drop when they echo back under another name. */
+  sentChat?: string[];
   /** Lines the agent heard but didn't answer since its last turn, oldest first. */
   transcript?: string[];
   /**
@@ -213,7 +222,8 @@ export interface RecallChannelConfig {
   readonly botName?: string;
   /**
    * Public URL of the webhook route, for bots `receive` creates. Defaults to
-   * the route on `VERCEL_PROJECT_PRODUCTION_URL`.
+   * `RECALL_WEBHOOK_URL`, then the route on the current Vercel deployment.
+   * See `resolveRecallWebhookUrl`.
    */
   readonly webhookUrl?: string;
   /**
@@ -252,7 +262,7 @@ export interface RecallChannel extends Channel<RecallChannelState, RecallReceive
  * meeting chat.
  */
 export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
-  const route = config.route ?? "/eve/v1/recall";
+  const route = config.route ?? DEFAULT_RECALL_ROUTE;
   const botName = config.botName ?? "eve";
   const onMeetingEvent = config.onMeetingEvent ?? defaultOnMeetingEvent;
   const shouldRespond = async (input: RecallRespondInput): Promise<boolean> => {
@@ -289,7 +299,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       if (event === undefined || typeof payload.message !== "string") {
         return defaultDeliverResult(payload);
       }
-      channel.state.platform ??= await lookUpPlatform(api, channel.state.botId);
+      if (!channel.state.platform) await identifyBot(api, channel.state);
 
       if (channel.state.awaitingCall && isInCall(event)) {
         await flushOutbox(
@@ -297,6 +307,10 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
           (channel as RecallChannelContext & { readonly ctx: ContextAccessor }).ctx,
         );
       }
+
+      // The route drops chat under the configured name; the session also knows
+      // the name Recall shows and what the bot just sent.
+      if (isOwnChat(event, channel.state)) return undefined;
 
       const transcript = channel.state.transcript ?? [];
       const line = payload.message;
@@ -326,7 +340,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
     ],
 
     async receive(input, { from }) {
-      const webhookUrl = resolveWebhookUrl(config.webhookUrl, route);
+      const webhookUrl = resolveRecallWebhookUrl(config.webhookUrl, route);
       const bot = await createRecallBot({
         ...api,
         body: recallBotConfig({
@@ -339,7 +353,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       return await from(bot.id).send(input.message, {
         auth: input.auth,
         // Recall rejects chat until the bot is admitted, which can take minutes.
-        state: { awaitingCall: true, botId: bot.id, platform: bot.platform ?? null },
+        state: { awaitingCall: true, botId: bot.id, botName, platform: bot.platform ?? null },
       });
     },
 
@@ -380,7 +394,9 @@ function handleWebhook(input: {
     }
 
     // Acknowledge first: Recall retries anything slower than its timeout.
-    waitUntil(dispatch({ ...input, event, from }));
+    // Retries reuse the webhook id, which the session deduplicates.
+    const deliveryId = request.headers.get("webhook-id") ?? request.headers.get("svix-id");
+    waitUntil(dispatch({ ...input, deliveryId, event, from }));
     return new Response(null, { status: 204 });
   };
 }
@@ -388,6 +404,7 @@ function handleWebhook(input: {
 async function dispatch(input: {
   readonly api: RecallApiOptions;
   readonly botName: string;
+  readonly deliveryId: string | null;
   readonly event: RecallMeetingEvent;
   readonly from: ChannelFrom<RecallDeliveryState>;
   readonly onMeetingEvent: NonNullable<RecallChannelConfig["onMeetingEvent"]>;
@@ -414,6 +431,7 @@ async function dispatch(input: {
       attachInputText(
         {
           auth: result.auth,
+          idempotencyKey: input.deliveryId ?? undefined,
           context: [formatRecallContextBlock(event)],
           state: { botId: event.botId, event, platform: null },
           title: result.title,
@@ -489,14 +507,18 @@ function formatRecallContextBlock(event: RecallMeetingEvent): string {
   return lines.join("\n");
 }
 
-/** The bot's meeting platform, or `null` to try again on the next delivery. */
-async function lookUpPlatform(api: RecallApiOptions, botId: string | null): Promise<string | null> {
-  if (!botId) return null;
+/**
+ * Reads the meeting platform and display name of a bot eve didn't create.
+ * A failed lookup leaves the platform unknown, so the next delivery retries.
+ */
+async function identifyBot(api: RecallApiOptions, state: RecallChannelState): Promise<void> {
+  if (!state.botId) return;
   try {
-    return (await getRecallBot({ ...api, botId })).platform ?? null;
+    const bot = await getRecallBot({ ...api, botId: state.botId });
+    state.platform = bot.platform ?? null;
+    if (bot.name !== undefined) state.botName = bot.name;
   } catch (error) {
     log.warn("Recall bot lookup failed; private chat and chat limits fall back", { error });
-    return null;
   }
 }
 
@@ -551,9 +573,23 @@ function isOwnMessage(event: RecallMeetingEvent, botName: string): boolean {
   return event.type === "chat" && event.participant.name === botName;
 }
 
+/**
+ * Whether a chat line is the bot's own. Matching what it sent also catches
+ * bots shown under another name, such as signed-in Google Meet bots, which
+ * use the Google account's name.
+ */
+function isOwnChat(event: RecallMeetingEvent, state: RecallChannelState): boolean {
+  if (event.type !== "chat") return false;
+  if (state.botName !== undefined && event.participant.name === state.botName) return true;
+  return state.sentChat?.includes(event.text.trim()) === true;
+}
+
 function buildRecallHandle(
   api: RecallApiOptions,
-  state: Pick<RecallChannelState, "awaitingCall" | "botId" | "outbox" | "platform" | "replyTo">,
+  state: Pick<
+    RecallChannelState,
+    "awaitingCall" | "botId" | "outbox" | "platform" | "replyTo" | "sentChat"
+  >,
 ): RecallHandle {
   const botId = (): string => {
     if (!state.botId) throw new Error("recallChannel: this session has no Recall bot.");
@@ -590,6 +626,7 @@ function buildRecallHandle(
           platform: state.platform ?? undefined,
           to: to === "everyone" ? undefined : to,
         });
+        state.sentChat = [...(state.sentChat ?? []), message.trim()].slice(-MAX_SENT_CHAT);
         return true;
       } catch (error) {
         log.error("Recall chat message failed", { error });
@@ -606,15 +643,6 @@ function buildRecallHandle(
 
 const PRIVATE_REPLY_UNAVAILABLE =
   "I got a private message, but I can't answer it privately here. Ask me again in the meeting chat, or one person at a time.";
-
-function resolveWebhookUrl(explicit: string | undefined, route: string): string {
-  if (explicit) return explicit;
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
-  if (host) return new URL(route, `https://${host}`).toString();
-  throw new Error(
-    "recallChannel: set webhookUrl to the public HTTPS URL of the Recall route, such as a tunnel to `eve dev`, so Recall can reach the bot.",
-  );
-}
 
 async function readBoundedText(request: Request, maxBytes: number): Promise<string | undefined> {
   if (Number(request.headers.get("content-length") ?? 0) > maxBytes) return undefined;

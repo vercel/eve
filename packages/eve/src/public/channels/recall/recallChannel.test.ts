@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { readInputText } from "#internal/input-text.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
-import { sendRecallChatMessage } from "#public/channels/recall/api.js";
+import { resolveRecallWebhookUrl, sendRecallChatMessage } from "#public/channels/recall/api.js";
 import { defaultEvents, matchSpokenOption } from "#public/channels/recall/defaults.js";
 import {
   recallChannel,
@@ -41,9 +41,12 @@ function speech(text: string): string {
   });
 }
 
-function chat(text: string, to: string): string {
+function chat(text: string, to: string, from: { name: string } = participant): string {
   return JSON.stringify({
-    data: { bot: { id: "bot_1", metadata: {} }, data: { data: { text, to }, participant } },
+    data: {
+      bot: { id: "bot_1", metadata: {} },
+      data: { data: { text, to }, participant: { ...participant, ...from } },
+    },
     event: "participant_events.chat_message",
   });
 }
@@ -91,6 +94,8 @@ describe("recallChannel webhook", () => {
     expect(delivery.message).toBe("Alice: Eve, approve.");
     expect(readInputText(delivery)).toBe("approve");
     expect(delivery.auth.principalId).toBe("recall:bot_1:7");
+    // Recall retries with the same webhook id, so the session drops the repeat.
+    expect(delivery.idempotencyKey).toBe("msg_1");
   });
 
   it("leaves bot status webhooks out of the session by default", async () => {
@@ -215,7 +220,11 @@ function liveChannel(state: Record<string, unknown>) {
   const posts: { message: string; to?: string }[] = [];
   const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
     if (String(url).endsWith("/bot/") || String(url).endsWith("/bot/bot_1/")) {
-      return Response.json({ id: "bot_1", meeting_url: { meeting_id: "1", platform: "zoom" } });
+      return Response.json({
+        bot_name: "Notetaker",
+        id: "bot_1",
+        meeting_url: { meeting_id: "1", platform: "zoom" },
+      });
     }
     posts.push(JSON.parse(String(init?.body)) as { message: string; to?: string });
     return new Response("{}");
@@ -266,6 +275,26 @@ describe("recallChannel private replies", () => {
     await meeting.send("Deploying.");
 
     expect(meeting.posts).toEqual([{ message: "Deploying.", to: "7" }]);
+  });
+});
+
+describe("recallChannel own messages", () => {
+  it("drops chat from a bot eve didn't create, under the name Recall shows", async () => {
+    const meeting = liveChannel({ botId: "bot_1" });
+
+    expect(await meeting.hear(chat("Here are my notes.", "everyone", { name: "Notetaker" }))).toBe(
+      undefined,
+    );
+    expect(await meeting.hear(chat("thanks!", "everyone"))).toBeDefined();
+  });
+
+  it("drops its own message when it echoes back under another name", async () => {
+    const meeting = liveChannel({ botId: "bot_1", platform: "zoom" });
+    await meeting.send("Filed ENG-42.");
+
+    expect(await meeting.hear(chat("Filed ENG-42.", "everyone", { name: "Alice's Bot" }))).toBe(
+      undefined,
+    );
   });
 });
 
@@ -366,6 +395,41 @@ describe("recall sign-in", () => {
     expect(shared).toHaveLength(1);
     expect(shared[0]).toContain("can't deliver a private link");
     expect(shared[0]).not.toContain("ABCD");
+  });
+});
+
+describe("resolveRecallWebhookUrl", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  function deployment(env: string) {
+    vi.stubEnv("RECALL_WEBHOOK_URL", "");
+    vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
+    vi.stubEnv("VERCEL_ENV", env);
+    vi.stubEnv("VERCEL_URL", "agent-abc123.vercel.app");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.vercel.app");
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "bypass");
+  }
+
+  it("points a preview's bots at the preview, past Deployment Protection", () => {
+    deployment("preview");
+    expect(resolveRecallWebhookUrl()).toBe(
+      "https://agent-abc123.vercel.app/eve/v1/recall?x-vercel-protection-bypass=bypass",
+    );
+  });
+
+  it("points production bots at the production URL, under the agent's route prefix", () => {
+    deployment("production");
+    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support");
+    expect(resolveRecallWebhookUrl()).toBe(
+      "https://agent.vercel.app/support/eve/v1/recall?x-vercel-protection-bypass=bypass",
+    );
+  });
+
+  it("prefers RECALL_WEBHOOK_URL, and asks for it outside a deployment", () => {
+    deployment("development");
+    expect(() => resolveRecallWebhookUrl()).toThrow(/RECALL_WEBHOOK_URL/u);
+    vi.stubEnv("RECALL_WEBHOOK_URL", "https://tunnel.example/eve/v1/recall");
+    expect(resolveRecallWebhookUrl()).toBe("https://tunnel.example/eve/v1/recall");
   });
 });
 
