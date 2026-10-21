@@ -4,6 +4,7 @@ import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-sess
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { loadContext } from "#context/container.js";
 import { DynamicSkillSandboxKey, SandboxKey, SessionKey } from "#context/keys.js";
+import { overrideSandboxSession } from "#execution/sandbox/override-session.js";
 
 /**
  * Builds a {@link SessionContext} from the active ALS scope.
@@ -62,25 +63,5 @@ export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(
   deleteSandbox: RuntimeSandboxSession["delete"],
   stop: () => Promise<void>,
 ): Session & Pick<RuntimeSandboxSession, "delete" | "stop"> {
-  return new Proxy(Object.create(null) as object, {
-    get(_proxyTarget, property) {
-      if (property === "delete") return deleteSandbox;
-      if (property === "stop") return stop;
-      const value = Reflect.get(sandbox, property, sandbox);
-      return typeof value === "function" ? value.bind(sandbox) : value;
-    },
-    getOwnPropertyDescriptor(_proxyTarget, property) {
-      if (property === "delete" || property === "stop") {
-        return { configurable: true, enumerable: true, writable: false };
-      }
-      const descriptor = Reflect.getOwnPropertyDescriptor(sandbox, property);
-      return descriptor === undefined ? undefined : { ...descriptor, configurable: true };
-    },
-    has(_proxyTarget, property) {
-      return property === "delete" || property === "stop" || Reflect.has(sandbox, property);
-    },
-    ownKeys() {
-      return [...new Set([...Reflect.ownKeys(sandbox), "delete", "stop"])];
-    },
-  }) as Session & Pick<RuntimeSandboxSession, "delete" | "stop">;
+  return overrideSandboxSession(sandbox, { delete: deleteSandbox, stop });
 }
