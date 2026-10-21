@@ -8,7 +8,11 @@ import {
   context as otelContext,
   trace as otelTrace,
 } from "#compiled/@opentelemetry/api/index.js";
-import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  EntityConflictError,
+  HookNotFoundError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -577,10 +581,8 @@ describe("createWorkflowRuntime#createSession", () => {
   it("honors a reserved run id and stores the initial delivery identity", async () => {
     const source = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(source);
-    getWorldMock.mockResolvedValue({
-      ...world,
-      runs: { get: vi.fn().mockRejectedValue(new WorkflowRunNotFoundError("reserved")) },
-    });
+    const get = vi.fn().mockRejectedValue(new WorkflowRunNotFoundError("reserved"));
+    getWorldMock.mockResolvedValue({ ...world, runs: { get } });
     const sessionId = "wrun_01ARZ3NDEKTSV4RRFFQ69G5FAV";
     startMock.mockResolvedValue({ runId: sessionId });
     const handle = await buildRuntime(source).createSession({
@@ -591,6 +593,7 @@ describe("createWorkflowRuntime#createSession", () => {
       delivery: { deliveryId: "dlv_first", channelKind: "eve", channelName: "eve" },
     });
     expect(handle).toMatchObject({ sessionId, deliveryId: "dlv_first" });
+    expect(get).not.toHaveBeenCalled();
     expect(startMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -601,30 +604,48 @@ describe("createWorkflowRuntime#createSession", () => {
     );
   });
 
-  it.each([false, true])(
-    "returns the stored delivery identity on retry (collision %s)",
-    async (collision) => {
-      const source = {} as RuntimeCompiledArtifactsSource;
-      mockBundleAndRun(source);
-      const sessionId = "wrun_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-      const get = vi.fn().mockResolvedValue({
-        runId: sessionId,
-        attributes: { "eve.channel.initialDeliveryId": "dlv_original" },
-      });
-      if (collision) get.mockRejectedValueOnce(new WorkflowRunNotFoundError(sessionId));
-      getWorldMock.mockResolvedValue({ ...world, runs: { get } });
-      startMock.mockRejectedValue(new Error("Run already exists"));
-      const handle = await buildRuntime(source).createSession({
+  it("returns the stored delivery identity after a reserved creation conflict", async () => {
+    const source = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(source);
+    const sessionId = "wrun_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const get = vi.fn().mockResolvedValue({
+      runId: sessionId,
+      attributes: { "eve.channel.initialDeliveryId": "dlv_original" },
+    });
+
+    getWorldMock.mockResolvedValue({ ...world, runs: { get } });
+    startMock.mockRejectedValue(new EntityConflictError("Run already exists"));
+    const handle = await buildRuntime(source).createSession({
+      adapter,
+      auth: null,
+      input: { message: "retry" },
+      sessionId,
+      delivery: { deliveryId: "dlv_retry", channelKind: "eve", channelName: "eve" },
+    });
+    expect(handle).toMatchObject({ sessionId, existing: true, deliveryId: "dlv_original" });
+    expect(startMock).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat unrelated start failures as reserved creation conflicts", async () => {
+    const source = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(source);
+    const get = vi.fn().mockResolvedValue({ runId: "reserved" });
+    getWorldMock.mockResolvedValue({ ...world, runs: { get } });
+    const failure = new Error("queue unavailable");
+    startMock.mockRejectedValue(failure);
+    const logs = captureLogRecords();
+    await expect(
+      buildRuntime(source).createSession({
         adapter,
         auth: null,
-        input: { message: "retry" },
-        sessionId,
-        delivery: { deliveryId: "dlv_retry", channelKind: "eve", channelName: "eve" },
-      });
-      expect(handle).toMatchObject({ sessionId, existing: true, deliveryId: "dlv_original" });
-      expect(startMock).toHaveBeenCalledTimes(collision ? 1 : 0);
-    },
-  );
+        input: { message: "hello" },
+        sessionId: "reserved",
+      }),
+    ).rejects.toBe(failure);
+    expect(get).not.toHaveBeenCalled();
+    expect(logs.records).toHaveLength(1);
+  });
 
   it("starts workflowEntry on the deployment accepting the request", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
