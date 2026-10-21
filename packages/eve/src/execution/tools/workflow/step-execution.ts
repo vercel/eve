@@ -6,10 +6,7 @@ import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandb
 import { createLogger, logError } from "#internal/logging.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import {
-  hasSameSandboxEnvironmentConfiguration,
-  type SandboxEnvironmentIdentity,
-} from "#shared/sandbox-environment.js";
+import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
@@ -64,12 +61,10 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         getSandbox: (async (environment?: SandboxEnvironmentIdentity) => {
           const access = await sandbox.open();
           // The step imports its own copy of the module that declares the
-          // environment, so the same provider and configuration match.
-          if (
-            environment !== undefined &&
-            (access.environment === undefined ||
-              !hasSameSandboxEnvironmentConfiguration(access.environment, environment))
-          ) {
+          // environment, so it can't match by identity. An agent has one
+          // sandbox definition, and the argument only narrows the type, so
+          // the provider is enough.
+          if (environment !== undefined && access.environment?.provider !== environment.provider) {
             throw fatal(
               'ctx.getSandbox() in a "use step" function received a sandbox environment the session\'s sandbox does not use. ' +
                 "Pass the environment the agent's sandbox definition opens, or call ctx.getSandbox() without one.",

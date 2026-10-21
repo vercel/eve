@@ -129,19 +129,6 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   return typeof value;
 }
 
-/**
- * Whether two environments have the same provider and configuration. Only a
- * workflow step uses this looser match: it imports its own copy of the module
- * that declares the session's environment, so the objects differ. Everywhere
- * else an environment must be the same object.
- */
-export function hasSameSandboxEnvironmentConfiguration(
-  left: SandboxEnvironmentIdentity,
-  right: SandboxEnvironmentIdentity,
-): boolean {
-  return left.provider === right.provider && left[CONFIGURATION_HASH] === right[CONFIGURATION_HASH];
-}
-
 export function getSandboxEnvironmentRuntime(
   environment: SandboxEnvironmentIdentity,
 ): SandboxProviderRuntime {

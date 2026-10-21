@@ -54,7 +54,7 @@ export default defineSandbox(() => environment.open());
 
 `environment.open()` starts the persistent sandbox owned by the current eve session. The `defineSandbox()` selector runs until initialization succeeds, then eve checkpoints the selected provider and its state. Later workflow steps and process restarts call the provider's `resume()` directly without rerunning the selector or `environment.open()`.
 
-Pass options for the live sandbox to `open()`, then configure the returned sandbox before returning it. `open()` applies its options only when it creates the sandbox. Initialization can run more than once against the same sandbox, for example when a subagent that shares the sandbox opens it before the parent does, or on the next access after an initialization that failed. Make it safe to repeat:
+Pass options for the live sandbox to `open()`, then configure the returned sandbox before returning it. `open()` applies its options only when it creates the sandbox. Initialization can run more than once against the same sandbox, for example when a subagent that shares the sandbox opens it before the parent does, when a [workflow step](/docs/tools/workflows#use-the-session-sandbox-in-a-step) opens it before the session records it, or on the next access after an initialization that failed. Make it safe to repeat:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
