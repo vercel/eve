@@ -1,5 +1,8 @@
 autoDedupe: true
 enableGlobalVirtualStore: false
+# Temporary for Better Auth PR #11948: its pinned preview uses internal tarball URLs.
+# Remove this setting together with the preview package before merging.
+blockExoticSubdeps: false
 
 packages:
   - apps/*
@@ -48,7 +51,8 @@ catalog:
   "@vercel/sandbox": "3.3.0"
   "@workflow/world-postgres": "5.0.3"
   ai: "^7.0.137"
-  better-auth: "1.6.26"
+  better-auth: "https://pkg.pr.new/better-auth/better-auth/better-auth@4da5f5f"
+  "@vercel/oidc": "3.8.0"
   marked: "17.0.6"
   next: "16.3.4"
   phase: "0.0.1"

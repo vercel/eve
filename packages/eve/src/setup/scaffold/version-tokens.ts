@@ -36,6 +36,8 @@ const TOKEN_SOURCES: Readonly<Record<string, TokenSource>> = {
   [versionToken("EVE_PACKAGE_DEPENDENCY")]: { kind: "eve-version" },
   [NODE_ENGINE_TOKEN]: { kind: "eve-node-engine" },
   [versionToken("AI_SDK")]: { kind: "catalog", packageName: "ai" },
+  [versionToken("BETTER_AUTH")]: { kind: "catalog", packageName: "better-auth" },
+  [versionToken("VERCEL_OIDC")]: { kind: "catalog", packageName: "@vercel/oidc" },
   [versionToken("NEXT")]: { kind: "catalog", packageName: "next" },
   [versionToken("REACT")]: { kind: "catalog", packageName: "react" },
   [versionToken("REACT_DOM")]: { kind: "catalog", packageName: "react-dom" },

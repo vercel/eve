@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Web Chat auth provisioning", () => {
-  it("creates a team-only app with project callbacks and sensitive credentials for both deployments", async () => {
+  it("creates a team-only app with client authentication disabled until OIDC is configured", async () => {
     initial();
     missingApp();
     response(app);
@@ -62,7 +62,7 @@ describe("Web Chat auth provisioning", () => {
       signInFrom: "owning-team",
       scopes: ["openid", "email", "profile"],
       grantTypes: { authorization_code: true },
-      clientAuthenticationMethods: { client_secret_post: true },
+      clientAuthenticationMethods: {},
       projectRedirectUris: [{ projectId: "prj_123", path: "/api/auth/callback/vercel" }],
     });
     const variables = JSON.parse(requests[2]![1]!.body as string);
@@ -314,4 +314,144 @@ describe("Web Chat auth provisioning", () => {
     await expect(provisionWebChatAuth(project)).rejects.toThrow("client secret limit");
     expect(writes()).toEqual([]);
   });
+});
+
+const oidcProvider = {
+  issuerUrl: "https://oidc.vercel.com/acme",
+  claims: {
+    aud: ["https://vercel.com/acme"],
+    owner_id: ["team_test"],
+    project_id: ["prj_123"],
+    environment: ["production", "preview"],
+  },
+};
+const oidcApp = {
+  ...app,
+  clientAuthenticationMethods: { oidc_token: true },
+  oidcProviders: [oidcProvider],
+};
+const oidcEnvs = [
+  {
+    id: "client",
+    key: "VERCEL_APP_CLIENT_ID",
+    value: "cl_test",
+    target: ["production", "preview"],
+  },
+  {
+    id: "method",
+    key: "VERCEL_APP_AUTH_METHOD",
+    value: "oidc_token",
+    target: ["production", "preview"],
+  },
+  { id: "session", key: "BETTER_AUTH_SECRET", target: ["production", "preview"] },
+];
+
+describe("OIDC Web Chat setup", () => {
+  it("creates and verifies project trust before writing configuration without a client secret", async () => {
+    initial();
+    missingApp();
+    response({ ...app, clientAuthenticationMethods: {} });
+    response({ id: "team_test", slug: "acme" });
+    response({ app: oidcApp });
+    response({ app: oidcApp });
+    response({ created: oidcEnvs, failed: [] });
+    await provisionWebChatAuth(project);
+    const requests = writes();
+    expect(requests).toHaveLength(3);
+    expect(JSON.parse(String(requests[1]?.[1]?.body))).toEqual({
+      clientAuthenticationMethods: { oidc_token: true },
+      oidcProviders: [oidcProvider],
+    });
+    const envs = JSON.parse(String(requests[2]?.[1]?.body));
+    expect(envs.map((env: { key: string }) => env.key)).toEqual([
+      "VERCEL_APP_CLIENT_ID",
+      "VERCEL_APP_AUTH_METHOD",
+      "BETTER_AUTH_SECRET",
+    ]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/secrets"))).toBe(false);
+  });
+  it("reuses OIDC setup and its session secret without writes", async () => {
+    initial(oidcEnvs);
+    response({ app: oidcApp });
+    response({ id: "team_test", slug: "acme" });
+    await provisionWebChatAuth(project);
+    expect(writes()).toEqual([]);
+  });
+  it("recovers an app created before its OIDC trust was saved", async () => {
+    initial();
+    response({ app: { ...app, clientAuthenticationMethods: {} } });
+    response({ id: "team_test", slug: "acme" });
+    response({});
+    response({ app: oidcApp });
+    response({ created: oidcEnvs, failed: [] });
+    await provisionWebChatAuth(project);
+    expect(writes()[0]?.[1]?.method).toBe("PATCH");
+  });
+  it.each(["aud", "owner_id", "project_id", "environment"])(
+    "rejects a changed %s trust rule without overwriting it",
+    async (claim) => {
+      initial(oidcEnvs);
+      response({
+        app: {
+          ...oidcApp,
+          oidcProviders: [
+            { ...oidcProvider, claims: { ...oidcProvider.claims, [claim]: ["other"] } },
+          ],
+        },
+      });
+      response({ id: "team_test", slug: "acme" });
+      await expect(provisionWebChatAuth(project)).rejects.toThrow("OIDC trust");
+      expect(writes()).toEqual([]);
+    },
+  );
+  it("accepts the global issuer only when the project uses it", async () => {
+    response({
+      id: "prj_123",
+      accountId: "team_test",
+      name: "agent",
+      oidcTokenConfig: { issuerMode: "global" },
+    });
+    response({ envs: oidcEnvs });
+    response({
+      app: {
+        ...oidcApp,
+        oidcProviders: [{ ...oidcProvider, issuerUrl: "https://oidc.vercel.com" }],
+      },
+    });
+    response({ id: "team_test", slug: "acme" });
+    await provisionWebChatAuth(project);
+    expect(writes()).toEqual([]);
+  });
+  it("fills missing preview settings without changing production", async () => {
+    initial(oidcEnvs.map((env) => ({ ...env, target: ["production"] })));
+    response({ app: oidcApp });
+    response({ id: "team_test", slug: "acme" });
+    response({ created: [], failed: [] });
+    await provisionWebChatAuth(project);
+    const variables = JSON.parse(String(writes()[0]?.[1]?.body));
+    expect(
+      variables.every(
+        (env: { target: string[] }) => env.target.length === 1 && env.target[0] === "preview",
+      ),
+    ).toBe(true);
+  });
+  it("preserves successful writes on a partial failure so retry can reuse the session secret", async () => {
+    initial();
+    response({ app: oidcApp });
+    response({ id: "team_test", slug: "acme" });
+    response({ created: [oidcEnvs[2]], failed: [{}] });
+    await expect(provisionWebChatAuth(project)).rejects.toThrow("incomplete");
+    expect(writes().every(([, options]) => options?.method !== "DELETE")).toBe(true);
+  });
+});
+
+it("recovers an OIDC marker written before the client ID", async () => {
+  initial([oidcEnvs[1], oidcEnvs[2]]);
+  response({ app: oidcApp });
+  response({ id: "team_test", slug: "acme" });
+  response({ created: [oidcEnvs[0]], failed: [] });
+  await provisionWebChatAuth(project);
+  expect(JSON.parse(String(writes()[0]?.[1]?.body)).map((env: { key: string }) => env.key)).toEqual(
+    ["VERCEL_APP_CLIENT_ID"],
+  );
 });

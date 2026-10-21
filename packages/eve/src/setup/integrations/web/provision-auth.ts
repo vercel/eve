@@ -9,6 +9,11 @@ const APP_CONFLICT_RECOVERY =
 const CALLBACK_PATH = "/api/auth/callback/vercel";
 const TARGETS = ["production", "preview"] as const;
 const KEYS = ["VERCEL_APP_CLIENT_ID", "VERCEL_APP_CLIENT_SECRET", "BETTER_AUTH_SECRET"] as const;
+const AUTH_METHOD_KEY = "VERCEL_APP_AUTH_METHOD";
+const OidcProviderSchema = z.object({
+  issuerUrl: z.string(),
+  claims: z.record(z.string(), z.array(z.string())),
+});
 const AppSchema = z.object({
   clientId: z.string().min(1),
   teamId: z.string(),
@@ -17,6 +22,7 @@ const AppSchema = z.object({
   grantTypes: z.record(z.string(), z.boolean()).optional(),
   clientAuthenticationMethods: z.record(z.string(), z.boolean()).optional(),
   projectRedirectUris: z.array(z.object({ projectId: z.string(), path: z.string() })).optional(),
+  oidcProviders: z.array(OidcProviderSchema).optional(),
   clientSecrets: z.array(z.object({ lastFourChars: z.string() })).optional(),
 });
 const EnvSchema = z.object({
@@ -53,7 +59,6 @@ function assertMatchingApp(app: App, project: VercelProjectReference, configured
     app.teamId !== project.orgId ||
     app.signInFrom !== "owning-team" ||
     !app.grantTypes?.authorization_code ||
-    !app.clientAuthenticationMethods?.client_secret_post ||
     !["openid", "email", "profile"].every((scope) => app.scopes.includes(scope)) ||
     !app.projectRedirectUris?.some(
       (uri) => uri.projectId === project.projectId && uri.path === CALLBACK_PATH,
@@ -100,9 +105,14 @@ export async function provisionWebChatAuth(
   };
   const getApp = async (id: string): Promise<App | undefined> => {
     try {
-      return z
+      const result = z
         .object({ app: AppSchema })
-        .parse(await request(`/oauth-apps/${encodeURIComponent(id)}`)).app;
+        .safeParse(await request(`/oauth-apps/${encodeURIComponent(id)}`));
+      if (!result.success)
+        throw new Error(
+          "Vercel App configuration is unavailable. Check that you can read and manage this app, or ask a team owner to finish setup.",
+        );
+      return result.data.app;
     } catch (error) {
       if (error instanceof AppApiError && error.code === "invalid_client") return undefined;
       throw error;
@@ -110,7 +120,17 @@ export async function provisionWebChatAuth(
   };
   const projectPath = `/v9/projects/${encodeURIComponent(project.projectId)}`;
   const remote = z
-    .object({ id: z.string(), accountId: z.string(), name: z.string() })
+    .object({
+      id: z.string(),
+      accountId: z.string(),
+      name: z.string(),
+      oidcTokenConfig: z
+        .object({
+          enabled: z.boolean().optional(),
+          issuerMode: z.enum(["team", "global"]).optional(),
+        })
+        .optional(),
+    })
     .parse(await request(projectPath));
   if (remote.id !== project.projectId || remote.accountId !== project.orgId) {
     throw new Error("The linked Vercel project is not available in the selected team.");
@@ -119,12 +139,18 @@ export async function provisionWebChatAuth(
     .object({ envs: z.array(EnvSchema) })
     .parse(await request(`${projectPath}/env`)).envs;
   const envs = allEnvs.filter((env) => !env.gitBranch && !env.customEnvironmentIds?.length);
-  const forTarget = (key: string, target: string) =>
-    envs.find(
+  const forTarget = (key: string, target: string) => {
+    const matches = envs.filter(
       (env) =>
         env.key === key &&
         (typeof env.target === "string" ? [env.target] : (env.target ?? [])).includes(target),
     );
+    if (matches.length > 1)
+      throw new Error(
+        "Web Chat has conflicting environment variables. Check production and preview before retrying.",
+      );
+    return matches[0];
+  };
   const clientIds = new Set(
     TARGETS.map((target) => forTarget(KEYS[0], target)?.value).filter(Boolean),
   );
@@ -160,7 +186,7 @@ export async function provisionWebChatAuth(
           projectRedirectUris: [{ projectId: project.projectId, path: CALLBACK_PATH }],
           scopes: ["openid", "email", "profile"],
           grantTypes: { authorization_code: true },
-          clientAuthenticationMethods: { client_secret_post: true },
+          clientAuthenticationMethods: {},
           signInFrom: "owning-team",
         }),
       );
@@ -176,6 +202,128 @@ export async function provisionWebChatAuth(
     }
   }
   assertMatchingApp(app, project, configuredId !== undefined);
+  const configuredMethods = TARGETS.map((target) => forTarget(AUTH_METHOD_KEY, target)?.value);
+  if (
+    configuredMethods.some(
+      (method) =>
+        method !== undefined && method !== "oidc_token" && method !== "client_secret_post",
+    ) ||
+    new Set(configuredMethods.filter(Boolean)).size > 1
+  ) {
+    throw new Error(
+      "Web Chat has conflicting authentication methods. Check production and preview environment variables before retrying.",
+    );
+  }
+  const method =
+    configuredMethods.find(Boolean) ??
+    (app.clientAuthenticationMethods?.client_secret_post ? "client_secret_post" : "oidc_token");
+  if (
+    method === "oidc_token" &&
+    Object.entries(app.clientAuthenticationMethods ?? {}).some(
+      ([key, enabled]) => enabled && key !== "oidc_token",
+    )
+  ) {
+    throw new Error(
+      "The Vercel App does not match OIDC client authentication. Check its settings before retrying.",
+    );
+  }
+  if (method === "oidc_token") {
+    if (
+      TARGETS.some((target) => forTarget(KEYS[1], target)) ||
+      remote.oidcTokenConfig?.enabled === false
+    ) {
+      throw new Error(
+        "Web Chat OIDC setup requires project OIDC tokens and no existing client-secret configuration. Check the project settings before retrying.",
+      );
+    }
+    const team = z
+      .object({ id: z.string(), slug: z.string().min(1) })
+      .parse(await request(`/v2/teams/${encodeURIComponent(project.orgId)}`));
+    if (team.id !== project.orgId) throw new Error("The Vercel team is unavailable.");
+    const provider = {
+      issuerUrl:
+        remote.oidcTokenConfig?.issuerMode === "global"
+          ? "https://oidc.vercel.com"
+          : `https://oidc.vercel.com/${team.slug}`,
+      claims: {
+        aud: [`https://vercel.com/${team.slug}`],
+        owner_id: [team.id],
+        project_id: [project.projectId],
+        environment: [...TARGETS],
+      },
+    };
+    const matches = (candidate: App): boolean =>
+      candidate.clientAuthenticationMethods?.oidc_token === true &&
+      Object.entries(candidate.clientAuthenticationMethods).every(
+        ([key, enabled]) => !enabled || key === "oidc_token",
+      ) &&
+      candidate.oidcProviders?.length === 1 &&
+      candidate.oidcProviders[0]?.issuerUrl === provider.issuerUrl &&
+      Object.keys(candidate.oidcProviders[0].claims).length ===
+        Object.keys(provider.claims).length &&
+      Object.entries(provider.claims).every(([claim, values]) => {
+        const actual = candidate.oidcProviders?.[0]?.claims[claim];
+        return actual?.length === values.length && values.every((value) => actual.includes(value));
+      });
+    if (!matches(app)) {
+      if (
+        Object.values(app.clientAuthenticationMethods ?? {}).some(Boolean) ||
+        app.oidcProviders?.length
+      ) {
+        throw new Error(
+          "The Vercel App's OIDC trust does not match this project and environments. Check the app in team settings before retrying.",
+        );
+      }
+      await request(`/oauth-apps/${encodeURIComponent(app.clientId)}`, "PATCH", {
+        clientAuthenticationMethods: { oidc_token: true },
+        oidcProviders: [provider],
+      });
+      const configured = await getApp(app.clientId);
+      if (!configured || !matches(configured))
+        throw new Error("Vercel App OIDC configuration is incomplete. Retry setup.");
+      assertMatchingApp(configured, project, configuredId !== undefined);
+    }
+    const oidcValues = {
+      VERCEL_APP_CLIENT_ID: app.clientId,
+      VERCEL_APP_AUTH_METHOD: "oidc_token",
+      BETTER_AUTH_SECRET: randomBytes(32).toString("base64url"),
+    };
+    const variables = Object.entries(oidcValues).flatMap(([key, value]) => {
+      const target = TARGETS.filter((target) => !forTarget(key, target));
+      return target.length
+        ? [
+            {
+              key,
+              value,
+              target,
+              type: key === "BETTER_AUTH_SECRET" ? "sensitive" : "plain",
+              visibility: key === "BETTER_AUTH_SECRET" ? "secret" : "config",
+            },
+          ]
+        : [];
+    });
+    if (!variables.length) return;
+    const result = z
+      .object({ created: z.array(EnvSchema), failed: z.array(z.unknown()) })
+      .parse(
+        await request(
+          `/v10/projects/${encodeURIComponent(project.projectId)}/env`,
+          "POST",
+          variables,
+        ),
+      );
+    // Preserve successful writes so retries reuse the session secret, even after partial failures.
+    if (result.failed.length)
+      throw new Error(
+        "Web Chat auth environment setup is incomplete. Retry `eve add channel/web --skip-install`.",
+      );
+    return;
+  }
+  if (!app.clientAuthenticationMethods?.client_secret_post) {
+    throw new Error(
+      "The Vercel App does not match the project's existing client-secret authentication. Check its settings before retrying.",
+    );
+  }
   const missingTargets = (key: string) => TARGETS.filter((target) => !forTarget(key, target));
   if (KEYS.every((key) => missingTargets(key).length === 0)) return;
   const secretTargets = missingTargets(KEYS[1]);

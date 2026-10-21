@@ -268,6 +268,10 @@ async function patchWebPackageJson(
     zod: resolveVersionToken("zodPackageVersion", options.zodPackageVersion),
     ...(authentication === "sign-in-with-vercel"
       ? {
+          "@vercel/oidc": resolveVersionToken(
+            "vercelOidcPackageVersion",
+            options.vercelOidcPackageVersion,
+          ),
           "better-auth": resolveVersionToken(
             "betterAuthPackageVersion",
             options.betterAuthPackageVersion,

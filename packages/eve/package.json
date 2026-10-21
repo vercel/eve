@@ -620,7 +620,7 @@
     "@vercel/blob": "2.8.0",
     "@vercel/connect": "catalog:",
     "@vercel/detect-agent": "1.2.3",
-    "@vercel/oidc": "3.8.0",
+    "@vercel/oidc": "catalog:",
     "@vercel/otel": "catalog:",
     "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",

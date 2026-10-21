@@ -1,6 +1,7 @@
 import { DEFAULT_EVE_PACKAGE_CONTRACT, type EvePackageContract } from "../create/project.js";
 
 const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
+const DEFAULT_VERCEL_OIDC_PACKAGE_VERSION = "__VERCEL_OIDC_VERSION__";
 const DEFAULT_BETTER_AUTH_PACKAGE_VERSION = "__BETTER_AUTH_VERSION__";
 const DEFAULT_NEXT_PACKAGE_VERSION = "__NEXT_VERSION__";
 const DEFAULT_SIGN_IN_WITH_VERCEL_NEXT_PACKAGE_VERSION = "16.3.0";
@@ -17,6 +18,7 @@ export interface WebPackageVersions {
   evePackage?: EvePackageContract;
   aiPackageVersion?: string;
   betterAuthPackageVersion?: string;
+  vercelOidcPackageVersion?: string;
   nextPackageVersion?: string;
   reactPackageVersion?: string;
   reactDomPackageVersion?: string;
@@ -35,6 +37,8 @@ export function resolveWebPackageVersions(
     aiPackageVersion: input?.aiPackageVersion ?? DEFAULT_AI_PACKAGE_VERSION,
     betterAuthPackageVersion:
       input?.betterAuthPackageVersion ?? DEFAULT_BETTER_AUTH_PACKAGE_VERSION,
+    vercelOidcPackageVersion:
+      input?.vercelOidcPackageVersion ?? DEFAULT_VERCEL_OIDC_PACKAGE_VERSION,
     nextPackageVersion:
       input?.nextPackageVersion ??
       (authentication === "sign-in-with-vercel"

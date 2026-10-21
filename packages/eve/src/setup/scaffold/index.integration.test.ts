@@ -28,7 +28,8 @@ const LATEST_EVE_PACKAGE = { version: "latest", nodeEngine: ">=24" } as const;
 const TEST_WEB_PACKAGE_VERSIONS = {
   evePackage: TEST_EVE_PACKAGE,
   aiPackageVersion: "7.0.0",
-  betterAuthPackageVersion: "1.6.26-test",
+  betterAuthPackageVersion: "1.7.7-test",
+  vercelOidcPackageVersion: "3.8.0-test",
   nextPackageVersion: "16.2.6",
   reactPackageVersion: "19.2.6",
   reactDomPackageVersion: "19.2.6",
@@ -355,7 +356,8 @@ describe("ensureChannel", () => {
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
       dependencies: Record<string, string>;
     };
-    expect(packageJson.dependencies["better-auth"]).toBe("1.6.26-test");
+    expect(packageJson.dependencies["better-auth"]).toBe("1.7.7-test");
+    expect(packageJson.dependencies["@vercel/oidc"]).toBe("3.8.0-test");
     expect(packageJson.dependencies.next).toBe("16.3.0");
 
     const pageSource = await readFile(join(projectRoot, "app/page.tsx"), "utf8");
@@ -377,7 +379,9 @@ describe("ensureChannel", () => {
     const authSource = await readFile(join(projectRoot, "lib/auth.ts"), "utf8");
     expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');
     expect(authSource).toContain("process.env.VERCEL_PROJECT_PRODUCTION_URL");
-    expect(authSource).toContain('clientId: requireEnvironmentVariable("VERCEL_APP_CLIENT_ID")');
+    expect(authSource).toContain(
+      'const clientId = requireEnvironmentVariable("VERCEL_APP_CLIENT_ID")',
+    );
     expect(authSource).toContain('throw new Error("No trusted deployment hosts are configured")');
     expect(authSource).not.toContain("*.vercel.app");
 
