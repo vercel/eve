@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
@@ -13,6 +13,21 @@ import type {
 import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { withHandleRelease } from "#execution/sandbox/handle-release.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
+import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
+import {
+  createBundledRuntimeCompiledArtifactsSource,
+  createDiskRuntimeCompiledArtifactsSource,
+} from "#runtime/compiled-artifacts-source.js";
+import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import {
+  defineSandboxProvider,
+  type SandboxProviderSessionContext,
+} from "#shared/sandbox-provider.js";
 
 const durable = vi.hoisted(() => ({
   attempt: 1,
@@ -30,6 +45,22 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
     }),
   }),
 }));
+const bundle = vi.hoisted(() => ({
+  loadedFrom: [] as unknown[],
+  registry: undefined as RuntimeSandboxRegistry | undefined,
+}));
+vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
+  getCompiledRuntimeAgentBundle: async (input: { compiledArtifactsSource: unknown }) => {
+    bundle.loadedFrom.push(input.compiledArtifactsSource);
+    return {
+      compiledArtifactsSource: input.compiledArtifactsSource,
+      graph: { root: { nodeId: "__root__", sandboxRegistry: bundle.registry } },
+    };
+  },
+}));
+vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
+  loadSandboxPreparedArtifact: async () => null,
+}));
 vi.mock("#internal/workflow/runtime.js", () => ({
   getRun: () => ({
     getReadable: ({ namespace }: { namespace: string }) => ({
@@ -39,7 +70,76 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   }),
 }));
 
-function context(user = "user-1"): WorkflowStepContext {
+/**
+ * A provider whose `start` upserts a sandbox by session id and whose
+ * `onSessionEnd` deletes by it, as the provider contract requires. Resuming
+ * a sandbox that is gone throws. Each open hands out its own handle over the
+ * shared sandbox; `released` records which handles a borrower freed, and
+ * `shutDown` which the runtime's shutdown stopped.
+ */
+function upsertSandboxes() {
+  const live = new Map<string, ReturnType<typeof mockSandbox>>();
+  const starts: string[] = [];
+  const resumes: string[] = [];
+  const handles: object[] = [];
+  const released: object[] = [];
+  const shutDown: object[] = [];
+  const stopped: Mock<() => Promise<void>> = vi.fn(async () => {});
+  const deleted: Mock<() => Promise<void>> = vi.fn(async () => {});
+  const handleFor = (key: string) => {
+    let sandbox = live.get(key);
+    if (sandbox === undefined) {
+      sandbox = mockSandbox();
+      live.set(key, sandbox);
+    }
+    const handle = withHandleRelease(
+      {
+        sandbox: sandbox.session,
+        onRuntimeShutdown: async () => void shutDown.push(handle),
+        onSandboxDelete: deleted,
+        onSandboxStop: stopped,
+      },
+      async () => void released.push(handle),
+    );
+    handles.push(handle);
+    return handle;
+  };
+  const provider = defineSandboxProvider({
+    name: "upsert",
+    environment: () => ({
+      onSessionEnd: async (context: SandboxProviderSessionContext) =>
+        void live.delete(context.session.id),
+      prepare: async () => null,
+      resume: async (_context: unknown, _artifact: unknown, state: { readonly key: string }) => {
+        resumes.push(state.key);
+        if (!live.has(state.key)) throw new Error(`Sandbox "${state.key}" no longer exists.`);
+        return handleFor(state.key);
+      },
+      start: async (context: SandboxProviderSessionContext) => {
+        starts.push(context.session.id);
+        return { handle: handleFor(context.session.id), state: { key: context.session.id } };
+      },
+    }),
+  });
+  const environment = provider.environment();
+  const registry: RuntimeSandboxRegistry = {
+    sandbox: {
+      definition: {
+        environment,
+        kind: "independent",
+        logicalPath: "sandbox.ts",
+        revisionHash: "hash",
+        selector: defineSandbox(() => environment.open()),
+        sourceId: "sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+  return { deleted, handles, provider, registry, released, resumes, shutDown, starts, stopped };
+}
+
+function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext {
   const auth = {
     attributes: {},
     authenticator: "test",
@@ -59,6 +159,7 @@ function context(user = "user-1"): WorkflowStepContext {
     },
     callId: "call-1",
     toolName: "devbox",
+    sandbox: { bundle: { source: createBundledRuntimeCompiledArtifactsSource() }, sessionId },
   };
 }
 
@@ -74,10 +175,12 @@ async function runStep<TContext = ToolContext>(
 }
 
 describe("workflow step authorization", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     durable.attempt = 1;
     durable.stepId = "step-1";
     durable.entries.clear();
+    bundle.loadedFrom = [];
+    await shutdownActiveSandboxHandles();
   });
   afterEach(() => vi.unstubAllEnvs());
   it.each([
@@ -106,6 +209,152 @@ describe("workflow step authorization", () => {
       });
     },
   );
+
+  it("resolves a development delivery's generation and starts, then resumes, the sandbox by key", async () => {
+    const { registry, resumes, starts } = upsertSandboxes();
+    bundle.registry = registry;
+    const owner = { ...context("user-1", "owner-session") };
+    // `eve dev` deliveries carry the generation a development source resolves to.
+    const generation = {
+      generationId: "generation-1",
+      source: createDiskRuntimeCompiledArtifactsSource("/virtual/app"),
+    };
+    const plan = { path: "/workspace/plan.txt" };
+    await expect(
+      withDevelopmentWorkflowGeneration(generation, () =>
+        runStep(
+          async (ctx) => {
+            await (await ctx.getSandbox()).writeTextFile({ ...plan, content: "draft" });
+            return "written";
+          },
+          {
+            ...owner,
+            sandbox: { bundle: { source: { kind: "development" } }, sessionId: "owner-session" },
+          },
+        ),
+      ),
+    ).resolves.toMatchObject({ kind: "result", output: "written" });
+    expect(bundle.loadedFrom).toEqual([generation.source]);
+    expect(starts).toEqual(["owner-session"]);
+
+    const recorded = {
+      session: { providerName: "upsert", state: { key: "owner-session" }, stateProtocolVersion: 1 },
+    };
+    await expect(
+      runStep(async (ctx) => await (await ctx.getSandbox()).readTextFile(plan), {
+        ...owner,
+        sandbox: { ...owner.sandbox, sessionId: "owner-session", state: recorded },
+      }),
+    ).resolves.toMatchObject({ kind: "result", output: "draft" });
+    expect(starts).toEqual(["owner-session"]);
+    expect(resumes).toEqual(["owner-session"]);
+  });
+
+  it("leaves the session's handle tracked for runtime shutdown after a step uses the sandbox", async () => {
+    const { handles, registry, released, shutDown } = upsertSandboxes();
+    bundle.registry = registry;
+    // The session's turn opened its sandbox in this process.
+    const session = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry,
+      sessionId: "session-1",
+      state: null,
+    });
+    await session.get();
+    const sessionHandle = handles[0];
+    await expect(runStep(async (ctx) => void (await ctx.getSandbox()))).resolves.toMatchObject({
+      kind: "result",
+    });
+    await shutdownActiveSandboxHandles();
+    expect(handles).toHaveLength(2);
+    expect(shutDown).toEqual([sessionHandle]);
+    // The step frees its own handle; the session's stays live.
+    expect(released).toEqual([handles[1]]);
+  });
+
+  it("keeps tracked for runtime shutdown a sandbox only a step opened", async () => {
+    const { handles, registry, released, shutDown } = upsertSandboxes();
+    bundle.registry = registry;
+    await expect(runStep(async (ctx) => void (await ctx.getSandbox()))).resolves.toMatchObject({
+      kind: "result",
+    });
+    await expect(runStep(async (ctx) => void (await ctx.getSandbox()))).resolves.toMatchObject({
+      kind: "result",
+    });
+    await shutdownActiveSandboxHandles();
+    // The first step's handle is the one shutdown reaches; the second step frees its own.
+    expect(shutDown).toEqual([handles[0]]);
+    expect(released).toEqual([handles[1]]);
+  });
+
+  it("starts the sandbox by key when the state the call captured is gone", async () => {
+    const { registry, resumes, starts } = upsertSandboxes();
+    bundle.registry = registry;
+    // A turn deleted the sandbox after the call captured its state.
+    const stale = {
+      session: { providerName: "upsert", state: { key: "session-1" }, stateProtocolVersion: 1 },
+    };
+    await expect(
+      runStep(
+        async (ctx) => {
+          await (await ctx.getSandbox()).writeTextFile({ content: "x", path: "/workspace/a.txt" });
+          return "written";
+        },
+        { ...context(), sandbox: { ...context().sandbox, state: stale } },
+      ),
+    ).resolves.toMatchObject({ kind: "result", output: "written" });
+    expect(resumes).toEqual(["session-1"]);
+    expect(starts).toEqual(["session-1"]);
+  });
+
+  it("fails ctx.getSandbox() without retrying once its step has returned", async () => {
+    const { registry, starts } = upsertSandboxes();
+    bundle.registry = registry;
+    const result = await runStep(async (ctx) => () => ctx.getSandbox());
+    const later = result.kind === "result" ? (result.output as () => Promise<unknown>) : undefined;
+    await expect(later?.()).rejects.toMatchObject({
+      fatal: true,
+      message: expect.stringContaining(
+        'was called after the "use step" function of tool "devbox" returned',
+      ),
+    });
+    expect(starts).toEqual([]);
+  });
+
+  it("accepts its own copy of the session's environment and leaves stopping and deleting to the session", async () => {
+    const { deleted, provider, registry, stopped } = upsertSandboxes();
+    bundle.registry = registry;
+    // The step imports its own copy of the module that declares the environment.
+    await expect(
+      runStep(async (ctx) => {
+        await ctx.getSandbox(provider.environment());
+        return "opened";
+      }),
+    ).resolves.toMatchObject({ output: "opened" });
+    const other = defineSandboxProvider({
+      name: "other",
+      environment: () => ({
+        onSessionEnd: async () => {},
+        prepare: async () => null,
+        resume: vi.fn(),
+        start: vi.fn(),
+      }),
+    }).environment();
+    const misuse: [string, (ctx: ToolContext) => Promise<unknown>][] = [
+      ["received a sandbox environment", (ctx) => ctx.getSandbox(other)],
+      ["sandbox.stop() is unavailable", async (ctx) => await (await ctx.getSandbox()).stop()],
+      ["sandbox.delete() is unavailable", async (ctx) => await (await ctx.getSandbox()).delete()],
+    ];
+    for (const [message, access] of misuse) {
+      await expect(runStep(access)).rejects.toMatchObject({
+        fatal: true,
+        message: expect.stringContaining(message),
+      });
+    }
+    expect(stopped).not.toHaveBeenCalled();
+    expect(deleted).not.toHaveBeenCalled();
+  });
 
   it("does not exchange a consumed code again when the rest of the step retries", async () => {
     let exchanged = false;

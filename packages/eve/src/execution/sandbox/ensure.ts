@@ -7,7 +7,9 @@ import {
 } from "#context/build-callback-context.js";
 import {
   trackActiveSandboxHandle,
+  trackActiveSandboxHandleIfAbsent,
   untrackActiveSandboxHandle,
+  untrackActiveSandboxSession,
 } from "#execution/sandbox/active-handles.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
@@ -45,6 +47,15 @@ interface EnsureSandboxAccessInput {
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
   readonly state: SandboxState | null;
+  /**
+   * `true` for a caller that borrows a session's sandbox outside its turns,
+   * such as a workflow step. Its state was captured earlier, so a sandbox
+   * that is gone falls back to `start`, which upserts by the session id. Its
+   * handle joins the shutdown registry only when no handle is tracked for
+   * the session, so it never replaces or drops the session's own, and then
+   * stays tracked for runtime shutdown after `detach`.
+   */
+  readonly borrowed?: boolean;
 }
 
 /** The access `ensureSandboxAccess` builds, with what the opener may do beyond the sandbox API. */
@@ -88,6 +99,14 @@ export async function ensureSandboxAccess(
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
+  let trackedByBorrower: object | undefined;
+  const track: typeof trackActiveSandboxHandle = (entry) => {
+    if (input.borrowed !== true) trackActiveSandboxHandle(entry);
+    else if (trackActiveSandboxHandleIfAbsent(entry)) trackedByBorrower = entry.handle;
+  };
+  const untrack: typeof untrackActiveSandboxHandle = (entry) => {
+    if (input.borrowed !== true) untrackActiveSandboxHandle(entry);
+  };
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
   const captured = (): SandboxState => ({ session: persisted });
@@ -222,7 +241,7 @@ export async function ensureSandboxAccess(
       });
     const handle = await opening;
     installHandle(provider.providerName, handle);
-    trackActiveSandboxHandle({
+    track({
       handle,
       providerName: provider.providerName,
       sessionId: input.sessionId,
@@ -241,7 +260,14 @@ export async function ensureSandboxAccess(
     }
 
     const context = providerContext("sandbox-initialization");
-    if (persisted !== null) {
+    if (persisted !== null && input.borrowed === true) {
+      try {
+        return await resumePersisted(context);
+      } catch {
+        // The session may have deleted the sandbox since the state was captured.
+        persisted = null;
+      }
+    } else if (persisted !== null) {
       return await resumePersisted(context);
     }
 
@@ -300,7 +326,7 @@ export async function ensureSandboxAccess(
       persisted = null;
       throw error;
     }
-    trackActiveSandboxHandle({
+    track({
       handle: opened.handle,
       providerName: opened.providerName,
       sessionId: input.sessionId,
@@ -320,7 +346,7 @@ export async function ensureSandboxAccess(
   function forgetHandle() {
     const current = opened;
     if (current !== undefined) {
-      untrackActiveSandboxHandle({
+      untrack({
         handle: current.handle,
         providerName: current.providerName,
         sessionId: input.sessionId,
@@ -351,7 +377,9 @@ export async function ensureSandboxAccess(
     async detach() {
       // A failed open left nothing to let go of.
       if (requiring !== undefined) await requiring.catch(() => undefined);
-      return forgetHandle()?.handle;
+      const handle = forgetHandle()?.handle;
+      // A borrowed handle runtime shutdown still tracks stays live for it.
+      return handle === trackedByBorrower ? undefined : handle;
     },
     async end(reason: SandboxSessionEndReason) {
       if (input.ownsSandbox === false) return;
@@ -370,6 +398,11 @@ export async function ensureSandboxAccess(
         reason,
       });
       forgetHandle();
+      // A borrower may have left the only tracked handle for this key.
+      untrackActiveSandboxSession({
+        providerName: provider.providerName,
+        sessionId: input.sessionId,
+      });
       persisted = null;
     },
     async get() {

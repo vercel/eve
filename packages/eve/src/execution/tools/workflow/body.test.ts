@@ -62,6 +62,17 @@ it("binds workflow-only methods to the run context", async () => {
   });
 });
 
+it("points a workflow body that opens the sandbox to a step helper", async () => {
+  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext) => ctx.getSandbox());
+  await expect(startCallBody(input).outcome).resolves.toMatchObject({
+    error: {
+      message:
+        'ctx.getSandbox() is not available inside a workflow tool; pass ctx directly to a "use step" helper to open the session\'s sandbox. Tool "deploy" runs as a durable workflow body, which only replays deterministic code.',
+    },
+    status: "failed",
+  });
+});
+
 // #3836: a selected option's answer carries `text: undefined`, and a tool that
 // returns it as-is, or returns nothing, must still complete with JSON.
 it.each([

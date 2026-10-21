@@ -283,7 +283,11 @@ export function createSharedContext(
   return {
     agent,
     ask: askPerson,
-    getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
+    getSandbox: () =>
+      unavailable(
+        "getSandbox()",
+        'pass ctx directly to a "use step" helper to open the session\'s sandbox',
+      ),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
     requireAuth: () =>

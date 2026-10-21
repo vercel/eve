@@ -39,6 +39,29 @@ export function trackActiveSandboxHandle(input: {
   );
 }
 
+/**
+ * Registers a live sandbox handle for shutdown tracking only when no handle is
+ * tracked for that provider and durable session yet. Returns whether it did.
+ */
+export function trackActiveSandboxHandleIfAbsent(input: {
+  readonly providerName: string;
+  readonly handle: ShutdownCapableSandboxHandle;
+  readonly sessionId: string;
+}): boolean {
+  const key = createActiveSandboxHandleKey(input.providerName, input.sessionId);
+  if (activeSandboxHandles.has(key)) return false;
+  activeSandboxHandles.set(key, input.handle);
+  return true;
+}
+
+/** Drops whatever handle is tracked for a durable session whose sandbox is gone. */
+export function untrackActiveSandboxSession(input: {
+  readonly providerName: string;
+  readonly sessionId: string;
+}): void {
+  activeSandboxHandles.delete(createActiveSandboxHandleKey(input.providerName, input.sessionId));
+}
+
 /** Drops a handle from shutdown tracking, unless a newer handle replaced it. */
 export function untrackActiveSandboxHandle(input: {
   readonly providerName: string;

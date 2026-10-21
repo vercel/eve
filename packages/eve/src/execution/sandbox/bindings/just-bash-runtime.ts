@@ -3,6 +3,8 @@ import { dirname } from "node:path";
 
 import type { IFileSystem } from "just-bash";
 
+import { withHandleRelease } from "#execution/sandbox/handle-release.js";
+
 import {
   createFileBackedInternalSandboxSession,
   pathExists,
@@ -205,21 +207,25 @@ export async function createBashSandbox(input: {
  */
 export function createJustBashHandle(sandbox: BashSandbox): SandboxProviderHandle<SandboxSession> {
   const session = buildSandboxSession(createFileBackedInternalSandboxSession({ sandbox }));
-  return {
-    sandbox: session,
-    async onSandboxDelete() {
-      await sandbox.dispose();
-      await rm(sandbox.rootPath, { force: true, recursive: true });
+  // Each handle runs its own interpreter over the session's root.
+  return withHandleRelease(
+    {
+      sandbox: session,
+      async onSandboxDelete() {
+        await sandbox.dispose();
+        await rm(sandbox.rootPath, { force: true, recursive: true });
+      },
+      async onSandboxStop() {
+        await sandbox.dispose();
+      },
+      // The interpreter lives in this process, so stopping it is all the
+      // shutdown a just-bash sandbox needs.
+      async onRuntimeShutdown() {
+        await sandbox.dispose();
+      },
     },
-    async onSandboxStop() {
-      await sandbox.dispose();
-    },
-    // The interpreter lives in this process, so stopping it is all the
-    // shutdown a just-bash sandbox needs.
-    async onRuntimeShutdown() {
-      await sandbox.dispose();
-    },
-  };
+    () => sandbox.dispose(),
+  );
 }
 
 function resolveLocalSandboxFilesystemRootPath(rootPath: string): string {

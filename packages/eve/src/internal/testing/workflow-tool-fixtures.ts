@@ -12,7 +12,7 @@ import {
   sleep as workflowSleep,
 } from "#compiled/@workflow/core/index.js";
 
-import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import type { WorkflowStepToolContext, WorkflowToolContext } from "#tools/workflow-definition.js";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
@@ -38,6 +38,56 @@ export async function authorizedDeployWorkflow(input: DeployInput, ctx: Workflow
   const plan = await planDeployStep(input.service);
   const authenticatedAs = await authorizedDeployStep(input.service, ctx);
   return { plan, authenticatedAs };
+}
+
+export async function sandboxPrepareWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await prepareSandboxStep(input.service, ctx);
+}
+
+async function prepareSandboxStep(service: string, ctx: WorkflowStepToolContext) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  const seed = await sandbox.readTextFile({ path: "/workspace/seed.txt" });
+  await sandbox.writeTextFile({ content: `prepared:${service}`, path: "/workspace/prepared.txt" });
+  return { seed };
+}
+
+export async function sandboxParallelPrepareWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  await Promise.all([
+    writeSandboxFileStep(ctx, "plan", input.service),
+    writeSandboxFileStep(ctx, "config", input.service),
+  ]);
+  return await readSandboxFilesStep(ctx);
+}
+
+const STEP_RUNS = Symbol.for("eve.test.sandbox-step-runs");
+
+/**
+ * How many times each sandbox-writing step ran, by file name, so a test can
+ * rule out reruns. Steps run from their own bundled copy of this module, so
+ * the count lives on `globalThis`.
+ */
+export function sandboxStepRuns(): Map<string, number> {
+  const shared = globalThis as typeof globalThis & { [STEP_RUNS]?: Map<string, number> };
+  return (shared[STEP_RUNS] ??= new Map());
+}
+async function writeSandboxFileStep(ctx: WorkflowStepToolContext, name: string, service: string) {
+  "use step";
+  const runs = sandboxStepRuns();
+  runs.set(name, (runs.get(name) ?? 0) + 1);
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({ content: `${name}:${service}`, path: `/workspace/${name}.txt` });
+}
+
+async function readSandboxFilesStep(ctx: WorkflowStepToolContext) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  return {
+    config: await sandbox.readTextFile({ path: "/workspace/config.txt" }),
+    plan: await sandbox.readTextFile({ path: "/workspace/plan.txt" }),
+  };
 }
 
 export async function workflowContextMisuseWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {

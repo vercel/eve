@@ -1,6 +1,17 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import type { SessionContext } from "#context/session-context.js";
+import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
+import { releaseSandboxHandle } from "#execution/sandbox/handle-release.js";
+import { createLogger, logError } from "#internal/logging.js";
+import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
+import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import {
+  hasSameSandboxEnvironmentConfiguration,
+  type SandboxEnvironmentIdentity,
+} from "#shared/sandbox-environment.js";
+import type { SandboxAccess } from "#sandbox/state.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   isAuthorizationSignal,
@@ -13,9 +24,12 @@ import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { completeWorkflowStepAuthorization } from "#execution/tools/workflow/authorization-completion.js";
 import {
+  type WorkflowStepContext,
   type WorkflowStepInvocation,
   type WorkflowStepResult,
 } from "#execution/tools/workflow/step-context.js";
+
+const log = createLogger("workflow-step");
 
 /** Keeps token capabilities and bearer values inside the executing step. */
 export function withWorkflowStepAuthorization(execute: (...args: never[]) => unknown) {
@@ -34,18 +48,37 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.setVirtualContext(AuthorizationHookKey, input.token);
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
 
+    const sandbox = openStepSandbox(input);
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
       const auth = createAuthorizationContext({
         scope: input.toolName,
         completeAuthorization: completeWorkflowStepAuthorization,
       });
+      const base = buildBaseToolContext({
+        toolName: input.toolName,
+        options: { abortSignal: input.abortSignal, toolCallId: input.callId },
+      });
       const ctx = {
-        ...buildBaseToolContext({
-          toolName: input.toolName,
-          options: { abortSignal: input.abortSignal, toolCallId: input.callId },
-        }),
+        ...base,
         agent: () => unavailableInStep("ctx.agent()", "Call ctx.agent() in the workflow body."),
         ask: () => unavailableInStep("ctx.ask()", "Call ctx.ask() in the workflow body."),
+        getSandbox: (async (environment?: SandboxEnvironmentIdentity) => {
+          const access = await sandbox.open();
+          // The step imports its own copy of the module that declares the
+          // environment, so the same provider and configuration match.
+          if (
+            environment !== undefined &&
+            (access.environment === undefined ||
+              !hasSameSandboxEnvironmentConfiguration(access.environment, environment))
+          ) {
+            throw fatal(
+              'ctx.getSandbox() in a "use step" function received a sandbox environment the session\'s sandbox does not use. ' +
+                "Pass the environment the agent's sandbox definition opens, or call ctx.getSandbox() without one.",
+            );
+          }
+          context.setVirtualContext(SandboxKey, access);
+          return await base.getSandbox();
+        }) as SessionContext["getSandbox"],
         getToken: auth.getToken,
         requireAuth: auth.requireAuth,
       };
@@ -71,6 +104,8 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
           Object.assign(error, { fatal: true });
         }
         throw error;
+      } finally {
+        await sandbox.release();
       }
       const remaining = context.get(PendingAuthorizationResultKey) ?? [];
       const authorized = input.authorizationResults
@@ -86,9 +121,92 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
   return wrapped;
 }
 
+/**
+ * The calling session's sandbox, opened on the step's first `ctx.getSandbox()`
+ * under the key of the session that owns it, and let go of when the step
+ * ends. Recorded state, when the call captured it, resumes the sandbox;
+ * without it, or when that sandbox is gone, the provider's `start` upserts
+ * it by that key with the owner's sandbox definition, so the session finds
+ * the same sandbox and its session-end cleanup removes it. The step never owns the sandbox: the
+ * session's turns may be using it, so the step can neither stop nor delete it.
+ * A step that never asks for it loads nothing.
+ */
+function openStepSandbox(input: WorkflowStepContext) {
+  const { bundle, sessionId, state } = input.sandbox;
+  // The step's own context replaces the delivery's, which carries the
+  // development generation a development source resolves to.
+  const delivery = contextStorage.getStore();
+  const resolveSource = () => resolveDurableCompiledArtifactsSource(bundle.source);
+  let opening: Promise<EnsuredSandboxAccess> | undefined;
+  let released = false;
+  const open = async (): Promise<EnsuredSandboxAccess> => {
+    const compiled = await getCompiledRuntimeAgentBundle({
+      compiledArtifactsSource:
+        delivery === undefined ? resolveSource() : contextStorage.run(delivery, resolveSource),
+      nodeId: bundle.nodeId,
+    });
+    const node = compiled.graph.root;
+    return await ensureSandboxAccess({
+      compiledArtifactsSource: compiled.compiledArtifactsSource,
+      nodeId: node.nodeId,
+      ownsSandbox: false,
+      registry: node.sandboxRegistry,
+      sessionId,
+      state: state ?? null,
+      borrowed: true,
+    });
+  };
+  const openOnce = (): Promise<EnsuredSandboxAccess> => {
+    opening ??= open().catch((error: unknown) => {
+      opening = undefined;
+      throw error;
+    });
+    return opening;
+  };
+  return {
+    async open(): Promise<SandboxAccess> {
+      if (released) {
+        throw fatal(
+          `ctx.getSandbox() was called after the "use step" function of tool "${input.toolName}" returned. ` +
+            "Call it inside the step, which lets go of the sandbox when it ends.",
+        );
+      }
+      const access = await openOnce();
+      return {
+        ...access,
+        delete: () =>
+          unavailableInStep(
+            "sandbox.delete()",
+            "The step borrows the session's sandbox, and only the session can delete it.",
+          ),
+        stop: () =>
+          unavailableInStep(
+            "sandbox.stop()",
+            "The session's turns may be using the sandbox; eve lets go of the step's handle when the step ends.",
+          ),
+      };
+    },
+    async release(): Promise<void> {
+      released = true;
+      const access = await opening?.catch(() => undefined);
+      try {
+        const handle = await access?.detach();
+        if (handle !== undefined) await releaseSandboxHandle(handle);
+      } catch (error) {
+        logError(log, "failed to release a workflow step's sandbox", error, {
+          sessionId,
+          toolName: input.toolName,
+        });
+      }
+    },
+  };
+}
+
 function unavailableInStep(capability: string, guidance: string): never {
-  throw Object.assign(
-    new Error(`${capability} is unavailable inside a "use step" function. ${guidance}`),
-    { fatal: true },
-  );
+  throw fatal(`${capability} is unavailable inside a "use step" function. ${guidance}`);
+}
+
+/** A misuse a retry would repeat, which the Workflow SDK fails without retrying. */
+function fatal(message: string): Error {
+  return Object.assign(new Error(message), { fatal: true });
 }

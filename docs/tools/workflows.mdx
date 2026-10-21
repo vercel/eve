@@ -90,9 +90,9 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `agent`, `agents`, `ask`, and `reply`; each call it receives carries its own `callId` and
   `abortSignal`.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
-  `session`, `callId`, `toolName`, `abortSignal`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
+  `session`, `callId`, `toolName`, `abortSignal`, `getSandbox`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
   `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
-  `getSandbox` remains unavailable.
+  Call `getSandbox`, `getToken`, and `requireAuth` in a step: the workflow body throws when it calls them.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
@@ -437,6 +437,57 @@ itself contains no credentials.
 
 Cancelling an authorization wait withdraws its callback. Cancellation uses the existing turn
 cancellation path rather than a separate authorization completion event.
+
+## Use the session sandbox in a step
+
+Pass `ctx` directly to a step helper and call `ctx.getSandbox()` there. The step opens the
+[sandbox](/docs/sandbox) of the session that called the tool, the same sandbox that session's
+turns use. When the session shares its parent's sandbox, as a copy started by the built-in `agent`
+tool does, the step opens that shared sandbox. The step sees files the session wrote, and the
+session's later tool calls see files the step writes:
+
+```ts title="agent/tools/analyze.ts"
+import { defineWorkflowTool, type WorkflowStepToolContext } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Prepare the input file for an analysis run.",
+  inputSchema: z.object({ value: z.string() }),
+  async task(input, ctx) {
+    "use workflow";
+    await prepareInput(ctx, input);
+    return { path: "/workspace/input.json" };
+  },
+});
+
+async function prepareInput(ctx: WorkflowStepToolContext, input: { value: string }) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({ path: "/workspace/input.json", content: JSON.stringify(input) });
+}
+```
+
+- The workflow body cannot open the sandbox, because it replays. `ctx.getSandbox()` in the body
+  throws and tells you to pass `ctx` to a step helper.
+- The step opens the sandbox directly, with any sandbox provider. If the session recorded its
+  sandbox before it called the tool, the step resumes it. Otherwise, or if that sandbox is gone by
+  the time the step runs, the step opens it the way the session's first turn would: it runs your
+  `defineSandbox()` definition, and the provider finds or creates the sandbox by the session's id. The session's later turns open the same sandbox. Your
+  definition can run once for each caller that opens the sandbox before the session records it,
+  so make its initialization safe to repeat.
+- The step does not own the sandbox. When the step ends, even by throwing, eve lets go of the
+  step's handle and leaves the sandbox running for the session. eve never stops or deletes the
+  sandbox for a step, and `sandbox.stop()` and `sandbox.delete()` in a step fail without a retry,
+  because the session's turns may be using the sandbox.
+- The session removes the sandbox when the session ends, even when only a step opened it.
+- A step can use the sandbox while the session's turns use it too, as subagents that share a
+  sandbox do. Give each one its own files to write.
+- Steps run at least once and retry after a failure, so make sandbox writes safe to repeat. Write
+  whole files instead of appending to them, or check for earlier output first.
+- When the session shares its parent's sandbox, the step opens it by the parent's session id with
+  the parent's sandbox definition, and the parent removes it when the parent ends.
+- A step runs wherever the workflow runs. A sandbox that lives on one machine, such as just-bash
+  on the local disk, is reachable from a step only on that machine, as in local development.
 
 ## Ask a human: `ctx.ask`
 
