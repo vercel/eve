@@ -36,6 +36,7 @@ import {
   getHookByToken,
   getRun,
   getWorld,
+  reenqueueRun,
   start,
   type Run,
   type StartOptionsWithoutDeploymentId,
@@ -151,7 +152,12 @@ export function createWorkflowRuntime(config: {
   const existingHandle = async (input: RunInput): Promise<RunHandle | undefined> => {
     if (input.sessionId === undefined) return undefined;
     try {
-      const run = await (await getWorld()).runs.get(input.sessionId);
+      const world = await getWorld();
+      const run = await world.runs.get(input.sessionId);
+      // The winner's run_created landed but its queue message may not have:
+      // re-publish from the stored run, never from this caller's input or auth.
+      // A duplicate delivery replays the same run, so its turn runs once.
+      if (run.status === "pending") await reenqueueRun(world, run.runId);
       const deliveryId = run.attributes?.["eve.channel.initialDeliveryId"];
       return {
         sessionId: input.sessionId,
