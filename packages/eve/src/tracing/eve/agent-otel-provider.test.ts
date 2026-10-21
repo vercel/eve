@@ -35,6 +35,7 @@ import {
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
+import { traceSessionIdFromContext } from "#tracing/eve/conversation-context.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
@@ -3007,6 +3008,7 @@ describe("createAgentOtelInstrumentation", () => {
     const active = withSpy.mock.calls[0]?.[0];
     expect(active).toBeDefined();
     expect(activeTraceOperation(active!)?.type).toBe("model");
+    expect(traceSessionIdFromContext(active)).toBe("session-1");
     withSpy.mockRestore();
   });
 

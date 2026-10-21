@@ -28,10 +28,9 @@ import type { AgentTurnTraceState } from "#tracing/eve/agent-trace-state.js";
 import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
-import { traceSessionIdOf } from "#tracing/eve/operation-input.js";
 import { ROOT_CONTEXT } from "#compiled/@opentelemetry/api/index.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
-import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
+import { traceSessionIdOf, withOperationTraceContext } from "#tracing/eve/conversation-context.js";
 import type {
   AgentSpanIdGenerator,
   AgentRun,
@@ -116,7 +115,10 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
     const session = await input.stateStore.get("session", sessionId);
     return input.tracing.resume({
       identity: eveTurnIdentity({ sessionId, rootSessionId: turn.rootSessionId, turnId }),
-      context: context ?? hostContext(session?.channelAudience, { sessionId, ...turn }),
+      context: withOperationTraceContext(
+        context ?? withChannelAudience(ROOT_CONTEXT, session?.channelAudience),
+        { sessionId, ...turn },
+      ),
     });
   }
 

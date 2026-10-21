@@ -16,6 +16,10 @@ interface OperationConversation {
   readonly traceSessionId?: string;
 }
 
+export function traceSessionIdOf(scope: OperationConversation): string {
+  return scope.traceSessionId ?? scope.rootSessionId ?? scope.sessionId;
+}
+
 export function operationConversationId(input: OperationConversation): string {
   return resolveConversationId(input.rootSessionId ?? input.sessionId);
 }
@@ -23,24 +27,24 @@ export function operationConversationId(input: OperationConversation): string {
 export function withOperationTraceContext(context: Context, input: OperationConversation): Context {
   return withConversationId(context, operationConversationId(input)).setValue(
     TRACE_SESSION_KEY,
-    input.traceSessionId ?? input.rootSessionId ?? input.sessionId,
+    traceSessionIdOf(input),
   );
 }
 
 export function conversationIdFromContext(context: unknown): string | undefined {
-  if (typeof context !== "object" || context === null) return undefined;
-  const getValue = Reflect.get(context, "getValue");
-  return typeof getValue === "function"
-    ? readConversationId(Reflect.apply(getValue, context, [CONVERSATION_KEY]))
-    : undefined;
+  return readConversationId(readContextValue(context, CONVERSATION_KEY));
 }
 
 export function traceSessionIdFromContext(context: unknown): string | undefined {
+  const value = readContextValue(context, TRACE_SESSION_KEY);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readContextValue(context: unknown, key: symbol): unknown {
   if (typeof context !== "object" || context === null) return undefined;
   const getValue = Reflect.get(context, "getValue");
   if (typeof getValue !== "function") return undefined;
-  const value = Reflect.apply(getValue, context, [TRACE_SESSION_KEY]);
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return Reflect.apply(getValue, context, [key]);
 }
 
 export function readConversationBaggage(value: string | null): string | undefined {
