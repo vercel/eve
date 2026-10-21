@@ -212,11 +212,41 @@ export function recallBotConfig(input: RecallBotConfigInput): Record<string, unk
   return config;
 }
 
-/** Sends a Recall bot to a meeting. Returns the new bot's id. */
+/** A Recall bot: its id and meeting platform, such as `zoom` or `google_meet`. */
+export interface RecallBot {
+  readonly id: string;
+  readonly platform?: string;
+}
+
+interface RecallBotResponse {
+  readonly id: string;
+  readonly meeting_url?: { readonly platform?: unknown } | null;
+}
+
+/** Sends a Recall bot to a meeting. */
 export async function createRecallBot(
   input: RecallApiOptions & { readonly body: Record<string, unknown> },
-): Promise<{ readonly id: string }> {
-  return await callRecallApi<{ readonly id: string }>({ ...input, path: "/bot/" });
+): Promise<RecallBot> {
+  return toRecallBot(await callRecallApi<RecallBotResponse>({ ...input, path: "/bot/" }));
+}
+
+/** Looks up a Recall bot by id. */
+export async function getRecallBot(
+  input: RecallApiOptions & { readonly botId: string },
+): Promise<RecallBot> {
+  return toRecallBot(
+    await callRecallApi<RecallBotResponse>({
+      ...input,
+      path: `/bot/${encodeURIComponent(input.botId)}/`,
+    }),
+  );
+}
+
+// Participants carry a `platform` too, but it's how they joined ("desktop",
+// "dial_in"), not the meeting platform.
+function toRecallBot(bot: RecallBotResponse): RecallBot {
+  const platform = bot.meeting_url?.platform;
+  return typeof platform === "string" ? { id: bot.id, platform } : { id: bot.id };
 }
 
 function chunkText(text: string, size: number): string[] {

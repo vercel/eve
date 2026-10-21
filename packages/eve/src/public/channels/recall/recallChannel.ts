@@ -17,6 +17,7 @@ import {
 import {
   callRecallApi,
   createRecallBot,
+  getRecallBot,
   leaveRecallCall,
   outputRecallAudio,
   recallBotConfig,
@@ -60,7 +61,7 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
 /** JSON-serializable state for one bot's meeting session. */
 export interface RecallChannelState extends PromptQueueState {
   botId: string | null;
-  /** Meeting platform, such as `zoom`, learned from the first participant event. */
+  /** Meeting platform, such as `zoom`, from the bot. `null` until it's known. */
   platform: string | null;
   /** Lines the agent heard but didn't answer since its last turn, oldest first. */
   transcript?: string[];
@@ -103,7 +104,7 @@ export interface RecallChannelCredentials {
 /** Low-level handle on the meeting's bot, exposed to hooks and event handlers. */
 export interface RecallHandle {
   readonly botId: string;
-  /** Meeting platform, when known. */
+  /** Meeting platform, such as `zoom`, from the bot. Unknown in `onMeetingEvent`. */
   readonly platform: string | undefined;
   /** Whether {@link sendChatMessage} can reach one participant. Only Zoom supports it. */
   readonly supportsDirectMessages: boolean;
@@ -282,13 +283,13 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
 
     async deliver(payload, channel) {
       const delivered = payload.state as Partial<RecallDeliveryState> | undefined;
-      if (delivered?.platform) channel.state.platform = delivered.platform;
       // A session's first send seeds state with the whole delivery.
       delete (channel.state as RecallDeliveryState).event;
       const event = delivered?.event;
       if (event === undefined || typeof payload.message !== "string") {
         return defaultDeliverResult(payload);
       }
+      channel.state.platform ??= await lookUpPlatform(api, channel.state.botId);
 
       if (channel.state.awaitingCall && isInCall(event)) {
         await flushOutbox(
@@ -338,7 +339,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       return await from(bot.id).send(input.message, {
         auth: input.auth,
         // Recall rejects chat until the bot is admitted, which can take minutes.
-        state: { awaitingCall: true, botId: bot.id, platform: null },
+        state: { awaitingCall: true, botId: bot.id, platform: bot.platform ?? null },
       });
     },
 
@@ -392,10 +393,10 @@ async function dispatch(input: {
   readonly onMeetingEvent: NonNullable<RecallChannelConfig["onMeetingEvent"]>;
 }): Promise<void> {
   const { event } = input;
-  const platform = "participant" in event ? (event.participant.platform ?? null) : null;
+  // The route doesn't know the platform; the session looks it up once.
   const ctx: RecallContext = {
     botName: input.botName,
-    recall: buildRecallHandle(input.api, { botId: event.botId, platform }),
+    recall: buildRecallHandle(input.api, { botId: event.botId, platform: null }),
   };
 
   let result: RecallInboundResult | undefined;
@@ -413,8 +414,8 @@ async function dispatch(input: {
       attachInputText(
         {
           auth: result.auth,
-          context: [formatRecallContextBlock(event, platform)],
-          state: { botId: event.botId, event, platform },
+          context: [formatRecallContextBlock(event)],
+          state: { botId: event.botId, event, platform: null },
           title: result.title,
         },
         // The speaker prefix stays model-visible; a pending prompt matches what they said.
@@ -469,11 +470,10 @@ function formatTranscript(lines: readonly string[]): string {
   ].join("\n");
 }
 
-function formatRecallContextBlock(event: RecallMeetingEvent, platform: string | null): string {
+function formatRecallContextBlock(event: RecallMeetingEvent): string {
   const lines = [
     "<recall_context>",
     "channel: meeting",
-    ...(platform ? [`platform: ${platform}`] : []),
     `bot_id: ${event.botId}`,
     "response_medium: meeting chat",
     "response_instructions: Your replies are posted to the meeting chat as plain text. Keep them short and skip markdown. Lines are transcribed speech or chat, prefixed with the participant's display name, which is not verified.",
@@ -487,6 +487,17 @@ function formatRecallContextBlock(event: RecallMeetingEvent, platform: string | 
     "</recall_context>",
   ];
   return lines.join("\n");
+}
+
+/** The bot's meeting platform, or `null` to try again on the next delivery. */
+async function lookUpPlatform(api: RecallApiOptions, botId: string | null): Promise<string | null> {
+  if (!botId) return null;
+  try {
+    return (await getRecallBot({ ...api, botId })).platform ?? null;
+  } catch (error) {
+    log.warn("Recall bot lookup failed; private chat and chat limits fall back", { error });
+    return null;
+  }
 }
 
 /** Real-time events only flow once the bot is in the call; joining statuses don't count. */
