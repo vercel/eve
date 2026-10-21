@@ -1,17 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createLinqAdapter, directMessage, fetchMessage, markRead, newMessage, reaction, send } =
-  vi.hoisted(() => ({
-    createLinqAdapter: vi.fn((_config: { credentials?: () => unknown | Promise<unknown> }) => ({
+const {
+  createLinqAdapter,
+  directMessage,
+  fetchMessage,
+  markRead,
+  newMessage,
+  reaction,
+  send,
+  vercelOidc,
+} = vi.hoisted(() => ({
+  createLinqAdapter: vi.fn(
+    (_config: {
+      credentials?: () => unknown | Promise<unknown>;
+      webhookVerifier?: (request: Request, rawBody: Uint8Array) => unknown;
+    }) => ({
       name: "linq",
-    })),
-    directMessage: vi.fn(),
-    fetchMessage: vi.fn(),
-    markRead: vi.fn(),
-    newMessage: vi.fn(),
-    reaction: vi.fn(),
-    send: vi.fn(),
-  }));
+    }),
+  ),
+  directMessage: vi.fn(),
+  fetchMessage: vi.fn(),
+  markRead: vi.fn(),
+  newMessage: vi.fn(),
+  reaction: vi.fn(),
+  send: vi.fn(),
+  vercelOidc: vi.fn(),
+}));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
   chatSdkChannel: () => ({
@@ -32,10 +46,18 @@ vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
 vi.mock("#compiled/@linqapp/chat-sdk-adapter/index.js", () => ({
   createLinqAdapter,
 }));
-vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
+vi.mock("#public/channels/auth.js", () => ({ vercelOidc }));
 
 import { Message } from "#compiled/chat/index.js";
 import { defaultLinqAuth, linqChannel } from "#public/channels/linq/linqChannel.js";
+
+function forgedWebhook(): Request {
+  return new Request("https://agent.example/eve/v1/linq", {
+    body: JSON.stringify({ event_type: "message.received", data: { direction: "inbound" } }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+}
 
 describe("linqChannel", () => {
   beforeEach(() => {
@@ -121,17 +143,37 @@ describe("linqChannel", () => {
   it("uses lazy credentials and the managed credential verifier", async () => {
     const apiKey = vi.fn(async () => "rotating-token");
     const signingSecret = vi.fn(async () => "rotating-secret");
-    const webhookVerifier = vi.fn();
+    const webhookVerifier = vi.fn(async () => true);
 
     linqChannel({ credentials: { apiKey, signingSecret, webhookVerifier } });
 
     const config = createLinqAdapter.mock.calls[0]?.[0];
-    expect(config).toMatchObject({ webhookVerifier });
     expect(config).not.toHaveProperty("signingSecret");
+    const request = forgedWebhook();
+    const rawBody = new Uint8Array();
+    await expect(config?.webhookVerifier?.(request, rawBody)).resolves.toBe(true);
+    expect(webhookVerifier).toHaveBeenCalledWith(request, rawBody);
     await expect(config?.credentials?.()).resolves.toEqual({
       apiKey: "rotating-token",
       signingSecret: "rotating-secret",
     });
+  });
+
+  it.each([
+    ["default Vercel OIDC verifier", undefined],
+    ["supplied verifier", () => null],
+  ])("rejects webhooks when the %s returns a falsy result", async (_name, webhookVerifier) => {
+    vercelOidc.mockReturnValue(async () => null);
+    const { createLinqAdapter: createRealLinqAdapter } = await vi.importActual<
+      typeof import("#compiled/@linqapp/chat-sdk-adapter/index.js")
+    >("#compiled/@linqapp/chat-sdk-adapter/index.js");
+
+    linqChannel({ credentials: { apiKey: "linq-api-key", webhookVerifier } });
+    const config = createLinqAdapter.mock.calls[0]?.[0];
+    if (config === undefined) throw new Error("Expected Linq adapter config.");
+    const response = await createRealLinqAdapter(config).handleWebhook(forgedWebhook());
+
+    expect(response.status).toBe(401);
   });
 
   it("drops blank inbound messages", async () => {

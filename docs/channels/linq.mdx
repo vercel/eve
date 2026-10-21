@@ -37,7 +37,7 @@ export default linqChannel({
 });
 ```
 
-Set `route` to override the webhook path or `webhookVerifier` to use a different trusted-forwarder verifier.
+Set `route` to override the webhook path or `webhookVerifier` to use a different trusted-forwarder verifier. A verifier rejects a webhook by throwing or returning a falsy value such as `null` or `false`.
 
 ## Tapbacks
 
