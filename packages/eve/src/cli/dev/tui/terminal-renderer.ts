@@ -146,7 +146,12 @@ import {
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
-import { inputContextLabel, renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
+import {
+  fitQuestionPanel,
+  inputContextLabel,
+  renderQuestionPanel,
+  renderQuestionPrompt,
+} from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
@@ -291,6 +296,8 @@ type AgentHeaderOptions = {
 
 const caretBlinkMs = 500;
 const tickMs = 90;
+// Two rules, two padding rows, and one navigation row stay outside the body viewport.
+const hitlDrawerChromeRows = 5;
 // How long to wait on a lone `ESC` before treating it as the Escape key, so a
 // split arrow sequence (`ESC` then `[A`) has time to reassemble first.
 const escFlushMs = 30;
@@ -1109,18 +1116,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
     let approvalCursor = 0;
     this.#hitlDrawer = (width) =>
       renderTransientDrawer(
-        [
-          `  ${this.#theme.colors.bold(stripTerminalControls(request.prompt))}`,
-          "",
-          ...renderQuestionChoices(
-            [
+        renderQuestionPanel(
+          {
+            prompt: request.prompt,
+            options: [
               { id: "yes", label: "Yes" },
               { id: "no", label: "No" },
             ],
-            approvalCursor,
-            this.#theme,
-          ),
-        ],
+            cursor: approvalCursor,
+            allowFreeform: false,
+            editor: EMPTY_LINE,
+            caretVisible: false,
+            maxRows: this.#height() - hitlDrawerChromeRows,
+          },
+          this.#theme,
+          width,
+        ),
         ["y yes · n no · Ctrl-C cancel"],
         this.#theme,
         width,
@@ -1224,6 +1235,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
               allowFreeform: hasFreeformRow,
               editor,
               caretVisible: this.#caretVisible,
+              maxRows: this.#height() - hitlDrawerChromeRows,
             },
             this.#theme,
             width,
@@ -1249,11 +1261,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       });
       if (inputRows.at(-1) === "") inputRows.pop();
       return renderTransientDrawer(
-        [
-          `  ${this.#theme.colors.bold(stripTerminalControls(question.prompt))}`,
-          "",
-          ...inputRows.map((row) => `  ${row}`),
-        ],
+        fitQuestionPanel(
+          [
+            ...renderQuestionPrompt(question.prompt, this.#theme, width),
+            "",
+            ...inputRows.map((row) => `  ${row}`),
+          ],
+          this.#height() - hitlDrawerChromeRows,
+        ),
         ["Enter submit · Esc dismiss"],
         this.#theme,
         width,
@@ -3328,7 +3343,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const width = this.#width();
     const footer = this.#footerRows(width);
     const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
-    const maxBlockRows = Math.max(1, this.#height() - startupHeader.length - footer.length);
+    const maxBlockRows = Math.max(0, this.#height() - startupHeader.length - footer.length);
     const committed: string[] = [];
     let previous = this.#lastCommitted;
 
@@ -3401,7 +3416,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (!this.#isInteractive) return;
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const maxBlockRows = Math.max(1, this.#height() - footer.length);
+    const maxBlockRows = Math.max(0, this.#height() - footer.length);
     let previous = this.#lastCommitted;
     const flat: string[] = [];
 
@@ -3551,7 +3566,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const drawer = this.#hitlDrawer(width);
       const available = this.#height() - drawer.rows.length - drawer.controls.length - 1;
       const activity = available >= 4 ? this.#taskPanelRows(width, available + 1) : [];
-      return [...activity.slice(0, -1), ...drawer.rows, ...drawer.controls];
+      return [...activity.slice(0, -1), ...drawer.rows, ...drawer.controls].map((row) =>
+        clip(row, width),
+      );
     }
 
     const flow = this.#setupFlow;
@@ -4434,6 +4451,7 @@ function clipLiveRows(
   width: number,
   theme: Theme,
 ): string[] {
+  if (maxRows <= 0) return [];
   if (rows.length <= maxRows) return [...rows];
   if (maxRows <= 1) {
     return [clip(hiddenRowsMarker(rows.length, theme), width)];

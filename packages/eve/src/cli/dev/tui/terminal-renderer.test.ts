@@ -34,6 +34,7 @@ import type { AgentTUISessionOptions } from "./runner.js";
 import { PROMPT_COMMANDS, promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
+import { visibleLength } from "#cli/ui/terminal-text.js";
 
 /** A session view over the conversation these events produce. */
 function conversationOf(
@@ -962,6 +963,78 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it.each([13, 8])("keeps the focused question option inside a %i-row terminal", async (rows) => {
+    const { screen, input, renderer } = makeRenderer(60, rows);
+    renderer.renderConversation(
+      conversationOf(
+        [
+          stampTestEvent(createTurnStartedEvent({ sequence: 0, turnId: "turn_1" })),
+          stampTestEvent(
+            createMessageAppendedEvent({
+              messageDelta: "Preparing the deployment",
+              sequence: 1,
+              stepIndex: 0,
+              turnId: "turn_1",
+            }),
+            1,
+          ),
+        ],
+        { working: true },
+      ),
+    );
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Which environment should Alice use?",
+      display: "select",
+      options: [
+        { id: "production", label: "Production", description: "Use the production environment" },
+        { id: "staging", label: "Staging", description: "Use the staging environment" },
+        { id: "preview", label: "Preview", description: "Use the preview environment" },
+      ],
+      allowFreeform: true,
+    });
+    try {
+      for (const label of ["Production", "Staging", "Preview", "Type your own answer…"]) {
+        const lines = screen.snapshot().split("\n");
+        expect(lines.length).toBeLessThanOrEqual(rows);
+        expect(lines.some((line) => line.includes(label))).toBe(true);
+        expect(lines.every((line) => visibleLength(line) <= screen.columns)).toBe(true);
+        if (label !== "Type your own answer…") input.down();
+      }
+      input.type("sandbox");
+      input.enter();
+      await expect(answer).resolves.toEqual({ text: "sandbox" });
+    } finally {
+      renderer.shutdown();
+      await answer.catch(() => {});
+    }
+  });
+
+  it.each([15, 8])(
+    "fits a wrapped free-text question and editor inside a narrow %i-row terminal",
+    async (rows) => {
+      const { screen, input, renderer } = makeRenderer(30, rows);
+      const answer = renderer.readInputQuestion({
+        requestId: "q1",
+        prompt:
+          "Which environment should Alice use for the next deployment?\nPlease enter the environment name.",
+        display: "text",
+      });
+      try {
+        input.type("staging");
+        const lines = screen.snapshot().split("\n");
+        expect(lines.length).toBeLessThanOrEqual(screen.rows);
+        expect(lines.every((line) => visibleLength(line) <= screen.columns)).toBe(true);
+        expect(screen.snapshot()).toContain("staging");
+        input.enter();
+        await expect(answer).resolves.toEqual({ text: "staging" });
+      } finally {
+        renderer.shutdown();
+        await answer.catch(() => {});
+      }
+    },
+  );
+
   it("renders the question drawer with shared option rows", async () => {
     const { screen, input, renderer } = makeRenderer();
 
@@ -1864,6 +1937,29 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await expect(approval).resolves.toEqual({ approved: true });
     renderer.shutdown();
+  });
+
+  it("keeps approval choices reachable with a long prompt in a small terminal", async () => {
+    const { screen, input, renderer } = makeRenderer(25, 8);
+    const approval = renderer.readToolApproval({
+      approvalId: "a1",
+      toolCallId: "c1",
+      toolName: "deploy",
+      prompt: "Approve deploying Alice's changes?\nThe staging environment is ready.",
+      input: {},
+    });
+    try {
+      input.down();
+      const lines = screen.snapshot().split("\n");
+      expect(lines.length).toBeLessThanOrEqual(screen.rows);
+      expect(lines.every((line) => visibleLength(line) <= screen.columns)).toBe(true);
+      expect(screen.snapshot()).toContain("No");
+      input.enter();
+      await expect(approval).resolves.toEqual({ approved: false, reason: "Denied by user." });
+    } finally {
+      renderer.shutdown();
+      await approval.catch(() => {});
+    }
   });
 
   it("shows where an approval sits among the open ones and who asked for it", async () => {
