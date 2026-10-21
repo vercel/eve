@@ -3,7 +3,6 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
-import { releaseSandboxHandle } from "#execution/sandbox/handle-release.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -190,8 +189,7 @@ function openStepSandbox(input: WorkflowStepContext) {
       released = true;
       const access = await opening?.catch(() => undefined);
       try {
-        const handle = await access?.detach();
-        if (handle !== undefined) await releaseSandboxHandle(handle);
+        await access?.detach();
       } catch (error) {
         logError(log, "failed to release a workflow step's sandbox", error, {
           sessionId,

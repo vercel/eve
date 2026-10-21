@@ -7,9 +7,7 @@ import {
 } from "#context/build-callback-context.js";
 import {
   trackActiveSandboxHandle,
-  trackActiveSandboxHandleIfAbsent,
   untrackActiveSandboxHandle,
-  untrackActiveSandboxSession,
 } from "#execution/sandbox/active-handles.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
@@ -51,9 +49,8 @@ interface EnsureSandboxAccessInput {
    * `true` for a caller that borrows a session's sandbox outside its turns,
    * such as a workflow step. Its state was captured earlier, so a sandbox
    * that is gone falls back to `start`, which upserts by the session id. Its
-   * handle joins the shutdown registry only when no handle is tracked for
-   * the session, so it never replaces or drops the session's own, and then
-   * stays tracked for runtime shutdown after `detach`.
+   * handle stays out of the shutdown registry, which tracks one handle per
+   * session, so it never replaces or drops the session's own.
    */
   readonly borrowed?: boolean;
 }
@@ -99,10 +96,8 @@ export async function ensureSandboxAccess(
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
-  let trackedByBorrower: object | undefined;
   const track: typeof trackActiveSandboxHandle = (entry) => {
     if (input.borrowed !== true) trackActiveSandboxHandle(entry);
-    else if (trackActiveSandboxHandleIfAbsent(entry)) trackedByBorrower = entry.handle;
   };
   const untrack: typeof untrackActiveSandboxHandle = (entry) => {
     if (input.borrowed !== true) untrackActiveSandboxHandle(entry);
@@ -377,9 +372,7 @@ export async function ensureSandboxAccess(
     async detach() {
       // A failed open left nothing to let go of.
       if (requiring !== undefined) await requiring.catch(() => undefined);
-      const handle = forgetHandle()?.handle;
-      // A borrowed handle runtime shutdown still tracks stays live for it.
-      return handle === trackedByBorrower ? undefined : handle;
+      return forgetHandle()?.handle;
     },
     async end(reason: SandboxSessionEndReason) {
       if (input.ownsSandbox === false) return;
@@ -398,11 +391,6 @@ export async function ensureSandboxAccess(
         reason,
       });
       forgetHandle();
-      // A borrower may have left the only tracked handle for this key.
-      untrackActiveSandboxSession({
-        providerName: provider.providerName,
-        sessionId: input.sessionId,
-      });
       persisted = null;
     },
     async get() {

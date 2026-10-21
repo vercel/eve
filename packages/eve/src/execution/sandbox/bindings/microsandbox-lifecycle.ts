@@ -1,5 +1,4 @@
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-import { withHandleRelease } from "#execution/sandbox/handle-release.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
@@ -432,26 +431,22 @@ function createHandle(
       );
     },
   );
-  // Each handle holds its own SDK client to the VM; detaching it leaves the VM running.
-  return withHandleRelease(
-    {
-      sandbox: session,
-      async onSandboxDelete() {
-        await deleteMicrosandboxSession({ context, sessionIdentity });
-      },
-      async onSandboxStop() {
-        await withMicrosandboxLifecycleLock(context.storagePath, sessionIdentity, () =>
-          sandbox.stop(),
-        );
-      },
-      async onRuntimeShutdown() {
-        await withMicrosandboxLifecycleLock(context.storagePath, sessionIdentity, () =>
-          sandbox.shutdown(),
-        );
-      },
+  return {
+    sandbox: session,
+    async onSandboxDelete() {
+      await deleteMicrosandboxSession({ context, sessionIdentity });
     },
-    () => sandbox.detach(),
-  );
+    async onSandboxStop() {
+      await withMicrosandboxLifecycleLock(context.storagePath, sessionIdentity, () =>
+        sandbox.stop(),
+      );
+    },
+    async onRuntimeShutdown() {
+      await withMicrosandboxLifecycleLock(context.storagePath, sessionIdentity, () =>
+        sandbox.shutdown(),
+      );
+    },
+  };
 }
 
 function createMicrosandboxInternalSession(sandbox: MicrosandboxVm): InternalSandboxSession {

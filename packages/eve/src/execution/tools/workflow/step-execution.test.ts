@@ -14,7 +14,6 @@ import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { withHandleRelease } from "#execution/sandbox/handle-release.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
@@ -74,15 +73,13 @@ vi.mock("#internal/workflow/runtime.js", () => ({
  * A provider whose `start` upserts a sandbox by session id and whose
  * `onSessionEnd` deletes by it, as the provider contract requires. Resuming
  * a sandbox that is gone throws. Each open hands out its own handle over the
- * shared sandbox; `released` records which handles a borrower freed, and
- * `shutDown` which the runtime's shutdown stopped.
+ * shared sandbox; `shutDown` records which ones the runtime's shutdown stopped.
  */
 function upsertSandboxes() {
   const live = new Map<string, ReturnType<typeof mockSandbox>>();
   const starts: string[] = [];
   const resumes: string[] = [];
   const handles: object[] = [];
-  const released: object[] = [];
   const shutDown: object[] = [];
   const stopped: Mock<() => Promise<void>> = vi.fn(async () => {});
   const deleted: Mock<() => Promise<void>> = vi.fn(async () => {});
@@ -92,15 +89,12 @@ function upsertSandboxes() {
       sandbox = mockSandbox();
       live.set(key, sandbox);
     }
-    const handle = withHandleRelease(
-      {
-        sandbox: sandbox.session,
-        onRuntimeShutdown: async () => void shutDown.push(handle),
-        onSandboxDelete: deleted,
-        onSandboxStop: stopped,
-      },
-      async () => void released.push(handle),
-    );
+    const handle = {
+      sandbox: sandbox.session,
+      onRuntimeShutdown: async () => void shutDown.push(handle),
+      onSandboxDelete: deleted,
+      onSandboxStop: stopped,
+    };
     handles.push(handle);
     return handle;
   };
@@ -136,7 +130,7 @@ function upsertSandboxes() {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { deleted, handles, provider, registry, released, resumes, shutDown, starts, stopped };
+  return { deleted, handles, provider, registry, resumes, shutDown, starts, stopped };
 }
 
 function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext {
@@ -210,8 +204,8 @@ describe("workflow step authorization", () => {
     },
   );
 
-  it("resolves a development delivery's generation and starts, then resumes, the sandbox by key", async () => {
-    const { registry, resumes, starts } = upsertSandboxes();
+  it("resolves a development delivery's generation and starts the sandbox by key", async () => {
+    const { registry, starts } = upsertSandboxes();
     bundle.registry = registry;
     const owner = { ...context("user-1", "owner-session") };
     // `eve dev` deliveries carry the generation a development source resolves to.
@@ -236,22 +230,10 @@ describe("workflow step authorization", () => {
     ).resolves.toMatchObject({ kind: "result", output: "written" });
     expect(bundle.loadedFrom).toEqual([generation.source]);
     expect(starts).toEqual(["owner-session"]);
-
-    const recorded = {
-      session: { providerName: "upsert", state: { key: "owner-session" }, stateProtocolVersion: 1 },
-    };
-    await expect(
-      runStep(async (ctx) => await (await ctx.getSandbox()).readTextFile(plan), {
-        ...owner,
-        sandbox: { ...owner.sandbox, sessionId: "owner-session", state: recorded },
-      }),
-    ).resolves.toMatchObject({ kind: "result", output: "draft" });
-    expect(starts).toEqual(["owner-session"]);
-    expect(resumes).toEqual(["owner-session"]);
   });
 
   it("leaves the session's handle tracked for runtime shutdown after a step uses the sandbox", async () => {
-    const { handles, registry, released, shutDown } = upsertSandboxes();
+    const { handles, registry, shutDown } = upsertSandboxes();
     bundle.registry = registry;
     // The session's turn opened its sandbox in this process.
     const session = await ensureSandboxAccess({
@@ -267,25 +249,9 @@ describe("workflow step authorization", () => {
       kind: "result",
     });
     await shutdownActiveSandboxHandles();
+    // The step's handle neither replaced nor dropped the session's.
     expect(handles).toHaveLength(2);
     expect(shutDown).toEqual([sessionHandle]);
-    // The step frees its own handle; the session's stays live.
-    expect(released).toEqual([handles[1]]);
-  });
-
-  it("keeps tracked for runtime shutdown a sandbox only a step opened", async () => {
-    const { handles, registry, released, shutDown } = upsertSandboxes();
-    bundle.registry = registry;
-    await expect(runStep(async (ctx) => void (await ctx.getSandbox()))).resolves.toMatchObject({
-      kind: "result",
-    });
-    await expect(runStep(async (ctx) => void (await ctx.getSandbox()))).resolves.toMatchObject({
-      kind: "result",
-    });
-    await shutdownActiveSandboxHandles();
-    // The first step's handle is the one shutdown reaches; the second step frees its own.
-    expect(shutDown).toEqual([handles[0]]);
-    expect(released).toEqual([handles[1]]);
   });
 
   it("starts the sandbox by key when the state the call captured is gone", async () => {
