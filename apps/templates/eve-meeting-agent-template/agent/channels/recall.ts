@@ -1,12 +1,9 @@
 import { decide } from "eve/ai";
 import { recallChannel } from "eve/channels/recall";
 
-import { recallWebhookUrl } from "../lib/webhook-url.js";
-
 // Lines that don't start a turn are kept as recent transcript for the next
 // one, so "open a ticket for that" has context.
 export default recallChannel({
-  webhookUrl: recallWebhookUrl(),
   async shouldRespond({ event, line, transcript, botName }) {
     if (event.type === "chat") return true;
     if (event.type !== "speech") return false;

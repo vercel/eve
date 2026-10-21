@@ -1,8 +1,6 @@
-import { createRecallBot, recallBotConfig } from "eve/channels/recall";
+import { createRecallBot, recallBotConfig, resolveRecallWebhookUrl } from "eve/channels/recall";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-
-import { recallWebhookUrl } from "../lib/webhook-url.js";
 
 export default defineTool({
   description:
@@ -15,16 +13,10 @@ export default defineTool({
     if (ctx.session.auth.initiator?.authenticator === "recall-webhook") {
       throw new Error("Join other meetings from outside a meeting.");
     }
-    const webhookUrl = recallWebhookUrl();
-    if (!webhookUrl) {
-      throw new Error(
-        "Set RECALL_WEBHOOK_URL to the public HTTPS URL of /eve/v1/recall, such as a tunnel to `eve dev`.",
-      );
-    }
     const bot = await createRecallBot({
       body: recallBotConfig({
         meetingUrl,
-        webhookUrl,
+        webhookUrl: resolveRecallWebhookUrl(),
         greeting:
           "Hi, I'm eve, and this meeting is transcribed. Say my name or message me here to open or update a Linear issue.",
       }),

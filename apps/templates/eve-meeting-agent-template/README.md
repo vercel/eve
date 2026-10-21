@@ -13,7 +13,6 @@ Recall joins the call, transcribes it, and posts each final utterance and chat m
 The main pieces are:
 
 - `agent/channels/recall.ts`: `recallChannel()` from `eve/channels/recall`, which verifies Recall webhooks and posts replies to the meeting chat, plus the `shouldRespond` check for which lines get an answer
-- `agent/lib/webhook-url.ts`: the public webhook URL bots post to
 - `agent/tools/join_meeting.ts`: sends a bot to a meeting on request, for testing
 - `agent/connections/linear.ts`: [Linear's MCP server](https://linear.app/docs/mcp) through an app-scoped [Vercel Connect](https://vercel.com/docs/connect) connector
 - `agent/instructions.md`: when to speak and how to work with Linear
@@ -37,7 +36,7 @@ LINEAR_CONNECTOR=<connector-uid>   # defaults to "linear"
 RECALL_API_KEY=...
 RECALL_WORKSPACE_VERIFICATION_SECRET=whsec_...
 RECALL_REGION=us-east-1            # your Recall workspace region
-RECALL_WEBHOOK_URL=https://...     # only needed for previews or local development
+RECALL_WEBHOOK_URL=https://...     # only needed for local development
 ```
 
 ## Deploy
@@ -46,11 +45,11 @@ RECALL_WEBHOOK_URL=https://...     # only needed for previews or local developme
 vercel deploy --prod
 ```
 
-Recall posts to `/eve/v1/recall` at the production URL. If Deployment Protection covers production, run `vercel project protection enable --protection-bypass`, redeploy, and append `?x-vercel-protection-bypass=<secret>` to webhook URLs you configure in Recall.
+Recall posts to `/eve/v1/recall` at the production URL. If Deployment Protection covers production, run `vercel project protection enable --protection-bypass`, and redeploy. Bots the agent creates carry the bypass secret automatically; append `?x-vercel-protection-bypass=<secret>` to webhook URLs you configure in Recall yourself.
 
 ## Join meetings
 
-Use Recall's [calendar integration](https://docs.recall.ai/docs/calendar-integration) so the bot joins meetings automatically, such as every meeting its calendar is invited to. Configure those bots with the body `recallBotConfig` from `eve/channels/recall` builds, as `agent/tools/join_meeting.ts` does, with `webhookUrl` set to `https://<your-project>.vercel.app/eve/v1/recall`.
+Use Recall's [calendar integration](https://docs.recall.ai/docs/calendar-integration) so the bot joins meetings automatically, such as every meeting its calendar is invited to. Configure those bots with the body `recallBotConfig` from `eve/channels/recall` builds, as `agent/tools/join_meeting.ts` does, with `webhookUrl` set to `https://<your-project>.vercel.app/eve/v1/recall`. Previews send their own bots' webhooks to themselves.
 
 To test without a calendar, open the terminal UI against the deployment and ask the agent to join a meeting, then admit the bot:
 
