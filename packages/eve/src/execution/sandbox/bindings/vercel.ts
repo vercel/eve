@@ -708,7 +708,11 @@ function resolveVercelSandboxPath(path: string): string {
   return `${WORKSPACE_ROOT}/${path}`;
 }
 
-/** Resolves every path with one `realpath` call, which prints one line per path. */
+/**
+ * The SDK writes by unpacking a tar archive, which replaces a symlinked
+ * destination instead of writing through it. Resolve every path first, with
+ * one `realpath` call that prints one line per path.
+ */
 async function resolveVercelWriteFiles(
   sandbox: VercelSandbox,
   files: SandboxWriteFilesOptions["files"],
