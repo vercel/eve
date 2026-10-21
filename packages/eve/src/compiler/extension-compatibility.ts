@@ -172,10 +172,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 40,
+    current: 41,
     supported: [
       3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
-      34, 35, 36, 37, 38, 39, 40,
+      34, 35, 36, 37, 38, 39, 41,
     ],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -186,6 +186,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       20: "Run mode was removed and agent definitions no longer declare outputSchema; sessions always park, ConversationContext no longer carries mode, and structured output is requested per turn.",
       21: 'Background task execution was removed: subagent results no longer carry backgroundTask, message.completed always carries text, and experimental.tasks is gone. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       22: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
+      40: "limits.sessionUsage replaces the numeric per-session token and cost limits",
     },
   },
   connection: {
