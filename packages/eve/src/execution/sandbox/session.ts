@@ -14,8 +14,10 @@ import type {
   SandboxSpawnOptions,
   SandboxWriteBinaryFileOptions,
   SandboxWriteFileOptions,
+  SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
+import { SANDBOX_WRITE_FILES } from "#shared/sandbox-write-files.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 
 export type { InternalSandboxSession };
@@ -125,6 +127,19 @@ export function buildSandboxSession(
       });
     },
   };
+  if (primitives.writeFiles !== undefined) {
+    Object.assign(session, {
+      [SANDBOX_WRITE_FILES]: async (options: SandboxWriteFilesOptions) => {
+        await primitives.writeFiles?.({
+          abortSignal: options.abortSignal,
+          files: options.files.map((file) => ({
+            content: file.content,
+            path: primitives.resolvePath(file.path),
+          })),
+        });
+      },
+    });
+  }
   if (setNetworkPolicy === undefined) return session;
   return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
 }

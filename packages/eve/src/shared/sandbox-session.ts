@@ -63,6 +63,14 @@ export type SandboxWriteBinaryFileOptions = Parameters<AiSdkSandbox["writeBinary
 export type SandboxWriteTextFileOptions = Parameters<AiSdkSandbox["writeTextFile"]>[0];
 
 /**
+ * Options for writing several files from raw bytes in one batch.
+ */
+export interface SandboxWriteFilesOptions {
+  readonly abortSignal?: AbortSignal;
+  readonly files: readonly { readonly content: Uint8Array; readonly path: string }[];
+}
+
+/**
  * Options for removing a path from a sandbox.
  *
  * Relative paths resolve from `/workspace`; absolute paths pass through.
@@ -152,4 +160,9 @@ export interface InternalSandboxSession extends Pick<
   removePath(options: SandboxRemovePathOptions): Promise<void>;
   /** Translates a user-facing path to the provider's native path. */
   resolvePath(path: string): string;
+  /**
+   * Writes several already-resolved files in one provider call. Providers that
+   * omit it get one `writeFile` per file.
+   */
+  writeFiles?(options: SandboxWriteFilesOptions): Promise<void>;
 }

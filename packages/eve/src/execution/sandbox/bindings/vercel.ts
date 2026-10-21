@@ -16,6 +16,7 @@ import type {
   SandboxSession,
   SandboxSpawnOptions,
   SandboxWriteFileOptions,
+  SandboxWriteFilesOptions,
 } from "#shared/sandbox-session.js";
 import {
   isSandboxPreparedArtifactRecord,
@@ -656,9 +657,17 @@ function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSan
       return normalizeVercelReadStream(await sandbox.readFile({ path: options.path }));
     },
     async writeFile(options: SandboxWriteFileOptions) {
-      const bytes = await streamToBuffer(options.content);
-      const path = await resolveVercelWritePath(sandbox, options.path, options.abortSignal);
-      await sandbox.writeFiles([{ content: bytes, path }], { signal: options.abortSignal });
+      const files = [{ content: await streamToBuffer(options.content), path: options.path }];
+      await sandbox.writeFiles(await resolveVercelWriteFiles(sandbox, files, options.abortSignal), {
+        signal: options.abortSignal,
+      });
+    },
+    async writeFiles(options: SandboxWriteFilesOptions) {
+      if (options.files.length === 0) return;
+      await sandbox.writeFiles(
+        await resolveVercelWriteFiles(sandbox, options.files, options.abortSignal),
+        { signal: options.abortSignal },
+      );
     },
     async removePath(options: SandboxRemovePathOptions) {
       await sandbox.fs.rm(options.path, {
@@ -699,19 +708,25 @@ function resolveVercelSandboxPath(path: string): string {
   return `${WORKSPACE_ROOT}/${path}`;
 }
 
-async function resolveVercelWritePath(
+/** Resolves every path with one `realpath` call, which prints one line per path. */
+async function resolveVercelWriteFiles(
   sandbox: VercelSandbox,
-  path: string,
+  files: SandboxWriteFilesOptions["files"],
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<{ content: Uint8Array; path: string }[]> {
   const result = await sandbox.runCommand({
-    args: ["-m", "--", path],
+    args: ["-m", "--", ...files.map((file) => file.path)],
     cmd: "realpath",
     signal,
   });
-  const resolved = (await result.stdout()).trim();
-  if (result.exitCode !== 0 || !resolved.startsWith("/") || resolved.includes("\n")) {
-    throw new Error(`Failed to resolve Vercel Sandbox write path: ${path}`);
+  const paths = (await result.stdout()).trim().split("\n");
+  const resolved = files.flatMap((file, index) => {
+    const path = paths[index];
+    return path?.startsWith("/") === true ? [{ content: file.content, path }] : [];
+  });
+  if (result.exitCode !== 0 || paths.length !== files.length || resolved.length !== files.length) {
+    const requested = files.map((file) => file.path).join(", ");
+    throw new Error(`Failed to resolve Vercel Sandbox write path: ${requested}`);
   }
   return resolved;
 }
