@@ -199,6 +199,21 @@ describe("ensureSandboxAccess", () => {
     expect(value.create).toHaveBeenCalledOnce();
   });
 
+  // https://github.com/vercel/eve/issues/5113
+  it.fails("starts a fresh sandbox when the persisted one is gone", async () => {
+    const setup = vi.fn();
+    const value = fixture(setup);
+    value.create.mockRejectedValueOnce(
+      new Error('microsandbox session "ses_1" is no longer available to resume.'),
+    );
+    const { sandbox } = await open(value.registry, "session-1", {
+      session: { providerName: "test", state: null, stateProtocolVersion: 1 },
+    });
+    expect(sandbox).toBeTruthy();
+    expect(setup).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
+  });
+
   it("starts a fresh sandbox for a session imported from eve 0.54", async () => {
     const setup = vi.fn();
     const value = fixture(setup);
