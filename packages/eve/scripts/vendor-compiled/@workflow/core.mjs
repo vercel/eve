@@ -176,13 +176,28 @@ function honorReservedRunId() {
     name: "eve:reserved-run-id",
     transform(source, id) {
       if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/runtime/start.js")) return null;
-      const search = "const runId = `wrun_${world.createRunId";
-      if (source.split(search).length !== 2)
-        throw new Error("Recheck the reserved Workflow run id transform.");
-      return {
-        code: source.replace(search, "const runId = opts.runId ?? `wrun_${world.createRunId"),
-        map: null,
-      };
+      // A reserved id is the caller's claim on one run. Its `run_created` must
+      // land before the queue message is published: start() otherwise swallows
+      // the 409 of a run that already exists and still queues this caller's
+      // input for it. Awaiting first makes the conflict throw with nothing
+      // published, as a dynamic start already does.
+      const edits = [
+        [
+          "const runId = `wrun_${world.createRunId",
+          "const runId = opts.runId ?? `wrun_${world.createRunId",
+        ],
+        [
+          "const [runCreatedResult, queueResult] = await Promise.allSettled([",
+          "if (opts.runId !== undefined) await runCreated;\nconst [runCreatedResult, queueResult] = await Promise.allSettled([",
+        ],
+      ];
+      let code = source;
+      for (const [search, replacement] of edits) {
+        if (code.split(search).length !== 2)
+          throw new Error("Recheck the reserved Workflow run id transform.");
+        code = code.replace(search, replacement);
+      }
+      return { code, map: null };
     },
   };
 }
