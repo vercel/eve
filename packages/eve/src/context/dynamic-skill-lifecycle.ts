@@ -107,14 +107,17 @@ async function syncDynamicSkillFiles(input: {
   readonly next: ReadonlyMap<string, SandboxSkillPackage>;
 }): Promise<void> {
   const { ctx, kept, previous, next } = input;
-  if (previous.size === 0 && next.size === 0) return;
+  // The written record, not the manifest, finds withdrawn files: a skill that
+  // went markdown-only has no revision left, but its files are still there.
+  const written = ctx.get(DynamicSkillSandboxKey) ?? {};
+  const withdrawn = Object.keys(written).filter((name) => !kept.has(name));
+  if (withdrawn.length === 0 && next.size === 0) return;
 
   const access = ctx.require(SandboxKey);
-  const written = ctx.get(DynamicSkillSandboxKey) ?? {};
   const identity = sandboxIdentity(await access.captureState());
   const isWritten = (name: string) => identity !== null && written[name] === identity;
 
-  const stale = [...previous.keys()].filter((name) => !kept.has(name) && isWritten(name));
+  const stale = withdrawn.filter(isWritten);
   const pending = [...next.values()].filter(
     ({ revision, skill }) => previous.get(skill.name) !== revision || !isWritten(skill.name),
   );
@@ -125,9 +128,7 @@ async function syncDynamicSkillFiles(input: {
 
   // Forget touched packages first so a failed write is never skipped later.
   const nextWritten = { ...written };
-  for (const name of previous.keys()) {
-    if (!next.has(name)) delete nextWritten[name];
-  }
+  for (const name of withdrawn) delete nextWritten[name];
   for (const { skill } of pending) delete nextWritten[skill.name];
   ctx.set(DynamicSkillSandboxKey, { ...nextWritten });
 
