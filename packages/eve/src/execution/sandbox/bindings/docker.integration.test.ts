@@ -24,6 +24,7 @@ import type {
   DockerSandboxEnvironmentOptions,
   DockerSandboxRuntimeOptions,
 } from "#public/sandbox/docker-sandbox.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -520,12 +521,31 @@ describe("Docker provider create", () => {
     expect(findCall(calls, (args) => args[0] === "run")).toBeUndefined();
   });
 
+  it("reports a session as gone only when Docker has no such container", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    let inspect: FakeResponse = { exitCode: 0, stdout: "true\n" };
+    const { cli } = createFakeDockerCli((args) => (isContainerInspect(args) ? inspect : undefined));
+    const engine = createEngine({ cli });
+    const { state } = await engine.start({ appRoot, sandboxName: SESSION_KEY });
+    const resume = () => engine.openSession({ existing: state, appRoot, sandboxName: SESSION_KEY });
+
+    inspect = { exitCode: 1, stderr: "Cannot connect to the Docker daemon. Is it running?" };
+    const unavailable = resume();
+    await expect(unavailable).rejects.toThrow("Cannot connect to the Docker daemon");
+    await expect(unavailable).rejects.not.toBeInstanceOf(SandboxSessionGoneError);
+
+    inspect = { exitCode: 1, stderr: "Error: No such container: eve-session" };
+    await expect(resume()).rejects.toBeInstanceOf(SandboxSessionGoneError);
+  });
+
   it("attaches to the peer container when another process wins the create race", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     let peerCreated = false;
     const { calls, cli } = createFakeDockerCli((args) => {
       if (isContainerInspect(args)) {
-        return peerCreated ? { exitCode: 0, stdout: "true\n" } : { exitCode: 1 };
+        return peerCreated
+          ? { exitCode: 0, stdout: "true\n" }
+          : { exitCode: 1, stderr: "Error: No such container" };
       }
       if (args[0] === "run") {
         peerCreated = true;

@@ -679,7 +679,7 @@ function createMockMicrosandboxModule(
     Snapshot: {
       async get(snapshotName: string) {
         if (!snapshots.has(snapshotName)) {
-          throw new Error(`snapshot store unavailable for ${snapshotName}`);
+          throw new Error(`snapshot not found: ${snapshotName}`);
         }
         return {};
       },

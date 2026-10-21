@@ -32,8 +32,11 @@ export async function snapshotExists(
   try {
     await module.Snapshot.get(snapshotName);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMicrosandboxNotFoundError(error)) {
+      return false;
+    }
+    throw error;
   }
 }
 

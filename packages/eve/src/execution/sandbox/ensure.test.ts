@@ -207,23 +207,33 @@ describe("ensureSandboxAccess", () => {
     value.create.mockRejectedValueOnce(
       new SandboxSessionGoneError('microsandbox session "ses_1" is no longer available to resume.'),
     );
-    const { sandbox } = await open(value.registry, "session-1", {
+    const { access, sandbox } = await open(value.registry, "session-1", {
       session: { providerName: "test", state: null, stateProtocolVersion: 1 },
     });
     expect(sandbox).toBeTruthy();
     expect(setup).toHaveBeenCalledOnce();
     expect(value.start).toHaveBeenCalledOnce();
+    await expect(access.captureState()).resolves.toEqual({
+      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+    });
   });
 
   it("keeps the persisted sandbox when resume fails for another reason", async () => {
     const value = fixture();
     value.create.mockRejectedValueOnce(new Error("daemon unavailable"));
-    await expect(
-      open(value.registry, "session-1", {
-        session: { providerName: "test", state: null, stateProtocolVersion: 1 },
-      }),
-    ).rejects.toThrow("daemon unavailable");
+    const state = {
+      session: { providerName: "test", state: { key: "old" }, stateProtocolVersion: 1 },
+    };
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state,
+    });
+    await expect(access.get()).rejects.toThrow("daemon unavailable");
     expect(value.start).not.toHaveBeenCalled();
+    await expect(access.captureState()).resolves.toEqual(state);
   });
 
   it("starts a fresh sandbox for a session imported from eve 0.54", async () => {

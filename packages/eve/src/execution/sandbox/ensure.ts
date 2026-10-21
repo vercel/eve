@@ -1,5 +1,6 @@
 import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { createLogger } from "#internal/logging.js";
 import { contextStorage } from "#context/container.js";
 import {
   buildCallbackContext,
@@ -77,6 +78,8 @@ interface OpenedSandbox {
 // process late arrivals resume from the winner's state instead of running
 // the selector again.
 const pendingSandboxStarts = new Map<string, Promise<SandboxSessionState | null>>();
+
+const log = createLogger("execution.sandbox");
 
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
@@ -247,6 +250,11 @@ export async function ensureSandboxAccess(
         return await resumePersisted(context);
       } catch (error) {
         if (!(error instanceof SandboxSessionGoneError)) throw error;
+        log.warn("session sandbox is gone, starting a fresh one", {
+          error,
+          providerName: persisted.providerName,
+          sessionId: input.sessionId,
+        });
         persisted = null;
       }
     }
