@@ -6,8 +6,6 @@ export interface RecallParticipant {
   readonly id: string;
   readonly name: string;
   readonly isHost: boolean;
-  /** Meeting platform, such as `zoom`, `google_meet`, or `microsoft_teams`. */
-  readonly platform?: string;
   readonly email?: string;
 }
 
@@ -122,7 +120,6 @@ function readParticipant(value: unknown): RecallParticipant | undefined {
     id,
     isHost: value.is_host === true,
     name: name || "Unknown participant",
-    platform: typeof value.platform === "string" ? value.platform : undefined,
   };
 }
 

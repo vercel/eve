@@ -73,7 +73,8 @@ export function recallDriver(
       email: null,
       extra_data: {},
       is_host: person === "alice",
-      platform,
+      // How they joined; the meeting platform comes from the bot.
+      platform: "desktop",
     };
   }
 
@@ -99,11 +100,16 @@ export function recallDriver(
     const text = await request.text();
     const body = text ? (JSON.parse(text) as ChatBody) : {};
     const chat = url.pathname === `/api/v1/bot/${botId}/send_chat_message/`;
+    const bot = request.method === "GET" && url.pathname === `/api/v1/bot/${botId}/`;
     const authorized = request.headers.get("authorization") === `Token ${API_KEY}`;
     return {
       body,
       method: chat && authorized ? "send_chat_message" : `${request.method} ${url.pathname}`,
-      response: authorized ? {} : new Response("Unauthorized", { status: 401 }),
+      response: !authorized
+        ? new Response("Unauthorized", { status: 401 })
+        : bot
+          ? { id: botId, meeting_url: { meeting_id: "1", platform } }
+          : {},
     };
   }
 

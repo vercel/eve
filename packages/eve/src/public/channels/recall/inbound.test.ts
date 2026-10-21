@@ -9,7 +9,7 @@ const participant = {
   id: 12,
   is_host: true,
   name: " Alice ",
-  platform: "zoom",
+  platform: "desktop",
 };
 
 describe("parseRecallEvent", () => {
@@ -35,7 +35,7 @@ describe("parseRecallEvent", () => {
     expect(event).toEqual({
       botId: "bot_1",
       botMetadata: { requestedBy: "alice" },
-      participant: { id: "12", isHost: true, name: "Alice", platform: "zoom" },
+      participant: { id: "12", isHost: true, name: "Alice" },
       text: "Eve, open a ticket.",
       type: "speech",
     });

@@ -33,6 +33,7 @@ export {
   startRecallOutputMedia,
   stopRecallOutputMedia,
   type RecallApiOptions,
+  type RecallBot,
   type RecallBotConfigInput,
   type RecallFetch,
   type RecallSendChatMessageInput,

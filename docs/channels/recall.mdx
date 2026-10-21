@@ -93,7 +93,7 @@ Two hooks decide what reaches the agent:
 
 A line that `shouldRespond` declines costs no model call. The channel keeps the last 60 declined lines and gives them to the next turn as recent transcript, so the agent knows what "can you file that?" refers to. A declined line also doesn't cancel a pending approval or question.
 
-The model sees speech as `Alice: ...` and chat as `Alice (in chat):` followed by the message. Each turn also gets the meeting platform, the bot id, and the speaker's participant id, name, and host flag.
+The model sees speech as `Alice: ...` and chat as `Alice (in chat):` followed by the message. Each turn also gets the bot id and the speaker's participant id, name, and host flag.
 
 `shouldRespond` is a good place for a fast decision model, because it sees the recent transcript:
 
@@ -167,7 +167,7 @@ Recall sends bot status changes, such as `call_ended`, as workspace webhooks tha
 
 Hooks and event handlers receive `recall`, a handle on the meeting's bot:
 
-- `sendChatMessage(message, { to? })` posts to the chat and returns `false` if Recall rejects it. Pass a participant id as `to` to reach one person; check `supportsDirectMessages` first. Without `to`, it follows the turn: a private turn posts privately. Pass `{ to: "everyone" }` to post publicly anyway.
+- `sendChatMessage(message, { to? })` posts to the chat and returns `false` if Recall rejects it. Pass a participant id as `to` to reach one person; check `supportsDirectMessages` first. The channel learns the meeting platform from the bot itself, so `platform` and `supportsDirectMessages` are only known inside the session, not in `onMeetingEvent`. Without `to`, it follows the turn: a private turn posts privately. Pass `{ to: "everyone" }` to post publicly anyway.
 - `outputAudio(mp3)` plays an MP3 clip through the bot. The bot must be created with Recall's `automatic_audio_output` option, and you can't combine it with Output Media.
 - `startOutputMedia(url)` and `stopOutputMedia()` stream a web page into the meeting as the bot's camera and microphone, using Recall Output Media. Output Media isn't available in Slack huddles.
 - `leaveCall()` removes the bot from the meeting.

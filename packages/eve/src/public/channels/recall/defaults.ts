@@ -34,7 +34,6 @@ export function recallParticipantAuth(event: {
     name: participant.name,
     participantId: participant.id,
   };
-  if (participant.platform !== undefined) attributes.platform = participant.platform;
   return {
     attributes,
     authenticator: RECALL_AUTHENTICATOR,
@@ -144,6 +143,8 @@ export function matchSpokenOption<T extends { readonly id: string; readonly labe
       continue;
     }
     const word = said[i]!;
+    // "the second one": after an ordinal, "one" names the option, not a number.
+    if (word === "one" && ORDINALS.includes(said[i - 1] ?? "")) continue;
     if (optionWords.has(word)) rest.push(word);
     else if (NUMBER_WORDS.includes(word)) rest.push(String(NUMBER_WORDS.indexOf(word) + 1));
     else if (ORDINALS.includes(word)) rest.push(String(ORDINALS.indexOf(word) + 1));

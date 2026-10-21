@@ -15,7 +15,7 @@ import {
 import { signRecallWebhook } from "#public/channels/recall/verify.js";
 
 const SECRET = `whsec_${Buffer.from("recall-test-secret").toString("base64")}`;
-const participant = { id: 7, is_host: false, name: "Alice", platform: "zoom" };
+const participant = { id: 7, is_host: false, name: "Alice", platform: "desktop" };
 
 function signed(payload: string, extraHeaders: Record<string, string> = {}): Request {
   const timestamp = Math.floor(Date.now() / 1000);
@@ -214,7 +214,9 @@ describe("recallChannel deliver", () => {
 function liveChannel(state: Record<string, unknown>) {
   const posts: { message: string; to?: string }[] = [];
   const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
-    if (String(url).endsWith("/bot/")) return Response.json({ id: "bot_1" });
+    if (String(url).endsWith("/bot/") || String(url).endsWith("/bot/bot_1/")) {
+      return Response.json({ id: "bot_1", meeting_url: { meeting_id: "1", platform: "zoom" } });
+    }
     posts.push(JSON.parse(String(init?.body)) as { message: string; to?: string });
     return new Response("{}");
   });
@@ -256,7 +258,8 @@ const approvalOptions = [
 
 describe("recallChannel private replies", () => {
   it("keeps a turn private once a private chat joins it", async () => {
-    const meeting = liveChannel({ botId: "bot_1", platform: "zoom" });
+    // A bot eve didn't send learns its platform from Recall, not from participants.
+    const meeting = liveChannel({ botId: "bot_1" });
 
     await meeting.hear(chat("can you deploy v2.4?", "only_bot"));
     await meeting.hear(speech("Eve, use the release branch"));
@@ -273,6 +276,8 @@ describe("recallChannel spoken answers", () => {
     ["Eve, one", "approve"],
     ["eve option two please", "cancel"],
     ["let's go with the first", "approve"],
+    ["the first one", "approve"],
+    ["Eve, the second one", "cancel"],
     ["neither, approve is wrong", undefined],
     ["Eve, what does it deploy?", undefined],
   ])("reads %j as %s", (said, picked) => {
