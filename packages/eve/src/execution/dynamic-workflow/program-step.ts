@@ -1,12 +1,8 @@
-import { createHash } from "node:crypto";
-
 import { FatalError, RetryableError } from "#compiled/@workflow/core/index.js";
 import type { RunLimits } from "#compiled/run/index.js";
 import {
   WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
-  WORKFLOW_PROGRAM_CPU_TIMEOUT_MS,
   WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES,
-  WORKFLOW_PROGRAM_TIMEOUT_MS,
   readWorkflowProgramAgentCall,
   type WorkflowProgramAgentCall,
   type WorkflowProgramCallResult,
@@ -36,17 +32,14 @@ interface WorkflowProgramStepInput {
 }
 
 const WORKFLOW_PROGRAM_CONTINUATION_AUDIENCE = "eve.workflow-program/v1";
-/** Host function group behind the prelude's `ctx`; programs call `ctx.agent`, not this. */
 const WORKFLOW_PROGRAM_HOST_NAMESPACE = "__eveWorkflowProgram";
 /** Size limit for the JSON text of a program's result and of each `ctx.agent()` call. */
 const WORKFLOW_PROGRAM_MAX_JSON_BYTES = 1024 * 1024;
 const WORKFLOW_PROGRAM_MAX_SOURCE_BYTES = 256 * 1024;
-
-const WORKFLOW_PROGRAM_GUEST_ERROR_NAMES = {
-  WORKFLOW_PROGRAM_AGENT_FAILED: "WorkflowProgramAgentError",
-  WORKFLOW_PROGRAM_INVALID_AGENT_CALL: "WorkflowProgramAgentCallError",
-  WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: "WorkflowProgramSubagentLimitError",
-} as const;
+/** Guest JavaScript time per run or resume; parked agent calls do not count. */
+const WORKFLOW_PROGRAM_CPU_TIMEOUT_MS = 30_000;
+/** Wall-clock time per run or resume; parked agent calls do not count. */
+const WORKFLOW_PROGRAM_TIMEOUT_MS = 300_000;
 
 /**
  * Converts the program's values to JSON inside the sandbox, where run's limits
@@ -113,18 +106,14 @@ async function runWorkflowProgram(
   const { maxAgeMs, signingKey } = input.program.continuationSecurity;
   const runner = createRunner({
     continuationAudience: WORKFLOW_PROGRAM_CONTINUATION_AUDIENCE,
-    continuationCodec: createSignedContinuationCodec({
-      maxAgeMs,
-      // Hashing gives run a 32-byte secret whatever the stored key's length.
-      secret: createHash("sha256").update(signingKey).digest(),
-    }),
+    continuationCodec: createSignedContinuationCodec({ maxAgeMs, secret: signingKey }),
   });
 
   // run shows the program only RunError messages; other host errors read "Host function failed."
-  const guestError = (message: string, code: keyof typeof WORKFLOW_PROGRAM_GUEST_ERROR_NAMES) => {
-    const error = new RunError(message, code);
+  const guestError = (message: string) => {
+    const error = new RunError(message, "WORKFLOW_PROGRAM_AGENT_ERROR");
     // RunError takes its name from its class, which the minified vendored bundle renames.
-    error.name = WORKFLOW_PROGRAM_GUEST_ERROR_NAMES[code];
+    error.name = "WorkflowProgramAgentError";
     return error;
   };
 
@@ -139,14 +128,12 @@ async function runWorkflowProgram(
               parseWorkflowProgramJson(callJson, "ctx.agent() input"),
             );
           } catch (error) {
-            throw guestError(toErrorMessage(error), "WORKFLOW_PROGRAM_INVALID_AGENT_CALL");
+            throw guestError(toErrorMessage(error));
           }
           const { interrupt, resume } = getHostFunctionContext();
           if (resume === undefined) return interrupt(call);
           const outcome = resume.resolution as WorkflowProgramCallResult;
-          if (outcome.status === "failed") {
-            throw guestError(outcome.error, outcome.code ?? "WORKFLOW_PROGRAM_AGENT_FAILED");
-          }
+          if (outcome.status === "failed") throw guestError(outcome.error);
           return outcome.output;
         },
       },

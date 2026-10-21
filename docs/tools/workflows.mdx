@@ -150,24 +150,17 @@ fan-out followed by fan-in. The program must await every `ctx.agent` call before
 that is still pending at that point, such as one that is never awaited or one that loses a
 `Promise.race` or `Promise.any`, fails the workflow.
 
-Generated code can catch these errors at the corresponding `ctx.agent` call. Each has a stable
-`name` and `code`:
-
-| `name`                              | `code`                                    | Thrown when                                                  |
-| ----------------------------------- | ----------------------------------------- | ------------------------------------------------------------ |
-| `WorkflowProgramAgentError`         | `WORKFLOW_PROGRAM_AGENT_FAILED`           | The child turn fails, or its reply is over 4 MiB of JSON.    |
-| `WorkflowProgramSubagentLimitError` | `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED` | The call is over the `maxSubagents` budget. No child starts. |
-| `WorkflowProgramAgentCallError`     | `WORKFLOW_PROGRAM_INVALID_AGENT_CALL`     | The arguments are invalid or over 1 MiB of JSON.             |
+A failed child turn, an invalid call, or a call over the `maxSubagents` budget throws a
+`WorkflowProgramAgentError` at that `ctx.agent` call, which the program can catch; the message
+says which.
 
 The sandbox converts the program's return value and each `ctx.agent` input with `JSON.stringify`,
 so a `Date` becomes a string and functions and `undefined` members drop. A return value that
 converts to nothing, such as `undefined`, becomes `null`. Each converted value may be up to 1 MiB of
 JSON, each child reply up to 4 MiB of JSON, and the program source up to 256 KiB.
 
-The program starts again from the top on every resume, replaying earlier `ctx.agent` results
-instead of calling those agents again. Each start or resume may spend up to 30 seconds running
-JavaScript and up to 5 minutes in total. Time spent waiting for child agents does not count, so a
-program fails at either limit only when its own code runs too long.
+Each start or resume may spend up to 30 seconds running JavaScript and up to 5 minutes in total.
+Time spent waiting for child agents does not count toward either limit.
 
 ### Migrate from `experimental_workflow`
 

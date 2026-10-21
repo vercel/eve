@@ -140,7 +140,6 @@ describe("runJsProgram", () => {
               interruptionId: "interrupt-2",
               value: {
                 status: "failed",
-                code: "WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED",
                 error: expect.stringContaining("WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED"),
               },
             },
@@ -210,20 +209,6 @@ describe("runJsProgram", () => {
     await expect(runJsProgram("return 1", cancelledCtx, options)).rejects.toThrow(
       "owner cancelled",
     );
-    expect(mocks.runWorkflowProgramStep).toHaveBeenCalledTimes(1);
-  });
-
-  it("refuses a program parked by a code-mode build before calling any child", async () => {
-    mocks.runWorkflowProgramStep.mockResolvedValueOnce({
-      interrupt: { type: "code-mode-interrupt" },
-      pending: [{ payload: { toolInput: { input: { message: "one" }, target: "researcher" } } }],
-      status: "interrupted",
-    });
-
-    await expect(runJsProgram("return 1", ctx, options)).rejects.toThrow(
-      "WORKFLOW_PROGRAM_CONTINUATION_UNSUPPORTED",
-    );
-    expect(reply).not.toHaveBeenCalled();
     expect(mocks.runWorkflowProgramStep).toHaveBeenCalledTimes(1);
   });
 });

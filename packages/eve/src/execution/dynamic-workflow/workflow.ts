@@ -41,7 +41,6 @@ export async function runJsProgram(
   let calls = 0;
   while (outcome.status === "interrupted") {
     ctx.abortSignal.throwIfAborted();
-    const continuation = readWorkflowProgramContinuation(outcome);
     const resolutions = await Promise.all(
       outcome.pending.map(async ({ call, id }): Promise<WorkflowProgramResolution> => {
         const invocationIndex = calls++;
@@ -50,7 +49,6 @@ export async function runJsProgram(
             interruptionId: id,
             value: {
               status: "failed",
-              code: "WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED",
               error: `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most ${String(program.maxSubagents)} agents; "${call.target}" was not called.`,
             },
           };
@@ -64,21 +62,12 @@ export async function runJsProgram(
         }
       }),
     );
-    outcome = await runWorkflowProgramStep({ ...base, resume: { continuation, resolutions } });
+    outcome = await runWorkflowProgramStep({
+      ...base,
+      resume: { continuation: outcome.continuation, resolutions },
+    });
   }
   return outcome.output;
-}
-
-/**
- * eve releases that ran programs on `@ai-sdk/code-mode` recorded a code-mode
- * interrupt in this step's output, which `run` cannot resume. Fail before
- * starting any child agent.
- */
-function readWorkflowProgramContinuation(outcome: { readonly continuation?: unknown }): string {
-  if (typeof outcome.continuation === "string") return outcome.continuation;
-  throw new Error(
-    "WORKFLOW_PROGRAM_CONTINUATION_UNSUPPORTED: this workflow program was paused by an earlier eve version and cannot resume on this one. Run the workflow again.",
-  );
 }
 
 /** Sends one program agent call to a new session and returns that turn's reply. */
