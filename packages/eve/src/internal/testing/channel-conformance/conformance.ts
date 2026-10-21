@@ -27,6 +27,7 @@ import { telegramDriver } from "#internal/testing/channel-conformance/telegram-d
 import { tuiDriver } from "#internal/testing/channel-conformance/tui-driver.js";
 import { twilioDriver } from "#internal/testing/channel-conformance/twilio-driver.js";
 import { webChatDriver } from "#internal/testing/channel-conformance/web-chat-driver.js";
+import { whatsappDriver } from "#internal/testing/channel-conformance/whatsapp-driver.js";
 
 export interface BrokenCell {
   readonly reason: string;
@@ -202,6 +203,33 @@ const TELEGRAM_BROKEN = {
   ]),
 };
 
+/** WhatsApp can't edit a sent message, which is how eve retires an answered or inactive prompt. */
+const WHATSAPP_NO_EDITS =
+  "WhatsApp can't edit a sent message, so an answered prompt keeps its buttons and eve posts nothing in its place";
+
+const WHATSAPP_BROKEN = {
+  ...staleAnsweredPrompts(WHATSAPP_NO_EDITS, [
+    "approvalPress",
+    "approvalText",
+    "questionPress",
+    "questionText",
+  ]),
+  ...Object.fromEntries(
+    [
+      "pressing Approve after the session's run ended outside eve runs nothing and clears the approval's buttons",
+      "pressing an option after the session's run ended outside eve clears the question's buttons",
+    ].map((rule) => [
+      rule,
+      { reason: WHATSAPP_NO_EDITS, symptom: /the answered prompt still offers \[".+\]/u },
+    ]),
+  ),
+  "a question pressed after the session's run ended outside eve keeps its prompt and says it is no longer active":
+    {
+      reason: WHATSAPP_NO_EDITS,
+      symptom: /the inactive prompt reads .* to match \/no longer active\//u,
+    },
+} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
+
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
 const TUI_TYPED_REPLIES =
@@ -316,6 +344,7 @@ const channelConformance = {
       },
     },
   ],
+  whatsapp: [{ driver: whatsappDriver, broken: WHATSAPP_BROKEN }],
 } satisfies Record<string, readonly ConformanceChannel[]>;
 
 /**
