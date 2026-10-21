@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { z } from "#compiled/zod/index.js";
+import type { AgentInfoResult } from "#client/agent-info-types.js";
+import { HealthResultSchema, type HealthResult } from "#client/health-schema.js";
+
+type ReadonlyDeep<T> = T extends readonly (infer Item)[]
+  ? readonly ReadonlyDeep<Item>[]
+  : T extends object
+    ? { readonly [Key in keyof T]: ReadonlyDeep<T[Key]> }
+    : T;
 
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
@@ -7,6 +16,14 @@ import { webSearch } from "#tools/provided/web-search.js";
 import { defineMemory } from "#public/memory/index.js";
 
 describe("buildAgentInfoResponse", () => {
+  it("keeps the public inspection and health contracts aligned with their validators", () => {
+    type ValidatedInfo = ReadonlyDeep<z.output<typeof AgentInfoResultSchema>>;
+    // Flatten interfaces and intersections while preserving keys and modifiers.
+    type Shape<T> = T extends object ? { [K in keyof T]: Shape<T[K]> } : T;
+    expectTypeOf<Shape<AgentInfoResult>>().toEqualTypeOf<Shape<ValidatedInfo>>();
+    expectTypeOf<HealthResult>().toEqualTypeOf<z.output<typeof HealthResultSchema>>();
+  });
+
   it("projects v4 exclusively from the effective compiled graph", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",

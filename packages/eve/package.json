@@ -658,15 +658,47 @@
     "zod-validation-error": "5.0.0"
   },
   "peerDependencies": {
+    "@nuxt/kit": "^4.0.0",
+    "@nuxt/schema": "^4.0.0",
     "@opentelemetry/api": "^1.0.0",
+    "@vercel/connect": "^2.5.2",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",
     "dd-trace": "^6.13.0",
     "just-bash": "^3.1.0",
-    "microsandbox": "^0.5.0"
+    "microsandbox": "^0.5.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "svelte": "^5.0.0",
+    "vite": "^8.3.1",
+    "vue": "^3.5.0"
   },
   "peerDependenciesMeta": {
+    "@nuxt/kit": {
+      "optional": true
+    },
+    "@nuxt/schema": {
+      "optional": true
+    },
+    "@vercel/connect": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    },
     "@opentelemetry/api": {
       "optional": true
     },
