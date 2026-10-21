@@ -627,6 +627,68 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(get).toHaveBeenCalledTimes(1);
   });
 
+  it("never hands another principal's input to a session reserved by its owner", async () => {
+    const source = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(source);
+    const sessionId = "wrun_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const owner = {
+      attributes: {},
+      authenticator: "app",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const other = {
+      attributes: {},
+      authenticator: "app",
+      principalId: "mallory",
+      principalType: "user",
+    };
+    const runs = new Map<string, { runId: string; attributes: Record<string, string> }>();
+    const get = vi.fn(async (runId: string) => {
+      const run = runs.get(runId);
+      if (run === undefined) throw new WorkflowRunNotFoundError(runId);
+      return run;
+    });
+    getWorldMock.mockResolvedValue({ ...world, runs: { get } });
+    startMock.mockImplementation(async (_entry, _args, options: { runId?: string }) => {
+      const runId = options.runId!;
+      if (runs.has(runId)) throw new EntityConflictError("Run already exists");
+      runs.set(runId, { runId, attributes: { "eve.channel.initialDeliveryId": "dlv_alice" } });
+      return { runId };
+    });
+    const runtime = buildRuntime(source);
+
+    const first = await runtime.createSession({
+      adapter,
+      auth: owner,
+      input: { message: "alice's request" },
+      sessionId,
+      delivery: { deliveryId: "dlv_alice", channelKind: "eve", channelName: "eve" },
+    });
+    const second = await runtime.createSession({
+      adapter,
+      auth: other,
+      input: { message: "mallory's request" },
+      sessionId,
+      delivery: { deliveryId: "dlv_mallory", channelKind: "eve", channelName: "eve" },
+    });
+
+    expect(first).toMatchObject({ sessionId, deliveryId: "dlv_alice" });
+    expect(first.existing).toBeUndefined();
+    expect(second).toMatchObject({ sessionId, existing: true, deliveryId: "dlv_alice" });
+    // The other principal's start lost to the owner's run: its input and auth
+    // never reached that run, and no hook was resumed on its behalf.
+    const started = startMock.mock.calls.map(([, [workflowInput]]) => workflowInput);
+    expect(started.map((workflowInput) => workflowInput.input)).toEqual([
+      { message: "alice's request" },
+      { message: "mallory's request" },
+    ]);
+    expect([...runs.values()]).toEqual([
+      { runId: sessionId, attributes: { "eve.channel.initialDeliveryId": "dlv_alice" } },
+    ]);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("does not treat unrelated start failures as reserved creation conflicts", async () => {
     const source = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(source);
