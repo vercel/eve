@@ -216,7 +216,6 @@ describe("evaluateValues", () => {
         { call: { callId: "call-1", input: {}, toolName: "count", version: offered.version } },
       ],
       messages: [],
-      position: { sequence: 0, stepIndex: 0, turnId: "turn-1" },
       publish: async () => {},
       tools: new Map([["count", rebuilt]]),
       view: () => ({ projection: initialSessionProjection() }),

@@ -499,7 +499,6 @@ export class ModelCaller {
       excludedCallIds: options.excludedCallIds ?? new Set(),
       messages,
       modelCallId: stepResult.callId,
-      position: { ...step.position(), turnId: activeTurnId(step.position()) },
       publish: step.publish,
       telemetry: options.telemetry,
       toolCalls: (stepResult.toolCalls ?? []) as TypedToolCall<ToolSet>[],

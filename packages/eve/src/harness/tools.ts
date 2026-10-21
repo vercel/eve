@@ -14,7 +14,7 @@ import {
   onceOutcome,
   withApprovalGrants,
 } from "#approval/evaluation.js";
-import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
+import { approvalDecision, callApprovalDecision, type ApprovalDecision } from "#approval/status.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import { createLogger } from "#internal/logging.js";
@@ -179,15 +179,6 @@ interface ApprovalCall {
   readonly recheck?: boolean;
 }
 
-/** Rechecks a person's approved call, allowing a policy to deny it before execution. */
-export async function recheckApprovedCall(
-  definition: HarnessToolDefinition,
-  call: ApprovalCall,
-): Promise<ApprovalDecision> {
-  const decision = await decideApproval(definition, { ...call, recheck: true });
-  return decision.awaitsPerson === true ? { denied: false } : decision;
-}
-
 /** Decides whether a call runs, needs a person's approval, or is denied. */
 export async function decideApproval(
   definition: HarnessToolDefinition,
@@ -208,11 +199,9 @@ export async function decideApproval(
     call.recheck === true ? markApprovalRecheck(context) : context,
   );
   const decision = approvalDecision(status);
-  const once = onceOutcome(status);
-  if (once === "required") return { ...decision, once: { grantable: true } };
-  const grant = call.approvalGrants?.find((entry) => entry.toolName === definition.name);
-  if (once === "granted" && grant !== undefined) {
-    return { ...decision, clearedBy: { grant: { interactionId: grant.interactionId } } };
-  }
-  return decision;
+  return callApprovalDecision(decision, {
+    grant: call.approvalGrants?.find((entry) => entry.toolName === definition.name),
+    once: onceOutcome(status),
+    recheck: call.recheck === true,
+  });
 }

@@ -25,13 +25,7 @@ import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-acti
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
-import {
-  decideApproval,
-  invokeTool,
-  isRunnableTool,
-  recheckApprovedCall,
-  type RunnableTool,
-} from "#harness/tools.js";
+import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -86,20 +80,6 @@ export interface CallOutcome {
   readonly signIn?: ToolSignIn;
 }
 
-/** Where a call's facts belong: its turn, and the run that made it when it's open. */
-export interface CallPosition {
-  readonly turnId: string;
-  readonly runId?: string;
-  readonly sequence?: number;
-  readonly stepIndex?: number;
-}
-
-export function scopeOf(position: CallPosition): { turnId: string; runId?: string } {
-  return position.runId === undefined
-    ? { turnId: position.turnId }
-    : { runId: position.runId, turnId: position.turnId };
-}
-
 /**
  * Runs one local call: it decides the approval, streams the call's progress and result, and
  * returns the result the model reads. A call a person approved revalidates its input first.
@@ -111,7 +91,6 @@ export async function executeToolCall(
     readonly approvalGrants?: readonly ApprovalGrant[];
     readonly definition: RunnableTool;
     readonly messages: readonly ModelMessage[];
-    readonly position: CallPosition;
     readonly publish: HandleEventFn;
     readonly telemetry?: TelemetryOptions;
     /** The AI SDK's ID for the model call that made a fresh call. */
@@ -132,7 +111,6 @@ export async function executeToolCall(
 ): Promise<CallOutcome> {
   const { callId, toolName, input: args } = call;
   const { definition } = input;
-  const at = scopeOf(input.position);
   const settled: CallResult[] = [];
   const toolResults: TypedToolResult<ToolSet>[] = [];
   // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
@@ -170,27 +148,20 @@ export async function executeToolCall(
         toolResults,
       };
     }
-    const decision =
-      approval === "recheck"
-        ? await recheckApprovedCall(definition, {
-            abortSignal: input.abortSignal,
-            callId,
-            input: args,
-            approvalGrants: input.approvalGrants,
-          })
-        : await decideApproval(definition, {
-            abortSignal: input.abortSignal,
-            callId,
-            input: args,
-            approvalGrants: input.approvalGrants,
-          });
+    const decision = await decideApproval(definition, {
+      abortSignal: input.abortSignal,
+      callId,
+      input: args,
+      approvalGrants: input.approvalGrants,
+      recheck: approval === "recheck",
+    });
     if (decision.awaitsPerson === true)
       return { awaitsApproval: true, once: decision.once, settled, toolResults };
     if (decision.denied) {
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
         { callId, input: args, toolName },
-        { approval, position: at, publish: input.publish, reason: decision.reason },
+        { approval, publish: input.publish, reason: decision.reason },
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
@@ -494,7 +465,6 @@ export async function executeInlineCalls(input: {
   readonly approvalGrants: readonly ApprovalGrant[];
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
-  readonly position: CallPosition;
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
   readonly telemetry?: TelemetryOptions;
@@ -564,7 +534,6 @@ async function decideDeferredCall(
   input: {
     readonly abortSignal: AbortSignal | undefined;
     readonly approvalGrants: readonly ApprovalGrant[];
-    readonly position: CallPosition;
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
@@ -585,7 +554,6 @@ async function decideDeferredCall(
     };
   return await publishDenial(call, {
     approval: "evaluate",
-    position: input.position,
     publish: input.publish,
     reason: decision.reason,
   });
@@ -595,11 +563,10 @@ async function decideDeferredCall(
  * Reports a call its approval policy refused, so it doesn't run. A refusal as the response ends
  * fails the call, as the AI SDK reported it; a refusal of a call a person approved rejects it.
  */
-async function publishDenial(
+export async function publishDenial(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
-    readonly approval: "evaluate" | "recheck";
-    readonly position: CallPosition;
+    readonly approval: CallApproval;
     readonly publish: HandleEventFn;
     readonly reason: string | undefined;
   },

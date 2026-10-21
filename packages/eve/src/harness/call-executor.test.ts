@@ -36,7 +36,6 @@ it.each([
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
-      position: { turnId: "turn_0" },
       publish: async (publication) => {
         events.push(...eventsOf(publication));
       },
@@ -86,7 +85,6 @@ it.each([null, "allow", { type: "approved", reason: 123 }])(
         beforeExecute: () => {},
         excludedCallIds: new Set(),
         messages: [],
-        position: { turnId: "turn_0" },
         publish: async () => {},
         toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "save", type: "tool-call" }],
         tools: new Map([
@@ -133,7 +131,6 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
-      position: { turnId: "turn_0" },
       publish: async () => {},
       toolCalls: [
         {
@@ -158,7 +155,6 @@ it("keeps a thrown tool error's name in the durable call ending", async () => {
     beforeExecute: () => {},
     excludedCallIds: new Set(),
     messages: [],
-    position: { turnId: "turn_0" },
     publish: async (publication) => {
       events.push(...eventsOf(publication));
     },
@@ -210,7 +206,6 @@ it.each(["policy", "prompt"] as const)(
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
-      position: { turnId: "turn_0" },
       publish: async (publication) => {
         events.push(...eventsOf(publication));
       },
@@ -259,7 +254,6 @@ it("closes a streaming tool when progress publication fails", async () => {
     beforeExecute: () => {},
     excludedCallIds: new Set(),
     messages: [],
-    position: { turnId: "turn_0" },
     publish: async (publication) => {
       if (eventsOf(publication).some((event) => event.type === "call.progress"))
         throw new Error("Progress unavailable");

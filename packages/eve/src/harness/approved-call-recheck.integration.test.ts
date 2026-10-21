@@ -317,60 +317,64 @@ describe("approved call recheck (real AI SDK)", () => {
       tasks: [{ callId: "call-0", clearedBy: { policy: "approval" } }],
     });
   });
-  it.each(["workflow", "agent"])("rechecks an approved %s call before dispatch", async (kind) => {
-    let frozen = false;
-    const policy = vi.fn((ctx: ApprovalContext) =>
-      frozen && ctx.session.auth.current?.principalId === "user-1"
-        ? { type: "denied" as const, reason: "A change freeze is in effect." }
-        : ("user-approval" as const),
-    );
-    const fixture = setup(
-      workflow(
+  it.each(["local", "workflow", "agent"])(
+    "rechecks an approved %s call before execution",
+    async (kind) => {
+      let frozen = false;
+      const policy = vi.fn((ctx: ApprovalContext) =>
+        frozen && ctx.session.auth.current?.principalId === "user-1"
+          ? { type: "denied" as const, reason: "A change freeze is in effect." }
+          : ("user-approval" as const),
+      );
+      const tool = workflow(
         "deploy",
         policy,
         kind === "agent" ? "workflow//./agent/subagents/release//run" : undefined,
-      ),
-    );
-    const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
-    const request = fixture.events.find((event) => event.type === "interaction.opened");
-    expect(request?.type === "interaction.opened" && request.data.request.kind).toBe("approval");
+      );
+      const execute = vi.fn(() => "deployed");
+      const fixture = setup(kind === "local" ? { ...tool, workflowId: undefined, execute } : tool);
+      const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+      const request = fixture.events.find((event) => event.type === "interaction.opened");
+      expect(request?.type === "interaction.opened" && request.data.request.kind).toBe("approval");
 
-    // A freeze begins for the requester after she asked, before anyone approves.
-    frozen = true;
-    const start = fixture.events.length;
-    const approved = await fixture.step(initial.session, {
-      answers: [
+      // A freeze begins for the requester after she asked, before anyone approves.
+      frozen = true;
+      const start = fixture.events.length;
+      const approved = await fixture.step(initial.session, {
+        answers: [
+          {
+            deliveryId: "delivery-approve",
+            optionId: "approve",
+            interactionId: request?.type === "interaction.opened" ? request.data.interactionId : "",
+            responseId: "response-approve",
+          },
+        ],
+      });
+
+      // The recheck runs as the requester, and its denial means execution never starts.
+      expect(execute).not.toHaveBeenCalled();
+      expect(runtimeWait(approved.session.state)).toBeUndefined();
+      expect(policy.mock.calls.at(-1)?.[0].session.auth.current?.principalId).toBe("user-1");
+      expect(
+        fixture.events.slice(start).filter((event) => event.type === "call.settled"),
+      ).toMatchObject([
         {
-          deliveryId: "delivery-approve",
-          optionId: "approve",
-          interactionId: request?.type === "interaction.opened" ? request.data.interactionId : "",
-          responseId: "response-approve",
+          data: {
+            callId: "call-0",
+            outcome: "rejected",
+            output: { code: "TOOL_EXECUTION_DENIED", message: "A change freeze is in effect." },
+          },
         },
-      ],
-    });
-
-    // The recheck runs as the requester, and its denial means the run never starts.
-    expect(runtimeWait(approved.session.state)).toBeUndefined();
-    expect(policy.mock.calls.at(-1)?.[0].session.auth.current?.principalId).toBe("user-1");
-    expect(
-      fixture.events.slice(start).filter((event) => event.type === "call.settled"),
-    ).toMatchObject([
-      {
-        data: {
-          callId: "call-0",
-          outcome: "rejected",
-          output: { code: "TOOL_EXECUTION_DENIED", message: "A change freeze is in effect." },
-        },
-      },
-    ]);
-    expect(
-      approved.session.history
-        .flatMap((message) => (message.role === "tool" ? message.content : []))
-        .filter((part) => part.type === "tool-result"),
-    ).toMatchObject([
-      { output: { reason: "A change freeze is in effect.", type: "execution-denied" } },
-    ]);
-  });
+      ]);
+      expect(
+        approved.session.history
+          .flatMap((message) => (message.role === "tool" ? message.content : []))
+          .filter((part) => part.type === "tool-result"),
+      ).toMatchObject([
+        { output: { reason: "A change freeze is in effect.", type: "execution-denied" } },
+      ]);
+    },
+  );
 
   it.each(["workflow", "agent"])(
     "fails an approved %s call whose dynamic entry changed before dispatch",

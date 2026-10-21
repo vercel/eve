@@ -28,7 +28,8 @@ import {
   withdrawSignIns,
   withdrawUnavailable,
 } from "./approvals.js";
-import { rejectApprovedCall, runApprovedCalls, type ApprovedCallResult } from "./approved-calls.js";
+import { runApprovedCalls } from "./approved-calls.js";
+import { publishDenial, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
   compactInput,
@@ -38,7 +39,7 @@ import {
   type ResolvedStepInput,
   withoutResponses,
 } from "./delivery.js";
-import { recheckApprovedCall } from "#harness/tools.js";
+import { decideApproval } from "#harness/tools.js";
 import { changedSinceOffered, changedToolMessage, failedCall } from "#harness/approval-outcome.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 
@@ -208,7 +209,7 @@ async function runApproved(
     byStep.set(parked, [...(byStep.get(parked) ?? []), approval]);
   }
   const tasks: RuntimeWorkflowTaskRequest[] = [];
-  const denied: ApprovedCallResult[] = [];
+  const denied: CallResult[] = [];
   const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
   const claimed = new Set<string>();
   for (const [parked, approvals] of byStep) {
@@ -224,7 +225,8 @@ async function runApproved(
         denied.push({ part: failed.part });
         continue;
       }
-      const recheck = await recheckApprovedCall(tool, {
+      const recheck = await decideApproval(tool, {
+        recheck: true,
         abortSignal: step.config.abortSignal,
         approvalGrants: grantedApprovals(step.view()),
         callId: approval.call.callId,
@@ -232,12 +234,13 @@ async function runApproved(
       });
       if (recheck.denied) {
         denied.push(
-          await rejectApprovedCall({
-            position: step.position(),
-            publish: step.publish,
-            approval,
-            reason: recheck.reason,
-          }),
+          ...(
+            await publishDenial(approval.call, {
+              approval: "recheck",
+              publish: step.publish,
+              reason: recheck.reason,
+            })
+          ).settled,
         );
       } else {
         workflows.set(approval.call.callId, {
@@ -308,7 +311,6 @@ async function runApproved(
         approvalGrants: grantedApprovals(step.view()),
         approvals,
         messages: step.session.history,
-        position: step.position(),
         publish: step.publish,
         responderOf: (approval) => approval.responder,
         telemetry: attempt?.telemetry,

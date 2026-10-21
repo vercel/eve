@@ -998,6 +998,19 @@ describe("buildToolSet", () => {
       },
     );
 
+    it.each([
+      ["approved", { denied: false, clearedBy: { policy: "approval" } }],
+      ["denied", { denied: true, reason: undefined }],
+    ] as const)("keeps a final %s verdict over a remembered grant", async (status, expected) => {
+      const approval = async (context: ApprovalContext) => {
+        await perTool(context);
+        return status;
+      };
+      await expect(
+        resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants }),
+      ).resolves.toEqual(expected);
+    });
+
     it("gives policies a frozen evaluation without leaking grants into JSON", async () => {
       let seen: ApprovalContext | undefined;
       const approval = (context: ApprovalContext) => {
