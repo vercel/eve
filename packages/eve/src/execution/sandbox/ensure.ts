@@ -35,6 +35,7 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 
 interface EnsureSandboxAccessInput {
@@ -242,7 +243,12 @@ export async function ensureSandboxAccess(
 
     const context = providerContext("sandbox-initialization");
     if (persisted !== null) {
-      return await resumePersisted(context);
+      try {
+        return await resumePersisted(context);
+      } catch (error) {
+        if (!(error instanceof SandboxSessionGoneError)) throw error;
+        persisted = null;
+      }
     }
 
     // Apps hosted in one process can reuse a node id and a tool session id.

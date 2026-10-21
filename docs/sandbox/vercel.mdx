@@ -156,7 +156,7 @@ Vercel allows up to four non-overlapping, absolute Drive mount paths per sandbox
 
 Configure project credentials and custom fetch behavior on the environment, not in `open()`, because resume does not reconstruct start-only options.
 
-Initialize the returned sandbox directly in `defineSandbox()`. If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access, so make initialization safe to repeat; session end deletes the sandbox. After initialization succeeds, the provider persists only immutable JSON-compatible state. If the named Vercel Sandbox later disappears, resume fails rather than recreating initialization side effects.
+Initialize the returned sandbox directly in `defineSandbox()`. If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access, so make initialization safe to repeat; session end deletes the sandbox. After initialization succeeds, the provider persists only immutable JSON-compatible state. If the named Vercel Sandbox later disappears, resume does not recreate it; eve reruns the selector to start a fresh sandbox instead.
 
 eve owns the persistent sandbox identity and prepared snapshot source.
 
