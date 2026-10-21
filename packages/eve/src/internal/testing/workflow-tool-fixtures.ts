@@ -279,3 +279,89 @@ export async function failingServeWorkflow(): Promise<never> {
   "use workflow";
   throw new Error("Live serve workflow must not execute.");
 }
+
+/** Reads a token from the `oauth/issues` connector, whose sign-in always fails terminally. */
+export async function failedSignInWorkflow(_input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await failedSignInStep(ctx);
+}
+
+async function failedSignInStep(ctx: WorkflowToolContext): Promise<string> {
+  "use step";
+  const provider: AuthorizationDefinition = {
+    principalType: "user",
+    vercelConnect: { connector: "oauth/issues" },
+    async getToken() {
+      throw new ConnectionAuthorizationRequiredError("issues");
+    },
+    async startAuthorization({ callbackUrl }) {
+      return {
+        challenge: {
+          displayName: "Issues",
+          url: `https://idp.example/authorize?cb=${callbackUrl}`,
+        },
+        resume: { nonce: "issues-nonce" },
+      };
+    },
+    async completeAuthorization() {
+      throw new ConnectionAuthorizationFailedError("issues", {
+        message: "Authorization did not complete.",
+        reason: "authorization_incomplete",
+        retryable: false,
+      });
+    },
+  };
+  return (await ctx.getToken(provider)).token;
+}
+
+/** Signs in to `oauth/a`, then reads `oauth/b`, whose token read fails terminally. */
+export async function signInThenFailWorkflow(_input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await signInThenFailStep(ctx);
+}
+
+async function signInThenFailStep(ctx: WorkflowToolContext): Promise<string> {
+  "use step";
+  const a = (await ctx.getToken(signInA())).token;
+  const b: AuthorizationDefinition = {
+    principalType: "user",
+    async getToken() {
+      throw new ConnectionAuthorizationFailedError("b", {
+        message: "B is not installed.",
+        reason: "b_not_installed",
+        retryable: false,
+      });
+    },
+  };
+  return `${a}:${(await ctx.getToken(b)).token}`;
+}
+
+/** Signs in to `oauth/a`. */
+export async function signInAWorkflow(_input: unknown, ctx: WorkflowToolContext) {
+  "use workflow";
+  return await signInAStep(ctx);
+}
+
+async function signInAStep(ctx: WorkflowToolContext): Promise<string> {
+  "use step";
+  return (await ctx.getToken(signInA())).token;
+}
+
+function signInA(): AuthorizationDefinition {
+  return {
+    principalType: "user",
+    vercelConnect: { connector: "oauth/a" },
+    async getToken() {
+      throw new ConnectionAuthorizationRequiredError("a");
+    },
+    async startAuthorization({ callbackUrl }) {
+      return {
+        challenge: { displayName: "A", url: `https://idp.example/authorize?cb=${callbackUrl}` },
+        resume: { nonce: "a-nonce" },
+      };
+    },
+    async completeAuthorization() {
+      return { token: "a-token" };
+    },
+  };
+}

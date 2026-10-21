@@ -156,3 +156,22 @@ export function isConnectionAuthorizationFailedError(
 ): err is ConnectionAuthorizationFailedError {
   return err instanceof Error && err.name === "ConnectionAuthorizationFailedError";
 }
+
+// Rooted on the global symbol registry so every bundled copy of eve reads the same key.
+const FAILED_SIGN_IN = Symbol.for("eve.failed-sign-in");
+
+/** Marks `error` as the failure of the sign-in named `name`. */
+export function attributeSignInFailure<T extends ConnectionAuthorizationFailedError>(
+  error: T,
+  name: string,
+): T {
+  Object.defineProperty(error, FAILED_SIGN_IN, { configurable: true, value: name });
+  return error;
+}
+
+/** The sign-in `error` is the failure of, if a sign-in's completion or token raised it. */
+export function failedSignIn(error: unknown): string | undefined {
+  if (!isConnectionAuthorizationFailedError(error)) return undefined;
+  const name: unknown = Reflect.get(error, FAILED_SIGN_IN);
+  return typeof name === "string" ? name : undefined;
+}

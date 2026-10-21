@@ -1,3 +1,4 @@
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionAuthorization, SessionProjection } from "#protocol/session-projection.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
@@ -54,6 +55,18 @@ export function terminalSignInFailure(
       attempt.turnId === projection.activeTurnId &&
       sameSignIn(attempt, challenge),
   );
+}
+
+/** What a call that needs the sign-in `refused` records as failed fails with. */
+export function signInAlreadyFailedError(
+  scope: string,
+  refused: Pick<SessionAuthorization, "reason">,
+): ConnectionAuthorizationFailedError {
+  return new ConnectionAuthorizationFailedError(scope, {
+    message: `Authorization for "${scope}" already failed in this turn and can't be retried${refused.reason === undefined ? "." : `: ${refused.reason}`}`,
+    ...(refused.reason !== undefined && { reason: refused.reason }),
+    retryable: false,
+  });
 }
 
 /**

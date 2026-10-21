@@ -26,8 +26,10 @@ import {
   createActionResultEvent,
   createAuthorizationCompletedEvent,
 } from "#protocol/message.js";
-import { authorizationEventFields } from "#harness/authorization-event-fields.js";
-import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
+import {
+  authorizationEventFields,
+  failedSignInFields,
+} from "#harness/authorization-event-fields.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -84,19 +86,14 @@ export async function runApprovedCalls(input: {
    * reason it didn't. Reported before the call's result.
    */
   const reportSignIns = async (call: ApprovedCall, failure?: Error | string): Promise<void> => {
-    const reason = isConnectionAuthorizationFailedError(failure)
-      ? (failure.reason ?? failure.message)
-      : failure === undefined || typeof failure === "string"
-        ? failure
-        : failure.message;
     for (const challenge of call.signIns ?? []) {
       await input.publish(
         createAuthorizationCompletedEvent({
           ...authorizationEventFields(challenge),
           ...at,
-          outcome: reason === undefined ? "authorized" : "failed",
-          ...(reason !== undefined && { reason }),
-          ...(isConnectionAuthorizationFailedError(failure) && { retryable: failure.retryable }),
+          ...(failure === undefined
+            ? { outcome: "authorized" }
+            : failedSignInFields(challenge, failure)),
         }),
       );
     }

@@ -24,6 +24,7 @@ import {
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -105,11 +106,15 @@ async function handleWorkflowToolRunRequest(
   const { cursor, message } = input;
   if (message.request.kind === "authorization-request") {
     const request = message.request;
-    await deliverWorkflowAuthorization({ ...message, request }, async () => {
-      await cursor.advance((state) =>
-        runProxySubagentEventStep({ hookPayload: request.event, ...state }),
-      );
-    });
+    await deliverWorkflowAuthorization(
+      { ...message, request },
+      storedProjection(cursor.sessionState.snapshot.session.state),
+      async () => {
+        await cursor.advance((state) =>
+          runProxySubagentEventStep({ hookPayload: request.event, ...state }),
+        );
+      },
+    );
     return;
   }
   await cursor.advance((state) =>

@@ -1,7 +1,7 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
-import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { failedSignIn, isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   isAuthorizationSignal,
   PendingAuthorizationResultKey,
@@ -56,6 +56,14 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
             "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
           ),
       });
+      // A completion consumes its callback before it runs, so the sign-in a failure names
+      // consumed one without completing.
+      const authorized = (failed?: string) => {
+        const remaining = context.get(PendingAuthorizationResultKey) ?? [];
+        return input.authorizationResults
+          .filter((result) => !remaining.includes(result) && result.name !== failed)
+          .map((result) => result.attemptId);
+      };
       let output: unknown;
       try {
         output = await auth.run(() =>
@@ -66,19 +74,24 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
           ),
         );
       } catch (error) {
-        // The Workflow SDK recognizes fatal=true; preserve eve's classified error fields.
         if (isConnectionAuthorizationFailedError(error) && !error.retryable) {
-          Object.assign(error, { fatal: true });
+          const signIn = failedSignIn(error);
+          return {
+            kind: "result",
+            authorized: authorized(signIn),
+            failure: {
+              connectionName: error.connectionName,
+              message: error.message,
+              ...(error.reason !== undefined && { reason: error.reason }),
+              ...(signIn !== undefined && { signIn }),
+            },
+          };
         }
         throw error;
       }
-      const remaining = context.get(PendingAuthorizationResultKey) ?? [];
-      const authorized = input.authorizationResults
-        .filter((result) => !remaining.includes(result))
-        .map((result) => result.attemptId);
       return isAuthorizationSignal(output)
-        ? { kind: "authorization-required", signal: output, authorized }
-        : { kind: "result", output, authorized };
+        ? { kind: "authorization-required", signal: output, authorized: authorized() }
+        : { kind: "result", output, authorized: authorized() };
     });
   };
   // The SDK reads retry policy from the registered function at execution time.

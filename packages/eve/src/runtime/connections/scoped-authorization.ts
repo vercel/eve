@@ -13,9 +13,11 @@
 
 import { type AlsContext, contextStorage, loadContext } from "#context/container.js";
 import {
+  attributeSignInFailure,
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
+  isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
@@ -37,7 +39,7 @@ import {
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
 import { liveProjection } from "#harness/session-machine/current.js";
-import { terminalSignInFailure } from "#harness/hitl/sign-ins.js";
+import { signInAlreadyFailedError, terminalSignInFailure } from "#harness/hitl/sign-ins.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
   type AuthorizationDefinition,
@@ -173,11 +175,14 @@ export async function handleAuthorizationError(
   }
   const { scoped } = error;
   if (error.justAuthorized) {
-    throw new ConnectionAuthorizationFailedError(scoped.scope, {
-      message: `Authorization for "${scoped.scope}" failed: the service rejected the token immediately after authorization.`,
-      reason: "token_rejected_after_authorization",
-      retryable: false,
-    });
+    throw attributeSignInFailure(
+      new ConnectionAuthorizationFailedError(scoped.scope, {
+        message: `Authorization for "${scoped.scope}" failed: the service rejected the token immediately after authorization.`,
+        reason: "token_rejected_after_authorization",
+        retryable: false,
+      }),
+      scoped.scope,
+    );
   }
 
   // A sign-in this turn already failed terminally is reported, not started again.
@@ -191,11 +196,7 @@ export async function handleAuthorizationError(
           principal: resolveScopedPrincipal(scoped),
         });
   if (refused !== undefined) {
-    throw new ConnectionAuthorizationFailedError(scoped.scope, {
-      message: `Authorization for "${scoped.scope}" already failed in this turn and can't be retried${refused.reason === undefined ? "." : `: ${refused.reason}`}`,
-      ...(refused.reason !== undefined && { reason: refused.reason }),
-      retryable: false,
-    });
+    throw signInAlreadyFailedError(scoped.scope, refused);
   }
 
   if (options.evictToken) {
@@ -338,13 +339,20 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const ctx: AlsContext = loadContext();
   const principal = result.principal ?? resolveScopedPrincipal(input, ctx);
-  const token = await interactive.completeAuthorization({
-    callbackUrl: result.hookUrl,
-    connection,
-    principal,
-    resume: result.resume,
-    callback: result.callback,
-  });
+  let token: Awaited<ReturnType<typeof interactive.completeAuthorization>>;
+  try {
+    token = await interactive.completeAuthorization({
+      callbackUrl: result.hookUrl,
+      connection,
+      principal,
+      resume: result.resume,
+      callback: result.callback,
+    });
+  } catch (error) {
+    throw isConnectionAuthorizationFailedError(error)
+      ? attributeSignInFailure(error, scope)
+      : error;
+  }
   writeCachedToken(ctx, input.instanceId ?? scope, principalKey(principal), token);
   return true;
 }

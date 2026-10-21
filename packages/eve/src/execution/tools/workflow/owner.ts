@@ -9,6 +9,8 @@ import {
   type ChannelReader,
 } from "#execution/tools/workflow/owner-channels.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { terminalSignInFailure } from "#harness/hitl/sign-ins.js";
+import type { SessionAuthorization, SessionProjection } from "#protocol/session-projection.js";
 
 /**
  * The run's inbox as its body sees it. Everything the body sends its session,
@@ -73,13 +75,27 @@ export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
   };
 }
 
+/**
+ * How the session answers a step's sign-in event: `null` once it relayed the event, or the
+ * failure of the same sign-in earlier in the turn, when it refuses to ask again.
+ */
+export type WorkflowAuthorizationAcknowledgement = Pick<SessionAuthorization, "reason"> | null;
+
 /** Acknowledge only step-owned events, after delivery or deliberate discard. */
 export async function deliverWorkflowAuthorization(
   message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolAuthorizationRequest },
+  projection: SessionProjection,
   deliver: () => Promise<void>,
 ): Promise<void> {
-  await deliver();
   // Agent events reuse their invocation reply channel; it is not an event acknowledgement.
-  if (message.request.event.childSessionId === message.from.runId)
-    await resumeHookStep(message.replyTo, null, { ifPresent: true });
+  if (message.request.event.childSessionId !== message.from.runId) return await deliver();
+  const { event } = message.request.event;
+  const refused =
+    event.type === "authorization.required"
+      ? terminalSignInFailure(projection, event.data)
+      : undefined;
+  if (refused === undefined) await deliver();
+  const acknowledgement: WorkflowAuthorizationAcknowledgement =
+    refused === undefined ? null : { reason: refused.reason };
+  await resumeHookStep(message.replyTo, acknowledgement, { ifPresent: true });
 }

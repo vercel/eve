@@ -1,4 +1,5 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { attributeSignInFailure, ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 import type { ToolContext } from "#tools/definition.js";
@@ -7,6 +8,8 @@ import {
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
 import { disposeHook } from "#execution/hook-ownership.js";
+import type { WorkflowAuthorizationAcknowledgement } from "#execution/tools/workflow/owner.js";
+import { signInAlreadyFailedError } from "#harness/hitl/sign-ins.js";
 import { runSignIn } from "#harness/session-machine/transitions.js";
 import type {
   WorkflowStepAuthorizationResult,
@@ -77,7 +80,7 @@ async function executeAuthorizedStep(
         });
       } catch (error) {
         if (!ctx.abortSignal.aborted) {
-          await reportPendingAsFailed(run, ctx.abortSignal, pending);
+          await reportPendingAsFailed(run, ctx.abortSignal, pending, error);
         }
         throw error;
       }
@@ -91,8 +94,19 @@ async function executeAuthorizedStep(
       );
 
       if (result.kind === "result") {
-        await reportPendingAsFailed(run, ctx.abortSignal, pending);
-        return result.output;
+        if (result.failure === undefined) {
+          await reportPendingAsFailed(run, ctx.abortSignal, pending);
+          return result.output;
+        }
+        const { connectionName, message, reason, signIn } = result.failure;
+        const failure = new ConnectionAuthorizationFailedError(connectionName, {
+          message,
+          ...(reason !== undefined && { reason }),
+          retryable: false,
+        });
+        if (signIn !== undefined) attributeSignInFailure(failure, signIn);
+        await reportPendingAsFailed(run, ctx.abortSignal, pending, failure);
+        throw failure;
       }
 
       await collectAuthorizationCallbacks({
@@ -170,8 +184,12 @@ async function collectAuthorizationCallbacks(input: {
   const { authorizationResults, callback, challenges, ctx, pending, run } = input;
   for (const challenge of challenges) {
     const identified = requireAttemptId(challenge);
+    const refused = await reportAuthorization(run, ctx.abortSignal, identified);
+    if (refused !== null) {
+      await reportPendingAsFailed(run, ctx.abortSignal, pending);
+      throw signInAlreadyFailedError(identified.name, refused);
+    }
     pending.set(identified.attemptId, identified);
-    await reportAuthorization(run, ctx.abortSignal, identified);
 
     try {
       const response = await waitForCallback(callback, identified, ctx.abortSignal);
@@ -187,7 +205,7 @@ async function collectAuthorizationCallbacks(input: {
     } catch (error) {
       // Cancelled turns close their inbox; cancelled tasks discard further deliveries.
       if (!ctx.abortSignal.aborted) {
-        await reportAuthorization(run, ctx.abortSignal, identified, "failed");
+        await reportAuthorization(run, ctx.abortSignal, identified, { failure: error });
       }
       throw error;
     }
@@ -205,20 +223,22 @@ async function reportPendingAsFailed(
   run: WorkflowToolRunContext,
   signal: AbortSignal,
   pending: ReadonlyMap<string, IdentifiedAuthorizationChallenge>,
+  failure?: unknown,
 ): Promise<void> {
   for (const challenge of pending.values()) {
-    await reportAuthorization(run, signal, challenge, "failed");
+    await reportAuthorization(run, signal, challenge, { failure });
   }
 }
 
+/** Reports one sign-in event; the session answers whether it relayed a request for one. */
 async function reportAuthorization(
   run: WorkflowToolRunContext,
   signal: AbortSignal,
   challenge: IdentifiedAuthorizationChallenge,
-  outcome?: "authorized" | "failed",
-): Promise<void> {
+  outcome?: Parameters<typeof runSignIn>[2],
+): Promise<WorkflowAuthorizationAcknowledgement> {
   const event = runSignIn(run.from, challenge, outcome);
-  const acknowledged = createHook<void>();
+  const acknowledged = createHook<WorkflowAuthorizationAcknowledgement>();
   try {
     // The relay can run before this suspension registers the hook, and the
     // session's acknowledgement skips a hook it can't find. A generated token
@@ -242,7 +262,7 @@ async function reportAuthorization(
       }),
       signal,
     );
-    await withAbort(acknowledged, signal);
+    return await withAbort(acknowledged, signal);
   } finally {
     await disposeHook(acknowledged);
   }

@@ -7,7 +7,7 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { authorizedDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
-import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
+import { captureConsoleOutput } from "#internal/testing/log-records.js";
 import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
@@ -81,10 +81,11 @@ describe("workflow step authorization failures", () => {
             )
               events.push(...(await stream.nextTurn()));
             expect(
-              filterEventsByType(events, "authorization.completed").map(
-                (event) => event.data.outcome,
-              ),
-            ).toEqual(["failed"]);
+              filterEventsByType(events, "authorization.completed").map(({ data }) => [
+                data.outcome,
+                data.retryable,
+              ]),
+            ).toEqual([["failed", false]]);
           }
           expect(filterEventsByType(events, "authorization.required")).toHaveLength(1);
           await waitForWorkflowToolRunTerminal(executorRunId);
@@ -97,11 +98,8 @@ describe("workflow step authorization failures", () => {
           await run.cancel();
         }
       });
-      // A denied or rejected authorization fails the step fatally.
-      expect(
-        output.lines.filter((line) => line.startsWith(workflowSdkNotice.fatalStep)),
-      ).toHaveLength(disposition === "cancel" ? 0 : 1);
-      expect(output.unexpected(workflowSdkNotice.fatalStep)).toEqual([]);
+      // A denied or rejected authorization ends the step with its failure instead of throwing.
+      expect(output.unexpected()).toEqual([]);
     },
     60_000,
   );

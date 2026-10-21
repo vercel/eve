@@ -5,7 +5,10 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { authorizationEventFields } from "#harness/authorization-event-fields.js";
+import {
+  authorizationEventFields,
+  failedSignInFields,
+} from "#harness/authorization-event-fields.js";
 import {
   type TurnWaitingOn,
   createActionResultEvent,
@@ -649,7 +652,7 @@ export function runSignIn(
     readonly turnId: string;
   },
   challenge: AuthorizationChallenge,
-  outcome?: "authorized" | "failed",
+  outcome?: "authorized" | { readonly failure: unknown },
 ) {
   const fields = {
     ...authorizationEventFields(challenge),
@@ -658,13 +661,17 @@ export function runSignIn(
     taskId: from.taskId,
     turnId: from.turnId,
   };
-  return outcome === undefined
-    ? createAuthorizationRequiredEvent({
-        ...fields,
-        description: `Sign in to ${challenge.name} to continue.`,
-        webhookUrl: challenge.hookUrl,
-      })
-    : createAuthorizationCompletedEvent({ ...fields, outcome });
+  if (outcome === undefined) {
+    return createAuthorizationRequiredEvent({
+      ...fields,
+      description: `Sign in to ${challenge.name} to continue.`,
+      webhookUrl: challenge.hookUrl,
+    });
+  }
+  return createAuthorizationCompletedEvent({
+    ...fields,
+    ...(outcome === "authorized" ? { outcome } : failedSignInFields(challenge, outcome.failure)),
+  });
 }
 
 // ---------------------------------------------------------------------------
