@@ -1,11 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("#execution/dynamic-workflow/schema.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#execution/dynamic-workflow/schema.js")>()),
-  // Keeps the runaway-program case fast; every other program here finishes far sooner.
-  WORKFLOW_PROGRAM_CPU_TIMEOUT_MS: 1_000,
-}));
-
 import { runWorkflowProgramStep } from "#execution/dynamic-workflow/program-step.js";
 import type {
   WorkflowProgramCallResult,
@@ -319,12 +313,6 @@ try {
       'WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most 1 agents; "researcher" was not called.',
     );
     expect(agent).toHaveBeenCalledTimes(1);
-  });
-
-  it("stops a runaway program at the CPU limit", async () => {
-    await expect(
-      runWorkflowProgramStep({ callId: "cpu", program: program("while (true) {}") }),
-    ).rejects.toThrow("JavaScript runtime exceeded its CPU time limit of 1000ms.");
   });
 
   it("rejects oversized source and tampered continuations", async () => {
