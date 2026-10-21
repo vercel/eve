@@ -61,6 +61,18 @@ describe("eval artifacts", () => {
     });
   });
 
+  it("records each eval's start and completion time in every JSON artifact", async () => {
+    await writeArtifacts("/tmp/eve-evals", skippedSummary());
+
+    const timing = {
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:01.000Z",
+    };
+    expect(writtenJson("/tmp/eve-evals/summary.json")).toMatchObject({ evals: [timing] });
+    expect(writtenJson("/tmp/eve-evals/results.jsonl")).toMatchObject(timing);
+    expect(writtenJson("/tmp/eve-evals/evals/runtime/skipped.json")).toMatchObject(timing);
+  });
+
   it("keeps assertion diagnostics in the run summary", async () => {
     await writeArtifacts("/tmp/eve-evals", judgedSummary());
 
