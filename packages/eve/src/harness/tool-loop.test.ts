@@ -49,6 +49,7 @@ import {
   type ConversationContext,
 } from "#shared/conversation-context.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { ActiveSkillContextOverflowError } from "#harness/compaction/active-skill-overflow.js";
 import { compactMessages, shouldCompact } from "#harness/compaction/engine.js";
 import {
   createFrameworkUserMessage,
@@ -8276,6 +8277,53 @@ describe("createToolLoopHarness", () => {
         safetyIdentifier: invocationOwnerKey(auth),
         store: false,
       },
+    });
+  });
+
+  it("fails the turn when active skill instructions do not fit after compaction", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockRejectedValueOnce(
+      new ActiveSkillContextOverflowError({
+        budgetTokens: 1_000,
+        estimatedTokens: 4_000,
+        skills: ["release"],
+      }),
+    );
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "unreachable", role: "assistant" }] },
+      text: "unreachable",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig(emit, {
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "old message", kind: "user" as const, role: "user" },
+        { content: "old reply", role: "assistant" },
+      ],
+    });
+
+    const result = await runStep(session, { message: "Hi" });
+
+    expect(result.next).toBeNull();
+    expect(compactMessages).toHaveBeenCalledTimes(1);
+    expect(getCompatibilityEventTypes(events)).toEqual(
+      expect.arrayContaining(["compaction.requested", "turn.failed", "session.waiting"]),
+    );
+    expect(getCompatibilityEventTypes(events)).not.toContain("compaction.completed");
+    expect(events.find((e) => e.type === "turn.failed")?.data).toMatchObject({
+      code: "ACTIVE_SKILL_CONTEXT_OVERFLOW",
+      details: { budgetTokens: 1_000, estimatedTokens: 4_000, skills: ["release"] },
+      terminal: false,
     });
   });
 

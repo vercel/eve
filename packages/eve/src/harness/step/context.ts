@@ -9,6 +9,7 @@ import { isDynamicConnectionResolutionError } from "#context/dynamic-connection-
 import { isDynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { ParentSessionKey, SessionCallbackKey, SessionPredecessorKey } from "#context/keys.js";
 import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
+import type { ActiveSkillContextOverflowError } from "#harness/compaction/active-skill-overflow.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -179,6 +180,36 @@ export async function failBoundaryEvent(step: Step, error: unknown): Promise<Ste
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
   if (isDynamicConnectionResolutionError(error)) return failConnectionResolution(step, error);
   throw error;
+}
+
+/**
+ * Compaction can't fit the active skills' instructions: the turn fails with history untouched,
+ * and the session waits for the user to clear it or shorten the skills.
+ */
+export async function failActiveSkillOverflow(
+  step: Step,
+  error: ActiveSkillContextOverflowError,
+): Promise<StepResult> {
+  if (step.emit === undefined) throw error;
+  step.instrumentation?.recordError(error);
+  log.error(error.message, {
+    ...error.details,
+    sessionId: step.session.sessionId,
+    turnId: activeTurnId(step.position()),
+  });
+  await step.apply(
+    fail(step.view(), {
+      code: error.code,
+      details: { ...error.details, skills: [...error.details.skills] },
+      message: error.message,
+    }),
+  );
+  step.session = { ...step.session, outputSchema: undefined };
+  return {
+    next: null,
+    session: step.session,
+    settledTurn: { isError: true, output: error.message },
+  };
 }
 
 /** A dynamic connection resolver threw: the session parks so the next message can retry. */

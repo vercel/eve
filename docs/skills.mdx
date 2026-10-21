@@ -17,6 +17,8 @@ The description is a routing hint, not a label. Write it as the task that should
 Use when the user needs a release checklist or changelog workflow.
 ```
 
+A loaded skill stays active for the rest of the session. Context compaction keeps the latest successful load of each skill verbatim, never summarized or truncated, until the model loads that skill again or the session is cleared. If the active skills alone don't fit the compaction budget, the turn fails with `ACTIVE_SKILL_CONTEXT_OVERFLOW` and history is left unchanged; shorten the skills or clear the session.
+
 Loading a skill adds instructions, never a new execution surface. Tools stay visible whether a skill is loaded or not. If you need typed runtime behavior, reach for a [tool](./tools) instead.
 
 ## Deferred skills

@@ -13,6 +13,8 @@ import {
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
+import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { ActiveSkillContextOverflowError } from "#harness/compaction/active-skill-overflow.js";
 
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 
@@ -20,6 +22,8 @@ const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
  * Element type of a non-string `ModelMessage.content` array.
  */
 type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
+type ToolCallPart = Extract<ModelMessageContentPart, { type: "tool-call" }>;
+type ToolResultPart = Extract<ModelMessageContentPart, { type: "tool-result" }>;
 
 // Static envelope estimate stays valid because createCompactionPrompt bounds
 // its transcript to the caller's threshold budget, so the summarization call
@@ -86,6 +90,7 @@ export type CompactionSummarizer = (prompt: {
 
 /** Conversation regions and config handed to each compaction heuristic. */
 interface CompactionHeuristicInput {
+  readonly activeSkills: ActiveSkills;
   readonly config: CompactionConfig;
   readonly conversation: readonly ModelMessage[];
   readonly older: readonly ModelMessage[];
@@ -128,7 +133,11 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
           { content: input.previousCheckpoint, role: "assistant" },
         ];
   const capped = withResumptionGuard(
-    [...checkpointHead, ...capToolResults(input.older), ...input.recent],
+    [
+      ...checkpointHead,
+      ...capToolResults(input.older, input.activeSkills.callIds),
+      ...input.recent,
+    ],
     input.conversation,
     input.config.threshold,
   );
@@ -182,13 +191,14 @@ export async function compactMessages(
   historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const activeSkills = findActiveSkills(conversation);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
   let keep = selectRecentWindowSize(conversation, recentConfig);
 
   if (!forceSummary) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
-      return keepNonToolResultMessages(recent);
+      return [...retainedSkillMessages(activeSkills), ...keepNonToolResultMessages(recent)];
     }
 
     // Capping preserves most of the measured prompt. Retain any known
@@ -200,6 +210,7 @@ export async function compactMessages(
     );
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
+        activeSkills,
         config,
         conversation,
         older,
@@ -213,6 +224,9 @@ export async function compactMessages(
     }
   }
 
+  // Kept skills can't shrink, so a summary that fits only the bare estimate would make
+  // shouldCompact fire again every step. Judge those summaries on its ruler.
+  const summaryRuler = activeSkills.pairs.length > 0 ? "should-compact" : "estimate";
   while (true) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
 
@@ -234,27 +248,111 @@ export async function compactMessages(
 
     // Prefer keeping the recent tail verbatim — surviving tool results are the
     // model's evidence that work already ran. Degrade to text-only, then to a
-    // smaller window, only under threshold pressure.
+    // smaller window, only under threshold pressure. Active skills ride along
+    // whole in every candidate, right after the summary.
     const verbatim = withResumptionGuard(
-      [...summaryHead, ...recent],
+      [...summaryHead, ...retainedSkillMessages(activeSkills, recent), ...recent],
       conversation,
       config.threshold,
     );
-    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
+    if (evaluateThreshold(verbatim, config, summaryRuler).type === "within-limit") {
       return verbatim;
     }
 
     const stripped = withResumptionGuard(
-      [...summaryHead, ...keepNonToolResultMessages(recent)],
+      [
+        ...summaryHead,
+        ...retainedSkillMessages(activeSkills),
+        ...keepNonToolResultMessages(recent),
+      ],
       conversation,
       config.threshold,
     );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
+    const evaluation = evaluateThreshold(stripped, config, summaryRuler);
+    if (evaluation.type === "within-limit") {
+      return stripped;
+    }
+    if (keep === 0) {
+      // Only the summary and the active skills remain. Accepting an over-budget history
+      // would re-trigger compaction every step without progress.
+      if (activeSkills.pairs.length > 0) {
+        throw new ActiveSkillContextOverflowError({
+          budgetTokens: config.threshold,
+          estimatedTokens: evaluation.estimatedTokens,
+          skills: activeSkills.pairs.map((pair) => pair.name),
+        });
+      }
       return stripped;
     }
 
     keep -= 1;
   }
+}
+
+/** The latest successful `eve__skill` load of each skill, in load order. */
+interface ActiveSkills {
+  readonly callIds: ReadonlySet<string>;
+  readonly pairs: readonly {
+    readonly call: ToolCallPart;
+    readonly name: string;
+    readonly result: ToolResultPart;
+  }[];
+}
+
+/**
+ * Finds the skill instructions the model activated, read from the transcript
+ * itself so a newer available version never rewrites an earlier activation. A
+ * later successful load of the same skill replaces the earlier one; a failed
+ * load activates nothing.
+ */
+function findActiveSkills(messages: readonly ModelMessage[]): ActiveSkills {
+  const calls = new Map<string, { readonly call: ToolCallPart; readonly name: string }>();
+  const byName = new Map<string, ActiveSkills["pairs"][number]>();
+  for (const message of messages) {
+    if (typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-call" && part.toolName === SKILL_TOOL_NAME) {
+        const name = (part.input as { readonly name?: unknown } | undefined)?.name;
+        if (typeof name === "string") calls.set(part.toolCallId, { call: part, name });
+        continue;
+      }
+      if (part.type !== "tool-result" || !isSuccessfulOutput(part.output)) continue;
+      const call = calls.get(part.toolCallId);
+      if (call === undefined) continue;
+      // Re-inserting moves the skill to its latest load position.
+      byName.delete(call.name);
+      byName.set(call.name, { ...call, result: part });
+    }
+  }
+  const pairs = [...byName.values()];
+  return { callIds: new Set(pairs.map((pair) => pair.call.toolCallId)), pairs };
+}
+
+function isSuccessfulOutput(output: ToolResultPart["output"]): boolean {
+  return output.type === "text" || output.type === "json" || output.type === "content";
+}
+
+/**
+ * The active skills' call/result exchanges to place after a summary, leaving
+ * out any whose result survives in `kept`.
+ */
+function retainedSkillMessages(
+  skills: ActiveSkills,
+  kept: readonly ModelMessage[] = [],
+): ModelMessage[] {
+  const keptIds = new Set<string>();
+  for (const message of kept) {
+    if (message.role !== "tool" || typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-result") keptIds.add(part.toolCallId);
+    }
+  }
+  const pairs = skills.pairs.filter((pair) => !keptIds.has(pair.call.toolCallId));
+  if (pairs.length === 0) return [];
+  return [
+    { content: pairs.map((pair) => pair.call), role: "assistant" },
+    { content: pairs.map((pair) => pair.result), role: "tool" },
+  ];
 }
 
 const CAPPED_RESULT_ANNOTATION =
@@ -273,7 +371,10 @@ const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
  * same limit it was measured against, and a text output is measured by its
  * value, so a later compaction leaves an already-capped part as it is.
  */
-function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
+function capToolResults(
+  messages: readonly ModelMessage[],
+  protectedCallIds: ReadonlySet<string>,
+): ModelMessage[] {
   return messages.map((message) => {
     if (message.role !== "tool" || typeof message.content === "string") {
       return message;
@@ -281,7 +382,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
 
     let changed = false;
     const content = message.content.map((part) => {
-      if (part.type !== "tool-result") {
+      if (part.type !== "tool-result" || protectedCallIds.has(part.toolCallId)) {
         return part;
       }
       // File parts of a content output reduce to their text stubs before the

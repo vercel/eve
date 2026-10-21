@@ -19,7 +19,13 @@ import {
 import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import { startStep } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
-import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
+import { ActiveSkillContextOverflowError } from "#harness/compaction/active-skill-overflow.js";
+import {
+  failActiveSkillOverflow,
+  failBoundaryEvent,
+  failModelSelection,
+  type Step,
+} from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   buildPrompt,
@@ -133,6 +139,9 @@ export async function runModelStep(
   try {
     result = await caller.call({ suppressStepStartedEmission: true });
   } catch (error) {
+    if (error instanceof ActiveSkillContextOverflowError) {
+      return await failActiveSkillOverflow(step, error);
+    }
     caller.throwIfCompactionFailed();
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();

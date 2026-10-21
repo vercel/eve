@@ -1136,3 +1136,193 @@ describe("compactMessages: summarization fallback", () => {
     expect(result.filter((m) => m.content === "Continue.")).toHaveLength(0);
   });
 });
+
+describe("compactMessages: active skills", () => {
+  const instructions = (marker: string) => `# Procedure ${marker}\n${"step ".repeat(1_000)}`;
+
+  function skillLoad(input: {
+    readonly callId: string;
+    readonly name: string;
+    readonly output: { type: "text"; value: string } | { type: "error-text"; value: string };
+  }): [ModelMessage, ModelMessage] {
+    return [
+      {
+        content: [
+          {
+            input: { name: input.name },
+            toolCallId: input.callId,
+            toolName: "eve__skill",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: input.output,
+            toolCallId: input.callId,
+            toolName: "eve__skill",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ];
+  }
+
+  async function summarize(messages: ModelMessage[]) {
+    const summarizer = summarizeWith("checkpoint text");
+    const result = await compactMessages(
+      messages,
+      { recentWindowSize: 1, threshold: ROOMY },
+      summarizer,
+      true,
+    );
+    expectWellFormedCompaction(result, ROOMY);
+    return { result, summarizer };
+  }
+
+  function skillResults(messages: readonly ModelMessage[]): string[] {
+    return messages.flatMap((message) =>
+      typeof message.content === "string"
+        ? []
+        : message.content.flatMap((part) =>
+            part.type === "tool-result" &&
+            part.toolName === "eve__skill" &&
+            part.output.type === "text"
+              ? [part.output.value]
+              : [],
+          ),
+    );
+  }
+
+  it("keeps an active skill whole while capping other tool results", async () => {
+    const body = instructions("A");
+    const [grepCall, grepResult] = toolExchange({ callId: "call-grep", payloadChars: 4_000 });
+    const messages = [
+      user("deploy it"),
+      ...skillLoad({ callId: "call-skill", name: "deploy", output: { type: "text", value: body } }),
+      grepCall,
+      grepResult,
+      user("go on"),
+    ];
+
+    const { result, summarizer } = await compact(messages, { recentWindowSize: 1 });
+
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(skillResults(result)).toEqual([body]);
+    expect(JSON.stringify(result)).toContain("Truncated by eve");
+  });
+
+  it("re-attaches the latest load of each skill after a summary", async () => {
+    const messages = [
+      user("deploy it"),
+      ...skillLoad({
+        callId: "c1",
+        name: "deploy",
+        output: { type: "text", value: instructions("A") },
+      }),
+      ...skillLoad({
+        callId: "c2",
+        name: "review",
+        output: { type: "text", value: "review steps" },
+      }),
+      ...skillLoad({
+        callId: "c3",
+        name: "deploy",
+        output: { type: "text", value: instructions("B") },
+      }),
+      ...skillLoad({
+        callId: "c4",
+        name: "broken",
+        output: { type: "error-text", value: "unknown" },
+      }),
+      ...toolExchange({ callId: "call-grep", payloadChars: 6_000 }),
+      user("continue"),
+    ];
+
+    const { result, summarizer } = await summarize(messages);
+
+    expect(summarizer).toHaveBeenCalled();
+    expect(result.slice(0, 2)).toEqual(checkpointHead("checkpoint text"));
+    // Load order is kept, the replaced version and the failed load are gone.
+    expect(skillResults(result)).toEqual(["review steps", instructions("B")]);
+    expect(result.at(-1)).toEqual(user("continue"));
+  });
+
+  it("does not duplicate a skill whose load survives in the recent tail", async () => {
+    const body = instructions("A");
+    const messages = [
+      user("first"),
+      ...toolExchange({ callId: "call-grep", payloadChars: 6_000 }),
+      user("deploy"),
+      ...skillLoad({ callId: "c1", name: "deploy", output: { type: "text", value: body } }),
+    ];
+
+    const { result } = await summarize(messages);
+
+    expect(skillResults(result)).toEqual([body]);
+  });
+
+  it("keeps the activated skill through repeated compactions", async () => {
+    const body = instructions("A");
+    const first = await summarize([
+      user("deploy"),
+      ...skillLoad({ callId: "c1", name: "deploy", output: { type: "text", value: body } }),
+      ...toolExchange({ callId: "g1", payloadChars: 6_000 }),
+      user("next"),
+    ]);
+    const second = await summarize([
+      ...first.result,
+      ...toolExchange({ callId: "g2", payloadChars: 6_000 }),
+      user("again"),
+    ]);
+
+    expect(skillResults(second.result)).toEqual([body]);
+  });
+
+  it("reports an overflow instead of truncating skills that cannot fit", async () => {
+    const messages = [
+      user("deploy"),
+      ...skillLoad({
+        callId: "c1",
+        name: "deploy",
+        output: { type: "text", value: instructions("A") },
+      }),
+      user("go"),
+    ];
+
+    await expect(
+      compactMessages(messages, { recentWindowSize: 1, threshold: 200 }, summarizeWith("s"), true),
+    ).rejects.toMatchObject({
+      code: "ACTIVE_SKILL_CONTEXT_OVERFLOW",
+      details: { budgetTokens: 200, skills: ["deploy"] },
+    });
+  });
+
+  it("reports an overflow when skills fit only without the compaction envelope", async () => {
+    const messages = [
+      user("deploy"),
+      ...skillLoad({
+        callId: "c1",
+        name: "deploy",
+        output: { type: "text", value: instructions("A") },
+      }),
+      user("go"),
+    ];
+    const { result } = await summarize(messages);
+    // The summary fits this budget on its own, but not with the envelope shouldCompact adds.
+    const threshold = estimateTokens(result);
+
+    await expect(
+      compactMessages(
+        messages,
+        { recentWindowSize: 1, threshold },
+        summarizeWith("checkpoint text"),
+        true,
+      ),
+    ).rejects.toMatchObject({ code: "ACTIVE_SKILL_CONTEXT_OVERFLOW" });
+    expect(shouldCompact(result, { recentWindowSize: 1, threshold })).toBe(true);
+  });
+});
