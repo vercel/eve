@@ -50,7 +50,25 @@ export default githubChannel({
 
 A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts. The [Slack channel](/docs/channels/slack#customize-rendering) takes renderers instead: a renderer's handler keeps Slack's default by calling `next()` and replaces it by skipping `next`.
 
-Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
+Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. It holds the path-derived channel identity, such as `channel:github` for `agent/channels/github.ts`, not the platform name, so a comparison like `ctx.channel.kind === "github"` never matches. Import the channel definition and compare with `isChannel` from `eve/channels` instead:
+
+```ts title="agent/hooks/github-only.ts"
+import { isChannel } from "eve/channels";
+import { defineHook } from "eve/hooks";
+
+import github from "../channels/github";
+
+export default defineHook({
+  events: {
+    async "turn.started"(_event, ctx) {
+      if (!isChannel(ctx.channel, github)) return;
+      // GitHub-owned turns only.
+    },
+  },
+});
+```
+
+For typed channel metadata in dynamic resolvers or instrumentation, narrow with `isChannel` the same way; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
 
 ## Hook structure and context
 
