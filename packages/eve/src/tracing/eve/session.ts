@@ -31,7 +31,7 @@ import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import { traceSessionIdOf } from "#tracing/eve/operation-input.js";
 import { ROOT_CONTEXT } from "#compiled/@opentelemetry/api/index.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
-import { withOperationConversation } from "#tracing/eve/conversation-context.js";
+import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
 import type {
   AgentSpanIdGenerator,
   AgentRun,
@@ -257,12 +257,16 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
   };
 }
 
-/** Spans this process starts inherit the channel audience and the operation's conversation. */
+/** Spans this process starts inherit the operation's audience and trace correlation. */
 function hostContext(
   audience: ChannelAudience | undefined,
-  operation: { readonly sessionId: string; readonly rootSessionId?: string },
+  operation: {
+    readonly sessionId: string;
+    readonly rootSessionId?: string;
+    readonly traceSessionId?: string;
+  },
 ) {
-  return withOperationConversation(withChannelAudience(ROOT_CONTEXT, audience), operation);
+  return withOperationTraceContext(withChannelAudience(ROOT_CONTEXT, audience), operation);
 }
 
 function activationLinks(turn: AgentTurnTraceState): TraceLink[] | undefined {

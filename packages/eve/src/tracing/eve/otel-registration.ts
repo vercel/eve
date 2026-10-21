@@ -18,7 +18,10 @@ import { type Attributes } from "#compiled/@vercel/agent-runs/index.js";
 import { invocationName } from "#compiled/@vercel/agent-runs/otel.js";
 export type SamplingOperation = { readonly name: string; readonly attributes?: Attributes };
 
-import { conversationIdFromContext } from "#tracing/eve/conversation-context.js";
+import {
+  conversationIdFromContext,
+  traceSessionIdFromContext,
+} from "#tracing/eve/conversation-context.js";
 
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
@@ -98,17 +101,23 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
 
   onStart(span: unknown, parentContext: unknown): void {
     if (isRegistrationSpan(span)) return;
+    const mutableSpan = span as {
+      readonly attributes?: Record<string, unknown>;
+      setAttribute(key: string, value: string): void;
+    };
     const conversationId = conversationIdFromContext(parentContext);
     if (
       conversationId !== undefined &&
-      (span as { attributes?: Record<string, unknown> }).attributes?.["gen_ai.conversation.id"] ===
-        undefined
-    ) {
-      (span as { setAttribute(key: string, value: string): void }).setAttribute(
-        "gen_ai.conversation.id",
-        conversationId,
-      );
-    }
+      mutableSpan.attributes?.["gen_ai.conversation.id"] === undefined
+    )
+      mutableSpan.setAttribute("gen_ai.conversation.id", conversationId);
+    const traceSessionId = traceSessionIdFromContext(parentContext);
+    if (
+      process.env.VERCEL_ENV !== undefined &&
+      traceSessionId !== undefined &&
+      mutableSpan.attributes?.["vercel.session_id"] === undefined
+    )
+      mutableSpan.setAttribute("vercel.session_id", traceSessionId);
     const identity = spanIdentity(span);
     if (identity !== undefined) addBounded(this.startedSpans, identity);
     for (const processor of this.processors) processor.onStart(span, parentContext);

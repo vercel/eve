@@ -4,6 +4,7 @@ import { readConversationId, resolveConversationId } from "#shared/conversation-
 
 const BAGGAGE_KEY = "eve.conversation.id";
 const CONVERSATION_KEY = createContextKey("eve.trace.conversation.id");
+const TRACE_SESSION_KEY = createContextKey("eve.trace.session.id");
 
 export function withConversationId(context: Context, conversationId: string): Context {
   return context.setValue(CONVERSATION_KEY, conversationId);
@@ -12,14 +13,18 @@ export function withConversationId(context: Context, conversationId: string): Co
 interface OperationConversation {
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly traceSessionId?: string;
 }
 
 export function operationConversationId(input: OperationConversation): string {
   return resolveConversationId(input.rootSessionId ?? input.sessionId);
 }
 
-export function withOperationConversation(context: Context, input: OperationConversation): Context {
-  return withConversationId(context, operationConversationId(input));
+export function withOperationTraceContext(context: Context, input: OperationConversation): Context {
+  return withConversationId(context, operationConversationId(input)).setValue(
+    TRACE_SESSION_KEY,
+    input.traceSessionId ?? input.rootSessionId ?? input.sessionId,
+  );
 }
 
 export function conversationIdFromContext(context: unknown): string | undefined {
@@ -28,6 +33,14 @@ export function conversationIdFromContext(context: unknown): string | undefined 
   return typeof getValue === "function"
     ? readConversationId(Reflect.apply(getValue, context, [CONVERSATION_KEY]))
     : undefined;
+}
+
+export function traceSessionIdFromContext(context: unknown): string | undefined {
+  if (typeof context !== "object" || context === null) return undefined;
+  const getValue = Reflect.get(context, "getValue");
+  if (typeof getValue !== "function") return undefined;
+  const value = Reflect.apply(getValue, context, [TRACE_SESSION_KEY]);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export function readConversationBaggage(value: string | null): string | undefined {
