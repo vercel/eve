@@ -43,6 +43,7 @@ export function renderQuestionPanel(
   const rows = renderQuestionPrompt(state.prompt, theme, width);
   rows.push("");
   let focusedRow = rows.length;
+  let focusedEndRow = focusedRow;
   for (const [index, option] of state.options.entries()) {
     if (index === state.cursor) focusedRow = rows.length;
     rows.push(
@@ -50,9 +51,10 @@ export function renderQuestionPanel(
         row.split(/\r?\n/u),
       ),
     );
+    if (index === state.cursor) focusedEndRow = rows.length - 1;
   }
   if (state.allowFreeform) {
-    if (state.cursor === state.options.length) focusedRow = rows.length;
+    if (state.cursor === state.options.length) focusedRow = focusedEndRow = rows.length;
     rows.push(renderFreeformRow(state, theme, width));
   }
 
@@ -60,6 +62,7 @@ export function renderQuestionPanel(
     rows.map((row) => clipVisible(row, width)),
     state.maxRows ?? rows.length,
     focusedRow,
+    focusedEndRow,
   );
 }
 
@@ -75,8 +78,11 @@ export function fitQuestionPanel(
   rows: readonly string[],
   maxRows: number,
   focusedRow = rows.length - 1,
+  focusedEndRow = focusedRow,
 ): string[] {
-  const start = Math.max(0, Math.min(focusedRow - maxRows + 1, rows.length - maxRows));
+  // Keep the label when one choice's description is taller than the viewport.
+  const end = Math.min(focusedEndRow, focusedRow + maxRows - 1);
+  const start = Math.max(0, Math.min(end - maxRows + 1, rows.length - maxRows));
   return rows.slice(start, start + maxRows);
 }
 
