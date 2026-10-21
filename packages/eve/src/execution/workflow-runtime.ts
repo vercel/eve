@@ -257,8 +257,10 @@ export function createWorkflowRuntime(config: {
     } catch (error) {
       // A different Functions instance may have won the same run creation.
       // The world's durable run is the authority, not an in-process lock.
-      const winner = await existingHandle(input);
-      if (winner) return winner;
+      if (EntityConflictError.is(error)) {
+        const winner = await existingHandle(input);
+        if (winner) return winner;
+      }
       logError(log, "failed to start workflow run", error, {
         continuationToken: input.continuationToken,
       });
@@ -296,7 +298,7 @@ export function createWorkflowRuntime(config: {
 
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
-      return (await existingHandle(input)) ?? (await startSession(input));
+      return await startSession(input);
     },
 
     async dispatchContinuation<TCommand extends SessionCommand>(
