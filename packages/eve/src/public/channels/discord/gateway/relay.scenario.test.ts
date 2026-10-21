@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DiscordGatewayFatalError,
+  type DiscordGatewaySession,
   experimental_runDiscordGatewayRelay,
 } from "#public/channels/discord/gateway/index.js";
 
@@ -15,6 +16,8 @@ const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 interface GatewayConnection {
   readonly path: string;
   readonly received: Record<string, any>[];
+  /** Close code of the relay's close frame, once it sends one. */
+  readonly closedWith: number | undefined;
   send(payload: unknown): void;
   close(code: number): void;
   /** Stops answering, like a peer whose TCP connection silently died. */
@@ -70,6 +73,7 @@ function acceptWebSocket(req: IncomingMessage, socket: Duplex): GatewayConnectio
 
   const received: Record<string, any>[] = [];
   let silent = false;
+  let closedWith: number | undefined;
   let buffer = Buffer.alloc(0);
   socket.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
@@ -80,8 +84,9 @@ function acceptWebSocket(req: IncomingMessage, socket: Duplex): GatewayConnectio
         received.push(payload);
         if (payload.op === 1 && !silent) socket.write(encodeFrame(1, Buffer.from('{"op":11}')));
       }
-      if (frame.opcode === 8 && !silent) {
-        socket.end(encodeFrame(8, frame.payload));
+      if (frame.opcode === 8) {
+        closedWith = frame.payload.readUInt16BE(0);
+        if (!silent) socket.end(encodeFrame(8, frame.payload));
       }
     }
   });
@@ -91,6 +96,9 @@ function acceptWebSocket(req: IncomingMessage, socket: Duplex): GatewayConnectio
   return {
     path: req.url ?? "",
     received,
+    get closedWith() {
+      return closedWith;
+    },
     send: (payload) => socket.write(encodeFrame(1, Buffer.from(JSON.stringify(payload)))),
     goSilent: () => {
       silent = true;
@@ -219,6 +227,68 @@ describe("experimental_runDiscordGatewayRelay", () => {
       { authorization: "Bearer relay", body: messageCreate(4, "M2") },
       { authorization: "Bearer relay", body: messageCreate(6, "M3") },
     ]);
+  });
+
+  it("hands its session to the relay that replaces it, which resumes it", async () => {
+    const connections: GatewayConnection[] = [];
+    const discord = await startFakeDiscord((connection) => {
+      connections.push(connection);
+      connection.send(HELLO);
+    });
+    const resumeUrl = `${discord.url.replace("http", "ws")}/resume`;
+    let saved: DiscordGatewaySession | undefined = {
+      resumeUrl,
+      savedAt: Date.now(),
+      sequence: 4,
+      sessionId: "S1",
+    };
+    const relay = (signal: AbortSignal) =>
+      experimental_runDiscordGatewayRelay({
+        api: { apiBaseUrl: `${discord.url}/api/v10` },
+        credentials: { botToken: "bot-token" },
+        handoff: {
+          put: async (session) => {
+            saved = session;
+          },
+          take: async () => {
+            const session = saved;
+            saved = undefined;
+            return session;
+          },
+        },
+        signal,
+        url: discord.url,
+      });
+
+    const first = new AbortController();
+    const firstRelay = relay(first.signal);
+    await waitFor(() => connections[0]?.received.length === 1);
+    expect(connections[0]!.path).toMatch(/^\/resume\?/);
+    expect(connections[0]!.received[0]).toEqual({
+      d: { seq: 4, session_id: "S1", token: "bot-token" },
+      op: 6,
+    });
+    connections[0]!.send(messageCreate(5, "M1"));
+    connections[0]!.send({ d: null, op: 0, s: 6, t: "RESUMED" });
+    await waitFor(() => discord.forwarded.length === 1);
+    first.abort();
+    await firstRelay;
+
+    // A 1000 or 1001 close would end the session, leaving nothing to resume.
+    expect(connections[0]!.closedWith).toBe(4000);
+    expect(saved).toMatchObject({ resumeUrl, sequence: 6, sessionId: "S1" });
+
+    const second = new AbortController();
+    const secondRelay = relay(second.signal);
+    await waitFor(() => connections[1]?.received.length === 1);
+    second.abort();
+    await secondRelay;
+
+    expect(connections[1]!.path).toMatch(/^\/resume\?/);
+    expect(connections[1]!.received[0]).toEqual({
+      d: { seq: 6, session_id: "S1", token: "bot-token" },
+      op: 6,
+    });
   });
 
   it("abandons a connection that stops acknowledging heartbeats and resumes elsewhere", async () => {

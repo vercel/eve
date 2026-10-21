@@ -143,6 +143,28 @@ The bot needs the **Send Messages in Threads** permission to reply in threads, i
 https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=309237713920
 ```
 
+### Keep messages across deploys
+
+On a deploy, Vercel sends `SIGTERM` to the old daemon and starts the new one at the same time. By default, each relay opens a new Gateway session, so messages sent while the new daemon boots are lost. To deliver them, connect a private Vercel Blob store to the project and pass `handoff`:
+
+```ts title="daemon/main.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import {
+  experimental_runDiscordGatewayRelay,
+  vercelBlobHandoff,
+} from "eve/channels/discord/gateway";
+
+await experimental_runDiscordGatewayRelay({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+  handoff: vercelBlobHandoff(),
+  url: process.env.EVE_URL,
+});
+```
+
+The stopping relay leaves its session resumable and saves it to Blob. The new relay waits up to 10 seconds for it, resumes it, and Discord replays the missed messages in order. `vercelBlobHandoff` reads `BLOB_READ_WRITE_TOKEN`, or `VERCEL_OIDC_TOKEN` with `BLOB_STORE_ID`, which Vercel sets for the store you connect.
+
+When no saved session arrives, as on the first deploy or after a crash, the relay starts a new session after the wait. It ignores a session saved more than a minute earlier, because Discord expires a closed session after a few minutes. Off Vercel, pass any object with `take` and `put` methods, such as one backed by a file on a persistent volume.
+
 ### Run the relay outside Vercel
 
 `experimental_runDiscordGatewayRelay` runs on any host that keeps a Node.js 24 process up, such as a VM, a container platform, or a home server, while the agent stays on Vercel. Run exactly one relay per bot. Three things change off Vercel:
@@ -316,7 +338,7 @@ Scale the production daemon to zero while you do this. Every connection receives
 ### Limitations
 
 - Run one relay per bot. Each connection receives every message. Bots large enough to need Discord's sharding are out of scope.
-- Messages sent while no relay is connected are not delivered. On a deploy, Vercel sends `SIGTERM` to the old daemon and starts the new one at the same time. The old relay disconnects right away, so messages sent while the new daemon boots and connects, usually a few seconds, are lost. A crash or restart leaves the same gap. The relay does not resume the previous Gateway session in a new process, so Discord does not replay these messages.
+- Messages sent while no relay is connected are not delivered. On a deploy, messages sent while the new daemon boots are lost unless you [hand off the session](#keep-messages-across-deploys). A crash still loses messages, because the relay has no chance to save its session.
 - `experimental_runDiscordGatewayRelay` drops a message, rather than retrying it, when eve answers with a `5xx`, takes longer than 30 seconds to accept it, or the connection fails after the request is sent. eve may have started the turn already, and a retry could answer twice. The relay logs each dropped message.
 
 ## How the channel handles messages

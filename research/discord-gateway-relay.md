@@ -96,6 +96,8 @@ Discord Gateway ──WS──▶ experimental_runDiscordGatewayRelay ──POST
 - No deduplication. A Gateway sequence number identifies a dispatch only within one session, and
   eve has no idempotent `send`, so two relays connected at once, or a retry after eve started a turn,
   can answer twice.
-- No cross-process resume. A deploy or restart starts a new Gateway session, so messages sent while
-  no relay is connected are lost. Handing the session cursor to the next process is a follow-up.
+- Cross-process resume is opt-in. With `handoff` (for example `vercelBlobHandoff()`), a stopping
+  relay closes resumably and saves `{ sessionId, resumeUrl, sequence }`; the replacement waits up to
+  10 seconds to take it and sends RESUME, so Discord replays what it missed. Without a handoff, or
+  after a crash, a new session starts and messages sent in between are lost.
 - One relay per bot. Sharding is out of scope.

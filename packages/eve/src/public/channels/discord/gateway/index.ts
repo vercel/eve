@@ -14,11 +14,23 @@ import {
 } from "#public/channels/discord/api.js";
 import {
   DiscordGatewayFatalError,
+  type ResumableGatewaySession,
   runGatewayConnection,
+  sleep,
 } from "#public/channels/discord/gateway/connection.js";
 import { createForwarder } from "#public/channels/discord/gateway/forwarder.js";
+import type {
+  DiscordGatewayHandoff,
+  DiscordGatewaySession,
+} from "#public/channels/discord/gateway/handoff.js";
 
 export { DiscordGatewayFatalError };
+export {
+  type DiscordGatewayHandoff,
+  type DiscordGatewaySession,
+  vercelBlobHandoff,
+  type VercelBlobHandoffOptions,
+} from "#public/channels/discord/gateway/handoff.js";
 
 const log = createLogger("discord.gateway");
 
@@ -28,6 +40,11 @@ const MESSAGE_CONTENT_INTENT = 1 << 15;
 
 // Vercel Daemons get 10 seconds between SIGTERM and SIGKILL by default.
 const SHUTDOWN_DRAIN_MS = 8_000;
+// On a deploy, the old relay saves its session as the new one boots, so give it time to land.
+const HANDOFF_WAIT_MS = 10_000;
+const HANDOFF_POLL_MS = 500;
+// Discord expires a session a few minutes after its connection closes; resume only fresh ones.
+const HANDOFF_MAX_AGE_MS = 60_000;
 
 /** Options for {@link experimental_runDiscordGatewayRelay}. */
 export interface DiscordGatewayRelayOptions {
@@ -61,6 +78,14 @@ export interface DiscordGatewayRelayOptions {
    * refuses the connection.
    */
   readonly messageContent?: boolean;
+  /**
+   * Hands the Gateway session from a stopping relay to the one that replaces
+   * it, such as {@link vercelBlobHandoff}. The stopping relay keeps the session
+   * resumable and saves it; the next relay waits up to 10 seconds for it,
+   * resumes it, and Discord replays the messages sent in between. Without it,
+   * each relay starts a new session and those messages are lost.
+   */
+  readonly handoff?: DiscordGatewayHandoff;
   /** Stops the relay. Defaults to the process's `SIGTERM` and `SIGINT`. */
   readonly signal?: AbortSignal;
 }
@@ -88,23 +113,65 @@ export async function experimental_runDiscordGatewayRelay(
   });
 
   log.info("Discord Gateway relay started", { target: target.href });
+  const handoff = options.handoff;
+  let session: ResumableGatewaySession | undefined;
   try {
-    await runGatewayConnection({
+    session = await runGatewayConnection({
       apiBaseUrl: options.api?.apiBaseUrl,
       fetch: options.api?.fetch,
       intents:
         GUILD_MESSAGES_INTENT |
         DIRECT_MESSAGES_INTENT |
         (options.messageContent === true ? MESSAGE_CONTENT_INTENT : 0),
+      keepSessionOnAbort: handoff !== undefined,
       onDispatch: (dispatch) => {
         if (dispatch.t === "MESSAGE_CREATE") forwarder.enqueue(dispatch);
       },
       resolveToken: () => resolveDiscordBotToken(options.credentials?.botToken),
+      resume: handoff === undefined ? undefined : await takeSession(handoff, signal),
       signal,
     });
   } finally {
     shutdown?.dispose();
+    // Before draining, so the next relay can resume while this one finishes deliveries.
+    if (handoff !== undefined && session !== undefined) await saveSession(handoff, session);
     await forwarder.drain(SHUTDOWN_DRAIN_MS);
+  }
+}
+
+async function takeSession(
+  handoff: DiscordGatewayHandoff,
+  signal: AbortSignal,
+): Promise<ResumableGatewaySession | undefined> {
+  const deadline = Date.now() + HANDOFF_WAIT_MS;
+  while (!signal.aborted) {
+    let saved: DiscordGatewaySession | undefined;
+    try {
+      saved = await handoff.take();
+    } catch (error) {
+      log.warn("Discord Gateway handoff could not be read; starting a new session", { error });
+      return undefined;
+    }
+    if (saved !== undefined && Date.now() - saved.savedAt <= HANDOFF_MAX_AGE_MS) {
+      log.info("Resuming the Discord Gateway session a previous relay left", {
+        sessionId: saved.sessionId,
+      });
+      return { resumeUrl: saved.resumeUrl, sequence: saved.sequence, sessionId: saved.sessionId };
+    }
+    if (Date.now() >= deadline) return undefined;
+    await sleep(HANDOFF_POLL_MS, signal);
+  }
+  return undefined;
+}
+
+async function saveSession(
+  handoff: DiscordGatewayHandoff,
+  session: ResumableGatewaySession,
+): Promise<void> {
+  try {
+    await handoff.put({ ...session, savedAt: Date.now() });
+  } catch (error) {
+    log.warn("Discord Gateway session could not be saved for the next relay", { error });
   }
 }
 

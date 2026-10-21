@@ -32,6 +32,17 @@ export interface GatewayConnectionOptions {
   readonly resolveToken: () => Promise<string>;
   readonly onDispatch: (dispatch: DiscordGatewayDispatch) => void;
   readonly signal: AbortSignal;
+  /** A session another process left resumable; the first connection resumes it. */
+  readonly resume?: ResumableGatewaySession;
+  /** Close resumably on abort, so another process can resume the session. */
+  readonly keepSessionOnAbort?: boolean;
+}
+
+/** What a process needs to resume a Gateway session another one held. */
+export interface ResumableGatewaySession {
+  readonly sessionId: string;
+  readonly resumeUrl: string;
+  readonly sequence: number;
 }
 
 interface GatewayPayload {
@@ -50,11 +61,17 @@ type GatewayUrlResult = { readonly url: string } | { readonly fatal: string };
 
 /**
  * Holds one Discord Gateway session until `signal` aborts, resuming across
- * reconnects so dispatches are not lost while the process lives.
+ * reconnects so dispatches are not lost while the process lives. Resolves with
+ * the session as it stood at abort, when there is one to resume.
  */
-export async function runGatewayConnection(options: GatewayConnectionOptions): Promise<void> {
-  let session: GatewaySession | undefined;
-  let sequence: number | null = null;
+export async function runGatewayConnection(
+  options: GatewayConnectionOptions,
+): Promise<ResumableGatewaySession | undefined> {
+  let session: GatewaySession | undefined =
+    options.resume === undefined
+      ? undefined
+      : { id: options.resume.sessionId, resumeUrl: options.resume.resumeUrl };
+  let sequence: number | null = options.resume?.sequence ?? null;
   let failures = 0;
   let nextDelayMs: number | undefined;
 
@@ -77,9 +94,9 @@ export async function runGatewayConnection(options: GatewayConnectionOptions): P
       continue;
     }
 
-    if (options.signal.aborted) return;
+    if (options.signal.aborted) break;
     const closed = await connect(url, token);
-    if (options.signal.aborted) return;
+    if (options.signal.aborted) break;
 
     if (FATAL_CLOSE_CODES.has(closed.code)) {
       throw new DiscordGatewayFatalError(
@@ -101,6 +118,10 @@ export async function runGatewayConnection(options: GatewayConnectionOptions): P
     });
     await sleep(delayMs, options.signal);
   }
+
+  return session === undefined || sequence === null
+    ? undefined
+    : { resumeUrl: session.resumeUrl, sequence, sessionId: session.id };
 
   async function discoverGatewayUrl(token: string): Promise<GatewayUrlResult> {
     const response = await callDiscordApi({
@@ -150,7 +171,7 @@ export async function runGatewayConnection(options: GatewayConnectionOptions): P
         socket.close(code, reason);
         closeTimer = setTimeout(() => settle(code, reason), CLOSE_HANDSHAKE_TIMEOUT_MS);
       };
-      const onAbort = () => close(1000, "shutdown");
+      const onAbort = () => close(options.keepSessionOnAbort ? RESUMABLE_CLOSE : 1000, "shutdown");
       options.signal.addEventListener("abort", onAbort, { once: true });
 
       const heartbeat = (intervalMs: number) => {
