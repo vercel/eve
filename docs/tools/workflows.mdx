@@ -146,16 +146,23 @@ continue a child from an earlier call. Agent authorization, questions, approvals
 behave as they do for sessions an authored workflow tool opens with `ctx.agent`.
 
 The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
-fan-out followed by fan-in. `Promise.race` is not supported: the program returns while the losing
-call is still pending, so the resume fails with "JavaScript runtime returned while a hostFunction
-bridge request was still pending".
-A failed child turn throws a `WorkflowProgramAgentError` at the corresponding `ctx.agent` call, and
-an invalid call throws a `WorkflowProgramAgentCallError`, so generated code can catch either.
+fan-out followed by fan-in. The program must await every `ctx.agent` call before it returns. A call
+that is still pending at that point, such as one that is never awaited or one that loses a
+`Promise.race` or `Promise.any`, fails the workflow.
+
+Generated code can catch these errors at the corresponding `ctx.agent` call. Each has a stable
+`name` and `code`:
+
+| `name`                              | `code`                                    | Thrown when                                                  |
+| ----------------------------------- | ----------------------------------------- | ------------------------------------------------------------ |
+| `WorkflowProgramAgentError`         | `WORKFLOW_PROGRAM_AGENT_FAILED`           | The child turn fails, or its reply is over 4 MiB of JSON.    |
+| `WorkflowProgramSubagentLimitError` | `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED` | The call is over the `maxSubagents` budget. No child starts. |
+| `WorkflowProgramAgentCallError`     | `WORKFLOW_PROGRAM_INVALID_AGENT_CALL`     | The arguments are invalid or over 1 MiB of JSON.             |
 
 The sandbox converts the program's return value and each `ctx.agent` input with `JSON.stringify`,
 so a `Date` becomes a string and functions and `undefined` members drop. A return value that
 converts to nothing, such as `undefined`, becomes `null`. Each converted value may be up to 1 MiB of
-JSON, and the program source up to 256 KiB.
+JSON, each child reply up to 4 MiB of JSON, and the program source up to 256 KiB.
 
 The program starts again from the top on every resume, replaying earlier `ctx.agent` results
 instead of calling those agents again. Each start or resume may spend up to 30 seconds running

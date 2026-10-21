@@ -101,14 +101,76 @@ return {
     );
   });
 
-  it("stops a shared-reference result inside the sandbox", async () => {
-    // The sandbox holds 18 objects; their JSON text is about 1.7 MB.
+  it("measures values whose encoding run escapes six-fold by their JSON", async () => {
+    // run encodes each `<` as `\u003C`; the quotes bring the JSON text to the limit.
+    const atLimit = await runWorkflowProgramStep({
+      callId: "escaped-result",
+      program: program('return "<".repeat(1_048_574);'),
+    });
+    expect(atLimit.status === "completed" && (atLimit.output as string).length).toBe(1_048_574);
+    await expect(
+      runWorkflowProgramStep({
+        callId: "escaped-result-over",
+        program: program('return "<".repeat(1_048_575);'),
+      }),
+    ).rejects.toThrow(
+      "Workflow program result is 1048577 bytes of JSON, over the 1048576 byte limit.",
+    );
+
+    // `{"target":"researcher","input":{"message":""}}` adds 46 bytes to the message.
+    const parked = await runWorkflowProgramStep({
+      callId: "escaped-input",
+      program: program('return ctx.agent("researcher", { message: "<".repeat(1_048_530) });'),
+    });
+    expect(parked.status === "interrupted" && parked.pending[0]!.call.input.message.length).toBe(
+      1_048_530,
+    );
+    await expect(
+      runWorkflowProgramStep({
+        callId: "escaped-input-over",
+        program: program(`
+try {
+  return await ctx.agent("researcher", { message: "<".repeat(1_048_531) });
+} catch (error) {
+  return { code: error.code, message: error.message };
+}`),
+      }),
+    ).resolves.toEqual({
+      output: {
+        code: "WORKFLOW_PROGRAM_INVALID_AGENT_CALL",
+        message:
+          "Workflow program ctx.agent() input is 1048577 bytes of JSON, over the 1048576 byte limit.",
+      },
+      status: "completed",
+    });
+  });
+
+  it("resumes with a child reply of up to 4 MiB of JSON", async () => {
+    // run encodes this 4 MiB of JSON as about 24 MiB.
+    const reply = "<".repeat(4 * 1024 * 1024 - 2);
+    const input = program(
+      'const reply = await ctx.agent("researcher", { message: "m" }); return reply.length;',
+    );
+    const first = await runWorkflowProgramStep({ callId: "large-reply", program: input });
+    await expect(
+      runWorkflowProgramStep({
+        callId: "large-reply",
+        program: input,
+        resume: resume(first, [{ status: "completed", output: reply }]),
+      }),
+    ).resolves.toEqual({ output: reply.length, status: "completed" });
+  });
+
+  it("converts a shared-reference result to JSON inside the sandbox", async () => {
+    // The sandbox holds 18 objects; the host only receives their 1.7 MB of JSON text.
     await expect(
       runWorkflowProgramStep({
         callId: "dag-result",
         program: program(`${sharedReferenceDag(17)} return o;`),
       }),
-    ).rejects.toThrow("JavaScript runtime result exceeds the 2098176 byte size limit.");
+    ).rejects.toThrow(
+      "Workflow program result is 1703925 bytes of JSON, over the 1048576 byte limit.",
+    );
   });
 
   it("rejects values that bypass the program prelude", async () => {
@@ -172,13 +234,16 @@ return ctx.agent("researcher", { message: pair.join("|") });`);
     ).resolves.toEqual({ output: { done: true }, status: "completed" });
   });
 
-  it("fails Promise.race on resume because the losing call is still pending", async () => {
+  it("fails a program that returns before every ctx.agent call settles", async () => {
+    const pendingMessage =
+      "Workflow program returned while a ctx.agent() call was still pending. Await every ctx.agent() call before returning, including calls passed to Promise.race or Promise.any.";
     const input = program(`
 return Promise.race([
   ctx.agent("researcher", { message: "a" }),
   ctx.agent("reviewer", { message: "b" }),
 ]);`);
     const first = await runWorkflowProgramStep({ callId: "race", program: input });
+    // The losing call is still pending when the race settles on resume.
     await expect(
       runWorkflowProgramStep({
         callId: "race",
@@ -188,9 +253,14 @@ return Promise.race([
           { status: "completed", output: "B" },
         ]),
       }),
-    ).rejects.toThrow(
-      "JavaScript runtime returned while a hostFunction bridge request was still pending: __eveWorkflowProgram.agent.",
-    );
+    ).rejects.toThrow(pendingMessage);
+
+    await expect(
+      runWorkflowProgramStep({
+        callId: "detached",
+        program: program('ctx.agent("researcher", { message: "a" }); return "done";'),
+      }),
+    ).rejects.toThrow(pendingMessage);
   });
 
   it("lets generated code catch a failed child, including on later replays", async () => {
@@ -267,7 +337,7 @@ try {
     );
   });
 
-  it("stops a shared-reference agent input inside the sandbox", async () => {
+  it("converts a shared-reference agent input to JSON inside the sandbox", async () => {
     await expect(
       runWorkflowProgramStep({
         callId: "dag-input",
@@ -279,40 +349,55 @@ try {
 }`),
       }),
     ).resolves.toEqual({
-      output: "Host function arguments exceed the 2098176 byte size limit.",
+      output:
+        "Workflow program ctx.agent() input is 1703988 bytes of JSON, over the 1048576 byte limit.",
       status: "completed",
     });
   });
 
-  it("enforces the total call budget through the real sandbox", async () => {
+  /** A workflow context whose children reply to the message they receive with `reply`. */
+  const replyingCtx = (callId: string, reply: (message: string) => string) => {
     const agent = vi.fn(() => ({
-      send: async () => ({
-        result: async () => ({ data: undefined, message: "ok", status: "waiting" }),
+      send: async (message: string) => ({
+        result: async () => ({ data: undefined, message: reply(message), status: "waiting" }),
       }),
     }));
-    const ctx = {
-      abortSignal: new AbortController().signal,
-      agent,
-      callId: "policy",
-    } as never;
-
-    await expect(
-      runJsProgram(
-        `
+    return { agent, ctx: { abortSignal: new AbortController().signal, agent, callId } as never };
+  };
+  const catchSecondCall = `
+await ctx.agent("researcher", { message: "one" });
 try {
-  await ctx.agent("researcher", { message: "one" });
   await ctx.agent("researcher", { message: "two" });
   return "unexpected";
 } catch (error) {
-  return error.message;
-}`,
-        ctx,
-        { maxSubagents: 1 },
-      ),
-    ).resolves.toBe(
-      'WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most 1 agents; "researcher" was not called.',
-    );
+  return { code: error.code, message: error.message, name: error.name };
+}`;
+
+  it("enforces the total call budget through the real sandbox", async () => {
+    const { agent, ctx } = replyingCtx("policy", () => "ok");
+
+    await expect(runJsProgram(catchSecondCall, ctx, { maxSubagents: 1 })).resolves.toEqual({
+      code: "WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED",
+      message:
+        'WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most 1 agents; "researcher" was not called.',
+      name: "WorkflowProgramSubagentLimitError",
+    });
     expect(agent).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets generated code catch a child reply over 4 MiB of JSON", async () => {
+    // With its quotes, the second reply is 4 MiB + 1 byte of JSON.
+    const { agent, ctx } = replyingCtx("large-reply", (message) =>
+      message === "one" ? "ok" : "<".repeat(4 * 1024 * 1024 - 1),
+    );
+
+    await expect(runJsProgram(catchSecondCall, ctx, { maxSubagents: 2 })).resolves.toEqual({
+      code: "WORKFLOW_PROGRAM_AGENT_FAILED",
+      message:
+        'Agent "researcher" replied with 4194305 bytes of JSON, over the 4194304 byte limit for a ctx.agent() result.',
+      name: "WorkflowProgramAgentError",
+    });
+    expect(agent).toHaveBeenCalledTimes(2);
   });
 
   it("rejects oversized source and tampered continuations", async () => {

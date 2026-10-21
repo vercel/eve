@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { FatalError } from "#compiled/@workflow/core/index.js";
+import { FatalError, RetryableError } from "#compiled/@workflow/core/index.js";
 import type { RunLimits } from "#compiled/run/index.js";
 import {
   WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
   WORKFLOW_PROGRAM_CPU_TIMEOUT_MS,
+  WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES,
   WORKFLOW_PROGRAM_TIMEOUT_MS,
   readWorkflowProgramAgentCall,
   type WorkflowProgramAgentCall,
@@ -44,6 +45,7 @@ const WORKFLOW_PROGRAM_MAX_SOURCE_BYTES = 256 * 1024;
 const WORKFLOW_PROGRAM_GUEST_ERROR_NAMES = {
   WORKFLOW_PROGRAM_AGENT_FAILED: "WorkflowProgramAgentError",
   WORKFLOW_PROGRAM_INVALID_AGENT_CALL: "WorkflowProgramAgentCallError",
+  WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: "WorkflowProgramSubagentLimitError",
 } as const;
 
 /**
@@ -57,17 +59,21 @@ function wrapWorkflowProgram(js: string): string {
 }
 
 /**
- * run measures JSON text in its own encoding, which escapes every quote, so
- * run gets twice the budget and eve checks the JSON size itself.
+ * run measures values in its own encoding, which can turn one byte of JSON
+ * into six (`<` becomes `\u003C`), so run gets the worst-case budget and eve's
+ * JSON size checks always fail first, with eve's message.
  */
-const runEncodingLimit = (jsonBytes: number) => jsonBytes * 2 + 1024;
+const runEncodingLimit = (jsonBytes: number) => jsonBytes * 6 + 1024;
+
+/** Gives programs holding the busy workers time to finish before the step retries. */
+const WORKFLOW_PROGRAM_BUSY_RETRY_MS = 5_000;
 
 const WORKFLOW_PROGRAM_LIMITS: RunLimits = {
   cpuTimeoutMs: WORKFLOW_PROGRAM_CPU_TIMEOUT_MS,
   maxBridgeRequests: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
   maxConsoleOutputBytes: 64 * 1024,
   maxHostFunctionArgumentsBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_JSON_BYTES),
-  maxHostFunctionOutputBytes: 4 * 1024 * 1024,
+  maxHostFunctionOutputBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES),
   maxInFlightBridgeRequests: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
   maxResultBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_JSON_BYTES),
   // eve checks the program's own size; the ASCII wrapper's length is its byte count.
@@ -86,7 +92,9 @@ export async function runWorkflowProgramStep(
   try {
     return await runWorkflowProgram(input);
   } catch (error) {
-    // The sandbox is deterministic, so a failed program fails the same way on every retry.
+    // The step has no side effects, so retrying a busy runtime is safe.
+    if (RetryableError.is(error)) throw error;
+    // The sandbox is deterministic, so any other failure repeats on every retry.
     throw new FatalError(toErrorMessage(error));
   }
 }
@@ -120,7 +128,7 @@ async function runWorkflowProgram(
     return error;
   };
 
-  const result = await runner.run({
+  const running = runner.run({
     source: wrapWorkflowProgram(input.program.js),
     hostFunctions: {
       [WORKFLOW_PROGRAM_HOST_NAMESPACE]: {
@@ -137,7 +145,7 @@ async function runWorkflowProgram(
           if (resume === undefined) return interrupt(call);
           const outcome = resume.resolution as WorkflowProgramCallResult;
           if (outcome.status === "failed") {
-            throw guestError(outcome.error, "WORKFLOW_PROGRAM_AGENT_FAILED");
+            throw guestError(outcome.error, outcome.code ?? "WORKFLOW_PROGRAM_AGENT_FAILED");
           }
           return outcome.output;
         },
@@ -147,6 +155,19 @@ async function runWorkflowProgram(
     continuationContext: { callId: input.callId },
     continuation: input.resume?.continuation,
     resolutions: input.resume?.resolutions.slice(),
+  });
+  const result = await running.catch((error: unknown) => {
+    if (!RunError.isInstance(error)) throw error;
+    // run has no free worker or worker memory in this process; another attempt can succeed.
+    if (error.code === "RUN_CONCURRENCY_LIMIT") {
+      throw new RetryableError(error.message, { retryAfter: WORKFLOW_PROGRAM_BUSY_RETRY_MS });
+    }
+    if (error.code === "RUN_DETACHED_BRIDGE_REQUEST") {
+      throw new Error(
+        "Workflow program returned while a ctx.agent() call was still pending. Await every ctx.agent() call before returning, including calls passed to Promise.race or Promise.any.",
+      );
+    }
+    throw error;
   });
 
   if (result.status === "completed") {

@@ -140,6 +140,7 @@ describe("runJsProgram", () => {
               interruptionId: "interrupt-2",
               value: {
                 status: "failed",
+                code: "WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED",
                 error: expect.stringContaining("WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED"),
               },
             },
@@ -147,6 +148,36 @@ describe("runJsProgram", () => {
         }),
       }),
     );
+  });
+
+  it("returns a catchable failure for a child reply over 4 MiB of JSON", async () => {
+    // Quotes make each JSON text 4 MiB and 4 MiB + 1 byte.
+    const atLimit = "<".repeat(4 * 1024 * 1024 - 2);
+    mocks.runWorkflowProgramStep
+      .mockResolvedValueOnce({
+        continuation,
+        pending: [pending, secondPending],
+        status: "interrupted",
+      })
+      .mockResolvedValueOnce({ output: "caught", status: "completed" });
+    reply.mockImplementation((_target, message: string) =>
+      message === "one" ? atLimit : `${atLimit}<`,
+    );
+
+    await expect(runJsProgram("return 1", ctx, options)).resolves.toBe("caught");
+    const { resolutions } = mocks.runWorkflowProgramStep.mock.lastCall![0].resume;
+    expect(resolutions[0]).toEqual({
+      interruptionId: "interrupt-1",
+      value: { status: "completed", output: atLimit },
+    });
+    expect(resolutions[1]).toEqual({
+      interruptionId: "interrupt-2",
+      value: {
+        status: "failed",
+        error:
+          'Agent "researcher" replied with 4194305 bytes of JSON, over the 4194304 byte limit for a ctx.agent() result.',
+      },
+    });
   });
 
   it("validates JavaScript and the trusted call budget before starting a program", async () => {

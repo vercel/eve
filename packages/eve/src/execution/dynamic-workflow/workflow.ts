@@ -1,6 +1,7 @@
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+  WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES,
   parseWorkflowProgramOptions,
   type WorkflowProgramAgentCall,
   type WorkflowProgramInput,
@@ -49,6 +50,7 @@ export async function runJsProgram(
             interruptionId: id,
             value: {
               status: "failed",
+              code: "WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED",
               error: `WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED: workflow may invoke at most ${String(program.maxSubagents)} agents; "${call.target}" was not called.`,
             },
           };
@@ -94,8 +96,15 @@ async function callProgramAgent(
       `Agent "${call.target}" failed to handle the message: ${result.error?.message ?? "no reason given"}`,
     );
   }
-  if (outputSchema !== undefined) return result.data ?? null;
-  return result.message ?? null;
+  const output = outputSchema !== undefined ? (result.data ?? null) : (result.message ?? null);
+  // Checked here so the program can catch an oversized reply; run would fail the whole workflow.
+  const bytes = new TextEncoder().encode(JSON.stringify(output)).byteLength;
+  if (bytes > WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES) {
+    throw new Error(
+      `Agent "${call.target}" replied with ${String(bytes)} bytes of JSON, over the ${String(WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES)} byte limit for a ctx.agent() result.`,
+    );
+  }
+  return output;
 }
 
 export { MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS };

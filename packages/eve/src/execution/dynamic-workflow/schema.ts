@@ -3,6 +3,8 @@ import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.j
 export const DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 100;
 export const MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 128;
 export const WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT = 256;
+/** Size limit for the JSON text of each child reply a `ctx.agent()` call resolves to. */
+export const WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES = 4 * 1024 * 1024;
 /** Guest JavaScript time per run or resume; parked agent calls do not count. */
 export const WORKFLOW_PROGRAM_CPU_TIMEOUT_MS = 30_000;
 /** Wall-clock time per run or resume; parked agent calls do not count. */
@@ -38,7 +40,12 @@ export interface WorkflowProgramPendingCall {
 
 export type WorkflowProgramCallResult =
   | { readonly output: JsonValue; readonly status: "completed" }
-  | { readonly error: string; readonly status: "failed" };
+  | {
+      /** Set when no child ran; a failure without a code is a failed child call. */
+      readonly code?: "WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED";
+      readonly error: string;
+      readonly status: "failed";
+    };
 
 export interface WorkflowProgramResolution {
   readonly interruptionId: string;
