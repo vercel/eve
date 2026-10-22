@@ -80,7 +80,7 @@ Without `--models`, publication covers the complete configured model matrix. Use
 publish or refresh selected model rows. The published suite currently includes weather-tool,
 new-project, OpenAPI connection, packaged skill, conditional approval, custom channel, and digest
 schedule cases. The iMessage case remains available for local runs but is excluded from the
-published matrix. Each
+published matrix, and so is the company-brain case. Each
 cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
 when every cell should run again. A successful run writes aggregate results to
 `apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
@@ -112,3 +112,11 @@ export default defineAuthoringCase({
 Use `simpleProject` for the selected canary's `eve init` output and `emptyProject` for a project
 the coding agent creates. Put reusable setup under `lib/setups/`. Native runs support one-turn
 cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.
+
+## Partial credit
+
+A run passes only when every grader test passes. Each run's `result.json` also records
+`analysis.checks` (`passed`, `total`, and `score`, the share of grader tests that passed), and the
+PR-label workflow reports the mean per case. Use it to hill-climb large cases such as
+`author-009-company-brain`, where each test grades one requirement independently, so fixing one
+requirement moves the score before the whole case passes.

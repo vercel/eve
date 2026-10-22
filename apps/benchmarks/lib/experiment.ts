@@ -6,6 +6,7 @@ import {
   type AuthoringTreatment,
   publishedBenchmark,
 } from "./benchmark-config.js";
+import { recordGraderChecks } from "./checks.js";
 import { createNativeAuthoringSetup } from "./native-authoring-setup.js";
 
 export function authoringExperiment(options: {
@@ -36,6 +37,7 @@ export function authoringExperiment(options: {
       revision: options.revision,
       treatment: options.treatment,
     }),
+    onRunComplete: recordGraderChecks,
     agentOptions: {
       cliPackage:
         options.benchmark.harness === "Claude Code"
