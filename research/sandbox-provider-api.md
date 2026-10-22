@@ -322,12 +322,15 @@ runtime
                  eve checkpoints { providerName, state, stateProtocolVersion }
   later step   ─ resume(ctx, artifact, state) → connection
                  └─ throws SandboxSessionGoneError → eve clears state, reruns selector
+  step ends        → connection.close?() (a turn's step, a "use step" function, or an
+                     invokeTool call; the next step resumes through a new connection)
   sandbox.stop()   → connection.stop(), connection.close?()
   sandbox.delete() → connection.close?(), onSessionEnd(ctx, state, { reason: "deleted" }),
                      eve clears state
-  process exit     → connection.stop(), connection.close?() (failures logged, not thrown)
-  keyed call ends  → connection.close?()
-  terminal outcome → connection.close?() for this process's connections,
+  process exit     → connection.stop(), connection.close?() on the connections the process
+                     still holds, including each session's latest connection without close()
+                     (failures logged, not thrown)
+  terminal outcome → connection.close?() for a connection the ending step holds,
                      onSessionEnd(ctx, state | null, { reason })
   (close runs at most once per connection; stop is idempotent and may run again after
   the connection resumes; a failed close never blocks deletion)
@@ -399,7 +402,7 @@ Docker mounts `await ctx.resourcesDirectory()` and calls
 `ctx.populate(connection, { mountedAt: "/eve/resources" })`. Vercel skips
 preparation when `ctx.isEmpty` and no `source` is set, in
 `VercelSandbox.environment()` itself and therefore under `DefaultSandbox` too.
-Vercel and just-bash set `toolSessions: true`; only just-bash needs `close()`.
+Vercel and just-bash set `toolSessions: true`; no built-in needs `close()`.
 
 ## Custom provider example
 
@@ -532,7 +535,17 @@ the last step. There are no public dual-shape overloads.
    `#execution/tool-session/*`, `#runtime/sandbox/*`, or
    `#shared/sandbox-{provider,session,write-files}.js`). Engine helpers such
    as other binding modules, stream utilities, and the optional-package loader
-   stay allowed.
+   stay allowed. Implemented: `ensureSandboxAccess` runs the implementation and
+   its connections directly, `createConnectionSession()` in
+   `execution/sandbox/session.ts` derives every session, and `prewarm.ts`
+   builds the prepare context. A workflow step, a turn's step, and a keyed or
+   unkeyed `invokeTool` call close their connection when they end; after a
+   turn's step, a connection without `close()` stays registered for server
+   shutdown. `DefaultSandbox` is a `defineSandboxProvider()` selector over the
+   three built-ins and keeps its two internal hooks: session end receives the
+   prepared artifact, and records the picked provider wrote still resume. The
+   guard is rule 44. The opaque provider runtime on `SandboxEnvironment` bumped
+   six extension contract epochs, all retained.
 6. Later: a host provider on the same contract.
 
 ## Open questions
