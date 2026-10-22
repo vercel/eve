@@ -33,8 +33,8 @@ describe("prewarmAppSandboxes", () => {
       join(agentRoot, "sandbox", "sandbox.ts"),
       [
         'import { defineSandbox } from "eve/sandbox";',
-        'import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";',
-        "export const environment = MicrosandboxSandbox.dockerfile();",
+        'import { DockerSandbox } from "eve/sandbox/docker";',
+        "export const environment = DockerSandbox.dockerfile();",
         "export default defineSandbox(() => environment.open());",
       ].join("\n"),
     );
@@ -75,7 +75,7 @@ describe("prewarmAppSandboxes", () => {
         {
           artifact: { imageReference: "registry.example/eve@sha256:test" },
           nodeId: "__root__",
-          providerName: "microsandbox",
+          providerName: "docker",
         },
       ],
       kind: "eve-sandbox-prepared-artifacts",

@@ -201,11 +201,6 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "sandbox-docker-daemon-unreachable",
     },
     {
-      title: "microsandbox provisioning failure",
-      error: named("MicrosandboxDiagnosticError", "pulling template [T001]: registry unreachable."),
-      id: "sandbox-provisioning-failed",
-    },
-    {
       title: "port in use",
       error: Object.assign(new Error("listen EADDRINUSE: address already in use"), {
         code: "EADDRINUSE",
@@ -298,13 +293,6 @@ describe("summarizeKnownError (catalog table)", () => {
     );
     expect(summary?.message).toBe("the `docker` CLI was not found.");
     expect(summary?.hint).toBe("Install and start Docker Desktop.");
-  });
-
-  it("passes eve-authored sandbox messages through unchanged", () => {
-    const summary = summarizeKnownError(
-      named("MicrosandboxDiagnosticError", "pulling template [T001]: registry unreachable."),
-    );
-    expect(summary?.message).toBe("pulling template [T001]: registry unreachable.");
   });
 
   it("matches plain-object throwables that crossed a workflow step boundary", () => {

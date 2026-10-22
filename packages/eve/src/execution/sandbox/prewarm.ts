@@ -302,12 +302,7 @@ function formatSandboxTemplateCount(count: number): string {
 }
 
 function shouldLogSandboxPrewarmProgress(message: string): boolean {
-  return (
-    !message.startsWith("checking ") &&
-    !message.startsWith("reusing ") &&
-    message !== "loading microsandbox runtime" &&
-    message !== "microsandbox runtime ready"
-  );
+  return !message.startsWith("checking ") && !message.startsWith("reusing ");
 }
 
 function formatPrewarmFailureForEnvironment(input: {
@@ -320,7 +315,7 @@ function formatPrewarmFailureForEnvironment(input: {
 
   return new Error(
     `The ${input.providerName} sandbox provider is not available when deploying on Vercel. ` +
-      "Vercel build containers cannot run local Docker containers or microsandbox VMs. " +
+      "Vercel build containers cannot run local Docker containers. " +
       "Use DefaultSandbox.environment() so eve selects Vercel Sandbox on Vercel, or configure " +
       "VercelSandbox.environment() explicitly. " +
       `Original ${input.providerName} error: ${toErrorMessage(input.error)}`,
@@ -333,5 +328,5 @@ function isVercelEnvironment(): boolean {
 }
 
 function isLocalSandboxProvider(providerName: string): boolean {
-  return providerName === "docker" || providerName === "microsandbox";
+  return providerName === "docker";
 }

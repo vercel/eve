@@ -29,7 +29,6 @@ function bareToken(name: string): string {
 const NODE_ENGINE_TOKEN = bareToken("NODE_ENGINE");
 
 export const DEFAULT_CONNECT_PACKAGE_VERSION = "2.5.2";
-export const DEFAULT_MICROSANDBOX_PACKAGE_VERSION = "0.5.5";
 
 const TOKEN_SOURCES: Readonly<Record<string, TokenSource>> = {
   [versionToken("EVE_PACKAGE")]: { kind: "eve-version" },

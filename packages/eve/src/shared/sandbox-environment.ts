@@ -82,7 +82,10 @@ export function createSandboxEnvironment<
       const context = contextStorage.getStore();
       const runtime = context === undefined ? undefined : runtimes.get(context);
       if (runtime === undefined) {
-        throw new Error("Sandbox environments can only open sandboxes inside defineSandbox().");
+        throw new Error(
+          "Sandbox environments can only open sandboxes inside defineSandbox(). " +
+            "Use `ctx.getSandbox()` to reach the session's sandbox from tools and other runtime code.",
+        );
       }
       return (await runtime.open({
         configurationHash: hashConstructorOptions({

@@ -45,7 +45,7 @@ function applyDependencies(): SelfModificationApplyDependencies & {
   return {
     ensurePackageDependencies: vi.fn(async () => [
       {
-        dependencies: ["@vercel/connect", "microsandbox"],
+        dependencies: ["@vercel/connect"],
         devDependencies: [],
         path: "/project/package.json",
         scripts: [],
@@ -151,7 +151,7 @@ describe("self-modification integration setup", () => {
       projectId: "project",
     });
     expect(deps.ensurePackageDependencies).toHaveBeenCalledWith({
-      dependencies: { "@vercel/connect": "2.5.2", microsandbox: "0.5.5" },
+      dependencies: { "@vercel/connect": "2.5.2" },
       projectRoot: "/project",
     });
     expect(deps.installScaffoldDependencies).toHaveBeenCalledWith(
