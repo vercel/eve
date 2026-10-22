@@ -2656,6 +2656,14 @@ The MCP method signs each user in to their own Tavily account. Tool calls use th
     keywords: ["mcp", "sql", "analytics", "pipes", "datasources", "queries", "connect"],
     authModes: ["app"],
   },
+  tinyfish: {
+    logo: "tinyfish",
+    docsHref: "https://docs.tinyfish.ai/mcp-integration",
+    keywords: ["mcp", "web search", "content extraction", "browser automation", "oauth", "connect"],
+    authModes: ["user"],
+    configureNote:
+      "The registry connection requires approval for browser automation, deep research, monitors, browser sessions, wallet actions, cancellations, and unrecognized tools. Keep that fail-closed policy unless you have reviewed the tool's effects and TinyFish credit usage.",
+  },
   todoist: {
     logo: "todoist",
     docsHref: "/docs/connections/mcp",

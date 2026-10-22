@@ -73,6 +73,20 @@ describe("Agentcard connection setup", () => {
   });
 });
 
+describe("TinyFish connection setup", () => {
+  it("uses the published Connect service and documents the approval boundary", () => {
+    const integration = getIntegration("tinyfish")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = setup.variants["mcp:user"];
+
+    expect(quickStart).toContain('url: "https://agent.tinyfish.ai/mcp"');
+    expect(quickStart).toContain('auth: connect("tinyfish")');
+    expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create tinyfish");
+    expect(integrationMarkdown(integration)).toContain("requires approval for browser automation");
+    expect(integrationMarkdown(integration)).toContain("fail-closed policy");
+  });
+});
+
 describe("Context connection setup", () => {
   it("keeps the connector UID separate from its creation arguments", () => {
     const integration = getIntegration("context")!;

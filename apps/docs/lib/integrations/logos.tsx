@@ -583,6 +583,33 @@ const tinybirdLogo = (props: LogoProps) => (
   </svg>
 );
 
+const tinyfishLogo = (props: LogoProps) => (
+  <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M21 77c29 1 49 22 57 42-13 12-23 31-27 53-20-13-34-37-36-62-1-19 0-31 6-33Z"
+      fill="#ff6900"
+    />
+    <path d="M81 62c26-22 56-31 89-27-17-14-38-22-61-22 4 13 0 26-12 36Z" fill="#ffd093" />
+    <path
+      d="M116 204c-7 15-17 25-32 29-18 5-26-4-19-19 8-18 24-30 40-39 12 6 17 16 11 29Z"
+      fill="#ffd093"
+    />
+    <path
+      d="M109 63c57-31 121 4 127 63 7 69-63 111-125 82-37-17-52-55-40-89 7-20 20-36 38-49Z"
+      fill="#ff6900"
+    />
+    <path
+      d="M137 65c43-20 91 9 102 51 13 52-34 94-86 90-32-3-51-26-48-62 3-35 9-61 32-79Z"
+      fill="#ffd093"
+    />
+    <ellipse cx="170" cy="116" rx="10" ry="18" fill="#fff" />
+    <ellipse cx="202" cy="111" rx="10" ry="18" fill="#fff" />
+    <circle cx="165" cy="119" r="6" fill="#000" />
+    <circle cx="197" cy="113" r="6" fill="#000" />
+    <path d="M173 150c15 3 28-7 39-10 5 15-8 31-23 31-10 0-17-8-16-21Z" fill="#000" />
+  </svg>
+);
+
 const todoistLogo = (props: LogoProps) => <SiTodoist color="default" {...props} />;
 
 const webflowLogo = (props: LogoProps) => <SiWebflow color="default" {...props} />;
@@ -1182,6 +1209,7 @@ export const logos = {
   "ticket-tailor": ticketTailorLogo,
   ticktick: ticktickLogo,
   tinybird: tinybirdLogo,
+  tinyfish: tinyfishLogo,
   todoist: todoistLogo,
   webflow: webflowLogo,
   wix: wixLogo,

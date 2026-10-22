@@ -643,7 +643,7 @@
               "mcp"
             ]
           },
-          "requires": ">=0.29.0"
+          "requires": ">=0.39.1"
         }
       },
       "dependencies": [
@@ -2066,6 +2066,39 @@
           "path": "registry/connections/tinybird.ts",
           "type": "registry:file",
           "target": "agent/connections/tinybird.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/tinyfish",
+      "type": "registry:item",
+      "title": "TinyFish",
+      "description": "Search the web, fetch content, and run browser automation through TinyFish's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "tinyfish",
+              "tinyfish",
+              "tinyfish"
+            ]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/tinyfish.ts",
+          "type": "registry:file",
+          "target": "agent/connections/tinyfish.ts"
         }
       ]
     },
