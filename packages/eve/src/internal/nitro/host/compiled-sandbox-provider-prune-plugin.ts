@@ -1,11 +1,8 @@
 const PRUNED_LOCAL_SANDBOX_MODULE_ID = "\0eve-pruned-local-sandbox-providers";
 const PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID = "\0eve-pruned-local-sandbox-provider-constructors";
-const PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID = "\0eve-pruned-optional-engine-install";
 const LOCAL_BINDING_SOURCE_RE = /[/\\]bindings[/\\](?:docker|just-bash|local)\.(?:js|ts)$/;
 const LOCAL_PROVIDER_SOURCE_RE =
   /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|just-bash)\.(?:js|ts)$/;
-const OPTIONAL_ENGINE_INSTALL_SOURCE_RE =
-  /[/\\]internal[/\\]application[/\\]optional-package-install\.(?:js|ts)$/;
 
 interface BundlerPluginShape {
   readonly enforce?: "pre";
@@ -31,21 +28,6 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
     name: "eve-hosted-sandbox-provider-prune",
     load(id) {
       const sourcePath = id.split(/[?#]/u, 1)[0] ?? id;
-      if (
-        id === PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID ||
-        OPTIONAL_ENGINE_INSTALL_SOURCE_RE.test(sourcePath)
-      ) {
-        return [
-          "function pruned() {",
-          '  throw new Error("Optional local sandbox engines cannot be installed in hosted server runtimes.");',
-          "}",
-          "export const detectProjectPackageManager = pruned;",
-          "export const importInstalledEnginePackage = pruned;",
-          "export const installPackageIntoProject = pruned;",
-          "export const loadOptionalEnginePackage = pruned;",
-          "",
-        ].join("\n");
-      }
       if (
         id === PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID ||
         LOCAL_PROVIDER_SOURCE_RE.test(sourcePath)
@@ -85,9 +67,6 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
       const sourcePath = source.split(/[?#]/u, 1)[0] ?? source;
       if (LOCAL_PROVIDER_SOURCE_RE.test(sourcePath)) {
         return PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID;
-      }
-      if (OPTIONAL_ENGINE_INSTALL_SOURCE_RE.test(sourcePath)) {
-        return PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID;
       }
       if (!LOCAL_BINDING_SOURCE_RE.test(sourcePath)) return null;
       return PRUNED_LOCAL_SANDBOX_MODULE_ID;

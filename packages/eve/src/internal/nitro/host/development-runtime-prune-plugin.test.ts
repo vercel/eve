@@ -17,4 +17,16 @@ describe("createDevelopmentRuntimePrunePlugin", () => {
       );
     }
   });
+
+  it("prunes the optional engine installer from production graphs", () => {
+    const plugin = createDevelopmentRuntimePrunePlugin();
+    for (const path of [
+      "/repo/packages/eve/dist/src/internal/application/optional-package-install.js",
+      "#internal/application/optional-package-install.js",
+    ]) {
+      const id = plugin.resolveId?.(path);
+      if (id === null || id === undefined) throw new Error("Expected a pruned module id.");
+      expect(plugin.load?.(id)).toContain("export const loadOptionalEnginePackage = pruned;");
+    }
+  });
 });
