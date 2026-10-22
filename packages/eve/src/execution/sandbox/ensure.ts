@@ -188,7 +188,7 @@ export async function ensureSandboxAccess(
     if (persisted !== null) {
       throw new Error(
         `Sandbox "${definition.logicalPath}" already opened this session's sandbox. ` +
-          "Call `environment.open()` only from the defineSandbox() selector, and use `ctx.getSandbox()` to reach the existing sandbox.",
+          "Call `environment.open()` once in the defineSandbox() selector and return that sandbox.",
       );
     }
 

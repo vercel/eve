@@ -30,7 +30,7 @@ export async function ensureDevelopmentSandboxesPrepared(input: {
   while ((lease = await acquireRecoveryLease(lockPath, token)) === undefined) {
     if (Date.now() >= deadline) {
       throw new Error(
-        `Timed out after ${PREPARATION_WAIT_TIMEOUT_MS / 60_000} minutes waiting for another eve dev worker to prepare sandbox environments ` +
+        `Timed out after ${PREPARATION_WAIT_TIMEOUT_MS / 60_000} minutes waiting for another request or eve dev worker to prepare sandbox environments ` +
           `(this request needs provider "${input.providerName}"). ` +
           "Check the eve dev output or run `eve logs` to see which step is slow, such as an image pull, a Dockerfile build, or a `prepare` callback. " +
           "Retry after preparation finishes, or restart eve dev to cancel it.",

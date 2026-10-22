@@ -147,6 +147,8 @@ export function createDockerSandboxProvider(
       if (!(await dockerImageExists(cli, artifact.imageReference))) {
         throw new SandboxTemplateNotProvisionedError({
           providerName: DOCKER_PROVIDER_NAME,
+          reason:
+            "The Docker daemon has no image with that name: it was removed, for example by `docker image prune -a`, or the build used another Docker daemon.",
           templateKey: artifact.imageReference,
         });
       }

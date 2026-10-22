@@ -162,6 +162,8 @@ async function ensureSessionRoot(templateRootPath: string, sessionRootPath: stri
   if (!(await pathExists(templateRootPath))) {
     throw new SandboxTemplateNotProvisionedError({
       providerName: JUST_BASH_PROVIDER_NAME,
+      reason:
+        "The template directory does not exist: it was deleted, or the build ran on another machine.",
       templateKey: templateRootPath,
     });
   }

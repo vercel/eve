@@ -198,6 +198,7 @@ export function createVercelSandbox(
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
         throw new SandboxTemplateNotProvisionedError({
           providerName: "vercel",
+          reason: "The Vercel Sandbox snapshot expired or was deleted.",
           templateKey: artifact.snapshotId,
         });
       }
