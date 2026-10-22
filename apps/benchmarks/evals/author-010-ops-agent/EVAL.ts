@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -55,7 +55,7 @@ test("talks to the team in Slack through the Vercel Connect connector", () => {
 });
 
 test("connects to the Northstar API from the bundled contract as the app", async () => {
-  const connection = await load(`${agentRoot}/connections/northstar.ts`);
+  const { connection } = await northstarConnection();
   expect(connection.baseUrl ?? connection.spec?.servers?.[0]?.url).toBe(apiBaseUrl);
   // The contract has no public URL, so it has to travel with the project.
   expect(typeof connection.spec).toBe("object");
@@ -67,7 +67,7 @@ test("connects to the Northstar API from the bundled contract as the app", async
 });
 
 test("exposes lookups and purchase orders but not stock adjustments", async () => {
-  const connection = await load(`${agentRoot}/connections/northstar.ts`);
+  const { connection } = await northstarConnection();
   const allow = connection.operations?.allow;
   const block = connection.operations?.block;
   const operations = ["getStock", "listLowStock", "createPurchaseOrder", "adjustStock"];
@@ -78,7 +78,7 @@ test("exposes lookups and purchase orders but not stock adjustments", async () =
 });
 
 test("asks a person to approve purchase orders of $5,000 or more", async () => {
-  const connection = await load(`${agentRoot}/connections/northstar.ts`);
+  const { name, connection } = await northstarConnection();
   const policy =
     typeof connection.approval === "function" ? connection.approval : connection.approval?.request;
   expect(typeof policy).toBe("function");
@@ -91,7 +91,7 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
         callId: "call-1",
         session: session(),
         toolInput,
-        toolName: `northstar__${operation}`,
+        toolName: `${name}__${operation}`,
       }),
     );
   const order = (quantity: number, unitCostUsd: number) => ({
@@ -170,6 +170,17 @@ function sourceFiles(directory: string, pattern = /\.(?:ts|md)$/): string[] {
     .filter((entry) => entry.isFile() && pattern.test(entry.name))
     .map((entry) => join(entry.parentPath, entry.name))
     .sort();
+}
+
+/** The connection built from the Northstar contract; its file stem is its runtime name. */
+async function northstarConnection() {
+  for (const file of sourceFiles("connections", /\.ts$/)) {
+    const connection = await load(file);
+    if (connection?.spec?.paths?.["/purchase-orders"] || /northstar/i.test(file)) {
+      return { name: basename(file, ".ts"), connection };
+    }
+  }
+  throw new Error("The agent has no connection for the Northstar API.");
 }
 
 function slackChannelFile(): string {

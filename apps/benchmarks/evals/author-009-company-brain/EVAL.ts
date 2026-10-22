@@ -65,9 +65,10 @@ test("admits only company SSO tokens on the HTTP API", () => {
   expect(existsSync(file)).toBe(true);
   const source = readFileSync(file, "utf8");
   expect(source).toMatch(/from\s+["']eve\/channels\/eve["']/);
-  // The oidc() helper or a custom authenticator around verifyOidc(), wherever the channel imports it from.
+  // eve's oidc() or verifyOidc(), or a JWT verification of the same issuer and
+  // audience, wherever the channel imports it from.
   const auth = resolvedSource(file);
-  expect(auth).toMatch(/\b(?:oidc|verifyOidc)\s*\(/);
+  expect(auth).toMatch(/\b(?:oidc|verifyOidc|jwtVerify)\s*\(/);
   expect(auth).toMatch(/["']https:\/\/sso\.lumen\.dev\/?["']/);
   expect(auth).toMatch(/audiences?\s*:\s*\[?\s*["']atlas["']/);
   // localDev() never authenticates a production request; every other helper would.
@@ -291,19 +292,18 @@ test("researcher reads Notion as the employee and cannot query the warehouse", a
   expect(warehouseAccess).toEqual([]);
 });
 
-test("keeps metric definitions in a packaged skill with a reference file", () => {
-  const skill = sourceFiles("skills", /^SKILL\.md$/).find((file) => {
-    const references = sourceFiles(relativeToAgent(dirname(file)), /\.md$/).filter(
-      (path) => path !== file,
-    );
-    return references.some((path) => /one-time/i.test(readFileSync(path, "utf8")));
-  });
+test("keeps metric definitions in a skill loaded on demand", () => {
+  // The definitions may sit in SKILL.md itself or in a file next to it.
+  const skillText = (file: string) =>
+    sourceFiles(relativeToAgent(dirname(file)), /\.md$/)
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
+  const skill = sourceFiles("skills", /^SKILL\.md$/).find((file) =>
+    /one-time/i.test(skillText(file)),
+  );
   expect(skill).toBeDefined();
   expect(readFileSync(skill!, "utf8")).toMatch(/^---[\s\S]*?\bdescription\s*:[\s\S]*?---/);
-  const reference = sourceFiles(relativeToAgent(dirname(skill!)), /\.md$/)
-    .filter((path) => path !== skill)
-    .map((path) => readFileSync(path, "utf8"))
-    .join("\n");
+  const reference = skillText(skill!);
   expect(reference).toMatch(/ARR/);
   // Prose wraps and may spell numbers out: "active 12\nmonths ago", "twelve months".
   expect(reference).toMatch(/\b(?:30|thirty)\s+days\b/i);
