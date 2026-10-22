@@ -17,7 +17,7 @@ import {
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
-import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import { owningSandboxDefinition, type RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import {
   isRetiredSandboxSessionState,
   type SandboxAccess,
@@ -109,6 +109,7 @@ export async function ensureSandboxAccess(
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
   const captured = (): SandboxState => ({ session: persisted });
   const registered = input.registry.sandbox;
+  // Production always registers a sandbox; test runtimes without one cast a null registry.
   if (registered === null) {
     return {
       async captureState() {
@@ -124,6 +125,8 @@ export async function ensureSandboxAccess(
       async stop() {},
     };
   }
+  const ownerDefinition = owningSandboxDefinition(registered);
+  const ownerNodeId = registered.inheritance?.nodeId ?? input.nodeId;
 
   function providerContext(turnId: string): SandboxProviderSessionContext {
     const activeSession =
@@ -142,23 +145,21 @@ export async function ensureSandboxAccess(
   }
 
   function activeDefinition() {
-    const definition = registered.inheritance?.definition ?? registered.definition;
-    if (definition.kind !== "independent")
-      throw new Error(`Sandbox "${definition.logicalPath}" has no environment.`);
-    return definition;
+    if (ownerDefinition.kind !== "independent")
+      throw new Error(`Sandbox "${ownerDefinition.logicalPath}" has no environment.`);
+    return ownerDefinition;
   }
 
   async function loadArtifact(provider: SandboxProviderRuntime) {
-    const artifactNodeId = registered.inheritance?.nodeId ?? input.nodeId;
     const artifact = await loadSandboxPreparedArtifact({
       compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: artifactNodeId,
+      nodeId: ownerNodeId,
       providerName: provider.providerName,
     });
     if (artifact === undefined) {
       throw new SandboxTemplateNotProvisionedError({
         providerName: provider.providerName,
-        templateKey: artifactNodeId,
+        templateKey: ownerNodeId,
       });
     }
     return artifact;
@@ -252,7 +253,7 @@ export async function ensureSandboxAccess(
     if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
       await ensureDevelopmentSandboxesPrepared({
         compiledArtifactsSource: input.compiledArtifactsSource,
-        nodeId: registered.inheritance?.nodeId ?? input.nodeId,
+        nodeId: ownerNodeId,
         providerName: getSandboxEnvironmentRuntime(definition.environment).providerName,
       });
     }
@@ -273,11 +274,7 @@ export async function ensureSandboxAccess(
     }
 
     // Apps hosted in one process can reuse a node id and a tool session id.
-    const startKey = [
-      appRoot,
-      registered.inheritance?.nodeId ?? input.nodeId,
-      input.sessionId,
-    ].join("\0");
+    const startKey = [appRoot, ownerNodeId, input.sessionId].join("\0");
     // A failed start wakes every waiter at once; re-check so only one retries.
     let concurrentStart = pendingSandboxStarts.get(startKey);
     while (concurrentStart !== undefined) {
@@ -359,10 +356,8 @@ export async function ensureSandboxAccess(
     return current;
   }
 
-  const definition = registered.inheritance?.definition ?? registered.definition;
-
   return {
-    environment: definition.kind === "independent" ? definition.environment : undefined,
+    environment: ownerDefinition.kind === "independent" ? ownerDefinition.environment : undefined,
     async captureState() {
       if (opening !== undefined) await opening;
       return captured();
