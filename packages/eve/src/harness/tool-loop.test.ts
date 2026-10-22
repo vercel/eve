@@ -11085,6 +11085,94 @@ describe("createToolLoopHarness", () => {
       expect(JSON.stringify(modelCall.messages)).toContain(base64);
     });
 
+    it("hands the model a file URL a tool projects without downloading or staging it", async () => {
+      const { withParkedStep } = await import("#internal/testing/session-machine.js");
+      const { toolOutput, toolOutputPart } = await import("#tools/model-output.js");
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Read.", role: "assistant" }] },
+        text: "Read.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const url = "https://bucket.example.com/report.pdf?X-Amz-Signature=abc";
+      const tools: ToolLoopHarnessConfig["tools"] = new Map([
+        [
+          "fetch_report",
+          {
+            description: "Fetch a report.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "fetch_report",
+            toModelOutput: (output: unknown) =>
+              toolOutput.content([
+                toolOutputPart.fileUrl((output as { url: string }).url, {
+                  mediaType: "application/pdf",
+                }),
+              ]),
+            workflowId: "workflow//./agent/tools/fetch_report//execute",
+          },
+        ],
+      ]);
+      const parked = withParkedStep(createTestSession(), {
+        event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        messages: [
+          {
+            content: [
+              { input: {}, toolCallId: "report-1", toolName: "fetch_report", type: "tool-call" },
+            ],
+            role: "assistant",
+          },
+        ],
+        tasks: [
+          {
+            callId: "report-1",
+            entry: { entryPoint: "execute" },
+            input: {},
+            kind: "workflow-task",
+            toolName: "fetch_report",
+            workflowId: "workflow//./agent/tools/fetch_report//execute",
+          },
+        ],
+      });
+      const sandbox = mockSandbox({ id: "sbx_workflow_file_url" });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, sandbox.access);
+
+      await contextStorage.run(ctx, () =>
+        createToolLoopHarness(createTestConfig(undefined, { tools }))(parked, {
+          runtimeActionResults: [
+            {
+              callId: "report-1",
+              kind: "tool-result",
+              output: { url },
+              toolName: "fetch_report",
+            },
+          ],
+        }),
+      );
+
+      expect(sandbox.writes).toHaveLength(0);
+      const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as
+        | { stream: ReturnType<typeof vi.fn> }
+        | undefined;
+      const modelCall = agent?.stream.mock.calls[0]?.[0] as { messages: ModelMessage[] };
+      const toolMessage = modelCall.messages.find((message) => message.role === "tool");
+      expect(toolMessage?.content).toEqual([
+        expect.objectContaining({
+          output: {
+            type: "content",
+            value: [
+              {
+                data: { type: "url", url: new URL(url) },
+                mediaType: "application/pdf",
+                type: "file",
+              },
+            ],
+          },
+        }),
+      ]);
+    });
+
     it("stages non-inlinable FilePart bytes into the sandbox and hands the model a text reference instead of bytes", async () => {
       setupMockAgent({
         finishReason: "stop",

@@ -19,7 +19,7 @@ import {
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
-import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import { owningSandboxDefinition, type RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import {
   getSessionEndWithArtifact,
   resolvePersistedSandboxSessionState,
@@ -95,13 +95,14 @@ const log = createLogger("execution.sandbox");
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
 ): Promise<EnsuredSandboxAccess> {
+  // Production always registers a sandbox; test runtimes without one cast a null registry.
   const registered = input.registry.sandbox;
-  const ownerDefinition = registered?.inheritance?.definition ?? registered?.definition;
+  const persistedOwner = registered === null ? undefined : owningSandboxDefinition(registered);
   // A retired record cannot resume, so let the selector start a fresh sandbox.
   let persisted = resolvePersistedSandboxSessionState(
     input.state?.session,
-    ownerDefinition?.kind === "independent"
-      ? getSandboxEnvironmentRuntime(ownerDefinition.environment)
+    persistedOwner?.kind === "independent"
+      ? getSandboxEnvironmentRuntime(persistedOwner.environment)
       : undefined,
   );
   let opened: OpenedSandbox | undefined;
@@ -131,6 +132,8 @@ export async function ensureSandboxAccess(
       async stop() {},
     };
   }
+  const ownerDefinition = owningSandboxDefinition(registered);
+  const ownerNodeId = registered.inheritance?.nodeId ?? input.nodeId;
 
   function providerContext(turnId: string): SandboxProviderSessionContext {
     const activeSession =
@@ -149,25 +152,23 @@ export async function ensureSandboxAccess(
   }
 
   function activeDefinition() {
-    const definition = registered.inheritance?.definition ?? registered.definition;
-    if (definition.kind !== "independent")
+    if (ownerDefinition.kind !== "independent")
       throw new Error(
-        `Sandbox "${definition.logicalPath}" uses defineParentSandbox(), but this agent has no parent sandbox to share. ` +
+        `Sandbox "${ownerDefinition.logicalPath}" uses defineParentSandbox(), but this agent has no parent sandbox to share. ` +
           "Only a declared subagent can share its parent's sandbox. Give this agent its own sandbox with defineSandbox() and an exported environment.",
       );
-    return definition;
+    return ownerDefinition;
   }
 
   async function loadArtifact(provider: SandboxProviderRuntime) {
-    const artifactNodeId = registered.inheritance?.nodeId ?? input.nodeId;
     const artifact = await loadSandboxPreparedArtifact({
       compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: artifactNodeId,
+      nodeId: ownerNodeId,
       providerName: provider.providerName,
     });
     if (artifact === undefined) {
       throw new SandboxTemplateNotProvisionedError({
-        nodeId: artifactNodeId,
+        nodeId: ownerNodeId,
         providerName: provider.providerName,
       });
     }
@@ -275,7 +276,7 @@ export async function ensureSandboxAccess(
     if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
       await ensureDevelopmentSandboxesPrepared({
         compiledArtifactsSource: input.compiledArtifactsSource,
-        nodeId: registered.inheritance?.nodeId ?? input.nodeId,
+        nodeId: ownerNodeId,
         providerName: getSandboxEnvironmentRuntime(definition.environment).providerName,
       });
     }
@@ -296,11 +297,7 @@ export async function ensureSandboxAccess(
     }
 
     // Apps hosted in one process can reuse a node id and a tool session id.
-    const startKey = [
-      appRoot,
-      registered.inheritance?.nodeId ?? input.nodeId,
-      input.sessionId,
-    ].join("\0");
+    const startKey = [appRoot, ownerNodeId, input.sessionId].join("\0");
     // A failed start wakes every waiter at once; re-check so only one retries.
     let concurrentStart = pendingSandboxStarts.get(startKey);
     while (concurrentStart !== undefined) {
@@ -383,7 +380,7 @@ export async function ensureSandboxAccess(
   }
 
   return {
-    environment: ownerDefinition?.kind === "independent" ? ownerDefinition.environment : undefined,
+    environment: ownerDefinition.kind === "independent" ? ownerDefinition.environment : undefined,
     async captureState() {
       if (opening !== undefined) await opening;
       return captured();

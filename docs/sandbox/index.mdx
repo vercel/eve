@@ -156,6 +156,8 @@ Docker mounts the compiled trees read-only under `/eve/resources`, copies worksp
 
 eve writes byte-backed files that reach the agent into the sandbox under `/workspace/.eve/attachments/` and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
 
+Files that tools return by URL with `toolOutputPart.fileUrl` are not staged: the model provider reads the URL directly. See [Send a file by URL](/docs/tools#send-a-file-by-url).
+
 Before every model call, eve reads the referenced files back from the sandbox. Every file, whether attached to a message or returned by a tool, reaches the model with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow its label only when every major provider reads the format natively:
 
 - A PNG, JPEG, GIF, or WebP image up to 3 MiB and at most 8000 pixels per side.

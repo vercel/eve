@@ -41,6 +41,7 @@ import {
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
 import {
   isRetiredSandboxSessionState,
   resolvePersistedSandboxSessionState,
@@ -201,10 +202,9 @@ export async function prepareSuccessorStep(input: {
     sandboxState !== undefined &&
     !isRetiredSandboxSessionState(sandboxState)
   ) {
-    const definition =
-      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.inheritance
-        ?.definition ??
-      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.definition;
+    const definition = owningSandboxDefinition(
+      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox,
+    );
     if (definition.kind !== "independent") {
       throw new Error("Session checkpoint sandbox has no resolved provider.");
     }
