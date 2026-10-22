@@ -218,6 +218,19 @@ describe("ensureSandboxAccess", () => {
     });
   });
 
+  it("starts a fresh sandbox for a session saved with the removed microsandbox provider", async () => {
+    const setup = vi.fn();
+    const value = fixture(setup);
+    const { access } = await open(value.registry, "session-1", {
+      session: { providerName: "microsandbox", state: { key: "old" }, stateProtocolVersion: 1 },
+    });
+    expect(setup).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
+    await expect(access.captureState()).resolves.toEqual({
+      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+    });
+  });
+
   it("keeps the persisted sandbox when resume fails for another reason", async () => {
     const value = fixture();
     value.create.mockRejectedValueOnce(new Error("daemon unavailable"));

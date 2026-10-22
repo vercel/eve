@@ -41,6 +41,7 @@ import {
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { isRetiredSandboxSessionState } from "#sandbox/state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { walkCauseChain } from "#shared/errors.js";
@@ -191,12 +192,11 @@ export async function prepareSuccessorStep(input: {
   const bundle = context.require(BundleKey);
   const session = readDurableSession(checkpoint.sessionState);
   const sandboxState = session.sandboxState?.session;
-  // A record without `providerName` predates the provider redesign (eve 0.64)
-  // and is ignored at runtime, so it must not block the handoff.
+  // The runtime ignores a retired record, so it must not block the handoff.
   if (
     sandboxState !== null &&
     sandboxState !== undefined &&
-    sandboxState.providerName !== undefined
+    !isRetiredSandboxSessionState(sandboxState)
   ) {
     const definition =
       getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.inheritance
