@@ -235,7 +235,6 @@ async function createTestVercelSession() {
 
   await provider.prepare({
     appRoot: "/tmp/test-app-root",
-    seedFiles: [],
   });
   const handle = await provider.openSession({
     appRoot: "/tmp/test-app-root",
@@ -317,7 +316,7 @@ describe("createVercelSandbox", () => {
       loadSandboxModule: async () => sandboxModule as never,
     });
 
-    await provider.prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+    await provider.prepare({ appRoot: "/tmp/test-app-root" });
     await provider.openSession({
       appRoot: "/tmp/test-app-root",
       prepared: { snapshotId: "prepared-snapshot" },
@@ -394,7 +393,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
@@ -418,7 +416,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
@@ -453,7 +450,6 @@ describe("createVercelSandbox", () => {
     await expect(
       provider.prepare({
         appRoot: "/tmp/test-app-root",
-        seedFiles: [],
       }),
     ).rejects.toThrow(/The sandbox request is invalid/);
   });
@@ -537,25 +533,15 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [
-        {
-          content: "skill body",
-          path: "/workspace/skills/weather/SKILL.md",
-        },
-        {
-          content: Buffer.from([0, 1, 2, 3]),
-          path: "/workspace/assets/fixture.bin",
-        },
-        {
-          content: "model skill body",
-          path: "$HOME/.agents/skills/research/SKILL.md",
-        },
+      skills: [{ content: "model skill body", relativePath: "research/SKILL.md" }],
+      workspace: [
+        { content: "skill body", relativePath: "skills/weather/SKILL.md" },
+        { content: Buffer.from([0, 1, 2, 3]), relativePath: "assets/fixture.bin" },
       ],
     });
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     await provider.openSession({
@@ -592,7 +578,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
     const handle = await provider.openSession({
       appRoot: "/tmp/test-app-root",
@@ -627,7 +612,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     await provider.openSession({
@@ -879,7 +863,7 @@ describe("createVercelSandbox", () => {
       await createTestVercelSandbox({
         loadSandboxModule: async () => sandboxModule as never,
         prepare,
-      }).prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+      }).prepare({ appRoot: "/tmp/test-app-root" });
 
     /** The build-private sandboxes: everything a build created except the template pointer. */
     const privateSandboxes = (fake: ReturnType<typeof createFakeVercelProvider>) =>
@@ -1115,7 +1099,7 @@ describe("createVercelSandbox", () => {
       await createTestVercelSandbox({
         createOptions: { tags: { team: "x" } },
         loadSandboxModule: async () => fake.sandboxModule as never,
-      }).prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+      }).prepare({ appRoot: "/tmp/test-app-root" });
 
       expect(fake.pointer()?.tags).toEqual({ team: "x" });
     });
@@ -1153,7 +1137,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     await provider.openSession({
@@ -1256,7 +1239,6 @@ describe("createVercelSandbox", () => {
     });
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
     const handle = await provider.openSession({
       appRoot: "/tmp/test-app-root",
@@ -1293,7 +1275,6 @@ describe("createVercelSandbox", () => {
     });
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
     const handle = await provider.openSession({
       appRoot: "/tmp/test-app-root",
@@ -1376,7 +1357,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     const handle = await provider.openSession({
@@ -1420,7 +1400,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     const handle = await provider.openSession({
@@ -1506,7 +1485,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
     const handle = await provider.openSession({
       appRoot: "/tmp/test-app-root",
@@ -1625,7 +1603,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     await provider.openSession({
@@ -1683,7 +1660,6 @@ describe("createVercelSandbox", () => {
 
     await provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     expect(templateSandbox.runCommand).toHaveBeenCalledTimes(2);
@@ -1725,7 +1701,6 @@ describe("createVercelSandbox", () => {
 
     const prewarm = provider.prepare({
       appRoot: "/tmp/test-app-root",
-      seedFiles: [],
     });
 
     await expect(prewarm).rejects.toThrow(/Failed to initialize Vercel sandbox base runtime/);

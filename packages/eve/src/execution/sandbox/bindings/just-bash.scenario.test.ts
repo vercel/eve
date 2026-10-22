@@ -37,7 +37,6 @@ async function createPrewarmedLocalHandle(input: {
   const provider = createJustBashProvider();
   await provider.prepare({
     appRoot: input.appRoot,
-    seedFiles: [],
   });
   return await provider.openSession({
     appRoot: input.appRoot,
@@ -133,7 +132,7 @@ describe("just-bash sandbox file API", () => {
 
     await provider.prepare({
       appRoot,
-      seedFiles: [{ content: "from template", path: "/workspace/seed.txt" }],
+      workspace: [{ content: "from template", relativePath: "seed.txt" }],
     });
     expect(factoryCalls).toBe(0);
 
@@ -286,7 +285,6 @@ describe("just-bash sandbox file API", () => {
 
     await provider.prepare({
       appRoot,
-      seedFiles: [],
     });
 
     const { handle: firstHandle, state } = await provider.start({
@@ -318,7 +316,7 @@ describe("just-bash sandbox file API", () => {
   it("removes the session root by key at session end, so the next start is fresh", async () => {
     const appRoot = await createTemporaryCacheDirectory("session-end");
     const provider = createJustBashProvider();
-    await provider.prepare({ appRoot, seedFiles: [] });
+    await provider.prepare({ appRoot });
     const session = { appRoot, sandboxName: "session-end" };
     const { handle } = await provider.start(session);
     await handle.sandbox.writeTextFile({ content: "left behind", path: "left.txt" });
@@ -440,10 +438,10 @@ describe("just-bash provider", () => {
 
     await provider.prepare({
       appRoot,
-      seedFiles: [
+      workspace: [
         {
           content: "# Weather skill\n",
-          path: "/workspace/skills/weather.md",
+          relativePath: "skills/weather.md",
         },
       ],
     });
@@ -466,10 +464,10 @@ describe("just-bash provider", () => {
 
     const prepared = await provider.prepare({
       appRoot: buildRoot,
-      seedFiles: [
+      workspace: [
         {
           content: "# Weather skill\n",
-          path: "/workspace/skills/weather.md",
+          relativePath: "skills/weather.md",
         },
       ],
     });
@@ -495,7 +493,6 @@ describe("just-bash provider", () => {
 
     await provider.prepare({
       appRoot,
-      seedFiles: [],
     });
 
     const { handle: initialHandle, state: initialState } = await provider.start({
@@ -507,10 +504,10 @@ describe("just-bash provider", () => {
 
     await provider.prepare({
       appRoot,
-      seedFiles: [
+      workspace: [
         {
           content: "# Weather skill\n",
-          path: "/workspace/skills/weather.md",
+          relativePath: "skills/weather.md",
         },
       ],
     });

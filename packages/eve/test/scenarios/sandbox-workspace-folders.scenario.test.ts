@@ -30,20 +30,18 @@ describe("sandbox workspace folder convention", () => {
     // `materializeWorkspaceResources` → `prewarmSandboxes`; this test
     // exercises the disk → sandbox round trip directly with the
     // discovery output so it can stay focused on the local backend.
-    const files = (
-      await Promise.all(
-        discovered.manifest.sandboxWorkspaces.map((workspace) =>
-          materializeWorkspaceDirectory(workspace.sourcePath),
-        ),
-      )
-    ).flat();
+    const trees = await Promise.all(
+      discovered.manifest.sandboxWorkspaces.map((workspace) =>
+        materializeWorkspaceDirectory(workspace.sourcePath),
+      ),
+    );
 
     const appRoot = await createScratchDirectory("eve-sandbox-workspace-folders-");
     const backend = createSandboxProviderHarness(createJustBashSandboxProvider(), undefined);
 
     await backend.prepare({
       appRoot,
-      seedFiles: files.map((file) => ({ content: file.content, path: file.path })),
+      workspace: trees.flatMap((tree) => tree.workspace),
     });
 
     const handle = await backend.openSession({
@@ -75,7 +73,6 @@ describe("sandbox workspace folder convention", () => {
 
     await backend.prepare({
       appRoot,
-      seedFiles: [],
     });
 
     const handle = await backend.openSession({
@@ -98,7 +95,7 @@ describe("sandbox workspace folder convention", () => {
   it("materializes a fixture default workspace folder into a deterministic file list", async () => {
     const fixtureApp = await scenarioApp(SANDBOX_WORKSPACES_DESCRIPTOR);
     // Sanity check that the materializer reads the actual fixture from
-    // disk and emits the expected logical paths under /workspace.
+    // disk and emits the expected workspace-relative paths.
     const resolvedProject = await resolveDiscoveryProject(fixtureApp.appRoot);
     const discovered = await discoverAgent(resolvedProject);
     const [defaultWorkspace] = discovered.manifest.sandboxWorkspaces;
@@ -106,17 +103,18 @@ describe("sandbox workspace folder convention", () => {
       throw new Error("expected the fixture to expose a default sandbox workspace");
     }
 
-    const files = await materializeWorkspaceDirectory(defaultWorkspace.sourcePath);
+    const { skills, workspace } = await materializeWorkspaceDirectory(defaultWorkspace.sourcePath);
 
-    expect(files.map((file) => file.path).sort()).toEqual(["/workspace/notes.md"]);
+    expect(skills).toEqual([]);
+    expect(workspace.map((file) => file.relativePath)).toEqual(["notes.md"]);
 
-    const notesFile = files.find((file) => file.path === "/workspace/notes.md");
+    const notesFile = workspace.find((file) => file.relativePath === "notes.md");
     if (notesFile === undefined) {
-      throw new Error("expected materialization to include /workspace/notes.md");
+      throw new Error("expected materialization to include notes.md");
     }
 
     // Cross-check the bytes by reading the source path directly.
     const onDisk = await readFile(join(defaultWorkspace.sourcePath, "notes.md"), "utf8");
-    expect(notesFile.content.toString("utf8")).toBe(onDisk);
+    expect(Buffer.from(notesFile.content).toString("utf8")).toBe(onDisk);
   });
 });
