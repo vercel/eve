@@ -51,9 +51,14 @@ test("admits only company SSO tokens on the HTTP API", () => {
   expect(existsSync(file)).toBe(true);
   const source = readFileSync(file, "utf8");
   expect(source).toMatch(/from\s+["']eve\/channels\/eve["']/);
-  expect(source).toMatch(/\boidc\s*\(/);
-  expect(source).toMatch(/["']https:\/\/sso\.lumen\.dev\/?["']/);
-  expect(source).toMatch(/audiences\s*:\s*\[\s*["']atlas["']\s*\]/);
+  // The oidc() helper or a custom authenticator around verifyOidc(), possibly in agent/lib.
+  const auth = [
+    source,
+    ...sourceFiles("lib", /\.ts$/).map((path) => readFileSync(path, "utf8")),
+  ].join("\n");
+  expect(auth).toMatch(/\b(?:oidc|verifyOidc)\s*\(/);
+  expect(auth).toMatch(/["']https:\/\/sso\.lumen\.dev\/?["']/);
+  expect(auth).toMatch(/audiences?\s*:\s*\[?\s*["']atlas["']/);
   // localDev() never authenticates a production request; every other helper would.
   expect(source).not.toMatch(/\b(?:placeholderAuth|vercelOidc|httpBasic|jwtHmac|none)\s*\(/);
 });
@@ -62,7 +67,10 @@ test("run_sql sends read-only queries to the warehouse", async () => {
   const tool = await load(`${agentRoot}/tools/run_sql.ts`);
   const requests = stubWarehouse();
 
-  const output = await tool.execute(sqlInput(tool, "SELECT count(*) FROM analytics.customers"), {});
+  const output = await tool.execute(
+    sqlInput(tool, "SELECT count(*) FROM analytics.customers"),
+    toolContext([]),
+  );
   expect(requests).toHaveLength(1);
   const [{ url, init }] = requests;
   expect(url).toBe(`${warehouse}/query`);
@@ -75,7 +83,7 @@ test("run_sql sends read-only queries to the warehouse", async () => {
 
   await tool.execute(
     sqlInput(tool, "WITH recent AS (SELECT * FROM analytics.orders) SELECT count(*) FROM recent"),
-    {},
+    toolContext([]),
   );
   expect(requests).toHaveLength(2);
 });
@@ -84,7 +92,7 @@ test("run_sql refuses writes without calling the warehouse", async () => {
   const tool = await load(`${agentRoot}/tools/run_sql.ts`);
   const requests = stubWarehouse();
   // A tool that never calls the warehouse would refuse everything trivially.
-  await tool.execute(sqlInput(tool, "SELECT 1"), {});
+  await tool.execute(sqlInput(tool, "SELECT 1"), toolContext([]));
   expect(requests).toHaveLength(1);
 
   for (const query of [
@@ -94,7 +102,7 @@ test("run_sql refuses writes without calling the warehouse", async () => {
     "INSERT INTO analytics.orders (id) VALUES (1)",
   ]) {
     const parsed = tool.inputSchema.safeParse({ query });
-    if (parsed.success) await tool.execute(parsed.data, {}).catch(() => undefined);
+    if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
     expect(requests, query).toHaveLength(1);
   }
 });
@@ -108,7 +116,7 @@ test("run_sql asks a person before touching the pii schema", async () => {
       await policy({
         approvedTools: new Set(),
         callId: "sql-call",
-        session: {},
+        session: session([]),
         toolInput: sqlInput(tool, query),
         toolName: "run_sql",
       }),
@@ -150,7 +158,8 @@ test("revenue_forecast reads the quarter's forecast", async () => {
   const requests = stubWarehouse();
   const parsed = tool.inputSchema.safeParse({ quarter: "2026-Q4" });
   expect(parsed.success).toBe(true);
-  const output = await tool.execute(parsed.data, {});
+  // Re-checking the group inside execute is a valid second layer, so run as a finance user.
+  const output = await tool.execute(parsed.data, toolContext(["finance"]));
 
   expect(requests).toHaveLength(1);
   const url = new URL(requests[0].url);
@@ -298,13 +307,23 @@ function requiresApproval(decision: unknown): boolean {
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function resolveDynamic(definition: any, groups: string[] | undefined): Promise<unknown> {
   expect(definition?.kind).toBe("eve:dynamic");
-  const handler = definition.events?.["session.started"] ?? definition.events?.["turn.started"];
+  const handler = ["session.started", "turn.started", "step.started"]
+    .map((event) => definition.events?.[event])
+    .find((candidate) => typeof candidate === "function");
   expect(typeof handler).toBe("function");
+  return handler({}, { session: session(groups) });
+}
+
+function session(groups: string[] | undefined) {
   const current =
     groups === undefined
       ? undefined
-      : { principalId: "sso:ada", principalType: "user", attributes: { groups } };
-  return handler({}, { session: { id: "session-1", auth: { current } } });
+      : { principalId: "sso:ada", principalType: "user", subject: "ada", attributes: { groups } };
+  return { id: "session-1", auth: { current } };
+}
+
+function toolContext(groups: string[] | undefined) {
+  return { session: session(groups), callId: "call-1", abortSignal: new AbortController().signal };
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
