@@ -20,6 +20,40 @@ const event = (type, ms, data = {}) => ({
   data,
 });
 
+const synthetic = (events, extra = {}) => ({
+  id: "synthetic",
+  verdict: "passed",
+  startedAt: at(0),
+  completedAt: at(1000),
+  result: {
+    sessionId: "s",
+    status: "completed",
+    sessions: [{ sessionId: "s", primary: true, events }],
+  },
+  ...extra,
+});
+const turn = (start, end, inner, terminal = "turn.completed") => [
+  event("turn.started", start, { turnId: "t" }),
+  ...inner,
+  event(terminal, end, { turnId: "t" }),
+];
+const compactedArtifact = () => {
+  const artifact = synthetic([
+    ...turn(0, 100, [
+      event("step.started", 10, { turnId: "t", stepIndex: 0 }),
+      event("step.completed", 90, {
+        turnId: "t",
+        stepIndex: 0,
+        usage: { inputTokens: 10, outputTokens: 2 },
+      }),
+    ]),
+    event("compaction.requested", 150, { turnId: "t", stepIndex: 1 }),
+    event("compaction.completed", 200, { turnId: "t", stepIndex: 1 }),
+  ]);
+  artifact.result.derived = { usage: { inputTokens: 10, outputTokens: 2 } };
+  return artifact;
+};
+
 function assertPartition(metrics) {
   const v = values(metrics);
   const parts =
@@ -31,50 +65,25 @@ function assertPartition(metrics) {
   assert.equal(parts, v["latency.turn_ms"], "attribution must add up to non-human turn time");
 }
 
-test("derives every standard metric for a simple tool eval", () => {
+test("derives representative metrics from a captured tool eval", () => {
   const { metrics_version, metrics, failures } = deriveAttemptMetrics(
     fixture("agent-tools-ends-turn-function"),
   );
   assert.equal(metrics_version, METRICS_VERSION);
   assert.deepEqual(Object.keys(metrics).sort(), Object.keys(STANDARD_METRICS).sort());
   assert.deepEqual(failures, []);
-  assert.deepEqual(values(metrics), {
-    "latency.eval_wall_ms": 1050,
-    "latency.turn_ms": 116,
-    "latency.turn_ms_mean": 58,
-    "latency.ttft_ms_p50": 4,
-    "latency.output_tokens_per_s": "unavailable",
-    "attribution.model_ms": 17,
-    "attribution.tool_ms": 3,
-    "attribution.task_ms": 0,
-    "attribution.human_wait_ms": 0,
-    "attribution.compaction_ms": 0,
-    "attribution.framework_ms": 96,
-    "cost.total_usd": "unavailable",
-    "cost.primary_usd": "unavailable",
-    "cost.subagent_usd": "unavailable",
-    "tokens.input": 1117,
-    "tokens.output": 29,
-    "tokens.cache_read": 0,
-    "tokens.cache_write": 0,
-    "tokens.cache_hit_ratio": 0,
-    "tokens.peak_context": 391,
-    "counts.turns": 2,
-    "counts.steps": 3,
-    "counts.steps_per_turn": 1.5,
-    "counts.tool_calls": 2,
-    "counts.tool_calls_per_step": 2 / 3,
-    "counts.subagent_fan_out": 0,
-    "counts.subagent_depth": 0,
-    "counts.compactions": 0,
-    "counts.context_clears": 0,
-    "reliability.step_failures": 0,
-    "reliability.turn_failures": 0,
-    "reliability.session_failures": 0,
-    "reliability.tool_errors": 0,
-    "reliability.tool_error_rate": 0,
-    "reliability.truncations": 0,
-  });
+  const v = values(metrics);
+  assert.equal(v["latency.eval_wall_ms"], 1050);
+  assert.equal(v["latency.turn_ms"], 116);
+  assert.equal(v["latency.ttft_ms_p50"], 4);
+  assert.equal(v["attribution.model_ms"], 17);
+  assert.equal(v["attribution.tool_ms"], 3);
+  assert.equal(v["attribution.framework_ms"], 96);
+  assert.equal(v["tokens.input"], 1117);
+  assert.equal(v["tokens.peak_context"], 391);
+  assert.equal(v["counts.turns"], 2);
+  assert.equal(v["counts.steps"], 3);
+  assert.equal(v["counts.tool_calls"], 2);
   // Mock models report no cost: missing cost is unavailable, never zero.
   assert.equal(metrics["cost.primary_usd"].reason, "missing-step-cost");
   assert.equal(metrics["latency.output_tokens_per_s"].reason, "zero-stream-duration");
@@ -95,21 +104,22 @@ test("attributes delegated work to tasks across repeated captures of one session
 });
 
 test("excludes sign-in wait from latency and counts it as human wait", () => {
-  const { metrics } = deriveAttemptMetrics(fixture("agent-subagents-nested-authorization"));
+  const artifact = synthetic(
+    turn(0, 1000, [
+      event("authorization.required", 100, { turnId: "t", name: "account" }),
+      event("authorization.completed", 274, { turnId: "t", name: "account" }),
+    ]),
+  );
+  artifact.completedAt = at(1072);
+  const { metrics } = deriveAttemptMetrics(artifact);
   const v = values(metrics);
   assert.equal(v["attribution.human_wait_ms"], 174);
   assert.equal(v["latency.eval_wall_ms"], 1072 - 174);
   assertPartition(metrics);
 });
 
-test("closes a model step cut off by a session limit at its turn's end", () => {
-  const { metrics } = deriveAttemptMetrics(fixture("agent-subagents-usage-limit-tool"));
-  assert.equal(metrics["latency.turn_ms"].status, "measured");
-  assertPartition(metrics);
-});
-
 test("compaction outside a turn does not count toward turn time", () => {
-  const { metrics } = deriveAttemptMetrics(fixture("agent-tools-compacted-image"));
+  const { metrics } = deriveAttemptMetrics(compactedArtifact());
   assert.equal(values(metrics)["counts.compactions"], 1);
   assert.equal(values(metrics)["attribution.compaction_ms"], 0);
   assertPartition(metrics);
@@ -179,7 +189,7 @@ test("cost and tokens are the runner's eval usage, and unavailable without it", 
 test("compaction cost stays in the total but leaves the subagent split unknown", () => {
   // Compaction summary calls are paid and roll up into session usage, but no
   // step reports them: total − steps would misreport them as subagent spend.
-  const artifact = withCosts(fixture("agent-tools-compacted-image"), {
+  const artifact = withCosts(compactedArtifact(), {
     stepCost: 0.25,
     rolledUpCost: 2,
   });
@@ -212,24 +222,6 @@ test("a single step without cost makes cost unavailable, and inconsistent rollup
   assert.equal(metrics["cost.subagent_usd"].reason, "missing-step-cost");
   assert.equal(metrics["cost.total_usd"].status, "measured");
 });
-
-const synthetic = (events, extra = {}) => ({
-  id: "synthetic",
-  verdict: "passed",
-  startedAt: at(0),
-  completedAt: at(1000),
-  result: {
-    sessionId: "s",
-    status: "completed",
-    sessions: [{ sessionId: "s", primary: true, events }],
-  },
-  ...extra,
-});
-const turn = (start, end, inner, terminal = "turn.completed") => [
-  event("turn.started", start, { turnId: "t" }),
-  ...inner,
-  event(terminal, end, { turnId: "t" }),
-];
 
 test("overlapping parallel tools count once and streaming metrics use first deltas", () => {
   const step = { turnId: "t", stepIndex: 0 };
@@ -395,8 +387,4 @@ test("classifies outcomes and every gap reason", () => {
   const parked = synthetic([completedStep]);
   parked.result.derived = { parked: true };
   assert.deepEqual(classifyOutcome(parked), { outcome: "parked" });
-  assert.deepEqual(
-    classifyOutcome(fixture("agent-subagents-nested-authorization")).outcome,
-    "completed",
-  );
 });

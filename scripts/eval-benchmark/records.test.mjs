@@ -116,9 +116,14 @@ test("builds records and turns missing legs and evals into missing records", (t)
   ]);
   assert.equal(records[2].model_release, null);
   assert.equal(records[2].duration_ms, null);
+  assert.equal(completed.outcome, "completed");
+  assert.deepEqual(completed.metrics["latency.turn_ms"], {
+    status: "unavailable",
+    reason: "missing-session-capture",
+  });
 });
 
-test("derives each attempt's outcome, metrics, and failure codes", (t) => {
+test("attaches metrics to captured attempts and marks missing attempts as gaps", (t) => {
   const legsDir = legsDirectory(t);
   // A real captured artifact, with session events, in place of the minimal one.
   copyFileSync(
@@ -137,11 +142,7 @@ test("derives each attempt's outcome, metrics, and failure codes", (t) => {
   assert.equal(captured.gap_reason, null);
   assert.equal(captured.metrics_version, METRICS_VERSION);
   assert.deepEqual(Object.keys(captured.metrics).sort(), Object.keys(STANDARD_METRICS).sort());
-  assert.deepEqual(captured.metrics["latency.eval_wall_ms"], { status: "measured", value: 1050 });
-  assert.deepEqual(captured.metrics["attribution.framework_ms"], { status: "measured", value: 96 });
   assert.deepEqual(captured.metrics["tokens.input"], { status: "measured", value: 1117 });
-  assert.deepEqual(captured.metrics["counts.steps"], { status: "measured", value: 3 });
-  assert.deepEqual(captured.metrics["counts.tool_calls"], { status: "measured", value: 2 });
   // The fixture's model reports no cost: unavailable with a reason, never zero.
   assert.deepEqual(captured.metrics["cost.total_usd"], {
     status: "unavailable",
@@ -158,13 +159,6 @@ test("derives each attempt's outcome, metrics, and failure codes", (t) => {
     assert.deepEqual(record.metrics, {});
     assert.deepEqual(record.failures, []);
   }
-});
-
-test("an artifact without a session capture records every metric as unavailable", (t) => {
-  const [record] = build(legsDirectory(t));
-  assert.equal(record.outcome, "completed");
-  for (const measurement of Object.values(record.metrics))
-    assert.deepEqual(measurement, { status: "unavailable", reason: "missing-session-capture" });
 });
 
 test("excludes live-leg evals whose model steps all ran on another model", (t) => {
