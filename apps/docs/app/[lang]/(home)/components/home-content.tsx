@@ -4,23 +4,29 @@ import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical"
 import { pageTitleMetadata, siteTitle } from "@/lib/geistdocs/metadata-title";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { webSiteStructuredData } from "@/lib/geistdocs/structured-data";
+import { AgentTrace } from "./agent-trace";
 import { ArchitectureDiagram } from "./architecture";
+import { BuiltWithEve } from "./built-with-eve";
 import { CTA } from "./cta";
-import { FeatureGrid } from "./feature-grid";
 import { FileTree } from "./file-tree";
 import { HeroAudience } from "./hero-audience";
-import { NextjsInterop } from "./nextjs-interop";
+import { Programmable } from "./programmable";
+import { WhereEveFits } from "./where-eve-fits";
 
-const tagline = "Like Next.js for agents. File system based and production ready.";
+const headline = "The framework for production agents";
+const subhead =
+  "eve runs the agent loop and everything around it: channels, schedules, approvals, sandboxes, durable sessions, and evals. Write it in TypeScript and deploy it to Vercel or your own infrastructure.";
+const description =
+  "The TypeScript framework for production AI agents, with durable sessions, channels, approvals, sandboxes, and evals built in. Deploy to Vercel or your own infrastructure.";
 const titleMetadata = pageTitleMetadata(siteTitle);
 
 export const homeMetadata: Metadata = {
   ...titleMetadata,
-  description: tagline,
+  description,
   alternates: canonicalAlternates(canonicalRoutes.home),
   openGraph: {
     ...titleMetadata.openGraph,
-    description: tagline,
+    description,
     images: [staticOgImage],
     type: "website",
     url: canonicalRoutes.home,
@@ -28,21 +34,23 @@ export const homeMetadata: Metadata = {
   twitter: {
     ...titleMetadata.twitter,
     card: "summary_large_image",
-    description: tagline,
+    description,
     images: [staticOgImage],
   },
 };
 
 export const HomeContent = () => (
   <div className="mx-auto w-full max-w-[1080px] pb-8">
-    <JsonLd data={webSiteStructuredData(tagline)} />
+    <JsonLd data={webSiteStructuredData(description)} />
     <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 pt-24 pb-12 text-center sm:px-12 sm:pb-16 sm:pt-42">
-      <HeroAudience tagline={tagline} />
+      <HeroAudience headline={headline} subhead={subhead} />
     </section>
+    <AgentTrace />
     <FileTree />
-    <NextjsInterop />
+    <Programmable />
+    <BuiltWithEve />
+    <WhereEveFits />
     <ArchitectureDiagram />
     <CTA />
-    <FeatureGrid />
   </div>
 );

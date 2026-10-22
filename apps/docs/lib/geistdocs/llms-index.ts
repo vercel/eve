@@ -2,7 +2,7 @@ const EVE_ORIGIN = "https://eve.dev";
 
 export const createLlmsIndex = (): string => `# eve
 
-> eve is a filesystem-first, Apache-2.0 framework for building durable backend AI agents that run on Vercel or self-hosted infrastructure. eve is currently in beta.
+> eve is an Apache-2.0 TypeScript framework for building and running production AI agents. It runs the agent loop and the system around it (channels, schedules, human approvals, sandboxes, durable sessions, and evals) on Vercel or self-hosted infrastructure. Agents are authored as a directory of files, with TypeScript APIs for runtime control. eve is currently in beta.
 
 Use this file to choose the smallest relevant documentation set. Use \`/sitemap.md\` for the exhaustive page map and \`/llms-full.txt\` only for offline indexing or a large context window. For an installed project, prefer \`node_modules/eve/docs/\`: those docs match the installed eve version, while eve.dev documents the latest release.
 
@@ -12,6 +12,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Introduction
 
+- [Overview](${EVE_ORIGIN}/docs/overview.md): Learn what eve runs for you, how a request moves through it, and how eve compares with AI SDK, libfx, and Workflow SDK.
 - [Getting Started](${EVE_ORIGIN}/docs/getting-started.md): Create a project, configure model credentials, and run your first agent.
 - [Project Structure](${EVE_ORIGIN}/docs/concepts/project-structure.md): Choose a layout for agents and application code, add specialist subagents, and grow into an agent workspace.
 

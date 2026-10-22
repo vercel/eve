@@ -209,7 +209,7 @@ describe("defaultLanguageRedirects", () => {
     expect(defaultLanguageRedirects).toEqual([
       {
         source: "/en/docs",
-        destination: "/docs/getting-started",
+        destination: "/docs/overview",
         permanent: true,
       },
       {

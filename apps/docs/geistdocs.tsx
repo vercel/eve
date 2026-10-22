@@ -31,7 +31,7 @@ export const nav = [
 
 export const suggestions = [
   "How do I create my first agent?",
-  "What is the agent directory structure?",
+  "How does eve compare with AI SDK and libfx?",
   "How do channels work?",
   "How do I add tools to an agent?",
 ];
@@ -47,12 +47,12 @@ export const agent = {
   product: {
     name: "eve",
     description:
-      "A filesystem-first, Apache-2.0 framework for building durable backend AI agents that run on Vercel or your own infrastructure. eve is currently in beta.",
+      "An Apache-2.0 TypeScript framework for building and running production AI agents, with durable sessions, channels, schedules, human approvals, sandboxes, and evals, on Vercel or your own infrastructure. eve is currently in beta.",
     category: "Agent framework",
     audience: ["developers building AI agents", "teams running agents on any infrastructure"],
     useCases: [
-      "Create durable agents with filesystem conventions",
-      "Add channels, tools, skills, sandboxes, hooks, and schedules",
+      "Create durable agents with filesystem conventions and TypeScript APIs",
+      "Add channels, tools, skills, sandboxes, hooks, schedules, approvals, and evals",
       "Deploy agent workloads on Vercel or self-host them as Node services",
     ],
   },
@@ -71,7 +71,7 @@ export const agent = {
 export const title = "eve Documentation";
 
 export const prompt =
-  "You are a helpful assistant specializing in eve, a filesystem-first framework for building durable agents on Vercel. You help users understand how to build agents using markdown for instructions, TypeScript for tools, and the framework's built-in durability, governance, and observability features.";
+  "You are a helpful assistant specializing in eve, a TypeScript framework for building and running production AI agents on Vercel or self-hosted infrastructure. You help users understand how to build agents with eve's filesystem conventions and TypeScript APIs, and how eve's durable sessions, channels, approvals, sandboxes, evals, and observability work.";
 
 // The help-eve agent (vercel/internal-agents/agents/help-eve) answers Ask AI.
 // The deployment keeps the framework's pre-rename "ash" domain.

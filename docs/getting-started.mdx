@@ -4,6 +4,8 @@ description: "Create an eve project, configure model credentials, and run your f
 contentType: "How-to"
 ---
 
+This guide creates an eve project and runs your first agent. To learn what eve runs for you and how it compares with AI SDK and libfx, read the [Overview](./overview).
+
 ## Prerequisites
 
 You need:
@@ -58,6 +60,16 @@ npm run dev
 ```
 
 This starts an interactive session where you can send messages to your agent. Edit `agent/instructions.md` to change its behavior and `agent/agent.ts` to configure its model. eve reloads your changes as you work. You can also ask the agent to update its own instructions, tools, or skills; see [Self-Modification](./guides/self-modification).
+
+## What the project includes
+
+The project you created is a complete agent application. While `npm run dev` runs, it:
+
+- Serves the [eve HTTP API](./channels/eve) under `/eve/v1`. The terminal UI, `useEveAgent`, and `eve/client` all talk to this API.
+- Runs each conversation as a durable session that checkpoints every step. The terminal UI keeps the conversation as eve rebuilds your changes.
+- Gives the agent a [sandbox](./sandbox) for shell commands and files.
+
+Add channels, schedules, connections, and evals as files when the agent needs them. The [Overview](./overview#what-eve-runs-for-you) lists what each one adds.
 
 <span id="project-layout" />
 <span id="agent-directory-layout" />

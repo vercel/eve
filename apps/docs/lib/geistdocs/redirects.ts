@@ -148,7 +148,7 @@ export const compatibilityRedirects: DocsRedirect[] = [
 export const defaultLanguageRedirects: DocsRedirect[] = [
   {
     source: `/${defaultLanguage}/docs`,
-    destination: "/docs/getting-started",
+    destination: "/docs/overview",
     permanent: true,
   },
   {

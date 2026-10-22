@@ -41,12 +41,12 @@ const snippets: Snippet[] = [
     lang: "markdown",
     NavIcon: IconFileText,
     description:
-      "An instructions.md file is a complete agent. Describe its role in Markdown, then run eve.",
-    code: `# Identity
+      "The always-on system prompt. Write it in Markdown, or switch to instructions.ts when it needs code.",
+    code: `# Support
 
-You are an expert weather assistant.
-You can fetch the weather for any
-city in the world.`,
+You resolve order issues for Acme customers.
+Look up the order before you answer.
+Hand disputes over $500 to the billing agent.`,
   },
   {
     label: "Agent",
@@ -55,52 +55,57 @@ city in the world.`,
     lang: "typescript",
     NavIcon: IconSparkles,
     description:
-      "eve uses a default model. Add agent.ts when you want to choose a model or configure the runtime.",
+      "The model, reasoning effort, and runtime settings. Without this file, eve uses its default model.",
     code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-6-luna-fast",
+  model: "anthropic/claude-sonnet-5",
   reasoning: "high",
 });`,
   },
   {
     label: "Skills",
     name: "skills/",
-    fileName: "skills/research.md",
+    fileName: "skills/refunds.md",
     lang: "markdown",
     NavIcon: IconWrench,
     description:
-      "Skills are Markdown playbooks loaded only when relevant, so the agent gets focused guidance without carrying it in every prompt.",
+      "Playbooks the model loads only when a task calls for one, so they cost no context until then.",
     code: `---
-name: research
-description: Research unfamiliar topics
+description: Issue refunds and explain timelines
 ---
 
-When the task is novel or ambiguous,
-gather evidence first, then answer.`,
+Confirm the order and the charge first.
+Tell the customer when the money will arrive.`,
   },
   {
     label: "Tools",
     name: "tools/",
-    fileName: "tools/get_weather.ts",
+    fileName: "tools/refund_charge.ts",
     lang: "typescript",
     NavIcon: IconWorkflow,
     description:
-      "Drop a TypeScript file in tools/ and the model can call it — the filename becomes the tool name, no registration required.",
+      "Typed functions the model can call. The filename is the tool name, and the approval policy decides when a person must sign off and who may.",
     code: `import { defineTool } from "eve/tools";
-import z from "zod";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+import { billingLeads, stripe } from "../lib/billing";
 
 export default defineTool({
-  description: "Get the weather for a city",
+  description: "Refund a charge.",
   inputSchema: z.object({
-    cityName: z.string(),
+    chargeId: z.string(),
+    amount: z.number(),
   }),
-  async execute(input) {
-    const res = await fetch(
-      \`\${process.env.WEATHER_API_URL}/current?city=\${input.cityName}\`
-    );
-    const data = await res.json();
-    return data.current_condition[0];
+  approval: {
+    request: always(),
+    response: ({ response }) =>
+      billingLeads.includes(response.principal.principalId)
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "Billing leads approve refunds." },
+  },
+  async execute({ chargeId, amount }) {
+    return stripe.refunds.create({ charge: chargeId, amount });
   },
 });`,
   },
@@ -111,7 +116,7 @@ export default defineTool({
     lang: "typescript",
     NavIcon: IconSandbox,
     description:
-      "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
+      "Each session gets an isolated shell and filesystem. Add this file to choose a provider or prepare the environment.",
     code: `import { DefaultSandbox,
   defineSandbox } from "eve/sandbox";
 
@@ -134,12 +139,13 @@ export default defineSandbox(() =>
     fileName: "channels/slack.ts",
     lang: "typescript",
     NavIcon: IconMessage,
-    description: "Add channel files to use the same agent in Slack, Discord, Teams, or the web.",
+    description:
+      "Each channel file puts the same agent on another surface, such as Slack, Teams, GitHub, or your web app.",
     code: `import { slackChannel } from
   "eve/channels/slack";
 
 export default slackChannel({
-  botName: "my-agent",
+  botName: "support",
 });`,
   },
   {
@@ -149,7 +155,7 @@ export default slackChannel({
     lang: "typescript",
     NavIcon: IconLinked,
     description:
-      "Connections handle auth for services like GitHub, Stripe, and Linear, so tools can call them without managing tokens.",
+      "MCP and OpenAPI servers the agent can use. Credentials stay out of the model's context, and a sign-in prompt parks the turn until the user connects.",
     code: `import { defineMcpClientConnection }
   from "eve/connections";
 
@@ -158,18 +164,17 @@ export default defineMcpClientConnection({
 });`,
   },
   {
-    label: "Sub Agents",
+    label: "Subagents",
     name: "subagents/",
-    fileName: "subagents/researcher/agent.ts",
+    fileName: "subagents/billing/agent.ts",
     lang: "typescript",
     NavIcon: IconAgents,
     description:
-      "Add subagents for specialized work. The main agent delegates tasks and combines the results.",
-    code: `import { defineAgent } from
-  "eve";
+      "Specialists with their own instructions, tools, and model. The root agent delegates to them and keeps working.",
+    code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  description: "Investigate questions",
+  description: "Investigates billing disputes",
   model: "openai/gpt-6-luna-fast",
   reasoning: "high",
 });`,
@@ -177,34 +182,41 @@ export default defineAgent({
   {
     label: "Schedules",
     name: "schedules/",
-    fileName: "schedules/daily-report.md",
-    lang: "markdown",
+    fileName: "schedules/weekly-digest.ts",
+    lang: "typescript",
     NavIcon: IconClock,
     description:
-      "Schedules run agents automatically for jobs like daily reports and weekly digests, continuing durably without an active session.",
-    code: `---
-cron: "0 8 * * *"
----
+      "Cron jobs that start the agent without a user message and deliver the result to any channel.",
+    code: `import { defineSchedule } from "eve/schedules";
+import slack from "../channels/slack";
 
-Send the user a daily weather
-digest for their saved cities.`,
+export default defineSchedule({
+  cron: "0 9 * * 1",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(slack, { channelId: "C0123ABC" }).send(
+        "Summarize last week's refunds.",
+        { auth: appAuth },
+      ),
+    );
+  },
+});`,
   },
   {
     label: "Evals",
     name: "evals/",
-    fileName: "evals/weather/brooklyn-forecast.eval.ts",
+    fileName: "evals/refunds/needs-approval.eval.ts",
     lang: "typescript",
     NavIcon: IconFileText,
     description:
-      "Evals run the agent through real sessions and score the result, so you can catch regressions as it evolves.",
+      "Evals live next to agent/ at the project root. They drive real sessions through the agent's HTTP API, locally or in CI with eve eval.",
     code: `import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    const turn = await t.send("What is the weather in Brooklyn?");
-    t.succeeded();
-    t.check(turn.message, includes("Sunny"));
+    const turn = await t.send("Refund order #4821, it arrived broken.");
+    t.parked();
+    turn.calledTool("refund_charge", { status: "pending" });
   },
 });`,
   },
@@ -226,7 +238,7 @@ export async function FileTree() {
               data-line-numbers="true"
               className={cn(
                 props.className,
-                "rounded-none border-0 bg-transparent px-0 py-4",
+                "my-0! rounded-none border-0 bg-transparent px-0 [&_[data-section=content]]:rounded-none! [&_[data-section=content]]:border-0! [&_pre]:rounded-none! [&_pre]:bg-transparent!",
                 "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
                 // Wrap long lines instead of scrolling horizontally (keep the
                 // line-number grid, just constrain its column so lines wrap).
@@ -265,8 +277,9 @@ export async function FileTree() {
               is a directory
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-              An instructions.md file is all you need to run an agent. Skills, tools, channels, and
-              the rest are optional building blocks you add as it grows.
+              Each file and folder turns on a part of the runtime. Start with one Markdown file and
+              add TypeScript as the agent grows. eve compiles the directory into an app with HTTP
+              routes, durable sessions, and a sandbox.
             </p>
           </div>
         }

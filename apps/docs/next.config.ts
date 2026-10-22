@@ -64,7 +64,7 @@ const config: NextConfig = {
       },
       {
         source: "/docs",
-        destination: "/docs/getting-started",
+        destination: "/docs/overview",
         permanent: true,
       },
       ...compatibilityRedirects,

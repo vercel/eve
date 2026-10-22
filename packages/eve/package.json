@@ -2,7 +2,7 @@
   "name": "eve",
   "version": "0.82.0",
   "private": false,
-  "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
+  "description": "TypeScript framework for production AI agents, with durable sessions, channels, approvals, sandboxes, and evals. Runs on Vercel or your own infrastructure.",
   "keywords": [
     "agent-framework",
     "agents",

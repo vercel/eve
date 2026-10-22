@@ -14,12 +14,14 @@
 
 </div>
 
-[eve](https://eve.dev/) is a filesystem-first framework for durable AI agents. Core agent capabilities live in
-conventional locations, so projects are easier to inspect, extend, and operate.
+[eve](https://eve.dev/) is a TypeScript framework for building and running production AI agents. It runs
+the agent loop and the system around it: the channels where the agent talks, the schedules that start it,
+the approvals it waits for, the sandbox where it runs code, the durable sessions that survive restarts and
+redeploys, and the evals that check its behavior. Deploy it to Vercel or your own infrastructure.
 
-## The filesystem is the authoring interface
+## Start with files, take control in TypeScript
 
-A typical eve agent has this structure:
+An eve agent is a directory. Each file or folder turns on a part of the runtime:
 
 ```text
 my-agent/
@@ -32,11 +34,19 @@ my-agent/
     │   └── plan_a_trip.md
     ├── channels/           # Optional: message channels (HTTP, Slack, Discord)
     │   └── slack.ts
+    ├── subagents/          # Optional: specialist agents the root agent delegates to
+    ├── hooks/              # Optional: subscribers to runtime events
     └── schedules/          # Optional: recurring cron jobs
         └── weekly_recap.ts
 ```
 
-Read the [documentation](https://eve.dev/docs) for the full project layout and guides.
+Conventions cover the common case. When an agent needs more control, each convention has a TypeScript
+form, and the runtime has typed APIs: resolve models and tools per caller with `defineDynamic`, wait on people or webhooks inside
+a tool with `defineWorkflowTool`, observe every runtime event with `defineHook`, and call the agent from your
+own code with `eve/client`.
+
+Read the [overview](https://eve.dev/docs/overview) for what eve runs for you and how it compares with AI SDK
+and libfx, or browse the [documentation](https://eve.dev/docs) for guides.
 
 ## Quick start
 
