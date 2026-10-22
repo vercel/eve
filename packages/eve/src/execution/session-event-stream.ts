@@ -219,17 +219,12 @@ export async function* streamSessionEvents(
   const reader = createEventReader();
   let history: V26HistoryReader | undefined;
   for await (const { line, position, record } of streamSessionLines(sessionId, options)) {
-    if (line !== undefined) {
-      yield* reader.read(line, position);
-      continue;
-    }
-    if (!isV26Line(record)) continue;
-    if (history === undefined) {
+    if (history === undefined && isV26Line(record)) {
       history = createV26HistoryReader();
       // Each v26 line reads in light of those before it.
       if (position > 0) await readV26Prefix(history, sessionId, position, options.signal);
     }
-    const read = history.read(record, position);
+    const read = history === undefined ? line : history.read(record, position);
     if (read !== undefined) yield* reader.read(read, position);
   }
 }

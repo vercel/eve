@@ -10,9 +10,11 @@ import {
   STEER_AND_CANCEL,
 } from "#execution/v26-history.fixtures.js";
 import { createV26HistoryReader, v26LineStream } from "#execution/v26-history.js";
-import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { cascade } from "#harness/session-machine/cascade.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { createEventReader } from "#protocol/session-lines.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { idle, waiting } from "#protocol/session-projection/selectors.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 
@@ -150,10 +152,29 @@ describe("createV26HistoryReader", () => {
     expect(transcriptOf(read([received, failed("message")]).events).messages).toHaveLength(1);
   });
 
-  it("reads nothing from a v27 line or a record that isn't a v26 event", () => {
-    const history = createV26HistoryReader();
-    expect(history.read({ at: "2026-10-01T00:00:00.000Z", facts: [] }, 0)).toBeUndefined();
-    expect(history.read("not a record", 1)).toBeUndefined();
+  it("reads the end a v27 deployment appends to a stranded v26 session as it was written", () => {
+    // What a v27 deployment writes when Alice resets the session Bob left waiting on an approval.
+    const recorded = emptySessionView();
+    for (const event of read(PENDING_APPROVAL).events) foldReceivedEvent(recorded, event);
+    const ended: SessionEvent = {
+      data: {
+        cause: { policy: "stranded-message" },
+        error: { code: "session_stranded", message: "This session is no longer available." },
+        outcome: "failed",
+      },
+      type: "session.ended",
+    };
+    const end = { at: "2026-10-01T00:00:00.000Z", facts: cascade(recorded, [ended]) };
+
+    const { events, violations } = read([...PENDING_APPROVAL, end]);
+    expect(violations).toEqual([]);
+    const tables = sessionTables(conversationOf(events).view);
+    expect(tables.session.status).toBe("ended");
+    expect(Object.values(tables.interactions).map((row) => row.status)).toEqual(["settled"]);
+  });
+
+  it("reads nothing from a record that isn't a line", () => {
+    expect(createV26HistoryReader().read("not a record", 0)).toBeUndefined();
   });
 });
 

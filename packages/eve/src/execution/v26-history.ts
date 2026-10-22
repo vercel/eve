@@ -14,11 +14,13 @@
 import { cascade } from "#harness/session-machine/cascade.js";
 import { FACT_CATALOG } from "#protocol/session-events/catalog.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import type {
-  CommitLine,
-  ErrorInfo,
-  JsonValue,
-  UserPart,
+import {
+  type CommitLine,
+  type ErrorInfo,
+  isStoredLine,
+  type JsonValue,
+  type StoredLine,
+  type UserPart,
 } from "#protocol/session-events/envelope.js";
 import type { Fact } from "#protocol/session-events/facts.js";
 import type { Capability, CallOutcome } from "#protocol/session-events/families/call.js";
@@ -33,13 +35,14 @@ import { isV26Line } from "#protocol/v26-lines.js";
 
 type Data = Readonly<Record<string, unknown>>;
 
-/** Reads consecutive stored v26 lines of one session, from its first. */
+/** Reads consecutive stored lines of one session an eve before v27 started, from its first. */
 export interface V26HistoryReader {
   /**
-   * The v27 commit the v26 record at `position` reads as, or `undefined` when it records
-   * nothing a v27 reader folds, such as a streamed delta or a v27 line.
+   * The v27 line the record at `position` reads as, or `undefined` when it records nothing a v27
+   * reader folds, such as a streamed delta. A v27 line reads as itself: a v27 deployment that
+   * ends a stranded v26 session appends its end as one.
    */
-  read(record: unknown, position: number): CommitLine<SessionEvent> | undefined;
+  read(record: unknown, position: number): StoredLine<SessionEvent> | undefined;
 }
 
 /** A reader for one session's stored v26 lines. Read them in order, from position 0. */
@@ -48,6 +51,12 @@ export function createV26HistoryReader(): V26HistoryReader {
   const translator = new Translator(view);
   return {
     read(record, position) {
+      if (isStoredLine(record)) {
+        const line = record as StoredLine<SessionEvent>;
+        if ("facts" in line) translator.noteIntroduced(line.facts);
+        foldLine(view, line, position, { retention: "operational" });
+        return line;
+      }
       if (!isV26Line(record)) return undefined;
       const event = record as { readonly type: string; readonly data?: unknown; meta?: unknown };
       const data = isRecord(event.data) ? event.data : {};
