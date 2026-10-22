@@ -143,7 +143,7 @@ eve calls the lifecycle methods at these points:
 | The eve server shuts down                             | `connection.stop()`, then `connection.close()`, on every open session connection; eve logs failures and does not throw them                                    |
 | The owning session reaches a terminal outcome         | `connection.close()` on this process's connections for the session, then `onSessionEnd(ctx, state, { reason })` with `"completed"`, `"expired"`, or `"failed"` |
 
-eve calls `stop()` and `close()` at most once per connection, retrying only after a failure. A failed `close()` never prevents `onSessionEnd()` from deleting the sandbox.
+eve calls `close()` at most once per connection, retrying only after a failure. `stop()` can run again after the session uses a stopped connection, so make it a no-op when the sandbox is already stopped. A failed `close()` never prevents `onSessionEnd()` from deleting the sandbox.
 
 ### `prepare()`
 

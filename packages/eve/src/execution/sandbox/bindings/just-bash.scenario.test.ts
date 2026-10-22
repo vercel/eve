@@ -6,9 +6,8 @@ import { decodeBytesToUtf8, defineCommand, MountableFs, ReadWriteFs } from "just
 import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { createJustBashSandboxProvider } from "#execution/sandbox/bindings/just-bash.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
 import { executeBashOnSandbox } from "#execution/sandbox/bash.js";
 import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
 import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
@@ -18,8 +17,8 @@ const createScratchDirectory = useTemporaryDirectories();
 // The whole file exercises the opt-in just-bash provider; the workspace
 // devDependency provides the `just-bash` install that applications opt
 // into explicitly.
-function createJustBashProvider(options: JustBashSandboxCreateOptions = {}) {
-  return createSandboxProviderHarness(createJustBashSandboxProvider(options), undefined);
+function createJustBashProvider(options: JustBashEnvironmentOptions = {}) {
+  return createSandboxEnvironmentHarness(JustBashSandbox.environment(options));
 }
 
 async function createTemporaryCacheDirectory(label: string): Promise<string> {
@@ -298,9 +297,9 @@ describe("just-bash sandbox file API", () => {
 
     await firstHandle.onSandboxStop();
 
-    expect(state).toMatchObject({ version: 2 });
+    const { rootPath } = state as { readonly rootPath: string };
     await expect(
-      readFile(join(state.rootPath, "fs", "workspace", "persisted.txt"), "utf8"),
+      readFile(join(rootPath, "fs", "workspace", "persisted.txt"), "utf8"),
     ).resolves.toBe("survives reconnect");
 
     const reconnectedHandle = await provider.openSession({
@@ -359,6 +358,47 @@ describe("just-bash sandbox file API", () => {
     const content = await handle.sandbox.readTextFile({ path: "/workspace/rel.txt" });
 
     expect(content).toBe("relative write");
+  });
+
+  it("runs commands in any working directory, even with a trailing comment", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("working-directory");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-working-directory",
+    });
+    await handle.sandbox.writeTextFile({ content: "nested", path: "sub/deeper/note.txt" });
+
+    await expect(handle.sandbox.run({ command: "pwd # workspace" })).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "/workspace\n",
+    });
+    await expect(
+      handle.sandbox.run({
+        command: "pwd; exit 4 # subdirectory",
+        workingDirectory: "sub/deeper/..",
+      }),
+    ).resolves.toMatchObject({ exitCode: 4, stdout: "/workspace/sub\n" });
+    await expect(
+      handle.sandbox.run({ command: "echo unreachable", workingDirectory: "missing" }),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("/workspace/missing"),
+      stdout: "",
+    });
+    await expect(handle.sandbox.readTextFile({ path: "sub/../sub/deeper/note.txt" })).resolves.toBe(
+      "nested",
+    );
+  });
+
+  it("rejects reading a directory instead of reporting it missing", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-read-directory",
+    });
+    await handle.sandbox.writeTextFile({ content: "inside", path: "folder/file.txt" });
+
+    await expect(handle.sandbox.readTextFile({ path: "folder" })).rejects.toThrow(/EISDIR/);
   });
 
   it("preserves Buffer bytes written through the public session", async () => {

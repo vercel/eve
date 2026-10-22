@@ -277,7 +277,7 @@ function adaptSandboxProvider<
   prepare: ((sandbox: SandboxSession & Extensions) => void | Promise<void>) | undefined,
 ): LegacySandboxProviderImplementation<OpenOptions, Artifact, State, SandboxSession & Extensions> {
   const closers = new WeakMap<SandboxProviderHandle, () => Promise<void>>();
-  // Connections this process holds per session, so terminal cleanup can close them.
+  // Closable connections this process holds per session, so terminal cleanup can close them.
   const open = new Map<string, Set<() => Promise<void>>>();
 
   function createHandle(
@@ -286,18 +286,20 @@ function adaptSandboxProvider<
     state: Readonly<State>,
   ): SandboxProviderHandle<SandboxSession & Extensions> {
     const sessionId = context.session.id;
-    // eve may stop or close one connection from several paths, such as
-    // `sandbox.stop()` and then server shutdown, so each runs once.
-    const stop = once(() => connection.stop());
+    // A stopped connection can resume on its next use, so a later stop runs
+    // again; only a stop already in flight is shared. Close runs once.
+    const stop = shared(() => connection.stop());
     const close = once(async () => {
       const remaining = open.get(sessionId);
       remaining?.delete(close);
       if (remaining?.size === 0) open.delete(sessionId);
       await connection.close?.();
     });
-    let sessionClosers = open.get(sessionId);
-    if (sessionClosers === undefined) open.set(sessionId, (sessionClosers = new Set()));
-    sessionClosers.add(close);
+    if (connection.close !== undefined) {
+      let sessionClosers = open.get(sessionId);
+      if (sessionClosers === undefined) open.set(sessionId, (sessionClosers = new Set()));
+      sessionClosers.add(close);
+    }
     const release = async () => {
       try {
         await stop();
@@ -472,6 +474,14 @@ function createConnectionSession<Extensions extends object>(
 }
 
 /** Runs `run` at most once while it succeeds; a failed run can be retried. */
+function shared(run: () => Promise<void>): () => Promise<void> {
+  let running: Promise<void> | undefined;
+  return () =>
+    (running ??= run().finally(() => {
+      running = undefined;
+    }));
+}
+
 function once(run: () => Promise<void>): () => Promise<void> {
   let running: Promise<void> | undefined;
   return () =>

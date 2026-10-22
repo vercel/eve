@@ -2,18 +2,14 @@ import { randomUUID } from "node:crypto";
 import { dirname as posixDirname } from "node:path/posix";
 
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
+import { stopDockerContainerIfRunning } from "#execution/sandbox/bindings/docker-container.js";
+import { setDockerNetworkPolicy } from "#execution/sandbox/bindings/docker-network.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
-import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
-import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
-import type {
-  InternalSandboxSession,
-  SandboxReadFileOptions,
-  SandboxRemovePathOptions,
-  SandboxSpawnOptions,
-  SandboxWriteFileOptions,
-} from "#shared/sandbox-session.js";
+import type { DockerSandboxSession } from "#public/sandbox/docker.js";
+import type { SandboxConnection } from "#public/sandbox/provider.js";
+
+export type DockerSandboxExtensions = Pick<DockerSandboxSession, "setNetworkPolicy">;
 
 const DOCKER_SPAWN_PID_FILE_PREFIX = "/tmp/.eve-sbx-spawn-";
 
@@ -48,10 +44,17 @@ const DOCKER_KILL_TREE_SCRIPT = [
   "exit 0",
 ].join("\n");
 
-export function createDockerInternalSession(input: {
+/**
+ * A connection bound to one container's identity rather than its name, so a
+ * stale connection's commands, file operations, network policy changes, and
+ * stop never reach a later container that reuses the session's name.
+ * Deletion is the exception: `onSessionEnd` removes by session name, because
+ * it is the single deletion path and must work without an open connection.
+ */
+export function createDockerConnection(input: {
   readonly cli: DockerCli;
   readonly containerIdentity: string;
-}): InternalSandboxSession {
+}): SandboxConnection<DockerSandboxExtensions> {
   const { cli, containerIdentity } = input;
 
   async function killSpawnTree(pidFilePath: string): Promise<void> {
@@ -71,10 +74,12 @@ export function createDockerInternalSession(input: {
   }
 
   return {
-    resolvePath: resolveWorkspacePath,
-    async spawn(options: SandboxSpawnOptions) {
-      const args = ["exec", "-w", resolveWorkspacePath(options.workingDirectory ?? WORKSPACE_ROOT)];
-      for (const [key, value] of Object.entries(options.env ?? {})) {
+    extensions: {
+      setNetworkPolicy: (policy) => setDockerNetworkPolicy(cli, containerIdentity, policy),
+    },
+    async spawn(options) {
+      const args = ["exec", "-w", options.workingDirectory];
+      for (const [key, value] of Object.entries(options.env)) {
         args.push("-e", `${key}=${value}`);
       }
       // `docker exec` cannot deliver signals to the exec'd process, so
@@ -108,7 +113,7 @@ export function createDockerInternalSession(input: {
         },
       };
     },
-    async readFile(options: SandboxReadFileOptions) {
+    async readFile(options) {
       const quoted = shellQuote(options.path);
       const result = await cli.run(
         [
@@ -126,9 +131,9 @@ export function createDockerInternalSession(input: {
         return null;
       }
       expectDockerSuccess(result, `read "${options.path}" from sandbox container`);
-      return bufferToStream(result.stdoutBytes);
+      return result.stdoutBytes;
     },
-    async removePath(options: SandboxRemovePathOptions) {
+    async removePath(options) {
       const flags = `${options.recursive === true ? "r" : ""}${options.force === true ? "f" : ""}`;
       const args = [
         "exec",
@@ -141,20 +146,22 @@ export function createDockerInternalSession(input: {
       const result = await cli.run(args, { signal: options.abortSignal });
       expectDockerSuccess(result, `remove "${options.path}" from sandbox container`);
     },
-    async writeFile(options: SandboxWriteFileOptions) {
-      const bytes = await streamToBuffer(options.content);
-      const result = await cli.run(
-        [
-          "exec",
-          "-i",
-          containerIdentity,
-          "bash",
-          "-lc",
-          `mkdir -p ${shellQuote(posixDirname(options.path))} && cat > ${shellQuote(options.path)}`,
-        ],
-        { signal: options.abortSignal, stdin: bytes },
-      );
-      expectDockerSuccess(result, `write "${options.path}" into sandbox container`);
+    stop: () => stopDockerContainerIfRunning(cli, containerIdentity),
+    async writeFiles(options) {
+      for (const file of options.files) {
+        const result = await cli.run(
+          [
+            "exec",
+            "-i",
+            containerIdentity,
+            "bash",
+            "-lc",
+            `mkdir -p ${shellQuote(posixDirname(file.path))} && cat > ${shellQuote(file.path)}`,
+          ],
+          { signal: options.abortSignal, stdin: file.content },
+        );
+        expectDockerSuccess(result, `write "${file.path}" into sandbox container`);
+      }
     },
   };
 }

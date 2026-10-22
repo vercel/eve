@@ -6,13 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   DockerDaemonUnavailableError,
   type DockerCli,
-  type DockerCommandResult,
-  type DockerProcess,
 } from "#execution/sandbox/bindings/docker-cli.js";
-import {
-  createDockerSandboxProvider,
-  pruneDockerSandboxTemplates,
-} from "#execution/sandbox/bindings/docker.js";
+import { pruneDockerSandboxTemplates } from "#execution/sandbox/bindings/docker.js";
 import { EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV } from "#execution/sandbox/development-run.js";
 import {
   createDockerSandboxOptionsHash,
@@ -26,9 +21,16 @@ import type {
 } from "#public/sandbox/docker-sandbox.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import { createDockerSandboxRuntime } from "#internal/testing/docker-sandbox-runtime.js";
+import {
+  createFakeDockerCli,
+  fakeDockerContainerIdentity,
+  findCall,
+  isContainerInspect,
+  type FakeResponse,
+} from "#internal/testing/fake-docker-cli.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { bufferToStream } from "#execution/sandbox/stream-utils.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
@@ -37,103 +39,20 @@ import { createSandboxProviderResources } from "#shared/sandbox-provider.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-type FakeResponse = Partial<DockerCommandResult> & {
-  readonly streamStdout?: string;
-};
-
-interface FakeDockerCall {
-  readonly args: readonly string[];
-  readonly stdin?: Buffer;
-}
-
-function createFakeDockerCli(
-  respond: (args: readonly string[]) => FakeResponse | undefined = () => undefined,
-): { calls: FakeDockerCall[]; cli: DockerCli; killedStreams: (readonly string[])[] } {
-  const calls: FakeDockerCall[] = [];
-  const createdContainerNames = new Set<string>();
-  const killedStreams: (readonly string[])[] = [];
-
-  function resolve(args: readonly string[]): DockerCommandResult {
-    let partial = respond(args) ?? {};
-    if (args[0] === "container" && args[1] === "inspect" && args[3] === "{{.Id}}") {
-      const containerName = args.at(-1) ?? "unknown";
-      if (createdContainerNames.has(containerName) || (partial.exitCode ?? 0) === 0) {
-        partial = { ...partial, exitCode: 0, stdout: fakeDockerContainerIdentity(containerName) };
-      }
-    }
-    const stdout = partial.stdout ?? "";
-    const result = {
-      exitCode: partial.exitCode ?? 0,
-      stderr: partial.stderr ?? "",
-      stdout,
-      stdoutBytes: partial.stdoutBytes ?? Buffer.from(stdout, "utf8"),
-    };
-    if (args[0] === "run" && result.exitCode === 0) {
-      const nameIndex = args.indexOf("--name");
-      const containerName = nameIndex === -1 ? undefined : args[nameIndex + 1];
-      if (containerName !== undefined) createdContainerNames.add(containerName);
-    }
-    return result;
-  }
-
-  return {
-    calls,
-    killedStreams,
-    cli: {
-      async run(args, options) {
-        calls.push({
-          args: [...args],
-          stdin: options?.stdin === undefined ? undefined : Buffer.from(options.stdin),
-        });
-        return resolve(args);
-      },
-      stream(args): DockerProcess {
-        calls.push({ args: [...args] });
-        const partial = respond(args) ?? {};
-        return {
-          stdout: bufferToStream(Buffer.from(partial.streamStdout ?? "", "utf8")),
-          stderr: bufferToStream(Buffer.alloc(0)),
-          async wait() {
-            return { exitCode: partial.exitCode ?? 0 };
-          },
-          async kill() {
-            killedStreams.push([...args]);
-          },
-        };
-      },
-    },
-  };
-}
-
 function createEngine(input: {
   readonly cli: DockerCli;
   readonly options?: DockerSandboxEnvironmentOptions;
   readonly runtimeOptions?: DockerSandboxRuntimeOptions;
 }) {
   return createSandboxProviderHarness(
-    createDockerSandboxProvider(input.options, input.cli),
+    createDockerSandboxRuntime(input.options, input.cli),
     input.runtimeOptions ?? {},
     { preparedArtifact: () => ({ imageReference: TEMPLATE_IMAGE }) },
   );
 }
 
-function findCall(
-  calls: readonly FakeDockerCall[],
-  predicate: (args: readonly string[]) => boolean,
-): FakeDockerCall | undefined {
-  return calls.find((call) => predicate(call.args));
-}
-
 function isImageInspect(args: readonly string[], reference: string): boolean {
   return args[0] === "image" && args[1] === "inspect" && args.at(-1) === reference;
-}
-
-function isContainerInspect(args: readonly string[]): boolean {
-  return args[0] === "container" && args[1] === "inspect";
-}
-
-function fakeDockerContainerIdentity(containerName: string): string {
-  return `sha256:${containerName}`;
 }
 
 const TEMPLATE_KEY = "eve-sbx-tpl-local-abc123";
@@ -356,7 +275,8 @@ describe("Docker provider prewarm", () => {
         calls,
         (args) =>
           args[0] === "exec" &&
-          (args.at(-1) ?? "").includes("cp -a /eve/resources/workspace/. /workspace/"),
+          // The spawn wrapper re-quotes the script for `bash -lc`, escaping its quoted root.
+          (args.at(-1) ?? "").includes("cp -a '\\''/eve/resources'\\''/workspace/. /workspace/"),
       ),
     ).toBeDefined();
   });
@@ -758,7 +678,8 @@ describe("Docker provider create", () => {
   it("rejects domain-level network policies with guidance toward the Vercel provider", async () => {
     const { handle } = await createRunningSessionHandle({});
 
-    await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } })).rejects.toThrow(
+    // DefaultSandbox forwards the shared network policy type unchanged.
+    await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } } as never)).rejects.toThrow(
       /Vercel provider/,
     );
   });
@@ -784,7 +705,7 @@ describe("Docker template prune", () => {
 
   // Mirrors how prewarm and session start build the provider context.
   async function prepareLikeDevelopment(appRoot: string, cli: DockerCli) {
-    return await createDockerSandboxProvider(undefined, cli).prepare({
+    return await createDockerSandboxRuntime(undefined, cli).prepare({
       files: createSandboxProviderFiles(join(appRoot, "sandbox")),
       host: createSandboxProviderHost(appRoot),
       resources: createSandboxProviderResources({}),

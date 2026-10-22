@@ -7,7 +7,6 @@ import {
 } from "#execution/tool-session/sandbox.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 import {
   type SandboxSessionEndWithArtifact,
@@ -15,7 +14,7 @@ import {
   withSessionEndArtifact,
 } from "#sandbox/state.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
-import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type {
@@ -35,7 +34,7 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 
 export interface DefaultSandboxEnvironmentOptions {
   readonly docker?: DockerSandboxEnvironmentOptions;
-  readonly justBash?: JustBashSandboxCreateOptions;
+  readonly justBash?: JustBashEnvironmentOptions;
   readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
   readonly vercel?: VercelSandboxCreateOptions;
 }

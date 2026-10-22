@@ -2,50 +2,13 @@ import { randomUUID } from "node:crypto";
 import { access, cp, mkdir, rename, rm, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { resolveSandboxModelPath } from "#shared/skill-paths.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+
 interface SandboxSeedFile {
   readonly content: string | Uint8Array;
   readonly path: string;
-}
-import type {
-  InternalSandboxSession,
-  SandboxProcess,
-  SandboxRemovePathOptions,
-  SandboxSession,
-  SandboxSpawnOptions,
-} from "#shared/sandbox-session.js";
-
-interface FileBackedSandbox {
-  readFileBytes(path: string): Promise<Buffer | null>;
-  removePath(options: SandboxRemovePathOptions): Promise<void>;
-  spawn(options: SandboxSpawnOptions): Promise<SandboxProcess>;
-  writeFiles(
-    files: ReadonlyArray<{ readonly path: string; readonly content: Uint8Array }>,
-  ): Promise<void>;
-}
-
-export function createFileBackedInternalSandboxSession(input: {
-  readonly sandbox: FileBackedSandbox;
-}): InternalSandboxSession {
-  return {
-    resolvePath: resolveWorkspacePath,
-    async spawn(options: SandboxSpawnOptions) {
-      return await input.sandbox.spawn(options);
-    },
-    async readFile(options) {
-      const buf = await input.sandbox.readFileBytes(options.path);
-      return buf === null ? null : bufferToStream(buf);
-    },
-    async removePath(options: SandboxRemovePathOptions) {
-      await input.sandbox.removePath(options);
-    },
-    async writeFile(options) {
-      const buf = await streamToBuffer(options.content);
-      await input.sandbox.writeFiles([{ content: buf, path: options.path }]);
-    },
-  };
 }
 
 export function resolveWorkspacePath(path: string): string {

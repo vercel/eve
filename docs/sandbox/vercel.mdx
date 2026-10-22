@@ -53,7 +53,7 @@ Outside Vercel and without a linked project, such as in CI or on a self-hosted s
 
 ## Snapshot preparation
 
-eve creates a temporary persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, runs the authored `prepare` callback, and captures a snapshot. The build artifact records the snapshot ID.
+eve creates a temporary, non-persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, runs the authored `prepare` callback, and captures a snapshot. The build artifact records the snapshot ID.
 
 When a live session sandbox does not exist, eve creates it directly from that snapshot ID. Runtime does not need to look up the temporary template Sandbox.
 
@@ -92,6 +92,8 @@ export default defineSandbox(async () => {
   return sandbox;
 });
 ```
+
+Relative paths, including a relative `workingDirectory` passed to `run()` or `spawn()`, resolve from `/workspace`.
 
 Use the environment's `prepare` callback for immutable setup that every new session should inherit. Use post-open initialization for state that belongs only to one durable session.
 
@@ -132,11 +134,16 @@ const sandboxName = sandbox.name;
 
 ## Mount a Drive
 
-A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` in your app, create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+
+```bash
+pnpm add @vercel/sandbox
+```
 
 ```ts
+import { Drive } from "@vercel/sandbox";
 import { defineSandbox } from "eve/sandbox";
-import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
 const REGION = "iad1";
 
@@ -156,6 +163,8 @@ export default defineSandbox(async () => {
 });
 ```
 
+`Drive.getOrCreate()` comes from your app's own `@vercel/sandbox`, so it resolves credentials through the SDK, not eve: it reads `token`, `teamId`, and `projectId` passed to it, or a Vercel OIDC token, which the SDK refreshes from your Vercel CLI login and linked project. It does not read `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, or the credentials passed to `VercelSandbox.environment()`, so outside Vercel without a linked project, pass them to `Drive.getOrCreate()` too.
+
 This example mounts the Drive read-write at `/data`. Files written there remain on the Drive after the sandbox stops. Keep Drive mounts separate from eve's managed `/workspace` directory.
 
 Set the same region on the environment and the Drive. The environment region places the prepared snapshot and each session sandbox together with the Drive.
@@ -173,6 +182,8 @@ return environment.open({
 ```
 
 Before mounting `drive.snapshot()`, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
+
+Each `mounts` entry is a `Drive`, which mounts read-write, or a `{ drive, mode }` reference to an existing Drive by name, where `mode` is `"read-write"` or `"snapshot"`. `drive.snapshot()` returns such a reference.
 
 Vercel allows up to four non-overlapping, absolute Drive mount paths per sandbox. See the Vercel documentation for [Drive lifecycle, limits, and pricing](https://vercel.com/docs/sandbox/concepts/drives).
 

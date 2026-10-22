@@ -30,12 +30,12 @@ When `agent/sandbox/Dockerfile` exists, eve builds it during preparation and use
 
 ## Environment options
 
-Image, pull policy, environment variables, and `prepare` belong to the reusable environment. During preparation, eve starts a temporary container, hydrates managed resources, runs authored preparation, and commits the result as the recorded template image.
+Image, pull policy, environment variables, and `prepare` belong to the reusable environment. During preparation, eve starts a temporary container, seeds workspace and skill files, runs your `prepare`, and commits the result as the recorded template image.
 
 ## Live container options
 
 Pass `networkPolicy` to `open()`. Docker supports only `"allow-all"` and `"deny-all"`. The policy applies to the live container, not the prepared image.
 
-A session-owned container keeps writable `/workspace` state in its container filesystem. A stopped container restarts with that state.
+A session-owned container keeps writable `/workspace` state in its container filesystem. A stopped container restarts with that state. `sandbox.delete()` removes the session's container by name and succeeds when the container is already gone.
 
 See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

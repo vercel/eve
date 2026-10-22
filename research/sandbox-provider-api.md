@@ -329,7 +329,8 @@ runtime
   keyed call ends  → connection.close?()
   terminal outcome → connection.close?() for this process's connections,
                      onSessionEnd(ctx, state | null, { reason })
-  (stop and close run at most once per connection; a failed close never blocks deletion)
+  (close runs at most once per connection; stop is idempotent and may run again after
+  the connection resumes; a failed close never blocks deletion)
 ```
 
 ## Invariants
@@ -395,10 +396,10 @@ names match.
 | just-bash      | root directory from hash of `{ sessionId, version: 2 }`                  | `{ autoInstall, customCommands, filesystem, version: 2 }`, first 24 hex                                                                                                                     |
 
 Docker mounts `await ctx.resourcesDirectory()` and calls
-`ctx.populate(connection, { mountedAt: "/eve/resources" })`. Vercel's
-`DefaultSandbox` facade skips preparation when `ctx.isEmpty`;
-`VercelSandbox.environment()` does not. Vercel and just-bash set
-`toolSessions: true`; only just-bash needs `close()`.
+`ctx.populate(connection, { mountedAt: "/eve/resources" })`. Vercel skips
+preparation when `ctx.isEmpty` and no `source` is set, in
+`VercelSandbox.environment()` itself and therefore under `DefaultSandbox` too.
+Vercel and just-bash set `toolSessions: true`; only just-bash needs `close()`.
 
 ## Custom provider example
 
@@ -517,8 +518,13 @@ the last step. There are no public dual-shape overloads.
 3. Migrate Docker, with the golden key and name test.
 4. Migrate Vercel Sandbox, with the golden key and name test. Its changeset
    notes that a relative `workingDirectory` now resolves from `/workspace`.
+   Implemented: `VercelSandbox.environment()` itself keeps skipping an empty
+   preparation without a `source`, because deployed self-modification relies
+   on it, and the same step removed `Drive` (minor changeset).
 5. Make core consume the new shape directly. Remove the internal old shape,
-   and the tool-session `WeakMap`. Add a
+   and the tool-session `WeakMap`. Close a connection when the step that
+   opened it lets go of it; until then, eve closes connections only at the
+   other lifecycle points above. Add a
    `guard:invariants` rule for files under `src/execution/sandbox/bindings/`
    and `src/sandbox/providers/`: they may import the provider contract only
    through `#public/sandbox/*`, and may not import core sandbox modules
