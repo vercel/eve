@@ -149,14 +149,17 @@ describe("defineSandboxProvider", () => {
     const artifacts = [
       await prepare(environment, {
         skills: [{ content: "# Skill", relativePath: "review/SKILL.md" }],
-        workspace: [{ content: "seed", relativePath: "seed.txt" }],
+        workspace: [
+          { content: "seed", relativePath: "seed.txt" },
+          { content: "literal", relativePath: "$HOME/notes.txt" },
+        ],
       }),
       await prepare(provider.environment()),
     ];
 
     expect(artifacts).toEqual([{ empty: false }, { empty: true }]);
     expect(calls).toEqual([
-      "write /workspace/seed.txt /home/agent/.agents/skills/review/SKILL.md",
+      "write /workspace/seed.txt /workspace/$HOME/notes.txt /home/agent/.agents/skills/review/SKILL.md",
       "write /workspace/prepared.txt",
     ]);
   });

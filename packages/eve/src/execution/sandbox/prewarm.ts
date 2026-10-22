@@ -277,18 +277,12 @@ export function createSandboxPrepareContext(input: {
 }): SandboxPrepareContext {
   const { log, resources, storagePath } = input;
   const { prepare } = input.provider;
-  // Workspace paths stay relative so the session resolves them from the connection's root.
-  const files = [
-    ...(resources.workspace ?? []).map((file) => ({ ...file, path: file.relativePath })),
-    ...(resources.skills ?? []).map((file) => ({
-      ...file,
-      path: `${MODEL_SKILL_ROOT}/${file.relativePath}`,
-    })),
-  ];
+  const workspace = resources.workspace ?? [];
+  const skills = resources.skills ?? [];
   const resourcesPath = resources.key === undefined ? undefined : resources.path;
   return {
     files: input.files,
-    isEmpty: files.length === 0 && prepare === undefined,
+    isEmpty: workspace.length === 0 && skills.length === 0 && prepare === undefined,
     log,
     async populate(connection, options) {
       const session = createConnectionSession(connection);
@@ -296,15 +290,27 @@ export function createSandboxPrepareContext(input: {
       if (options?.mountedAt !== undefined && resourcesPath !== undefined) {
         log("copying workspace and skills from mounted resources");
         await copyMountedResources(session, shellQuote(options.mountedAt));
-      } else if (files.length > 0) {
+      } else if (workspace.length > 0 || skills.length > 0) {
         log("writing workspace and skills");
+        const bytes = (file: SandboxProviderResourceFile) =>
+          typeof file.content === "string" ? Buffer.from(file.content) : file.content;
         await session.writeFiles({
-          files: await Promise.all(
-            files.map(async (file) => ({
-              content: typeof file.content === "string" ? Buffer.from(file.content) : file.content,
-              path: await resolveSandboxModelPath({ path: file.path, sandbox: session }),
+          files: [
+            // A workspace file named like `$HOME/...` still lands under the workspace root.
+            ...workspace.map((file) => ({
+              content: bytes(file),
+              path: session.resolvePath(file.relativePath),
             })),
-          ),
+            ...(await Promise.all(
+              skills.map(async (file) => ({
+                content: bytes(file),
+                path: await resolveSandboxModelPath({
+                  path: `${MODEL_SKILL_ROOT}/${file.relativePath}`,
+                  sandbox: session,
+                }),
+              })),
+            )),
+          ],
         });
       }
       if (prepare === undefined) return;
