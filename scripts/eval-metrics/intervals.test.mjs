@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  coveredLength,
   coveredLengthBetween,
   firstDeltaInStep,
   pairIntervals,
@@ -72,7 +71,7 @@ test("unions overlapping intervals and measures coverage within and outside boun
     { startAt: 0, endAt: 7 },
     { startAt: 10, endAt: 12 },
   ]);
-  assert.equal(coveredLength(spans), 9);
+  assert.equal(coveredLengthBetween(spans), 9);
   assert.equal(coveredLengthBetween(spans, { within: [{ startAt: 3, endAt: 11 }] }), 5);
   assert.equal(
     coveredLengthBetween(spans, {
@@ -81,7 +80,7 @@ test("unions overlapping intervals and measures coverage within and outside boun
     }),
     2.5,
   );
-  assert.equal(coveredLength([]), 0);
+  assert.equal(coveredLengthBetween([]), 0);
 });
 
 test("finds the first text or reasoning delta of each step, ignoring other steps", () => {

@@ -1,6 +1,5 @@
 /**
- * @typedef {{ sessionId: string, eventId: string }} EventReference
- * @typedef {{ status: "measured", value: number, evidence?: readonly EventReference[] }
+ * @typedef {{ status: "measured", value: number }
  *   | { status: "unavailable" | "not-applicable", reason: string }} Measurement
  */
 
@@ -14,7 +13,7 @@ export function notApplicable(reason) {
   return { status: "not-applicable", reason };
 }
 
-/** Merge repeated session captures and validate event identities before selecting measurement evidence. */
+/** Merge repeated session captures and validate event identities before measuring. */
 export function captureSessions(sessions) {
   if (!Array.isArray(sessions)) return undefined;
 
@@ -44,16 +43,7 @@ export function captureSessions(sessions) {
     bySession.set(session.sessionId, events);
   }
 
-  return {
-    bySession,
-    events: [...bySession.values()].flat(),
-    sessionId: (event) => eventSessions.get(event.meta.id),
-    refs: (events) =>
-      events.map((event) => ({
-        sessionId: eventSessions.get(event.meta.id),
-        eventId: event.meta.id,
-      })),
-  };
+  return { bySession, events: [...bySession.values()].flat() };
 }
 
 /** Match an event type and exact data fields, preserving capture order. */

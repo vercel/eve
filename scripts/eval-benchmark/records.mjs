@@ -30,7 +30,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { classifyOutcome } from "../eval-metrics/gaps.mjs";
-import { METRICS_VERSION, deriveAttemptMetrics } from "../eval-metrics/standard.mjs";
+import {
+  METRICS_VERSION,
+  deriveAttemptMetrics,
+  listEvalArtifacts,
+} from "../eval-metrics/standard.mjs";
 
 export const RECORD_SCHEMA_VERSION = 1;
 export const LEG_ARTIFACT_PREFIX = "benchmark-leg-";
@@ -172,16 +176,6 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
 function ranOnModel(artifact, modelId) {
   const models = artifact.result?.derived?.models ?? [];
   return models.length === 0 || models.includes(modelId);
-}
-
-/** Find every eval detail artifact under one `.eve/evals/<timestamp>` tree. */
-export function listEvalArtifacts(runDirectory) {
-  const evalsDirectory = join(runDirectory, "evals");
-  if (!existsSync(evalsDirectory)) return [];
-  return readdirSync(evalsDirectory, { withFileTypes: true, recursive: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map((entry) => join(entry.parentPath, entry.name))
-    .sort();
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

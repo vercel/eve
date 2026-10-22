@@ -85,14 +85,6 @@ export function unionIntervals(intervals) {
   return merged;
 }
 
-/** Total covered length of possibly overlapping intervals. */
-export function coveredLength(intervals) {
-  return unionIntervals(intervals).reduce(
-    (total, { startAt, endAt }) => total + endAt - startAt,
-    0,
-  );
-}
-
 /**
  * Covered length of `intervals` that lies inside `within` and outside `excluding`.
  *

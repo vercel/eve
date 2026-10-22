@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { captureSessions, selectEvents } from "./measurements/events.mjs";
-import { completedTurns } from "./measurements/lifecycle.mjs";
+import { deriveAttemptMetrics } from "./standard.mjs";
 
 const event = (type, id, second, data = {}) => ({
   type,
@@ -24,8 +24,6 @@ test("indexes captures, deduplicates identical events, and selects exact data fi
   assert.deepEqual(capture.bySession.get("session"), [start, later]);
   assert.deepEqual(selectEvents(capture.events, "turn.started", { turnId: "turn" }), [start]);
   assert.deepEqual(selectEvents(capture.events, "turn.started", { turnId: "other" }), []);
-  assert.equal(capture.sessionId(start), "session");
-  assert.deepEqual(capture.refs([start]), [{ sessionId: "session", eventId: "start" }]);
   assert.equal(captureSessions(undefined), undefined);
   assert.deepEqual(captureSessions([]).events, []);
 });
@@ -45,7 +43,7 @@ test("rejects malformed or ambiguous capture identities", () => {
     assert.throws(() => captureSessions(sessions), message);
 });
 
-test("turn matching rejects incomplete and ambiguous evidence", () => {
+test("turn pairing makes turn time unavailable on incomplete or ambiguous evidence", () => {
   const [start, end] = turn("one", 1, 3);
   for (const [events, reason] of [
     [[], "missing-turn"],
@@ -55,7 +53,10 @@ test("turn matching rejects incomplete and ambiguous evidence", () => {
     [[start, end, { ...end, meta: { ...end.meta, id: "another-end" } }], "ambiguous-turn"],
     [[start, end, event("turn.completed", "orphan", 4, { turnId: "other" })], "turn-start-missing"],
   ]) {
-    const capture = captureSessions([{ sessionId: "session", events }]);
-    assert.deepEqual(completedTurns(capture, ["session"]), { status: "unavailable", reason });
+    const artifact = { result: { sessions: [{ sessionId: "session", events }] } };
+    assert.deepEqual(deriveAttemptMetrics(artifact).metrics["latency.turn_ms"], {
+      status: "unavailable",
+      reason,
+    });
   }
 });

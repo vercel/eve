@@ -34,7 +34,6 @@ import {
   pairIntervals,
   stepKey,
 } from "./measurements/intervals.mjs";
-import { completedTurns } from "./measurements/lifecycle.mjs";
 
 /** Bump whenever a definition below changes meaning. */
 export const METRICS_VERSION = 1;
@@ -153,9 +152,20 @@ function rootSessionIds(capture) {
 /** Pair every interval family of one session, clipping nothing yet. */
 function sessionTimeline(capture, sessionId) {
   const events = capture.bySession.get(sessionId);
-  const turns = completedTurns(capture, [sessionId], { terminalTypes: TURN_TERMINALS });
+  const turnStarts = selectEvents(events, "turn.started");
+  const turnKey = (e) => [e.data?.turnId];
+  // A root session with no turns has no turn time to attribute; without this,
+  // every latency and attribution part would read as a measured zero.
+  const turns =
+    turnStarts.length === 0
+      ? unavailable("missing-turn")
+      : pairIntervals(
+          turnStarts,
+          TURN_TERMINALS.flatMap((type) => selectEvents(events, type)),
+          { startKeys: turnKey, endKeys: turnKey, subject: "turn" },
+        );
   const terminals = new Map(
-    turns.status === "ready" ? turns.turns.map((t) => [t.start.data.turnId, t.completed]) : [],
+    turns.status === "ready" ? turns.intervals.map((turn) => [turn.key, turn.end]) : [],
   );
   // Work a turn abandons (a cancelled turn, a step cut off by a session
   // limit) ends with that turn.
@@ -196,10 +206,7 @@ function sessionTimeline(capture, sessionId) {
   );
   return {
     events,
-    turns:
-      turns.status === "ready"
-        ? toIntervals(turns.turns.map((t) => ({ start: t.start, end: t.completed })))
-        : turns,
+    turns,
     steps,
     actions,
     tasks,
@@ -213,18 +220,6 @@ function taskIdentity(event) {
   return typeof taskId === "string" && typeof callId === "string"
     ? `${taskId}/${callId}`
     : undefined;
-}
-
-function toIntervals(pairs) {
-  const intervals = [];
-  for (const { start, end } of pairs) {
-    const startAt = timestamp(start);
-    const endAt = timestamp(end);
-    if (startAt === undefined || endAt === undefined) return unavailable("missing-timestamp");
-    if (endAt < startAt) return unavailable("negative-duration");
-    intervals.push({ start, end, startAt, endAt });
-  }
-  return { status: "ready", intervals };
 }
 
 /** Input requests, responder-bound approvals, and sign-ins, from request to resolution. */
@@ -463,7 +458,15 @@ function isAmount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-/** The session's latest rolled-up usage, which includes delegated spend. */
+/**
+ * The session's latest rolled-up usage, which includes delegated spend.
+ *
+ * Not `result.derived.usage`: the runner keeps the last *capture* of each
+ * session, and an eval can capture a session again before its final usage
+ * (an earlier snapshot captured last), which undercounts. It also sums a
+ * missing cost as zero. This takes the latest usage event by time and makes
+ * cost unavailable when any root session reported none.
+ */
 function latestUsage(events) {
   let latest;
   for (const event of events) {
@@ -502,8 +505,8 @@ function efficiency(capture, roots, rootIds) {
     "counts.subagent_depth": measured(
       Math.max(...rootIds.map((id) => delegationDepth(capture, id))),
     ),
-    "counts.compactions": measured(selectEvents(capture.events, "compaction.completed").length),
-    "counts.context_clears": measured(selectEvents(capture.events, "context.cleared").length),
+    "counts.compactions": measured(selectEvents(rootEvents, "compaction.completed").length),
+    "counts.context_clears": measured(selectEvents(rootEvents, "context.cleared").length),
   };
 }
 
@@ -553,19 +556,18 @@ function failureCodes(events) {
     .sort((a, b) => a.type.localeCompare(b.type) || a.code.localeCompare(b.code));
 }
 
-/** Find every eval detail artifact under one `.eve/evals/<timestamp>` tree. */
+/**
+ * Every eval detail artifact under one `.eve/evals/<timestamp>` tree, sorted.
+ * The record builder and this file's CLI share it, so they agree on which
+ * artifacts exist.
+ */
 export function listEvalArtifacts(runDirectory) {
   const evalsDirectory = join(runDirectory, "evals");
-  const files = [];
-  const visit = (directory) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) visit(path);
-      else if (entry.name.endsWith(".json")) files.push(path);
-    }
-  };
-  if (existsSync(evalsDirectory)) visit(evalsDirectory);
-  return files.sort();
+  if (!existsSync(evalsDirectory)) return [];
+  return readdirSync(evalsDirectory, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort();
 }
 
 // `node scripts/eval-metrics/standard.mjs <.eve/evals/<timestamp>>` prints each

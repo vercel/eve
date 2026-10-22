@@ -2,22 +2,16 @@
 // nothing about the model or eve: it counts toward coverage but is excluded
 // from pass rates and from latency and cost medians.
 
-/** Every gap reason, in classification priority order. */
-export const GAP_REASONS = Object.freeze([
-  // The publish job found no artifact for a planned leg.
-  "job-missing",
-  // A planned eval has no result in its leg's artifacts.
-  "eval-missing",
-  // The model provider or network failed: HTTP 429/5xx, or a network-level error.
-  "provider-unavailable",
-  // eve could not write its durable event stream.
-  "stream-write-failed",
-  // The eval timed out before any model step completed.
-  "timeout-before-first-step",
-  // The eval errored before any model step completed.
-  "error-before-first-step",
-]);
-
+/**
+ * Gap reasons, in classification priority order:
+ *
+ * - `job-missing`: The publish job found no artifact for a planned leg.
+ * - `eval-missing`: A planned eval has no result in its leg's artifacts.
+ * - `provider-unavailable`: The model provider or network failed: HTTP 429/5xx, or a network-level error.
+ * - `stream-write-failed`: eve could not write its durable event stream.
+ * - `timeout-before-first-step`: The eval timed out before any model step completed.
+ * - `error-before-first-step`: The eval errored before any model step completed.
+ */
 /** @typedef {"completed" | "timed_out" | "skipped" | "parked" | "gap"} Outcome */
 
 const FAILURE_EVENTS = new Set(["step.failed", "turn.failed", "session.failed"]);
@@ -51,7 +45,9 @@ export function classifyOutcome(evalArtifact) {
   if (completedSteps === 0 && error !== undefined && !realFailure)
     return gap("error-before-first-step");
   if (timedOut) return { outcome: "timed_out" };
-  if (isParkedOnInput(evalArtifact)) return { outcome: "parked" };
+  // The runner's own definition (eve's derive-run-facts), so the eval report
+  // and the benchmark record agree on what parked means.
+  if (evalArtifact?.result?.derived?.parked === true) return { outcome: "parked" };
   return { outcome: "completed" };
 }
 
@@ -71,18 +67,4 @@ export function isProviderFailure(event) {
   }
   if (details?.semanticErrorId === "network-request-failed") return true;
   return NETWORK_FAILURE.test(JSON.stringify(details ?? {}) + (event.data?.message ?? ""));
-}
-
-/** The primary session's last turn lifecycle event parks it on a person. */
-function isParkedOnInput(evalArtifact) {
-  const primaryId = evalArtifact?.result?.sessionId;
-  const primary = (evalArtifact?.result?.sessions ?? []).filter(
-    (session) => session.sessionId === primaryId,
-  );
-  const lifecycle = primary
-    .flatMap((session) => session.events ?? [])
-    .filter((event) => event.type.startsWith("turn."))
-    .sort((a, b) => Date.parse(a.meta?.at ?? "") - Date.parse(b.meta?.at ?? ""));
-  const last = lifecycle.at(-1);
-  return last?.type === "turn.waiting" && last.data?.on === "input";
 }

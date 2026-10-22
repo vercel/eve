@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { GAP_REASONS, classifyOutcome } from "./gaps.mjs";
+import { classifyOutcome } from "./gaps.mjs";
 import { METRICS_VERSION, STANDARD_METRICS, deriveAttemptMetrics } from "./standard.mjs";
 
 // Fixtures are trimmed `eve eval` detail artifacts captured from mock-model
@@ -353,19 +353,12 @@ test("classifies outcomes and every gap reason", () => {
     error: "expectOk: session failed",
   });
   assert.deepEqual(classifyOutcome(sessionFailed), { outcome: "completed" });
-  const parked = synthetic([
-    event("turn.started", 0, { turnId: "t" }),
-    completedStep,
-    event("turn.waiting", 60, { turnId: "t", on: "input" }),
-  ]);
+  // Parked is the runner's derived fact (eve's derive-run-facts), not re-derived here.
+  const parked = synthetic([completedStep]);
+  parked.result.derived = { parked: true };
   assert.deepEqual(classifyOutcome(parked), { outcome: "parked" });
-
-  assert.deepEqual(GAP_REASONS, [
-    "job-missing",
-    "eval-missing",
-    "provider-unavailable",
-    "stream-write-failed",
-    "timeout-before-first-step",
-    "error-before-first-step",
-  ]);
+  assert.deepEqual(
+    classifyOutcome(fixture("agent-subagents-nested-authorization")).outcome,
+    "completed",
+  );
 });
