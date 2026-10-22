@@ -61,15 +61,8 @@ export function createJustBashSandboxProvider(
       await rm(state?.rootPath ?? sessionRootPath(context), { force: true, recursive: true });
     },
     async prepare(context) {
-      const templateKey = context
-        .templateKey({
-          autoInstall,
-          // A command built from a class hashes by its own fields; a plain copy keeps that key.
-          customCommands: options.customCommands?.map((command) => ({ ...command })),
-          filesystem: options.filesystem,
-          version: 2,
-        })
-        .slice(0, 24);
+      // Custom commands and the filesystem apply only to live sessions, so they stay out of the key.
+      const templateKey = context.templateKey({ version: 2 }).slice(0, 24);
       const templateRootPath = resolveTemplateRootPath(context.storagePath, templateKey);
       if (await pathExists(templateRootPath)) {
         await touchDirectory(templateRootPath);

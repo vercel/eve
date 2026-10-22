@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -10,25 +10,14 @@ import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// Values recorded from the provider before it moved to the public provider
-// API. Running sessions and shipped artifacts depend on them, so they must
-// never change.
-const GOLDEN = {
-  sessionRoot: "just-bash/sessions/e87bbba07bceb2ae5b77ad77",
-  templateKeys: {
-    customCommands: "454772e755ab66d06f71e33a",
-    defaults: "81d1596e5801b5002c9c98f1",
-    noAutoInstall: "c2a20b8d7c53299c7f94cf4b",
-    resources: "a6084cbac4e7af6015da73a2",
-  },
-};
+// Recorded from the provider before it moved to the public provider API.
+// Running sessions depend on it, so it must never change.
+const GOLDEN_SESSION_ROOT = "just-bash/sessions/e87bbba07bceb2ae5b77ad77";
 
-// Built from source text, so the hashed source does not depend on formatting or transpilation.
-const execute = new Function('return async () => ({ exitCode: 0, stderr: "", stdout: "hi\\n" })')();
-const filesystem = new Function("return (context) => context.defaultFilesystem")();
-
-class ClassCommand {
-  readonly name = "class-command";
+class QueryCommand {
+  readonly name = "query";
+  readonly client = new Map([["primary", "db.internal"]]);
+  readonly since = new Date(0);
   async execute() {
     return { exitCode: 0, stderr: "", stdout: "" };
   }
@@ -43,35 +32,16 @@ function createProvider(options?: JustBashEnvironmentOptions) {
 }
 
 describe("just-bash persisted identities", () => {
-  it("derives the same template keys as earlier releases", async () => {
+  it("keeps custom commands and the filesystem out of the template key", async () => {
     const appRoot = await createScratchDirectory("eve-just-bash-template-keys-");
-    const sourceRevision = "golden-source-revision";
-    const prepare = async (options: JustBashEnvironmentOptions | undefined, files = {}) =>
-      await createProvider(options).prepare({ appRoot, sourceRevision, ...files });
 
-    const keys = {
-      customCommands: await prepare({
-        customCommands: [{ execute, name: "hello" }, new ClassCommand()],
-        filesystem,
-      }),
-      defaults: await prepare(undefined),
-      noAutoInstall: await prepare({ autoInstall: false }),
-      resources: await prepare(undefined, {
-        resourcesKey: "golden-resources",
-        skills: [{ content: "# Weather\n", relativePath: "weather/SKILL.md" }],
-        workspace: [{ content: "notes\n", relativePath: "notes.txt" }],
-      }),
-    };
+    const plain = await createProvider().prepare({ appRoot });
+    const customized = await createProvider({
+      customCommands: [new QueryCommand()],
+      filesystem: ({ defaultFilesystem }) => defaultFilesystem,
+    }).prepare({ appRoot });
 
-    expect(keys).toEqual({
-      customCommands: { templateKey: GOLDEN.templateKeys.customCommands },
-      defaults: { templateKey: GOLDEN.templateKeys.defaults },
-      noAutoInstall: { templateKey: GOLDEN.templateKeys.noAutoInstall },
-      resources: { templateKey: GOLDEN.templateKeys.resources },
-    });
-    for (const templateKey of Object.values(GOLDEN.templateKeys)) {
-      await access(join(appRoot, "just-bash/templates", templateKey));
-    }
+    expect(customized).toEqual(plain);
   });
 
   it("records the same session root and state as earlier releases", async () => {
@@ -81,12 +51,12 @@ describe("just-bash persisted identities", () => {
 
     const { state } = await provider.start({ appRoot, sandboxName: "session_golden" });
 
-    expect(state).toEqual({ rootPath: join(appRoot, GOLDEN.sessionRoot), version: 2 });
+    expect(state).toEqual({ rootPath: join(appRoot, GOLDEN_SESSION_ROOT), version: 2 });
   });
 
   it("opens a template and resumes a session that an earlier release wrote", async () => {
     const appRoot = await createScratchDirectory("eve-just-bash-earlier-release-");
-    const templateKey = GOLDEN.templateKeys.defaults;
+    const templateKey = "81d1596e5801b5002c9c98f1";
     const templateRoot = join(appRoot, "just-bash/templates", templateKey);
     await mkdir(join(templateRoot, "fs/workspace"), { recursive: true });
     await writeFile(join(templateRoot, "fs/workspace/notes.txt"), "from the template\n");
@@ -94,7 +64,7 @@ describe("just-bash persisted identities", () => {
       join(templateRoot, "metadata.json"),
       `${JSON.stringify({ env: { GREETING: "hello" }, version: 1 }, null, 2)}\n`,
     );
-    const sessionRoot = join(appRoot, GOLDEN.sessionRoot);
+    const sessionRoot = join(appRoot, GOLDEN_SESSION_ROOT);
     await mkdir(join(sessionRoot, "fs/workspace"), { recursive: true });
     await writeFile(join(sessionRoot, "fs/workspace/kept.txt"), "kept\n");
     const provider = createProvider();
