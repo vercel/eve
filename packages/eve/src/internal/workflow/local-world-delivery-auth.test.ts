@@ -14,15 +14,19 @@ const QUEUE_HEADERS = {
 };
 
 function createFakeWorld() {
-  const enqueued: Array<{ name: string; headers: Record<string, string> | undefined }> = [];
+  const enqueued: Array<{
+    name: string;
+    message: unknown;
+    headers: Record<string, string> | undefined;
+  }> = [];
   const start = vi.fn(async () => {});
   const world = {
     queue: async (
       name: string,
-      _message: unknown,
+      message: unknown,
       options?: { headers?: Record<string, string> },
     ) => {
-      enqueued.push({ name, headers: options?.headers });
+      enqueued.push({ name, message, headers: options?.headers });
       return { messageId: "msg_1" };
     },
     createQueueHandler:
@@ -32,16 +36,24 @@ function createFakeWorld() {
         return Response.json({ ok: true });
       },
     runs: {
-      list: async () => ({
-        cursor: null,
-        data: [{ runId: "wrun_1", workflowName: "entry" }],
-        hasMore: false,
-      }),
+      list: vi.fn(async ({ pagination }: { pagination: { cursor?: string } }) =>
+        pagination.cursor === undefined
+          ? {
+              cursor: "page_2",
+              data: [{ runId: "wrun_1", workflowName: "entry" }],
+              hasMore: true,
+            }
+          : {
+              cursor: null,
+              data: [{ runId: "wrun_2", workflowName: "other" }],
+              hasMore: false,
+            },
+      ),
     },
     start,
   };
   const secured = authenticateLocalWorkflowDeliveries(world as never, SECRET);
-  return { enqueued, secured, start };
+  return { enqueued, secured, start, listRuns: world.runs.list };
 }
 
 describe("authenticateLocalWorkflowDeliveries", () => {
@@ -57,6 +69,7 @@ describe("authenticateLocalWorkflowDeliveries", () => {
     expect(enqueued).toEqual([
       {
         name: "__wkf_workflow_entry",
+        message: { runId: "wrun_1" },
         headers: { "x-other": "1", [LOCAL_WORKFLOW_DELIVERY_HEADER]: SECRET },
       },
     ]);
@@ -92,15 +105,32 @@ describe("authenticateLocalWorkflowDeliveries", () => {
   });
 
   it("re-enqueues active runs through the stamped queue when the world starts", async () => {
-    vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", "");
-    const { enqueued, secured, start } = createFakeWorld();
+    vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", "evetest");
+    const { enqueued, secured, start, listRuns } = createFakeWorld();
     await secured.start?.();
     expect(start).toHaveBeenCalledTimes(1);
     expect(enqueued).toEqual([
       {
-        name: expect.stringMatching(/workflow_entry$/),
+        name: "__evetest_wkf_workflow_entry",
+        message: { runId: "wrun_1" },
+        headers: { [LOCAL_WORKFLOW_DELIVERY_HEADER]: SECRET },
+      },
+      {
+        name: "__evetest_wkf_workflow_other",
+        message: { runId: "wrun_2" },
         headers: { [LOCAL_WORKFLOW_DELIVERY_HEADER]: SECRET },
       },
     ]);
+    expect(listRuns.mock.calls).toEqual([
+      [{ pagination: { cursor: undefined }, resolveData: "none", status: ["pending", "running"] }],
+      [{ pagination: { cursor: "page_2" }, resolveData: "none", status: ["pending", "running"] }],
+    ]);
+  });
+
+  it("rejects recovery without an installed namespace", async () => {
+    vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", undefined);
+    const { enqueued, secured } = createFakeWorld();
+    await expect(secured.start?.()).rejects.toThrow("WORKFLOW_QUEUE_NAMESPACE");
+    expect(enqueued).toEqual([]);
   });
 });

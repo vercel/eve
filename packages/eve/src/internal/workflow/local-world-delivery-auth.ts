@@ -3,7 +3,10 @@ import { randomBytes } from "node:crypto";
 import type { ValidQueueName } from "#compiled/@workflow/world/index.js";
 import type { LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
-import { WORKFLOW_QUEUE_NAMESPACE_ENV } from "#internal/workflow/queue-namespace.js";
+import {
+  workflowQueuePrefix,
+  WORKFLOW_QUEUE_NAMESPACE_ENV,
+} from "#internal/workflow/queue-namespace.js";
 
 export const LOCAL_WORKFLOW_DELIVERY_HEADER = "x-eve-workflow-delivery";
 
@@ -54,8 +57,13 @@ export function authenticateLocalWorkflowDeliveries(
 
 /** Mirrors world-local's startup recovery, but through the stamped `world.queue`. */
 async function reenqueueActiveRuns(world: LocalWorld): Promise<void> {
-  const namespace = process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] || undefined;
-  const prefix = namespace === undefined ? "__wkf_workflow_" : `__${namespace}_wkf_workflow_`;
+  const namespace = process.env[WORKFLOW_QUEUE_NAMESPACE_ENV];
+  if (!namespace) {
+    throw new Error(
+      `${WORKFLOW_QUEUE_NAMESPACE_ENV} must be installed before local workflow recovery.`,
+    );
+  }
+  const prefix = workflowQueuePrefix(namespace);
   let cursor: string | undefined;
   do {
     const page = await world.runs.list({
