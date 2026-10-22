@@ -123,8 +123,6 @@ export interface SandboxConnection<Extensions extends object = {}> {
   }): Promise<Uint8Array | ReadableStream<Uint8Array> | null>;
   writeFiles(options: SandboxWriteFilesOptions): Promise<void>;
   removePath(options: SandboxRemovePathOptions): Promise<void>;
-  /** Defaults to anchoring relative paths at `/workspace`. */
-  resolvePath?(path: string): string;
   /** Releases compute and keeps the sandbox's files. */
   stop(): Promise<void>;
   /** Releases what this process holds, such as a local interpreter, without touching the sandbox. */
@@ -146,7 +144,9 @@ Each method has a fixed contract:
   It is the only write primitive. Every built-in already buffers each write
   before sending it, so a bytes-only primitive does not regress them.
 - Every path a connection receives is absolute, and `workingDirectory` is
-  always set.
+  always set. eve is the only owner of path resolution: relative paths and a
+  relative or missing `workingDirectory` resolve from `/workspace`, which every
+  built-in's `resolvePath` already does.
 
 eve derives the rest of `SandboxSession`: `run` over `spawn`, binary and text
 variants, encodings and line ranges, single-file writes over `writeFiles`, path
@@ -215,13 +215,21 @@ export interface SandboxPrepareContext<Extensions extends object> {
   log(message: string): void;
   resolveProjectPath(path: string): string;
   templateKey(identity: SandboxIdentity): string;
-  /** A stable read-only host copy (`workspace/`, `skills/`) for bind mounts, when one exists. */
+  /** A stable read-only host directory with `workspace/` and `skills/`, when one exists. */
   resourcesDirectory(): Promise<string | undefined>;
-  /** Writes workspace and skill files, then runs authored `prepare` with a logging session. */
+  /** Seeds `/workspace` and `$HOME/.agents/skills`, then runs authored `prepare`. */
   populate(
     connection: SandboxConnection<Extensions>,
     options?: { readonly mountedAt?: string },
   ): Promise<void>;
+}
+
+export type WithPrepareOption<Options, Session> = Options extends undefined
+  ? SandboxPrepareOption<Session> | undefined
+  : Options & SandboxPrepareOption<Session>;
+
+export interface SandboxPrepareOption<Session> {
+  readonly prepare?: (sandbox: Session) => void | Promise<void>;
 }
 ```
 
@@ -253,29 +261,46 @@ and `sourceRevision` are reserved, and eve throws if `identity` sets either one.
 includes its `customCommands` and `filesystem` functions, so its key stays
 reproducible.
 
+`populate()` writes the workspace and skill files through
+`connection.writeFiles()` in one batch. With `mountedAt`, the provider has
+mounted `resourcesDirectory()` read-only at that sandbox path, and `populate()`
+copies `<mountedAt>/workspace/.` into `/workspace` and `<mountedAt>/skills/.`
+into `$HOME/.agents/skills` instead of writing them, as Docker does today.
+Either way, authored `prepare` runs next, with a logging session over the same
+connection.
+
 `resolveProjectPath` stays on both contexts because just-bash's `filesystem`
 callback and a host provider need project paths. `host.loadOptionalPackage`
-leaves the public context: just-bash calls eve's internal optional-package
-loader directly, as an internal engine helper.
+leaves the public context. just-bash calls eve's internal optional-package
+loaders directly, an allowed internal engine helper: the installing loader in
+`prepare` and the import-only loader in `start` and `resume`, as the two host
+implementations do today. It passes `ctx.resolveProjectPath(".")` as the app
+root.
 
-`prepare` becomes a standard environment option:
-`WithPrepareOption<Options, Session>` adds
-`prepare?: (sandbox: Session) => void | Promise<void>`, typed with the
-provider's extensions (#3717). eve removes it before calling the provider's
-`environment()` and runs it inside `populate()`. No built-in includes `prepare`
-in its template identity today, and `sourceRevision` already captures changes
-to it.
+`prepare` becomes a standard environment option through `WithPrepareOption`,
+typed with the provider's extensions (#3717). A provider without environment
+options still accepts `{ prepare }`. eve removes `prepare` before calling the
+provider's `environment()` and runs it inside `populate()`. No built-in
+includes `prepare` in its template identity today. `sourceRevision` hashes only
+the sandbox definition's source file, so it captures a `prepare` written there
+but not one imported from another module (see open questions).
 
-### Public surface changes
+### Export inventory
 
-| Change         | Items                                                                                                                                                                                                                             |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Newly public   | `SandboxConnection`, `SandboxSessionGoneError`, `SandboxTemplateNotProvisionedError`, `SANDBOX_AGENT_ENV`, `ctx.kind`, `SandboxSession.writeFiles`, eve-owned `SandboxNetworkPolicy`                                              |
-| Removed        | `SandboxProviderHandle`, the `SandboxProviderResource*` and `SandboxProviderTargetFile` types, `ctx.host`, `ctx.resources`, `ctx.sourceRevision`, the `Drive` re-export, just-bash's `CustomCommand` and `IFileSystem` in options |
-| Stays internal | Ensure orchestration, artifact store, identity hashing, `invokeTool` wiring, Docker CLI and Vercel SDK glue                                                                                                                       |
+| Module                  | Export                                                                                                                                                                          | Change                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `eve/sandbox/provider`  | `defineSandboxProvider`, `SandboxProviderDefinition`, `SandboxProviderImplementation`                                                                                           | New shape                                                               |
+| `eve/sandbox/provider`  | `SandboxProvider`, `SandboxProviderFiles`, `SandboxDeleteOptions`                                                                                                               | Unchanged                                                               |
+| `eve/sandbox/provider`  | `SandboxPreparedArtifact`, `SandboxProviderSessionContext`, `SandboxProviderPrepareContext`                                                                                     | Renamed `SandboxJson`, `SandboxSessionContext`, `SandboxPrepareContext` |
+| `eve/sandbox/provider`  | `SandboxConnection`, `SandboxIdentity`, `SandboxPrepareOption`, `WithPrepareOption`, `SandboxSessionGoneError`, `SandboxTemplateNotProvisionedError`, `SANDBOX_AGENT_ENV`       | Added                                                                   |
+| `eve/sandbox/provider`  | `SandboxProviderHandle`, `SandboxProviderResources`, `SandboxProviderResourceTree`, `SandboxProviderResourceFile`, `SandboxProviderResourceSource`, `SandboxProviderTargetFile` | Removed                                                                 |
+| `eve/sandbox`           | `SandboxSession` and its option, process, and result types; `SandboxNetworkPolicy`                                                                                              | eve-owned declarations; `SandboxSession` gains `writeFiles`             |
+| `eve/sandbox`           | `SandboxNetworkRule`, `SandboxNetworkMatch`, `SandboxNetworkMatcher`, `SandboxWriteFilesOptions`, `SandboxRemovePathOptions`                                                    | Added                                                                   |
+| `eve/sandbox/vercel`    | `Drive`; `VercelSandboxMount`, `VercelSandboxMounts`, `VercelSandboxMountMode`                                                                                                  | `Drive` removed; mount types become eve-owned structural types          |
+| `eve/sandbox/just-bash` | `JustBashEnvironmentOptions`, `JustBashFilesystemContext`                                                                                                                       | `customCommands` and `filesystem` use eve-owned structural types        |
 
-Vercel mounts and just-bash's `customCommands` and `filesystem` get eve-owned
-structural types that describe only the members eve forwards.
+Ensure orchestration, the artifact store, identity hashing, `invokeTool`
+wiring, and Docker CLI and Vercel SDK glue stay internal.
 
 ## Lifecycle
 
@@ -320,8 +345,9 @@ runtime
   is for a call that overlaps another call's start in the same process: it
   resumes from that start's state. Because nothing ever ends a keyed sandbox, a
   provider that sets `toolSessions: true` must bound retention itself, as Vercel
-  does with snapshot expiration. Without `toolSessions`, keyed calls fail with
-  `ToolSessionSandboxUnsupportedError`. An unkeyed call uses a fresh
+  does with snapshot expiration. Without `toolSessions`, a keyed call fails with
+  `ToolSessionSandboxUnsupportedError` when it requests a sandbox; a keyed
+  call that never calls `ctx.getSandbox()` runs normally. An unkeyed call uses a fresh
   `call_session_` id with `kind: "session"`, and calls `onSessionEnd()` when it
   ends if it requested a sandbox.
 - **Missing templates.** A provider throws `SandboxTemplateNotProvisionedError`
@@ -331,8 +357,11 @@ runtime
   Template retention and pruning stay with the provider.
 - **Seeding.** `populate()` writes workspace and skill files before authored
   `prepare`, and runs only at build time. Runtime never seeds.
-- **Paths.** Relative paths resolve from `/workspace`; eve resolves `$HOME` in
-  skill targets.
+- **Paths.** Relative paths and working directories resolve from `/workspace`;
+  eve resolves `$HOME` in skill targets. This changes one behavior: Vercel
+  passes a relative `workingDirectory` to the SDK unchanged today, while Docker
+  and just-bash already resolve it from `/workspace`. The Vercel migration PR
+  states this in its changeset.
 - **Environment.** Providers apply `SANDBOX_AGENT_ENV` (`AI_AGENT=eve`) beneath
   environment-level `env` when they create the sandbox, as Docker and Vercel do
   today. Per-call `env` overrides both. just-bash has no environment-level
@@ -349,13 +378,15 @@ runtime
 ## Byte-identical built-ins
 
 Each built-in keeps its own native-name derivation from `ctx.session.id` and
-passes its current identity fields to `ctx.templateKey()`:
+passes exactly its current identity fields to `ctx.templateKey()`. Each
+migration PR adds a golden test that the old and new template keys and session
+names match.
 
-| Provider       | Session name (unchanged)                                                 | Template identity passed to `templateKey`                                                  |
-| -------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| Docker         | `eve-sbx-` + hash of `{ namespace: storagePath, sessionId, version: 2 }` | `{ dockerfile, optionsHash, version: 2 }`, first 24 hex                                    |
-| Vercel Sandbox | `eve-sbx-vercel-` + hash of `{ sessionId, version: 2 }`                  | `{ createOptions, resolvedImage, version: 3 }`, first 32 hex, `eve-sbx-tpl-vercel-` prefix |
-| just-bash      | root directory from hash of `{ sessionId, version: 2 }`                  | `{ autoInstall, customCommands, filesystem, version: 2 }`, first 24 hex                    |
+| Provider       | Session name (unchanged)                                                 | Template identity passed to `templateKey`                                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker         | `eve-sbx-` + hash of `{ namespace: storagePath, sessionId, version: 2 }` | `{ dockerfile: dockerfile?.contentHash, optionsHash, version: 2 }`, first 24 hex                                                                                                            |
+| Vercel Sandbox | `eve-sbx-vercel-` + hash of `{ sessionId, version: 2 }`                  | `{ createOptions: vercelIdentityOptions(createOptions), resolvedImage, version: 3 }`, where `resolvedImage` is `undefined` when `source` is set; first 32 hex, `eve-sbx-tpl-vercel-` prefix |
+| just-bash      | root directory from hash of `{ sessionId, version: 2 }`                  | `{ autoInstall, customCommands, filesystem, version: 2 }`, first 24 hex                                                                                                                     |
 
 Docker mounts `await ctx.resourcesDirectory()` and calls
 `ctx.populate(connection, { mountedAt: "/eve/resources" })`. Vercel's
@@ -368,6 +399,7 @@ Docker mounts `await ctx.resourcesDirectory()` and calls
 A backend for a hypothetical snapshot-capable engine, `@acme/sdk`:
 
 ```ts
+import { createHash } from "node:crypto";
 import { defineSandbox } from "eve/sandbox";
 import {
   defineSandboxProvider,
@@ -381,10 +413,13 @@ export const AcmeSandbox = defineSandboxProvider({
   name: "acme",
   environment(options: { readonly project: string }) {
     const acme = new AcmeClient({ project: options.project });
-    const nameFor = (sessionId: string) => `eve-${sessionId}`;
+    // Session ids can be long, so hash them into a bounded machine name.
+    const nameFor = (sessionId: string) =>
+      `eve-${createHash("sha256").update(sessionId).digest("hex").slice(0, 32)}`;
     return {
       async prepare(ctx) {
-        const template = `eve-tpl-${ctx.templateKey({ version: 1 }).slice(0, 32)}`;
+        const key = ctx.templateKey({ project: options.project, version: 1 });
+        const template = `eve-tpl-${key.slice(0, 32)}`;
         const cached = await acme.snapshots.find(template);
         if (cached !== null) return { snapshotId: cached.id };
         const machine = await acme.machines.create({
@@ -400,7 +435,9 @@ export const AcmeSandbox = defineSandboxProvider({
       },
       async start(ctx, open: { readonly egress?: "allow-all" | "deny-all" } | undefined, artifact) {
         const name = nameFor(ctx.session.id);
-        const machine = await acme.machines.upsert({
+        // Atomic create-if-absent: an existing machine is returned unchanged,
+        // so `egress` and the snapshot apply only on creation.
+        const machine = await acme.machines.createIfAbsent({
           egress: open?.egress ?? "allow-all",
           env: SANDBOX_AGENT_ENV,
           name,
@@ -432,10 +469,12 @@ function connect(machine: AcmeMachine): SandboxConnection {
         env,
         signal: abortSignal,
       }),
-    readFile: ({ path }) => machine.files.read(path),
+    // Acme returns `null` for a missing path and rejects for a directory.
+    readFile: ({ abortSignal, path }) => machine.files.read(path, { signal: abortSignal }),
     writeFiles: ({ abortSignal, files }) =>
       machine.files.write(files, { mkdirs: true, signal: abortSignal }),
-    removePath: ({ force, path, recursive }) => machine.files.remove(path, { force, recursive }),
+    removePath: ({ abortSignal, force, path, recursive }) =>
+      machine.files.remove(path, { force, recursive, signal: abortSignal }),
     stop: () => machine.suspend(),
   };
 }
@@ -465,9 +504,10 @@ the last step. There are no public dual-shape overloads.
    `custom-provider` fixture, and add evals for gone-sandbox recovery and for
    keyed calls on a provider without `toolSessions`. Built-ins keep the old
    shape through the internal type (minor changeset).
-2. Migrate just-bash.
-3. Migrate Docker.
-4. Migrate Vercel Sandbox.
+2. Migrate just-bash, with the golden key and name test.
+3. Migrate Docker, with the golden key and name test.
+4. Migrate Vercel Sandbox, with the golden key and name test. Its changeset
+   notes that a relative `workingDirectory` now resolves from `/workspace`.
 5. Make core consume the new shape directly. Remove the internal old shape,
    the tool-session `WeakMap`, and `SANDBOX_WRITE_FILES`. Add a
    `guard:invariants` rule for files under `src/execution/sandbox/bindings/`
@@ -489,13 +529,26 @@ the last step. There are no public dual-shape overloads.
 - **Extension types through wrappers.** Abort binding, logging, and the runtime
   lifecycle proxy must keep extension members and their types. #5020 needs a
   type test that covers each wrapper.
+- **Imported `prepare` callbacks.** `sourceRevision` misses changes to a
+  `prepare` imported from another module, so a template can stay stale. Now
+  that eve owns `prepare`, it could hash the bundled callback's module graph
+  into the template key. That changes every key once, so it belongs in its own
+  PR.
 
 ## Relationship to other plans
 
-This proposal supersedes the provider contract, handle hooks, and `prepare`
-ownership in [`sandbox-environments-open.md`](./sandbox-environments-open.md)
-(draft). That plan said core never reserves `prepare`; this one makes it a
-standard option so eve can order seeding before `prepare`, compute `isEmpty`,
-and type the `prepare` sandbox with provider extensions. Its environment
-`open()` model, provider-owned identity, immutable state, and gone semantics
+This proposal supersedes three parts of
+[`sandbox-environments-open.md`](./sandbox-environments-open.md) (draft):
+
+- **Provider contract and handle hooks.** Connections and `onSessionEnd` replace
+  `SandboxProviderHandle`.
+- **`prepare` ownership.** That plan said core never reserves `prepare`. This
+  one makes it a standard option so eve can seed before `prepare`, compute
+  `isEmpty`, and type the `prepare` sandbox with provider extensions.
+- **Native identity.** That plan derived native identity from the session id,
+  artifact, environment options, and open options, with no core-computed keys.
+  Since #5132, native identity comes from the session id and a provider
+  namespace only, and this proposal adds the core-computed `templateKey`.
+
+Its environment `open()` model, immutable session state, and gone semantics
 still apply.
