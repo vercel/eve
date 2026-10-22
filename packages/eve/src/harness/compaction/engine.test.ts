@@ -335,22 +335,30 @@ describe("shouldCompact", () => {
 // strategy a test hits is pure threshold arithmetic:
 //
 // - The tool-result cap heuristic is accepted only when the capped history
-//   PLUS the fixed compaction prompt envelope fits the threshold.
-//   `HEURISTICS_FORBIDDEN` sits below the envelope estimate, so no heuristic
-//   can be accepted and the summarization fallback always runs.
+//   PLUS the fixed compaction prompt envelope fits 60% of the threshold, and a
+//   summary is accepted on the same limit.
+// - `SUMMARY_THRESHOLD` with `PROSE_BULK` in the older region: capping cannot
+//   shrink prose, so the summarization fallback always runs, and a small
+//   summary plus tail fits the limit.
 // - `ROOMY` accepts capping whenever the history's bulk is tool output.
 //
 // Every result is checked against `expectWellFormedCompaction`: no orphaned
-// tool_result, never trailing on an assistant message, and — unless the
-// window was exhausted — within the threshold on shouldCompact's own ruler,
-// so the result cannot immediately re-trigger compaction.
+// tool_result, never trailing on an assistant message, and within the accept
+// limit on shouldCompact's own ruler, so the result cannot re-trigger
+// compaction.
 
 const ENVELOPE_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
-const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS);
+const SUMMARY_THRESHOLD = 4_000;
+const PROSE_BULK = "filler ".repeat(4_000);
 const ROOMY = 100_000;
+
+/** The threshold whose 60% accept limit is `tokens` on shouldCompact's ruler. */
+function thresholdAccepting(tokens: number): number {
+  return Math.ceil((tokens + ENVELOPE_TOKENS) / 0.6) + 1;
+}
 
 const CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
@@ -438,9 +446,7 @@ function expectWellFormedCompaction(result: ModelMessage[], threshold: number): 
 
   expect(result.at(-1)?.role, "history must not trail on assistant content").not.toBe("assistant");
 
-  if (result.length > 2) {
-    expect(estimateTokens(result)).toBeLessThanOrEqual(threshold);
-  }
+  expect(estimateTokens(result) + ENVELOPE_TOKENS).toBeLessThanOrEqual(Math.floor(threshold * 0.6));
 }
 
 async function compact(
@@ -497,6 +503,53 @@ describe("compactMessages: tool-result cap heuristic", () => {
       expect(shouldCompact(result, { recentWindowSize: 1, threshold: 20_000 })).toBe(false);
     },
   );
+
+  describe("headroom after capping", () => {
+    // Older region: prose that capping cannot shrink, plus one large tool
+    // result that it can. Measure the capped size on shouldCompact's ruler,
+    // then place the trigger relative to it.
+    const [call, resultMsg] = toolExchange({ callId: "bulk", payloadChars: 400_000 });
+    const messages = [
+      user(`Earlier analysis. ${"notes ".repeat(6_000)}`),
+      call,
+      resultMsg,
+      user("Continue."),
+    ];
+    async function cappedTokens(): Promise<number> {
+      const capped = await compactMessages(
+        messages,
+        { recentWindowSize: 1, threshold: 10_000_000 },
+        summarizeWith("unused"),
+      );
+      expect(JSON.stringify(capped)).toContain("Truncated by eve");
+      return estimateTokens(capped) + ENVELOPE_TOKENS;
+    }
+
+    it("summarizes when capping lands just under the trigger", async () => {
+      // Production case: capping brought 180k-trigger history to 168.7k
+      // (~94%), shouldCompact re-fired six steps later, and a summary ran
+      // anyway after a second prompt-cache miss.
+      const threshold = Math.ceil((await cappedTokens()) / 0.94);
+      expect(shouldCompact(messages, { recentWindowSize: 1, threshold })).toBe(true);
+
+      const { result, summarizer } = await compact(messages, { recentWindowSize: 1, threshold });
+
+      expect(summarizer).toHaveBeenCalledOnce();
+      expect(result[1]).toEqual(assistant("checkpoint text"));
+      expect(JSON.stringify(result)).not.toContain("Truncated by eve");
+    });
+
+    it("accepts capping that leaves real headroom below the trigger", async () => {
+      const threshold = Math.ceil((await cappedTokens()) / 0.5);
+      expect(shouldCompact(messages, { recentWindowSize: 1, threshold })).toBe(true);
+
+      const { result, summarizer } = await compact(messages, { recentWindowSize: 1, threshold });
+
+      expect(summarizer).not.toHaveBeenCalled();
+      expect(result).toHaveLength(messages.length);
+      expect(JSON.stringify(result)).toContain("Truncated by eve");
+    });
+  });
 
   it("accepts capping that frees enough space against the measured input count", async () => {
     const messages = [
@@ -949,15 +1002,17 @@ describe("compactMessages: forced summary", () => {
 
 describe("compactMessages: summarization fallback", () => {
   it("summarizes when capping cannot free enough space", async () => {
-    // All bulk is conversational prose — capping removes nothing — and the
-    // threshold sits below the prompt envelope, so no heuristic can be
-    // accepted regardless.
-    const messages = [user("old context to fold away"), assistant("old reply"), user("continue")];
+    // All bulk is conversational prose, so capping removes nothing.
+    const messages = [
+      user("old context to fold away"),
+      assistant(`old reply ${PROSE_BULK}`),
+      user("continue"),
+    ];
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 1,
       summary: "Distilled story",
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: SUMMARY_THRESHOLD,
     });
 
     expect(summarizer).toHaveBeenCalledTimes(1);
@@ -975,12 +1030,12 @@ describe("compactMessages: summarization fallback", () => {
     const messages = [
       ...checkpointHead(previousCheckpoint),
       user("new evidence"),
-      assistant("latest response"),
+      assistant(`latest response ${PROSE_BULK}`),
     ];
 
     const { result, summarizer } = await compact(messages, {
       summary: "Updated checkpoint",
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: SUMMARY_THRESHOLD,
     });
 
     expect(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain(previousCheckpoint);
@@ -1023,7 +1078,7 @@ describe("compactMessages: summarization fallback", () => {
     const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 600 });
     const summary = "s".repeat(2_800);
     const head = checkpointHead(summary);
-    const threshold = Math.floor(
+    const threshold = thresholdAccepting(
       (estimateTokens([...head, task]) + estimateTokens([...head, call, resultMsg, task])) / 2,
     );
     const { result } = await compact([user("old notes ".repeat(4_000)), task, call, resultMsg], {
@@ -1033,7 +1088,7 @@ describe("compactMessages: summarization fallback", () => {
     });
 
     expect(result.at(-1)).toEqual(task);
-    expect(estimateTokens(result)).toBeLessThanOrEqual(threshold);
+    expect(result).not.toContainEqual(call);
   });
 
   it("strips tool activity from the tail when verbatim does not fit but text does", async () => {
@@ -1058,9 +1113,10 @@ describe("compactMessages: summarization fallback", () => {
       user("do the thing"),
       assistant("Running the tool."),
     ]);
-    const threshold = Math.floor((verbatimSize + strippedSize) / 2);
-    expect(strippedSize).toBeLessThan(threshold);
-    expect(verbatimSize).toBeGreaterThan(threshold);
+    const threshold = thresholdAccepting((verbatimSize + strippedSize) / 2);
+    const limit = Math.floor(threshold * 0.6) - ENVELOPE_TOKENS;
+    expect(strippedSize).toBeLessThan(limit);
+    expect(verbatimSize).toBeGreaterThan(limit);
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 3,
@@ -1081,7 +1137,8 @@ describe("compactMessages: summarization fallback", () => {
     const { result } = await compact(messages, {
       recentWindowSize: 10,
       summary: "Summary of the large SQL result",
-      threshold: HEURISTICS_FORBIDDEN,
+      // Room for the summary and the prompt, not for the capped result.
+      threshold: thresholdAccepting(300),
     });
 
     // The folded-away user prompt is replayed as the live turn, so the model
@@ -1096,24 +1153,28 @@ describe("compactMessages: summarization fallback", () => {
   it("replays the folded-away user prompt when the tail would trail on assistant content", async () => {
     const messages = [
       user("please fix the flaky test"),
-      assistant("working on it"),
+      assistant(`working on it ${PROSE_BULK}`),
       assistant("still going"),
     ];
 
     const { result } = await compact(messages, {
       recentWindowSize: 1,
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: SUMMARY_THRESHOLD,
     });
 
     expect(result.at(-1)).toEqual(user("please fix the flaky test"));
   });
 
   it("falls back to a framework continuation when the real user prompt survives in the tail", async () => {
-    const messages = [user("old context"), user("latest question"), assistant("answering")];
+    const messages = [
+      user(`old context ${PROSE_BULK}`),
+      user("latest question"),
+      assistant("answering"),
+    ];
 
     const { result } = await compact(messages, {
       recentWindowSize: 2,
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: SUMMARY_THRESHOLD,
     });
 
     // "latest question" is already in the kept tail — replaying it would ask
@@ -1125,14 +1186,74 @@ describe("compactMessages: summarization fallback", () => {
   });
 
   it("does not append any resumption when the tail already ends on a user turn", async () => {
-    const messages = [user("old"), assistant("old reply"), user("latest question")];
+    const messages = [user("old"), assistant(`old reply ${PROSE_BULK}`), user("latest question")];
 
     const { result } = await compact(messages, {
       recentWindowSize: 1,
-      threshold: HEURISTICS_FORBIDDEN,
+      threshold: SUMMARY_THRESHOLD,
     });
 
     expect(result.at(-1)).toEqual(user("latest question"));
     expect(result.filter((m) => m.content === "Continue.")).toHaveLength(0);
+  });
+
+  it("does not accept a summary and tail that fit only without the prompt envelope", async () => {
+    // Production case: a session compacted 160 times in 1h43m because a
+    // summary plus tail that fit the bare history size was accepted, and
+    // shouldCompact (which adds the prompt envelope) fired again next step.
+    const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 3_600 });
+    const messages = [
+      user("Investigate."),
+      assistant(`investigation notes ${PROSE_BULK}`),
+      user("do the thing"),
+      call,
+      resultMsg,
+    ];
+    const summaryHead = checkpointHead("checkpoint text");
+    const verbatimSize = estimateTokens([...summaryHead, ...messages.slice(2)]);
+    // Just under the envelope: the summary and tail fit the bare size, and
+    // the tail still fits the window reserve, but not shouldCompact's ruler.
+    const threshold = Math.floor(verbatimSize + ENVELOPE_TOKENS - 20);
+    expect(verbatimSize).toBeLessThanOrEqual(threshold);
+    expect(verbatimSize + ENVELOPE_TOKENS).toBeGreaterThan(threshold);
+
+    const compactionConfig = { recentWindowSize: 3, threshold };
+    const summarizer = summarizeWith("checkpoint text");
+    const result = await compactMessages(messages, compactionConfig, summarizer);
+
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(shouldCompact(result, compactionConfig)).toBe(false);
+  });
+
+  it("fails instead of returning a summary that is over the limit", async () => {
+    const messages = [user("Investigate."), assistant(`notes ${PROSE_BULK}`), user("continue")];
+
+    await expect(
+      compactMessages(
+        messages,
+        { recentWindowSize: 1, threshold: SUMMARY_THRESHOLD },
+        summarizeWith("s".repeat(40_000)),
+      ),
+    ).rejects.toThrow(/could not fit the summary/);
+  });
+
+  it("continues instead of replaying a task that does not fit the accept limit", async () => {
+    // The task fits the threshold, so a bare summary and the replayed task
+    // would fit on the old ruler, but not under the 60% accept limit.
+    const task = user(`Review every file. ${"requirement ".repeat(5_600)}`);
+    const messages = [task, assistant("working on it"), assistant("still going")];
+    const threshold = 20_000;
+    expect(estimateTokens([task])).toBeGreaterThan(Math.floor(threshold * 0.6));
+    expect(estimateTokens([task])).toBeLessThan(threshold);
+
+    const compactionConfig = { recentWindowSize: 1, threshold };
+    const summarizer = summarizeWith("checkpoint text");
+    const result = await compactMessages(messages, compactionConfig, summarizer);
+
+    expect(result.at(-1)).toEqual(
+      createFrameworkUserMessage("execution.continuation", "Continue."),
+    );
+    expect(result).not.toContainEqual(task);
+    expect(shouldCompact(result, compactionConfig)).toBe(false);
   });
 });

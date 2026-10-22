@@ -20,16 +20,24 @@ const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // block, and 10 advertised tools; with nothing deferred and no skills or
 // connections, the agent has no catalog tools) at 2,273
 // tokens. This allowance sits 230.25 tokens below that estimate, the offset the
-// cases have always run with, so the threshold leaves them a ~670-token history
-// budget. When eve's fixed instructions or tools change, re-measure: log what
-// `estimateRequestEnvelope` (packages/eve/src/harness/request-envelope.ts)
-// returns while `EVE_E2E_MODEL=mock pnpm exec eve eval --strict
-// content-output-file-stub` runs in this fixture, subtract 230.25, and round up.
+// cases have always run with. When eve's fixed instructions or tools change,
+// re-measure: log what `estimateRequestEnvelope`
+// (packages/eve/src/harness/request-envelope.ts) returns while
+// `EVE_E2E_MODEL=mock pnpm exec eve eval --strict content-output-file-stub`
+// runs in this fixture, subtract 230.25, and round up.
 const TEST_REQUEST_ENVELOPE_TOKENS = 2_043;
-// Fit the capped file-output exchange, while forcing the larger review and
-// handoff reports into the assistant checkpoint consumed by the script.
-const TEST_HISTORY_BUDGET_TOKENS = 900;
-const COMPACTION_PRESSURE_USAGE = { inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + 4_096 };
+// Compaction accepts a compacted history only under 60% of the history
+// threshold, with the ~405-token compaction prompt envelope counted inside it.
+// A 5,000-token allowance leaves a ~4,770-token history threshold and a
+// ~2,860-token accept limit: room for that envelope, a 700-1,100-token summary
+// and a short tail. A smaller allowance leaves no room for the summary, and
+// compaction fails. Pressure still comes from the history growing past the
+// threshold (task-survival), the attachment (content-output-file-stub) and the
+// reported usage below (redundant-tool-calls).
+const TEST_HISTORY_BUDGET_TOKENS = 5_000;
+const COMPACTION_PRESSURE_USAGE = {
+  inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS + 1_000,
+};
 const MAX_TOOL_CALLS = 10;
 
 type RegressionCase = "content-output-file-stub" | "redundant-tool-calls" | "task-survival";
