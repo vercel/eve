@@ -3436,6 +3436,27 @@
       ]
     },
     {
+      "name": "instrumentation/oodle",
+      "type": "registry:item",
+      "title": "Oodle",
+      "description": "Send agent traces to Oodle over OpenTelemetry.",
+      "dependencies": [
+        "@vercel/otel"
+      ],
+      "envVars": {
+        "OODLE_OTLP_ENDPOINT": "",
+        "OODLE_API_KEY": "",
+        "OODLE_INSTANCE": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/oodle.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation/oodle.ts"
+        }
+      ]
+    },
+    {
       "name": "instrumentation/jaeger",
       "type": "registry:item",
       "title": "Jaeger",

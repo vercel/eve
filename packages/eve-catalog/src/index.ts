@@ -955,6 +955,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "oodle",
+    name: "Oodle",
+    kind: "instrumentation",
+    tagline: "Send agent traces to Oodle over OpenTelemetry.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "jaeger",
     name: "Jaeger",
     kind: "instrumentation",

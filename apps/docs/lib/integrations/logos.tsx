@@ -815,6 +815,21 @@ const raindropLogo = (props: LogoProps) => (
   </svg>
 );
 
+const oodleLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      clipRule="evenodd"
+      d="M 5.889 11.293 C 5.19 11.735 4.602 12.264 4.123 12.878 C 3.342 13.864 2.951 15.028 2.951 16.371 C 2.951 17.714 3.342 18.887 4.123 19.889 C 4.905 20.875 5.979 21.64 7.346 22.184 C 8.714 22.728 10.264 23 11.998 23 C 13.756 23 15.306 22.728 16.649 22.184 C 18.016 21.64 19.09 20.875 19.872 19.889 C 20.653 18.887 21.044 17.714 21.044 16.371 C 21.044 15.028 20.653 13.864 19.872 12.878 C 19.394 12.244 18.794 11.703 18.072 11.252 V 14.23 C 18.445 14.772 18.631 15.387 18.631 16.077 C 18.631 16.932 18.345 17.679 17.772 18.318 C 17.199 18.945 16.411 19.433 15.409 19.779 C 15.056 19.903 14.683 20.005 14.291 20.084 C 13.584 20.311 12.82 20.425 11.998 20.425 C 11.173 20.425 10.412 20.311 9.716 20.084 C 9.322 20.005 8.946 19.903 8.587 19.779 C 7.584 19.433 6.796 18.945 6.223 18.318 C 5.65 17.679 5.364 16.932 5.364 16.077 C 5.364 15.409 5.539 14.81 5.889 14.281 V 11.293Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+    <rect fill="currentColor" height="16.882" rx="0.968" width="1.936" x="6.945" y="4.752" />
+    <rect fill="currentColor" height="14.885" rx="0.968" width="1.936" x="9.668" y="6.748" />
+    <rect fill="currentColor" height="16.882" rx="0.968" width="1.936" x="12.391" y="4.752" />
+    <rect fill="currentColor" height="20.634" rx="0.968" width="1.936" x="15.114" y="1" />
+  </svg>
+);
+
 const shopifyLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 109.5 124.5" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -853,6 +868,7 @@ export const logos = {
   braintrust: braintrustLogo,
   jaeger: jaegerLogo,
   raindrop: raindropLogo,
+  oodle: oodleLogo,
   kernel: kernelLogo,
   upstash: upstashLogo,
   arcana: arcanaLogo,
