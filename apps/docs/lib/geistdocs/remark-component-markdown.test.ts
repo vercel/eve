@@ -4,13 +4,17 @@ import { describe, expect, it } from "vitest";
 import { remarkComponentMarkdown } from "./remark-component-markdown";
 import config from "../../source.config";
 
+async function configuredProcessor() {
+  const options =
+    typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
+  const plugins = options?.remarkPlugins;
+  if (!Array.isArray(plugins)) throw new Error("Expected configured remark plugins");
+  return createProcessor({ remarkPlugins: plugins });
+}
+
 describe("component Markdown export", () => {
   it("expands the runtime diagram without changing HTML or component examples", async () => {
-    const options =
-      typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
-    const plugins = options?.remarkPlugins;
-    if (!Array.isArray(plugins)) throw new Error("Expected configured remark plugins");
-    const processor = createProcessor({ remarkPlugins: plugins });
+    const processor = await configuredProcessor();
     const source = [
       "## Agent loop and sandbox",
       "",
@@ -68,42 +72,41 @@ describe("component Markdown export", () => {
     );
   });
 
-  it("expands the use case components into Markdown lists and tables", async () => {
-    const options =
-      typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
-    const plugins = options?.remarkPlugins;
-    if (!Array.isArray(plugins)) throw new Error("Expected configured remark plugins");
-    const processor = createProcessor({ remarkPlugins: plugins });
+  it("renders use case cards as Markdown lists with their titles and links", async () => {
+    const processor = await configuredProcessor();
     const source = [
-      "<UseCaseOverview />",
-      '<UseCasePatterns useCase="business" />',
-      '<UseCaseCapabilities useCase="service" />',
-    ].join("\n\n");
+      "<UseCaseSummaries>",
+      '  <UseCaseSummary audience="For your team" title="Business agents" href="#business-agents" channels={["slack"]}>',
+      "    Automate a company function.",
+      "  </UseCaseSummary>",
+      "</UseCaseSummaries>",
+      "",
+      "<TemplateCards>",
+      '  <TemplateCard title="iMessage agent" template="openinstinct-eve-template" label="iMessage">',
+      "    A multi-tenant iMessage service.",
+      "  </TemplateCard>",
+      "</TemplateCards>",
+      "",
+      "<Capabilities>",
+      '  <Capability icon="channels" title="Meet employees where they work" href="/docs/channels/overview" link="Channels">',
+      "    One agent serves Slack and",
+      "    your own web apps.",
+      "  </Capability>",
+      "</Capabilities>",
+    ].join("\n");
     const markdown = toMarkdown(processor.parse(source), {
       extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
     });
 
-    expect(markdown).toContain("- **[Business agents](#business-agents)** (for your team)");
-    expect(markdown).toContain("It usually runs in iMessage, WhatsApp, Telegram, Discord, or Web.");
     expect(markdown).toContain(
-      "See the [Software Factory template](/templates/eve-software-factory-template).",
+      "- **[Business agents](#business-agents)** (For your team): Automate a company function.",
     );
     expect(markdown).toContain(
-      "| Isolate every tenant | [Multi-tenancy](/docs/patterns/multi-tenant-auth)",
+      "- **iMessage agent**: A multi-tenant iMessage service. See the [iMessage template](/templates/openinstinct-eve-template).",
     );
-    expect(markdown).not.toMatch(/<UseCase/);
-  });
-
-  it("rejects a use case component without a known literal use case", async () => {
-    const options =
-      typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
-    const processor = createProcessor({ remarkPlugins: options?.remarkPlugins as never });
-    const tree = processor.parse('<UseCasePatterns useCase="internal" />');
-
-    expect(() =>
-      toMarkdown(tree, {
-        extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
-      }),
-    ).toThrow("UseCasePatterns Markdown export requires a literal useCase string.");
+    expect(markdown).toContain(
+      "- **Meet employees where they work**: One agent serves Slack and your own web apps. See [Channels](/docs/channels/overview).",
+    );
+    expect(markdown).not.toMatch(/<(UseCase|Template|Capabilit)/);
   });
 });
