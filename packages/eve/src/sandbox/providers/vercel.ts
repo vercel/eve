@@ -1,38 +1,30 @@
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
+import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 import {
-  createVercelSandboxProvider,
-  type VercelSandboxPreparedArtifact,
-  type VercelSandboxSessionState,
-} from "#execution/sandbox/bindings/vercel.js";
+  defineSandboxProvider,
+  type SandboxProvider,
+  type WithPrepareOption,
+} from "#public/sandbox/provider.js";
 import type {
   VercelSandboxCreateOptions,
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
-import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
-import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
 
-export type VercelSandboxEnvironmentOptions = VercelSandboxCreateOptions & {
-  readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
-};
+/** Vercel create options plus `prepare`, which receives a {@link VercelSandboxSession}. */
+export type VercelSandboxEnvironmentOptions = WithPrepareOption<
+  VercelSandboxCreateOptions,
+  VercelSandboxSession
+>;
 export type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
 
-const provider = defineLegacySandboxProvider<
+// `| undefined` keeps the options one optional argument: the create options
+// are a union that would otherwise spread into one signature per member.
+export const VercelSandbox: SandboxProvider<
   VercelSandboxEnvironmentOptions | undefined,
   VercelSandboxRuntimeOptions,
-  VercelSandboxPreparedArtifact,
-  VercelSandboxSessionState,
   VercelSandboxSession
->({
+> = defineSandboxProvider({
   name: "vercel",
-  environment: (options) => createVercelSandboxProvider(options),
+  environment: (options: VercelSandboxCreateOptions) =>
+    createVercelSandbox({ createOptions: options }),
 });
-
-export const VercelSandbox = {
-  name: "vercel",
-  environment(
-    options?: VercelSandboxEnvironmentOptions,
-  ): SandboxEnvironment<VercelSandboxRuntimeOptions, VercelSandboxSession> {
-    return provider.environment(options);
-  },
-};

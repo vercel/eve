@@ -93,6 +93,8 @@ export default defineSandbox(async () => {
 });
 ```
 
+Relative paths, including a relative `workingDirectory` passed to `run()` or `spawn()`, resolve from `/workspace`.
+
 Use the environment's `prepare` callback for immutable setup that every new session should inherit. Use post-open initialization for state that belongs only to one durable session.
 
 ## Network policy
@@ -132,11 +134,16 @@ const sandboxName = sandbox.name;
 
 ## Mount a Drive
 
-A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` in your app, create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+
+```bash
+pnpm add @vercel/sandbox
+```
 
 ```ts
+import { Drive } from "@vercel/sandbox";
 import { defineSandbox } from "eve/sandbox";
-import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
 const REGION = "iad1";
 
@@ -173,6 +180,8 @@ return environment.open({
 ```
 
 Before mounting `drive.snapshot()`, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
+
+Each `mounts` entry is a `Drive`, which mounts read-write, or a `{ drive, mode }` reference to an existing Drive by name, where `mode` is `"read-write"` or `"snapshot"`. `drive.snapshot()` returns such a reference.
 
 Vercel allows up to four non-overlapping, absolute Drive mount paths per sandbox. See the Vercel documentation for [Drive lifecycle, limits, and pricing](https://vercel.com/docs/sandbox/concepts/drives).
 

@@ -517,6 +517,9 @@ the last step. There are no public dual-shape overloads.
 3. Migrate Docker, with the golden key and name test.
 4. Migrate Vercel Sandbox, with the golden key and name test. Its changeset
    notes that a relative `workingDirectory` now resolves from `/workspace`.
+   Implemented: `VercelSandbox.environment()` itself keeps skipping an empty
+   preparation without a `source`, because deployed self-modification relies
+   on it, and the same step removed `Drive` (minor changeset).
 5. Make core consume the new shape directly. Remove the internal old shape,
    and the tool-session `WeakMap`. Add a
    `guard:invariants` rule for files under `src/execution/sandbox/bindings/`
