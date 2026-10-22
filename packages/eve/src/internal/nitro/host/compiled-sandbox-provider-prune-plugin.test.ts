@@ -14,12 +14,12 @@ describe("createCompiledSandboxProviderPrunePlugin", () => {
 
   it("replaces local provider constructors with hosted stubs", () => {
     const plugin = createCompiledSandboxProviderPrunePlugin();
-    const source = plugin.load?.("/repo/packages/eve/src/sandbox/providers/microsandbox.ts");
+    const source = plugin.load?.("/repo/packages/eve/src/sandbox/providers/docker.ts");
 
-    expect(source).toContain("MicrosandboxSandbox");
+    expect(source).toContain("DockerSandbox");
   });
 
-  it.each(["docker.ts", "just-bash.ts", "local.js", "local.ts", "microsandbox.ts"])(
+  it.each(["docker.ts", "just-bash.ts", "local.js", "local.ts"])(
     "keeps the hosted local-backend stub aligned for %s",
     (fileName) => {
       const plugin = createCompiledSandboxProviderPrunePlugin();

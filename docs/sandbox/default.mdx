@@ -12,6 +12,6 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it tries [Docker](/docs/sandbox/docker), [microsandbox](/docs/sandbox/microsandbox), and [just-bash](/docs/sandbox/just-bash), in that order, according to host support.
+On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it selects [Docker](/docs/sandbox/docker) when a Docker daemon is reachable and falls back to [just-bash](/docs/sandbox/just-bash) otherwise.
 
 Use a provider directly when you need its image, VM, network, compute, or mount options.

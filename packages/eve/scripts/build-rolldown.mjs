@@ -166,7 +166,6 @@ const EXTERNAL_PACKAGES = new Set([
   "ai",
   "braintrust",
   "just-bash",
-  "microsandbox",
   "next",
   "nitro",
   "react",

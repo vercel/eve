@@ -205,7 +205,7 @@ describe("ensureSandboxAccess", () => {
     const setup = vi.fn();
     const value = fixture(setup);
     value.create.mockRejectedValueOnce(
-      new SandboxSessionGoneError('microsandbox session "ses_1" is no longer available to resume.'),
+      new SandboxSessionGoneError('docker session "ses_1" is no longer available to resume.'),
     );
     const { access, sandbox } = await open(value.registry, "session-1", {
       session: { providerName: "test", state: null, stateProtocolVersion: 1 },

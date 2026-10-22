@@ -91,7 +91,7 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-eve runs `prepare` while creating a reusable provider artifact, not once for each live session sandbox. Vercel captures a snapshot; Docker captures an image; microsandbox captures a VM snapshot; and just-bash captures a filesystem template.
+eve runs `prepare` while creating a reusable provider artifact, not once for each live session sandbox. Vercel captures a snapshot; Docker captures an image; and just-bash captures a filesystem template.
 
 During `eve dev`, startup and authored-source rebuilds do not prepare sandbox environments. The first sandbox access prepares all environments in that compiled generation before opening the requested sandbox. This includes environments declared by subagents and extensions, even if they use different providers. Concurrent requests share the preparation work; a failed preparation can be retried on a later access. Optional provider installation and setup can make that first access slow.
 
@@ -151,7 +151,7 @@ interface SandboxProviderResourceTree {
 }
 ```
 
-Docker and microsandbox mount the compiled trees read-only under `/eve/resources`, copy workspace seeds into writable `/workspace`, and expose skills read-only where possible. Vercel's snapshot environment writes workspace and skill contents before capturing its snapshot. Custom providers decide whether to upload, mount, or write each tree, but must expose the final target paths before authored preparation runs.
+Docker mounts the compiled trees read-only under `/eve/resources`, copies workspace seeds into writable `/workspace`, and exposes skills read-only where possible. Vercel's snapshot environment writes workspace and skill contents before capturing its snapshot. Custom providers decide whether to upload, mount, or write each tree, but must expose the final target paths before authored preparation runs.
 
 ## Inbound attachments
 
@@ -244,13 +244,12 @@ Preparation discovers authored files through `ctx.files`; core keeps project lay
 
 ## Providers
 
-| Provider                                   | Use it for                                                                              |
-| ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| [Default](/docs/sandbox/default)           | Automatic provider selection with eve's standard behavior.                              |
-| [Vercel](/docs/sandbox/vercel)             | Snapshot-backed persistent Vercel Sandboxes, domain network policies, and Drive mounts. |
-| [Docker](/docs/sandbox/docker)             | Local containers from the default image, an existing OCI image, or a Dockerfile.        |
-| [microsandbox](/docs/sandbox/microsandbox) | Local lightweight VMs from an OCI image or Dockerfile.                                  |
-| [just-bash](/docs/sandbox/just-bash)       | A pure-JavaScript shell and virtual filesystem without native process isolation.        |
+| Provider                             | Use it for                                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------------------- |
+| [Default](/docs/sandbox/default)     | Automatic provider selection with eve's standard behavior.                              |
+| [Vercel](/docs/sandbox/vercel)       | Snapshot-backed persistent Vercel Sandboxes, domain network policies, and Drive mounts. |
+| [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.        |
+| [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.        |
 
 ## Lifecycle
 

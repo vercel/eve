@@ -42,9 +42,6 @@ importers:
       '@types/react-dom':
         specifier: ~19.2.3
         version: 19.2.4(@types/react@19.2.18)
-      microsandbox:
-        specifier: ^0.5.10
-        version: 0.5.10
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -1318,6 +1315,7 @@ snapshots:
       '@superradcompany/microsandbox-darwin-arm64': 0.5.10
       '@superradcompany/microsandbox-linux-arm64-gnu': 0.5.10
       '@superradcompany/microsandbox-linux-x64-gnu': 0.5.10
+    optional: true
 
   nanoid@3.3.18: {}
 

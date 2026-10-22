@@ -111,9 +111,6 @@ importers:
       drizzle-kit:
         specifier: 0.31.10
         version: 0.31.10
-      microsandbox:
-        specifier: ^0.5.10
-        version: 0.5.10
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -6678,6 +6675,7 @@ snapshots:
       '@superradcompany/microsandbox-darwin-arm64': 0.5.10
       '@superradcompany/microsandbox-linux-arm64-gnu': 0.5.10
       '@superradcompany/microsandbox-linux-x64-gnu': 0.5.10
+    optional: true
 
   motion-dom@12.43.0:
     dependencies:

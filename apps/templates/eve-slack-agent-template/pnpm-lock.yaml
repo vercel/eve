@@ -24,9 +24,6 @@ importers:
       '@types/node':
         specifier: ^25.9.3
         version: 25.9.5
-      microsandbox:
-        specifier: ^0.5.10
-        version: 0.5.10
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -813,6 +810,7 @@ snapshots:
       '@superradcompany/microsandbox-darwin-arm64': 0.5.10
       '@superradcompany/microsandbox-linux-arm64-gnu': 0.5.10
       '@superradcompany/microsandbox-linux-x64-gnu': 0.5.10
+    optional: true
 
   mimic-fn@2.1.0: {}
 
