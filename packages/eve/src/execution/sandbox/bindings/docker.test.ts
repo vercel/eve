@@ -137,3 +137,29 @@ describe("Docker sandbox session identity", () => {
     ]);
   });
 });
+
+describe("Docker sandbox network policy", () => {
+  it("rejects a domain allow-list at open before creating a container", async () => {
+    const run = vi.fn<DockerCli["run"]>();
+    const provider = createSandboxProviderHarness(
+      createDockerSandboxProvider(undefined, {
+        run,
+        stream() {
+          throw new Error("stream is not used by this test");
+        },
+      }),
+      {},
+      { preparedArtifact: () => ({ imageReference: "image-a" }) },
+    );
+
+    await expect(
+      provider.start({
+        appRoot: "/tmp/eve-app",
+        // DefaultSandbox forwards the shared network policy type unchanged.
+        options: { networkPolicy: { allow: ["example.com"] } } as never,
+        sandboxName: "session-key",
+      }),
+    ).rejects.toThrow(/supports only the "allow-all" and "deny-all"/);
+    expect(run).not.toHaveBeenCalled();
+  });
+});

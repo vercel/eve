@@ -132,6 +132,9 @@ function createParentRoute(
     async cancel() {
       return { status: "no_active_turn" };
     },
+    async prewarm() {
+      return { status: "ready" as const };
+    },
     async compact() {
       return { sessionId: "parent-1", status: "accepted" };
     },

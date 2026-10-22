@@ -1,7 +1,10 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { createAuthoredModuleBuildOptions } from "#internal/authored-module-build-options.js";
+import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
+import {
+  createAuthoredModuleBuildOptions,
+  evaluatedBundleSourcemap,
+} from "#internal/authored-module-build-options.js";
 import {
   AUTHORED_BUNDLED_MODULE_EXTENSION,
   AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
@@ -66,6 +69,9 @@ async function writeAuthoredModuleGraph(
       .filter((modulePath) => resolveAuthoredPackageRoot(modulePath) === packageRoot)
       .map((modulePath, index) => [`entry-${index}`, modulePath]),
   );
+  const sourcemap = evaluatedBundleSourcemap();
+  // The content hash ignores inline maps, so cached chunks with and without one need distinct names.
+  const fileName = sourcemap === false ? "[name]-[hash].mjs" : "[name]-[hash]-mapped.mjs";
   const result = await buildWithNitroRolldown({
     ...createAuthoredModuleBuildOptions({
       packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
@@ -80,21 +86,19 @@ async function writeAuthoredModuleGraph(
     preserveEntrySignatures: "strict",
     write: false,
     output: {
-      chunkFileNames: "[name]-[hash].mjs",
+      chunkFileNames: fileName,
       codeSplitting: true,
       comments: false,
-      entryFileNames: "[name]-[hash].mjs",
+      entryFileNames: fileName,
       format: "esm",
-      sourcemap: "inline",
+      sourcemap,
     },
   });
   const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
-  mkdirSync(directoryPath, { recursive: true });
   for (const item of result.output) {
     if (item.type !== "chunk") continue;
     // File names carry a content hash, so an existing file already has this content.
-    const filePath = join(directoryPath, item.fileName);
-    if (!existsSync(filePath)) writeFileSync(filePath, item.code);
+    const filePath = writeAuthoredModuleCacheFile(directoryPath, item.fileName, item.code);
     const modulePath = item.isEntry ? inputs.get(item.name) : undefined;
     if (modulePath !== undefined) entryPaths.set(modulePath, filePath);
   }

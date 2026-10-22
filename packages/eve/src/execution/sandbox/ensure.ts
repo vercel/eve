@@ -19,9 +19,10 @@ import {
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
-import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import { owningSandboxDefinition, type RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import {
-  isRetiredSandboxSessionState,
+  getSessionEndWithArtifact,
+  resolvePersistedSandboxSessionState,
   type SandboxAccess,
   type SandboxSessionEndReason,
   type SandboxSessionState,
@@ -94,10 +95,16 @@ const log = createLogger("execution.sandbox");
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
 ): Promise<EnsuredSandboxAccess> {
+  // Production always registers a sandbox; test runtimes without one cast a null registry.
+  const registered = input.registry.sandbox;
+  const persistedOwner = registered === null ? undefined : owningSandboxDefinition(registered);
   // A retired record cannot resume, so let the selector start a fresh sandbox.
-  const session = input.state?.session ?? null;
-  let persisted: SandboxSessionState | null =
-    session === null || isRetiredSandboxSessionState(session) ? null : session;
+  let persisted = resolvePersistedSandboxSessionState(
+    input.state?.session,
+    persistedOwner?.kind === "independent"
+      ? getSandboxEnvironmentRuntime(persistedOwner.environment)
+      : undefined,
+  );
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
@@ -110,7 +117,6 @@ export async function ensureSandboxAccess(
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
   const captured = (): SandboxState => ({ session: persisted });
-  const registered = input.registry.sandbox;
   if (registered === null) {
     return {
       async captureState() {
@@ -126,6 +132,8 @@ export async function ensureSandboxAccess(
       async stop() {},
     };
   }
+  const ownerDefinition = owningSandboxDefinition(registered);
+  const ownerNodeId = registered.inheritance?.nodeId ?? input.nodeId;
 
   function providerContext(turnId: string): SandboxProviderSessionContext {
     const activeSession =
@@ -144,25 +152,23 @@ export async function ensureSandboxAccess(
   }
 
   function activeDefinition() {
-    const definition = registered.inheritance?.definition ?? registered.definition;
-    if (definition.kind !== "independent")
+    if (ownerDefinition.kind !== "independent")
       throw new Error(
-        `Sandbox "${definition.logicalPath}" uses defineParentSandbox(), but this agent has no parent sandbox to share. ` +
+        `Sandbox "${ownerDefinition.logicalPath}" uses defineParentSandbox(), but this agent has no parent sandbox to share. ` +
           "Only a declared subagent can share its parent's sandbox. Give this agent its own sandbox with defineSandbox() and an exported environment.",
       );
-    return definition;
+    return ownerDefinition;
   }
 
   async function loadArtifact(provider: SandboxProviderRuntime) {
-    const artifactNodeId = registered.inheritance?.nodeId ?? input.nodeId;
     const artifact = await loadSandboxPreparedArtifact({
       compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: artifactNodeId,
+      nodeId: ownerNodeId,
       providerName: provider.providerName,
     });
     if (artifact === undefined) {
       throw new SandboxTemplateNotProvisionedError({
-        nodeId: artifactNodeId,
+        nodeId: ownerNodeId,
         providerName: provider.providerName,
       });
     }
@@ -235,15 +241,16 @@ export async function ensureSandboxAccess(
   async function resumePersisted(context: SandboxProviderSessionContext) {
     if (persisted === null) throw new Error("Sandbox session state is missing.");
     const provider = getSandboxEnvironmentRuntime(activeDefinition().environment);
+    // State another provider or protocol recorded cannot resume here, for example
+    // after the app switches providers or rolls back eve, so start a fresh sandbox.
     if (persisted.providerName !== provider.providerName) {
-      throw new Error(
+      throw new SandboxSessionGoneError(
         `This session's sandbox was created by provider "${persisted.providerName}", but the agent now selects provider "${provider.providerName}". ` +
-          "eve cannot move a sandbox between providers. Start a new session, or restore the previous provider. " +
-          "With DefaultSandbox, the provider can change when Docker starts or stops between processes.",
+          "eve cannot move a sandbox between providers, so the session continues in a fresh sandbox without the old sandbox's files.",
       );
     }
     if (persisted.stateProtocolVersion !== provider.stateProtocolVersion) {
-      throw new Error(
+      throw new SandboxSessionGoneError(
         `Sandbox session state protocol ${persisted.stateProtocolVersion} is incompatible with provider "${provider.providerName}" protocol ${provider.stateProtocolVersion}.`,
       );
     }
@@ -269,7 +276,7 @@ export async function ensureSandboxAccess(
     if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
       await ensureDevelopmentSandboxesPrepared({
         compiledArtifactsSource: input.compiledArtifactsSource,
-        nodeId: registered.inheritance?.nodeId ?? input.nodeId,
+        nodeId: ownerNodeId,
         providerName: getSandboxEnvironmentRuntime(definition.environment).providerName,
       });
     }
@@ -279,7 +286,7 @@ export async function ensureSandboxAccess(
       try {
         return await resumePersisted(context);
       } catch (error) {
-        if (!(error instanceof SandboxSessionGoneError)) throw error;
+        if (!SandboxSessionGoneError.is(error)) throw error;
         log.warn("session sandbox is gone, starting a fresh one", {
           error,
           providerName: persisted.providerName,
@@ -290,11 +297,7 @@ export async function ensureSandboxAccess(
     }
 
     // Apps hosted in one process can reuse a node id and a tool session id.
-    const startKey = [
-      appRoot,
-      registered.inheritance?.nodeId ?? input.nodeId,
-      input.sessionId,
-    ].join("\0");
+    const startKey = [appRoot, ownerNodeId, input.sessionId].join("\0");
     // A failed start wakes every waiter at once; re-check so only one retries.
     let concurrentStart = pendingSandboxStarts.get(startKey);
     while (concurrentStart !== undefined) {
@@ -376,10 +379,8 @@ export async function ensureSandboxAccess(
     return current;
   }
 
-  const definition = registered.inheritance?.definition ?? registered.definition;
-
   return {
-    environment: definition.kind === "independent" ? definition.environment : undefined,
+    environment: ownerDefinition.kind === "independent" ? ownerDefinition.environment : undefined,
     async captureState() {
       if (opening !== undefined) await opening;
       return captured();
@@ -410,9 +411,18 @@ export async function ensureSandboxAccess(
         persisted.stateProtocolVersion === provider.stateProtocolVersion
           ? persisted.state
           : null;
-      await provider.implementation.onSessionEnd(providerContext("sandbox-cleanup"), state, {
-        reason,
-      });
+      const context = providerContext("sandbox-cleanup");
+      const endWithArtifact = getSessionEndWithArtifact(provider.implementation);
+      if (endWithArtifact === undefined) {
+        await provider.implementation.onSessionEnd(context, state, { reason });
+      } else {
+        const artifact = await loadSandboxPreparedArtifact({
+          compiledArtifactsSource: input.compiledArtifactsSource,
+          nodeId: registered.inheritance?.nodeId ?? input.nodeId,
+          providerName: provider.providerName,
+        });
+        await endWithArtifact(context, state, { artifact, reason });
+      }
       forgetHandle();
       persisted = null;
     },

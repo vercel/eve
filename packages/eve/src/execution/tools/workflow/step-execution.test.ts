@@ -24,7 +24,7 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 
@@ -97,7 +97,7 @@ function upsertSandboxes() {
     handles.push(handle);
     return handle;
   };
-  const provider = defineSandboxProvider({
+  const provider = defineLegacySandboxProvider({
     name: "upsert",
     environment: () => ({
       onSessionEnd: async (context: SandboxProviderSessionContext) =>
@@ -274,7 +274,7 @@ describe("workflow step authorization", () => {
         return "opened";
       }),
     ).resolves.toMatchObject({ output: "opened" });
-    const other = defineSandboxProvider({
+    const other = defineLegacySandboxProvider({
       name: "other",
       environment: () => ({
         onSessionEnd: async () => {},

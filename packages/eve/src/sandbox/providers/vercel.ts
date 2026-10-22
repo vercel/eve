@@ -1,6 +1,5 @@
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import {
-  createVercelSandbox,
   createVercelSandboxProvider,
   type VercelSandboxPreparedArtifact,
   type VercelSandboxSessionState,
@@ -10,7 +9,7 @@ import type {
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 export type VercelSandboxEnvironmentOptions = VercelSandboxCreateOptions & {
@@ -18,21 +17,7 @@ export type VercelSandboxEnvironmentOptions = VercelSandboxCreateOptions & {
 };
 export type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
 
-const defaultProvider = defineSandboxProvider<
-  VercelSandboxEnvironmentOptions | undefined,
-  VercelSandboxRuntimeOptions,
-  VercelSandboxPreparedArtifact,
-  VercelSandboxSessionState,
-  VercelSandboxSession
->({
-  name: "vercel",
-  environment: (options) => {
-    const { prepare, ...createOptions } = options ?? {};
-    return createVercelSandbox({ createOptions, prepare, skipEmptyPreparation: true });
-  },
-});
-
-const provider = defineSandboxProvider<
+const provider = defineLegacySandboxProvider<
   VercelSandboxEnvironmentOptions | undefined,
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
@@ -42,12 +27,6 @@ const provider = defineSandboxProvider<
   name: "vercel",
   environment: (options) => createVercelSandboxProvider(options),
 });
-
-export function createDefaultVercelEnvironment(
-  options?: VercelSandboxEnvironmentOptions,
-): SandboxEnvironment<VercelSandboxRuntimeOptions, VercelSandboxSession> {
-  return defaultProvider.environment(options);
-}
 
 export const VercelSandbox = {
   name: "vercel",

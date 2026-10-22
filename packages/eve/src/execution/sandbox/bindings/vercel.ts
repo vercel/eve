@@ -24,7 +24,7 @@ import {
   providerResourceTargetFiles,
   type SandboxPreparedArtifact,
   type SandboxProviderHandle,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
@@ -95,7 +95,7 @@ type VercelEnvironmentOptions = VercelCreateOptions & {
 
 export function createVercelSandboxProvider(
   environmentOptions: Readonly<VercelEnvironmentOptions> | undefined,
-): SandboxProviderImplementation<
+): LegacySandboxProviderImplementation<
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
@@ -111,12 +111,11 @@ interface CreateVercelSandboxInput {
   readonly loadDeleteSandboxModule?: () => Promise<VercelModule>;
   readonly loadSandboxModule?: () => Promise<VercelModule>;
   readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
-  readonly skipEmptyPreparation?: boolean;
 }
 
 export function createVercelSandbox(
   input: CreateVercelSandboxInput = {},
-): SandboxProviderImplementation<
+): LegacySandboxProviderImplementation<
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
@@ -174,13 +173,12 @@ export function createVercelSandbox(
         loadDeleteSandboxModule,
         session,
       });
-      if (
-        session.created &&
-        artifact.snapshotId === undefined &&
-        runtimeOptions.networkPolicy !== undefined
-      ) {
+      // Template-less sessions run base setup with open egress, so the policy
+      // from open() or else the environment applies only once it finishes.
+      const networkPolicy = runtimeOptions.networkPolicy ?? createOptions.networkPolicy;
+      if (session.created && artifact.snapshotId === undefined && networkPolicy !== undefined) {
         try {
-          await applyInitialVercelNetworkPolicy(session.sandbox, runtimeOptions.networkPolicy);
+          await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
         } catch (error) {
           try {
             await deleteVercelSandbox({
@@ -229,10 +227,13 @@ export function createVercelSandbox(
     },
     async prepare(context) {
       const seedFiles = providerResourceTargetFiles(context.resources);
+      // Without inputs a snapshot only repeats the base setup every session
+      // runs anyway. An authored `source` keeps one, so sessions start from
+      // the build's capture instead of fetching the source again.
       if (
-        input.skipEmptyPreparation === true &&
         input.prepare === undefined &&
-        seedFiles.length === 0
+        seedFiles.length === 0 &&
+        createOptions.source === undefined
       )
         return {};
       const templateKey = `eve-sbx-tpl-vercel-${createSandboxProviderIdentity({

@@ -100,5 +100,21 @@ for (const item of items) {
         'Registry item "memory/supermemory" must declare SUPERMEMORY_API_KEY as an environment variable.',
       );
     }
+  } else if (slug === "memanto") {
+    if (!item.dependencies?.some((dependency) => dependency.startsWith("@moorcheh-ai/memanto@"))) {
+      throw new Error('Registry item "memory/memanto" must depend on @moorcheh-ai/memanto.');
+    }
+    if (
+      !("MOORCHEH_API_KEY" in (item.envVars ?? {})) ||
+      !("MEMANTO_BASE_URL" in (item.envVars ?? {}))
+    ) {
+      throw new Error(
+        'Registry item "memory/memanto" must declare MOORCHEH_API_KEY and MEMANTO_BASE_URL as environment variables.',
+      );
+    }
+    const source = await readFile(join(docsRoot, expectedPath), "utf8");
+    if (!/capture:\s*false/.test(source)) {
+      throw new Error('Registry item "memory/memanto" must keep automatic capture disabled.');
+    }
   }
 }

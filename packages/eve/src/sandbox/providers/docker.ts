@@ -5,7 +5,7 @@ import type {
   DockerSandboxRuntimeOptions,
 } from "#public/sandbox/docker-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
 
 export type {
   DockerSandboxEnvironmentOptions,
@@ -14,7 +14,7 @@ export type {
 
 type DockerfileEnvironmentInput = Omit<DockerSandboxEnvironmentOptions, "image">;
 
-const provider = defineSandboxProvider<
+const provider = defineLegacySandboxProvider<
   DockerSandboxEnvironmentOptions,
   DockerSandboxRuntimeOptions,
   { readonly imageReference: string },

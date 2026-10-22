@@ -1,6 +1,6 @@
 ---
 issue: "TBD (maintainer-requested research; no matching issue found)"
-status: proposed
+status: in-progress
 last_updated: "2026-10-22"
 ---
 
@@ -158,7 +158,7 @@ a type error (`never`), and eve throws on them at runtime.
 
 ```ts
 export function defineSandboxProvider<
-  EnvironmentOptions extends object | undefined,
+  EnvironmentOptions extends object,
   OpenOptions extends object | undefined,
   Artifact extends SandboxJson,
   State extends SandboxJson,
@@ -167,7 +167,7 @@ export function defineSandboxProvider<
   readonly name: string;
   readonly stateProtocolVersion?: number;
   environment(
-    ...args: SandboxOptionArguments<EnvironmentOptions>
+    options: EnvironmentOptions,
   ): SandboxProviderImplementation<OpenOptions, Artifact, State, Extensions>;
 }): SandboxProvider<
   WithPrepareOption<EnvironmentOptions, SandboxSession & Extensions>,
@@ -176,7 +176,7 @@ export function defineSandboxProvider<
 >;
 
 export interface SandboxProviderImplementation<OpenOptions, Artifact, State, Extensions> {
-  prepare(ctx: SandboxPrepareContext<Extensions>): Promise<Artifact>;
+  prepare(ctx: SandboxPrepareContext): Promise<Artifact>;
   start(
     ctx: SandboxSessionContext,
     options: Readonly<OpenOptions> | undefined,
@@ -207,7 +207,7 @@ export interface SandboxSessionContext {
   resolveProjectPath(path: string): string;
 }
 
-export interface SandboxPrepareContext<Extensions extends object> {
+export interface SandboxPrepareContext {
   readonly files: SandboxProviderFiles;
   readonly storagePath: string;
   /** No workspace or skill files and no authored `prepare`. */
@@ -219,14 +219,13 @@ export interface SandboxPrepareContext<Extensions extends object> {
   resourcesDirectory(): Promise<string | undefined>;
   /** Seeds `/workspace` and `$HOME/.agents/skills`, then runs authored `prepare`. */
   populate(
-    connection: SandboxConnection<Extensions>,
+    connection: SandboxConnection<object>,
     options?: { readonly mountedAt?: string },
   ): Promise<void>;
 }
 
-export type WithPrepareOption<Options, Session> = Options extends undefined
-  ? SandboxPrepareOption<Session> | undefined
-  : Options & SandboxPrepareOption<Session>;
+export type WithPrepareOption<Options extends object, Session> = Options &
+  SandboxPrepareOption<Session>;
 
 export interface SandboxPrepareOption<Session> {
   readonly prepare?: (sandbox: Session) => void | Promise<void>;
@@ -234,7 +233,11 @@ export interface SandboxPrepareOption<Session> {
 ```
 
 Type parameters are inferred from the returned implementation, so authors do
-not pass five explicit generics. `SandboxJson` is today's
+not pass five explicit generics. `environment()` takes a plain parameter, and
+`SandboxPrepareContext` is not generic over the extensions, because TypeScript
+cannot infer through a conditional rest tuple and fixes a type parameter as soon
+as a context-sensitive method such as `prepare(ctx)` uses it. `State` comes from
+`start()`'s return value when `start()` precedes `resume()`. `SandboxJson` is today's
 `SandboxPreparedArtifact` under a name that fits both artifacts and state.
 
 `ctx.session.id` keeps its current meaning: the id of the session that owns
@@ -280,7 +283,8 @@ root.
 `prepare` becomes a standard environment option through `WithPrepareOption`,
 typed with the provider's extensions (#3717). A provider without environment
 options still accepts `{ prepare }`. eve removes `prepare` before calling the
-provider's `environment()` and runs it inside `populate()`. No built-in
+provider's `environment()`, which always receives an object (`{}` when the
+caller passes none), and runs it inside `populate()`. No built-in
 includes `prepare` in its template identity today. `sourceRevision` hashes only
 the sandbox definition's source file, so it captures a `prepare` written there
 but not one imported from another module (see open questions).
@@ -318,12 +322,14 @@ runtime
                  eve checkpoints { providerName, state, stateProtocolVersion }
   later step   ─ resume(ctx, artifact, state) → connection
                  └─ throws SandboxSessionGoneError → eve clears state, reruns selector
-  sandbox.stop()   → connection.stop()
+  sandbox.stop()   → connection.stop(), connection.close?()
   sandbox.delete() → connection.close?(), onSessionEnd(ctx, state, { reason: "deleted" }),
                      eve clears state
-  process exit     → connection.stop() (failures logged, not thrown)
+  process exit     → connection.stop(), connection.close?() (failures logged, not thrown)
   keyed call ends  → connection.close?()
-  terminal outcome → onSessionEnd(ctx, state | null, { reason })
+  terminal outcome → connection.close?() for this process's connections,
+                     onSessionEnd(ctx, state | null, { reason })
+  (stop and close run at most once per connection; a failed close never blocks deletion)
 ```
 
 ## Invariants
@@ -503,13 +509,16 @@ the last step. There are no public dual-shape overloads.
    custom-provider docs in `docs/sandbox/index.mdx`, migrate the e2e
    `custom-provider` fixture, and add evals for gone-sandbox recovery and for
    keyed calls on a provider without `toolSessions`. Built-ins keep the old
-   shape through the internal type (minor changeset).
+   shape through the internal type (minor changeset). Implemented: the public
+   `writeFiles()` replaced `SANDBOX_WRITE_FILES` in this step, and unit tests
+   through the public API cover keyed calls, because no e2e fixture has a
+   custom root sandbox behind a keyed channel.
 2. Migrate just-bash, with the golden key and name test.
 3. Migrate Docker, with the golden key and name test.
 4. Migrate Vercel Sandbox, with the golden key and name test. Its changeset
    notes that a relative `workingDirectory` now resolves from `/workspace`.
 5. Make core consume the new shape directly. Remove the internal old shape,
-   the tool-session `WeakMap`, and `SANDBOX_WRITE_FILES`. Add a
+   and the tool-session `WeakMap`. Add a
    `guard:invariants` rule for files under `src/execution/sandbox/bindings/`
    and `src/sandbox/providers/`: they may import the provider contract only
    through `#public/sandbox/*`, and may not import core sandbox modules
