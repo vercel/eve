@@ -1029,7 +1029,7 @@
               "flora"
             ]
           },
-          "requires": ">=0.29.0"
+          "requires": ">=0.82.0"
         }
       },
       "dependencies": [
