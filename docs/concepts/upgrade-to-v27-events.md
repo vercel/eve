@@ -5,7 +5,18 @@ description: "Move hooks, channels, clients, and evals from the v26 event stream
 
 Stream version 27 changes event names, payloads, and client state. New sessions use v27; sessions started on an earlier deployment keep their earlier stream. Update event consumers and rebuild extensions before deploying. A v27 deployment serves an older session's stored history as v27 lines, so a v27 frontend renders it; its owning deployment can still serve its channels. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
 
-Discard persisted pre-v27 event arrays before hydrating a v27 frontend. Do not pass those arrays as `initialEvents`; read the session's stream again instead. Saved cursors still count the same stored lines.
+Don't pass event arrays saved before the upgrade as `initialEvents`. When the session's stream is still available, read it again from position 0 and replace what you saved. Saved cursors still count the same stored lines.
+
+When the saved array is the only copy, for example because the stream expired, convert it once and store the result:
+
+```ts
+import { convertLegacyEvents } from "eve/internal/legacy-events";
+
+// One session's saved events, from its `session.started` on, as they were saved.
+const events = convertLegacyEvents(saved);
+```
+
+The result is what a reader of the session's stream gets today, at the same positions, so `conversationOf(events)` renders it and the next stored line is `saved.length`. A session saved mid-turn stays unfinished. Convert each session separately: the function throws for an array that doesn't start at `session.started`, that holds a second session, or that holds current events. `convertLegacyEvents` is a migration aid with no compatibility promise and will be removed in a later release.
 
 ## Event mapping
 

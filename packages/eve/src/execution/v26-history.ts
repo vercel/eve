@@ -13,7 +13,7 @@
 
 import { cascade } from "#harness/session-machine/cascade.js";
 import { FACT_CATALOG } from "#protocol/session-events/catalog.js";
-import type { SessionEvent } from "#protocol/session-event.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import {
   type CommitLine,
   type ErrorInfo,
@@ -31,6 +31,7 @@ import type {
 } from "#protocol/session-events/families/interaction.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
+import { createEventReader } from "#protocol/session-lines.js";
 import { isV26Line } from "#protocol/v26-lines.js";
 
 type Data = Readonly<Record<string, unknown>>;
@@ -102,6 +103,52 @@ export function v26LineStream(
       },
     }),
   );
+}
+
+/**
+ * The events one session's saved v26 events read as, for an application that kept them: the
+ * events a v27 reader of the session's stream would read from them, at the same positions. They
+ * must be the session's events from its first, one per stored line, in order, as a v26 client
+ * read them from position 0; the next stored line is then at `records.length`.
+ */
+export function convertLegacyEvents(records: readonly unknown[]): SessionStreamEvent[] {
+  if (!isSessionStarted(records[0])) {
+    throw new TypeError(
+      "Expected saved events of one session from its first, `session.started`. Each event " +
+        "reads in light of those before it, so events saved from a later position can't be " +
+        "converted; read the session's stream from position 0 again instead.",
+    );
+  }
+  const history = createV26HistoryReader();
+  const reader = createEventReader();
+  const events: SessionStreamEvent[] = [];
+  records.forEach((record, position) => {
+    if (position > 0 && isSessionStarted(record)) {
+      throw new TypeError(
+        `Saved event ${String(position)} starts another session. Convert each session's ` +
+          "events separately: split them where each `session.started` begins.",
+      );
+    }
+    if (!isV26Line(record) || hasStreamPosition(record)) {
+      throw new TypeError(
+        `Saved event ${String(position)} isn't an event saved before the upgrade to this eve ` +
+          "version. Pass only those, as they were saved, one per stored line.",
+      );
+    }
+    const line = history.read(record, position);
+    if (line !== undefined) events.push(...reader.read(line, position));
+  });
+  return events;
+}
+
+/** A v27 event looks like a v26 one but for the stream position a reader stamped on it. */
+function hasStreamPosition(record: unknown): boolean {
+  const meta = (record as { readonly meta?: unknown }).meta;
+  return isRecord(meta) && meta.position !== undefined;
+}
+
+function isSessionStarted(record: unknown): boolean {
+  return isV26Line(record) && (record as { readonly type: string }).type === "session.started";
 }
 
 interface Context {

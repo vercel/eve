@@ -495,6 +495,12 @@
       "import": "./dist/src/self-modification/sandbox.js",
       "default": "./dist/src/self-modification/sandbox.js"
     },
+    "./internal/legacy-events": {
+      "eve-source": "./src/internal/legacy-events.ts",
+      "types": "./dist/src/internal/legacy-events.d.ts",
+      "import": "./dist/src/internal/legacy-events.js",
+      "default": "./dist/src/internal/legacy-events.js"
+    },
     "./internal/scaffold": {
       "eve-source": "./src/internal/scaffold.ts",
       "types": "./dist/src/internal/scaffold.d.ts",

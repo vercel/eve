@@ -9,10 +9,15 @@ import {
   PENDING_APPROVAL,
   STEER_AND_CANCEL,
 } from "#execution/v26-history.fixtures.js";
-import { createV26HistoryReader, v26LineStream } from "#execution/v26-history.js";
+import {
+  convertLegacyEvents,
+  createV26HistoryReader,
+  v26LineStream,
+} from "#execution/v26-history.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { isStoredLine } from "#protocol/session-events/envelope.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { idle, waiting } from "#protocol/session-projection/selectors.js";
@@ -194,3 +199,55 @@ describe("v26LineStream", () => {
     expect(out[8 - 5]).toEqual({ $eve: "position", next: 9 });
   });
 });
+
+describe("convertLegacyEvents", () => {
+  it("reads saved events as the session's stream serves them, at their stored positions", async () => {
+    const reader = createEventReader();
+    const served: SessionStreamEvent[] = [];
+    let position = 0;
+    for await (const value of v26LineStream(streamOf(KITCHEN_SINK), 0)) {
+      if (isStoredLine(value)) served.push(...reader.read(value, position));
+      position += 1;
+    }
+    expect(convertLegacyEvents(KITCHEN_SINK)).toEqual(served);
+  });
+
+  it("leaves events saved mid-turn unfinished, at the positions they were stored", () => {
+    // Saved while the second turn streamed its reply: the last event is a delta.
+    const delta = {
+      data: { messageDelta: "It is", sequence: 1, stepIndex: 0, turnId: "turn_1" },
+      meta: { at: "2026-10-01T00:00:00.000Z" },
+      type: "message.appended",
+    };
+    const saved = [...KITCHEN_SINK.slice(0, 13), delta];
+    const events = convertLegacyEvents(saved);
+    const lines = events.map((event) => event.meta.position.line);
+    // Each event keeps its stored line; the trailing delta reads as none, so the last is earlier.
+    expect(lines).toEqual(lines.toSorted((a, b) => a - b));
+    expect(lines.at(-1)).toBe(12);
+    const tables = sessionTables(conversationOf(events).view);
+    expect(tables.turns["turn_1"]?.status).toBe("running");
+    expect(tables.session.status).not.toBe("ended");
+  });
+
+  it("refuses events it can't read in order from the session's first", () => {
+    expect(() => convertLegacyEvents([])).toThrow(/from its first/);
+    expect(() => convertLegacyEvents(KITCHEN_SINK.slice(1))).toThrow(/from its first/);
+    expect(() => convertLegacyEvents([...PENDING_APPROVAL, ...ATTACHMENT])).toThrow(
+      `Saved event ${String(PENDING_APPROVAL.length)} starts another session.`,
+    );
+    const converted = convertLegacyEvents(PENDING_APPROVAL);
+    expect(() => convertLegacyEvents([PENDING_APPROVAL[0], converted[1]])).toThrow(
+      /Saved event 1 isn't an event saved before the upgrade/,
+    );
+  });
+});
+
+function streamOf(records: readonly unknown[]): ReadableStream<unknown> {
+  return new ReadableStream<unknown>({
+    start(controller) {
+      for (const record of records) controller.enqueue(record);
+      controller.close();
+    },
+  });
+}
