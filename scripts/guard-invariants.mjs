@@ -96,9 +96,10 @@
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
  *   rule 44 — Every concrete built-in sandbox provider is defined through
- *             `defineSandboxProvider()` and does not import sandbox runtime
+ *             `defineSandboxProvider()`, or the internal
+ *             `defineLegacySandboxProvider()` until it migrates to the
+ *             connection contract, and does not import sandbox runtime
  *             orchestration, registries, key derivation, or session state.
- *             Built-ins and authored providers must share one contract.
  *   rule 45 — Provided tools under `packages/eve/src/tools/provided/**` and
  *             the body of every agent tool import only public eve entry
  *             points (the `#` specifiers of the package's `exports`), the
@@ -1694,7 +1695,7 @@ async function checkRule44SandboxProviders() {
   for (const name of providerNames) {
     const file = `packages/eve/src/sandbox/providers/${name}.ts`;
     const source = await readFile(join(REPO_ROOT, file), "utf8");
-    if (!source.includes("defineSandboxProvider")) {
+    if (!/\bdefine(Legacy)?SandboxProvider\b/.test(source)) {
       issues.push({
         file,
         message: "Built-in sandbox providers must use defineSandboxProvider().",

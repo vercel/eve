@@ -8,7 +8,7 @@ import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
@@ -39,7 +39,7 @@ function fixture(setup?: () => void, returnCopy = false) {
     handle: await create(),
     state: { key: context.session.id },
   }));
-  const provider = defineSandboxProvider({
+  const provider = defineLegacySandboxProvider({
     name: "test",
     environment: () => ({ onSessionEnd, prepare: async () => null, resume: create, start }),
   });
@@ -89,7 +89,7 @@ function upsertingFixture() {
       onSandboxStop: async () => {},
     };
   };
-  const environment = defineSandboxProvider({
+  const environment = defineLegacySandboxProvider({
     name: "upserting",
     environment: () => ({
       onSessionEnd: async (context: SandboxProviderSessionContext) =>

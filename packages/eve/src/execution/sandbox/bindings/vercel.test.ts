@@ -3,7 +3,6 @@ import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import { writeSandboxFiles } from "#shared/sandbox-write-files.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import { createVercelSandbox as createVercelImplementation } from "#execution/sandbox/bindings/vercel.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
@@ -490,7 +489,7 @@ describe("createVercelSandbox", () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     vi.mocked(sessionSandbox.runCommand).mockClear();
 
-    await writeSandboxFiles(handle.sandbox, {
+    await handle.sandbox.writeFiles({
       files: [
         { content: Buffer.from("A"), path: "/home/agent/.agents/skills/policy/a.md" },
         { content: Buffer.from("B"), path: "skills/policy/b notes.md " },

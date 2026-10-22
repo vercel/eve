@@ -1,0 +1,5 @@
+---
+"eve": minor
+---
+
+**Breaking for custom sandbox providers.** `defineSandboxProvider()` now takes a byte-level `SandboxConnection` (`spawn`, `readFile`, `writeFiles`, `removePath`, `stop`, optional `close` and `extensions`) and eve derives the full sandbox session from it. `start()` returns `{ connection, state }` and `resume()` returns a connection; `onSandboxStop()` and `onRuntimeShutdown()` become `connection.stop()`, and `onSandboxDelete()` folds into `onSessionEnd()` with `reason: "deleted"`. Replace `ctx.resources`/`ctx.sourceRevision` with `ctx.templateKey()` and `ctx.populate()`, drop your own `prepare` option (eve now runs it), and set `toolSessions: true` to support keyed `invokeTool` calls. `eve/sandbox/provider` also exports `SandboxSessionGoneError`, `SandboxTemplateNotProvisionedError`, and `SANDBOX_AGENT_ENV`, and `SandboxSession` gains `writeFiles()` with eve-owned session and network-policy types. Built-in providers are unchanged. See the [custom sandbox providers guide](https://eve.dev/docs/sandbox/custom-providers).

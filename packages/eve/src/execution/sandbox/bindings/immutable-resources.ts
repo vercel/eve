@@ -48,16 +48,19 @@ export async function hydrateSandboxProviderResources(input: {
   }
 }
 
-async function hydrateSandboxFromImmutableResources(session: SandboxSession): Promise<void> {
+export async function hydrateSandboxFromImmutableResources(
+  session: SandboxSession,
+  root = SANDBOX_RESOURCES_ROOT,
+): Promise<void> {
   const result = await session.run({
     command: [
       "set -e",
-      `if [ -d ${SANDBOX_RESOURCES_ROOT}/workspace ]; then cp -a ${SANDBOX_RESOURCES_ROOT}/workspace/. /workspace/; fi`,
-      `if [ -d ${SANDBOX_RESOURCES_ROOT}/skills ]; then`,
+      `if [ -d ${root}/workspace ]; then cp -a ${root}/workspace/. /workspace/; fi`,
+      `if [ -d ${root}/skills ]; then`,
       '  mkdir -p "$HOME/.agents"',
       '  rm -rf "$HOME/.agents/skills"',
       '  mkdir -p "$HOME/.agents/skills"',
-      `  cp -a ${SANDBOX_RESOURCES_ROOT}/skills/. "$HOME/.agents/skills/"`,
+      `  cp -a ${root}/skills/. "$HOME/.agents/skills/"`,
       "fi",
     ].join("\n"),
   });

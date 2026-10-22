@@ -23,11 +23,11 @@ import type {
   SandboxNetworkPolicy,
 } from "#shared/sandbox-network-policy.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   isSandboxPreparedArtifactRecord,
   type SandboxPreparedArtifact,
   type SandboxProviderHandle,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
   type SandboxProviderRuntime,
 } from "#shared/sandbox-provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
@@ -83,7 +83,7 @@ const JUST_BASH_NETWORK_POLICY_MESSAGE =
  * just-bash in development. Preparation records the choice, so the runtime
  * uses the provider the build selected and never probes the host.
  */
-export const DefaultSandbox = defineSandboxProvider<
+export const DefaultSandbox = defineLegacySandboxProvider<
   DefaultSandboxEnvironmentOptions,
   DefaultSandboxRuntimeOptions,
   DefaultSandboxPreparedArtifact,
@@ -149,7 +149,7 @@ export const DefaultSandbox = defineSandboxProvider<
       await inner.implementation.onSessionEnd(context, innerState, { reason: options.reason });
     };
 
-    const implementation: SandboxProviderImplementation<
+    const implementation: LegacySandboxProviderImplementation<
       DefaultSandboxRuntimeOptions,
       DefaultSandboxPreparedArtifact,
       DefaultSandboxSessionState,

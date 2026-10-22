@@ -74,6 +74,7 @@ function createFakeAccess(
         },
         async writeFile() {},
         async writeBinaryFile() {},
+        async writeFiles() {},
         async writeTextFile() {},
       };
     },

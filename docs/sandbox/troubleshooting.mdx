@@ -95,6 +95,7 @@ The build recorded an artifact, but the provider can no longer use its template.
 | Docker    | The Docker daemon has no image with that name: it was removed, for example by `docker image prune -a`, or the build used another Docker daemon. |
 | Vercel    | The Vercel Sandbox snapshot expired or was deleted.                                                                                             |
 | just-bash | The template directory under `.eve/sandbox-cache/` was deleted, or the build ran on another machine.                                            |
+| Custom    | The image, snapshot, or template that the artifact names no longer exists, so the provider threw `SandboxTemplateNotProvisionedError`.          |
 
 The runtime never recreates a template. Run `eve build` again and deploy its output.
 
@@ -145,6 +146,42 @@ Timed out after 10 minutes waiting for another request or eve dev worker to prep
 ```
 
 Another request or `eve dev` worker is still preparing environments. Check the `eve dev` output, or run `eve logs`, to find the slow step, such as an image pull, a Dockerfile build, or a `prepare` callback. Retry after preparation finishes, or restart `eve dev` to cancel it.
+
+## Custom provider errors
+
+These errors come from a provider defined with `defineSandboxProvider()`, or from a keyed tool call on a provider that cannot keep its sandbox. See [Custom sandbox providers](/docs/sandbox/custom-providers).
+
+### `cannot keep a sandbox between invokeTool calls`
+
+```text
+Sandbox provider "acme" cannot keep a sandbox between invokeTool calls, so a call with a key cannot open one.
+```
+
+A keyed `invokeTool` call, such as an MCP tool session, requested the sandbox, and the provider does not keep sandboxes between calls. Call the tool without a key, use Vercel Sandbox or just-bash, or set `toolSessions: true` on a custom provider that bounds how long it keeps those sandboxes. Docker does not support keyed calls. See [Keep sandboxes for keyed tool calls](/docs/sandbox/custom-providers#keep-sandboxes-for-keyed-tool-calls).
+
+### `Sandbox connection extensions cannot replace the session members eve provides`
+
+```text
+Sandbox connection extensions cannot replace the session members eve provides: run. Rename them.
+```
+
+The connection's `extensions` define a member that eve already provides on every sandbox session, such as `run`, `readFile`, `stop`, or `delete`. Rename the extension member.
+
+### `ctx.templateKey() reserves`
+
+```text
+ctx.templateKey() reserves "sourceRevision": eve adds the workspace and skill files and the sandbox source revision itself.
+```
+
+The identity passed to `ctx.templateKey()` in `prepare()` sets `resources` or `sourceRevision`. eve adds both to every template key. Rename that identity field.
+
+### `returned non-serializable session state`
+
+```text
+Sandbox provider "acme" returned non-serializable session state.
+```
+
+`start()` returned state that is not JSON-compatible, such as a class instance, a function, or `undefined`. Return only strings, numbers, booleans, `null`, arrays, and plain objects, and keep live clients in the connection instead.
 
 ## Provider setup errors
 

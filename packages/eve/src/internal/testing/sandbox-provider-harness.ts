@@ -4,7 +4,7 @@ import {
   createSandboxProviderResources,
   type SandboxPreparedArtifact,
   type SandboxProviderHandle,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
   type SandboxProviderResourceFile,
 } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
@@ -15,7 +15,12 @@ export function createSandboxProviderHarness<
   SessionState,
   Session extends SandboxSession,
 >(
-  implementation: SandboxProviderImplementation<Options, PreparedArtifact, SessionState, Session>,
+  implementation: LegacySandboxProviderImplementation<
+    Options,
+    PreparedArtifact,
+    SessionState,
+    Session
+  >,
   options: Options,
   harnessOptions: {
     readonly preparedArtifact?: () => PreparedArtifact;

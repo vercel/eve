@@ -5,7 +5,7 @@ import {
   type SandboxPreparedArtifactStore,
 } from "#execution/sandbox/prewarm.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   type SandboxProviderPrepareContext,
 } from "#shared/sandbox-provider.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -159,7 +159,7 @@ function createGraph(
     };
   } = {},
 ): ResolvedAgentGraphBundle {
-  const provider = defineSandboxProvider({
+  const provider = defineLegacySandboxProvider({
     name: input.providerName ?? "test",
     environment: () => ({
       async onSessionEnd() {},

@@ -50,7 +50,7 @@ import {
   isSandboxPreparedArtifactRecord,
   sandboxProviderResourceIdentity,
   type SandboxPreparedArtifact,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
@@ -98,7 +98,7 @@ type DockerSandboxSessionState = {
 export function createDockerSandboxProvider(
   createOptions?: DockerSandboxEnvironmentOptions,
   dockerCli?: DockerCli,
-): SandboxProviderImplementation<
+): LegacySandboxProviderImplementation<
   DockerSandboxRuntimeOptions,
   DockerSandboxPreparedArtifact,
   DockerSandboxSessionState,

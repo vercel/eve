@@ -286,7 +286,7 @@ export async function ensureSandboxAccess(
       try {
         return await resumePersisted(context);
       } catch (error) {
-        if (!(error instanceof SandboxSessionGoneError)) throw error;
+        if (!SandboxSessionGoneError.is(error)) throw error;
         log.warn("session sandbox is gone, starting a fresh one", {
           error,
           providerName: persisted.providerName,

@@ -24,7 +24,7 @@ import {
   providerResourceTargetFiles,
   type SandboxPreparedArtifact,
   type SandboxProviderHandle,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
@@ -95,7 +95,7 @@ type VercelEnvironmentOptions = VercelCreateOptions & {
 
 export function createVercelSandboxProvider(
   environmentOptions: Readonly<VercelEnvironmentOptions> | undefined,
-): SandboxProviderImplementation<
+): LegacySandboxProviderImplementation<
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
@@ -115,7 +115,7 @@ interface CreateVercelSandboxInput {
 
 export function createVercelSandbox(
   input: CreateVercelSandboxInput = {},
-): SandboxProviderImplementation<
+): LegacySandboxProviderImplementation<
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,

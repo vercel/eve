@@ -4,7 +4,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { writeSandboxFiles } from "#shared/sandbox-write-files.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
@@ -106,7 +105,7 @@ export async function writeSkillPackageToSandbox(input: {
       }),
     })),
   );
-  await writeSandboxFiles(input.sandbox, { files });
+  await input.sandbox.writeFiles({ files });
 }
 
 /**

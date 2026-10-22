@@ -128,7 +128,7 @@ export interface SandboxProviderHandle<Session extends SandboxSession = SandboxS
   onSandboxStop(): Promise<void>;
 }
 
-export interface SandboxProviderImplementation<
+export interface LegacySandboxProviderImplementation<
   OpenOptions extends object | undefined,
   PreparedArtifact extends SandboxPreparedArtifact,
   SessionState,
@@ -172,7 +172,7 @@ type SandboxOptionArguments<Options extends object | undefined> = Options extend
     ? [options?: Readonly<Options>]
     : [options: Readonly<Options>];
 
-export type SandboxProviderDefinition<
+export type LegacySandboxProviderDefinition<
   EnvironmentOptions extends object | undefined,
   OpenOptions extends object | undefined,
   PreparedArtifact extends SandboxPreparedArtifact,
@@ -183,7 +183,7 @@ export type SandboxProviderDefinition<
   readonly stateProtocolVersion?: number;
   environment(
     ...args: SandboxOptionArguments<EnvironmentOptions>
-  ): SandboxProviderImplementation<OpenOptions, PreparedArtifact, SessionState, Session>;
+  ): LegacySandboxProviderImplementation<OpenOptions, PreparedArtifact, SessionState, Session>;
 };
 
 export interface SandboxProvider<
@@ -197,7 +197,7 @@ export interface SandboxProvider<
   ): SandboxEnvironment<OpenOptions, Session>;
 }
 
-type ErasedSandboxProviderImplementation = SandboxProviderImplementation<
+type ErasedSandboxProviderImplementation = LegacySandboxProviderImplementation<
   object | undefined,
   SandboxPreparedArtifact,
   SandboxPreparedArtifact,
@@ -210,14 +210,20 @@ export interface SandboxProviderRuntime {
   readonly stateProtocolVersion: number;
 }
 
-export function defineSandboxProvider<
+/**
+ * Defines a provider on the handle-based contract that eve's built-in
+ * providers still implement and core runs. Internal: the public
+ * `defineSandboxProvider()` in `#sandbox/provider.js` compiles the
+ * connection-based contract onto it until every built-in migrates.
+ */
+export function defineLegacySandboxProvider<
   EnvironmentOptions extends object | undefined = undefined,
   OpenOptions extends object | undefined = undefined,
   PreparedArtifact extends SandboxPreparedArtifact = SandboxPreparedArtifact,
   SessionState = SandboxPreparedArtifact,
   Session extends SandboxSession = SandboxSession,
 >(
-  definition: SandboxProviderDefinition<
+  definition: LegacySandboxProviderDefinition<
     EnvironmentOptions,
     OpenOptions,
     PreparedArtifact,
@@ -247,7 +253,7 @@ function eraseSandboxProviderImplementation<
   SessionState,
   Session extends SandboxSession,
 >(
-  implementation: SandboxProviderImplementation<Options, Artifact, SessionState, Session>,
+  implementation: LegacySandboxProviderImplementation<Options, Artifact, SessionState, Session>,
 ): ErasedSandboxProviderImplementation {
   return implementation as ErasedSandboxProviderImplementation;
 }

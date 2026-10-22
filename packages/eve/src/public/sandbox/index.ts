@@ -15,8 +15,10 @@ export {
   type RuntimeSandboxSession,
   type RuntimeSandboxSessionFor,
   type SandboxSpawnOptions,
+  type SandboxRemovePathOptions,
   type SandboxWriteBinaryFileOptions,
   type SandboxWriteFileOptions,
+  type SandboxWriteFilesOptions,
   type SandboxWriteTextFileOptions,
 } from "#public/definitions/sandbox.js";
 export { DefaultSandbox } from "#sandbox/providers/default.js";
@@ -26,6 +28,9 @@ export type {
   DefaultSandboxSession,
 } from "#sandbox/providers/default.js";
 export type {
+  SandboxNetworkMatch,
+  SandboxNetworkMatcher,
   SandboxNetworkOptions,
   SandboxNetworkPolicy,
+  SandboxNetworkRule,
 } from "#shared/sandbox-network-policy.js";

@@ -9,7 +9,7 @@ import type {
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 export type VercelSandboxEnvironmentOptions = VercelSandboxCreateOptions & {
@@ -17,7 +17,7 @@ export type VercelSandboxEnvironmentOptions = VercelSandboxCreateOptions & {
 };
 export type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
 
-const provider = defineSandboxProvider<
+const provider = defineLegacySandboxProvider<
   VercelSandboxEnvironmentOptions | undefined,
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,

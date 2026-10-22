@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
 
-const provider = defineSandboxProvider({
+const provider = defineLegacySandboxProvider({
   name: "test",
   environment: () => ({
     async onSessionEnd() {},
