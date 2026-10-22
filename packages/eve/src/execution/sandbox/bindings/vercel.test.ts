@@ -566,6 +566,45 @@ describe("createVercelSandbox", () => {
     );
   });
 
+  it("splits the realpath arguments of a large batch across calls and still uploads once", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    vi.mocked(sessionSandbox.runCommand).mockReset();
+    vi.mocked(sessionSandbox.runCommand).mockImplementation(
+      async (command: { args?: readonly string[] }) => ({
+        ...createMockCommandResult(),
+        stdout: vi.fn().mockResolvedValue(
+          (command.args ?? [])
+            .slice(3)
+            .map((path) => `/real${path}\0`)
+            .join(""),
+        ),
+      }),
+    );
+    const paths = Array.from(
+      { length: 2_000 },
+      (_, index) => `/workspace/${"nested/".repeat(12)}file-${index}.txt`,
+    );
+
+    await handle.sandbox.writeFiles({
+      files: paths.map((path) => ({ content: Buffer.from(path), path })),
+    });
+
+    const calls = vi
+      .mocked(sessionSandbox.runCommand)
+      .mock.calls.map(([command]) => (command as { args: string[] }).args);
+    expect(calls.length).toBeGreaterThan(1);
+    for (const args of calls) {
+      expect(args.slice(0, 3)).toEqual(["-m", "-z", "--"]);
+      expect(Buffer.byteLength(args.join(" "))).toBeLessThan(100 * 1024);
+    }
+    expect(calls.flatMap((args) => args.slice(3))).toEqual(paths);
+    expect(sessionSandbox.writeFiles).toHaveBeenCalledOnce();
+    expect(sessionSandbox.writeFiles).toHaveBeenLastCalledWith(
+      paths.map((path) => ({ content: Buffer.from(path), path: `/real${path}` })),
+      { signal: undefined },
+    );
+  });
+
   it("resolves and writes all seed paths to the sandbox filesystem in one batch", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });

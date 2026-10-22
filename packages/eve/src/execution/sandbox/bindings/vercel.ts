@@ -601,32 +601,33 @@ function createVercelConnection(
   };
 }
 
+/** Keeps each `realpath` argument list far below the kernel's argument size limit. */
+const REALPATH_ARGUMENT_BYTES = 64 * 1024;
+
 /**
  * The SDK writes by unpacking a tar archive, which replaces a symlinked
  * destination instead of writing through it. Resolve every path first, with
- * one `realpath` call. `-z` ends each path with NUL, so names with whitespace
- * or newlines come back intact.
+ * as few `realpath` calls as the argument size limit allows.
  */
 async function resolveVercelWriteFiles(
   sandbox: VercelSandbox,
   files: SandboxWriteFilesOptions["files"],
   signal?: AbortSignal,
 ): Promise<{ content: Uint8Array; path: string }[]> {
-  const result = await sandbox.runCommand({
-    args: ["-m", "-z", "--", ...files.map((file) => file.path)],
-    cmd: "realpath",
-    signal,
-  });
-  if (result.exitCode !== 0) {
-    const stderr = (await result.stderr()).trim();
-    throw new Error(`Failed to resolve Vercel Sandbox write paths with realpath: ${stderr}`);
+  const paths: string[] = [];
+  let batch: string[] = [];
+  let batchBytes = 0;
+  for (const file of files) {
+    const bytes = Buffer.byteLength(file.path) + 1;
+    if (batch.length > 0 && batchBytes + bytes > REALPATH_ARGUMENT_BYTES) {
+      paths.push(...(await resolveVercelPaths(sandbox, batch, signal)));
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(file.path);
+    batchBytes += bytes;
   }
-  const paths = (await result.stdout()).split("\0").slice(0, -1);
-  if (paths.length !== files.length) {
-    throw new Error(
-      `Failed to resolve Vercel Sandbox write paths: realpath printed ${paths.length} paths for ${files.length} files.`,
-    );
-  }
+  paths.push(...(await resolveVercelPaths(sandbox, batch, signal)));
   return files.map((file, index) => {
     const path = paths[index];
     if (path === undefined || !path.startsWith("/")) {
@@ -634,6 +635,30 @@ async function resolveVercelWriteFiles(
     }
     return { content: file.content, path };
   });
+}
+
+/** `-z` ends each path with NUL, so names with whitespace or newlines come back intact. */
+async function resolveVercelPaths(
+  sandbox: VercelSandbox,
+  paths: readonly string[],
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const result = await sandbox.runCommand({
+    args: ["-m", "-z", "--", ...paths],
+    cmd: "realpath",
+    signal,
+  });
+  if (result.exitCode !== 0) {
+    const stderr = (await result.stderr()).trim();
+    throw new Error(`Failed to resolve Vercel Sandbox write paths with realpath: ${stderr}`);
+  }
+  const resolved = (await result.stdout()).split("\0").slice(0, -1);
+  if (resolved.length !== paths.length) {
+    throw new Error(
+      `Failed to resolve Vercel Sandbox write paths: realpath printed ${resolved.length} paths for ${paths.length} files.`,
+    );
+  }
+  return resolved;
 }
 
 /**
