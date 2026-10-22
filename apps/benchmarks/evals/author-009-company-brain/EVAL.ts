@@ -148,12 +148,12 @@ test("run_sql asks a person before touching the pii schema", async () => {
 
 test("reads Notion as the signed-in employee through a narrow MCP connection", async () => {
   const file = sourceFiles("connections", /\.ts$/).find((path) =>
-    readFileSync(path, "utf8").includes("mcp.notion.com/mcp"),
+    resolvedSource(path).includes("mcp.notion.com/mcp"),
   );
   expect(file).toBeDefined();
   const connection = await load(file!);
   expect(connection.url).toBe("https://mcp.notion.com/mcp");
-  expect(new Set(connection.tools?.allow)).toEqual(new Set(["search", "fetch"]));
+  expectOnlySearchAndFetch(connection.tools?.allow);
   expect(connection.tools?.block).toBeUndefined();
 
   const auth = typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
@@ -289,7 +289,7 @@ test("researcher reads Notion as the employee and cannot query the warehouse", a
   expect(file).toBeDefined();
   const connection = await load(file!);
   expect(connection.url).toBe("https://mcp.notion.com/mcp");
-  expect(new Set(connection.tools?.allow)).toEqual(new Set(["search", "fetch"]));
+  expectOnlySearchAndFetch(connection.tools?.allow);
   const auth = typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
   expect(auth?.vercelConnect?.connector).toBe("mcp.notion.com/atlas");
   expect(auth?.principalType ?? auth?.credentialOwner).toBe("user");
@@ -301,7 +301,7 @@ test("researcher reads Notion as the employee and cannot query the warehouse", a
   expect(warehouseAccess).toEqual([]);
 });
 
-test("keeps metric definitions in a skill loaded on demand", () => {
+test("keeps metric definitions in a skill loaded on demand", async () => {
   // A single-file skill (`skills/<name>.md`), or a packaged one whose definitions
   // sit in SKILL.md itself or in a file next to it.
   const packaged = sourceFiles("skills", /^SKILL\.md$/).map((file) => ({
@@ -313,7 +313,19 @@ test("keeps metric definitions in a skill loaded on demand", () => {
   const singleFile = sourceFiles("skills", /\.md$/)
     .filter((file) => dirname(file) === `${agentRoot}/skills` && !file.endsWith("/SKILL.md"))
     .map((file) => ({ file, text: readFileSync(file, "utf8") }));
-  const skill = [...packaged, ...singleFile].find(({ text }) => /one-time/i.test(text));
+  // Or a `defineSkill({ markdown, files })` module, possibly re-exported from lib/.
+  const defined = await Promise.all(
+    sourceFiles("skills", /\.ts$/)
+      .filter((file) => dirname(file) === `${agentRoot}/skills`)
+      .map(async (file) => {
+        const definition = await load(file);
+        return {
+          file,
+          text: [definition?.markdown, ...strings(definition?.files)].join("\n"),
+        };
+      }),
+  );
+  const skill = [...packaged, ...singleFile, ...defined].find(({ text }) => /one-time/i.test(text));
   expect(skill).toBeDefined();
   // Only a packaged SKILL.md must describe itself; a single file falls back to its name.
   if (skill!.file.endsWith("/SKILL.md")) {
@@ -432,6 +444,20 @@ async function load(path: string): Promise<any> {
   return (await import(pathToFileURL(resolve(path)).href)).default;
 }
 
+/** Every string inside a value, such as the file contents of a `defineSkill({ files })`. */
+function strings(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (value === null || typeof value !== "object") return [];
+  return Object.values(value).flatMap(strings);
+}
+
+/** Notion's hosted server names these `notion-search` and `notion-fetch`; either spelling counts. */
+function expectOnlySearchAndFetch(allow: unknown) {
+  expect(Array.isArray(allow)).toBe(true);
+  const names = new Set((allow as unknown[]).map((name) => String(name).replace(/^notion-/, "")));
+  expect(names).toEqual(new Set(["search", "fetch"]));
+}
+
 function slackChannelFile(): string {
   const file = sourceFiles("channels", /\.ts$/).find((path) =>
     /slackChannel\s*\(/.test(readFileSync(path, "utf8")),
@@ -509,6 +535,7 @@ function session(caller: Caller) {
             authenticator: ssoAuthenticator(),
             principalId: "sso:ada",
             principalType: "user",
+            issuer: "https://sso.lumen.dev",
             subject: "ada",
             attributes: { groups: caller },
           };
