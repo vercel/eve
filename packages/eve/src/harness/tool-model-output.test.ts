@@ -83,6 +83,42 @@ describe("normalizeToolModelOutput", () => {
     });
   });
 
+  it("parses https file URLs into the AI SDK's URL shape", () => {
+    const url = "https://bucket.example.com/report.pdf?X-Amz-Signature=abc";
+
+    expect(
+      normalize(
+        toolOutput.content([
+          toolOutputPart.fileUrl(url, { mediaType: "application/pdf", filename: "report.pdf" }),
+        ]),
+      ),
+    ).toEqual({
+      type: "content",
+      value: [
+        {
+          type: "file",
+          data: { type: "url", url: new URL(url) },
+          mediaType: "application/pdf",
+          filename: "report.pdf",
+        },
+      ],
+    });
+  });
+
+  it.each([
+    ["http URL", "http://example.com/a.pdf"],
+    ["sandbox ref", "eve-sandbox:/workspace/.eve/attachments/a.pdf"],
+    ["data URL", "data:application/pdf;base64,aGVsbG8="],
+    ["relative path", "/workspace/a.pdf"],
+  ])("rejects a file url that is a %s", (_label, url) => {
+    expect(() =>
+      normalize({
+        type: "content",
+        value: [{ type: "file", data: { type: "url", url }, mediaType: "application/pdf" }],
+      }),
+    ).toThrow(/https: URL/u);
+  });
+
   it.each([
     [
       "raw Uint8Array payload",
@@ -90,11 +126,6 @@ describe("normalizeToolModelOutput", () => {
       /base64 string, received raw bytes/u,
     ],
     ["raw untagged bytes", new Uint8Array([1, 2, 3]), /base64 string, received raw bytes/u],
-    [
-      "url file-data tag",
-      { type: "url", url: "https://example.com/a.png" },
-      /"url" is not supported yet/u,
-    ],
     [
       "reference file-data tag",
       { type: "reference", reference: "file_abc" },
