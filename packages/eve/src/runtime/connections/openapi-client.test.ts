@@ -490,7 +490,7 @@ describe("OpenApiConnectionClient", () => {
       async (_url: URL, _init: RequestInit) =>
         new Response("moved", {
           status: 302,
-          headers: { location: "https://elsewhere.example.net/steal" },
+          headers: { location: "https://storage.example.net/archive.tar.gz" },
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -510,11 +510,29 @@ describe("OpenApiConnectionClient", () => {
     );
     const result = await client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS);
 
-    expect(result).toEqual({ status: 302, statusText: expect.any(String), body: "moved" });
+    expect(result).toEqual({
+      status: 302,
+      statusText: expect.any(String),
+      body: "moved",
+      location: "https://storage.example.net/archive.tar.gz",
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
     const [, init] = fetchMock.mock.calls[0]!;
     expect(init.redirect).toBe("manual");
     expect(init.headers).toHaveProperty("X-API-Key", "secret");
+  });
+
+  it("fails with a clear error when same-origin redirects loop", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(null, { status: 302, headers: { location: "/v1/projects/prj_1" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(makeConnection());
+
+    await expect(
+      client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS),
+    ).rejects.toThrow(/stopped after 10 redirects/);
   });
 
   it("throws for an unknown tool name", async () => {
