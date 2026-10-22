@@ -10,7 +10,7 @@
     "start": "next start",
     "postinstall": "fumadocs-mdx",
     "translate": "npx @vercel/geistdocs translate",
-    "test:unit": "pnpm --filter eve build:compiled && vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts",
     "render:eve-5": "NODE_OPTIONS=--loader=./scripts/wgsl-node-loader.mjs tsx scripts/render-eve-5.ts",
     "registry:build": "tsx scripts/prepare-registry-output.ts && shadcn build",
     "registry:check": "node --test ../../scripts/materialize-registry-release-requirements.test.mjs ../../scripts/validate-public-registry-requirements.test.mjs && node ../../scripts/validate-public-registry-requirements.mjs && pnpm run registry:build && pnpm run registry:validate && pnpm run registry:validate:channels && pnpm run registry:validate:instrumentation && pnpm run registry:validate:memory && tsc --project registry/tsconfig.json",
