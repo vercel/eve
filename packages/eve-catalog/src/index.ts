@@ -867,11 +867,11 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "stacktree",
     name: "Stacktree",
     kind: "connection",
-    tagline: "Publish and update private HTML pages through Stacktree's MCP server.",
+    tagline: "Publish and update unlisted HTML pages through Stacktree's MCP server.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description:
-        "Stacktree: publish HTML pages to private links, update them in place, and manage access and feedback.",
+        "Stacktree: publish HTML pages to unlisted links, update them in place, set optional passcode or email gates, and manage feedback.",
       mcp: { url: "https://api.stacktr.ee/mcp" },
     },
   },

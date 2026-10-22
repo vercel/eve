@@ -76,10 +76,7 @@ const buildSnippet = (
 
   const headerLines: string[] = [];
   if (auth === "apiKey" && spec.apiKey) {
-    const value = spec.apiKey.prefix
-      ? `\`${spec.apiKey.prefix}\${process.env.${spec.apiKey.env}!}\``
-      : `process.env.${spec.apiKey.env}!`;
-    headerLines.push(`    "${spec.apiKey.header}": ${value},`);
+    headerLines.push(`    "${spec.apiKey.header}": process.env.${spec.apiKey.env}!,`);
   }
   for (const [name, value] of Object.entries(transport?.headers ?? {})) {
     headerLines.push(`    "${name}": "${value}",`);
