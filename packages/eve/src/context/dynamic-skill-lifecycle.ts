@@ -86,6 +86,8 @@ function toDurableSkill(skill: MaterializableSkillPackage): DurableDynamicSkillM
   };
 }
 
+// The whole persisted record, including the generation `start()` sets: provider
+// state alone repeats when a gone sandbox is recreated under the same name.
 function sandboxIdentity(state: SandboxState): string | null {
   return state.session === null ? null : JSON.stringify(state.session);
 }

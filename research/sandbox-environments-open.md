@@ -6,6 +6,9 @@ last_updated: "2026-10-22"
 
 # Sandbox environments and provider sessions
 
+> [!NOTE]
+> [`sandbox-provider-api.md`](./sandbox-provider-api.md) supersedes the provider contract, provider-handle lifecycle hooks, the rule that core never reserves `prepare`, and the native identity section of this plan. The environment `open()` model, immutable session state, and gone semantics still apply.
+
 ## Decision
 
 Authors configure an immutable provider environment, then open its sandbox for the current eve session:

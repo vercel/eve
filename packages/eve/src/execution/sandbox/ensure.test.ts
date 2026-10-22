@@ -12,6 +12,7 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
+import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
@@ -181,7 +182,9 @@ describe("ensureSandboxAccess", () => {
   it("keeps missing production artifacts fatal without starting a sandbox", async () => {
     vi.mocked(loadSandboxPreparedArtifact).mockResolvedValueOnce(undefined);
     const value = fixture();
-    await expect(open(value.registry)).rejects.toThrow();
+    const failure = open(value.registry);
+    await expect(failure).rejects.toThrow(SandboxTemplateNotProvisionedError);
+    await expect(failure).rejects.toThrow('agent node "__root__"');
     expect(value.create).not.toHaveBeenCalled();
   });
 
@@ -214,7 +217,12 @@ describe("ensureSandboxAccess", () => {
     expect(setup).toHaveBeenCalledOnce();
     expect(value.start).toHaveBeenCalledOnce();
     await expect(access.captureState()).resolves.toEqual({
-      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+      session: {
+        generation: expect.any(String),
+        providerName: "test",
+        state: { key: "session-1" },
+        stateProtocolVersion: 1,
+      },
     });
   });
 
@@ -227,7 +235,12 @@ describe("ensureSandboxAccess", () => {
     expect(setup).toHaveBeenCalledOnce();
     expect(value.start).toHaveBeenCalledOnce();
     await expect(access.captureState()).resolves.toEqual({
-      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+      session: {
+        generation: expect.any(String),
+        providerName: "test",
+        state: { key: "session-1" },
+        stateProtocolVersion: 1,
+      },
     });
   });
 

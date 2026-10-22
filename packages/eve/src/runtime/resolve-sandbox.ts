@@ -44,6 +44,9 @@ export async function resolveSandboxDefinition(
     sourceKind: "module" as const,
   };
   if (!isSandboxEnvironment(environment))
-    throw new ResolveAgentError(`Sandbox "${definition.logicalPath}" has no environment.`);
+    throw new ResolveAgentError(
+      `Sandbox "${definition.logicalPath}" has no environment. ` +
+        "Export the environment its selector opens, for example `export const environment = DefaultSandbox.environment();`.",
+    );
   return { ...base, environment, kind: "independent" };
 }

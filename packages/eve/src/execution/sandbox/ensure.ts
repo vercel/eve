@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
@@ -146,7 +148,10 @@ export async function ensureSandboxAccess(
 
   function activeDefinition() {
     if (ownerDefinition.kind !== "independent")
-      throw new Error(`Sandbox "${ownerDefinition.logicalPath}" has no environment.`);
+      throw new Error(
+        `Sandbox "${ownerDefinition.logicalPath}" uses defineParentSandbox(), but this agent has no parent sandbox to share. ` +
+          "Only a declared subagent can share its parent's sandbox. Give this agent its own sandbox with defineSandbox() and an exported environment.",
+      );
     return ownerDefinition;
   }
 
@@ -158,8 +163,8 @@ export async function ensureSandboxAccess(
     });
     if (artifact === undefined) {
       throw new SandboxTemplateNotProvisionedError({
+        nodeId: ownerNodeId,
         providerName: provider.providerName,
-        templateKey: ownerNodeId,
       });
     }
     return artifact;
@@ -171,14 +176,23 @@ export async function ensureSandboxAccess(
     environment: object,
     context: SandboxProviderSessionContext,
   ): Promise<RuntimeSandboxSession> {
-    if (opening !== undefined) throw new Error("A sandbox definition can open only one sandbox.");
+    if (opening !== undefined)
+      throw new Error(
+        "A sandbox definition can open only one sandbox. Call `environment.open()` once in the defineSandbox() selector and return that sandbox.",
+      );
     const definition = activeDefinition();
     if (environment !== definition.environment)
-      throw new Error(`Sandbox "${definition.logicalPath}" selected a different environment.`);
+      throw new Error(
+        `Sandbox "${definition.logicalPath}" opened an environment other than the one it exports as \`environment\`. ` +
+          "Call `open()` on the exported environment. A selector cannot open an environment created inside the selector or exported by another sandbox file.",
+      );
     if (provider !== getSandboxEnvironmentRuntime(definition.environment))
       throw new Error(`Sandbox "${definition.logicalPath}" selected a different provider.`);
     if (persisted !== null) {
-      throw new Error(`Sandbox "${definition.logicalPath}" is already initialized.`);
+      throw new Error(
+        `Sandbox "${definition.logicalPath}" already opened this session's sandbox. ` +
+          "Call `environment.open()` once in the defineSandbox() selector and return that sandbox.",
+      );
     }
 
     const artifact = await loadArtifact(provider);
@@ -190,6 +204,7 @@ export async function ensureSandboxAccess(
         );
       }
       persisted = {
+        generation: randomUUID(),
         providerName: provider.providerName,
         state: result.state,
         stateProtocolVersion: provider.stateProtocolVersion,
@@ -223,7 +238,9 @@ export async function ensureSandboxAccess(
     const provider = getSandboxEnvironmentRuntime(activeDefinition().environment);
     if (persisted.providerName !== provider.providerName) {
       throw new Error(
-        `Sandbox session state belongs to provider "${persisted.providerName}", not "${provider.providerName}".`,
+        `This session's sandbox was created by provider "${persisted.providerName}", but the agent now selects provider "${provider.providerName}". ` +
+          "eve cannot move a sandbox between providers. Start a new session, or restore the previous provider. " +
+          "With DefaultSandbox, the provider can change when Docker starts or stops between processes.",
       );
     }
     if (persisted.stateProtocolVersion !== provider.stateProtocolVersion) {
