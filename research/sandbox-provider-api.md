@@ -158,7 +158,7 @@ a type error (`never`), and eve throws on them at runtime.
 
 ```ts
 export function defineSandboxProvider<
-  EnvironmentOptions extends object | undefined,
+  EnvironmentOptions extends object,
   OpenOptions extends object | undefined,
   Artifact extends SandboxJson,
   State extends SandboxJson,
@@ -224,9 +224,8 @@ export interface SandboxPrepareContext {
   ): Promise<void>;
 }
 
-export type WithPrepareOption<Options, Session> = Options extends undefined
-  ? SandboxPrepareOption<Session> | undefined
-  : Options & SandboxPrepareOption<Session>;
+export type WithPrepareOption<Options extends object, Session> = Options &
+  SandboxPrepareOption<Session>;
 
 export interface SandboxPrepareOption<Session> {
   readonly prepare?: (sandbox: Session) => void | Promise<void>;
@@ -284,7 +283,8 @@ root.
 `prepare` becomes a standard environment option through `WithPrepareOption`,
 typed with the provider's extensions (#3717). A provider without environment
 options still accepts `{ prepare }`. eve removes `prepare` before calling the
-provider's `environment()` and runs it inside `populate()`. No built-in
+provider's `environment()`, which always receives an object (`{}` when the
+caller passes none), and runs it inside `populate()`. No built-in
 includes `prepare` in its template identity today. `sourceRevision` hashes only
 the sandbox definition's source file, so it captures a `prepare` written there
 but not one imported from another module (see open questions).
