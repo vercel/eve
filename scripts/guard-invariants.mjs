@@ -95,11 +95,16 @@
  *             executor. The generic inbox and state cursor must not
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
- *   rule 44 — Every concrete built-in sandbox provider is defined through
- *             `defineSandboxProvider()`, or the internal
- *             `defineLegacySandboxProvider()` until it migrates to the
- *             connection contract, and does not import sandbox runtime
- *             orchestration, registries, key derivation, or session state.
+ *   rule 44 — Sandbox providers are built on the public provider contract.
+ *             Files under `src/execution/sandbox/bindings/` and
+ *             `src/sandbox/providers/` reach the contract only through
+ *             `#public/sandbox/*` and never import core sandbox modules
+ *             (session construction, ensure, prewarm, tool sessions, the
+ *             runtime sandbox registry, or the shared provider and session
+ *             internals). Engine helpers such as other binding modules,
+ *             stream utilities, and the optional-package loader stay
+ *             allowed. Every concrete built-in under `src/sandbox/providers/`
+ *             is defined through `defineSandboxProvider()`.
  *   rule 45 — Provided tools under `packages/eve/src/tools/provided/**` and
  *             the body of every agent tool import only public eve entry
  *             points (the `#` specifiers of the package's `exports`), the
@@ -142,6 +147,10 @@
  *             itself and external packages. eve reaches it only through the
  *             vendored root, delegation, otel, and ai-sdk entrypoints under
  *             `#compiled/@vercel/agent-runs/`, never the workspace package itself.
+ *   rule 53 — Legacy session snapshots are read only at ingress. Outside
+ *             `execution/legacy-session/`, only the ingress files that import
+ *             protocol-1 sessions may import it, so current execution
+ *             consumes only normalized session state.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -264,6 +273,7 @@ function isTsLike(relPath) {
  *   rule50: Violation[];
  *   rule51: Violation[];
  *   rule52: Violation[];
+ *   rule53: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -293,6 +303,7 @@ async function scanRepo(state) {
     checkRule37(posix, content, state.rule37);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
+    checkRule53(posix, lines, state.rule53);
     checkRule45(posix, lines, state.rule45);
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
@@ -387,7 +398,7 @@ const LEGACY_INGRESS_FILES = new Set([
   "packages/eve/src/eve-channel/index.ts",
 ]);
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
-function checkRule44(posix, lines, violations) {
+function checkRule53(posix, lines, violations) {
   if (
     posix.includes("/execution/legacy-session/") ||
     posix.includes("/internal/testing/") ||
@@ -401,13 +412,56 @@ function checkRule44(posix, lines, violations) {
       /import\(["'][^"']*legacy-session\//.test(line)
     )
       violations.push({
-        rule: 44,
+        rule: 53,
         file: posix,
         line: index + 1,
         message:
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
   });
+}
+
+// ---------- Rule 44: sandbox providers use the public provider contract ----------
+
+const SANDBOX_PROVIDER_DIRS = [
+  "packages/eve/src/execution/sandbox/bindings/",
+  "packages/eve/src/sandbox/providers/",
+];
+
+const SANDBOX_CORE_IMPORT_RE =
+  /(?:from\s+|import\s*\()["']#(?:sandbox\/provider|execution\/sandbox\/(?:ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule44(posix, lines, violations) {
+  if (!SANDBOX_PROVIDER_DIRS.some((dir) => posix.startsWith(dir))) return;
+  if (/\.test\.ts$/.test(posix)) return;
+  lines.forEach((line, index) => {
+    if (!SANDBOX_CORE_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 44,
+      file: posix,
+      line: index + 1,
+      message:
+        "Sandbox providers reach the provider contract only through #public/sandbox/* and may not import core sandbox modules. Use the public contract, or an engine helper such as another binding module.",
+    });
+  });
+  if (!posix.startsWith("packages/eve/src/sandbox/providers/")) return;
+  const source = lines.join("\n");
+  if (!/\bdefineSandboxProvider\(/.test(source)) {
+    violations.push({
+      rule: 44,
+      file: posix,
+      message: "Built-in sandbox providers must use defineSandboxProvider().",
+    });
+  }
+  if (source.includes("createSandboxEnvironment")) {
+    violations.push({
+      rule: 44,
+      file: posix,
+      message:
+        "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
+    });
+  }
 }
 
 // ---------- Rule 45: provided tools use only public entry points ----------
@@ -1684,43 +1738,6 @@ function diffCounts(current, baseline) {
 
 // ---------- Entry point ----------
 
-async function checkRule44SandboxProviders() {
-  const providerNames = ["docker", "just-bash", "vercel"];
-  const forbidden = [
-    "#execution/sandbox/ensure.js",
-    "#execution/sandbox/prewarm.js",
-    "#runtime/sandbox/registry.js",
-    "#sandbox/state.js",
-  ];
-  const issues = [];
-  for (const name of providerNames) {
-    const file = `packages/eve/src/sandbox/providers/${name}.ts`;
-    const source = await readFile(join(REPO_ROOT, file), "utf8");
-    if (!/\bdefine(Legacy)?SandboxProvider\b/.test(source)) {
-      issues.push({
-        file,
-        message: "Built-in sandbox providers must use defineSandboxProvider().",
-      });
-    }
-    if (source.includes("createSandboxEnvironment")) {
-      issues.push({
-        file,
-        message:
-          "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
-      });
-    }
-    for (const specifier of forbidden) {
-      if (source.includes(specifier)) {
-        issues.push({
-          file,
-          message: `Built-in sandbox providers may not bypass the provider contract through ${specifier}.`,
-        });
-      }
-    }
-  }
-  return issues;
-}
-
 async function main() {
   const baselineRaw = await readFile(BASELINE_PATH, "utf8");
   const baseline = JSON.parse(baselineRaw);
@@ -1748,6 +1765,7 @@ async function main() {
     rule37: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
+    rule53: /** @type {Violation[]} */ ([]),
     rule45: {
       allowlist: new Set(baseline.rule45_providedToolPrivateImportAllowlist),
       violations: /** @type {Violation[]} */ ([]),
@@ -1856,12 +1874,9 @@ async function main() {
 
   // Rule 43
   violations.push(...state.rule43);
-  violations.push(...state.rule44);
 
   // Rule 44
-  for (const issue of await checkRule44SandboxProviders()) {
-    violations.push({ rule: 44, ...issue });
-  }
+  violations.push(...state.rule44);
 
   // Rule 45
   violations.push(...state.rule45.violations);
@@ -1876,6 +1891,7 @@ async function main() {
   violations.push(...state.rule50);
   violations.push(...state.rule51);
   violations.push(...state.rule52);
+  violations.push(...state.rule53);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
