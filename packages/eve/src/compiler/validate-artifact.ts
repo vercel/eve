@@ -343,6 +343,7 @@ function collectReferencedModuleSources(
     if (node.config.dynamicModel !== undefined) add(node.config.dynamicModel);
   }
   for (const route of node.channelRoutes.effective) add(route);
+  for (const channel of node.channelRoutes.receiveOnly) add(channel);
   for (const route of node.channelRoutes.shadowed) {
     if (route.source.backing.kind !== "resource") add(route.source);
   }

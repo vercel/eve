@@ -111,9 +111,19 @@ export interface CompiledShadowedChannelRoute {
   readonly winnerSourceId: string;
 }
 
+/**
+ * Channel authored with `routes: []` and a `receive` hook. It mounts no
+ * HTTP route but stays resolvable as a schedule or cross-channel target.
+ */
+export type CompiledReceiveOnlyChannelDefinition = Omit<
+  CompiledChannelDefinition,
+  "cors" | "method" | "urlPath"
+>;
+
 export interface CompiledChannelRoutePlan {
   readonly effective: readonly CompiledChannelDefinition[];
   readonly preflight: readonly CompiledChannelPreflightDefinition[];
+  readonly receiveOnly: readonly CompiledReceiveOnlyChannelDefinition[];
   readonly shadowed: readonly CompiledShadowedChannelRoute[];
 }
 
@@ -552,6 +562,9 @@ const compiledChannelRoutePlanSchema: z.ZodType<CompiledChannelRoutePlan> = z
   .object({
     effective: z.array(compiledChannelDefinitionSchema).readonly(),
     preflight: z.array(compiledChannelPreflightDefinitionSchema).readonly(),
+    receiveOnly: z
+      .array(compiledChannelDefinitionSchema.omit({ cors: true, method: true, urlPath: true }))
+      .readonly(),
     shadowed: z.array(compiledShadowedChannelRouteSchema).readonly(),
   })
   .strict();
@@ -1164,6 +1177,7 @@ export function createCompiledAgentResources(
     channelRoutes: {
       effective: [...input.channelRoutes.effective],
       preflight: [...input.channelRoutes.preflight],
+      receiveOnly: [...input.channelRoutes.receiveOnly],
       shadowed: [...input.channelRoutes.shadowed],
     },
     connections: [...(input.connections ?? [])],

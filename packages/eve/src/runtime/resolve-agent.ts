@@ -51,8 +51,8 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
           },
   })) satisfies ResolvedSkillDefinition[];
   const resolvedChannels: ResolvedChannelDefinition[] = await Promise.all(
-    input.manifest.channelRoutes.effective.map((channelEntry) =>
-      resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
+    [...input.manifest.channelRoutes.effective, ...input.manifest.channelRoutes.receiveOnly].map(
+      (channelEntry) => resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
     ),
   );
   const resolvedTools = await Promise.all(

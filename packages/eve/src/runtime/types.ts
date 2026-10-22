@@ -244,11 +244,13 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
  */
 export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly name: string;
-  readonly method: ChannelRouteMethod;
+  /** Omitted for receive-only channels, which mount no route. */
+  readonly method?: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
   readonly turnPolicy?: CompiledChannel["turnPolicy"];
   readonly cors?: NormalizedChannelCorsOptions;
-  readonly urlPath: string;
+  /** Omitted for receive-only channels, which mount no route. */
+  readonly urlPath?: string;
   readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**
    * Universal entry point for new sessions, called by cross-channel

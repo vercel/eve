@@ -1132,6 +1132,39 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.diagnosticsSummary.warnings).toBe(1);
   });
 
+  it("keeps receive-only channels resolvable without mounting a route", async () => {
+    const receive = vi.fn();
+    const worker = defineChannel({ routes: [], receive });
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/worker.ts",
+        loadNamespace: async () => ({ default: worker }),
+      },
+    ]);
+
+    const compiled = compiledAgentManifestSchema.parse(
+      JSON.parse(
+        JSON.stringify(
+          await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+        ),
+      ),
+    );
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+
+    expect(compiled.channelRoutes.effective.some((route) => route.name === "worker")).toBe(false);
+    expect(compiled.channelRoutes.receiveOnly).toEqual([
+      expect.objectContaining({ logicalPath: "channels/worker.ts", name: "worker" }),
+    ]);
+    expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
+
+    const resolved = await resolveAgent({ manifest: compiled, moduleMap });
+    const channel = resolved.channels.find((entry) => entry.name === "worker");
+    expect(channel).toMatchObject({ definition: worker, receive, method: undefined });
+  });
+
   it("rejects duplicate routes emitted by one selected channel", async () => {
     const sourceRegistry = registry([
       {
