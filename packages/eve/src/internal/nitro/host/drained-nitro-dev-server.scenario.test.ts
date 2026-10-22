@@ -493,6 +493,28 @@ describe("drained Nitro dev server", () => {
     await expect(pending).rejects.toThrow();
   });
 
+  it("closes within a bounded interval while a recycle waits for a booting spare", async () => {
+    const { createRunner } = createRunnerFactory(
+      async () => new Response("ok"),
+      async (runnerIndex) => {
+        if (runnerIndex === 1) {
+          await new Promise<never>(() => undefined);
+        }
+      },
+    );
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    await listen(server);
+    await server.replaceWorker(replacement("/tmp/first.mjs"));
+    server.prepareSpareWorker();
+
+    const recycling = server.recycleWorker();
+    recycling.catch(() => undefined);
+    // Let the recycle start waiting on the spare before closing.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await withinDeadline(server.close(), "Timed out closing while a recycle waited for its spare.");
+    await expect(recycling).rejects.toThrow();
+  });
+
   it("terminates the client connection when a worker response fails mid-stream", async () => {
     let failStream: (() => void) | undefined;
     const { createRunner } = createRunnerFactory(async () => {

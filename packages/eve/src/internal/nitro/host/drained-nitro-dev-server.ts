@@ -153,23 +153,24 @@ export class DrainedNitroDevServer {
     this.#discardSpare();
 
     const slot = this.#createSlot(host);
+    let settle: (ready: boolean) => void = () => undefined;
     const spare: SpareRunner = {
-      ready: slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS).then(
-        () => true,
-        () => {
-          forget();
-          return false;
-        },
-      ),
+      ready: new Promise<boolean>((resolve) => {
+        settle = resolve;
+      }),
       slot,
     };
+    // A spare that closes or fails readiness is never ready, so a recycle
+    // waiting on it moves on instead of waiting out the readiness timeout.
     const forget = () => {
+      settle(false);
       if (this.#spare !== spare) return;
       this.#spare = undefined;
       void this.#releaseSlot(slot);
     };
     this.#spare = spare;
     slot.runner.onceClosed(forget);
+    slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS).then(() => settle(true), forget);
   }
 
   #enqueueSwap(swap: () => Promise<void>): Promise<void> {
@@ -184,6 +185,10 @@ export class DrainedNitroDevServer {
     }
 
     let slot = useSpare ? await this.#takeSpare(host) : undefined;
+    if (this.#closed) {
+      if (slot !== undefined) await this.#releaseSlot(slot);
+      throw new Error("Development server is closed.");
+    }
     if (slot === undefined) {
       slot = this.#createSlot(host);
       this.#pendingSlot = slot;
@@ -358,9 +363,15 @@ export class DrainedNitroDevServer {
 
     // Terminate a candidate still waiting on readiness so the replace chain
     // settles within a bounded interval instead of the readiness timeout.
-    await this.#pendingSlot?.runner
-      .close(new Error("Development server is closing."))
-      .catch(() => undefined);
+    // Terminate a booting spare too: a recycle may be waiting on it.
+    await Promise.all(
+      [this.#pendingSlot, this.#spare?.slot].map(
+        async (slot) =>
+          await slot?.runner
+            .close(new Error("Development server is closing."))
+            .catch(() => undefined),
+      ),
+    );
     await this.#replaceChain.catch(() => undefined);
 
     const listeners = [...this.#listeners];
