@@ -28,6 +28,10 @@ Don’t rely on `vercelOidc()` as the only production authenticator outside Verc
 
 The default local Workflow world stores run state under `.eve/.workflow-data`. Mount that directory on persistent storage so runs survive process and container replacement.
 
+With the default local world, each `eve start` process accepts workflow queue deliveries only from its own queue. Keep deliveries on the process that enqueued them. Do not point `WORKFLOW_LOCAL_BASE_URL` at a load balancer that can forward deliveries to another replica; that replica rejects them with HTTP 401. Use a custom world designed for shared queue delivery when scaling across replicas.
+
+On startup, eve re-enqueues pending and running local workflow runs with a new per-process delivery proof. Local recovery always runs; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` does not disable it in `eve start`.
+
 You can instead select an installed Workflow world package in the root `agent.ts`:
 
 ```typescript
