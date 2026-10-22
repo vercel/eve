@@ -9,7 +9,7 @@ import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-wor
 import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
@@ -76,7 +76,7 @@ function createSessionSandboxHarness() {
   const initializedSessionIds: string[] = [];
   const sessionKeys: string[] = [];
   let sandboxCount = 0;
-  const provider = defineSandboxProvider({
+  const provider = defineLegacySandboxProvider({
     name: "session-reset-test",
     environment: () => ({
       async onSessionEnd() {},

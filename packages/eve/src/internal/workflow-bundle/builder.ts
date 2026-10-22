@@ -26,7 +26,6 @@ import {
   createWorkflowImport,
   createWorkflowNodeBuiltinGuardPlugin,
   createWorkflowDriverAliasPlugin,
-  createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
   WORKFLOW_SOURCE_EXTENSIONS,
@@ -326,7 +325,6 @@ export class WorkflowBundleBuilder {
       platform: "neutral",
       plugins: [
         createWorkflowVirtualEntryPlugin(virtualEntrySource),
-        createWorkflowPseudoPackagePlugin(),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
         createAuthoredRelativeExtensionResolverPlugin({
           extensions: WORKFLOW_SOURCE_EXTENSIONS,

@@ -472,6 +472,9 @@ importers:
       '@mdx-js/mdx':
         specifier: 3.1.1
         version: 3.1.1(supports-color@10.2.2)
+      '@moorcheh-ai/memanto':
+        specifier: 0.2.29
+        version: 0.2.29(ai@7.0.137(zod@4.5.4))(eve@packages+eve)(openai@6.49.0(@smithy/signature-v4@5.7.3)(ws@8.21.3(bufferutil@4.1.0))(zod@4.5.4))(zod@4.5.4)
       '@novu/chat-sdk-adapter':
         specifier: 0.1.0
         version: 0.1.0(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react@19.2.6)(supports-color@10.2.2)(zod@4.5.4)
@@ -3893,6 +3896,27 @@ packages:
   '@modelcontextprotocol/server@2.0.0':
     resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
     engines: {node: '>=20'}
+
+  '@moorcheh-ai/memanto@0.2.29':
+    resolution: {integrity: sha512-6i2cWYd/mRmUBlRsDQBaIlLEMzGSmJ1WbLNYrkq5Qh0Wx6FiWdegDOQ1WwyTx2dA9HeQWzITgNPVhlSN0HqRkQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@mastra/core': '>=1.0.0'
+      ai: '>=5.0.0'
+      eve: '>=0.60.0'
+      openai: '>=4.55.0'
+      zod: '>=3.23.0'
+    peerDependenciesMeta:
+      '@mastra/core':
+        optional: true
+      ai:
+        optional: true
+      eve:
+        optional: true
+      openai:
+        optional: true
+      zod:
+        optional: true
 
   '@mux/mux-data-google-ima@0.3.17':
     resolution: {integrity: sha512-4wpH6dYybyZhqLn9qGn/+67Z8MZnQRAdqTFEEZw2bx61M9q01uPYYHxd8qwOnYtUGEeafsdTwVHVxKHGD3oc1A==}
@@ -17528,6 +17552,13 @@ snapshots:
   '@modelcontextprotocol/server@2.0.0':
     dependencies:
       '@modelcontextprotocol/core': 2.0.0
+      zod: 4.5.4
+
+  '@moorcheh-ai/memanto@0.2.29(ai@7.0.137(zod@4.5.4))(eve@packages+eve)(openai@6.49.0(@smithy/signature-v4@5.7.3)(ws@8.21.3(bufferutil@4.1.0))(zod@4.5.4))(zod@4.5.4)':
+    optionalDependencies:
+      ai: 7.0.137(zod@4.5.4)
+      eve: link:packages/eve
+      openai: 6.49.0(@smithy/signature-v4@5.7.3)(ws@8.21.3(bufferutil@4.1.0))(zod@4.5.4)
       zod: 4.5.4
 
   '@mux/mux-data-google-ima@0.3.17':

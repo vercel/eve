@@ -1,4 +1,8 @@
-import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import {
+  owningSandboxDefinition,
+  type RuntimeRegisteredSandbox,
+  type RuntimeSandboxRegistry,
+} from "#runtime/sandbox/registry.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type { SandboxProviderHandle, SandboxProviderRuntime } from "#shared/sandbox-provider.js";
 
@@ -6,8 +10,8 @@ import type { SandboxProviderHandle, SandboxProviderRuntime } from "#shared/sand
  * A keyed tool session has no end, so nothing ever runs its sandbox's
  * session-end cleanup. Only eve's bindings whose kept sandboxes stay bounded
  * opt in: Vercel's saved filesystems expire, and just-bash keeps only files on
- * the local disk. The marker stays internal so the public provider API is
- * unchanged.
+ * the local disk. Custom providers opt in with `toolSessions: true`, which
+ * `defineSandboxProvider()` turns into this marker.
  */
 
 /** What a binding that keeps tool-session sandboxes tells the calls that use them. */
@@ -32,13 +36,20 @@ export function withToolSessionSandboxes<Implementation extends object>(
   return implementation;
 }
 
+/** What a binding marked with `withToolSessionSandboxes` supports, or `undefined` when unmarked. */
+export function getToolSessionSandboxSupport(
+  implementation: object,
+): ToolSessionSandboxSupport | undefined {
+  return supported.get(implementation);
+}
+
 /** Raised when a keyed tool session opens a sandbox on a provider that cannot keep it. */
 export class ToolSessionSandboxUnsupportedError extends Error {
   constructor(providerName: string) {
     super(
       `Sandbox provider "${providerName}" cannot keep a sandbox between invokeTool calls, ` +
         "so a call with a key cannot open one. Call without a key for a sandbox that lasts " +
-        "one call, or use Vercel Sandbox or just-bash.",
+        "one call, or use Vercel Sandbox, just-bash, or a custom provider that sets `toolSessions: true`.",
     );
     this.name = "ToolSessionSandboxUnsupportedError";
   }
@@ -63,8 +74,9 @@ export async function releaseToolSessionHandle(
 }
 
 function registeredProvider(registry: RuntimeSandboxRegistry): SandboxProviderRuntime | undefined {
-  const registered = registry.sandbox;
-  const definition = registered?.inheritance?.definition ?? registered?.definition;
+  // Test runtimes without a sandbox cast a null registry.
+  const registered = registry.sandbox as RuntimeRegisteredSandbox | null | undefined;
+  const definition = registered ? owningSandboxDefinition(registered) : undefined;
   if (definition?.kind !== "independent") return undefined;
   return getSandboxEnvironmentRuntime(definition.environment);
 }

@@ -666,6 +666,43 @@ describe("EveAgentStore agent-session following", () => {
 });
 
 describe("EveAgentStore prewarming", () => {
+  it("deduplicates existing-session preparation and sends while it is pending or fails", async () => {
+    const preparation = Promise.withResolvers<Response>();
+    const stream = controlledStreamResponse();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (init?.method === "POST" && init.body === undefined) return preparation.promise;
+      if (init?.method === "POST") return startedResponse();
+      return stream.response;
+    });
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const prewarm = store.prewarm();
+    expect(store.prewarm()).toBe(prewarm);
+    const rejected = expect(prewarm).rejects.toThrow("prepare failed");
+    const sending = store.send({ message: "Hello" });
+    await vi.waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === "/eve/v1/session/session_1" &&
+            init?.method === "POST" &&
+            typeof init.body === "string" &&
+            JSON.parse(init.body).message === "Hello",
+        ),
+      ).toBe(true),
+    );
+    preparation.reject(new Error("prepare failed"));
+    await rejected;
+    for (const event of turnEvents())
+      stream.emit({ ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } });
+    await sending;
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.session?.sessionId).toBe("session_1");
+  });
+
   it("settles a send aborted during preparation without creating a session", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const store = createStore({ reducer: defaultMessageReducer() });

@@ -121,7 +121,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly followIdle?: boolean;
   /**
-   * Prewarm an owned session when true. React observes this value across renders;
+   * Create a session or prepare its existing idle owner when true. React observes this value across renders;
    * changing it from false to true prepares the current session, and reset checks
    * the latest rendered value before preparing the next session.
    *

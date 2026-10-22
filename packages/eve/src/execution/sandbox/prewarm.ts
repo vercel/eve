@@ -7,6 +7,7 @@ import {
   createSandboxProviderResources,
   type SandboxPreparedArtifact,
   type SandboxProviderPrepareContext,
+  type SandboxProviderResources,
   type SandboxProviderRuntime,
 } from "#shared/sandbox-provider.js";
 import {
@@ -207,7 +208,7 @@ async function collectPrewarmTargets(input: {
         "sandbox",
       );
       const provider = getSandboxEnvironmentRuntime(definition.environment);
-      const seedFiles = await loadResourceRootSeedFiles({
+      const resources = await loadSandboxProviderResources({
         compileDirectoryPath: input.compileDirectoryPath,
         workspaceResourceRoot,
       });
@@ -215,14 +216,7 @@ async function collectPrewarmTargets(input: {
         context: {
           files: createSandboxProviderFiles(sandboxRoot),
           host: createDevelopmentSandboxProviderHost(input.appRoot),
-          resources: createSandboxProviderResources({
-            resourcesKey: workspaceResourceRoot.contentHash,
-            resourcesPath:
-              workspaceResourceRoot.contentHash === undefined
-                ? undefined
-                : `${input.compileDirectoryPath}/${workspaceResourceRoot.logicalPath}`,
-            seedFiles,
-          }),
+          resources,
           sourceRevision: definition.revisionHash,
           storagePath: resolveSandboxCacheDirectory(input.appRoot),
         },
@@ -238,27 +232,22 @@ async function collectPrewarmTargets(input: {
 }
 
 /**
- * Resolves the per-node compiled workspace resource root to an absolute
- * disk path under `.eve/compile/` and materializes its contents into the
- * `{path, content}` shape consumed by sandbox providers.
- *
- * Returns an empty array when the resource root descriptor advertises no
- * root entries (the materializer would emit no files anyway).
+ * Reads the node's compiled workspace resource root under `.eve/compile/`
+ * into the resource trees handed to the provider. A root without content has
+ * no resources.
  */
-async function loadResourceRootSeedFiles(input: {
+async function loadSandboxProviderResources(input: {
   readonly compileDirectoryPath: string;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
-}): Promise<readonly { readonly content: Uint8Array; readonly path: string }[]> {
-  if (
-    input.workspaceResourceRoot.contentHash === undefined &&
-    input.workspaceResourceRoot.rootEntries.length === 0
-  ) {
-    return [];
-  }
-  const materialized = await materializeWorkspaceDirectory(
-    `${input.compileDirectoryPath}/${input.workspaceResourceRoot.logicalPath}`,
-  );
-  return materialized.map((file) => ({ content: file.content, path: file.path }));
+}): Promise<SandboxProviderResources> {
+  const { contentHash, logicalPath } = input.workspaceResourceRoot;
+  if (contentHash === undefined) return createSandboxProviderResources({});
+  const path = `${input.compileDirectoryPath}/${logicalPath}`;
+  return createSandboxProviderResources({
+    key: contentHash,
+    path,
+    ...(await materializeWorkspaceDirectory(path)),
+  });
 }
 
 async function loadGraphFromArtifacts(input: {

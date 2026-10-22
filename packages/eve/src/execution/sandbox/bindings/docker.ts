@@ -16,7 +16,10 @@ import {
   createDockerCli,
   type DockerCli,
 } from "#execution/sandbox/bindings/docker-cli.js";
-import { setDockerNetworkPolicy } from "#execution/sandbox/bindings/docker-network.js";
+import {
+  assertDockerNetworkPolicy,
+  setDockerNetworkPolicy,
+} from "#execution/sandbox/bindings/docker-network.js";
 import {
   createDockerSandboxOptionsHash,
   resolveDockerSandboxOptions,
@@ -47,7 +50,7 @@ import {
   isSandboxPreparedArtifactRecord,
   sandboxProviderResourceIdentity,
   type SandboxPreparedArtifact,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
@@ -95,7 +98,7 @@ type DockerSandboxSessionState = {
 export function createDockerSandboxProvider(
   createOptions?: DockerSandboxEnvironmentOptions,
   dockerCli?: DockerCli,
-): SandboxProviderImplementation<
+): LegacySandboxProviderImplementation<
   DockerSandboxRuntimeOptions,
   DockerSandboxPreparedArtifact,
   DockerSandboxSessionState,
@@ -297,7 +300,6 @@ export function createDockerSandboxProvider(
         );
 
         await hydrateSandboxProviderResources({
-          copySkills: true,
           log: context.log,
           resources: context.resources,
           session: templateSession,
@@ -343,6 +345,10 @@ export function createDockerSandboxProvider(
       return await openDockerSession(context, undefined, artifactValue, state.containerName, false);
     },
     async start(context, openOptions, artifactValue) {
+      // Callers that widen the option type, such as DefaultSandbox, reach here unchecked.
+      if (openOptions?.networkPolicy !== undefined) {
+        assertDockerNetworkPolicy(openOptions.networkPolicy);
+      }
       const containerName = dockerSessionName(context);
       return {
         handle: await openDockerSession(context, openOptions, artifactValue, containerName, true),

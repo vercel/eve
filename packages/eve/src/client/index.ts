@@ -30,6 +30,7 @@ export type {
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientAgentSession } from "#client/agent-session.js";
+export type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
 export { ClientSession } from "#client/session.js";
 export {
   ClientSessions,

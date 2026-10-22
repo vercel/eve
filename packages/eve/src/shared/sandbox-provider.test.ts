@@ -1,9 +1,9 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
 
-const provider = defineSandboxProvider<
+const provider = defineLegacySandboxProvider<
   { readonly image?: string },
   { readonly networkPolicy?: "allow-all" | "deny-all" },
   { readonly templateId: string },
@@ -37,6 +37,7 @@ function handle(nativeId: string) {
       readTextFile: vi.fn(),
       writeFile: vi.fn(),
       writeBinaryFile: vi.fn(),
+      writeFiles: vi.fn(),
       writeTextFile: vi.fn(),
       removePath: vi.fn(),
     },
@@ -47,7 +48,7 @@ function handle(nativeId: string) {
   };
 }
 
-describe("defineSandboxProvider", () => {
+describe("defineLegacySandboxProvider", () => {
   it("preserves provider-owned environment and open option types", () => {
     const environment = provider.environment({ image: "node:24" });
     expect(environment.provider).toBe("test-provider");

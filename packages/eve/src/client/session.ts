@@ -13,6 +13,7 @@ import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
 import {
   cancelClientSession,
+  prewarmClientSession,
   clearClientSession,
   compactClientSession,
   resetClientSession,
@@ -167,6 +168,17 @@ export class ClientSession {
       initialStreamIndex,
       input.message === undefined ? undefined : deliveryId,
     );
+  }
+
+  /** Requests preparation of an existing idle session; never starts a model turn. */
+  async prewarm(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<import("#protocol/prewarm-session.js").PrewarmSessionResult> {
+    return await prewarmClientSession({
+      context: this.#context,
+      sessionId: this.#state.sessionId,
+      signal: options?.signal,
+    });
   }
 
   /** Requests cooperative cancellation of this session's active turn. */

@@ -1,6 +1,6 @@
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-import { vercelOidc } from "#public/channels/auth.js";
+import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
   chatSdkChannel,
   type ChatSdkChannel,
@@ -118,7 +118,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
       ? { webhookVerifier: config.webhookVerifier }
       : webhookSecret
         ? { webhookSecret }
-        : { webhookVerifier: vercelOidc() }),
+        : { webhookVerifier: sameEnvironmentVercelOidc() }),
   });
   addPhotonAttachmentRehydration(imessage);
   const bridge = chatSdkChannel({

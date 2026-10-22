@@ -1,0 +1,221 @@
+{
+  "id": "static-tools/ends-turn-function",
+  "verdict": "passed",
+  "startedAt": "2026-10-05T23:35:48.752Z",
+  "completedAt": "2026-10-05T23:35:49.802Z",
+  "result": {
+    "derived": {
+      "usage": {
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "inputTokens": 1117,
+        "outputTokens": 29
+      }
+    },
+    "sessionId": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+    "runtimeIdentity": {
+      "eveVersion": "0.71.2"
+    },
+    "sessions": [
+      {
+        "sessionId": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+        "events": [
+          {
+            "type": "turn.started",
+            "meta": {
+              "id": "evt_01M476RV3PFF8YGR8F46VHK6NW",
+              "at": "2026-10-05T23:35:49.110Z"
+            },
+            "data": {
+              "turnId": "turn_0"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476RV3RZCCW92ZXEJWBW8WM",
+              "at": "2026-10-05T23:35:49.112Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476RV41G16Z7FSF37GAG635",
+              "at": "2026-10-05T23:35:49.121Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "mock-tool-call-1-0-1",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476RV4325FKVY9H3VTMBSEW",
+              "at": "2026-10-05T23:35:49.123Z"
+            },
+            "data": {
+              "result": {
+                "callId": "mock-tool-call-1-0-1"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476RV45DWXA28BBVBFY5HQF",
+              "at": "2026-10-05T23:35:49.125Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 0,
+              "usage": {
+                "inputTokens": 344,
+                "outputTokens": 4,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "turn.completed",
+            "meta": {
+              "id": "evt_01M476RV4NAD1MEWDF4H2CBQWB",
+              "at": "2026-10-05T23:35:49.141Z"
+            },
+            "data": {
+              "turnId": "turn_0"
+            }
+          },
+          {
+            "type": "turn.started",
+            "meta": {
+              "id": "evt_01M476RVPD601TWZ4WEK2RYKCG",
+              "at": "2026-10-05T23:35:49.709Z"
+            },
+            "data": {
+              "turnId": "turn_1"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476RVPD601TWZ4WEK2RYKCJ",
+              "at": "2026-10-05T23:35:49.709Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476RVPFWRV23DNSPJERPZRX",
+              "at": "2026-10-05T23:35:49.711Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "mock-tool-call-2-1-1",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476RVPGVTS0HK0BT3DHYRNB",
+              "at": "2026-10-05T23:35:49.712Z"
+            },
+            "data": {
+              "result": {
+                "callId": "mock-tool-call-2-1-1"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476RVPGVTS0HK0BT3DHYRNC",
+              "at": "2026-10-05T23:35:49.712Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 0,
+              "usage": {
+                "inputTokens": 382,
+                "outputTokens": 5,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476RVRMAYSTN1F5WH1BDHGM",
+              "at": "2026-10-05T23:35:49.780Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 1
+            }
+          },
+          {
+            "type": "message.appended",
+            "meta": {
+              "id": "evt_01M476RVRRACG4V1029E45SH2D",
+              "at": "2026-10-05T23:35:49.784Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 1
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476RVRRACG4V1029E45SH2H",
+              "at": "2026-10-05T23:35:49.784Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 1,
+              "usage": {
+                "inputTokens": 391,
+                "outputTokens": 20,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "stop"
+            }
+          },
+          {
+            "type": "turn.completed",
+            "meta": {
+              "id": "evt_01M476RVS25WY95VK1961T35DH",
+              "at": "2026-10-05T23:35:49.794Z"
+            },
+            "data": {
+              "turnId": "turn_1"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

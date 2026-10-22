@@ -364,6 +364,31 @@
       ]
     },
     {
+      "name": "memory/memanto",
+      "type": "registry:item",
+      "title": "Memanto",
+      "description": "Recall relevant long-term context and let agents deliberately save durable user memories.",
+      "dependencies": [
+        "@moorcheh-ai/memanto@0.2.29"
+      ],
+      "envVars": {
+        "MOORCHEH_API_KEY": "",
+        "MEMANTO_BASE_URL": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.60.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/memanto.ts",
+          "type": "registry:file",
+          "target": "agent/memory/memanto.ts"
+        }
+      ]
+    },
+    {
       "name": "tool/agent",
       "type": "registry:item",
       "title": "Agent",
@@ -1027,6 +1052,39 @@
       ]
     },
     {
+      "name": "connection/flora",
+      "type": "registry:item",
+      "title": "FLORA",
+      "description": "Generate image, video, audio, text, and 3D assets through FLORA's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "flora",
+              "agents.flora.ai/mcp",
+              "flora"
+            ]
+          },
+          "requires": ">=0.82.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/flora.ts",
+          "type": "registry:file",
+          "target": "agent/connections/flora.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/egnyte",
       "type": "registry:item",
       "title": "Egnyte",
@@ -1089,6 +1147,22 @@
           "path": "registry/connections/embat.ts",
           "type": "registry:file",
           "target": "agent/connections/embat.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/firecrawl",
+      "type": "registry:item",
+      "title": "Firecrawl",
+      "description": "Search, scrape, map, crawl, parse, and monitor web content.",
+      "envVars": {
+        "FIRECRAWL_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/firecrawl.ts",
+          "type": "registry:file",
+          "target": "agent/connections/firecrawl.ts"
         }
       ]
     },
@@ -3448,6 +3522,27 @@
           "path": "registry/instrumentation/raindrop.ts",
           "type": "registry:file",
           "target": "agent/instrumentation/raindrop.ts"
+        }
+      ]
+    },
+    {
+      "name": "instrumentation/oodle",
+      "type": "registry:item",
+      "title": "Oodle",
+      "description": "Send agent traces to Oodle over OpenTelemetry.",
+      "dependencies": [
+        "@vercel/otel"
+      ],
+      "envVars": {
+        "OODLE_OTLP_ENDPOINT": "",
+        "OODLE_API_KEY": "",
+        "OODLE_INSTANCE": ""
+      },
+      "files": [
+        {
+          "path": "registry/instrumentation/oodle.ts",
+          "type": "registry:file",
+          "target": "agent/instrumentation/oodle.ts"
         }
       ]
     },

@@ -1,11 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, fetchMessage, newMessage, reaction, send } = vi.hoisted(() => ({
+const {
+  createiMessageAdapter,
+  directMessage,
+  fetchMessage,
+  newMessage,
+  reaction,
+  send,
+  vercelOidc,
+} = vi.hoisted(() => ({
+  createiMessageAdapter: vi.fn(
+    (_config: { webhookVerifier?: (request: Request) => unknown }) => ({}),
+  ),
   directMessage: vi.fn(),
   fetchMessage: vi.fn(),
   newMessage: vi.fn(),
   reaction: vi.fn(),
   send: vi.fn(),
+  vercelOidc: vi.fn(),
 }));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
@@ -26,9 +38,9 @@ vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),
 }));
 vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
-  createiMessageAdapter: vi.fn(() => ({})),
+  createiMessageAdapter,
 }));
-vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
+vi.mock("#public/channels/auth.js", () => ({ vercelOidc }));
 
 import {
   defaultPhotonAuth,
@@ -41,6 +53,23 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 describe("photonIMessageChannel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("verifies webhooks by default only with Vercel OIDC from the current environment", async () => {
+    const runtime = { principalType: "runtime", subject: "production" };
+    const verify = vi.fn();
+    vercelOidc.mockReturnValue(verify);
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+    const webhookVerifier = createiMessageAdapter.mock.calls[0]?.[0].webhookVerifier;
+    if (webhookVerifier === undefined) throw new Error("Expected a default webhook verifier.");
+    const request = new Request("https://agent.example/webhook", { method: "POST" });
+
+    verify.mockResolvedValueOnce({ principalType: "service", subject: "preview" });
+    await expect(webhookVerifier(request)).resolves.toBeNull();
+    verify.mockResolvedValueOnce(runtime);
+    await expect(webhookVerifier(request)).resolves.toBe(runtime);
   });
 
   it("sends emoji tapbacks through the fetched spectrum message", async () => {

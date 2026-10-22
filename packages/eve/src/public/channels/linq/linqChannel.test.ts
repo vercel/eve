@@ -176,6 +176,20 @@ describe("linqChannel", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects default-verified webhooks signed by another environment of the project", async () => {
+    vercelOidc.mockReturnValue(async () => ({ principalType: "service", subject: "preview" }));
+    const { createLinqAdapter: createRealLinqAdapter } = await vi.importActual<
+      typeof import("#compiled/@linqapp/chat-sdk-adapter/index.js")
+    >("#compiled/@linqapp/chat-sdk-adapter/index.js");
+
+    linqChannel({ credentials: { apiKey: "linq-api-key" } });
+    const config = createLinqAdapter.mock.calls[0]?.[0];
+    if (config === undefined) throw new Error("Expected Linq adapter config.");
+    const response = await createRealLinqAdapter(config).handleWebhook(forgedWebhook());
+
+    expect(response.status).toBe(401);
+  });
+
   it("drops blank inbound messages", async () => {
     linqChannel({
       credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" },

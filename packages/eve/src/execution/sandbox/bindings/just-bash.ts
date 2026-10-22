@@ -34,7 +34,7 @@ import {
   providerResourceTargetFiles,
   sandboxProviderResourceIdentity,
   type SandboxPreparedArtifact,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
@@ -53,7 +53,7 @@ type JustBashSessionState = { readonly rootPath: string; readonly version: 2 };
 
 export function createJustBashSandboxProvider(
   authoredOptions: JustBashSandboxCreateOptions | undefined = undefined,
-): SandboxProviderImplementation<
+): LegacySandboxProviderImplementation<
   undefined,
   JustBashPreparedArtifact,
   JustBashSessionState,

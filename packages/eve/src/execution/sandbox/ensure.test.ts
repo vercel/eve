@@ -8,7 +8,7 @@ import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
@@ -39,7 +39,7 @@ function fixture(setup?: () => void, returnCopy = false) {
     handle: await create(),
     state: { key: context.session.id },
   }));
-  const provider = defineSandboxProvider({
+  const provider = defineLegacySandboxProvider({
     name: "test",
     environment: () => ({ onSessionEnd, prepare: async () => null, resume: create, start }),
   });
@@ -89,7 +89,7 @@ function upsertingFixture() {
       onSandboxStop: async () => {},
     };
   };
-  const environment = defineSandboxProvider({
+  const environment = defineLegacySandboxProvider({
     name: "upserting",
     environment: () => ({
       onSessionEnd: async (context: SandboxProviderSessionContext) =>
@@ -231,6 +231,27 @@ describe("ensureSandboxAccess", () => {
     const value = fixture(setup);
     const { access } = await open(value.registry, "session-1", {
       session: { providerName: "microsandbox", state: { key: "old" }, stateProtocolVersion: 1 },
+    });
+    expect(setup).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
+    await expect(access.captureState()).resolves.toEqual({
+      session: {
+        generation: expect.any(String),
+        providerName: "test",
+        state: { key: "session-1" },
+        stateProtocolVersion: 1,
+      },
+    });
+  });
+
+  it.each([
+    ["another provider", { providerName: "other", stateProtocolVersion: 1 }],
+    ["another state protocol", { providerName: "test", stateProtocolVersion: 2 }],
+  ])("starts a fresh sandbox for state %s recorded", async (_, record) => {
+    const setup = vi.fn();
+    const value = fixture(setup);
+    const { access } = await open(value.registry, "session-1", {
+      session: { ...record, state: { key: "old" } },
     });
     expect(setup).toHaveBeenCalledOnce();
     expect(value.start).toHaveBeenCalledOnce();

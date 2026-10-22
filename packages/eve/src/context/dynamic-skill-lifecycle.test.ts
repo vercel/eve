@@ -27,7 +27,7 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
@@ -76,7 +76,7 @@ function recreatableSandbox() {
     onSandboxDelete: async () => {},
     onSandboxStop: async () => {},
   });
-  const environment = defineSandboxProvider({
+  const environment = defineLegacySandboxProvider({
     name: "recreatable",
     environment: () => ({
       onSessionEnd: async () => {},
@@ -556,7 +556,7 @@ describe("dynamic skill supporting files", () => {
     const manifest = ctx.get(DynamicSkillManifestKey);
 
     content = "B";
-    vi.spyOn(sandbox.session, "writeBinaryFile").mockRejectedValueOnce(new Error("disk full"));
+    vi.spyOn(sandbox.session, "writeFiles").mockRejectedValueOnce(new Error("disk full"));
     await expect(dispatch(ctx, resolver)).rejects.toThrow("disk full");
     expect(ctx.get(DynamicSkillManifestKey)).toBe(manifest);
     expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});

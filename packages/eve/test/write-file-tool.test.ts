@@ -53,6 +53,7 @@ function createFakeAccess(files: Record<string, string>): {
     },
     async writeFile() {},
     async writeBinaryFile() {},
+    async writeFiles() {},
     async writeTextFile({ path, content }: { path: string; content: string }) {
       files[path] = content;
     },
