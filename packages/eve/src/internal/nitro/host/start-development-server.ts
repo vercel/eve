@@ -273,7 +273,6 @@ async function closeDevelopmentServerResources(input: {
   }
   await attempt(() =>
     stopDevelopmentSandboxResources({
-      appRoot: input.appRoot,
       devRunId: input.developmentSandboxRunId,
       log: (message) => console.warn(`[eve:dev] ${message}`),
     }),

@@ -3,7 +3,7 @@ title: "Default Sandbox"
 description: "Let eve select the sandbox provider for the current environment."
 ---
 
-`DefaultSandbox.environment()` preserves eve's standard behavior without exposing provider-specific live creation options.
+`DefaultSandbox.environment()` selects a sandbox provider for the host that loads your sandbox file. Its `open()` method takes no options.
 
 ```ts
 import { DefaultSandbox, defineSandbox } from "eve/sandbox";
@@ -12,6 +12,48 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it tries [Docker](/docs/sandbox/docker), [microsandbox](/docs/sandbox/microsandbox), and [just-bash](/docs/sandbox/just-bash), in that order, according to host support.
+On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it selects [Docker](/docs/sandbox/docker) when a Docker daemon is reachable and falls back to [just-bash](/docs/sandbox/just-bash) otherwise.
 
-Use a provider directly when you need its image, VM, network, compute, or mount options.
+Use a provider directly when you need options for `open()`, such as a per-sandbox `networkPolicy` or Vercel Drive `mounts`, or a provider-specific session such as one with `setNetworkPolicy()`.
+
+## How eve selects the provider
+
+`DefaultSandbox.environment()` selects the provider when it runs, which is when your sandbox module loads:
+
+1. If the `VERCEL` environment variable is set, it selects Vercel.
+2. Otherwise, if `docker version` reports a running Linux Docker daemon within five seconds, it selects Docker. eve checks once per process and reuses the answer.
+3. Otherwise, it selects just-bash.
+
+`eve build`, `eve dev`, and each production server process load the sandbox module separately, so each one selects a provider for its own host. If the build host and the runtime host differ, they can select different providers. For example, a build on a CI machine without Docker prepares a different provider's environment than a server with Docker selects, and the server fails with a provider mismatch error. Run `eve build` where the runtime's provider is available, or select that provider explicitly with `DockerSandbox` or `VercelSandbox`. See [Sandbox troubleshooting](/docs/sandbox/troubleshooting) for the exact errors.
+
+A running session keeps the provider that created its sandbox. If a later process selects a different provider, for example because Docker stopped, that session cannot resume its sandbox.
+
+## Environment options
+
+`DefaultSandbox.environment()` accepts options for each provider it might select. eve passes only the selected provider's options and ignores the rest:
+
+```ts
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+
+export const environment = DefaultSandbox.environment({
+  prepare: async (sandbox) => {
+    await sandbox.writeTextFile({ path: "notes/README.md", content: "Analysis notes\n" });
+  },
+  docker: { env: { APP_MODE: "agent" } },
+  vercel: { region: "iad1" },
+  justBash: { autoInstall: false },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+| Option     | Used when             | Accepts                                                                                                                             |
+| ---------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `prepare`  | Any provider          | Setup captured in the prepared environment. Replaces a `prepare` set inside the provider options.                                   |
+| `docker`   | Docker is selected    | The options of [`DockerSandbox.environment()`](/docs/sandbox/docker#environment-options), such as `image`, `env`, and `pullPolicy`. |
+| `vercel`   | Vercel is selected    | The options of [`VercelSandbox.environment()`](/docs/sandbox/vercel), such as `region`, `resources`, and credentials.               |
+| `justBash` | just-bash is selected | The options of [`JustBashSandbox.environment()`](/docs/sandbox/just-bash), such as `autoInstall` and `customCommands`.              |
+
+Keep a shared `prepare` callback portable, because it runs on whichever provider eve selects. just-bash runs no native binaries, so commands such as `apt-get` fail there.
+
+On Vercel, when the environment has no `prepare` callback, workspace seed, or skill files, `DefaultSandbox` skips the snapshot and creates each session sandbox directly from the configured `image` or `source`, or from eve's base image when neither is set.

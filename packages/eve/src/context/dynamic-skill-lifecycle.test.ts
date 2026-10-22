@@ -21,8 +21,22 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
-import type { SandboxSessionState } from "#sandbox/state.js";
+import type { SandboxAccess, SandboxSessionState, SandboxState } from "#sandbox/state.js";
+import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import {
+  defineSandboxProvider,
+  type SandboxProviderSessionContext,
+} from "#shared/sandbox-provider.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
+
+// Sandbox start loads the prepared artifact; these tests prepare none.
+vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
+  loadSandboxPreparedArtifact: vi.fn(async () => null),
+}));
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 const SKILL_ROOT = "/home/agent/.agents/skills";
@@ -47,6 +61,59 @@ function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledB
 
 function persistedSandbox(id: string): SandboxSessionState {
   return { providerName: "mock", state: { id }, stateProtocolVersion: 1 };
+}
+
+/**
+ * A provider that, like the built-in ones, names a session's sandbox the same
+ * way on every start, and whose sandbox can be removed outside eve.
+ */
+function recreatableSandbox() {
+  const sandboxes: ReturnType<typeof mockSandbox>[] = [];
+  let gone = false;
+  const handle = (sandbox: ReturnType<typeof mockSandbox>) => ({
+    sandbox: sandbox.session,
+    onRuntimeShutdown: async () => {},
+    onSandboxDelete: async () => {},
+    onSandboxStop: async () => {},
+  });
+  const environment = defineSandboxProvider({
+    name: "recreatable",
+    environment: () => ({
+      onSessionEnd: async () => {},
+      prepare: async () => null,
+      async resume() {
+        if (gone) {
+          gone = false;
+          throw new SandboxSessionGoneError("The sandbox was removed.");
+        }
+        return handle(sandboxes.at(-1)!);
+      },
+      async start(context: SandboxProviderSessionContext) {
+        const sandbox = mockSandbox({
+          commands: {
+            [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+          },
+        });
+        sandboxes.push(sandbox);
+        return { handle: handle(sandbox), state: { name: `sandbox-${context.session.id}` } };
+      },
+    }),
+  }).environment();
+  const registry: RuntimeSandboxRegistry = {
+    sandbox: {
+      definition: {
+        environment,
+        kind: "independent",
+        logicalPath: "sandbox.ts",
+        revisionHash: "hash",
+        selector: defineSandbox(() => environment.open()),
+        sourceId: "sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+  return { registry, removeOutsideEve: () => void (gone = true), sandboxes };
 }
 
 /** Mirrors ensureSandboxAccess: the persisted state appears once the sandbox starts. */
@@ -354,7 +421,7 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.files.has(`${SKILL_ROOT}/policy/b.md`)).toBe(false);
   });
 
-  it("rewrites unchanged packages for a different sandbox or after the sandbox is deleted", async () => {
+  it("rewrites unchanged packages for a different sandbox", async () => {
     const { ctx, sandbox, state } = createCtx();
     const resolver = createResolver("policy", () =>
       makeSkill("Policy", "# Policy", { "rules.md": "Rules" }),
@@ -364,10 +431,59 @@ describe("dynamic skill supporting files", () => {
     state.session = persistedSandbox("sandbox-2");
     await dispatch(ctx, resolver);
     expect(sandbox.writes).toHaveLength(4);
+  });
 
-    ctx.delete(DynamicSkillSandboxKey);
-    await dispatch(ctx, resolver);
-    expect(sandbox.writes).toHaveLength(6);
+  it("writes files into a sandbox recreated after it was gone, at the next turn", async () => {
+    const { registry, removeOutsideEve, sandboxes } = recreatableSandbox();
+    const ctx = new ContextContainer();
+    ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
+    ctx.set(SessionIdKey, "session-1");
+    ctx.set(BundleKey, createMockBundle());
+    const handler = () => makeSkill("Policy", "# Policy", { "rules.md": "Rules" });
+    const resolver: ResolvedDynamicSkillResolver = {
+      ...createResolver("policy", handler),
+      eventNames: ["turn.started"],
+      events: { "turn.started": handler },
+    };
+    // Each turn resumes from the state the previous turn checkpointed.
+    let state: SandboxState | null = null;
+    const turn = async (work?: (access: SandboxAccess) => Promise<unknown>) => {
+      const access = await ensureSandboxAccess({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        nodeId: "__root__",
+        registry,
+        sessionId: "session-1",
+        state,
+      });
+      ctx.setVirtualContext(SandboxKey, access);
+      await dispatchDynamicSkillEvent({
+        ctx,
+        event: { data: {}, type: "turn.started" } as UnstampedMessageStreamEvent,
+        messages: [],
+        resolvers: [resolver],
+      });
+      await work?.(access);
+      state = await access.captureState();
+    };
+    const rules = (index: number) => sandboxes[index]?.files.get(`${SKILL_ROOT}/policy/rules.md`);
+
+    await turn();
+    expect(rules(0)).toBe("Rules");
+
+    // The turn starts with the files counted as written; a tool then finds the
+    // sandbox gone, and eve starts a fresh one under the same provider state.
+    removeOutsideEve();
+    await turn(async (access) => await access.get());
+    expect(sandboxes).toHaveLength(2);
+    expect(rules(1)).toBeUndefined();
+
+    await turn();
+    expect(rules(1)).toBe("Rules");
+
+    // Resuming keeps the identity, so nothing is written again.
+    const writes = sandboxes[1]!.writes.length;
+    await turn();
+    expect(sandboxes[1]!.writes).toHaveLength(writes);
   });
 
   it("removes files when a package is withdrawn", async () => {

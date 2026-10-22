@@ -28,6 +28,10 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import {
+  invalidPreparedSandboxArtifactError,
+  invalidSandboxSessionStateError,
+} from "#shared/sandbox-recorded-data-error.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type {
   VercelSandboxMountOptions,
@@ -198,6 +202,7 @@ export function createVercelSandbox(
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
         throw new SandboxTemplateNotProvisionedError({
           providerName: "vercel",
+          reason: "The Vercel Sandbox snapshot expired or was deleted.",
           templateKey: artifact.snapshotId,
         });
       }
@@ -309,7 +314,7 @@ function requireVercelSessionState(state: SandboxPreparedArtifact): VercelSandbo
     state.version !== 3 ||
     typeof state.sandboxName !== "string"
   ) {
-    throw new Error("Invalid Vercel sandbox session state.");
+    throw invalidSandboxSessionStateError("Vercel sandbox");
   }
   return { sandboxName: state.sandboxName, version: 3 };
 }
@@ -321,7 +326,7 @@ function requirePreparedVercelTemplate(
     !isSandboxPreparedArtifactRecord(artifact) ||
     (artifact.snapshotId !== undefined && typeof artifact.snapshotId !== "string")
   ) {
-    throw new Error("Invalid prepared Vercel sandbox artifact.");
+    throw invalidPreparedSandboxArtifactError("Vercel sandbox");
   }
   return artifact.snapshotId === undefined ? {} : { snapshotId: artifact.snapshotId };
 }
