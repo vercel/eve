@@ -70,7 +70,9 @@ test("admits only company SSO tokens on the HTTP API", () => {
   const auth = resolvedSource(file);
   expect(auth).toMatch(/\b(?:oidc|verifyOidc|jwtVerify)\s*\(/);
   expect(auth).toMatch(/["']https:\/\/sso\.lumen\.dev\/?["']/);
-  expect(auth).toMatch(/audiences?\s*:\s*\[?\s*["']atlas["']/);
+  // The audience may be inline or in a constant: `audiences: [SSO_AUDIENCE]`.
+  expect(auth).toMatch(/\baudiences?\s*:/);
+  expect(auth).toMatch(/["']atlas["']/);
   // localDev() never authenticates a production request; every other helper would.
   expect(source).not.toMatch(/\b(?:placeholderAuth|vercelOidc|httpBasic|jwtHmac|none)\s*\(/);
 });
