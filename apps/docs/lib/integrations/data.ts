@@ -37,6 +37,8 @@ interface ApiKeySpec {
   env: string;
   /** Header used to send the API key. */
   header: string;
+  /** Literal value written before the API key in the header. */
+  prefix?: string;
 }
 
 interface ConnectorSpec {
@@ -2153,6 +2155,19 @@ WAYDOCK_MCP_KEY=wdmcp_your_key_here
 \`\`\`
 
 The connection sends the key as a bearer token and does not expose it to the model. Waydock enforces the key's scopes on every call. See Waydock's [authentication documentation](https://waydock.ai/docs/authentication) for key scopes and OAuth options.`,
+  },
+  stacktree: {
+    logo: "stacktree",
+    docsHref: "https://stacktr.ee/developers",
+    keywords: ["mcp", "publish", "html", "private link", "hosting"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "STACKTREE_API_KEY",
+      header: "authorization",
+      prefix: "Bearer ",
+    },
+    configureNote:
+      "Create an API key in the [Stacktree dashboard](https://app.stacktr.ee/api-keys). eve sends it as an Authorization Bearer token.",
   },
   agentcard: {
     logo: "agentcard",

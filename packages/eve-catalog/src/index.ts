@@ -864,6 +864,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "stacktree",
+    name: "Stacktree",
+    kind: "connection",
+    tagline: "Publish and update private HTML pages through Stacktree's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Stacktree: publish HTML pages to private links, update them in place, and manage access and feedback.",
+      mcp: { url: "https://api.stacktr.ee/mcp" },
+    },
+  },
+  {
     slug: "supabase",
     name: "Supabase",
     kind: "connection",
