@@ -170,7 +170,6 @@ describe("Docker provider prewarm", () => {
 
     await createEngine({ cli }).prepare({
       appRoot,
-      seedFiles: [],
     });
 
     expect(findCall(calls, (args) => args[0] === "build")?.args).toEqual([
@@ -200,7 +199,7 @@ describe("Docker provider prewarm", () => {
         : undefined,
     );
 
-    await createEngine({ cli, options: { env } }).prepare({ appRoot, seedFiles: [] });
+    await createEngine({ cli, options: { env } }).prepare({ appRoot });
 
     const runArgs = findCall(calls, (args) => args[0] === "run")?.args ?? [];
     expect(runArgs.filter((arg) => arg.startsWith("AI_AGENT="))).toEqual([expected]);
@@ -225,7 +224,7 @@ describe("Docker provider prewarm", () => {
 
     const result = await createEngine({ cli }).prepare({
       appRoot,
-      seedFiles: [{ content: "# Weather skill\n", path: "/workspace/skills/weather.md" }],
+      workspace: [{ content: "# Weather skill\n", relativePath: "skills/weather.md" }],
     });
 
     expect(result.imageReference).toMatch(/^eve-sandbox-template:/u);
@@ -296,7 +295,7 @@ describe("Docker provider prewarm", () => {
       return undefined;
     });
 
-    const result = await createEngine({ cli }).prepare({ appRoot, seedFiles: [] });
+    const result = await createEngine({ cli }).prepare({ appRoot });
     expect(result.imageReference).toBe(publishedReference);
     expect(
       calls.filter(({ args }) =>
@@ -320,7 +319,7 @@ describe("Docker provider prewarm", () => {
       return undefined;
     });
 
-    await expect(createEngine({ cli }).prepare({ appRoot, seedFiles: [] })).rejects.toThrow(
+    await expect(createEngine({ cli }).prepare({ appRoot })).rejects.toThrow(
       /Failed to commit sandbox template image .*: disk full/u,
     );
     expect(committedReference).toMatch(/^eve-sandbox-template:/u);
@@ -346,7 +345,6 @@ describe("Docker provider prewarm", () => {
       resourcesKey: "resources-hash",
       resourcesPath,
       appRoot,
-      seedFiles: [],
     });
 
     const run = findCall(calls, (args) => args[0] === "run");
@@ -375,7 +373,6 @@ describe("Docker provider prewarm", () => {
     await expect(
       createEngine({ cli }).prepare({
         appRoot,
-        seedFiles: [],
       }),
     ).rejects.toThrow(DockerDaemonUnavailableError);
   });

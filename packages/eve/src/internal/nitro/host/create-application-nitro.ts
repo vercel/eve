@@ -169,9 +169,8 @@ function collectConfiguredSandboxProviderNames(manifest: CompiledAgentManifest):
 
 /**
  * Hosted Vercel builds can prune local sandbox providers only when the
- * app did not explicitly configure one. Omitted backends resolve through
- * `DefaultSandbox.environment()`, which selects Vercel on hosted Vercel and never
- * needs local runtime code there.
+ * app did not explicitly configure one. `DefaultSandbox.environment()` records
+ * Vercel Sandbox when built on Vercel, so it never needs local runtime code there.
  */
 export function shouldPruneLocalSandboxProviders(input: {
   readonly configuredBackendNames: ReadonlySet<string>;

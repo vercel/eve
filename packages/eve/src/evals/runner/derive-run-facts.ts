@@ -76,7 +76,6 @@ export function deriveRunFacts(
   let messageCount = 0;
   let reasoningBlockCount = 0;
   const models = new Set<string>();
-  let usage: TokenUsage | undefined;
   let failureCode: string | undefined;
 
   const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
@@ -178,19 +177,7 @@ export function deriveRunFacts(
         break;
       }
 
-      case "session.waiting":
-      case "turn.waiting": {
-        usage = event.data.usage;
-        break;
-      }
-
-      case "session.completed": {
-        usage = event.data?.usage;
-        break;
-      }
-
       case "session.failed": {
-        usage = event.data.usage;
         failureCode = event.data.code;
         break;
       }
@@ -214,9 +201,34 @@ export function deriveRunFacts(
     messageCount,
     reasoningBlockCount,
     models: [...models],
-    usage,
+    usage: latestUsage(events)?.usage,
     failureCode,
   };
+}
+
+/**
+ * The last event in `events` (in stream order) that carries the session's
+ * running usage total (`session.waiting`, `turn.waiting`, `session.failed`, or
+ * `session.completed`), with its time, so an eval that captured a session more
+ * than once can keep the latest total by time rather than by capture order.
+ * `usage` is undefined when that event reported none.
+ */
+export function latestUsage(
+  events: readonly MessageStreamEvent[],
+): { readonly usage: TokenUsage | undefined; readonly at: number } | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event === undefined) continue;
+    switch (event.type) {
+      case "session.waiting":
+      case "turn.waiting":
+      case "session.failed":
+        return { usage: event.data.usage, at: Date.parse(event.meta.at) };
+      case "session.completed":
+        return { usage: event.data?.usage, at: Date.parse(event.meta.at) };
+    }
+  }
+  return undefined;
 }
 
 /**

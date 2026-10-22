@@ -1,4 +1,8 @@
-import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import {
+  owningSandboxDefinition,
+  type RuntimeRegisteredSandbox,
+  type RuntimeSandboxRegistry,
+} from "#runtime/sandbox/registry.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type { SandboxProviderHandle, SandboxProviderRuntime } from "#shared/sandbox-provider.js";
 
@@ -32,6 +36,13 @@ export function withToolSessionSandboxes<Implementation extends object>(
   return implementation;
 }
 
+/** What a binding marked with `withToolSessionSandboxes` supports, or `undefined` when unmarked. */
+export function getToolSessionSandboxSupport(
+  implementation: object,
+): ToolSessionSandboxSupport | undefined {
+  return supported.get(implementation);
+}
+
 /** Raised when a keyed tool session opens a sandbox on a provider that cannot keep it. */
 export class ToolSessionSandboxUnsupportedError extends Error {
   constructor(providerName: string) {
@@ -63,8 +74,9 @@ export async function releaseToolSessionHandle(
 }
 
 function registeredProvider(registry: RuntimeSandboxRegistry): SandboxProviderRuntime | undefined {
-  const registered = registry.sandbox;
-  const definition = registered?.inheritance?.definition ?? registered?.definition;
+  // Test runtimes without a sandbox cast a null registry.
+  const registered = registry.sandbox as RuntimeRegisteredSandbox | null | undefined;
+  const definition = registered ? owningSandboxDefinition(registered) : undefined;
   if (definition?.kind !== "independent") return undefined;
   return getSandboxEnvironmentRuntime(definition.environment);
 }
