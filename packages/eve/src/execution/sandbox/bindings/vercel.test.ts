@@ -1532,6 +1532,17 @@ describe("createVercelSandbox", () => {
     );
   });
 
+  it("stops a Vercel session again after it resumes", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
+
+    await handle.onSandboxStop();
+    await handle.sandbox.run({ command: "printf resumed" });
+    await handle.onRuntimeShutdown();
+
+    expect(sessionSandbox.stop).toHaveBeenCalledTimes(2);
+  });
+
   it("stops the sandbox and asks Vercel to delete orphan snapshots when deleting it", async () => {
     const fake = createFakeVercelProvider();
     const provider = createTestVercelSandbox({

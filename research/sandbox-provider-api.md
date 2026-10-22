@@ -329,7 +329,8 @@ runtime
   keyed call ends  → connection.close?()
   terminal outcome → connection.close?() for this process's connections,
                      onSessionEnd(ctx, state | null, { reason })
-  (stop and close run at most once per connection; a failed close never blocks deletion)
+  (close runs at most once per connection; stop is idempotent and may run again after
+  the connection resumes; a failed close never blocks deletion)
 ```
 
 ## Invariants
