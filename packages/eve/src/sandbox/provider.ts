@@ -277,7 +277,7 @@ function adaptSandboxProvider<
   prepare: ((sandbox: SandboxSession & Extensions) => void | Promise<void>) | undefined,
 ): LegacySandboxProviderImplementation<OpenOptions, Artifact, State, SandboxSession & Extensions> {
   const closers = new WeakMap<SandboxProviderHandle, () => Promise<void>>();
-  // Connections this process holds per session, so terminal cleanup can close them.
+  // Closable connections this process holds per session, so terminal cleanup can close them.
   const open = new Map<string, Set<() => Promise<void>>>();
 
   function createHandle(
@@ -295,9 +295,11 @@ function adaptSandboxProvider<
       if (remaining?.size === 0) open.delete(sessionId);
       await connection.close?.();
     });
-    let sessionClosers = open.get(sessionId);
-    if (sessionClosers === undefined) open.set(sessionId, (sessionClosers = new Set()));
-    sessionClosers.add(close);
+    if (connection.close !== undefined) {
+      let sessionClosers = open.get(sessionId);
+      if (sessionClosers === undefined) open.set(sessionId, (sessionClosers = new Set()));
+      sessionClosers.add(close);
+    }
     const release = async () => {
       try {
         await stop();

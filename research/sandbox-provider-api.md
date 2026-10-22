@@ -521,7 +521,9 @@ the last step. There are no public dual-shape overloads.
    preparation without a `source`, because deployed self-modification relies
    on it, and the same step removed `Drive` (minor changeset).
 5. Make core consume the new shape directly. Remove the internal old shape,
-   and the tool-session `WeakMap`. Add a
+   and the tool-session `WeakMap`. Close a connection when the step that
+   opened it lets go of it; until then, eve closes connections only at the
+   other lifecycle points above. Add a
    `guard:invariants` rule for files under `src/execution/sandbox/bindings/`
    and `src/sandbox/providers/`: they may import the provider contract only
    through `#public/sandbox/*`, and may not import core sandbox modules
