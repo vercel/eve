@@ -13,7 +13,6 @@ import {
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
-import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import {
   type AuthoredWorkflowModules,
   bundleFinalWorkflowOutput,
@@ -326,7 +325,6 @@ export class WorkflowBundleBuilder {
       platform: "neutral",
       plugins: [
         createWorkflowVirtualEntryPlugin(virtualEntrySource),
-        createPseudoPackagePlugin(),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
         createAuthoredRelativeExtensionResolverPlugin({
           extensions: WORKFLOW_SOURCE_EXTENSIONS,
