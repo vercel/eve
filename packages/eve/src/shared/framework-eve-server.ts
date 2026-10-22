@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
+import { resolveNodeExecutable } from "#shared/node-executable.js";
 
 /** Default time to wait for an eve server spawned by a framework integration. */
 export const DEFAULT_EVE_SERVER_TIMEOUT_MS = 180_000;
@@ -441,7 +442,7 @@ function startEveDevServer(input: {
       "0",
       ...(input.workspaceAgentName === undefined ? [] : ["--agent", input.workspaceAgentName]),
     ],
-    command: process.execPath,
+    command: resolveNodeExecutable(),
     cwd: input.appRoot,
     logLabel: input.logLabel,
     timeoutMs: input.timeoutMs,
