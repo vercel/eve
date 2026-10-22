@@ -20,7 +20,11 @@ export {
   type SandboxWriteTextFileOptions,
 } from "#public/definitions/sandbox.js";
 export { DefaultSandbox } from "#sandbox/providers/default.js";
-export type { DefaultSandboxEnvironmentOptions } from "#sandbox/providers/default.js";
+export type {
+  DefaultSandboxEnvironmentOptions,
+  DefaultSandboxRuntimeOptions,
+  DefaultSandboxSession,
+} from "#sandbox/providers/default.js";
 export type {
   SandboxNetworkOptions,
   SandboxNetworkPolicy,

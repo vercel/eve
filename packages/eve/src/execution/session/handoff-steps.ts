@@ -41,7 +41,10 @@ import {
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
-import { isRetiredSandboxSessionState } from "#sandbox/state.js";
+import {
+  isRetiredSandboxSessionState,
+  resolvePersistedSandboxSessionState,
+} from "#sandbox/state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { walkCauseChain } from "#shared/errors.js";
@@ -206,9 +209,10 @@ export async function prepareSuccessorStep(input: {
       throw new Error("Session checkpoint sandbox has no resolved provider.");
     }
     const provider = getSandboxEnvironmentRuntime(definition.environment);
+    const resolved = resolvePersistedSandboxSessionState(sandboxState, provider);
     if (
-      sandboxState.providerName !== provider.providerName ||
-      sandboxState.stateProtocolVersion !== provider.stateProtocolVersion
+      resolved?.providerName !== provider.providerName ||
+      resolved.stateProtocolVersion !== provider.stateProtocolVersion
     ) {
       throw new Error("Session checkpoint sandbox provider state is incompatible.");
     }

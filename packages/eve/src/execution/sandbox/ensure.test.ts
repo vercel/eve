@@ -418,7 +418,7 @@ describe("ensureSandboxAccess", () => {
     expect(value.onSessionEnd).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ session: expect.objectContaining({ id: "session-1" }) }),
       { key: "session-1" },
-      { reason: "expired" },
+      { artifact: null, reason: "expired" },
     );
     expect(value.deleteSandbox).not.toHaveBeenCalled();
     await expect(access.captureState()).resolves.toEqual({ session: null });
@@ -466,7 +466,7 @@ describe("ensureSandboxAccess", () => {
     expect(value.onSessionEnd).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ session: expect.objectContaining({ id: "unused" }) }),
       null,
-      { reason: "expired" },
+      { artifact: null, reason: "expired" },
     );
     expect(value.start).not.toHaveBeenCalled();
     expect(value.create).not.toHaveBeenCalled();

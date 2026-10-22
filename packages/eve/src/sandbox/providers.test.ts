@@ -1,18 +1,10 @@
 import type { DockerSandboxSession } from "#public/sandbox/docker.js";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { defineDefaultSandboxProvider } from "#sandbox/providers/default.js";
 import { DockerSandbox, VercelSandbox } from "#sandbox/providers.js";
 import type { RuntimeSandboxSessionFor } from "#shared/sandbox-session.js";
 
 describe("sandbox providers", () => {
-  it("implements default selection through the provider contract", () => {
-    const environment = defineDefaultSandboxProvider({
-      isDeployedOnVercel: () => true,
-      isDockerAvailable: () => false,
-    }).environment();
-    expect(environment.provider).toBe("vercel");
-  });
   it("exposes image and Dockerfile constructors only for local image providers", () => {
     expect(DockerSandbox.image("example.test/agent@sha256:abc").provider).toBe("docker");
     expect(DockerSandbox.dockerfile().provider).toBe("docker");

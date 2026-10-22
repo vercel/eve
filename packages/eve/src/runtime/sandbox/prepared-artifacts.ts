@@ -50,7 +50,10 @@ export async function loadSandboxPreparedArtifact(input: {
   const entry = manifest?.entries.find((candidate) => candidate.nodeId === input.nodeId);
   if (entry !== undefined && entry.providerName !== input.providerName) {
     throw new Error(
-      `Prepared sandbox artifact for node "${input.nodeId}" belongs to provider "${entry.providerName}", not "${input.providerName}".`,
+      `Prepared sandbox artifact for node "${input.nodeId}" belongs to provider "${entry.providerName}", ` +
+        `but the sandbox environment now selects "${input.providerName}". The sandbox module must ` +
+        "select the same provider during the build and at runtime. Select one provider explicitly, " +
+        "or use DefaultSandbox, which records its choice at build time.",
     );
   }
   return entry?.artifact;

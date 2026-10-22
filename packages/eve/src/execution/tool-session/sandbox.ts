@@ -32,6 +32,13 @@ export function withToolSessionSandboxes<Implementation extends object>(
   return implementation;
 }
 
+/** What a binding marked with `withToolSessionSandboxes` supports, or `undefined` when unmarked. */
+export function getToolSessionSandboxSupport(
+  implementation: object,
+): ToolSessionSandboxSupport | undefined {
+  return supported.get(implementation);
+}
+
 /** Raised when a keyed tool session opens a sandbox on a provider that cannot keep it. */
 export class ToolSessionSandboxUnsupportedError extends Error {
   constructor(providerName: string) {

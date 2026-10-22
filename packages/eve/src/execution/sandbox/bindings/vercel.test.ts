@@ -208,8 +208,12 @@ async function templateKeyOf(build: (module: object) => Promise<unknown>): Promi
   return name;
 }
 
+/** An environment with preparation, which Vercel captures in a template snapshot. */
 function createVercelSandbox(input: Parameters<typeof createVercelImplementation>[0] = {}) {
-  return createSandboxProviderHarness(createVercelImplementation(input), {});
+  return createSandboxProviderHarness(
+    createVercelImplementation({ prepare: async () => {}, ...input }),
+    {},
+  );
 }
 
 function createTestVercelSandbox(input: Parameters<typeof createVercelImplementation>[0] = {}) {
@@ -875,11 +879,13 @@ describe("createVercelSandbox", () => {
   });
 
   describe("shared templates", () => {
-    const buildWith = (prepare?: () => Promise<void> | void) => async (sandboxModule: object) =>
-      await createTestVercelSandbox({
-        loadSandboxModule: async () => sandboxModule as never,
-        prepare,
-      }).prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
+    const buildWith =
+      (prepare: () => Promise<void> | void = async () => {}) =>
+      async (sandboxModule: object) =>
+        await createTestVercelSandbox({
+          loadSandboxModule: async () => sandboxModule as never,
+          prepare,
+        }).prepare({ appRoot: "/tmp/test-app-root", seedFiles: [] });
 
     /** The build-private sandboxes: everything a build created except the template pointer. */
     const privateSandboxes = (fake: ReturnType<typeof createFakeVercelProvider>) =>
@@ -1171,6 +1177,40 @@ describe("createVercelSandbox", () => {
     expect(sessionArgs?.[0]).toMatchObject({
       source: { snapshotId: "template-snapshot", type: "snapshot" },
     });
+  });
+
+  it("captures a template only when preparation, managed files, or an authored source need one", async () => {
+    const prepareWith = async (
+      input: Parameters<typeof createVercelImplementation>[0],
+      seedFiles: { content: string; path: string }[] = [],
+    ) => {
+      const create = vi.fn(async (options: { name: string }) => createMockSandbox(options));
+      const provider = createSandboxProviderHarness(
+        createVercelImplementation({
+          ...input,
+          createSandbox: async ({ createOptions }) => (await create(createOptions)) as never,
+          loadSandboxModule: async () =>
+            ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
+        }),
+        {},
+      );
+      return {
+        artifact: await provider.prepare({ appRoot: "/tmp/test-app-root", seedFiles }),
+        create,
+      };
+    };
+
+    const empty = await prepareWith({ createOptions: { image: "example.test/agent:1" } });
+    expect(empty.artifact).toEqual({});
+    expect(empty.create).not.toHaveBeenCalled();
+
+    const sourced = await prepareWith({
+      createOptions: { source: { snapshotId: "author-snap", type: "snapshot" } },
+    });
+    const seeded = await prepareWith({}, [{ content: "notes", path: "/workspace/notes.md" }]);
+    for (const { artifact } of [sourced, seeded]) {
+      expect(artifact).toEqual({ snapshotId: expect.any(String) });
+    }
   });
 
   it("reports an unavailable prepared snapshot without mutating the build template", async () => {

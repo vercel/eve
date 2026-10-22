@@ -19,7 +19,7 @@ import {
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import {
-  isRetiredSandboxSessionState,
+  resolvePersistedSandboxSessionState,
   type SandboxAccess,
   type SandboxSessionEndReason,
   type SandboxSessionState,
@@ -92,10 +92,15 @@ const log = createLogger("execution.sandbox");
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
 ): Promise<EnsuredSandboxAccess> {
+  const registered = input.registry.sandbox;
+  const ownerDefinition = registered?.inheritance?.definition ?? registered?.definition;
   // A retired record cannot resume, so let the selector start a fresh sandbox.
-  const session = input.state?.session ?? null;
-  let persisted: SandboxSessionState | null =
-    session === null || isRetiredSandboxSessionState(session) ? null : session;
+  let persisted = resolvePersistedSandboxSessionState(
+    input.state?.session,
+    ownerDefinition?.kind === "independent"
+      ? getSandboxEnvironmentRuntime(ownerDefinition.environment)
+      : undefined,
+  );
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
@@ -108,7 +113,6 @@ export async function ensureSandboxAccess(
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
   const captured = (): SandboxState => ({ session: persisted });
-  const registered = input.registry.sandbox;
   if (registered === null) {
     return {
       async captureState() {
@@ -359,10 +363,8 @@ export async function ensureSandboxAccess(
     return current;
   }
 
-  const definition = registered.inheritance?.definition ?? registered.definition;
-
   return {
-    environment: definition.kind === "independent" ? definition.environment : undefined,
+    environment: ownerDefinition?.kind === "independent" ? ownerDefinition.environment : undefined,
     async captureState() {
       if (opening !== undefined) await opening;
       return captured();
@@ -393,7 +395,13 @@ export async function ensureSandboxAccess(
         persisted.stateProtocolVersion === provider.stateProtocolVersion
           ? persisted.state
           : null;
+      const artifact = await loadSandboxPreparedArtifact({
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId: registered.inheritance?.nodeId ?? input.nodeId,
+        providerName: provider.providerName,
+      });
       await provider.implementation.onSessionEnd(providerContext("sandbox-cleanup"), state, {
+        artifact,
         reason,
       });
       forgetHandle();

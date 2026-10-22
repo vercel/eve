@@ -138,13 +138,17 @@ export interface SandboxProviderImplementation<
    * Permanently deletes the sandbox for `context.session.id` after the session's terminal
    * outcome. `state` is what `start()` returned when the session recorded it, or `null` when
    * the session never did, for example because a subagent that shares the sandbox opened it.
-   * Find the sandbox from the key when `state` is `null`. Must succeed when no sandbox exists
-   * and be idempotent, because the cleanup step may retry.
+   * Find the sandbox from the key when `state` is `null`. `options.artifact` is what this
+   * build's `prepare()` returned, or `undefined` when nothing was prepared yet. Must succeed
+   * when no sandbox exists and be idempotent, because the cleanup step may retry.
    */
   onSessionEnd(
     context: SandboxProviderSessionContext,
     state: Readonly<SessionState> | null,
-    options: { readonly reason: "completed" | "expired" | "failed" },
+    options: {
+      readonly artifact?: Readonly<PreparedArtifact>;
+      readonly reason: "completed" | "expired" | "failed";
+    },
   ): Promise<void>;
   prepare(context: SandboxProviderPrepareContext): Promise<PreparedArtifact>;
   resume(

@@ -107,7 +107,6 @@ interface CreateVercelSandboxInput {
   readonly loadDeleteSandboxModule?: () => Promise<VercelModule>;
   readonly loadSandboxModule?: () => Promise<VercelModule>;
   readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
-  readonly skipEmptyPreparation?: boolean;
 }
 
 export function createVercelSandbox(
@@ -224,10 +223,13 @@ export function createVercelSandbox(
     },
     async prepare(context) {
       const seedFiles = providerResourceTargetFiles(context.resources);
+      // Without inputs a snapshot only repeats the base setup every session
+      // runs anyway. An authored `source` keeps one, so sessions start from
+      // the build's capture instead of fetching the source again.
       if (
-        input.skipEmptyPreparation === true &&
         input.prepare === undefined &&
-        seedFiles.length === 0
+        seedFiles.length === 0 &&
+        createOptions.source === undefined
       )
         return {};
       const templateKey = `eve-sbx-tpl-vercel-${createSandboxProviderIdentity({
