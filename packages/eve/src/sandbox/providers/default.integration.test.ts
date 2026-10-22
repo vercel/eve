@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +7,7 @@ import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
+import { TOOL_SESSION_ID_PREFIX } from "#execution/tool-session/id.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -60,6 +62,7 @@ async function access(input: {
   readonly appRoot: string;
   readonly environment: ReturnType<typeof DefaultSandbox.environment>;
   readonly selector: SandboxSelector;
+  readonly sessionId?: string;
   readonly state?: SandboxState;
 }) {
   const registry: RuntimeSandboxRegistry = {
@@ -80,7 +83,7 @@ async function access(input: {
     compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(input.appRoot),
     nodeId: "__root__",
     registry,
-    sessionId: "session-1",
+    sessionId: input.sessionId ?? "session-1",
     state: input.state ?? null,
   });
 }
@@ -145,6 +148,53 @@ describe("DefaultSandbox", () => {
     await allowed.get();
     await expect(opened?.setNetworkPolicy("allow-all")).resolves.toBeUndefined();
     await expect(opened?.setNetworkPolicy("deny-all")).rejects.toThrow(/just-bash/);
+  });
+
+  // Recorded from DefaultSandbox before it moved to the public provider API.
+  // Deployed builds and running sessions depend on them, so they must never change.
+  it("records the same artifact and session state as earlier releases", async () => {
+    const environment = DefaultSandbox.environment();
+    const { appRoot, artifact } = await build(environment, true);
+    expect(artifact).toEqual({
+      artifact: { templateKey: "f8ea3d0c5299b20a1228522b" },
+      provider: "just-bash",
+    });
+
+    const sandbox = await access({
+      appRoot,
+      environment,
+      selector: defineSandbox(() => environment.open()),
+    });
+    await sandbox.get();
+    await expect(sandbox.captureState()).resolves.toMatchObject({
+      session: {
+        providerName: "default",
+        state: {
+          provider: "just-bash",
+          state: {
+            rootPath: join(
+              resolveSandboxCacheDirectory(appRoot),
+              "just-bash/sessions/7ee62ad93371e90cea6827d5",
+            ),
+            version: 2,
+          },
+          stateProtocolVersion: 1,
+        },
+        stateProtocolVersion: 1,
+      },
+    });
+  });
+
+  it("keeps a keyed tool call's sandbox when the selected provider can", async () => {
+    const environment = DefaultSandbox.environment();
+    const { appRoot } = await build(environment, true);
+    const selector = defineSandbox(() => environment.open());
+    const sessionId = `${TOOL_SESSION_ID_PREFIX}desk`;
+
+    const first = await access({ appRoot, environment, selector, sessionId });
+    await (await first.get())?.writeTextFile({ content: "kept", path: "marker.txt" });
+    const second = await access({ appRoot, environment, selector, sessionId });
+    await expect((await second.get())?.readTextFile({ path: "marker.txt" })).resolves.toBe("kept");
   });
 
   it("ends a sandbox no checkpoint recorded through the provider its build selected", async () => {
