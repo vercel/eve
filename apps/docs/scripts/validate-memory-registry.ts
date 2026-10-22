@@ -100,5 +100,17 @@ for (const item of items) {
         'Registry item "memory/supermemory" must declare SUPERMEMORY_API_KEY as an environment variable.',
       );
     }
+  } else if (slug === "memanto") {
+    if (!item.dependencies?.includes("@moorcheh-ai/memanto@0.2.29")) {
+      throw new Error('Registry item "memory/memanto" must depend on @moorcheh-ai/memanto@0.2.29.');
+    }
+    if (
+      !("MOORCHEH_API_KEY" in (item.envVars ?? {})) ||
+      !("MEMANTO_BASE_URL" in (item.envVars ?? {}))
+    ) {
+      throw new Error(
+        'Registry item "memory/memanto" must declare MOORCHEH_API_KEY and MEMANTO_BASE_URL as environment variables.',
+      );
+    }
   }
 }

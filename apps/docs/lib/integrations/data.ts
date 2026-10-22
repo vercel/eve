@@ -1875,6 +1875,59 @@ Supermemory automatically recalls relevant context before a turn and captures co
 
 Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://supermemory.ai/docs/integrations/eve) for all options and tool behavior.`,
   },
+  memanto: {
+    logo: "memanto",
+    docsHref: "https://docs.memanto.ai/integrations/eve",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "semantic search",
+      "automatic recall",
+      "user profile",
+      "Memanto",
+      "Moorcheh",
+    ],
+    install: `Install Memanto memory for eve:
+
+\`\`\`bash
+eve add memory/memanto
+\`\`\`
+
+This installs \`@moorcheh-ai/memanto\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.60.0 or later.`,
+    quickStart: `Set a Moorcheh API key in the agent environment. Deployments also need the URL of a Memanto server that you run:
+
+\`\`\`bash title=".env.local"
+MOORCHEH_API_KEY=...
+# Deployments only
+MEMANTO_BASE_URL=https://...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/memanto.ts"
+import { memantoMemory } from "@moorcheh-ai/memanto/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: memantoMemory({
+    apiKey: process.env.MOORCHEH_API_KEY,
+    baseUrl: process.env.MEMANTO_BASE_URL,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`memanto\` slot. Before every turn, the provider recalls relevant context. It also gives the model \`memanto__remember\` and \`memanto__recall\` tools for deliberate saves and searches.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+All eve scopes share one Memanto agent. The provider tags each memory with a digest of eve's opaque scope key and filters recalls by that tag. Its tools are bound to the current scope, so the model cannot read or write another scope's memories.
+
+Memanto recalls before each turn, but automatic capture is off by default. To extract and save durable user messages after completed turns, set \`capture: true\`; this makes one server-side LLM call per turn. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
+
+During \`eve dev\`, omitting \`MEMANTO_BASE_URL\` starts a local server with \`uvx\`; install \`uv\` first. A deployment must use a running Memanto server at \`MEMANTO_BASE_URL\`. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {

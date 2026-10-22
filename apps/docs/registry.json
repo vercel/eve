@@ -364,6 +364,31 @@
       ]
     },
     {
+      "name": "memory/memanto",
+      "type": "registry:item",
+      "title": "Memanto",
+      "description": "Recall relevant long-term context and let agents deliberately save durable user memories.",
+      "dependencies": [
+        "@moorcheh-ai/memanto@0.2.29"
+      ],
+      "envVars": {
+        "MOORCHEH_API_KEY": "",
+        "MEMANTO_BASE_URL": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.60.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/memanto.ts",
+          "type": "registry:file",
+          "target": "agent/memory/memanto.ts"
+        }
+      ]
+    },
+    {
       "name": "tool/agent",
       "type": "registry:item",
       "title": "Agent",

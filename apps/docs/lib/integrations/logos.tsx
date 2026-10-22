@@ -253,6 +253,20 @@ const hindsightLogo = (props: LogoProps) => (
   </svg>
 );
 
+const memantoLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 96 120" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M24 0h60v24H72V12h-6v12H42V12h-6v12H24Zm-6 24h6v24h-6Zm66 0h6v24h-6ZM24 48h60v12H72v12H36V60H24Z"
+      fill="#5534A5"
+    />
+    <path d="m48 28 4 8-4 8-4-8 4-8Zm12 0 4 8-4 8-4-8 4-8Z" fill="white" />
+    <path
+      d="M18 72h6v36h-6Zm12 0h6v24h-6Zm12 0h6v12h-6Zm18 0h6v12h-6Zm12 0h6v24h-6Zm12 0h6v36h-6Z"
+      fill="#5534A5"
+    />
+  </svg>
+);
+
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
 const honeycombLogo = (props: LogoProps) => (
@@ -858,6 +872,7 @@ export const logos = {
   arcana: arcanaLogo,
   supermemory: supermemoryLogo,
   hindsight: hindsightLogo,
+  memanto: memantoLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
   brex: brexLogo,

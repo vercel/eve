@@ -373,6 +373,14 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "memanto",
+    name: "Memanto",
+    kind: "memory",
+    tagline:
+      "Recall relevant long-term context and let agents deliberately save durable user memories.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",
