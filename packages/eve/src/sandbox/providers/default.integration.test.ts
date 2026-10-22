@@ -185,7 +185,12 @@ describe("DefaultSandbox", () => {
         environment,
         selector: defineSandbox(selector),
         state: {
-          session: { providerName: "just-bash", state: recorded.state, stateProtocolVersion: 1 },
+          session: {
+            generation: "generation-1",
+            providerName: "just-bash",
+            state: recorded.state,
+            stateProtocolVersion: 1,
+          },
         },
       });
 
@@ -194,7 +199,12 @@ describe("DefaultSandbox", () => {
       );
       expect(selector).not.toHaveBeenCalled();
       await expect(resumed.captureState()).resolves.toEqual({
-        session: { providerName: "default", state: recorded, stateProtocolVersion: 1 },
+        session: {
+          generation: "generation-1",
+          providerName: "default",
+          state: recorded,
+          stateProtocolVersion: 1,
+        },
       });
     });
 

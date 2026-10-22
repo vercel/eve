@@ -10,6 +10,15 @@ import type {
 export type SandboxSessionEndReason = "completed" | "expired" | "failed";
 
 export interface SandboxSessionState {
+  /**
+   * Set anew each time this session's access calls `start()`, which is an upsert,
+   * and kept on resume. Providers name a session's sandbox deterministically, so
+   * without it a sandbox recreated after it was gone would look like the old one
+   * to dynamic skills, which then write their files into it at the next turn. A
+   * sandbox that a sharing subagent or a borrowed workflow step starts keeps this
+   * session's generation. Absent in state saved by earlier releases.
+   */
+  readonly generation?: string;
   readonly providerName: string;
   readonly state: SandboxPreparedArtifact;
   readonly stateProtocolVersion: number;
@@ -50,8 +59,9 @@ export function withAdoptedSandboxSessionStates<Implementation extends object>(
 
 /**
  * The persisted record the current provider should resume, or `null` for no
- * sandbox. A record the provider cannot adopt is returned as-is, so callers
- * still reject state that belongs to another provider.
+ * sandbox. A record the provider cannot adopt is returned as-is; resuming it
+ * starts a fresh sandbox, and handoff rejects it. An adopted record keeps its
+ * `generation`, because it still names the same live sandbox.
  */
 export function resolvePersistedSandboxSessionState(
   state: SandboxSessionState | null | undefined,
@@ -63,6 +73,7 @@ export function resolvePersistedSandboxSessionState(
   return adopted === undefined
     ? state
     : {
+        ...state,
         providerName: provider.providerName,
         state: adopted,
         stateProtocolVersion: provider.stateProtocolVersion,

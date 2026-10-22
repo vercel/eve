@@ -43,7 +43,7 @@ For example, a Vercel environment returns a handle with `setNetworkPolicy()`. Th
 
 ## Define an environment
 
-A sandbox module exports an environment and returns a sandbox from `defineSandbox()`:
+A sandbox module exports an environment and returns a sandbox from `defineSandbox()`. Put it at `agent/sandbox.ts`, or at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, eve reads the definition only from `agent/sandbox/sandbox.ts`.
 
 ```ts title="agent/sandbox.ts"
 import { DefaultSandbox, defineSandbox } from "eve/sandbox";
@@ -95,7 +95,7 @@ eve runs `prepare` while creating a reusable provider artifact, not once for eac
 
 During `eve dev`, startup and authored-source rebuilds do not prepare sandbox environments. The first sandbox access prepares all environments in that compiled generation before opening the requested sandbox. This includes environments declared by subagents and extensions, even if they use different providers. Concurrent requests share the preparation work; a failed preparation can be retried on a later access. Optional provider installation and setup can make that first access slow.
 
-`eve build` still prepares environments eagerly. In production, eve passes the recorded artifact directly to the provider when it creates a live sandbox. Production runtime does not rebuild or repair a missing artifact. A missing image, snapshot, or template fails with rebuild or redeploy guidance.
+`eve build` still prepares environments eagerly. In production, eve passes the recorded artifact directly to the provider when it creates a live sandbox. Production runtime does not rebuild or repair a missing artifact. A missing image, snapshot, or template fails with rebuild or redeploy guidance. [Sandbox troubleshooting](/docs/sandbox/troubleshooting) lists these errors with their causes and fixes.
 
 ### Reuse native resources across sessions
 
@@ -126,26 +126,25 @@ agent/sandbox/
     schema.sql
 ```
 
-Files under `agent/sandbox/workspace/` seed writable `/workspace`. eve copies the seed when it prepares a new environment generation. Existing live sandbox state is not overwritten by later seed changes.
+Files under `agent/sandbox/workspace/` seed writable `/workspace`. eve copies the seed into the prepared environment when it prepares a new environment generation, and each new session sandbox starts from that copy. Existing live sandbox state is not overwritten by later seed changes.
 
-Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
+Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. eve resolves `$HOME` by reading it inside the sandbox; when a sandbox has no usable home directory, skill paths fall back to `/workspace/skills`. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
 
-Providers receive both trees with explicit metadata:
+Providers receive both trees with explicit metadata. `source.kind` is `"none"` when the agent has no managed workspace or skill files, `"materialized"` when eve has also written the compiled files to the host directory at `path`, and `"inline"` when the contents are available only in each tree's `files`:
 
 ```ts
 interface SandboxProviderResources {
   source:
     | { kind: "none" }
     | { kind: "inline"; key: string }
-    | { kind: "materialized"; key: string; path: string }
-    | { kind: "reference"; key: string };
+    | { kind: "materialized"; key: string; path: string };
   workspace?: SandboxProviderResourceTree;
   skills?: SandboxProviderResourceTree;
 }
 
 interface SandboxProviderResourceTree {
   key: string;
-  files: ResourceFile[];
+  files: SandboxProviderResourceFile[];
   mountPath: string;
   targetPath: string;
 }
@@ -261,6 +260,7 @@ Changing sandbox source, preparation code, Dockerfile content, environment optio
 
 ## What to read next
 
+- [Sandbox troubleshooting](/docs/sandbox/troubleshooting) explains common sandbox errors and how to fix them.
 - [Subagents](/docs/subagents) explains delegation and sandbox ownership.
 - [Security model](/docs/concepts/security-model) describes the app-runtime and sandbox trust boundary.
 - [Vercel Sandbox](https://vercel.com/docs/sandbox) documents hosted sandbox behavior.

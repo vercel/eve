@@ -27,6 +27,30 @@ export default defineSandbox(() =>
 );
 ```
 
+## Authentication
+
+eve needs a Vercel token, team ID, and project ID to create Vercel Sandboxes. `eve build` needs them to capture the snapshot, and the runtime needs them to create and resume session sandboxes. Deployments on Vercel provide them automatically.
+
+eve resolves each value from the first source that is set:
+
+| Value      | Sources, in order                                               |
+| ---------- | --------------------------------------------------------------- |
+| Token      | `token` environment option, `VERCEL_OIDC_TOKEN`, `VERCEL_TOKEN` |
+| Team ID    | `teamId` environment option, `VERCEL_TEAM_ID`, `VERCEL_ORG_ID`  |
+| Project ID | `projectId` environment option, `VERCEL_PROJECT_ID`             |
+
+When all three resolve, eve uses them. Otherwise, eve requests a Vercel OIDC token and reads the team and project from the token. On Vercel, the deployment provides that token. Elsewhere, eve reads `VERCEL_OIDC_TOKEN` and, when it is missing or expired, refreshes it with your Vercel CLI login and the project linked in `.vercel/project.json`. If that also fails, eve falls back to the Vercel Sandbox SDK's own credential lookup, which reports an authentication error if it finds none.
+
+For local development, link the app to a Vercel project and pull its environment into `.env.local`:
+
+```bash
+eve link
+```
+
+`vercel link` followed by `vercel env pull` produces the same `.env.local`. A running `eve dev` reloads env files automatically.
+
+Outside Vercel and without a linked project, such as in CI or on a self-hosted server, set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`, or pass `token`, `teamId`, and `projectId` to `VercelSandbox.environment()`.
+
 ## Snapshot preparation
 
 eve creates a temporary persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, runs the authored `prepare` callback, and captures a snapshot. The build artifact records the snapshot ID.
