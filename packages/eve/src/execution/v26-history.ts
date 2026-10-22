@@ -12,6 +12,7 @@
 // Delete once no session a v27 deployment serves was recorded before v27.
 
 import { cascade } from "#harness/session-machine/cascade.js";
+import { FACT_CATALOG } from "#protocol/session-events/catalog.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type {
   CommitLine,
@@ -62,7 +63,9 @@ export function createV26HistoryReader(): V26HistoryReader {
       // The writer's own rule: a commit that ends an owner ends what it still holds.
       const facts = cascade(view, intents);
       const line: CommitLine<SessionEvent> = { at, facts };
-      foldLine(view, line, position);
+      translator.noteIntroduced(facts);
+      // As the writer folds: a whole session's settled rows would make each commit cost more.
+      foldLine(view, line, position, { retention: "operational" });
       return line;
     },
   };
@@ -119,10 +122,28 @@ class Translator {
   /** The delivery `turn.started` admitted, for the message v26 records next. */
   private startingDelivery: string | undefined;
 
+  /** Every entity a commit introduced, by family: the view drops them once they close. */
+  private readonly introduced = new Set<string>();
+
   private readonly view: SessionView;
 
   constructor(view: SessionView) {
     this.view = view;
+  }
+
+  noteIntroduced(facts: readonly SessionEvent[]): void {
+    for (const fact of facts) {
+      const descriptor = FACT_CATALOG[fact.type as Fact["type"]] as
+        | (typeof FACT_CATALOG)[Fact["type"]]
+        | undefined;
+      if (descriptor?.role !== "introduces") continue;
+      const id = (fact.data as Data)[descriptor.idField];
+      if (typeof id === "string") this.introduced.add(`${descriptor.family}:${id}`);
+    }
+  }
+
+  private isIntroduced(family: string, id: string): boolean {
+    return this.introduced.has(`${family}:${id}`);
   }
 
   factsOf(type: string, data: Data, context: Context): Fact[] {
@@ -224,7 +245,7 @@ class Translator {
   }
 
   private startTurn(turnId: string | undefined, context: Context): Fact[] {
-    if (turnId === undefined || this.view.turns[turnId] !== undefined) return [];
+    if (turnId === undefined || this.isIntroduced("turn", turnId)) return [];
     const facts: Fact[] = [];
     const deliveryId = this.unadmitted(context, `v26_${String(context.position)}`);
     facts.push(...this.admit(deliveryId));
@@ -242,10 +263,10 @@ class Translator {
   private received(data: Data, context: Context, id: string): Fact[] {
     const turnId = str(data.turnId);
     if (turnId === undefined) return [];
-    const facts = this.view.turns[turnId] === undefined ? this.startTurn(turnId, context) : [];
+    const facts = this.isIntroduced("turn", turnId) ? [] : this.startTurn(turnId, context);
     const deliveryId =
       this.startingDelivery !== undefined &&
-      this.view.deliveries[this.startingDelivery]?.status !== "consumed"
+      this.view.deliveries[this.startingDelivery]?.status === "admitted"
         ? this.startingDelivery
         : this.unadmitted(context, id);
     this.startingDelivery = undefined;
@@ -272,17 +293,18 @@ class Translator {
   /** The first of the line's deliveries v26 named that no turn consumed yet, or `fallback`. */
   private unadmitted(context: Context, fallback: string): string {
     return (
-      context.deliveryIds.find((deliveryId) => {
-        const row = this.view.deliveries[deliveryId];
-        return row === undefined || row.status === "admitted";
-      }) ?? fallback
+      context.deliveryIds.find(
+        (deliveryId) =>
+          !this.isIntroduced("delivery", deliveryId) ||
+          this.view.deliveries[deliveryId]?.status === "admitted",
+      ) ?? fallback
     );
   }
 
   private admit(deliveryId: string): Fact[] {
-    return this.view.deliveries[deliveryId] === undefined
-      ? [{ data: { deliveryId }, type: "delivery.admitted" }]
-      : [];
+    return this.isIntroduced("delivery", deliveryId)
+      ? []
+      : [{ data: { deliveryId }, type: "delivery.admitted" }];
   }
 
   private runOf(data: Data): string | undefined {
@@ -376,7 +398,7 @@ class Translator {
     return data.actions.flatMap((action): Fact[] => {
       if (!isRecord(action)) return [];
       const callId = str(action.callId);
-      if (callId === undefined || this.view.calls[callId] !== undefined) return [];
+      if (callId === undefined || this.isIntroduced("call", callId)) return [];
       const shown = isRecord(presentation[callId]) ? presentation[callId] : {};
       const capability = capabilityOf(action, str(shown.label));
       return [
@@ -453,7 +475,7 @@ class Translator {
       return [];
     this.taskCalls.add(callId);
     const facts: Fact[] = [];
-    if (this.view.tasks[taskId] === undefined) {
+    if (!this.isIntroduced("task", taskId)) {
       facts.push({
         data: {
           kind: str(data.kind) ?? "tool",
@@ -498,7 +520,7 @@ class Translator {
     const callId = str(data.callId);
     if (sessionId === undefined || callId === undefined || this.view.calls[callId] === undefined)
       return [];
-    if (this.view.children[sessionId] !== undefined) return [];
+    if (this.isIntroduced("child", sessionId)) return [];
     return [
       {
         data: {
@@ -518,8 +540,7 @@ class Translator {
     return data.requests.flatMap((request): Fact[] => {
       if (!isRecord(request)) return [];
       const interactionId = str(request.requestId);
-      if (interactionId === undefined || this.view.interactions[interactionId] !== undefined)
-        return [];
+      if (interactionId === undefined || this.isIntroduced("interaction", interactionId)) return [];
       const action = isRecord(request.action) ? request.action : {};
       const callId = relayedBy ?? str(action.callId);
       const turnId = str(data.turnId);
@@ -603,7 +624,7 @@ class Translator {
 
   private authorizationRequired(data: Data, id: string): Fact[] {
     const interactionId = str(data.attemptId) ?? id;
-    if (this.view.interactions[interactionId] !== undefined) return [];
+    if (this.isIntroduced("interaction", interactionId)) return [];
     const taskId = str(data.taskId);
     const turnId = str(data.turnId);
     const subject =
