@@ -1,10 +1,6 @@
 packages:
   - "."
 
-overrides:
-  "@nuxt/devtools>simple-git": 4.0.2
-  "launch-editor>shell-quote": 1.12.0
-
 minimumReleaseAgeExclude:
   - eve
   - "@vercel/connect"
@@ -17,6 +13,3 @@ allowBuilds:
   esbuild: true
   sharp: false
   vue-demi: false
-
-patchedDependencies:
-  "@nuxt/devtools@3.4.1": patches/@nuxt__devtools@3.4.1.patch
