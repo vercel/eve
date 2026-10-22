@@ -397,6 +397,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "waydock",
+    name: "Waydock",
+    kind: "connection",
+    tagline: "Access mail, calendar, meetings, tasks, and follow-ups through Waydock's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Waydock: access the user's mail, calendar, meetings, tasks, and follow-ups through its MCP server.",
+      mcp: { url: "https://mcp.waydock.ai/mcp" },
+    },
+  },
+  {
     slug: "vercel",
     name: "Vercel",
     kind: "connection",

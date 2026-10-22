@@ -1988,6 +1988,62 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  waydock: {
+    logo: "waydock",
+    docsHref: "https://waydock.ai/docs/quickstart",
+    keywords: ["mcp", "mail", "calendar", "meetings", "tasks", "api key"],
+    authModes: [],
+    quickStart: `Create \`agent/connections/waydock.ts\`:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const READ_ONLY_TOOLS = new Set([
+  "waydock_accounts",
+  "waydock_briefing",
+  "waydock_calendar",
+  "waydock_capabilities",
+  "waydock_follow_ups_list",
+  "waydock_health",
+  "waydock_inbox",
+  "waydock_mail_count",
+  "waydock_mail_get",
+  "waydock_mail_list",
+  "waydock_mail_search",
+  "waydock_meetings_list",
+  "waydock_quota",
+  "waydock_tasks_list",
+  "waydock_version",
+  "waydock_whoami",
+]);
+
+export default defineMcpClientConnection({
+  url: "https://mcp.waydock.ai/mcp",
+  description:
+    "Waydock: access the user's mail, calendar, meetings, tasks, and follow-ups through its MCP server.",
+  auth: {
+    getToken: async () => {
+      const token = process.env.WAYDOCK_MCP_KEY;
+      if (!token) throw new Error("WAYDOCK_MCP_KEY is not set.");
+      return { token };
+    },
+  },
+  approval: ({ toolName }) =>
+    READ_ONLY_TOOLS.has(toolName.split("__").pop() ?? toolName)
+      ? "not-applicable"
+      : "user-approval",
+});
+\`\`\`
+
+The filename supplies the \`waydock\` connection name. Known read-only tools run without an approval prompt. Every other tool, including unknown and future tools, requires user approval.`,
+    configure: `Create a scoped MCP key in [Waydock's MCP settings](https://waydock.ai/settings/account/mcp), then set it as a server-side environment variable:
+
+\`\`\`bash
+WAYDOCK_MCP_KEY=wdmcp_your_key_here
+\`\`\`
+
+The connection sends the key as a bearer token and does not expose it to the model. Waydock enforces the key's scopes on every call. See Waydock's [authentication documentation](https://waydock.ai/docs/authentication) for key scopes and OAuth options.`,
+  },
   agentcard: {
     logo: "agentcard",
     docsHref: "/docs/connections/mcp",

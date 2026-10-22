@@ -540,6 +540,22 @@
       ]
     },
     {
+      "name": "connection/waydock",
+      "type": "registry:item",
+      "title": "Waydock",
+      "description": "Access mail, calendar, meetings, tasks, and follow-ups through Waydock's MCP server.",
+      "envVars": {
+        "WAYDOCK_MCP_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/waydock.ts",
+          "type": "registry:file",
+          "target": "agent/connections/waydock.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/vercel",
       "type": "registry:item",
       "title": "Vercel",

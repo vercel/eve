@@ -43,7 +43,7 @@ const expectedSlugs = connectionEntries()
   .filter((entry) => entry.surfaces.registry)
   .map((entry) => entry.slug);
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
-const NON_CONNECT_SLUGS = new Set(["browser-use", "dataforseo"]);
+const NON_CONNECT_SLUGS = new Set(["browser-use", "dataforseo", "waydock"]);
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   agentcard: "mcp.agentcard.sh/mcp",
   vercel: "vercel",
