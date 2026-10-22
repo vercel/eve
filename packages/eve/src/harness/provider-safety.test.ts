@@ -106,6 +106,7 @@ describe("resolveCallProviderOptions", () => {
     gateway: false,
     googleSearchDropsTools: false,
     provider: "openai",
+    rejectsAssistantFinalPrompt: false,
   };
   const resolve = (
     profile: ModelProfile,

@@ -4,13 +4,16 @@ import {
   clipMiddleUtf16Safe,
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
-  COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
   serializeToolResultOutput,
   stubContentOutputFileParts,
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "#harness/compaction/prompt.js";
-import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
+import {
+  CONTINUATION_MESSAGE,
+  createFrameworkUserMessage,
+  isFrameworkUserMessage,
+} from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
@@ -349,7 +352,7 @@ function withResumptionGuard(
     ...messages,
     replay !== undefined && !alreadyKept
       ? replay
-      : createFrameworkUserMessage("execution.continuation", COMPACTION_RESUMPTION_MESSAGE),
+      : createFrameworkUserMessage("execution.continuation", CONTINUATION_MESSAGE),
   ];
 }
 

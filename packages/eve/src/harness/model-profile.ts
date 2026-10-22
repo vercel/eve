@@ -30,6 +30,8 @@ export interface ModelProfile {
    * the request keeps the search and drops every other tool.
    */
   readonly googleSearchDropsTools: boolean;
+  /** Rejects a prompt that ends on an assistant message (Anthropic has no assistant prefill). */
+  readonly rejectsAssistantFinalPrompt: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ export function resolveModelProfile(
       gateway: true,
       googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
       provider: modelId.split("/")[0]!,
+      rejectsAssistantFinalPrompt: modelId.startsWith("anthropic/"),
     };
   }
   // The Bedrock Converse provider reports `amazon-bedrock` and carries the Anthropic identity in
@@ -64,6 +67,7 @@ export function resolveModelProfile(
     gateway: false,
     googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
     provider: topLevelProvider,
+    rejectsAssistantFinalPrompt: anthropic,
   };
 }
 
