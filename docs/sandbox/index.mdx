@@ -130,27 +130,7 @@ Files under `agent/sandbox/workspace/` seed writable `/workspace`. eve copies th
 
 Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. A [custom provider](/docs/sandbox/custom-providers) can declare a different workspace root, so prefer relative paths in code that runs on any provider. eve resolves `$HOME` by reading it inside the sandbox; when a sandbox has no usable home directory, skill paths fall back to `skills/` under the workspace root. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
 
-Providers receive both trees with explicit metadata. `source.kind` is `"none"` when the agent has no managed workspace or skill files, `"materialized"` when eve has also written the compiled files to the host directory at `path`, and `"inline"` when the contents are available only in each tree's `files`:
-
-```ts
-interface SandboxProviderResources {
-  source:
-    | { kind: "none" }
-    | { kind: "inline"; key: string }
-    | { kind: "materialized"; key: string; path: string };
-  workspace?: SandboxProviderResourceTree;
-  skills?: SandboxProviderResourceTree;
-}
-
-interface SandboxProviderResourceTree {
-  key: string;
-  files: SandboxProviderResourceFile[];
-  mountPath: string;
-  targetPath: string;
-}
-```
-
-Docker mounts the compiled trees read-only under `/eve/resources`, copies workspace seeds into writable `/workspace`, and exposes skills read-only where possible. Vercel's snapshot environment writes workspace and skill contents before capturing its snapshot. Custom providers decide whether to upload, mount, or write each tree, but must expose the final target paths before authored preparation runs.
+Docker mounts the compiled trees read-only under `/eve/resources` and copies them into place. Vercel Sandbox writes workspace and skill files into the build sandbox before capturing its snapshot. A custom provider seeds both trees with `ctx.populate()` when it prepares a template; see [Bake files into templates](/docs/sandbox/custom-providers#bake-files-into-templates).
 
 ## Inbound attachments
 
