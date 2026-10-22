@@ -1,0 +1,40 @@
+---
+title: "Use Cases"
+description: "The two most common use cases for eve are business agents that work for your own company and agents you ship to customers as a product."
+---
+
+eve gives you everything you need for production agents. The two most common use cases for eve are business agents that work for your own company and agents you ship to customers as a product.
+
+<UseCaseOverview />
+
+## Business agents
+
+A business agent takes on work for teams inside your company. The most common are software factories that plan, build, and review code alongside engineers, and company brains that answer employees' questions from internal data. Employees reach the agent in Slack, Microsoft Teams, or GitHub, and it acts on the company's own systems and data.
+
+<UseCasePatterns useCase="business" />
+
+### How eve supports business agents
+
+An eve agent lives in [your repository](/docs/concepts/project-structure), so it is reviewed, deployed, and governed like the rest of your stack.
+
+<UseCaseCapabilities useCase="business" />
+
+## Agent as a Service (AaaS)
+
+In AaaS, the agent is the product. One multi-tenant deployment serves many customers, and each of them trusts it with their work over long stretches of time. It has to serve every user durably and keep each tenant's data and identity separate from the next.
+
+<UseCasePatterns useCase="service" />
+
+### How eve supports AaaS
+
+Each end user gets their own [sessions](/docs/concepts/sessions-runs-and-streaming) and connections, running on the same agent project you deploy once.
+
+<UseCaseCapabilities useCase="service" />
+
+## Start building
+
+Create an agent and open the terminal UI.
+
+```bash
+npx eve@latest init my-agent
+```

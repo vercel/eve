@@ -67,4 +67,43 @@ describe("component Markdown export", () => {
       expect.objectContaining({ type: "mdxJsxFlowElement", name: "AgentRuntimeDiagram" }),
     );
   });
+
+  it("expands the use case components into Markdown lists and tables", async () => {
+    const options =
+      typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
+    const plugins = options?.remarkPlugins;
+    if (!Array.isArray(plugins)) throw new Error("Expected configured remark plugins");
+    const processor = createProcessor({ remarkPlugins: plugins });
+    const source = [
+      "<UseCaseOverview />",
+      '<UseCasePatterns useCase="business" />',
+      '<UseCaseCapabilities useCase="service" />',
+    ].join("\n\n");
+    const markdown = toMarkdown(processor.parse(source), {
+      extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
+    });
+
+    expect(markdown).toContain("- **[Business agents](#business-agents)** (for your team)");
+    expect(markdown).toContain("It usually runs in iMessage, WhatsApp, Telegram, Discord, or Web.");
+    expect(markdown).toContain(
+      "See the [Software Factory template](/templates/eve-software-factory-template).",
+    );
+    expect(markdown).toContain(
+      "| Isolate every tenant | [Multi-tenancy](/docs/patterns/multi-tenant-auth)",
+    );
+    expect(markdown).not.toMatch(/<UseCase/);
+  });
+
+  it("rejects a use case component without a known literal use case", async () => {
+    const options =
+      typeof config.mdxOptions === "function" ? await config.mdxOptions() : config.mdxOptions;
+    const processor = createProcessor({ remarkPlugins: options?.remarkPlugins as never });
+    const tree = processor.parse('<UseCasePatterns useCase="internal" />');
+
+    expect(() =>
+      toMarkdown(tree, {
+        extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
+      }),
+    ).toThrow("UseCasePatterns Markdown export requires a literal useCase string.");
+  });
 });
