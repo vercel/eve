@@ -4,6 +4,49 @@ import { createDockerSandboxRuntime } from "#internal/testing/docker-sandbox-run
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 
+function createContainerStoreCli() {
+  let exists = false;
+  const run: DockerCli["run"] = vi.fn(async (args: readonly string[]) => {
+    if (args[0] === "rm") {
+      const gone = !exists;
+      exists = false;
+      return {
+        exitCode: gone ? 1 : 0,
+        stderr: gone ? "Error response from daemon: No such container: eve-sbx" : "",
+        stdout: "",
+        stdoutBytes: Buffer.alloc(0),
+      };
+    }
+    if (args[0] === "run") exists = true;
+    if (args[0] === "container" && !exists) {
+      return {
+        exitCode: 1,
+        stderr: "Error: No such container: eve-sbx",
+        stdout: "",
+        stdoutBytes: Buffer.alloc(0),
+      };
+    }
+    return {
+      exitCode: 0,
+      stderr: "",
+      stdout:
+        args[0] === "container" && args[3] === "{{.State.Running}}"
+          ? "true\n"
+          : args[0] === "container" && args[3] === "{{.Id}}"
+            ? "container-id-1\n"
+            : "",
+      stdoutBytes: Buffer.alloc(0),
+    };
+  });
+  const dockerCli: DockerCli = {
+    run,
+    stream() {
+      throw new Error("stream is not used by this test");
+    },
+  };
+  return { dockerCli, run };
+}
+
 describe("Docker sandbox deletion", () => {
   it("keeps an old handle bound to the deleted container identity", async () => {
     let containerId = "container-id-1";
@@ -52,32 +95,33 @@ describe("Docker sandbox deletion", () => {
       expect.anything(),
     );
   });
+
+  it("deletes the session container by name with the caller's signal, even when it is already gone", async () => {
+    const { dockerCli, run } = createContainerStoreCli();
+    const provider = createSandboxProviderHarness(
+      createDockerSandboxRuntime(undefined, dockerCli),
+      {},
+      { preparedArtifact: () => ({ imageReference: "image-a" }) },
+    );
+    const { handle, state } = await provider.start({
+      appRoot: "/tmp/eve-app",
+      sandboxName: "session-key",
+    });
+    const abortSignal = new AbortController().signal;
+
+    vi.mocked(run).mockClear();
+    await handle.onSandboxDelete({ abortSignal });
+    await handle.onSandboxDelete({ abortSignal });
+    expect(vi.mocked(run).mock.calls.filter(([args]) => args[0] === "rm")).toEqual([
+      [["rm", "-f", state.containerName], { signal: abortSignal }],
+      [["rm", "-f", state.containerName], { signal: abortSignal }],
+    ]);
+  });
 });
 
 describe("Docker sandbox session identity", () => {
   it("names the container from the session key alone and removes it by key at session end", async () => {
-    let removed = false;
-    const run: DockerCli["run"] = vi.fn(async (args: readonly string[]) => {
-      const gone = args[0] === "rm" && removed;
-      if (args[0] === "rm") removed = true;
-      return {
-        exitCode: gone ? 1 : 0,
-        stderr: gone ? "Error response from daemon: No such container: eve-sbx" : "",
-        stdout:
-          args[0] === "container" && args[3] === "{{.State.Running}}"
-            ? "true\n"
-            : args[0] === "container" && args[3] === "{{.Id}}"
-              ? "container-id-1\n"
-              : "",
-        stdoutBytes: Buffer.alloc(0),
-      };
-    });
-    const dockerCli: DockerCli = {
-      run,
-      stream() {
-        throw new Error("stream is not used by this test");
-      },
-    };
+    const { dockerCli, run } = createContainerStoreCli();
     const provider = createSandboxProviderHarness(
       createDockerSandboxRuntime(undefined, dockerCli),
       {},
@@ -95,9 +139,7 @@ describe("Docker sandbox session identity", () => {
 
     vi.mocked(run).mockClear();
     await provider.endSession({ ...session, state: null });
-    await provider.endSession({ ...session, state: null });
     expect(vi.mocked(run).mock.calls.map(([args]) => args)).toEqual([
-      ["rm", "-f", state.containerName],
       ["rm", "-f", state.containerName],
     ]);
   });

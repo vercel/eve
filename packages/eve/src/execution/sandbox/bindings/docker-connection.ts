@@ -46,8 +46,10 @@ const DOCKER_KILL_TREE_SCRIPT = [
 
 /**
  * A connection bound to one container's identity rather than its name, so a
- * connection to a deleted container never reaches a later container that
- * reuses the session's name.
+ * stale connection's commands, file operations, network policy changes, and
+ * stop never reach a later container that reuses the session's name.
+ * Deletion is the exception: `onSessionEnd` removes by session name, because
+ * it is the single deletion path and must work without an open connection.
  */
 export function createDockerConnection(input: {
   readonly cli: DockerCli;

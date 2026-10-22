@@ -3,8 +3,6 @@ import { join } from "node:path";
 import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-const SANDBOX_RESOURCES_ROOT = "/eve/resources";
-
 function resolveImmutableResourcesPath(input: {
   readonly storagePath: string;
   readonly provider: string;
@@ -24,19 +22,20 @@ export async function prepareImmutableResources(input: {
   return path;
 }
 
+/** `quotedRoot` is interpolated into the shell script, so callers pass it shell-quoted. */
 export async function hydrateSandboxFromImmutableResources(
   session: SandboxSession,
-  root = SANDBOX_RESOURCES_ROOT,
+  quotedRoot: string,
 ): Promise<void> {
   const result = await session.run({
     command: [
       "set -e",
-      `if [ -d ${root}/workspace ]; then cp -a ${root}/workspace/. /workspace/; fi`,
-      `if [ -d ${root}/skills ]; then`,
+      `if [ -d ${quotedRoot}/workspace ]; then cp -a ${quotedRoot}/workspace/. /workspace/; fi`,
+      `if [ -d ${quotedRoot}/skills ]; then`,
       '  mkdir -p "$HOME/.agents"',
       '  rm -rf "$HOME/.agents/skills"',
       '  mkdir -p "$HOME/.agents/skills"',
-      `  cp -a ${root}/skills/. "$HOME/.agents/skills/"`,
+      `  cp -a ${quotedRoot}/skills/. "$HOME/.agents/skills/"`,
       "fi",
     ].join("\n"),
   });

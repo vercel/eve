@@ -47,6 +47,7 @@ import {
   type SandboxSessionContext,
 } from "#public/sandbox/provider.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { isObject } from "#shared/guards.js";
 import {
   invalidPreparedSandboxArtifactError,
   invalidSandboxSessionStateError,
@@ -87,7 +88,7 @@ export type DockerSandboxProviderOptions = Omit<DockerSandboxEnvironmentOptions,
  *   next `start` or `resume` restarts it with state intact.
  */
 export function createDockerSandboxProvider(
-  createOptions: DockerSandboxProviderOptions = {},
+  createOptions: DockerSandboxProviderOptions,
   dockerCli?: DockerCli,
 ): SandboxProviderImplementation<
   DockerSandboxRuntimeOptions,
@@ -185,10 +186,10 @@ export function createDockerSandboxProvider(
   }
 
   return {
-    async onSessionEnd(context, state) {
+    async onSessionEnd(context, state, { abortSignal }) {
       await ensureDaemon();
       const containerName = state?.containerName ?? dockerSessionName(context);
-      const removed = await cli.run(["rm", "-f", containerName]);
+      const removed = await cli.run(["rm", "-f", containerName], { signal: abortSignal });
       if (removed.exitCode !== 0 && !/no such container/iu.test(removed.stderr)) {
         expectDockerSuccess(removed, `delete sandbox session container "${containerName}"`);
       }
@@ -205,7 +206,6 @@ export function createDockerSandboxProvider(
         .slice(0, 24);
       const templateReferenceInput = { optionsHash, templateKey };
       const imageReference = dockerTemplateImageReference(templateReferenceInput);
-      const resourcesPath = await context.resourcesDirectory();
       const markerPath = resolveDockerTemplateMarkerPath(
         context.storagePath,
         templateReferenceInput,
@@ -218,6 +218,7 @@ export function createDockerSandboxProvider(
         return { imageReference };
       }
 
+      const resourcesPath = await context.resourcesDirectory();
       let baseImage = options.image;
       if (dockerfile === undefined) {
         context.log(`checking base image "${options.image}"`);
@@ -322,19 +323,15 @@ function dockerSessionName(context: SandboxSessionContext): string {
   }).slice(0, 32)}`;
 }
 
-function isJsonRecord(value: SandboxJson): value is { readonly [key: string]: SandboxJson } {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function requirePreparedDockerArtifact(artifact: SandboxJson): DockerSandboxPreparedArtifact {
-  if (!isJsonRecord(artifact) || typeof artifact.imageReference !== "string") {
+  if (!isObject(artifact) || typeof artifact.imageReference !== "string") {
     throw invalidPreparedSandboxArtifactError("Docker sandbox");
   }
   return { imageReference: artifact.imageReference };
 }
 
 function requireDockerSessionState(state: SandboxJson): DockerSandboxSessionState {
-  if (!isJsonRecord(state) || state.version !== 2 || typeof state.containerName !== "string") {
+  if (!isObject(state) || state.version !== 2 || typeof state.containerName !== "string") {
     throw invalidSandboxSessionStateError("Docker sandbox");
   }
   return { containerName: state.containerName, version: 2 };
