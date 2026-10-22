@@ -5,10 +5,7 @@ import {
   getSandboxEnvironmentRuntime,
   type SandboxSelectorContext,
 } from "#shared/sandbox-environment.js";
-import {
-  createSandboxProviderResources,
-  type SandboxProviderPrepareContext,
-} from "#shared/sandbox-provider.js";
+import { createSandboxPrepareContext } from "#execution/sandbox/prewarm.js";
 
 import type { DeployedSelfModificationConfig } from "./remote/config.js";
 import { defineDeployedSelfModificationSandbox } from "./deployed-sandbox.js";
@@ -32,12 +29,17 @@ describe("deployed self-modification sandbox", () => {
     );
 
     expect(environment?.provider).toBe("vercel");
-    const prepareContext = {
-      resources: createSandboxProviderResources({}),
-    } as SandboxProviderPrepareContext;
-    await expect(
-      getSandboxEnvironmentRuntime(environment!).implementation.prepare(prepareContext),
-    ).resolves.toEqual({});
+    const runtime = getSandboxEnvironmentRuntime(environment!);
+    const prepareContext = createSandboxPrepareContext({
+      appRoot: "/app",
+      files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
+      log: () => {},
+      provider: runtime,
+      resources: {},
+      sourceRevision: "revision",
+      storagePath: "/app/.eve/sandbox",
+    });
+    await expect(runtime.implementation.prepare(prepareContext)).resolves.toEqual({});
     expect(isDeployedOnVercel).not.toHaveBeenCalled();
   });
 

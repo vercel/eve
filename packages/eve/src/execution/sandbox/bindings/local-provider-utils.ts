@@ -2,22 +2,6 @@ import { randomUUID } from "node:crypto";
 import { access, cp, mkdir, rename, rm, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
-import { resolveSandboxModelPath } from "#shared/skill-paths.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
-
-interface SandboxSeedFile {
-  readonly content: string | Uint8Array;
-  readonly path: string;
-}
-
-export function resolveWorkspacePath(path: string): string {
-  if (path.startsWith("/")) {
-    return path;
-  }
-  return `${WORKSPACE_ROOT}/${path}`;
-}
-
 export async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -77,22 +61,4 @@ export function resolveLocalProviderSessionRootPath(
   sessionKey: string,
 ): string {
   return join(cacheDirectory, providerCacheName, "sessions", sessionKey);
-}
-
-export async function writeSandboxSeedFiles(
-  session: SandboxSession,
-  seedFiles: ReadonlyArray<SandboxSeedFile>,
-): Promise<void> {
-  for (const file of seedFiles) {
-    const path = await resolveSandboxModelPath({
-      path: file.path,
-      sandbox: session,
-    });
-
-    if (typeof file.content === "string") {
-      await session.writeTextFile({ content: file.content, path });
-    } else {
-      await session.writeBinaryFile({ content: file.content, path });
-    }
-  }
 }

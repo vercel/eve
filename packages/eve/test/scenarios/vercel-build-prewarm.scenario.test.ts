@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { prewarmAppSandboxes } from "../../src/execution/sandbox/prewarm.js";
 import { runVercelBuildPrewarm } from "../../src/internal/nitro/host/vercel-build-prewarm.js";
-import type { SandboxProviderPrepareContext } from "../../src/shared/sandbox-provider.js";
+import { populatedPaths } from "../../src/internal/testing/sandbox-provider-harness.js";
+import type { SandboxPrepareContext } from "../../src/sandbox/provider.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -85,8 +86,8 @@ describe("Vercel build-time sandbox prewarm", () => {
 
     expect(events.seededTemplates).toEqual(["default", "default"]);
     expect([...events.writtenFilePaths].sort()).toEqual([
-      "$HOME/.agents/skills/research/SKILL.md",
-      "$HOME/.agents/skills/route-weather/SKILL.md",
+      "/home/agent/.agents/skills/research/SKILL.md",
+      "/home/agent/.agents/skills/route-weather/SKILL.md",
     ]);
   });
 });
@@ -181,19 +182,12 @@ function preparedSandboxSource(command: string): string {
 }
 
 function createRecordingDispatch(events: ReturnType<typeof createPrewarmEvents>) {
-  return async ({ context }: { context: SandboxProviderPrepareContext }) => {
+  return async ({ context }: { context: SandboxPrepareContext }) => {
     events.templateKeys.push(context.storagePath);
-    const files = [
-      ...(context.resources.workspace?.files.map((file) => ({
-        path: `${context.resources.workspace?.targetPath}/${file.relativePath}`,
-      })) ?? []),
-      ...(context.resources.skills?.files.map((file) => ({
-        path: `${context.resources.skills?.targetPath}/${file.relativePath}`,
-      })) ?? []),
-    ];
-    if (files.length > 0) {
+    const paths = await populatedPaths(context);
+    if (paths.length > 0) {
       events.seededTemplates.push("default");
-      events.writtenFilePaths.push(...files.map((file) => file.path));
+      events.writtenFilePaths.push(...paths);
     }
 
     return { storagePath: context.storagePath };

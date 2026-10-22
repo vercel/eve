@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -18,7 +18,7 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
 }));
 
-afterEach(() => shutdownActiveSandboxHandles());
+afterEach(() => shutdownActiveSandboxConnections());
 
 const alice: SessionAuthContext = {
   attributes: {},
@@ -294,7 +294,7 @@ describe("invokeTool", () => {
     expect(started).toHaveLength(2);
     expect(started[0]).not.toBe(started[1]);
     expect(deleted).toHaveBeenCalledTimes(2);
-    await shutdownActiveSandboxHandles();
+    await shutdownActiveSandboxConnections();
     expect(shutdown).not.toHaveBeenCalled();
   });
 
@@ -317,12 +317,12 @@ describe("invokeTool", () => {
     expect(closed).toHaveBeenCalledTimes(1);
     expect(reasons()).toEqual(["completed"]);
 
-    // A stopped connection can resume, so shutdown stops it again; it closes only once.
+    // A call that stopped and then ended its sandbox leaves nothing for shutdown to stop.
     expect(await invokeTool(runtime, "pause", {}, { auth: alice })).toMatchObject({
       status: "completed",
     });
-    await shutdownActiveSandboxHandles();
-    expect(shutdown).toHaveBeenCalledTimes(2);
+    await shutdownActiveSandboxConnections();
+    expect(shutdown).toHaveBeenCalledOnce();
     expect(closed).toHaveBeenCalledTimes(2);
 
     expect(await invokeTool(runtime, "discard", {}, { auth: alice })).toMatchObject({
@@ -372,7 +372,7 @@ describe("invokeTool", () => {
 
     expect(await result).toMatchObject({ status: "failed" });
     expect(deleted).toHaveBeenCalledTimes(1);
-    await shutdownActiveSandboxHandles();
+    await shutdownActiveSandboxConnections();
     expect(shutdown).not.toHaveBeenCalled();
   });
 
@@ -458,7 +458,7 @@ describe("invokeTool", () => {
     expect(released).toEqual([handles[1], handles[0], handles[2]]);
 
     // No call's connection is left for server shutdown, and the sandbox itself stays.
-    await shutdownActiveSandboxHandles();
+    await shutdownActiveSandboxConnections();
     expect(stopped).not.toHaveBeenCalled();
     expect(new Set(kinds)).toEqual(new Set(["tool-session"]));
     expect(deleted).not.toHaveBeenCalled();

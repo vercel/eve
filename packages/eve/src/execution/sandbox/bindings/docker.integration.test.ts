@@ -21,7 +21,7 @@ import type {
 } from "#public/sandbox/docker-sandbox.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import { createDockerSandboxRuntime } from "#internal/testing/docker-sandbox-runtime.js";
+import { createDockerSandboxHarness } from "#internal/testing/docker-sandbox-runtime.js";
 import {
   createFakeDockerCli,
   fakeDockerContainerIdentity,
@@ -29,13 +29,9 @@ import {
   isContainerInspect,
   type FakeResponse,
 } from "#internal/testing/fake-docker-cli.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
-import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
-import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
-import { createSandboxProviderResources } from "#shared/sandbox-provider.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -44,11 +40,11 @@ function createEngine(input: {
   readonly options?: DockerSandboxEnvironmentOptions;
   readonly runtimeOptions?: DockerSandboxRuntimeOptions;
 }) {
-  return createSandboxProviderHarness(
-    createDockerSandboxRuntime(input.options, input.cli),
-    input.runtimeOptions ?? {},
-    { preparedArtifact: () => ({ imageReference: TEMPLATE_IMAGE }) },
-  );
+  return createDockerSandboxHarness({
+    ...input,
+    preparedArtifact: () => ({ imageReference: TEMPLATE_IMAGE }),
+    runtimeOptions: input.runtimeOptions ?? {},
+  });
 }
 
 function isImageInspect(args: readonly string[], reference: string): boolean {
@@ -380,7 +376,7 @@ describe("Docker provider create", () => {
 
       // An authored stop releases the container; filesystem state survives
       // for the next `create` to restart from.
-      await handle.onSandboxStop();
+      await handle.connection.stop();
       expect(findCall(calls, (args) => args[0] === "stop")?.args).toEqual([
         "stop",
         "-t",
@@ -705,11 +701,8 @@ describe("Docker template prune", () => {
 
   // Mirrors how prewarm and session start build the provider context.
   async function prepareLikeDevelopment(appRoot: string, cli: DockerCli) {
-    return await createDockerSandboxRuntime(undefined, cli).prepare({
-      files: createSandboxProviderFiles(join(appRoot, "sandbox")),
-      host: createSandboxProviderHost(appRoot),
-      resources: createSandboxProviderResources({}),
-      sourceRevision: "test-source-revision",
+    return await createDockerSandboxHarness({ cli }).prepare({
+      appRoot,
       storagePath: resolveSandboxCacheDirectory(appRoot),
     });
   }

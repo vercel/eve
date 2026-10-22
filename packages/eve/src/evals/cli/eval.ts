@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import {
   EVE_DEV_STATE_DIR_ENV,
   EVE_EVALUATION_ENV_FLAG,
@@ -216,7 +216,8 @@ export async function runEvalCommand(
   } finally {
     for (const cleanup of [
       () => devServer?.close(),
-      () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
+      () =>
+        devServer && shutdownActiveSandboxConnections({ log: (message) => logger.error(message) }),
       () => devStateDirectory && removeEvalStateDirectory(devStateDirectory),
       () => config.teardown?.(setupContext),
     ]) {

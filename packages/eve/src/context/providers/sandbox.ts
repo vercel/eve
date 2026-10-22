@@ -1,4 +1,4 @@
-import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import type { ContextContainer } from "#context/container.js";
@@ -6,6 +6,9 @@ import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/ke
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getActiveRuntimeNode } from "#context/node.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
+import { createLogger, logError } from "#internal/logging.js";
+
+const log = createLogger("context.sandbox");
 
 export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   key: SandboxKey,
@@ -39,5 +42,12 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   async commit(access, session) {
     const state = await access.captureState();
     return { ...session, sandboxState: state };
+  },
+
+  // Closes the connection the step opened; `create` built the access.
+  async dispose(access) {
+    await (access as EnsuredSandboxAccess).release().catch((error: unknown) => {
+      logError(log, "failed to close a step's sandbox connection", error);
+    });
   },
 };

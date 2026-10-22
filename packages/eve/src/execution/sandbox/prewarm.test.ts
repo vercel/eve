@@ -4,10 +4,7 @@ import {
   prewarmAppSandboxes,
   type SandboxPreparedArtifactStore,
 } from "#execution/sandbox/prewarm.js";
-import {
-  defineLegacySandboxProvider,
-  type SandboxProviderPrepareContext,
-} from "#shared/sandbox-provider.js";
+import { defineSandboxProvider, type SandboxPrepareContext } from "#sandbox/provider.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedAgentGraphBundle } from "#runtime/graph.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
@@ -33,8 +30,8 @@ describe("prewarmAppSandboxes", () => {
     const appRoot = process.cwd();
     const firstSnapshotRoot = `${appRoot}/.eve/dev-runtime/snapshots/one/app`;
     const secondSnapshotRoot = `${appRoot}/.eve/dev-runtime/snapshots/two/app`;
-    const firstInputs: SandboxProviderPrepareContext[] = [];
-    const secondInputs: SandboxProviderPrepareContext[] = [];
+    const firstInputs: SandboxPrepareContext[] = [];
+    const secondInputs: SandboxPrepareContext[] = [];
     const workspaceResourceRoot = {
       contentHash: "workspace-content-hash",
       logicalPath: "empty-resource-root",
@@ -66,8 +63,8 @@ describe("prewarmAppSandboxes", () => {
     expect(secondInputs).toHaveLength(1);
     expect(firstInputs[0]?.storagePath).toBe(resolveSandboxCacheDirectory(appRoot));
     expect(secondInputs[0]?.storagePath).toBe(resolveSandboxCacheDirectory(appRoot));
-    expect(firstInputs[0]?.sourceRevision).toBe("sandbox-source-hash");
-    expect(secondInputs[0]?.sourceRevision).toBe("sandbox-source-hash");
+    expect(firstInputs[0]?.resolveProjectPath(".")).toBe(appRoot);
+    expect(secondInputs[0]?.templateKey({})).toBe(firstInputs[0]?.templateKey({}));
   });
 
   it("waits for other providers to finish before reporting a preparation failure", async () => {
@@ -142,8 +139,8 @@ function createMemoryArtifactStore(): SandboxPreparedArtifactStore {
   return { async write() {} };
 }
 
-function recordPrewarmInputs(inputs: SandboxProviderPrepareContext[]) {
-  return async ({ context }: { context: SandboxProviderPrepareContext }) => {
+function recordPrewarmInputs(inputs: SandboxPrepareContext[]) {
+  return async ({ context }: { context: SandboxPrepareContext }) => {
     inputs.push(context);
     return null;
   };
@@ -159,7 +156,7 @@ function createGraph(
     };
   } = {},
 ): ResolvedAgentGraphBundle {
-  const provider = defineLegacySandboxProvider({
+  const provider = defineSandboxProvider({
     name: input.providerName ?? "test",
     environment: () => ({
       async onSessionEnd() {},

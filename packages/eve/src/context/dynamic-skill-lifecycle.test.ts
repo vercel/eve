@@ -26,10 +26,7 @@ import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import {
-  defineLegacySandboxProvider,
-  type SandboxProviderSessionContext,
-} from "#shared/sandbox-provider.js";
+import { defineSandboxProvider } from "#sandbox/provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
 
@@ -70,13 +67,7 @@ function persistedSandbox(id: string): SandboxSessionState {
 function recreatableSandbox() {
   const sandboxes: ReturnType<typeof mockSandbox>[] = [];
   let gone = false;
-  const handle = (sandbox: ReturnType<typeof mockSandbox>) => ({
-    sandbox: sandbox.session,
-    onRuntimeShutdown: async () => {},
-    onSandboxDelete: async () => {},
-    onSandboxStop: async () => {},
-  });
-  const environment = defineLegacySandboxProvider({
+  const environment = defineSandboxProvider({
     name: "recreatable",
     environment: () => ({
       onSessionEnd: async () => {},
@@ -86,16 +77,16 @@ function recreatableSandbox() {
           gone = false;
           throw new SandboxSessionGoneError("The sandbox was removed.");
         }
-        return handle(sandboxes.at(-1)!);
+        return sandboxes.at(-1)!.connection;
       },
-      async start(context: SandboxProviderSessionContext) {
+      async start(context) {
         const sandbox = mockSandbox({
           commands: {
             [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
           },
         });
         sandboxes.push(sandbox);
-        return { handle: handle(sandbox), state: { name: `sandbox-${context.session.id}` } };
+        return { connection: sandbox.connection, state: { name: `sandbox-${context.session.id}` } };
       },
     }),
   }).environment();

@@ -9,11 +9,10 @@ import {
   type VercelSandboxPreparedArtifact,
   type VercelSandboxSessionState,
 } from "#execution/sandbox/bindings/vercel.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { defineSandboxProvider } from "#public/sandbox/provider.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
-import type { LegacySandboxProviderImplementation } from "#shared/sandbox-provider.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
@@ -243,27 +242,26 @@ type VercelTestInput = NonNullable<Parameters<typeof createVercelImplementation>
   readonly prepare?: (sandbox: VercelSandboxSession) => Promise<void> | void;
 };
 
-/** The binding behind the public provider contract, as core runs it. */
-function vercelImplementation({ prepare, ...input }: VercelTestInput = {}) {
+/** The binding behind the public provider contract, driven as core runs it. */
+function vercelHarness(
+  { prepare, ...input }: VercelTestInput = {},
+  options: VercelSandboxRuntimeOptions = {},
+  harnessOptions: { readonly preparedArtifact?: () => VercelSandboxPreparedArtifact } = {},
+) {
   const provider = defineSandboxProvider({
     name: "vercel",
     environment: () => createVercelImplementation(input),
   });
-  const environment = provider.environment(prepare === undefined ? {} : { prepare });
-  return getSandboxEnvironmentRuntime(environment)
-    .implementation as LegacySandboxProviderImplementation<
+  return createSandboxEnvironmentHarness<
     VercelSandboxRuntimeOptions,
     VercelSandboxPreparedArtifact,
     VercelSandboxSessionState,
     VercelSandboxSession
-  >;
+  >(provider.environment(prepare === undefined ? {} : { prepare }), options, harnessOptions);
 }
 
 function createVercelSandbox(input: VercelTestInput = {}) {
-  return createSandboxProviderHarness(
-    vercelImplementation({ prepare: async () => {}, ...input }),
-    {},
-  );
+  return vercelHarness({ prepare: async () => {}, ...input });
 }
 
 function createTestVercelSandbox(input: VercelTestInput = {}) {
@@ -739,11 +737,11 @@ describe("createVercelSandbox", () => {
     }
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi.fn().mockResolvedValue(sessionSandbox);
-    const provider = createSandboxProviderHarness(
-      vercelImplementation({
+    const provider = vercelHarness(
+      {
         loadSandboxModule: async () =>
           ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
-      }),
+      },
       {
         mounts: {
           "/data": new Drive(),
@@ -806,10 +804,7 @@ describe("createVercelSandbox", () => {
       vi.stubEnv("VERCEL_TOKEN", "token_golden");
       const fake = createFakeVercelProvider();
       sdk.module = fake.sandboxModule;
-      const provider = createSandboxProviderHarness(
-        getSandboxEnvironmentRuntime(DefaultSandbox.environment()).implementation,
-        undefined,
-      );
+      const provider = createSandboxEnvironmentHarness(DefaultSandbox.environment());
 
       const artifact = await provider.prepare({ appRoot });
       const session = await provider.start({ appRoot, sandboxName: "session_golden" });
@@ -1428,13 +1423,13 @@ describe("createVercelSandbox", () => {
       workspace: { content: string; relativePath: string }[] = [],
     ) => {
       const create = vi.fn(async (options: { name: string }) => createMockSandbox(options));
-      const provider = createSandboxProviderHarness(
-        vercelImplementation({
+      const provider = vercelHarness(
+        {
           ...input,
           createSandbox: async ({ createOptions }) => (await create(createOptions)) as never,
           loadSandboxModule: async () =>
             ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
-        }),
+        },
         {},
       );
       return {
@@ -1513,7 +1508,7 @@ describe("createVercelSandbox", () => {
   it("stops the session sandbox on shutdown so no VM outlives the server", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
 
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
 
     expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
   });
@@ -1523,7 +1518,7 @@ describe("createVercelSandbox", () => {
     vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
     vi.mocked(sessionSandbox.runCommand).mockClear();
 
-    await handle.onSandboxStop();
+    await handle.connection.stop();
     await handle.sandbox.run({ command: "printf resumed" });
 
     expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
@@ -1536,9 +1531,9 @@ describe("createVercelSandbox", () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
 
-    await handle.onSandboxStop();
+    await handle.connection.stop();
     await handle.sandbox.run({ command: "printf resumed" });
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
 
     expect(sessionSandbox.stop).toHaveBeenCalledTimes(2);
   });
@@ -1548,15 +1543,17 @@ describe("createVercelSandbox", () => {
     const provider = createTestVercelSandbox({
       loadSandboxModule: async () => fake.sandboxModule as never,
     });
-    const handle = await provider.openSession({
-      appRoot: "/tmp/test-app-root",
+    const session = { appRoot: "/tmp/test-app-root", sandboxName: "session-key" };
+    const handle = await provider.start({
+      ...session,
       prepared: { snapshotId: "prepared-snapshot" },
-      sandboxName: "session-key",
     });
     const sandbox = fake.sandboxes.get(handle.sandbox.name)!;
     const abortSignal = new AbortController().signal;
 
-    await expect(handle.onSandboxDelete({ abortSignal })).resolves.toBeUndefined();
+    await expect(
+      provider.endSession({ ...session, abortSignal, reason: "deleted", state: handle.state }),
+    ).resolves.toBeUndefined();
 
     expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
       expect.objectContaining({ name: handle.sandbox.name, resume: false, signal: abortSignal }),
@@ -1592,7 +1589,7 @@ describe("createVercelSandbox", () => {
       sandboxName: "session-key",
     });
 
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
 
     expect(sessionSandbox.stop).not.toHaveBeenCalled();
   });
@@ -1601,7 +1598,7 @@ describe("createVercelSandbox", () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     sessionSandbox.stop.mockRejectedValueOnce(new Error("provider unreachable"));
 
-    await expect(handle.onSandboxStop()).rejects.toThrow("provider unreachable");
+    await expect(handle.connection.stop()).rejects.toThrow("provider unreachable");
   });
 
   it.each([
@@ -1610,8 +1607,8 @@ describe("createVercelSandbox", () => {
   ])("applies the policy from %s after template-less base setup", async (_, environment, open) => {
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi.fn().mockResolvedValue(sessionSandbox);
-    const provider = createSandboxProviderHarness(
-      vercelImplementation({
+    const provider = vercelHarness(
+      {
         createOptions: environment,
         createSandbox: async ({ createOptions }) => {
           await create(createOptions);
@@ -1619,7 +1616,7 @@ describe("createVercelSandbox", () => {
         },
         loadSandboxModule: async () =>
           ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
-      }),
+      },
       open,
       { preparedArtifact: () => ({}) },
     );
@@ -1637,12 +1634,12 @@ describe("createVercelSandbox", () => {
     const sessionSandbox = createMockSandbox({ name: "session" });
     sessionSandbox.update.mockRejectedValueOnce(new Error("policy rejected"));
     const fake = createFakeVercelProvider(sessionSandbox);
-    const provider = createSandboxProviderHarness(
-      vercelImplementation({
+    const provider = vercelHarness(
+      {
         createSandbox: async ({ createOptions, sandboxModule }) =>
           await sandboxModule.Sandbox.create(createOptions),
         loadSandboxModule: async () => fake.sandboxModule as never,
-      }),
+      },
       { networkPolicy: "deny-all" },
       { preparedArtifact: () => ({}) },
     );
@@ -1844,9 +1841,9 @@ describe("createVercelSandbox", () => {
             ]) as never)
           : createMockCommandResult(),
     );
-    const readEnv = async (handle: typeof first.handle) =>
+    const readEnv = async (handle: { readonly sandbox: VercelSandboxSession }) =>
       JSON.parse((await handle.sandbox.run({ command: "env" })).stdout);
-    expect(await readEnv(first.handle)).toEqual({ AI_AGENT: "alice-bot", REVIEW_VALUE: "initial" });
+    expect(await readEnv(first)).toEqual({ AI_AGENT: "alice-bot", REVIEW_VALUE: "initial" });
 
     const reopened = await provider.start({
       appRoot: "/tmp/test-app-root",
@@ -1864,7 +1861,7 @@ describe("createVercelSandbox", () => {
       prepared: {},
       existing: first.state,
     });
-    expect(await readEnv(reopened.handle)).toEqual({
+    expect(await readEnv(reopened)).toEqual({
       AI_AGENT: "alice-bot",
       REVIEW_VALUE: "initial",
     });

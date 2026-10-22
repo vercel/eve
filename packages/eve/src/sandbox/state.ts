@@ -1,11 +1,7 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
+import type { SandboxProviderRuntime, SandboxSessionContext } from "#sandbox/provider.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
-import type {
-  SandboxDeleteOptions,
-  SandboxPreparedArtifact,
-  SandboxProviderRuntime,
-  SandboxProviderSessionContext,
-} from "#shared/sandbox-provider.js";
+import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
 
 export type SandboxSessionEndReason = "completed" | "expired" | "failed";
 
@@ -81,8 +77,8 @@ export function resolvePersistedSandboxSessionState(
 }
 
 /** Session-end cleanup that also needs the current build's prepared artifact. */
-export type SandboxSessionEndWithArtifact = (
-  context: SandboxProviderSessionContext,
+type SandboxSessionEndWithArtifact = (
+  context: SandboxSessionContext,
   state: SandboxPreparedArtifact | null,
   options: {
     readonly artifact: SandboxPreparedArtifact | undefined;

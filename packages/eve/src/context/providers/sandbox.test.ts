@@ -59,7 +59,7 @@ describe("sandboxProvider", () => {
   beforeEach(() => {
     vi.mocked(ensureSandboxAccess).mockResolvedValue({
       captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
-      detach: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
       end: vi.fn().mockResolvedValue(undefined),
       get: vi.fn().mockResolvedValue(null),
       stop: vi.fn().mockResolvedValue(undefined),
@@ -95,7 +95,7 @@ describe("sandboxProvider", () => {
     const end = vi.fn().mockResolvedValue(undefined);
     vi.mocked(ensureSandboxAccess).mockResolvedValueOnce({
       captureState: vi.fn().mockResolvedValue({ session: null }),
-      detach: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
       end,
       get: vi.fn().mockResolvedValue(null),
       stop: vi.fn().mockResolvedValue(undefined),
@@ -126,5 +126,31 @@ describe("sandboxProvider", () => {
         sessionId: "session_1",
       }),
     );
+  });
+
+  it("closes the step's connection when the scope ends, without throwing", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(
+      BundleKey,
+      createBundle({ agentName: "weather-agent", registry: createStubSandboxRegistry() }),
+    );
+    ctx.set(SessionIdKey, "session_1");
+    const release = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("interpreter stuck"));
+    vi.mocked(ensureSandboxAccess).mockResolvedValue({
+      captureState: vi.fn(),
+      end: vi.fn(),
+      get: vi.fn(),
+      release,
+      stop: vi.fn(),
+    });
+    const created = await sandboxProvider.create(ctx, createHarnessSession());
+
+    await sandboxProvider.dispose?.(created!.value);
+    await expect(sandboxProvider.dispose?.(created!.value)).resolves.toBeUndefined();
+
+    expect(release).toHaveBeenCalledTimes(2);
   });
 });

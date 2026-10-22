@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createDockerSandboxRuntime } from "#internal/testing/docker-sandbox-runtime.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { createDockerSandboxHarness } from "#internal/testing/docker-sandbox-runtime.js";
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 
 function createContainerStoreCli() {
@@ -67,16 +66,14 @@ describe("Docker sandbox deletion", () => {
         throw new Error("stream is not used by this test");
       },
     };
-    const provider = createSandboxProviderHarness(
-      createDockerSandboxRuntime(undefined, dockerCli),
-      {},
-      { preparedArtifact: () => ({ imageReference: "prepared-image" }) },
-    );
-    const oldHandle = await provider.openSession({
-      appRoot: "/tmp/eve-app",
-      sandboxName: "session-key",
+    const provider = createDockerSandboxHarness({
+      cli: dockerCli,
+      preparedArtifact: () => ({ imageReference: "prepared-image" }),
+      runtimeOptions: {},
     });
-    await oldHandle.onSandboxDelete();
+    const session = { appRoot: "/tmp/eve-app", sandboxName: "session-key" };
+    const oldHandle = await provider.start(session);
+    await provider.endSession({ ...session, reason: "deleted", state: oldHandle.state });
     containerId = "container-id-2";
     await provider.openSession({
       appRoot: "/tmp/eve-app",
@@ -98,20 +95,18 @@ describe("Docker sandbox deletion", () => {
 
   it("deletes the session container by name with the caller's signal, even when it is already gone", async () => {
     const { dockerCli, run } = createContainerStoreCli();
-    const provider = createSandboxProviderHarness(
-      createDockerSandboxRuntime(undefined, dockerCli),
-      {},
-      { preparedArtifact: () => ({ imageReference: "image-a" }) },
-    );
-    const { handle, state } = await provider.start({
-      appRoot: "/tmp/eve-app",
-      sandboxName: "session-key",
+    const provider = createDockerSandboxHarness({
+      cli: dockerCli,
+      preparedArtifact: () => ({ imageReference: "image-a" }),
+      runtimeOptions: {},
     });
+    const session = { appRoot: "/tmp/eve-app", sandboxName: "session-key" };
+    const { state } = await provider.start(session);
     const abortSignal = new AbortController().signal;
 
     vi.mocked(run).mockClear();
-    await handle.onSandboxDelete({ abortSignal });
-    await handle.onSandboxDelete({ abortSignal });
+    await provider.endSession({ ...session, abortSignal, reason: "deleted", state });
+    await provider.endSession({ ...session, abortSignal, reason: "deleted", state });
     expect(vi.mocked(run).mock.calls.filter(([args]) => args[0] === "rm")).toEqual([
       [["rm", "-f", state.containerName], { signal: abortSignal }],
       [["rm", "-f", state.containerName], { signal: abortSignal }],
@@ -122,11 +117,11 @@ describe("Docker sandbox deletion", () => {
 describe("Docker sandbox session identity", () => {
   it("names the container from the session key alone and removes it by key at session end", async () => {
     const { dockerCli, run } = createContainerStoreCli();
-    const provider = createSandboxProviderHarness(
-      createDockerSandboxRuntime(undefined, dockerCli),
-      {},
-      { preparedArtifact: () => ({ imageReference: "image-a" }) },
-    );
+    const provider = createDockerSandboxHarness({
+      cli: dockerCli,
+      preparedArtifact: () => ({ imageReference: "image-a" }),
+      runtimeOptions: {},
+    });
     const session = { appRoot: "/tmp/eve-app", sandboxName: "session-key" };
 
     const { state } = await provider.start(session);
@@ -148,16 +143,16 @@ describe("Docker sandbox session identity", () => {
 describe("Docker sandbox network policy", () => {
   it("rejects a domain allow-list at open before creating a container", async () => {
     const run = vi.fn<DockerCli["run"]>();
-    const provider = createSandboxProviderHarness(
-      createDockerSandboxRuntime(undefined, {
+    const provider = createDockerSandboxHarness({
+      cli: {
         run,
         stream() {
           throw new Error("stream is not used by this test");
         },
-      }),
-      {},
-      { preparedArtifact: () => ({ imageReference: "image-a" }) },
-    );
+      },
+      preparedArtifact: () => ({ imageReference: "image-a" }),
+      runtimeOptions: {},
+    });
 
     await expect(
       provider.start({

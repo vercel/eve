@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV } from "#execution/sandbox/development-run.js";
-import { createDockerSandboxRuntime } from "#internal/testing/docker-sandbox-runtime.js";
+import { createDockerSandboxHarness } from "#internal/testing/docker-sandbox-runtime.js";
 import {
   createFakeDockerCli,
   fakeDockerContainerIdentity,
@@ -13,7 +13,6 @@ import {
   isContainerInspect,
   type FakeResponse,
 } from "#internal/testing/fake-docker-cli.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type {
   DockerSandboxEnvironmentOptions,
@@ -27,10 +26,7 @@ function createEngine(input: {
   readonly options?: DockerSandboxEnvironmentOptions;
   readonly runtimeOptions?: DockerSandboxRuntimeOptions;
 }) {
-  return createSandboxProviderHarness(
-    createDockerSandboxRuntime(input.options, input.cli),
-    input.runtimeOptions ?? {},
-  );
+  return createDockerSandboxHarness({ ...input, runtimeOptions: input.runtimeOptions ?? {} });
 }
 
 // Literal values recorded from the previous release. Running sessions persist

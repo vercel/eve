@@ -20,10 +20,7 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import {
-  defineLegacySandboxProvider,
-  type SandboxProviderSessionContext,
-} from "#shared/sandbox-provider.js";
+import { defineSandboxProvider } from "#sandbox/provider.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -158,44 +155,33 @@ function createTestSandboxProvider() {
   const endedSessionIds: string[] = [];
   const events: string[] = [];
 
-  function createHandle(sessionId: string) {
+  function connect(sessionId: string) {
     let sandbox = sessionSandboxes.get(sessionId);
     if (sandbox === undefined) {
       sandbox = mockSandbox({ id: sessionId });
       sessionSandboxes.set(sessionId, sandbox);
     }
-    const opened = sandbox;
-    return {
-      sandbox: opened.session,
-      async onSandboxDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
-        events.push(`delete:${sessionId}`);
-        sessionSandboxes.delete(sessionId);
-        await opened.access.delete?.(options);
-      },
-      async onSandboxStop() {},
-      async onRuntimeShutdown() {},
-    };
+    return sandbox.connection;
   }
 
-  const provider = defineLegacySandboxProvider({
+  const provider = defineSandboxProvider({
     name: TEST_SANDBOX_PROVIDER_NAME,
     environment: () => ({
-      async onSessionEnd(context) {
-        endedSessionIds.push(context.session.id);
-        const sandbox = sessionSandboxes.get(context.session.id);
+      async onSessionEnd(context, _state, { reason }) {
+        if (reason === "deleted") events.push(`delete:${context.session.id}`);
+        else endedSessionIds.push(context.session.id);
         sessionSandboxes.delete(context.session.id);
-        await sandbox?.access.delete?.();
       },
       async prepare() {
         return null;
       },
-      async resume(context: SandboxProviderSessionContext) {
-        events.push(`resume:${context.session.id}`);
-        return createHandle(context.session.id);
-      },
-      async start(context: SandboxProviderSessionContext) {
+      async start(context) {
         events.push(`start:${context.session.id}`);
-        return { handle: createHandle(context.session.id), state: null };
+        return { connection: connect(context.session.id), state: null };
+      },
+      async resume(context) {
+        events.push(`resume:${context.session.id}`);
+        return connect(context.session.id);
       },
     }),
   });

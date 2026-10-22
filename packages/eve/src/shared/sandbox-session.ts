@@ -147,23 +147,3 @@ export interface RuntimeSandboxSession extends SandboxSession {
 
 export type RuntimeSandboxSessionFor<Session extends SandboxSession> = Session &
   Pick<RuntimeSandboxSession, "delete" | "stop">;
-
-/**
- * Byte-level primitives a built-in provider implements; `buildSandboxSession`
- * derives the public {@link SandboxSession} from them. Paths are already
- * resolved.
- */
-export interface InternalSandboxSession {
-  readFile(options: SandboxReadFileOptions): Promise<ReadableStream<Uint8Array> | null>;
-  /** Removes an already-resolved path from the provider filesystem. */
-  removePath(options: SandboxRemovePathOptions): Promise<void>;
-  /** Translates a user-facing path to the provider's native path. */
-  resolvePath(path: string): string;
-  spawn(options: SandboxSpawnOptions): Promise<SandboxProcess>;
-  writeFile(options: SandboxWriteFileOptions): Promise<void>;
-  /**
-   * Writes several already-resolved files in one provider call. Providers that
-   * omit it get one `writeFile` per file.
-   */
-  writeFiles?(options: SandboxWriteFilesOptions): Promise<void>;
-}

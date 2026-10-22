@@ -2252,7 +2252,11 @@ describe("turnStep", () => {
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle());
     const sandbox = mockSandbox({ id: "sbx_cancelled" });
-    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce(sandbox.access as never);
+    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce({
+      ...sandbox.access,
+      end: async () => {},
+      release: async () => {},
+    });
     const controller = new AbortController();
     controller.abort(new TurnCancelledError());
 

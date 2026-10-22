@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
@@ -7,10 +7,7 @@ import { importConversation, readLegacySnapshot } from "#execution/legacy-sessio
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineParentSandbox, defineSandbox } from "#public/definitions/sandbox.js";
-import {
-  defineLegacySandboxProvider,
-  type SandboxProviderSessionContext,
-} from "#shared/sandbox-provider.js";
+import { defineSandboxProvider, type SandboxSessionContext } from "#sandbox/provider.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -21,27 +18,28 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => null),
 }));
 
-function fixture(setup?: () => void, returnCopy = false) {
-  const deleteSandbox = vi.fn(async () => {});
+function fixture(
+  options: {
+    readonly closable?: boolean;
+    readonly returnCopy?: boolean;
+    readonly setup?: () => void;
+  } = {},
+) {
+  const { returnCopy = false, setup } = options;
   const onSessionEnd = vi.fn(async () => {});
   const stopSandbox = vi.fn(async () => {});
-  const shutdownSandbox = vi.fn(async () => {});
+  const closeSandbox = vi.fn(async () => {});
   const create = vi.fn(async () => {
-    const sandbox = mockSandbox();
-    return {
-      sandbox: sandbox.session,
-      onSandboxDelete: deleteSandbox,
-      onRuntimeShutdown: shutdownSandbox,
-      onSandboxStop: stopSandbox,
-    };
+    const { connection } = mockSandbox({ stop: stopSandbox });
+    return options.closable === true ? { ...connection, close: closeSandbox } : connection;
   });
-  const start = vi.fn(async (context: SandboxProviderSessionContext) => ({
-    handle: await create(),
+  const start = vi.fn(async (context: SandboxSessionContext) => ({
+    connection: await create(),
     state: { key: context.session.id },
   }));
-  const provider = defineLegacySandboxProvider({
+  const provider = defineSandboxProvider({
     name: "test",
-    environment: () => ({ onSessionEnd, prepare: async () => null, resume: create, start }),
+    environment: () => ({ onSessionEnd, prepare: async () => null, start, resume: create }),
   });
   const environment = provider.environment();
   const selector = defineSandbox(async () => {
@@ -63,43 +61,26 @@ function fixture(setup?: () => void, returnCopy = false) {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return {
-    create,
-    deleteSandbox,
-    onSessionEnd,
-    registry,
-    shutdownSandbox,
-    start,
-    stopSandbox,
-  };
+  return { closeSandbox, create, onSessionEnd, registry, start, stopSandbox };
 }
 /** A provider that honors the contract: `start` upserts on the session id, and cleanup deletes by it. */
 function upsertingFixture() {
   const live = new Map<string, ReturnType<typeof mockSandbox>>();
-  const handle = (sessionId: string) => {
+  const connect = (sessionId: string) => {
     let sandbox = live.get(sessionId);
     if (sandbox === undefined) {
       sandbox = mockSandbox();
       live.set(sessionId, sandbox);
     }
-    return {
-      sandbox: sandbox.session,
-      onRuntimeShutdown: async () => {},
-      onSandboxDelete: async () => void live.delete(sessionId),
-      onSandboxStop: async () => {},
-    };
+    return sandbox.connection;
   };
-  const environment = defineLegacySandboxProvider({
+  const environment = defineSandboxProvider({
     name: "upserting",
     environment: () => ({
-      onSessionEnd: async (context: SandboxProviderSessionContext) =>
-        void live.delete(context.session.id),
+      onSessionEnd: async (context) => void live.delete(context.session.id),
       prepare: async () => null,
-      resume: async (context: SandboxProviderSessionContext) => handle(context.session.id),
-      start: async (context: SandboxProviderSessionContext) => ({
-        handle: handle(context.session.id),
-        state: null,
-      }),
+      start: async (context) => ({ connection: connect(context.session.id), state: null }),
+      resume: async (context) => connect(context.session.id),
     }),
   }).environment();
   const registry: RuntimeSandboxRegistry = {
@@ -164,7 +145,7 @@ function inheritingChildRegistry(rootRegistry: RuntimeSandboxRegistry): RuntimeS
     },
   };
 }
-afterEach(() => shutdownActiveSandboxHandles());
+afterEach(() => shutdownActiveSandboxConnections());
 
 describe("ensureSandboxAccess", () => {
   it("does not prepare or start anything until the sandbox is requested", async () => {
@@ -192,10 +173,15 @@ describe("ensureSandboxAccess", () => {
     const value = fixture();
     expect((await open(value.registry)).sandbox).toBeTruthy();
     expect(value.create).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "session" }),
+      undefined,
+      null,
+    );
   });
   it("resumes persisted provider state without invoking the selector", async () => {
     const setup = vi.fn();
-    const value = fixture(setup);
+    const value = fixture({ setup });
     await open(value.registry, "session-1", {
       session: { providerName: "test", state: null, stateProtocolVersion: 1 },
     });
@@ -206,7 +192,7 @@ describe("ensureSandboxAccess", () => {
   // https://github.com/vercel/eve/issues/5113
   it("starts a fresh sandbox when the persisted one is gone", async () => {
     const setup = vi.fn();
-    const value = fixture(setup);
+    const value = fixture({ setup });
     value.create.mockRejectedValueOnce(
       new SandboxSessionGoneError('docker session "ses_1" is no longer available to resume.'),
     );
@@ -228,7 +214,7 @@ describe("ensureSandboxAccess", () => {
 
   it("starts a fresh sandbox for a session saved with the removed microsandbox provider", async () => {
     const setup = vi.fn();
-    const value = fixture(setup);
+    const value = fixture({ setup });
     const { access } = await open(value.registry, "session-1", {
       session: { providerName: "microsandbox", state: { key: "old" }, stateProtocolVersion: 1 },
     });
@@ -249,7 +235,7 @@ describe("ensureSandboxAccess", () => {
     ["another state protocol", { providerName: "test", stateProtocolVersion: 2 }],
   ])("starts a fresh sandbox for state %s recorded", async (_, record) => {
     const setup = vi.fn();
-    const value = fixture(setup);
+    const value = fixture({ setup });
     const { access } = await open(value.registry, "session-1", {
       session: { ...record, state: { key: "old" } },
     });
@@ -285,7 +271,7 @@ describe("ensureSandboxAccess", () => {
 
   it("starts a fresh sandbox for a session imported from eve 0.54", async () => {
     const setup = vi.fn();
-    const value = fixture(setup);
+    const value = fixture({ setup });
     const imported = importConversation(
       readLegacySnapshot({
         sessionId: "session-1",
@@ -322,7 +308,7 @@ describe("ensureSandboxAccess", () => {
 
   it("runs the parent's selector when a child that inherits its sandbox opens it first", async () => {
     const setup = vi.fn();
-    const value = fixture(setup);
+    const value = fixture({ setup });
 
     await open(inheritingChildRegistry(value.registry), "parent-session", null, "child");
 
@@ -335,7 +321,7 @@ describe("ensureSandboxAccess", () => {
   });
 
   it("rejects a fabricated sandbox", async () => {
-    const value = fixture(undefined, true);
+    const value = fixture({ returnCopy: true });
     await expect(open(value.registry)).rejects.toThrow("must return the sandbox it opens");
   });
 
@@ -401,9 +387,12 @@ describe("ensureSandboxAccess", () => {
 
   it("retries session setup after a selector failure", async () => {
     let attempts = 0;
-    const value = fixture(() => {
-      attempts += 1;
-      if (attempts === 1) throw new Error("setup failed");
+    const value = fixture({
+      closable: true,
+      setup: () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("setup failed");
+      },
     });
     const context = new ContextContainer();
     context.set(SessionKey, {
@@ -420,26 +409,64 @@ describe("ensureSandboxAccess", () => {
         state: null,
       });
       await expect(access.get()).rejects.toThrow("setup failed");
-      await shutdownActiveSandboxHandles();
-      expect(value.shutdownSandbox).not.toHaveBeenCalled();
+      // The rejected connection is closed and left out of shutdown tracking.
+      expect(value.closeSandbox).toHaveBeenCalledOnce();
+      await shutdownActiveSandboxConnections();
+      expect(value.stopSandbox).not.toHaveBeenCalled();
       await expect(access.get()).resolves.toBeTruthy();
     });
     expect(attempts).toBe(2);
   });
 
-  it("tracks dedicated handles for server shutdown", async () => {
-    const value = fixture();
+  it("stops and closes tracked connections at server shutdown", async () => {
+    const value = fixture({ closable: true });
     await open(value.registry);
-    await shutdownActiveSandboxHandles();
-    expect(value.shutdownSandbox).toHaveBeenCalledOnce();
+    await shutdownActiveSandboxConnections();
+    expect(value.stopSandbox).toHaveBeenCalledOnce();
+    expect(value.closeSandbox).toHaveBeenCalledOnce();
   });
 
-  it("deletes a dedicated sandbox and creates a fresh handle on next access", async () => {
+  it.each([
+    ["session", false, { closed: 0, stopped: 1 }],
+    ["session", true, { closed: 1, stopped: 0 }],
+    ["call", false, { closed: 0, stopped: 0 }],
+    ["none", true, { closed: 1, stopped: 0 }],
+  ] as const)(
+    "lets go of a %s access's connection (closable: %s) when its step ends",
+    async (shutdownTracking, closable, expected) => {
+      const value = fixture({ closable });
+      const access = await ensureSandboxAccess({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        nodeId: "__root__",
+        registry: value.registry,
+        sessionId: "session-1",
+        shutdownTracking,
+        state: null,
+      });
+      await access.get();
+
+      await access.release();
+      // Only a connection without close() stays for shutdown, and only a session's own.
+      await shutdownActiveSandboxConnections();
+
+      expect(value.closeSandbox).toHaveBeenCalledTimes(expected.closed);
+      expect(value.stopSandbox).toHaveBeenCalledTimes(expected.stopped);
+      // The next use in the session opens a new connection.
+      await access.get();
+      expect(value.create).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("deletes a dedicated sandbox and creates a fresh connection on next access", async () => {
     const value = fixture();
     const { access } = await open(value.registry);
     await access.delete?.();
     await access.get();
-    expect(value.deleteSandbox).toHaveBeenCalledOnce();
+    expect(value.onSessionEnd).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ session: expect.objectContaining({ id: "session-1" }) }),
+      { key: "session-1" },
+      { abortSignal: undefined, reason: "deleted" },
+    );
     expect(value.create).toHaveBeenCalledTimes(2);
   });
 
@@ -454,7 +481,6 @@ describe("ensureSandboxAccess", () => {
       { key: "session-1" },
       { reason: "expired" },
     );
-    expect(value.deleteSandbox).not.toHaveBeenCalled();
     await expect(access.captureState()).resolves.toEqual({ session: null });
   });
 

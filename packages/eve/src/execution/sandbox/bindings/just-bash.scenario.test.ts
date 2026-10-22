@@ -116,7 +116,7 @@ describe("just-bash sandbox file API", () => {
     await handle.sandbox.writeTextFile({ content: "scratch", path: "scratch.txt" });
     expect(await readFile(join(sourceRoot, "instructions.md"), "utf8")).toBe("after");
     expect(existsSync(join(sourceRoot, "scratch.txt"))).toBe(false);
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
   });
 
   it("applies the filesystem factory only to live sessions", async () => {
@@ -141,7 +141,7 @@ describe("just-bash sandbox file API", () => {
     });
     expect(factoryCalls).toBe(1);
     await expect(handle.sandbox.readTextFile({ path: "seed.txt" })).resolves.toBe("from template");
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
   });
 
   it("writes a file via the public session and reads it back", async () => {
@@ -286,7 +286,7 @@ describe("just-bash sandbox file API", () => {
       appRoot,
     });
 
-    const { handle: firstHandle, state } = await provider.start({
+    const { state, ...firstHandle } = await provider.start({
       appRoot,
       sandboxName: "session-reconnect",
     });
@@ -295,7 +295,7 @@ describe("just-bash sandbox file API", () => {
       path: "persisted.txt",
     });
 
-    await firstHandle.onSandboxStop();
+    await firstHandle.connection.stop();
 
     const { rootPath } = state as { readonly rootPath: string };
     await expect(
@@ -317,7 +317,7 @@ describe("just-bash sandbox file API", () => {
     const provider = createJustBashProvider();
     await provider.prepare({ appRoot });
     const session = { appRoot, sandboxName: "session-end" };
-    const { handle } = await provider.start(session);
+    const handle = await provider.start(session);
     await handle.sandbox.writeTextFile({ content: "left behind", path: "left.txt" });
 
     await provider.endSession({ ...session, state: null });
@@ -452,7 +452,7 @@ describe("just-bash custom commands", () => {
       exitCode: 23,
       stderr: "cap failed\n",
     });
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
   });
 });
 
@@ -558,12 +558,12 @@ describe("just-bash provider", () => {
       appRoot,
     });
 
-    const { handle: initialHandle, state: initialState } = await provider.start({
+    const { state: initialState, ...initialHandle } = await provider.start({
       appRoot,
       sandboxName: "session-seeded-later",
     });
     await initialHandle.sandbox.writeTextFile({ content: "kept", path: "notes.txt" });
-    await initialHandle.onRuntimeShutdown();
+    await initialHandle.connection.stop();
 
     await provider.prepare({
       appRoot,

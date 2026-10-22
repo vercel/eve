@@ -1,14 +1,12 @@
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-type NetworkPolicySandboxSession = SandboxSession & {
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-};
+import { posix } from "node:path";
+
+import type { SandboxConnection } from "#sandbox/provider.js";
+import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type {
-  InternalSandboxSession,
-  SandboxProcess,
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,
-  SandboxRemovePathOptions,
   SandboxReadTextFileOptions,
+  SandboxRemovePathOptions,
   SandboxRunOptions,
   SandboxSession,
   SandboxSpawnOptions,
@@ -17,12 +15,7 @@ import type {
   SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
-
-export type { InternalSandboxSession };
-
-const FALLBACK_WRITE_CONCURRENCY = 16;
 
 /**
  * Tells agent-aware CLIs (such as `vercel`) that an automated agent runs
@@ -32,122 +25,108 @@ const FALLBACK_WRITE_CONCURRENCY = 16;
 export const SANDBOX_AGENT_ENV: Readonly<Record<string, string>> = { AI_AGENT: "eve" };
 
 /**
- * Builds a public {@link SandboxSession} from provider-specific primitives.
- *
- * Encoding handling, line-range slicing, and the binary/text/stream
- * variants live here so each provider only has to implement byte-oriented
- * read/write primitives. `run` is implemented as a thin wrapper over the
- * provider's `spawn`: collect stdout/stderr to strings, await `wait()`,
- * then return the combined result.
- *
- * Providers without mutable firewall support omit `setNetworkPolicy`; the
- * dedicated Vercel provider wires it to `sandbox.update`.
+ * Builds the {@link SandboxSession} eve hands out from a provider's
+ * connection: every path and working directory resolves from `/workspace`,
+ * `run` collects `spawn`, the read and write variants share the connection's
+ * byte primitives, and the connection's extensions merge on top.
  */
-export function buildSandboxSession(
-  primitives: InternalSandboxSession,
-  setNetworkPolicy: (policy: SandboxNetworkPolicy) => Promise<void>,
-): NetworkPolicySandboxSession;
-export function buildSandboxSession(primitives: InternalSandboxSession): SandboxSession;
-export function buildSandboxSession(
-  primitives: InternalSandboxSession,
-  setNetworkPolicy?: (policy: SandboxNetworkPolicy) => Promise<void>,
-): SandboxSession {
-  async function run(options: SandboxRunOptions) {
-    const process = await primitives.spawn(options);
-    const [stdout, stderr, { exitCode }] = await Promise.all([
-      collectStreamToString(process.stdout),
-      collectStreamToString(process.stderr),
-      process.wait(),
-    ]);
-    return { exitCode, stderr, stdout };
+export function createConnectionSession<Extensions extends object>(
+  connection: SandboxConnection<Extensions>,
+): SandboxSession & Extensions {
+  async function read(options: { readonly abortSignal?: AbortSignal; readonly path: string }) {
+    return await connection.readFile({
+      abortSignal: options.abortSignal,
+      path: resolveSandboxPath(options.path),
+    });
   }
-  const session: { -readonly [Key in keyof SandboxSession]: SandboxSession[Key] } = {
-    resolvePath(path: string): string {
-      return primitives.resolvePath(path);
+  async function readBytes(options: { readonly abortSignal?: AbortSignal; readonly path: string }) {
+    const content = await read(options);
+    if (content === null) return null;
+    return ArrayBuffer.isView(content) ? Buffer.from(content) : await streamToBuffer(content);
+  }
+  async function write(
+    options: { readonly abortSignal?: AbortSignal; readonly path: string },
+    content: Uint8Array,
+  ) {
+    await connection.writeFiles({
+      abortSignal: options.abortSignal,
+      files: [{ content, path: resolveSandboxPath(options.path) }],
+    });
+  }
+  async function spawn(options: SandboxSpawnOptions) {
+    return await connection.spawn({
+      abortSignal: options.abortSignal,
+      command: options.command,
+      env: options.env ?? {},
+      workingDirectory: resolveSandboxPath(options.workingDirectory ?? WORKSPACE_ROOT),
+    });
+  }
+  const session: SandboxSession = {
+    resolvePath: resolveSandboxPath,
+    async run(options: SandboxRunOptions) {
+      const process = await spawn(options);
+      const [stdout, stderr, { exitCode }] = await Promise.all([
+        collectStreamToString(process.stdout),
+        collectStreamToString(process.stderr),
+        process.wait(),
+      ]);
+      return { exitCode, stderr, stdout };
     },
-    run,
-    async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
-      return await primitives.spawn(options);
-    },
+    spawn,
     async readFile(options: SandboxReadFileOptions) {
-      return await primitives.readFile({
-        abortSignal: options.abortSignal,
-        path: primitives.resolvePath(options.path),
-      });
+      const content = await read(options);
+      if (content === null || !ArrayBuffer.isView(content)) return content;
+      return bufferToStream(new Uint8Array(content.buffer, content.byteOffset, content.byteLength));
     },
-    async readBinaryFile(options: SandboxReadBinaryFileOptions) {
-      const stream = await primitives.readFile({
-        abortSignal: options.abortSignal,
-        path: primitives.resolvePath(options.path),
-      });
-      if (stream === null) {
-        return null;
-      }
-      return await streamToBuffer(stream);
-    },
+    readBinaryFile: (options: SandboxReadBinaryFileOptions) => readBytes(options),
     async readTextFile(options: SandboxReadTextFileOptions) {
       validateReadTextFileOptions(options);
-      const stream = await primitives.readFile({
-        abortSignal: options.abortSignal,
-        path: primitives.resolvePath(options.path),
-      });
-      if (stream === null) {
-        return null;
-      }
-      const buf = await streamToBuffer(stream);
-      const text = decodeBytes(buf, options.encoding ?? "utf-8");
-      return applyLineRange(text, options);
+      const content = await readBytes(options);
+      if (content === null) return null;
+      return applyLineRange(decodeBytes(content, options.encoding ?? "utf-8"), options);
     },
     async writeFile(options: SandboxWriteFileOptions) {
-      await primitives.writeFile({
-        abortSignal: options.abortSignal,
-        content: options.content,
-        path: primitives.resolvePath(options.path),
-      });
+      await write(options, await streamToBuffer(options.content));
     },
     async writeBinaryFile(options: SandboxWriteBinaryFileOptions) {
-      await primitives.writeFile({
-        abortSignal: options.abortSignal,
-        content: bufferToStream(options.content),
-        path: primitives.resolvePath(options.path),
-      });
+      await write(options, Buffer.from(options.content));
     },
     async writeTextFile(options: SandboxWriteTextFileOptions) {
-      const buf = encodeString(options.content, options.encoding ?? "utf-8");
-      await primitives.writeFile({
-        abortSignal: options.abortSignal,
-        content: bufferToStream(buf),
-        path: primitives.resolvePath(options.path),
-      });
+      const encoding = (options.encoding ?? "utf-8") as BufferEncoding;
+      await write(options, Buffer.from(options.content, encoding));
     },
     async writeFiles(options: SandboxWriteFilesOptions) {
-      const files = options.files.map((file) => ({
-        content: file.content,
-        path: primitives.resolvePath(file.path),
-      }));
-      if (primitives.writeFiles !== undefined) {
-        await primitives.writeFiles({ abortSignal: options.abortSignal, files });
-        return;
-      }
-      await mapWithConcurrency(files, FALLBACK_WRITE_CONCURRENCY, async (file) => {
-        await primitives.writeFile({
-          abortSignal: options.abortSignal,
-          content: bufferToStream(file.content),
-          path: file.path,
-        });
+      await connection.writeFiles({
+        abortSignal: options.abortSignal,
+        files: options.files.map((file) => ({
+          content: file.content,
+          path: resolveSandboxPath(file.path),
+        })),
       });
     },
     async removePath(options: SandboxRemovePathOptions) {
-      await primitives.removePath({
+      await connection.removePath({
         abortSignal: options.abortSignal,
         force: options.force,
-        path: primitives.resolvePath(options.path),
+        path: resolveSandboxPath(options.path),
         recursive: options.recursive,
       });
     },
   };
-  if (setNetworkPolicy === undefined) return session;
-  return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
+  const extensions: object = connection.extensions ?? {};
+  const collisions = Object.keys(extensions).filter(
+    (key) => Object.hasOwn(session, key) || key === "delete" || key === "stop",
+  );
+  if (collisions.length > 0) {
+    throw new Error(
+      `Sandbox connection extensions cannot replace the session members eve provides: ${collisions.join(", ")}. Rename them.`,
+    );
+  }
+  return { ...extensions, ...session } as SandboxSession & Extensions;
+}
+
+function resolveSandboxPath(path: string): string {
+  return posix.resolve(WORKSPACE_ROOT, path);
 }
 
 /**
@@ -239,17 +218,4 @@ function decodeBytes(buf: Uint8Array, encoding: string): string {
   return Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength).toString(
     encoding as BufferEncoding,
   );
-}
-
-/**
- * Encodes a string to raw bytes using the given encoding.
- *
- * `"utf-8"` uses `TextEncoder`; other encodings fall back to
- * `Buffer.from(str, encoding)`.
- */
-function encodeString(str: string, encoding: string): Uint8Array {
-  if (encoding === "utf-8" || encoding === "utf8") {
-    return new TextEncoder().encode(str);
-  }
-  return Buffer.from(str, encoding as BufferEncoding);
 }
