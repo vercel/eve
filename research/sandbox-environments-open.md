@@ -1,10 +1,13 @@
 ---
 issue: TBD
 status: draft
-last_updated: "2026-10-21"
+last_updated: "2026-10-22"
 ---
 
 # Sandbox environments and provider sessions
+
+> [!NOTE]
+> [`sandbox-provider-api.md`](./sandbox-provider-api.md) supersedes the provider contract, provider-handle lifecycle hooks, and the rule that core never reserves `prepare` in this plan. The environment `open()` model, provider-owned native identity, immutable session state, and gone semantics still apply.
 
 ## Decision
 
