@@ -7,6 +7,7 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
+import firecrawlConnection from "../../registry/connections/firecrawl";
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -32,14 +33,17 @@ describe("Browser Use connection setup", () => {
 });
 
 describe("Firecrawl connection setup", () => {
-  it("documents bearer authentication and approval for cost-sensitive tools", () => {
+  it("renders bearer authentication for cost-sensitive tools", () => {
     const integration = getIntegration("firecrawl")!;
 
     expect(integration.quickStart).toContain(
       "Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY!}`",
     );
-    expect(integration.quickStart).toContain("approval: always()");
     expect(buildConnectionInstall(integration)).toContain("eve add connection/firecrawl");
+  });
+
+  it("requires user approval for every installed tool call", () => {
+    expect(firecrawlConnection.approval!({} as never)).toBe("user-approval");
   });
 });
 

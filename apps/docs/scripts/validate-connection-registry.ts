@@ -87,7 +87,6 @@ for (const item of items) {
         ? declaredSetup
         : [declaredSetup];
   if (
-    !(slug in API_KEY_CONNECTIONS) &&
     setups?.some(
       (setup) =>
         setup.command === undefined ||
@@ -127,14 +126,14 @@ for (const item of items) {
             ...(principalType === undefined ? [] : ["--principal-type", principalType]),
           ],
         };
-  if (
-    !(slug in API_KEY_CONNECTIONS) &&
-    JSON.stringify(setups) !== JSON.stringify([expectedSetup])
-  ) {
+  const expectedSetups = slug in API_KEY_CONNECTIONS ? undefined : [expectedSetup];
+  if (JSON.stringify(setups) !== JSON.stringify(expectedSetups)) {
     throw new Error(
-      slug === "shopify"
-        ? 'Registry item "connection/shopify" must run eve integration setup shopify.'
-        : `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
+      slug in API_KEY_CONNECTIONS
+        ? `Registry item "${item.name}" must not configure Vercel Connect for API-key authentication.`
+        : slug === "shopify"
+          ? 'Registry item "connection/shopify" must run eve integration setup shopify.'
+          : `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
     );
   }
 
