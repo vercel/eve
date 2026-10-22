@@ -5,13 +5,15 @@ import { defineAuthoringCase, emptyProject } from "../../lib/authoring-case.js";
 export default defineAuthoringCase({
   startingPoint: emptyProject,
   projectDirectory: "atlas",
+  // A whole agent from scratch takes strong models about 10 minutes; weaker ones need longer.
+  timeoutSeconds: 1800,
   async interact({ send }) {
     await send(
       [
         "Build me an eve agent in a new `atlas` project. Atlas is Lumen's company brain: employees ask it questions about the business, and it answers from company data using each employee's own identity and access.",
         "",
         "- Employees ask it in Slack. There's no Vercel Connect for Slack here, so use the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` environment variables.",
-        "- Our internal portal talks to it over eve's HTTP API. In production, only accept bearer tokens from our SSO: OIDC issuer `https://sso.lumen.dev`, audience `atlas`. Nothing else should get in.",
+        "- Our internal portal talks to it over eve's HTTP API. In production, only accept bearer tokens from our SSO, using eve's built-in OIDC support: issuer `https://sso.lumen.dev`, audience `atlas`. Nothing else should get in.",
         '- It queries the data warehouse with a `run_sql` tool that takes a `query` string. It POSTs `{ "sql": <query> }` as JSON to `https://warehouse.lumen.dev/v1/query` with a bearer token from `WAREHOUSE_TOKEN` and returns the result. The tool is read-only: anything other than a single SELECT (or WITH ... SELECT) statement must be refused without calling the warehouse. Queries that touch the `pii` schema need a person to approve them first; everything else runs on its own.',
         "- It searches and reads our Notion as the employee who asked, so people only see pages they already have access to. Use the Notion MCP server at `https://mcp.notion.com/mcp` through the Vercel Connect connector `mcp.notion.com/atlas`. The model should only be able to discover the `search` and `fetch` tools.",
         "- A `revenue_forecast` tool takes a `quarter` such as `2026-Q4` and returns the forecast from `GET https://warehouse.lumen.dev/v1/forecast?quarter=<quarter>` with the same token. Only people in the `finance` group can use it; the signed-in user's groups arrive as a list in the `groups` auth attribute. Everyone else shouldn't even see the tool, with one exception: the weekly summary below includes the forecast, so the scheduled run, which has no signed-in employee, needs the tool too.",

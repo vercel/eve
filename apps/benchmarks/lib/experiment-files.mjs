@@ -11,9 +11,13 @@ export function fixtureNames(evalsRoot) {
 }
 
 export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(evalsRoot)) {
+  let timeoutSeconds;
   for (const name of names) {
     const fixtureRoot = join(evalsRoot, name);
     const authoringCase = await loadCase(fixtureRoot);
+    if (authoringCase.timeoutSeconds !== undefined) {
+      timeoutSeconds = Math.max(timeoutSeconds ?? 0, authoringCase.timeoutSeconds);
+    }
     writeFileSync(
       join(fixtureRoot, "PROMPT.md"),
       `${await promptForCase(authoringCase, fixtureRoot)}\n`,
@@ -34,6 +38,7 @@ export async function prepareFixtures(evalsRoot, subject, names = fixtureNames(e
       `${JSON.stringify({ name: `eve-authoring-${name}`, private: true, type: "module" }, null, 2)}\n`,
     );
   }
+  return { timeoutSeconds };
 }
 
 async function loadCase(fixtureRoot) {
@@ -86,6 +91,9 @@ export function writeExperiment(experimentsRoot, name, options) {
       `  packageSpec: ${JSON.stringify(options.packageSpec)},\n` +
       `  runs: ${options.runs},\n` +
       (options.evals === undefined ? "" : `  evals: ${JSON.stringify(options.evals)},\n`) +
+      (options.timeoutSeconds === undefined
+        ? ""
+        : `  timeoutSeconds: ${options.timeoutSeconds},\n`) +
       `  benchmark: ${JSON.stringify(options.benchmark)},\n` +
       `  treatment: ${JSON.stringify(options.treatment)},\n` +
       (options.verbose === undefined ? "" : `  verbose: ${options.verbose},\n`) +

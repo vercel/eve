@@ -57,13 +57,13 @@ for (const selectedEval of selectedEvals) {
 }
 
 const subjects = [canarySubject(values.canary, "current")];
-await prepareFixtures(
+const { timeoutSeconds } = await prepareFixtures(
   evalsRoot,
   subjects[0],
   selectedEvals.length === 0 ? publishedBenchmark.caseIds : selectedEvals,
 );
 mkdirSync(join(appRoot, "results"), { recursive: true });
-writeExperiments(subjects, runs, benchmark, treatment, values.verbose ?? false);
+writeExperiments(subjects, runs, benchmark, treatment, values.verbose ?? false, timeoutSeconds);
 const executable = join(appRoot, "node_modules/.bin/agent-eval");
 const experimentNames = subjects.map((subject) => subject.label);
 const args = values.dry
@@ -82,13 +82,14 @@ const result = spawnSync(executable, args, {
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);
 
-function writeExperiments(subjects, runs, benchmark, treatment, verbose) {
+function writeExperiments(subjects, runs, benchmark, treatment, verbose, timeoutSeconds) {
   resetExperiments(experimentsRoot);
   for (const subject of subjects) {
     writeExperiment(experimentsRoot, subject.label, {
       revision: subject.revision,
       packageSpec: subject.packageSpec,
       runs,
+      timeoutSeconds,
       benchmark,
       treatment,
       verbose,

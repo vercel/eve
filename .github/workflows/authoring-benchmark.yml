@@ -117,8 +117,8 @@ jobs:
     needs: request
     if: needs.request.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # Each case can take up to EVE_BENCHMARK_TIMEOUT (15 minutes) plus sandbox
-    # setup, and cases run sequentially within a model.
+    # Each case can take up to its agent time limit (15 minutes by default, longer
+    # for cases that set timeoutSeconds) plus sandbox setup.
     timeout-minutes: 240
     strategy:
       fail-fast: false

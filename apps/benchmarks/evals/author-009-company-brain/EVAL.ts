@@ -57,11 +57,8 @@ test("admits only company SSO tokens on the HTTP API", () => {
   expect(existsSync(file)).toBe(true);
   const source = readFileSync(file, "utf8");
   expect(source).toMatch(/from\s+["']eve\/channels\/eve["']/);
-  // The oidc() helper or a custom authenticator around verifyOidc(), possibly in agent/lib.
-  const auth = [
-    source,
-    ...sourceFiles("lib", /\.ts$/).map((path) => readFileSync(path, "utf8")),
-  ].join("\n");
+  // The oidc() helper or a custom authenticator around verifyOidc(), wherever the channel imports it from.
+  const auth = resolvedSource(file);
   expect(auth).toMatch(/\b(?:oidc|verifyOidc)\s*\(/);
   expect(auth).toMatch(/["']https:\/\/sso\.lumen\.dev\/?["']/);
   expect(auth).toMatch(/audiences?\s*:\s*\[?\s*["']atlas["']/);
@@ -269,8 +266,9 @@ test("researcher reads Notion as the employee and cannot query the warehouse", a
   expect(auth?.vercelConnect?.connector).toBe("mcp.notion.com/atlas");
   expect(auth?.principalType ?? auth?.credentialOwner).toBe("user");
 
+  expect(sourceFiles("subagents/researcher/tools", /^run_sql\.ts$/)).toEqual([]);
   const warehouseAccess = sourceFiles("subagents/researcher", /\.ts$/).filter((path) =>
-    /run_sql|warehouse\.lumen\.dev/.test(resolvedSource(path)),
+    /warehouse\.lumen\.dev/.test(resolvedSource(path)),
   );
   expect(warehouseAccess).toEqual([]);
 });
@@ -298,8 +296,8 @@ test("keeps metric definitions in a packaged skill with a reference file", () =>
 test("posts the weekly metrics summary to Slack", async () => {
   const [file, ...rest] = sourceFiles("schedules", /\.ts$/);
   expect(rest).toHaveLength(0);
-  expect(readFileSync(file, "utf8")).toMatch(/cron\s*:\s*["']0 15 \* \* (?:1|MON)["']/i);
   const schedule = await load(file);
+  expect(String(schedule.cron).trim()).toMatch(/^0 15 \* \* (?:1|MON)$/i);
   expect(typeof schedule.run).toBe("function");
   const slack = await load(`${agentRoot}/channels/slack.ts`);
 
