@@ -56,4 +56,4 @@ export default defineSandbox(() => environment.open());
 
 Keep a shared `prepare` callback portable, because it runs on whichever provider eve selects. just-bash runs no native binaries, so commands such as `apt-get` fail there.
 
-On Vercel, when the environment has no `prepare` callback, workspace seed, or skill files, `DefaultSandbox` skips the snapshot and creates each session sandbox directly from the configured image, or eve's base image.
+On Vercel, when the environment has no `prepare` callback, workspace seed, or skill files, `DefaultSandbox` skips the snapshot and creates each session sandbox directly from the configured `image` or `source`, or from eve's base image when neither is set.

@@ -93,7 +93,7 @@ The runtime never recreates a template. Run `eve build` again and deploy its out
 ### `Invalid prepared ... artifact`
 
 ```text
-Invalid prepared Docker artifact.
+Invalid prepared Docker sandbox artifact.
 ```
 
 The recorded artifact does not match the format that this eve version expects, usually because the build used a different eve version than the runtime. Run `eve build` with the same eve version that the runtime uses, then redeploy.
@@ -148,6 +148,14 @@ The just-bash sandbox provider requires the `just-bash` package, which is not bu
 ```
 
 `eve dev` installs `just-bash` automatically unless the environment sets `autoInstall: false`. Other commands require you to install it. Add it to your application, for example with `pnpm add -D just-bash`, which matches what `eve dev` installs. See [just-bash Sandbox](/docs/sandbox/just-bash#automatic-installation).
+
+### `Cannot build deployable Vercel output because this app requires sandbox templates`
+
+```text
+Cannot build deployable Vercel output because this app requires sandbox templates and VERCEL_OIDC_TOKEN is missing.
+```
+
+eve raises this during a Vercel build, when `VERCEL` is set, if the app needs sandbox templates prepared and `VERCEL_OIDC_TOKEN` is missing. Do not deploy the `.vercel/output` from a build that failed this way. For a local `vercel build`, run `vercel link` and `vercel pull`, then retry. In a build on Vercel, Vercel sets `VERCEL_OIDC_TOKEN` automatically; see [Vercel OIDC federation](https://vercel.com/docs/oidc).
 
 ### Vercel Sandbox authentication fails
 
