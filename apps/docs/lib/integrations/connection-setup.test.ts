@@ -43,7 +43,11 @@ describe("Firecrawl connection setup", () => {
   });
 
   it("requires user approval for every installed tool call", () => {
-    expect(firecrawlConnection.approval!({} as never)).toBe("user-approval");
+    const { approval } = firecrawlConnection;
+    if (typeof approval !== "function") {
+      throw new Error("Firecrawl requires an approval policy.");
+    }
+    expect(approval({} as never)).toBe("user-approval");
   });
 });
 
