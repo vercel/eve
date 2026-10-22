@@ -559,6 +559,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "flora",
+    name: "FLORA",
+    kind: "connection",
+    tagline: "Generate image, video, audio, text, and 3D assets through FLORA's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "FLORA: generate image, video, audio, text, and 3D assets on a canvas.",
+      mcp: { url: "https://agents.flora.ai/mcp" },
+    },
+  },
+  {
     slug: "egnyte",
     name: "Egnyte",
     kind: "connection",

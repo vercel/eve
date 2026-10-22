@@ -52,6 +52,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
   context: "mcp.context.dev",
+  flora: "https://agents.flora.ai/mcp",
   natural: "mcp.natural.com",
 };
 const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {

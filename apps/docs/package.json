@@ -61,6 +61,7 @@
     "@chat-adapter/state-redis": "4.42.0",
     "@chat-adapter/whatsapp": "4.42.0",
     "@chat-adapter/x": "4.42.0",
+    "@flora-ai/eve-extension": "0.10.1",
     "@getdial/chat-sdk-adapter": "0.2.0",
     "@github-tools/eve-extension": "^0.1.0",
     "@jetty/eve": "^0.3.0",

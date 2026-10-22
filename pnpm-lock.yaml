@@ -448,6 +448,9 @@ importers:
       '@chat-adapter/x':
         specifier: 4.42.0
         version: 4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@flora-ai/eve-extension':
+        specifier: 0.10.1
+        version: 0.10.1(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.137(zod@4.5.4))(eve@packages+eve)
       '@getdial/chat-sdk-adapter':
         specifier: 0.2.0
         version: 0.2.0(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
@@ -3395,6 +3398,12 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@flora-ai/eve-extension@0.10.1':
+    resolution: {integrity: sha512-tYX1pTOQKES0hlVj7l3JR0+SYIs1YKDQ/vFlQmVOJqyXRR23wqrCsZfr46iDxhEXsvwWnNZxyvFDaNYGzppQbQ==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      eve: '*'
 
   '@formatjs/intl-localematcher@0.6.2':
     resolution: {integrity: sha512-XOMO2Hupl0wdd172Y06h6kLpBz6Dv+J4okPLl4LPtzbr8f66WbIoy4ev98EBuZ6ZK4h5ydTN6XneT4QVpD7cdA==}
@@ -16894,6 +16903,18 @@ snapshots:
       react-dom: 19.2.6(react@19.2.6)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@flora-ai/eve-extension@0.10.1(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.137(zod@4.5.4))(eve@packages+eve)':
+    dependencies:
+      '@vercel/connect': 2.2.0(@ai-sdk/mcp@2.0.67(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.137(zod@4.5.4))(eve@packages+eve)
+      eve: link:packages/eve
+      zod: 4.5.4
+    transitivePeerDependencies:
+      - '@ai-sdk/mcp'
+      - '@auth/core'
+      - '@chat-adapter/slack'
+      - ai
+      - better-auth
 
   '@formatjs/intl-localematcher@0.6.2':
     dependencies:

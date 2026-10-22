@@ -702,6 +702,15 @@ const blitzreelsLogo = (props: LogoProps) => (
   </svg>
 );
 
+const floraLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M12 12h18v9a9 9 0 0 1-9 9h-9V12Z" fill="currentColor" />
+    <path d="M34 12h18v18h-9a9 9 0 0 1-9-9v-9Z" fill="currentColor" />
+    <path d="M12 34h9a9 9 0 0 1 9 9v9H12V34Z" fill="currentColor" />
+    <path d="M34 34h9a9 9 0 0 1 9 9v9H34V34Z" fill="currentColor" />
+  </svg>
+);
+
 export const muxLogo = (props: LogoProps) => (
   <svg fill="currentColor" viewBox="0 0 1600 500" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -918,6 +927,7 @@ export const logos = {
   messenger: messengerLogo,
   x: xLogo,
   blitzreels: blitzreelsLogo,
+  flora: floraLogo,
   mux: muxLogo,
   browserbase: browserbaseLogo,
   jetty: jettyLogo,

@@ -2085,6 +2085,21 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "images", "videos", "assets", "media", "oauth", "connect"],
     authModes: ["user"],
   },
+  flora: {
+    logo: "flora",
+    docsHref: "https://flora.ai/mcp",
+    keywords: ["mcp", "image", "video", "audio", "3d", "creative", "generation"],
+    authModes: ["user"],
+    connectors: {
+      user: {
+        uid: "agents.flora.ai/flora",
+        service: "https://agents.flora.ai/mcp",
+        name: "flora",
+      },
+    },
+    configureNote:
+      "Each user signs in to their own FLORA account when they first use a tool. Generation is billed to that account; confirm the quoted cost before starting a generation or technique.",
+  },
   coda: {
     logo: "coda",
     docsHref: "/docs/connections/mcp",

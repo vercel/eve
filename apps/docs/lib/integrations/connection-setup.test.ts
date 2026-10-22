@@ -57,6 +57,19 @@ describe("Context connection setup", () => {
   });
 });
 
+describe("FLORA connection setup", () => {
+  it("uses the published MCP URL and Connect connector name", () => {
+    const integration = getIntegration("flora")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.variants["mcp:user"]).toContain('url: "https://agents.flora.ai/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("agents.flora.ai/flora")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create https://agents.flora.ai/mcp --name flora",
+    );
+  });
+});
+
 describe("Neon connection setup", () => {
   it("generates the registry install and Vercel Connect configuration", () => {
     const integration = getIntegration("neon")!;

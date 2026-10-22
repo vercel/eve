@@ -88,4 +88,5 @@ minimumReleaseAgeExclude:
   - "@shadcn/registry@0.1.3"
   - "@stripe/link-integrations-eve@0.2.0"
   - "@stripe/link-sdk@0.9.0"
+  - "@flora-ai/eve-extension@0.10.1"
   - "chat@4.42.0"

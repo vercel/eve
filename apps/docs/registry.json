@@ -134,6 +134,25 @@
       ]
     },
     {
+      "name": "extension/flora",
+      "type": "registry:item",
+      "title": "FLORA",
+      "description": "Generate image, video, audio, text, and 3D assets on a FLORA canvas.",
+      "dependencies": [
+        "@flora-ai/eve-extension"
+      ],
+      "envVars": {
+        "FLORA_CONNECTOR": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/flora.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/flora.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/blitzreels",
       "type": "registry:item",
       "title": "BlitzReels",
@@ -1007,6 +1026,39 @@
           "path": "registry/connections/context.ts",
           "type": "registry:file",
           "target": "agent/connections/context.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/flora",
+      "type": "registry:item",
+      "title": "FLORA",
+      "description": "Generate image, video, audio, text, and 3D assets through FLORA's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "flora",
+              "https://agents.flora.ai/mcp",
+              "flora"
+            ]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/flora.ts",
+          "type": "registry:file",
+          "target": "agent/connections/flora.ts"
         }
       ]
     },
