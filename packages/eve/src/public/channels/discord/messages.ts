@@ -9,7 +9,8 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { readLimitedBytes } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { type AuthFn, localDev, routeAuth, vercelOidc } from "#public/channels/auth.js";
+import { type AuthFn, localDev, routeAuth } from "#public/channels/auth.js";
+import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
   callDiscordApi,
   discordContinuationToken,
@@ -161,7 +162,7 @@ export function createDiscordGatewayRoute(input: {
   readonly buildContext: (state: DiscordChannelState) => DiscordContext;
 }): HttpRouteDefinition<DiscordChannelState> {
   const { config, gateway } = input;
-  const auth = gateway.auth ?? [localDev(), sameEnvironmentRuntime()];
+  const auth = gateway.auth ?? [localDev(), sameEnvironmentVercelOidc()];
   const onMessage = gateway.onMessage ?? defaultOnMessage;
 
   return POST<DiscordChannelState>(
@@ -297,19 +298,6 @@ export function createDiscordGatewayRoute(input: {
       return Response.json({ accepted: true, sessionId: session.id }, { status: 202 });
     },
   );
-}
-
-/**
- * Vercel OIDC from this project's runtime in the current environment only.
- * Other environments, such as a preview deployment, authenticate as
- * `service` and must not reach production as any Discord user.
- */
-function sameEnvironmentRuntime(): AuthFn<Request> {
-  const oidc = vercelOidc();
-  return async (request) => {
-    const auth = await oidc(request);
-    return auth?.principalType === "runtime" ? auth : null;
-  };
 }
 
 function ignored(reason: string): Response {
