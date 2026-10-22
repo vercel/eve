@@ -53,7 +53,7 @@ Outside Vercel and without a linked project, such as in CI or on a self-hosted s
 
 ## Snapshot preparation
 
-eve creates a temporary persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, runs the authored `prepare` callback, and captures a snapshot. The build artifact records the snapshot ID.
+eve creates a temporary, non-persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, runs the authored `prepare` callback, and captures a snapshot. The build artifact records the snapshot ID.
 
 When a live session sandbox does not exist, eve creates it directly from that snapshot ID. Runtime does not need to look up the temporary template Sandbox.
 
@@ -162,6 +162,8 @@ export default defineSandbox(async () => {
   });
 });
 ```
+
+`Drive.getOrCreate()` comes from your app's own `@vercel/sandbox`, so it resolves credentials through the SDK, not eve: it reads `token`, `teamId`, and `projectId` passed to it, or a Vercel OIDC token, which the SDK refreshes from your Vercel CLI login and linked project. It does not read `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, or the credentials passed to `VercelSandbox.environment()`, so outside Vercel without a linked project, pass them to `Drive.getOrCreate()` too.
 
 This example mounts the Drive read-write at `/data`. Files written there remain on the Drive after the sandbox stops. Keep Drive mounts separate from eve's managed `/workspace` directory.
 
