@@ -1,16 +1,27 @@
-// Epoch 99 of the tool capability: sandbox sessions typed from the AI SDK. Epoch 100 declares eve-owned
-// session types with the same methods and adds `writeFiles`, which is additive.
-import { defineTool } from "#public/tools/index.js";
+// Retained tool epoch 99: file outputs still compile with proactive session preparation.
+import { defineTool, toolOutput, toolOutputPart } from "#public/tools/index.js";
 
 export default defineTool({
-  description: "Summarize Alice's notes in the sandbox.",
-  inputSchema: { type: "object", properties: {}, additionalProperties: false },
-  async execute(_input, ctx) {
-    const sandbox = await ctx.getSandbox();
-    const env: Record<string, string> = { NOTES_OWNER: "alice" };
-    await sandbox.writeTextFile({ content: "Feed the cat.", path: "notes/alice.txt" });
-    const result = await sandbox.run({ command: "wc -w notes/alice.txt", env });
-    const text = await sandbox.readTextFile({ path: "notes/alice.txt", startLine: 1 });
-    return { exitCode: result.exitCode, text, words: result.stdout.trim() };
+  description: "Capture a screenshot.",
+  inputSchema: {
+    type: "object",
+    properties: { page: { type: "string" } },
+    required: ["page"],
+    additionalProperties: false,
+  },
+  async execute(input: { page: string }) {
+    return { page: input.page, png: "aGVsbG8=" };
+  },
+  toModelOutput(output) {
+    return toolOutput.content([
+      toolOutputPart.text(`Screenshot of ${output.page}:`),
+      toolOutputPart.file(output.png, { mediaType: "image/png", filename: "page.png" }),
+      toolOutputPart.fileUrl("https://reports.example.com/page.png", { mediaType: "image/png" }),
+      {
+        type: "file",
+        data: { type: "data", data: output.png },
+        mediaType: "image/png",
+      },
+    ]);
   },
 });

@@ -35,7 +35,7 @@ vi.mock("#context/serialize.js", async (importOriginal) => ({
   ...(await importOriginal()),
   deserializeContext: (...args: unknown[]) => deserializeContextMock(...args),
 }));
-vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+vi.mock("#execution/durable-session-read.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: (...args: unknown[]) => readDurableSessionMock(...args),
 }));

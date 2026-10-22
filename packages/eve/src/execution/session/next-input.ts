@@ -12,6 +12,7 @@ import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 export type NextTurnInstruction =
+  | { readonly kind: "prewarm"; readonly targetDeploymentId: string }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
@@ -44,6 +45,11 @@ export async function nextTurnDelivery(input: {
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;
+    }
+
+    if (!inbox.hasPending()) {
+      const targetDeploymentId = queue.takePrewarmDeployment();
+      if (targetDeploymentId !== undefined) return { kind: "prewarm", targetDeploymentId };
     }
 
     // A delivery may already be in the pump queue by the time the owner exits

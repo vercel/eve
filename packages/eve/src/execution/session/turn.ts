@@ -105,20 +105,14 @@ export class SessionExecution {
       readonly control?: TurnControl;
     } = {},
   ): Promise<TurnOutcome> {
-    let turn: ActiveTurn;
-    try {
-      turn = new ActiveTurn(
-        this.input,
-        {
-          caller: options.caller,
-          principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
-        },
-        options.control,
-      );
-    } catch (error) {
-      options.control?.dispose();
-      throw error;
-    }
+    const turn = new ActiveTurn(
+      this.input,
+      {
+        caller: options.caller,
+        principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
+      },
+      options.control,
+    );
     try {
       const outcome = await this.runTurnSteps(turn, delivery);
       // Tasks run beside the turn, and a run can open a session after its call

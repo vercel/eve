@@ -91,7 +91,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `GET /eve/v1/health` (check whether the application is reachable)
 - `GET /eve/v1/info` (inspect the agent)
 - `POST /eve/v1/session` (create a session, optionally sending its first message)
-- `POST /eve/v1/session/:sessionId` (send a follow-up)
+- `POST /eve/v1/session/:sessionId` (send a follow-up, respond to an input request, or prepare an idle session with an empty body)
 - `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
 - `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
@@ -99,6 +99,17 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
+
+`POST /eve/v1/session/:sessionId` with no body or `{}` prepares an existing session using
+the channel's auth policy. Non-empty bodies retain the message and input-response behavior;
+empty or invalid messages and payloads without either input are rejected. Preparation
+returns `{ ok: true, status }`: `ready` when the owner already uses the serving
+deployment, `accepted` (HTTP 202) when a background preparation hint has been queued,
+`unsupported` when the World or owner cannot prepare, or `no_active_session` when no live
+owner exists. Other successful statuses use HTTP 200. Acceptance does not mean the handoff
+has completed. Idle preparation preserves the session ID, stream, history, and expiry;
+active work is not interrupted. See the [frontend guide](../guides/frontend/overview#returned-state)
+for client usage and deployment routing.
 
 `GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
 

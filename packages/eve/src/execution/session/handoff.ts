@@ -30,6 +30,7 @@ import {
   watchRunEnd,
   type RunWatch,
 } from "#execution/session/run-watch.js";
+import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import { isObject } from "#shared/guards.js";
 
@@ -41,7 +42,7 @@ import { isObject } from "#shared/guards.js";
  * A newer successor must always accept older checkpoints: every bump adds the
  * upgrade from the previous version in `checkpoint-migrations.ts`.
  */
-export const SESSION_CHECKPOINT_VERSION = 16;
+export const SESSION_CHECKPOINT_VERSION = 17;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
@@ -272,6 +273,21 @@ export class SessionHandoff {
     return await this.transfer(state, deploymentId, { reason: "compaction" });
   }
 
+  async tryPrewarmTransfer(
+    state: SessionTransferState,
+    targetDeploymentId: string,
+    sessionTimeoutDeadline: Date | undefined,
+  ): Promise<SessionTransferOutcome> {
+    if (targetDeploymentId === this.input.deploymentId)
+      return { kind: "retained", reason: "same-deployment" };
+    if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
+      return { kind: "retained", reason: "known-incompatible" };
+    return await this.transfer(state, targetDeploymentId, {
+      reason: "prewarm",
+      sessionTimeoutDeadline,
+    });
+  }
+
   private async transfer(
     state: SessionTransferState,
     targetDeploymentId: string,
@@ -281,6 +297,7 @@ export class SessionHandoff {
     if (this.worldUnsupported) return { kind: "retained", reason: "unsupported-world" };
     // The previous attempt's payloads have not come back yet.
     if (inbox.awaitingHandover) return { kind: "retained", reason: "busy" };
+    if (!isSessionStateIdleForHandoff(state)) return { kind: "retained", reason: "not-idle" };
     const ownerRunId = getWorkflowMetadata().workflowRunId;
     const attempt = this.attempts++;
     const attemptKey = `${ownerRunId}:${String(attempt)}`;

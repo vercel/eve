@@ -1,21 +1,12 @@
-// Epoch 66 of the channel capability: sandbox sessions typed from the AI SDK. Epoch 67 declares
-// eve-owned session types with the same methods and adds `writeFiles`, which is additive.
 import { defineChannel, POST } from "#public/channels/index.js";
 
+// Retained channel epoch 66: existing session authoring works with proactive preparation.
 export default defineChannel({
   routes: [
     POST("/reports", async (_request, { from }) => {
-      const { session } = await from("reports").create({
-        auth: null,
-        history: [{ role: "user", text: "Alice requested a report." }],
-      });
+      const { session } = await from("reports").create({ auth: null });
+      await session.send("Summarize the attached screenshot.", { auth: null });
       return Response.json({ sessionId: session.id });
     }),
   ],
-  events: {
-    "turn.completed": async (_event, _channel, ctx) => {
-      const sandbox = await ctx.getSandbox();
-      await sandbox.writeTextFile({ content: "Report sent to Bob.", path: "reports/status.txt" });
-    },
-  },
 });

@@ -1,14 +1,11 @@
-// Epoch 54 of the connection capability. Epoch 55 changes only the sandbox session types it reaches
-// (eve-owned declarations plus `writeFiles`); connection authoring is unchanged, as this example shows.
-import { defineDynamic, defineMcpClientConnection } from "#public/connections/index.js";
+// Retained connection epoch 54: existing authoring works with proactive session preparation.
+import { defineMcpClientConnection } from "#public/connections/index.js";
 
-export default defineDynamic({
-  events: {
-    "turn.started": (_event, ctx) =>
-      defineMcpClientConnection({
-        description: "Read Alice's support queue.",
-        url: "https://support.example.com/mcp",
-        headers: { "X-Session": ctx.session.id },
-      }),
+export default defineMcpClientConnection({
+  description: "Read reports from the tracker.",
+  url: "https://tracker.example.com/mcp",
+  auth: {
+    principalType: "app",
+    getToken: async () => ({ token: "service-credential" }),
   },
 });

@@ -137,11 +137,11 @@ export class EveAgentStore<TData> {
     return () => void this.#subscribers.delete(callback);
   }
 
-  /** Creates this store's owned session without starting a turn. */
+  /** Creates a session or prepares its idle owner without starting a turn. */
   prewarm(): Promise<void> {
     if (this.#prewarmPromise !== undefined) return this.#prewarmPromise;
-    if (this.#session !== undefined || this.#externalSession) return Promise.resolve();
-    if (this.#activeTurn !== undefined) {
+    if (this.#session === undefined && this.#externalSession) return Promise.resolve();
+    if (this.#activeTurn !== undefined && this.#session === undefined) {
       return this.#activeTurn.response.then((response) => {
         if (response === undefined) {
           throw this.#error ?? new DOMException("Session creation was aborted.", "AbortError");
@@ -149,7 +149,8 @@ export class EveAgentStore<TData> {
       });
     }
     const client = this.#client;
-    if (client === undefined) {
+    const session = this.#session;
+    if (client === undefined && session === undefined) {
       return Promise.reject(new Error("This eve agent store does not own a session client."));
     }
 
@@ -158,7 +159,11 @@ export class EveAgentStore<TData> {
     this.#prewarmController = controller;
     const promise = (async () => {
       try {
-        const created = await client.sessions.create({ signal: controller.signal });
+        if (session !== undefined) {
+          await session.prewarm({ signal: controller.signal });
+          return;
+        }
+        const created = await client!.sessions.create({ signal: controller.signal });
         if (generation !== this.#prewarmGeneration) return;
         this.#error = undefined;
         if (this.#status === "error") this.#status = "ready";
@@ -167,6 +172,7 @@ export class EveAgentStore<TData> {
         if (this.#followIdle) this.#ensureStream();
       } catch (error) {
         if (
+          session === undefined &&
           generation === this.#prewarmGeneration &&
           this.#activeTurn === undefined &&
           this.#error === undefined
@@ -518,7 +524,7 @@ export class EveAgentStore<TData> {
       headers: input.headers,
       streamReconnectPolicy: input.streamReconnectPolicy,
     };
-    if (this.#prewarmPromise !== undefined) {
+    if (this.#session === undefined && this.#prewarmPromise !== undefined) {
       // A failed speculative create must not prevent the user's message from being sent.
       await waitWithSignal(
         this.#prewarmPromise.catch((error: unknown) => {

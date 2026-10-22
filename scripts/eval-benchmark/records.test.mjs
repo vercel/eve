@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { publishRun } from "./publish.mjs";
+import { METRICS_VERSION, STANDARD_METRICS } from "../eval-metrics/standard.mjs";
 import { buildRecords, readLegs } from "./records.mjs";
 
 const SHA = "a".repeat(40);
@@ -115,6 +116,49 @@ test("builds records and turns missing legs and evals into missing records", (t)
   ]);
   assert.equal(records[2].model_release, null);
   assert.equal(records[2].duration_ms, null);
+  assert.equal(completed.outcome, "completed");
+  assert.deepEqual(completed.metrics["latency.turn_ms"], {
+    status: "unavailable",
+    reason: "missing-session-capture",
+  });
+});
+
+test("attaches metrics to captured attempts and marks missing attempts as gaps", (t) => {
+  const legsDir = legsDirectory(t);
+  // A real captured artifact, with session events, in place of the minimal one.
+  copyFileSync(
+    new URL("../eval-metrics/fixtures/agent-tools-ends-turn-function.json", import.meta.url),
+    join(
+      legsDir,
+      "benchmark-leg-live__agent-tools__alpha__local__1",
+      "run",
+      "evals",
+      "static-tools",
+      "ends-turn-function.json",
+    ),
+  );
+  const [captured, missingEval, missingJob] = build(legsDir);
+  assert.equal(captured.outcome, "completed");
+  assert.equal(captured.gap_reason, null);
+  assert.equal(captured.metrics_version, METRICS_VERSION);
+  assert.deepEqual(Object.keys(captured.metrics).sort(), Object.keys(STANDARD_METRICS).sort());
+  assert.deepEqual(captured.metrics["tokens.input"], { status: "measured", value: 1117 });
+  // The fixture's model reports no cost: unavailable with a reason, never zero.
+  assert.deepEqual(captured.metrics["cost.total_usd"], {
+    status: "unavailable",
+    reason: "missing-rolled-up-cost",
+  });
+  assert.deepEqual(captured.failures, []);
+
+  for (const [record, reason] of [
+    [missingEval, "eval-missing"],
+    [missingJob, "job-missing"],
+  ]) {
+    assert.equal(record.outcome, "gap");
+    assert.equal(record.gap_reason, reason);
+    assert.deepEqual(record.metrics, {});
+    assert.deepEqual(record.failures, []);
+  }
 });
 
 test("excludes live-leg evals whose model steps all ran on another model", (t) => {
