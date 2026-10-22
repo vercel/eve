@@ -55,37 +55,45 @@ test("talks to the team in Slack through the Vercel Connect connector", () => {
 });
 
 test("connects to the Northstar API from the bundled contract as the app", async () => {
-  const { connection } = await northstarConnection();
-  expect(connection.baseUrl ?? connection.spec?.servers?.[0]?.url).toBe(apiBaseUrl);
-  // The contract has no public URL, so it has to travel with the project.
-  expect(typeof connection.spec).toBe("object");
-  expect(Object.keys(connection.spec.paths)).toContain("/purchase-orders");
+  const connections = await northstarConnections();
+  expect(connections.length).toBeGreaterThan(0);
+  for (const { name, connection } of connections) {
+    expect(connection.baseUrl ?? connection.spec?.servers?.[0]?.url, name).toBe(apiBaseUrl);
+    // The contract has no public URL, so it has to travel with the project.
+    expect(typeof connection.spec, name).toBe("object");
+    expect(Object.keys(connection.spec.paths), name).toContain("/purchase-orders");
 
-  const auth = typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
-  expect(auth?.credentialOwner ?? "app").toBe("app");
-  expect(await auth.getToken({})).toMatchObject({ token: "test-token" });
+    const auth =
+      typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
+    expect(auth?.credentialOwner ?? "app", name).toBe("app");
+    expect(await auth.getToken({}), name).toMatchObject({ token: "test-token" });
+  }
 });
 
 test("exposes lookups and purchase orders but not stock adjustments", async () => {
-  const { connection } = await northstarConnection();
-  const allow = connection.operations?.allow;
-  const block = connection.operations?.block;
-  const operations = ["getStock", "listLowStock", "createPurchaseOrder", "adjustStock"];
-  const visible = operations.filter((operation) =>
-    allow ? allow.includes(operation) : !block?.includes(operation),
+  // The API may be split across connections, such as read-only lookups and purchasing.
+  const visible = new Set(
+    (await northstarConnections()).flatMap(({ connection }) =>
+      northstarOperations.filter((operation) => exposes(connection, operation)),
+    ),
   );
-  expect(visible.sort()).toEqual(["createPurchaseOrder", "getStock", "listLowStock"]);
+  expect([...visible].sort()).toEqual(["createPurchaseOrder", "getStock", "listLowStock"]);
 });
 
 test("asks a person to approve purchase orders of $5,000 or more", async () => {
-  const { name, connection } = await northstarConnection();
-  const policy =
-    typeof connection.approval === "function" ? connection.approval : connection.approval?.request;
-  expect(typeof policy).toBe("function");
+  const connections = await northstarConnections();
   // Connection tools reach the policy as `<connection>__<operation>`, with the
-  // JSON request body under `body`.
-  const needsApproval = async (operation: string, toolInput: Record<string, unknown>) =>
-    requiresApproval(
+  // JSON request body under `body`. Each operation goes to the connection that exposes it.
+  const needsApproval = async (operation: string, toolInput: Record<string, unknown>) => {
+    const owner = connections.find(({ connection }) => exposes(connection, operation));
+    expect(owner, operation).toBeDefined();
+    const { name, connection } = owner!;
+    const policy =
+      typeof connection.approval === "function"
+        ? connection.approval
+        : connection.approval?.request;
+    if (policy === undefined) return false;
+    return requiresApproval(
       await policy({
         approvedTools: new Set(),
         callId: "call-1",
@@ -94,6 +102,7 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
         toolName: `${name}__${operation}`,
       }),
     );
+  };
   const order = (quantity: number, unitCostUsd: number) => ({
     body: { sku: "NS-1042", quantity, unitCostUsd },
   });
@@ -172,15 +181,25 @@ function sourceFiles(directory: string, pattern = /\.(?:ts|md)$/): string[] {
     .sort();
 }
 
-/** The connection built from the Northstar contract; its file stem is its runtime name. */
-async function northstarConnection() {
+const northstarOperations = ["getStock", "listLowStock", "createPurchaseOrder", "adjustStock"];
+
+/** The connections built from the Northstar contract; each file stem is a runtime name. */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function northstarConnections(): Promise<Array<{ name: string; connection: any }>> {
+  const connections = [];
   for (const file of sourceFiles("connections", /\.ts$/)) {
     const connection = await load(file);
     if (connection?.spec?.paths?.["/purchase-orders"] || /northstar/i.test(file)) {
-      return { name: basename(file, ".ts"), connection };
+      connections.push({ name: basename(file, ".ts"), connection });
     }
   }
-  throw new Error("The agent has no connection for the Northstar API.");
+  return connections;
+}
+
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+function exposes(connection: any, operation: string): boolean {
+  const { allow, block } = connection.operations ?? {};
+  return allow ? allow.includes(operation) : !block?.includes(operation);
 }
 
 function slackChannelFile(): string {
