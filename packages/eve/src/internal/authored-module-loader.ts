@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
@@ -11,6 +11,7 @@ import {
   evaluatedBundleSourcemap,
   resolveAuthoredTsConfigPath,
 } from "#internal/authored-module-build-options.js";
+import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import {
   createExtensionMountPlugin,
@@ -654,13 +655,7 @@ async function writeAuthoredModuleBundle(
     resolveAuthoredPackageRoot(modulePath),
     AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
   );
-  const bundlePath = join(bundleDirectoryPath, `${bundleHash}.mjs`);
-
-  if (!existsSync(bundlePath)) {
-    mkdirSync(bundleDirectoryPath, { recursive: true });
-    writeFileSync(bundlePath, code);
-  }
-
+  const bundlePath = writeAuthoredModuleCacheFile(bundleDirectoryPath, `${bundleHash}.mjs`, code);
   const instance = options.extension?.evaluationId ?? "";
   return `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}&instance=${encodeURIComponent(instance)}`;
 }

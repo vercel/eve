@@ -7,6 +7,7 @@ import {
   type AuthoredModuleGraph,
 } from "#internal/authored-module-graph.js";
 import { bindingMountId } from "#compiler/extension-mount-bindings.js";
+import { pruneAuthoredModuleCache } from "#internal/authored-module-cache.js";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
@@ -160,11 +161,13 @@ export async function compileAgentManifest(
 
   const diagnosticsSummary = summarizeCompilerDiagnostics(diagnostics);
   const subagents = withDiagnosticsSummary(root.descendants, diagnosticsSummary);
-  return createCompiledAgentManifest({
+  const compiled = createCompiledAgentManifest({
     ...root.manifest,
     diagnosticsSummary,
     subagents,
   });
+  await pruneAuthoredModuleCache();
+  return compiled;
 }
 
 class AgentGraphCompiler {
