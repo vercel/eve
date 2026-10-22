@@ -217,6 +217,25 @@
       ]
     },
     {
+      "name": "extension/nimble",
+      "type": "registry:item",
+      "title": "Nimble",
+      "description": "Search the web, extract readable page content, and run multi-source research with Nimble.",
+      "dependencies": [
+        "@nimble-way/eve"
+      ],
+      "envVars": {
+        "NIMBLE_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/nimble.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/nimble.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/kernel",
       "type": "registry:item",
       "title": "KERNEL",

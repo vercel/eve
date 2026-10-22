@@ -326,6 +326,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "nimble",
+    name: "Nimble",
+    kind: "extension",
+    tagline: "Search the web, extract page content, and run multi-source research with Nimble.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "kernel",
     name: "KERNEL",
     kind: "extension",

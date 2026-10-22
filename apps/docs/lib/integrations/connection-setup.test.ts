@@ -117,6 +117,19 @@ describe("Kernel extension setup", () => {
   });
 });
 
+describe("Nimble extension setup", () => {
+  it("documents the API-key mount and billable-run boundary", () => {
+    const integration = getIntegration("nimble")!;
+
+    expect(integration.type).toBe("extension");
+    expect(integration.install).toContain("eve add extension/nimble");
+    expect(integration.quickStart).toContain("NIMBLE_API_KEY");
+    expect(integration.quickStart).toContain('import nimble from "@nimble-way/eve"');
+    expect(integration.configure).toContain("untrusted third-party content");
+    expect(integration.configure).toContain("billable, non-idempotent");
+  });
+});
+
 describe("Vercel MCP connection setup", () => {
   it("offers user OAuth and shared app credential setup", () => {
     const integration = getIntegration("vercel")!;
