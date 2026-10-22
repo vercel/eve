@@ -19,7 +19,7 @@ describe("VercelSandbox", () => {
     expectTypeOf(environment.open).toBeFunction();
   });
 
-  it("mounts a Drive from the app's own @vercel/sandbox install", () => {
+  it("accepts the Sandbox SDK's Drive and its snapshot reference as mounts", () => {
     expectTypeOf<Drive>().toExtend<VercelSandboxMount>();
     expectTypeOf<ReturnType<Drive["snapshot"]>>().toExtend<VercelSandboxMount>();
   });
