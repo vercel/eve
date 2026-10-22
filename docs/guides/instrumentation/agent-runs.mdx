@@ -22,9 +22,7 @@ during beta. All plans include 30-day Agent Runs retention during beta.
 ## Enable tracing on Vercel
 
 When `eve deploy` creates a new Vercel project, it configures 100% trace
-sampling on every path in all environments. This includes unrelated frontend
-and API traffic, which also counts toward tracing usage. Pass
-`eve deploy --no-trace-sampling` to skip automatic configuration.
+sampling on every path in all environments.
 
 Existing projects keep their tracing settings. To enable tracing for an existing
 project, select your team and project, then open
@@ -43,11 +41,11 @@ Tracing starts as soon as you save the rule. You can also manage sampling
 rules with [`vercel traces config`](https://vercel.com/docs/cli/traces#manage-trace-sampling-rules).
 The CLI accepts rates from 1 to 100%; add a 0% rule from the dashboard.
 
-### Limit tracing by path
+### Trace selected paths
 
-For projects that also serve a frontend or unrelated APIs, replace the all-path
-rule with 100% rules for the paths you need. For a single agent at the default
-mount, start with these **Request Path Prefix** values:
+If you prefer path-scoped sampling, replace the all-path rule with 100% rules
+for each required **Request Path Prefix**. For a single agent at the default
+mount, start with:
 
 - `/eve/v1`: eve's HTTP API and default channel endpoints.
 - `/.well-known/workflow`: workflow execution and webhooks.
