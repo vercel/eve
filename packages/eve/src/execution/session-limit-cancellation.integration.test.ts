@@ -12,6 +12,8 @@ import {
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { defineHook } from "#public/definitions/hook.js";
 
 /**
  * Declining a session-limit continuation prompt cancels the in-flight turn
@@ -54,12 +56,13 @@ async function deliver(
   continuationToken: string,
   payload: Record<string, unknown>,
   timeout = 15_000,
+  auth: SessionAuthContext | null = null,
 ): Promise<void> {
   const deadline = Date.now() + timeout;
   while (true) {
     try {
       await resumeHook(sessionInboxHookToken(continuationToken), {
-        auth: null,
+        auth,
         kind: "send",
         payload,
       });
@@ -145,6 +148,86 @@ describe("session-limit continuation decline integration", () => {
         expect(filterEventsByType(repromptTurn, "input.requested")).toHaveLength(1);
         expect(filterEventsByType(repromptTurn, "turn.cancelled")).toHaveLength(0);
         expectNoFailureEvents(repromptTurn);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  // #4923: a turn parked on its continuation prompt is still alice's turn, so
+  // bob's message waits for it to end instead of joining it.
+  it.fails("keeps another principal's message out of a turn parked on its prompt", async () => {
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "bob" };
+    const seen: (readonly [string, unknown])[] = [];
+    const runtime = await createTestRuntime({
+      agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-foreign-message" },
+      modules: [
+        {
+          logicalPath: "hooks/observe.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "message.received"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.principalId]);
+                },
+                "turn.cancelled"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.principalId]);
+                },
+                "turn.completed"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.principalId]);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    const continuationToken = "http:limit-foreign-message";
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Hello there" },
+          serializedContext: {
+            ...buildSerializedContext({ channelKind: "http", continuationToken }),
+            "eve.auth": alice,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await stream.nextTurn();
+        await deliver(continuationToken, { message: "keep going please" }, undefined, alice);
+        const promptTurn = await stream.nextTurn();
+        expect(promptTurn.at(-1)?.type).toBe("turn.waiting");
+        const requestId = requestIdFromPromptTurn(promptTurn);
+        seen.length = 0;
+
+        await deliver(continuationToken, { message: "bob here" }, undefined, bob);
+        await deliver(
+          continuationToken,
+          { inputResponses: [{ optionId: "stop", requestId }] },
+          undefined,
+          alice,
+        );
+        const declined = await stream.nextTurn();
+        expectNoFailureEvents(declined);
+        const bobTurn = await stream.nextTurn();
+        expectNoFailureEvents(bobTurn);
+        expect(seen).toEqual([
+          ["turn.cancelled", "alice"],
+          ["message.received", "bob"],
+        ]);
       } finally {
         stream.dispose();
         await run.cancel();
