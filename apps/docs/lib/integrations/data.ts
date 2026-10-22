@@ -2613,7 +2613,7 @@ export default otelIntegration({
     span: () => ({ redact: true, inputs: true, outputs: true }),
   },
   traceExporter: new OTLPHttpProtoTraceExporter({
-    url: \`\${process.env.OODLE_OTLP_ENDPOINT}/v1/traces\`,
+    url: \`https://\${process.env.OODLE_OTLP_ENDPOINT}/v1/traces\`,
     headers: {
       "X-API-KEY": process.env.OODLE_API_KEY!,
       "X-OODLE-INSTANCE": process.env.OODLE_INSTANCE!,
@@ -2621,7 +2621,7 @@ export default otelIntegration({
   }),
 });
 \`\`\``,
-    configure: `Open Oodle’s eve integration tile to get your OTLP collector endpoint, API key, and instance ID. Expose them as \`OODLE_OTLP_ENDPOINT\`, \`OODLE_API_KEY\`, and \`OODLE_INSTANCE\`. The registry template redacts inputs and outputs before export. See [Oodle’s eve guide](https://docs.oodle.ai/integrations/agent-observability/eve) for Oodle setup and the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
+    configure: `Open Oodle’s eve integration tile to get your OTLP collector domain, API key, and instance ID. Set \`OODLE_OTLP_ENDPOINT\` to the domain only, without a scheme or path; the template adds \`https://\` and \`/v1/traces\`. Set \`OODLE_API_KEY\` and \`OODLE_INSTANCE\` to the supplied values. The registry template redacts inputs and outputs before export. See [Oodle’s eve guide](https://docs.oodle.ai/integrations/agent-observability/eve) for Oodle setup and the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   jaeger: {
     logo: "jaeger",
