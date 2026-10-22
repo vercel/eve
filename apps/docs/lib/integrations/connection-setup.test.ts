@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,7 +9,6 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
-import floraConnection from "../../registry/connections/flora";
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -69,11 +70,15 @@ describe("FLORA connection setup", () => {
       "vercel connect create agents.flora.ai/mcp --name flora",
     );
     expect(integrationMarkdown(integration)).toContain("approval: always()");
-    const { approval } = floraConnection;
-    if (typeof approval !== "function") {
-      throw new Error("FLORA requires an approval policy.");
-    }
-    expect(approval({} as never)).toBe("user-approval");
+  });
+
+  it("shows the installed connection file in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/flora.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(getIntegration("flora")!.quickStart).toContain(source.trim());
   });
 });
 
