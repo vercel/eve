@@ -4,7 +4,7 @@ import type { MockModelRequest } from "eve/evals";
 
 import { readStripeColors, STRIPE_COUNT } from "./lib/stripes";
 
-const STAGED_IMAGE_PATH = /\/workspace\/\.eve\/attachments\/\S+\.png/u;
+const STAGED_IMAGE_PATH = /\.eve\/attachments\/\S+\.png/u;
 
 /**
  * Stripe colors in the latest tool-result image the prompt carries, whether

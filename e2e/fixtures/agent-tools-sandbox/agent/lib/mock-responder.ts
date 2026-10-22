@@ -26,6 +26,9 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   if (message.includes("EVE_SANDBOX_BASH_JOB")) {
     return respondToBashJob(message, request);
   }
+  if (message.includes("EVE_SANDBOX_FILE_TOOLS")) {
+    return respondToFileTools(message, request);
+  }
   if (message.includes("DYNAMIC-TURN-REPLAY-START")) {
     const gate = request.toolResults.find((result) => result.name === "dynamic-turn-replay-gate");
     if (gate === undefined) {
@@ -108,6 +111,23 @@ function respondToBashJob(message: string, request: MockModelRequest): MockModel
     return { toolCalls: [{ input: { command }, name: "bash" }] };
   }
   return "index job stopped";
+}
+
+/** Writes, reads, greps, and cats the note by the relative paths the prompt names. */
+function respondToFileTools(
+  message: string,
+  request: MockModelRequest,
+): MockModelResponse | string {
+  const [, path = "", content = ""] =
+    /create (\S+) with exactly this content: (\S+)/u.exec(message) ?? [];
+  const steps = [
+    { input: { content, filePath: path }, name: "write_file" },
+    { input: { filePath: path }, name: "read_file" },
+    { input: { path: "notes", pattern: content }, name: "grep" },
+    { input: { command: `cat ${path}` }, name: "bash" },
+  ];
+  const next = steps[request.toolResults.length];
+  return next === undefined ? bashStdout(request) : { toolCalls: [next] };
 }
 
 /** The `[Tasks]` note and `<task_result>` messages are eve's, not the user's. */
