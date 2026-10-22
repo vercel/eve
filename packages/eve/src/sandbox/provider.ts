@@ -76,7 +76,9 @@ export interface SandboxConnection<Extensions extends object = {}> {
   close?(): Promise<void>;
   /**
    * Provider capabilities merged onto the session, such as `setNetworkPolicy`.
-   * A member named like a session method is a type error, and eve rejects it.
+   * A plain object: eve merges its own enumerable properties, so use closures
+   * rather than class methods. A member named like a session method is a type
+   * error, and eve rejects it.
    */
   readonly extensions?: Extensions & { readonly [Key in ReservedSessionMember]?: never };
 }
@@ -199,12 +201,11 @@ export interface SandboxPrepareOption<Session> {
 }
 
 /** Environment options plus the standard `prepare` option. */
-export type WithPrepareOption<Options, Session> = Options extends undefined
-  ? SandboxPrepareOption<Session> | undefined
-  : Options & SandboxPrepareOption<Session>;
+export type WithPrepareOption<Options extends object, Session> = Options &
+  SandboxPrepareOption<Session>;
 
 export interface SandboxProviderDefinition<
-  EnvironmentOptions extends object | undefined,
+  EnvironmentOptions extends object,
   OpenOptions extends object | undefined,
   Artifact extends SandboxJson,
   State extends SandboxJson,
@@ -213,7 +214,10 @@ export interface SandboxProviderDefinition<
   readonly name: string;
   /** Bump when `State` changes incompatibly; recorded state from another version starts fresh. */
   readonly stateProtocolVersion?: number;
-  /** Receives the environment options without `prepare`, which eve runs in `ctx.populate()`. */
+  /**
+   * Receives the environment options without `prepare`, which eve runs in
+   * `ctx.populate()`. Always an object: `{}` when the caller passes none.
+   */
   environment(
     options: EnvironmentOptions,
   ): SandboxProviderImplementation<OpenOptions, Artifact, State, Extensions>;
@@ -221,7 +225,7 @@ export interface SandboxProviderDefinition<
 
 /** Defines a sandbox provider from a connection and a lifecycle. */
 export function defineSandboxProvider<
-  EnvironmentOptions extends object | undefined = undefined,
+  EnvironmentOptions extends object = {},
   OpenOptions extends object | undefined = undefined,
   Artifact extends SandboxJson = SandboxJson,
   State extends SandboxJson = SandboxJson,
@@ -251,9 +255,7 @@ export function defineSandboxProvider<
     stateProtocolVersion: definition.stateProtocolVersion,
     environment(options) {
       const { prepare, ...environmentOptions } = options ?? {};
-      const implementation = definition.environment(
-        (options === undefined ? undefined : environmentOptions) as EnvironmentOptions,
-      );
+      const implementation = definition.environment(environmentOptions as EnvironmentOptions);
       return adaptSandboxProvider(definition.name, implementation, prepare);
     },
   });
@@ -274,26 +276,31 @@ function adaptSandboxProvider<
   implementation: SandboxProviderImplementation<OpenOptions, Artifact, State, Extensions>,
   prepare: ((sandbox: SandboxSession & Extensions) => void | Promise<void>) | undefined,
 ): LegacySandboxProviderImplementation<OpenOptions, Artifact, State, SandboxSession & Extensions> {
-  const connections = new WeakMap<SandboxProviderHandle, SandboxConnection<Extensions>>();
+  const closers = new WeakMap<SandboxProviderHandle, () => Promise<void>>();
 
   function createHandle(
     context: SandboxSessionContext,
     connection: SandboxConnection<Extensions>,
     state: Readonly<State>,
   ): SandboxProviderHandle<SandboxSession & Extensions> {
+    let closing: Promise<void> | undefined;
+    const close = () => (closing ??= (async () => await connection.close?.())());
     const handle: SandboxProviderHandle<SandboxSession & Extensions> = {
       sandbox: createConnectionSession(connection),
       onRuntimeShutdown: () => connection.stop(),
       async onSandboxDelete(options) {
-        await connection.close?.();
-        await implementation.onSessionEnd(context, state, {
-          abortSignal: options?.abortSignal,
-          reason: "deleted",
-        });
+        try {
+          await close();
+        } finally {
+          await implementation.onSessionEnd(context, state, {
+            abortSignal: options?.abortSignal,
+            reason: "deleted",
+          });
+        }
       },
       onSandboxStop: () => connection.stop(),
     };
-    connections.set(handle, connection);
+    closers.set(handle, close);
     return handle;
   }
 
@@ -322,7 +329,7 @@ function adaptSandboxProvider<
   };
   if (implementation.toolSessions !== true) return adapted;
   return withToolSessionSandboxes(adapted, {
-    releaseHandle: async (handle) => await connections.get(handle)?.close?.(),
+    releaseHandle: async (handle) => await closers.get(handle)?.(),
   });
 }
 
@@ -348,7 +355,8 @@ function createPrepareContext<Extensions extends object>(
     log,
     async populate(connection, options) {
       const session = createConnectionSession(connection);
-      if (options?.mountedAt !== undefined) {
+      // Without a resource directory there is nothing mounted to copy from.
+      if (options?.mountedAt !== undefined && context.resources.source.kind === "materialized") {
         log("copying workspace and skills from mounted resources");
         await hydrateSandboxFromImmutableResources(session, shellQuote(options.mountedAt));
       } else if (files.length > 0) {
@@ -402,7 +410,8 @@ function createConnectionSession<Extensions extends object>(
   const session = buildSandboxSession({
     async readFile(options) {
       const content = await connection.readFile(options);
-      return content instanceof Uint8Array ? bufferToStream(content) : content;
+      if (content === null || !ArrayBuffer.isView(content)) return content;
+      return bufferToStream(new Uint8Array(content.buffer, content.byteOffset, content.byteLength));
     },
     removePath: (options) => connection.removePath(options),
     resolvePath: resolveSandboxPath,

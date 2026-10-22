@@ -50,35 +50,54 @@ function sessionContext(id = "session-1"): SandboxProviderSessionContext {
   };
 }
 
-type ResourceTrees = Pick<Parameters<typeof createSandboxProviderResources>[0], "skills" | "workspace">;
+type ResourceTrees = Pick<
+  Parameters<typeof createSandboxProviderResources>[0],
+  "skills" | "workspace"
+>;
 
-function prepareContext(
-  trees: ResourceTrees = {},
-): SandboxProviderPrepareContext {
+function prepareContext(trees: ResourceTrees = {}, path?: string): SandboxProviderPrepareContext {
   return {
     files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
     host: sessionContext().host,
-    resources: createSandboxProviderResources({ key: "resources-key", ...trees }),
+    resources: createSandboxProviderResources({ key: "resources-key", path, ...trees }),
     sourceRevision: "revision-1",
     storagePath: "/app/.eve/sandbox",
   };
 }
 
+/** A provider whose `prepare` populates `connection`, passing `mountedAt` through. */
+function bakingProvider(
+  connection: SandboxConnection<{ ping(): Promise<string> }>,
+  mountedAt?: string,
+) {
+  return defineSandboxProvider({
+    name: "baking",
+    environment: () => ({
+      async prepare(ctx) {
+        if (!ctx.isEmpty) await ctx.populate(connection, { mountedAt });
+        return { empty: ctx.isEmpty };
+      },
+      start: async () => ({ connection, state: null }),
+      resume: async () => connection,
+      onSessionEnd: async () => {},
+    }),
+  });
+}
+
 describe("defineSandboxProvider", () => {
-  it("derives the session from the connection and maps stop and delete onto it", async () => {
+  it("derives the session from the connection, resolving paths from /workspace", async () => {
     const { connection, files } = recordingConnection();
     const kinds: string[] = [];
-    const onSessionEnd = vi.fn(async () => {});
     const provider = defineSandboxProvider({
       name: "recording",
       environment: () => ({
-        onSessionEnd,
         prepare: async () => null,
-        resume: async () => connection,
         async start(ctx) {
           kinds.push(ctx.kind);
-          return { connection, state: { name: ctx.session.id } };
+          return { connection, state: null };
         },
+        resume: async () => connection,
+        onSessionEnd: async () => {},
       }),
     });
     const { implementation } = getSandboxEnvironmentRuntime(provider.environment());
@@ -103,20 +122,15 @@ describe("defineSandboxProvider", () => {
       expect.objectContaining({ path: "/tmp/x", recursive: true }),
     );
     expect(await sandbox.ping()).toBe("pong");
-
-    await handle.onSandboxStop();
-    await handle.onRuntimeShutdown();
-    expect(connection.stop).toHaveBeenCalledTimes(2);
-    await handle.onSandboxDelete();
-    expect(connection.close).toHaveBeenCalledOnce();
-    expect(onSessionEnd).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "session",
-        session: expect.objectContaining({ id: "session-1" }),
-      }),
-      { name: "session-1" },
-      { abortSignal: undefined, reason: "deleted" },
+    // A backend may answer with a stream instead of bytes.
+    vi.spyOn(connection, "readFile").mockResolvedValueOnce(
+      new Blob(["streamed"]).stream() as never,
     );
+    expect(await sandbox.readTextFile({ path: "b.txt" })).toBe("streamed");
+    expect(connection.readFile).toHaveBeenLastCalledWith({
+      abortSignal: undefined,
+      path: "/workspace/b.txt",
+    });
   });
 
   it("rejects connection extensions that would replace a session member", async () => {
@@ -124,13 +138,13 @@ describe("defineSandboxProvider", () => {
     const provider = defineSandboxProvider({
       name: "colliding",
       environment: () => ({
-        onSessionEnd: async () => {},
         prepare: async () => null,
-        resume: async () => connection,
         start: async () => ({
           connection: { ...connection, extensions: { run: async () => "mine" } } as never,
           state: null,
         }),
+        resume: async () => connection,
+        onSessionEnd: async () => {},
       }),
     });
     const { implementation } = getSandboxEnvironmentRuntime(provider.environment());
@@ -140,12 +154,33 @@ describe("defineSandboxProvider", () => {
     );
   });
 
+  it("passes environment options to the provider without prepare, and {} when omitted", () => {
+    const received: object[] = [];
+    const provider = defineSandboxProvider({
+      name: "options",
+      environment(options: { readonly region?: string }) {
+        received.push(options);
+        return {
+          prepare: async () => null,
+          start: async () => ({ connection: recordingConnection().connection, state: null }),
+          resume: async () => recordingConnection().connection,
+          onSessionEnd: async () => {},
+        };
+      },
+    });
+
+    provider.environment();
+    provider.environment({ prepare: async () => {} });
+    provider.environment({ prepare: async () => {}, region: "iad1" });
+
+    expect(received).toEqual([{}, {}, { region: "iad1" }]);
+  });
+
   it("hashes template identities with the workspace, skills, and source revision", async () => {
     const keys: string[] = [];
     const provider = defineSandboxProvider({
       name: "keys",
       environment: () => ({
-        onSessionEnd: async () => {},
         async prepare(ctx) {
           keys.push(ctx.templateKey({ image: "ubuntu", skip: undefined, version: 1 }));
           expect(() => ctx.templateKey({ sourceRevision: "mine" })).toThrow(
@@ -153,55 +188,65 @@ describe("defineSandboxProvider", () => {
           );
           return null;
         },
-        resume: async () => recordingConnection().connection,
         start: async () => ({ connection: recordingConnection().connection, state: null }),
+        resume: async () => recordingConnection().connection,
+        onSessionEnd: async () => {},
       }),
     });
     const { implementation } = getSandboxEnvironmentRuntime(provider.environment());
 
     await implementation.prepare(prepareContext());
 
-    // The formula built-in providers hash their template keys with; it must not drift.
+    // Golden value: if it changes, every custom provider's template keys change with it.
     expect(keys).toEqual(["d02550d7328ec5806580c8cd02c0c2b0b3e9a90bbbec7f552938442d79ffd8e1"]);
   });
 
   it("seeds workspace and skills in one batch before the authored prepare", async () => {
     const { calls, connection } = recordingConnection();
-    const empty: boolean[] = [];
-    const provider = defineSandboxProvider({
-      name: "baking",
-      environment: () => ({
-        onSessionEnd: async () => {},
-        async prepare(ctx) {
-          empty.push(ctx.isEmpty);
-          if (!ctx.isEmpty) await ctx.populate(connection);
-          return null;
-        },
-        resume: async () => connection,
-        start: async () => ({ connection, state: null }),
-      }),
-    });
+    const provider = bakingProvider(connection);
     const environment = provider.environment({
       prepare: async (sandbox) => {
         await sandbox.writeTextFile({ content: await sandbox.ping(), path: "prepared.txt" });
       },
     });
 
-    await getSandboxEnvironmentRuntime(environment).implementation.prepare(
-      prepareContext({
-        skills: [{ content: "# Skill", relativePath: "review/SKILL.md" }],
-        workspace: [{ content: "seed", relativePath: "seed.txt" }],
-      }),
-    );
-    await getSandboxEnvironmentRuntime(provider.environment()).implementation.prepare(
-      prepareContext(),
-    );
+    const artifacts = [
+      await getSandboxEnvironmentRuntime(environment).implementation.prepare(
+        prepareContext({
+          skills: [{ content: "# Skill", relativePath: "review/SKILL.md" }],
+          workspace: [{ content: "seed", relativePath: "seed.txt" }],
+        }),
+      ),
+      await getSandboxEnvironmentRuntime(provider.environment()).implementation.prepare(
+        prepareContext(),
+      ),
+    ];
 
-    expect(empty).toEqual([false, true]);
+    expect(artifacts).toEqual([{ empty: false }, { empty: true }]);
     expect(calls).toEqual([
       "write /workspace/seed.txt /home/agent/.agents/skills/review/SKILL.md",
       "write /workspace/prepared.txt",
     ]);
+  });
+
+  it("copies from mounted resources, and writes files when there is no resource directory", async () => {
+    const seed = { workspace: [{ content: "seed", relativePath: "seed.txt" }] };
+    const mounted = recordingConnection();
+    await getSandboxEnvironmentRuntime(
+      bakingProvider(mounted.connection, "/eve/res ources").environment(),
+    ).implementation.prepare(prepareContext(seed, "/app/.eve/compile/resources"));
+    const inline = recordingConnection();
+    await getSandboxEnvironmentRuntime(
+      bakingProvider(inline.connection, "/eve/resources").environment(),
+    ).implementation.prepare(prepareContext(seed));
+
+    expect(mounted.calls).toEqual([]);
+    expect(mounted.connection.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.stringContaining("cp -a '/eve/res ources'/workspace/. /workspace/"),
+      }),
+    );
+    expect(inline.calls).toEqual(["write /workspace/seed.txt"]);
   });
 });
 

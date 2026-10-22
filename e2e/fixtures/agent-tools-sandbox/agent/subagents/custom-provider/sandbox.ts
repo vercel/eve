@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { defineSandbox, type SandboxNetworkPolicy } from "eve/sandbox";
+import { defineSandbox } from "eve/sandbox";
 import {
   defineSandboxProvider,
   SandboxSessionGoneError,
@@ -18,7 +18,6 @@ export const CUSTOM_PROVIDER_TOKEN = "custom-provider-session-ok-P7M";
 interface Machine {
   readonly files: Map<string, Uint8Array>;
   readonly id: string;
-  policy: "allow-all" | "deny-all";
 }
 
 type CustomExtensions = {
@@ -28,8 +27,6 @@ type CustomExtensions = {
   machineId(): string;
   /** Removes the machine from the service, as maintenance would. */
   retireForMaintenance(): Promise<void>;
-  /** Accepts only what the machine can enforce, and rejects the rest. */
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
 
 const machines = new Map<string, Machine>();
@@ -41,15 +38,11 @@ const CustomSandbox = defineSandboxProvider({
       async prepare(ctx) {
         return { templateKey: ctx.templateKey({ machine: "memory", version: 1 }) };
       },
-      async start(ctx, open: { readonly networkPolicy?: "allow-all" | "deny-all" } | undefined) {
+      async start(ctx) {
         // An upsert on the session id: a live machine is returned unchanged.
         let machine = machines.get(ctx.session.id);
         if (machine === undefined) {
-          machine = {
-            files: new Map(),
-            id: randomUUID(),
-            policy: open?.networkPolicy ?? "allow-all",
-          };
+          machine = { files: new Map(), id: randomUUID() };
           machines.set(ctx.session.id, machine);
         }
         return {
@@ -108,14 +101,6 @@ function connect(sessionId: string, machine: Machine): SandboxConnection<CustomE
       probe: async () => `${CUSTOM_PROVIDER_TOKEN}:${sessionId}`,
       async retireForMaintenance() {
         if (machines.get(sessionId) === machine) machines.delete(sessionId);
-      },
-      async setNetworkPolicy(policy) {
-        if (policy !== "allow-all" && policy !== "deny-all") {
-          throw new Error(
-            'This machine enforces only "allow-all" and "deny-all"; it rejects allow-lists instead of weakening them.',
-          );
-        }
-        machine.policy = policy;
       },
     },
   };

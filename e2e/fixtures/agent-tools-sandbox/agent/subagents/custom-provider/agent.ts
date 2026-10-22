@@ -12,9 +12,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
   const tools = message.includes("maintenance")
     ? ["leave-note", "check-note"]
-    : message.includes("network")
-      ? ["restrict-network"]
-      : ["verify-provider-session"];
+    : ["verify-provider-session"];
   const next = tools.find((name) => !request.toolResults.some((entry) => entry.name === name));
   if (next !== undefined) return { toolCalls: [{ input: {}, name: next }] };
   const last = request.toolResults.find((entry) => entry.name === tools.at(-1));
