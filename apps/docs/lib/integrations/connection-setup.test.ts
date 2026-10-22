@@ -33,6 +33,26 @@ describe("Browser Use connection setup", () => {
   });
 });
 
+describe("Firecrawl connection setup", () => {
+  it("renders bearer authentication for cost-sensitive tools", () => {
+    const integration = getIntegration("firecrawl")!;
+
+    expect(integration.quickStart).toContain(
+      "Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY!}`",
+    );
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/firecrawl");
+  });
+
+  it("shows the installed connection file in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/firecrawl.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(getIntegration("firecrawl")!.quickStart).toContain(source.trim());
+  });
+});
+
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;

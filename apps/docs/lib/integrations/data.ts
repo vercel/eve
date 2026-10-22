@@ -1875,6 +1875,60 @@ Supermemory automatically recalls relevant context before a turn and captures co
 
 Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://supermemory.ai/docs/integrations/eve) for all options and tool behavior.`,
   },
+  memanto: {
+    logo: "memanto",
+    docsHref: "https://docs.memanto.ai/integrations/eve",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "semantic search",
+      "automatic recall",
+      "user profile",
+      "Memanto",
+      "Moorcheh",
+    ],
+    install: `Install Memanto memory for eve:
+
+\`\`\`bash
+eve add memory/memanto
+\`\`\`
+
+This installs \`@moorcheh-ai/memanto\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.60.0 or later.`,
+    quickStart: `Set a Moorcheh API key in the agent environment. Deployments also need the URL of a Memanto server that you run:
+
+\`\`\`bash title=".env.local"
+MOORCHEH_API_KEY=...
+# Deployments only
+MEMANTO_BASE_URL=https://...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/memanto.ts"
+import { memantoMemory } from "@moorcheh-ai/memanto/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: memantoMemory({
+    apiKey: process.env.MOORCHEH_API_KEY,
+    baseUrl: process.env.MEMANTO_BASE_URL,
+    capture: false,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`memanto\` slot. Before every turn, the provider recalls relevant context. It also gives the model \`memanto__remember\` and \`memanto__recall\` tools for deliberate saves and searches.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+All eve scopes share one Memanto agent. The provider tags each memory with a digest of eve's opaque scope key and filters recalls by that tag. Its tools are bound to the current scope, so the model cannot read or write another scope's memories.
+
+Automatic capture is unsupported in this reviewed configuration. The published adapter does not make completed-turn capture idempotent across eve operation replays. The registry explicitly sets \`capture: false\`; leave it disabled until the provider supports replay-safe idempotency. The model can still use \`memanto__remember\` for deliberate, scope-bound memory writes. Those are model-invoked writes, not user-approved writes. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
+
+The reviewed configuration expects a running Memanto server at \`MEMANTO_BASE_URL\`. If you omit it during \`eve dev\`, the adapter starts a local server with the unpinned default \`memanto\` package through \`uvx\`. That local-server path is outside the reviewed compatibility boundary. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
+  },
 };
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
@@ -2153,6 +2207,35 @@ Connect owns the OAuth flow, and each end-user authorizes in their own browser b
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "treasury", "cash", "payments", "accounting", "oauth", "connect"],
     authModes: ["user"],
+  },
+  firecrawl: {
+    logo: "firecrawl",
+    docsHref: "https://docs.firecrawl.dev/mcp-server",
+    keywords: ["mcp", "web search", "web scraping", "crawl", "parse", "monitoring"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "FIRECRAWL_API_KEY",
+      header: "Authorization",
+    },
+    quickStart: `Create \`agent/connections/firecrawl.ts\`. The filename creates the \`firecrawl\` connection. Firecrawl calls can consume usage or create persistent work, so this connection requires approval for every call:
+
+\`\`\`ts
+import { always } from "eve/tools/approval";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.firecrawl.dev/v2/mcp",
+  description: "Firecrawl: search, scrape, map, crawl, parse, and monitor web content.",
+  headers: () => ({
+    Authorization: \`Bearer \${process.env.FIRECRAWL_API_KEY!}\`,
+  }),
+  approval: always(),
+});
+\`\`\`
+
+Keep the API key in a server-side environment variable. eve sends it directly to Firecrawl and does not expose it to the model.`,
+    configureNote:
+      "An API key enables Firecrawl's full tool surface, subject to the plan and team policy. Keep approval enabled, or use tool filters and approval rules that prevent unattended cost-sensitive or persistent actions.",
   },
   "hugging-face": {
     logo: "hugging-face",
@@ -2622,6 +2705,38 @@ export default otelIntegration({
 });
 \`\`\``,
     configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
+  },
+  oodle: {
+    logo: "oodle",
+    docsHref: "https://docs.oodle.ai/integrations/agent-observability/eve",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "agent observability", "otlp"],
+    install: `Add Oodle instrumentation from eve's registry. Oodle ingests OTLP directly:
+
+\`\`\`bash
+eve add instrumentation/oodle
+\`\`\``,
+
+    quickStart: `Create \`agent/instrumentation/oodle.ts\` and send traces to Oodle's OTLP endpoint with your API key and instance ID:
+
+\`\`\`ts
+// agent/instrumentation/oodle.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
+
+export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: \`https://\${process.env.OODLE_OTLP_ENDPOINT}/v1/traces\`,
+    headers: {
+      "X-API-KEY": process.env.OODLE_API_KEY!,
+      "X-OODLE-INSTANCE": process.env.OODLE_INSTANCE!,
+    },
+  }),
+});
+\`\`\``,
+    configure: `Open Oodle’s eve integration tile to get your OTLP collector domain, API key, and instance ID. Set \`OODLE_OTLP_ENDPOINT\` to the domain only, without a scheme or path; the template adds \`https://\` and \`/v1/traces\`. Set \`OODLE_API_KEY\` and \`OODLE_INSTANCE\` to the supplied values. The registry template redacts inputs and outputs before export. See [Oodle’s eve guide](https://docs.oodle.ai/integrations/agent-observability/eve) for Oodle setup and the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
   jaeger: {
     logo: "jaeger",
