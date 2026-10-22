@@ -3,7 +3,8 @@ import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import { createEventReader } from "#protocol/session-lines.js";
-import { readV26TranscriptLine } from "#protocol/v26-transcript-lines.js";
+import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-history.js";
+import { isV26Line } from "#protocol/v26-lines.js";
 import { isStoredLine, type StoredLine } from "#protocol/session-events/envelope.js";
 
 /** Options for {@link streamSessionEvents}. */
@@ -208,17 +209,43 @@ export async function* streamSessionLines(
 
 /**
  * Iterates one session's events in process, from the lines {@link streamSessionLines} reads.
- * Lines an eve before v27 stored yield only the facts a transcript reads; see
- * `readV26TranscriptLine`.
+ * A session an eve before v27 recorded reads as the v27 commits its v26 lines record; see
+ * `#execution/v26-history.js`.
  */
 export async function* streamSessionEvents(
   sessionId: string,
   options: SessionEventStreamOptions = {},
 ): AsyncGenerator<SessionStreamEvent, void, undefined> {
   const reader = createEventReader();
+  let history: V26HistoryReader | undefined;
   for await (const { line, position, record } of streamSessionLines(sessionId, options)) {
-    // A session an earlier eve recorded in v26 lines still reads as a transcript.
-    const read = line ?? readV26TranscriptLine(record, position);
+    if (line !== undefined) {
+      yield* reader.read(line, position);
+      continue;
+    }
+    if (!isV26Line(record)) continue;
+    if (history === undefined) {
+      history = createV26HistoryReader();
+      // Each v26 line reads in light of those before it.
+      if (position > 0) await readV26Prefix(history, sessionId, position, options.signal);
+    }
+    const read = history.read(record, position);
     if (read !== undefined) yield* reader.read(read, position);
+  }
+}
+
+async function readV26Prefix(
+  history: V26HistoryReader,
+  sessionId: string,
+  end: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  for await (const { position, record } of streamSessionLines(sessionId, {
+    follow: false,
+    signal,
+    startIndex: 0,
+  })) {
+    if (position >= end) return;
+    history.read(record, position);
   }
 }

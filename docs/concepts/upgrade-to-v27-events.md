@@ -3,9 +3,9 @@ title: "Upgrade to v27 Session Events"
 description: "Move hooks, channels, clients, and evals from the v26 event stream to v27 facts."
 ---
 
-Stream version 27 changes event names, payloads, and client state. New sessions use v27; sessions started on an earlier deployment keep their earlier stream. Update event consumers and rebuild extensions before deploying. A v27 frontend cannot render an older session's event history; its owning deployment can still serve its channels. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
+Stream version 27 changes event names, payloads, and client state. New sessions use v27; sessions started on an earlier deployment keep their earlier stream. Update event consumers and rebuild extensions before deploying. A v27 deployment serves an older session's stored history as v27 lines, so a v27 frontend renders it; its owning deployment can still serve its channels. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
 
-Discard persisted pre-v27 event arrays and their saved cursors before hydrating a v27 frontend. Do not pass those arrays as `initialEvents`; keep older chats on the deployment that owns their stream.
+Discard persisted pre-v27 event arrays before hydrating a v27 frontend. Do not pass those arrays as `initialEvents`; read the session's stream again instead. Saved cursors still count the same stored lines.
 
 ## Event mapping
 

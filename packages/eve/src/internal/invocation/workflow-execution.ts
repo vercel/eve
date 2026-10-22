@@ -7,7 +7,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import { streamSessionLines } from "#execution/session-event-stream.js";
 import { createEventReader } from "#protocol/session-lines.js";
-import { isV26Line } from "#protocol/v26-transcript-lines.js";
+import { isV26Line } from "#protocol/v26-lines.js";
 import type {
   AgentInvocation,
   AgentInvocationInteraction,

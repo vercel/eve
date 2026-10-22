@@ -121,7 +121,7 @@ export default defineDynamic(async (ctx) => {
 
 The memo runs before the replacement's first model call, and the instruction enters the replacement's durable history once, ahead of the new message. In a session that replaced no other, `ctx.session.predecessor` is undefined and the instruction contributes nothing.
 
-`transcriptOf()` keeps the history each consumed delivery imported, the text of each consumed delivery, and each completed reply part, oldest first, as `{ role, text }` messages. Reasoning, narration, tool calls and results, attachments, interactions, and interrupted output are left out. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. A stranded session an eve version before v27 recorded reads the same way: `sessions.attach()` reads its user messages, assistant text, clears, and end from the v26 events it stored, and nothing else from them. `maxMessages` keeps only the newest messages.
+`transcriptOf()` keeps the history each consumed delivery imported, the text of each consumed delivery, and each completed reply part, oldest first, as `{ role, text }` messages. Reasoning, narration, tool calls and results, attachments, interactions, and interrupted output are left out. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. A stranded session an eve version before v27 recorded reads the same way: `sessions.attach()` reads the v26 events it stored as the v27 facts they record, reading from its first line whatever `startIndex` asks for. `maxMessages` keeps only the newest messages.
 
 The read and the prompt are yours to bound:
 
