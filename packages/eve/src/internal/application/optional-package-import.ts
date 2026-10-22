@@ -12,6 +12,29 @@ export async function importInstalledEnginePackage<T>(input: {
   return (await import(entrypointHref)) as T;
 }
 
+/**
+ * Loads an optional engine without installing it: from eve's own resolution
+ * first, then from the application. Fails with `missingMessage`.
+ */
+export async function importOptionalEnginePackage<T>(input: {
+  readonly appRoot: string;
+  readonly importModule: () => Promise<T>;
+  readonly missingMessage: string;
+  readonly packageName: string;
+}): Promise<T> {
+  try {
+    return await input.importModule();
+  } catch (importError) {
+    try {
+      return await importInstalledEnginePackage<T>(input);
+    } catch (installedImportError) {
+      throw new Error(input.missingMessage, {
+        cause: new AggregateError([importError, installedImportError]),
+      });
+    }
+  }
+}
+
 export async function resolveInstalledEnginePackageEntrypointHref(input: {
   readonly appRoot: string;
   readonly packageName: string;

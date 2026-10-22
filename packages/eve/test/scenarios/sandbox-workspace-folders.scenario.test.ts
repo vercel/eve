@@ -7,24 +7,15 @@ import { discoverAgent } from "../../src/discover/discover-agent.js";
 import { resolveDiscoveryProject } from "../../src/discover/project.js";
 // The just-bash engine keeps this scenario hermetic (no Docker daemon
 // requirement); the workspace devDependency provides the install.
-import { createSandboxProviderHarness } from "../../src/internal/testing/sandbox-provider-harness.js";
+import { createSandboxEnvironmentHarness } from "../../src/internal/testing/sandbox-provider-harness.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { SANDBOX_WORKSPACES_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/sandbox-workspaces.js";
 import { materializeWorkspaceDirectory } from "../../src/runtime/workspace/seed-files.js";
 import { JustBashSandbox } from "../../src/sandbox/providers/just-bash.js";
-import { getSandboxEnvironmentRuntime } from "../../src/shared/sandbox-environment.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const scenarioApp = useScenarioApp();
 const createScratchDirectory = useTemporaryDirectories();
-
-function createJustBashProvider() {
-  const environment = JustBashSandbox.environment();
-  return createSandboxProviderHarness(
-    getSandboxEnvironmentRuntime(environment).implementation,
-    undefined,
-  );
-}
 
 describe("sandbox workspace folder convention", () => {
   it("flows authored workspace files from disk through discovery into a live sandbox", async () => {
@@ -46,7 +37,7 @@ describe("sandbox workspace folder convention", () => {
     );
 
     const appRoot = await createScratchDirectory("eve-sandbox-workspace-folders-");
-    const backend = createJustBashProvider();
+    const backend = createSandboxEnvironmentHarness(JustBashSandbox.environment());
 
     await backend.prepare({
       appRoot,
@@ -78,7 +69,7 @@ describe("sandbox workspace folder convention", () => {
 
   it("opens an empty prewarmed template when the sandbox has no authored workspace files", async () => {
     const appRoot = await createScratchDirectory("eve-sandbox-no-workspace-");
-    const backend = createJustBashProvider();
+    const backend = createSandboxEnvironmentHarness(JustBashSandbox.environment());
 
     await backend.prepare({
       appRoot,

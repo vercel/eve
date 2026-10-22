@@ -2,7 +2,11 @@ export { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/provi
 export type {
   JustBashCommand,
   JustBashCommandContext,
+  JustBashCommandResult,
   JustBashCustomCommand,
+  JustBashDirectoryEntry,
+  JustBashFileStat,
   JustBashFilesystem,
   JustBashFilesystemContext,
+  JustBashLazyCommand,
 } from "#public/sandbox/just-bash-sandbox.js";

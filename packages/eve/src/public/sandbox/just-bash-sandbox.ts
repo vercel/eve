@@ -1,5 +1,3 @@
-import type { SandboxSession } from "#shared/sandbox-session.js";
-
 /**
  * The filesystem a just-bash interpreter runs on. just-bash's own filesystems,
  * such as `ReadWriteFs`, `OverlayFs`, and `MountableFs`, satisfy it.
@@ -144,6 +142,4 @@ export interface JustBashSandboxCreateOptions {
   readonly filesystem?: (
     context: JustBashFilesystemContext,
   ) => JustBashFilesystem | Promise<JustBashFilesystem>;
-  /** Idempotent setup captured in the prepared virtual filesystem. */
-  readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
 }

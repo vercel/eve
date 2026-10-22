@@ -11,7 +11,11 @@ import {
   resolveLocalProviderTemplatesDirectory,
   touchDirectory,
 } from "#execution/sandbox/bindings/local-provider-utils.js";
-import { createBashSandbox } from "#execution/sandbox/bindings/just-bash-runtime.js";
+import {
+  createBashSandbox,
+  importJustBashModule,
+  installJustBashModule,
+} from "#execution/sandbox/bindings/just-bash-runtime.js";
 import {
   LOCAL_SANDBOX_TEMPLATE_RECENT_WINDOW_MS,
   LOCAL_SANDBOX_TEMPLATE_RETAIN_COUNT,
@@ -27,6 +31,7 @@ import {
   type SandboxSessionContext,
 } from "#public/sandbox/provider.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
+import { isObject } from "#shared/guards.js";
 import {
   invalidPreparedSandboxArtifactError,
   invalidSandboxSessionStateError,
@@ -40,16 +45,15 @@ type JustBashPreparedArtifact = { readonly templateKey: string };
 type JustBashSessionState = { readonly rootPath: string; readonly version: 2 };
 
 export function createJustBashSandboxProvider(
-  options: Omit<JustBashSandboxCreateOptions, "prepare"> = {},
+  options: JustBashSandboxCreateOptions = {},
 ): SandboxProviderImplementation<undefined, JustBashPreparedArtifact, JustBashSessionState, {}> {
   const autoInstall = options.autoInstall ?? true;
 
   async function connect(context: SandboxSessionContext, rootPath: string) {
     return await createBashSandbox({
-      autoInstall,
       customCommands: options.customCommands,
       filesystem: options.filesystem,
-      install: false,
+      justBash: await importJustBashModule(context.resolveProjectPath(".")),
       resolveProjectPath: (path) => context.resolveProjectPath(path),
       rootPath,
       storagePath: context.storagePath,
@@ -73,8 +77,10 @@ export function createJustBashSandboxProvider(
       const temporaryTemplateRootPath = `${templateRootPath}.${randomUUID()}.tmp`;
       let published = false;
       const templateSandbox = await createBashSandbox({
-        autoInstall,
-        install: true,
+        justBash: await installJustBashModule({
+          appRoot: context.resolveProjectPath("."),
+          autoInstall,
+        }),
         resolveProjectPath: (path) => context.resolveProjectPath(path),
         rootPath: temporaryTemplateRootPath,
         storagePath: context.storagePath,
@@ -190,21 +196,17 @@ export async function pruneJustBashSandboxTemplates(input: {
 }
 
 function requirePreparedJustBashArtifact(artifact: SandboxJson): JustBashPreparedArtifact {
-  if (!isRecord(artifact) || typeof artifact.templateKey !== "string") {
+  if (!isObject(artifact) || typeof artifact.templateKey !== "string") {
     throw invalidPreparedSandboxArtifactError("just-bash sandbox");
   }
   return { templateKey: artifact.templateKey };
 }
 
 function requireJustBashSessionState(state: SandboxJson): JustBashSessionState {
-  if (!isRecord(state) || state.version !== 2 || typeof state.rootPath !== "string") {
+  if (!isObject(state) || state.version !== 2 || typeof state.rootPath !== "string") {
     throw invalidSandboxSessionStateError("just-bash sandbox");
   }
   return { rootPath: state.rootPath, version: 2 };
-}
-
-function isRecord(value: SandboxJson): value is { readonly [key: string]: SandboxJson } {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function resolveTemplateRootPath(storagePath: string, key: string): string {

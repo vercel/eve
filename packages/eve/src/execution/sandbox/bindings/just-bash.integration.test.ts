@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
-import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 
 vi.mock("just-bash", () => {
   throw new Error("Cannot find module 'just-bash'");
@@ -12,11 +11,7 @@ vi.mock("just-bash", () => {
 const createScratchDirectory = useTemporaryDirectories();
 
 function createJustBashProvider(options?: JustBashEnvironmentOptions) {
-  const environment = JustBashSandbox.environment(options);
-  return createSandboxProviderHarness(
-    getSandboxEnvironmentRuntime(environment).implementation,
-    undefined,
-  );
+  return createSandboxEnvironmentHarness(JustBashSandbox.environment(options));
 }
 
 describe("just-bash provider without the optional dependency installed", () => {

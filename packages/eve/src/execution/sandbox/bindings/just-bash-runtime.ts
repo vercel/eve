@@ -1,21 +1,22 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { IFileSystem } from "just-bash";
-
 import { pathExists } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { importOptionalEnginePackage } from "#execution/sandbox/provider-host.js";
+import { importOptionalEnginePackage } from "#internal/application/optional-package-import.js";
 import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
+import type {
+  JustBashFilesystem,
+  JustBashSandboxCreateOptions,
+} from "#public/sandbox/just-bash-sandbox.js";
 import { SANDBOX_AGENT_ENV, type SandboxConnection } from "#public/sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
+import { isObject } from "#shared/guards.js";
 
 const LOCAL_SANDBOX_METADATA_VERSION = 1;
 const LOCAL_SANDBOX_FILESYSTEM_DIRECTORY_NAME = "fs";
 const LOCAL_SANDBOX_METADATA_FILE_NAME = "metadata.json";
-const JUST_BASH_PACKAGE_NAME = "just-bash";
 
 type JustBashModule = typeof import("just-bash");
 
@@ -35,72 +36,61 @@ export interface BashSandbox extends SandboxConnection {
   close(): Promise<void>;
 }
 
-let justBashModulePromise: Promise<JustBashModule> | undefined;
+/**
+ * The package is intentionally not bundled with eve — the provider is opt-in —
+ * so it loads from the application's own dependency tree.
+ */
+const JUST_BASH_PACKAGE = {
+  importModule: async () => await import("just-bash"),
+  missingMessage:
+    "The just-bash sandbox provider requires the `just-bash` package, which is not bundled " +
+    "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
+    "DockerSandbox or DefaultSandbox instead.",
+  packageName: "just-bash",
+};
 
 /**
- * Loads `just-bash` from the application's own dependency tree. The
- * package is intentionally not bundled with eve — the provider is
- * opt-in — so when template preparation finds it missing during `eve dev`,
- * eve installs it into the project (unless `autoInstall: false`). Every
- * other load fails with an actionable install error instead.
+ * Loads `just-bash` for template preparation, installing it into the project
+ * when it is missing during `eve dev` (unless `autoInstall` is false).
  */
-async function loadJustBashModule(input: {
+export async function installJustBashModule(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
-  readonly install: boolean;
 }): Promise<JustBashModule> {
-  const load = {
+  return await loadOptionalEnginePackage<JustBashModule>({
+    ...JUST_BASH_PACKAGE,
     appRoot: input.appRoot,
-    importModule: async () => await import("just-bash"),
-    missingMessage:
-      "The just-bash sandbox provider requires the `just-bash` package, which is not bundled " +
-      "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
-      "DockerSandbox or DefaultSandbox instead.",
-    packageName: JUST_BASH_PACKAGE_NAME,
-  };
-  justBashModulePromise ??= (
-    input.install
-      ? loadOptionalEnginePackage<JustBashModule>({
-          ...load,
-          autoInstall: input.autoInstall,
-          ignoredOptionalDependencies: ["@mongodb-js/zstd", "node-liblzma"],
-        })
-      : importOptionalEnginePackage<JustBashModule>(load)
-  ).catch((error: unknown) => {
-    justBashModulePromise = undefined;
-    throw error;
+    autoInstall: input.autoInstall,
+    ignoredOptionalDependencies: ["@mongodb-js/zstd", "node-liblzma"],
   });
-  return await justBashModulePromise;
+}
+
+/** Loads `just-bash` for a session without installing it. */
+export async function importJustBashModule(appRoot: string): Promise<JustBashModule> {
+  return await importOptionalEnginePackage<JustBashModule>({ ...JUST_BASH_PACKAGE, appRoot });
 }
 
 export async function createBashSandbox(input: {
-  readonly autoInstall: boolean;
   readonly customCommands?: JustBashSandboxCreateOptions["customCommands"];
   readonly filesystem?: JustBashSandboxCreateOptions["filesystem"];
-  /** Lets `eve dev` install a missing `just-bash`, which only template preparation does. */
-  readonly install: boolean;
+  readonly justBash: JustBashModule;
   resolveProjectPath(path: string): string;
   readonly rootPath: string;
   readonly storagePath: string;
 }): Promise<BashSandbox> {
-  const justBash = await loadJustBashModule({
-    appRoot: input.resolveProjectPath("."),
-    autoInstall: input.autoInstall,
-    install: input.install,
-  });
-  const { ReadWriteFs, Sandbox } = justBash;
+  const { justBash } = input;
   const filesystemRootPath = resolveLocalSandboxFilesystemRootPath(input.rootPath);
   const metadataPath = resolveLocalSandboxMetadataPath(input.rootPath);
   const metadata = await readLocalMetadata(metadataPath);
 
   await mkdir(filesystemRootPath, { recursive: true });
 
-  const defaultFilesystem = new ReadWriteFs({
+  const defaultFilesystem = new justBash.ReadWriteFs({
     allowSymlinks: true,
     maxFileReadSize: Number.MAX_SAFE_INTEGER,
     root: filesystemRootPath,
   });
-  let filesystem: IFileSystem = defaultFilesystem;
+  let filesystem: JustBashFilesystem = defaultFilesystem;
   if (input.filesystem !== undefined) {
     try {
       filesystem = await input.filesystem({
@@ -114,9 +104,9 @@ export async function createBashSandbox(input: {
     }
   }
 
-  await ensureLocalSandboxDirectories(filesystem);
+  await filesystem.mkdir(WORKSPACE_ROOT, { recursive: true });
 
-  const sandbox = await Sandbox.create({
+  const sandbox = await justBash.Sandbox.create({
     cwd: WORKSPACE_ROOT,
     customCommands: input.customCommands === undefined ? undefined : [...input.customCommands],
     env: metadata === null ? undefined : { ...metadata.env },
@@ -125,8 +115,7 @@ export async function createBashSandbox(input: {
       dangerouslyAllowFullInternetAccess: true,
     },
   });
-  let stopped: Promise<void> | undefined;
-  const stop = async () => await (stopped ??= sandbox.stop());
+  const stop = async () => await sandbox.stop();
 
   return {
     async captureState() {
@@ -194,12 +183,6 @@ function resolveLocalSandboxMetadataPath(rootPath: string): string {
   return `${rootPath}/${LOCAL_SANDBOX_METADATA_FILE_NAME}`;
 }
 
-async function ensureLocalSandboxDirectories(filesystem: IFileSystem): Promise<void> {
-  await filesystem.mkdir(WORKSPACE_ROOT, {
-    recursive: true,
-  });
-}
-
 async function readLocalMetadata(metadataPath: string): Promise<LocalSandboxMetadata | null> {
   if (!(await pathExists(metadataPath))) {
     return null;
@@ -208,7 +191,7 @@ async function readLocalMetadata(metadataPath: string): Promise<LocalSandboxMeta
   const metadata: unknown = JSON.parse(await readFile(metadataPath, "utf8"));
 
   if (
-    !isRecord(metadata) ||
+    !isObject(metadata) ||
     metadata.version !== LOCAL_SANDBOX_METADATA_VERSION ||
     !isStringRecord(metadata.env)
   ) {
@@ -229,15 +212,6 @@ async function writeLocalMetadata(
   await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function isStringRecord(value: unknown): value is Readonly<Record<string, string>> {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.values(value).every((entry) => typeof entry === "string")
-  );
+  return isObject(value) && Object.values(value).every((entry) => typeof entry === "string");
 }

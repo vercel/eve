@@ -3,10 +3,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
-import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -24,11 +23,7 @@ class QueryCommand {
 }
 
 function createProvider(options?: JustBashEnvironmentOptions) {
-  const environment = JustBashSandbox.environment(options);
-  return createSandboxProviderHarness(
-    getSandboxEnvironmentRuntime(environment).implementation,
-    undefined,
-  );
+  return createSandboxEnvironmentHarness(JustBashSandbox.environment(options));
 }
 
 describe("just-bash persisted identities", () => {

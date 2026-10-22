@@ -8,6 +8,18 @@ import {
   type SandboxProviderResourceFile,
 } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import {
+  getSandboxEnvironmentRuntime,
+  type SandboxEnvironmentIdentity,
+} from "#shared/sandbox-environment.js";
+
+/** A harness over the provider implementation an environment carries. */
+export function createSandboxEnvironmentHarness(environment: SandboxEnvironmentIdentity) {
+  return createSandboxProviderHarness(
+    getSandboxEnvironmentRuntime(environment).implementation,
+    undefined,
+  );
+}
 
 export function createSandboxProviderHarness<
   Options extends object | undefined,

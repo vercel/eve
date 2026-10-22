@@ -6,9 +6,8 @@ import { decodeBytesToUtf8, defineCommand, MountableFs, ReadWriteFs } from "just
 import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
-import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { executeBashOnSandbox } from "#execution/sandbox/bash.js";
 import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
 import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
@@ -19,11 +18,7 @@ const createScratchDirectory = useTemporaryDirectories();
 // devDependency provides the `just-bash` install that applications opt
 // into explicitly.
 function createJustBashProvider(options: JustBashEnvironmentOptions = {}) {
-  const environment = JustBashSandbox.environment(options);
-  return createSandboxProviderHarness(
-    getSandboxEnvironmentRuntime(environment).implementation,
-    undefined,
-  );
+  return createSandboxEnvironmentHarness(JustBashSandbox.environment(options));
 }
 
 async function createTemporaryCacheDirectory(label: string): Promise<string> {
