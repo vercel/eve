@@ -101,8 +101,8 @@ for (const item of items) {
       );
     }
   } else if (slug === "memanto") {
-    if (!item.dependencies?.includes("@moorcheh-ai/memanto@0.2.29")) {
-      throw new Error('Registry item "memory/memanto" must depend on @moorcheh-ai/memanto@0.2.29.');
+    if (!item.dependencies?.some((dependency) => dependency.startsWith("@moorcheh-ai/memanto@"))) {
+      throw new Error('Registry item "memory/memanto" must depend on @moorcheh-ai/memanto.');
     }
     if (
       !("MOORCHEH_API_KEY" in (item.envVars ?? {})) ||
@@ -111,6 +111,10 @@ for (const item of items) {
       throw new Error(
         'Registry item "memory/memanto" must declare MOORCHEH_API_KEY and MEMANTO_BASE_URL as environment variables.',
       );
+    }
+    const source = await readFile(join(docsRoot, expectedPath), "utf8");
+    if (!/capture:\s*false/.test(source)) {
+      throw new Error('Registry item "memory/memanto" must keep automatic capture disabled.');
     }
   }
 }

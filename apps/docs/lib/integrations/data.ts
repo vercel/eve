@@ -1914,6 +1914,7 @@ export default defineMemory({
   provider: memantoMemory({
     apiKey: process.env.MOORCHEH_API_KEY,
     baseUrl: process.env.MEMANTO_BASE_URL,
+    capture: false,
   }),
   scope: byPrincipal,
 });
@@ -1924,9 +1925,9 @@ The filename creates the \`memanto\` slot. Before every turn, the provider recal
 
 All eve scopes share one Memanto agent. The provider tags each memory with a digest of eve's opaque scope key and filters recalls by that tag. Its tools are bound to the current scope, so the model cannot read or write another scope's memories.
 
-Memanto recalls before each turn, but automatic capture is off by default. To extract and save durable user messages after completed turns, set \`capture: true\`; this makes one server-side LLM call per turn. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
+Automatic capture is unsupported in this reviewed configuration. The published adapter does not make completed-turn capture idempotent across eve operation replays. The registry explicitly sets \`capture: false\`; leave it disabled until the provider supports replay-safe idempotency. The model can still use \`memanto__remember\` for deliberate, scope-bound memory writes. Those are model-invoked writes, not user-approved writes. Recalled content is user-provided data, not instructions. Do not store secrets or credentials in memory.
 
-During \`eve dev\`, omitting \`MEMANTO_BASE_URL\` starts a local server with \`uvx\`; install \`uv\` first. A deployment must use a running Memanto server at \`MEMANTO_BASE_URL\`. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
+The reviewed configuration expects a running Memanto server at \`MEMANTO_BASE_URL\`. If you omit it during \`eve dev\`, the adapter starts a local server with the unpinned default \`memanto\` package through \`uvx\`. That local-server path is outside the reviewed compatibility boundary. Keep \`MOORCHEH_API_KEY\` in the environment rather than prompts or source control. See the [Memanto eve guide](https://docs.memanto.ai/integrations/eve) for server setup and all provider options.`,
   },
 };
 

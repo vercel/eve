@@ -7,6 +7,7 @@ export default defineMemory({
   provider: memantoMemory({
     apiKey: process.env.MOORCHEH_API_KEY,
     baseUrl: process.env.MEMANTO_BASE_URL,
+    capture: false,
   }),
   scope: byPrincipal,
 });
