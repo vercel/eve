@@ -358,8 +358,11 @@ function startServerProcess(input: {
     }, timeoutMs);
 
     let settled = false;
+    // Accumulated because a failure line can span several `data` chunks.
+    let startupOutput = "";
     const cleanup = () => {
       settled = true;
+      startupOutput = "";
       clearTimeout(timeout);
       child.off("error", handleError);
       child.off("exit", handleEarlyExit);
@@ -388,8 +391,11 @@ function startServerProcess(input: {
       }
 
       const text = chunk.toString("utf8");
+      startupOutput += text;
       const startFailure =
-        input.listen === undefined ? undefined : readBuiltServerStartFailure(text, input.listen);
+        input.listen === undefined
+          ? undefined
+          : readBuiltServerStartFailure(startupOutput, input.listen);
 
       if (startFailure !== undefined) {
         flushOutput();

@@ -12,14 +12,17 @@ export function readBuiltServerStartFailure(
   listen: { readonly host: string; readonly port: number | string; readonly retryHint: string },
 ): Error | undefined {
   const failureIndex = output.indexOf(SRVX_START_FAILURE_MARKER);
+  // The error code is on the marker line; wait for the line to end so a
+  // partial read is not misclassified.
+  const failureLineEnd = failureIndex === -1 ? -1 : output.indexOf("\n", failureIndex);
 
-  if (failureIndex === -1) {
+  if (failureLineEnd === -1) {
     return undefined;
   }
 
   const failure = output.slice(failureIndex);
 
-  if (failure.includes("EADDRINUSE")) {
+  if (output.slice(failureIndex, failureLineEnd).includes("EADDRINUSE")) {
     return new Error(
       `Port ${String(listen.port)} on ${listen.host} is already in use. Another process is listening there; stop it or ${listen.retryHint}.`,
     );
