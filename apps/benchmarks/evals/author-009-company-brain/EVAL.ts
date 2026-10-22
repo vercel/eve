@@ -11,6 +11,12 @@ import { afterEach, expect, test, vi } from "vitest";
 const projectRoot = "atlas";
 const agentRoot = `${projectRoot}/agent`;
 const warehouse = "https://warehouse.lumen.dev/v1";
+const specialistModel = "anthropic/claude-sonnet-5";
+// The principal schedules pass as `appAuth`; `isScheduleAuth()` matches these three fields.
+const scheduleAuth = { authenticator: "app", principalId: "eve:app", principalType: "runtime" };
+
+/** A signed-in employee's groups, the schedule's app principal, or nobody. */
+type Caller = string[] | "schedule" | undefined;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -170,6 +176,105 @@ test("revenue_forecast reads the quarter's forecast", async () => {
   expect(JSON.stringify(output)).toContain("warehouse-row");
 });
 
+test("the scheduled run can use revenue_forecast", async () => {
+  const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
+  const tool = forecastTool(await resolveDynamic(definition, "schedule"));
+  expect(tool).toBeDefined();
+  const requests = stubWarehouse();
+  await tool.execute(tool.inputSchema.parse({ quarter: "2027-Q1" }), toolContext("schedule"));
+  expect(requests).toHaveLength(1);
+  expect(new URL(requests[0].url).searchParams.get("quarter")).toBe("2027-Q1");
+});
+
+test("analyze asks both specialists at the same time and returns both answers", async () => {
+  const tool = await load(`${agentRoot}/tools/analyze.ts`);
+  const sent: Array<{ name: string; message: unknown }> = [];
+  // A sequential implementation waits for the first answer before asking the second specialist.
+  let sentWhenFirstAnswerRead: number | undefined;
+  const ctx = {
+    ...toolContext(["eng"]),
+    agents: {},
+    ask: async () => {
+      throw new Error("analyze should not ask the employee anything.");
+    },
+    agent: (name: string) => ({
+      send: async (message: unknown) => {
+        sent.push({ name, message });
+        return {
+          result: async () => {
+            sentWhenFirstAnswerRead ??= sent.length;
+            return {
+              status: "waiting",
+              message: `${name}-answer`,
+              data: { answer: `${name}-answer` },
+            };
+          },
+        };
+      },
+    }),
+  };
+  const output = await tool.execute(
+    tool.inputSchema.parse({ question: "Why did ARR dip in March?" }),
+    ctx,
+  );
+
+  expect(sent.map((entry) => entry.name).sort()).toEqual(["analyst", "researcher"]);
+  for (const entry of sent) expect(JSON.stringify(entry.message)).toContain("ARR dip in March");
+  expect(sentWhenFirstAnswerRead).toBe(2);
+  expect(JSON.stringify(output)).toContain("analyst-answer");
+  expect(JSON.stringify(output)).toContain("researcher-answer");
+});
+
+test("the specialists are subagents hidden from the main model", async () => {
+  for (const name of ["analyst", "researcher"]) {
+    const definition = await load(`${agentRoot}/subagents/${name}/agent.ts`);
+    expect(definition.description, name).toBeTruthy();
+    expect(definition.model, name).toBe(specialistModel);
+    const disabled =
+      definition.tool === false ||
+      sourceFiles("tools", /\.ts$/).some(
+        (file) =>
+          file === `${agentRoot}/tools/${name}.ts` &&
+          /disableTool\s*\(/.test(readFileSync(file, "utf8")),
+      );
+    expect(disabled, name).toBe(true);
+  }
+});
+
+test("analyst queries the warehouse read-only and cannot read Notion", async () => {
+  const tool = await load(`${agentRoot}/subagents/analyst/tools/run_sql.ts`);
+  const requests = stubWarehouse();
+  await tool.execute(sqlInput(tool, "SELECT count(*) FROM analytics.customers"), toolContext([]));
+  expect(requests).toHaveLength(1);
+  expect(requests[0].url).toBe(`${warehouse}/query`);
+  const parsed = tool.inputSchema.safeParse({ query: "DELETE FROM analytics.orders" });
+  if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
+  expect(requests).toHaveLength(1);
+
+  const notion = sourceFiles("subagents/analyst", /\.ts$/).filter((file) =>
+    /mcp\.notion\.com/.test(resolvedSource(file)),
+  );
+  expect(notion).toEqual([]);
+});
+
+test("researcher reads Notion as the employee and cannot query the warehouse", async () => {
+  const file = sourceFiles("subagents/researcher/connections", /\.ts$/).find((path) =>
+    /mcp\.notion\.com\/mcp/.test(resolvedSource(path)),
+  );
+  expect(file).toBeDefined();
+  const connection = await load(file!);
+  expect(connection.url).toBe("https://mcp.notion.com/mcp");
+  expect(new Set(connection.tools?.allow)).toEqual(new Set(["search", "fetch"]));
+  const auth = typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
+  expect(auth?.vercelConnect?.connector).toBe("mcp.notion.com/atlas");
+  expect(auth?.principalType ?? auth?.credentialOwner).toBe("user");
+
+  const warehouseAccess = sourceFiles("subagents/researcher", /\.ts$/).filter((path) =>
+    /run_sql|warehouse\.lumen\.dev/.test(resolvedSource(path)),
+  );
+  expect(warehouseAccess).toEqual([]);
+});
+
 test("keeps metric definitions in a packaged skill with a reference file", () => {
   const skill = sourceFiles("skills", /^SKILL\.md$/).find((file) => {
     const references = sourceFiles(relativeToAgent(dirname(file)), /\.md$/).filter(
@@ -262,6 +367,20 @@ function sourceFilesUnder(root: string, pattern: RegExp): string[] {
     .sort();
 }
 
+/** A module's source plus the project files it imports, so re-exports count. */
+function resolvedSource(path: string, seen = new Set<string>()): string {
+  if (seen.has(path) || !existsSync(path)) return "";
+  seen.add(path);
+  const source = readFileSync(path, "utf8");
+  const imported = [...source.matchAll(/from\s+["'](\.{1,2}\/[^"']+)["']/g)].map((match) => {
+    const base = join(dirname(path), match[1]!.replace(/\.js$/, ""));
+    return [base, `${base}.ts`, join(base, "index.ts")].find(
+      (candidate) => existsSync(candidate) && candidate.endsWith(".ts"),
+    );
+  });
+  return [source, ...imported.map((file) => (file ? resolvedSource(file, seen) : ""))].join("\n");
+}
+
 function relativeToAgent(path: string): string {
   return path.slice(agentRoot.length + 1);
 }
@@ -305,25 +424,33 @@ function requiresApproval(decision: unknown): boolean {
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
-async function resolveDynamic(definition: any, groups: string[] | undefined): Promise<unknown> {
+async function resolveDynamic(definition: any, caller: Caller): Promise<unknown> {
   expect(definition?.kind).toBe("eve:dynamic");
   const handler = ["session.started", "turn.started", "step.started"]
     .map((event) => definition.events?.[event])
     .find((candidate) => typeof candidate === "function");
   expect(typeof handler).toBe("function");
-  return handler({}, { session: session(groups) });
+  return handler({}, { session: session(caller) });
 }
 
-function session(groups: string[] | undefined) {
+function session(caller: Caller) {
   const current =
-    groups === undefined
-      ? undefined
-      : { principalId: "sso:ada", principalType: "user", subject: "ada", attributes: { groups } };
+    caller === "schedule"
+      ? { ...scheduleAuth, attributes: {} }
+      : caller === undefined
+        ? undefined
+        : {
+            authenticator: "oidc",
+            principalId: "sso:ada",
+            principalType: "user",
+            subject: "ada",
+            attributes: { groups: caller },
+          };
   return { id: "session-1", auth: { current } };
 }
 
-function toolContext(groups: string[] | undefined) {
-  return { session: session(groups), callId: "call-1", abortSignal: new AbortController().signal };
+function toolContext(caller: Caller) {
+  return { session: session(caller), callId: "call-1", abortSignal: new AbortController().signal };
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
