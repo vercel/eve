@@ -27,6 +27,9 @@ const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
 const SESSION_USAGE_WINDOW_START_KEY = "eve.harness.sessionUsageWindowStart";
 const SESSION_USAGE_WINDOW_INDEX_KEY = "eve.harness.sessionUsageWindowIndex";
+const SESSION_USAGE_GRANTS_KEY = "eve.harness.sessionUsageGrants";
+// A copy of a grant arrives within moments of the grant; a few windows of memory are plenty.
+const MAX_REMEMBERED_GRANTS = 16;
 
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
@@ -87,22 +90,56 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
 
 /**
  * What the session spent since the last approved continuation, or since it
- * started. This is the `window` the session usage limit sees.
+ * started. This is the `window` the session usage limit sees. A window that
+ * starts at spend a child hasn't reported yet reads zero until it does.
  */
 export function getSessionUsageWindow(session: Pick<HarnessSession, "state">): TokenUsage {
-  return toUsage(subtractTokenUsage(getSessionTokenUsage(session), getWindowStart(session)));
+  return toUsage(
+    maxTokenUsage(
+      subtractTokenUsage(getSessionTokenUsage(session), getWindowStart(session)),
+      ZERO_TOKEN_USAGE,
+    ),
+  );
 }
 
-/** Starts a new usage window at the session's current totals, after an approved continuation. */
-export function resetSessionUsageWindow<T extends Pick<HarnessSession, "state">>(session: T): T {
+/**
+ * Starts a new usage window after an approved continuation, at the session's
+ * totals plus `unreported`: spend its children showed in their prompts but
+ * haven't reported yet. `grant` names the prompts the Continue answered; one
+ * reaches a session both as the answer and as a push, so a grant naming a
+ * prompt the session already granted changes nothing.
+ */
+export function resetSessionUsageWindow<T extends Pick<HarnessSession, "state">>(
+  session: T,
+  grant: readonly string[],
+  unreported?: TokenUsageDelta,
+): T {
+  const grants = getGrants(session);
+  if (grant.length === 0 || grants.some((ids) => ids.some((id) => grant.includes(id)))) {
+    return session;
+  }
+  const start = maxTokenUsage(
+    addTokenUsage(getSessionTokenUsage(session), toTokenUsageDelta(unreported)),
+    getWindowStart(session),
+  );
   return {
     ...session,
     state: {
       ...session.state,
+      [SESSION_USAGE_GRANTS_KEY]: [...grants, grant].slice(-MAX_REMEMBERED_GRANTS),
       [SESSION_USAGE_WINDOW_INDEX_KEY]: getSessionUsageWindowIndex(session) + 1,
-      [SESSION_USAGE_WINDOW_START_KEY]: getSessionTokenUsage(session),
+      [SESSION_USAGE_WINDOW_START_KEY]: start,
     },
   };
+}
+
+/** The prompts whose Continue started the current window. */
+export function getSessionUsageGrant(session: Pick<HarnessSession, "state">): readonly string[] {
+  return getGrants(session).at(-1) ?? [];
+}
+
+function getGrants(session: Pick<HarnessSession, "state">): readonly (readonly string[])[] {
+  return (session.state?.[SESSION_USAGE_GRANTS_KEY] as string[][] | undefined) ?? [];
 }
 
 /** How many usage windows the session has started before its current one. */
@@ -272,6 +309,17 @@ function subtractTokenUsage(total: TokenUsageTotals, base: TokenUsageTotals): To
     inputTokens: total.inputTokens - base.inputTokens,
     outputTokens: total.outputTokens - base.outputTokens,
     sawCost: total.sawCost || base.sawCost,
+  };
+}
+
+function maxTokenUsage(a: TokenUsageTotals, b: TokenUsageTotals): TokenUsageTotals {
+  return {
+    cacheReadTokens: Math.max(a.cacheReadTokens, b.cacheReadTokens),
+    cacheWriteTokens: Math.max(a.cacheWriteTokens, b.cacheWriteTokens),
+    costUsd: Math.max(a.costUsd, b.costUsd),
+    inputTokens: Math.max(a.inputTokens, b.inputTokens),
+    outputTokens: Math.max(a.outputTokens, b.outputTokens),
+    sawCost: a.sawCost || b.sawCost,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
+import { sessionLimitDecision } from "#harness/hitl/budget-request.js";
 
 const PROXY_INPUT_REQUEST_KINDS = {
   question: true,
@@ -61,12 +62,13 @@ export interface ProxyInputRequestBatch {
 
 /**
  * Whether the child, not this session, closes a relayed request. A child's tool approval can
- * refuse the person who answered, so it stays open here until the child's own `input.resolved`
- * or `approval.settled` arrives. This session closes every other relayed request once it
- * forwards the answer.
+ * refuse the person who answered, and a Continue elsewhere in the tree can settle a child's
+ * session-limit prompt before anyone answers it, so both stay open here until the child's own
+ * `input.resolved` or `approval.settled` arrives. This session closes every other relayed
+ * request, and a session-limit prompt it stops, once it forwards the answer.
  */
 export function resolvedByChild(kind: InputRequestKind): boolean {
-  return kind === "tool-approval";
+  return kind === "tool-approval" || kind === "session-limit";
 }
 
 /**
@@ -76,7 +78,16 @@ export function resolvedByChild(kind: InputRequestKind): boolean {
 export function resolvedForParent(
   data: InputResolvedStreamEvent["data"],
 ): InputResolvedStreamEvent["data"] | undefined {
-  const resolutions = data.resolutions.filter(({ kind }) => resolvedByChild(kind));
+  const resolutions = data.resolutions.filter(
+    (resolution) =>
+      resolvedByChild(resolution.kind) &&
+      // The parent already closed a prompt it stopped.
+      !(
+        resolution.kind === "session-limit" &&
+        resolution.response !== undefined &&
+        sessionLimitDecision(resolution.response) === false
+      ),
+  );
   return resolutions.length === 0 ? undefined : { ...data, resolutions };
 }
 

@@ -29,6 +29,46 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
+import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
+import { countRunUsage } from "#execution/agent-sessions/usage.js";
+import {
+  applySessionUsageContinuationStep,
+  continueSessionUsage,
+} from "#execution/session-usage-continuation.js";
+import { readDurableSession } from "#execution/durable-session-read.js";
+import { applySessionStateDelta } from "#execution/session/state-delta.js";
+import { createTask, readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
+import { DEFAULT_SESSION_USAGE_LIMIT } from "#harness/hitl/budget.js";
+import {
+  getSessionUsage,
+  getSessionUsageWindow,
+  getSessionUsageWindowIndex,
+} from "#harness/turn-tag-state.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { openInputs } from "#protocol/session-projection.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { TokenUsage } from "#shared/token-usage.js";
+
+const sent = vi.hoisted(() => ({
+  hook: vi.fn(async (..._args: unknown[]) => {}),
+  remote: vi.fn(async (..._args: unknown[]) => {}),
+  session: vi.fn(async (..._args: unknown[]) => {}),
+  workflowAsk: vi.fn(async (..._args: unknown[]) => {}),
+}));
+vi.mock("#execution/session-inbox/resume.js", () => ({ resumeSessionInbox: sent.session }));
+vi.mock("#internal/workflow/runtime.js", async (importOriginal: () => Promise<object>) => ({
+  ...(await importOriginal()),
+  resumeHook: sent.hook,
+}));
+vi.mock("#execution/agent-sessions/remote.js", () => ({
+  resolveRemoteAgentStreamHeaders: async () => ({}),
+  respondToRemoteAgentSession: sent.remote,
+}));
+vi.mock("#execution/tools/workflow/answer.js", async (importOriginal: () => Promise<object>) => ({
+  ...(await importOriginal()),
+  sendWorkflowAskAnswers: sent.workflowAsk,
+}));
 
 function fixture() {
   const order: string[] = [];
@@ -170,17 +210,8 @@ describe("proxied stream hooks", () => {
       {
         childContinuationToken: "child-token",
         payload: { inputResponses: [{ requestId: f.request.requestId, optionId: "continue" }] },
-        resolved: {
-          event: { sequence: 7, stepIndex: 2, turnId: "child-turn" },
-          resolutions: [
-            {
-              kind: "session-limit",
-              outcome: "answered",
-              requestId: f.request.requestId,
-              response: { requestId: f.request.requestId, optionId: "continue" },
-            },
-          ],
-        },
+        // The child closes its own prompt: a Continue elsewhere may have settled it first.
+        resolved: { event: { sequence: 7, stepIndex: 2, turnId: "child-turn" }, resolutions: [] },
       },
     ]);
   });
@@ -595,5 +626,346 @@ describe("proxied stream hooks", () => {
     expect(f.typed).toHaveBeenCalledTimes(2);
     expect(f.wildcard).toHaveBeenCalledTimes(2);
     expect(f.sessionWritable.locked).toBe(false);
+  });
+});
+
+// #4923: a turn's principal is fixed, so whichever route a relayed prompt
+// answers through, only the turn's own principal answers it by typing.
+describe("typed answers to a relayed prompt", () => {
+  const alice: SessionAuthContext = {
+    attributes: {},
+    authenticator: "test",
+    principalId: "alice",
+    principalType: "user",
+  };
+  const routes = [
+    ["a subagent", { send: sent.session }],
+    [
+      "a remote agent",
+      {
+        remote: {
+          name: "remote-child",
+          sessionId: "remote-session",
+          url: "https://remote.example",
+        },
+        send: sent.remote,
+      },
+    ],
+    [
+      "a workflow tool's ctx.ask",
+      { send: sent.workflowAsk, workflowAsk: { control: "control-1" } },
+    ],
+  ] as const;
+
+  it.each(routes)(
+    "keeps another principal's text for the parent when %s asked",
+    async (_, route) => {
+      const f = fixture();
+      f.ctx.set(AuthKey, alice);
+      const relayed = await emitProxiedSubagentEvent({
+        ...f,
+        hookPayload: {
+          ...f.hookPayload,
+          event: {
+            ...f.hookPayload.event,
+            requests: [
+              {
+                action: { callId: "deploy-1", input: {}, kind: "tool-call", toolName: "deploy" },
+                kind: "tool-approval",
+                options: [
+                  { id: "approve", label: "Approve" },
+                  { id: "cancel", label: "Cancel" },
+                ],
+                prompt: "Approve deploy?",
+                requestId: "approval-1",
+              },
+            ],
+          },
+          ...("remote" in route && { remote: route.remote }),
+        },
+        ...("workflowAsk" in route && { workflowAsk: route.workflowAsk }),
+      });
+      route.send.mockClear();
+      const { state } = relayed.sessionState.snapshot.session;
+      // Typed by the turn's own principal, the text would answer the prompt.
+      expect(
+        routeDeliverPayload({ payload: { message: "approve" }, resolveMessage: true, state })
+          .forChildren,
+      ).toHaveLength(1);
+      const delivery: DeliverHookPayload = {
+        auth: { ...alice, principalId: "bob" },
+        kind: "deliver",
+        payloads: [{ message: "approve" }],
+      };
+      const routed = await routeProxiedDeliverStep({
+        delivery,
+        serializedContext: relayed.serializedContext,
+        sessionState: relayed.sessionState,
+        sessionWritable: f.sessionWritable,
+      });
+      expect(routed).toMatchObject({ kind: "continue", remainder: delivery });
+      expect(route.send.mock.calls).toEqual([]);
+      expect(routed.stateDelta.serializedContext).toBeUndefined();
+    },
+  );
+});
+
+describe("a Continue on a relayed session-limit prompt", () => {
+  const alice: SessionAuthContext = {
+    attributes: {},
+    authenticator: "test",
+    principalId: "alice",
+    principalType: "user",
+  };
+  const M = 1_000_000;
+  const usage = (inputTokens: number) => ({
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    inputTokens,
+    outputTokens: 0,
+  });
+
+  /** A root whose direct child asked at 45M, through a started task run. */
+  async function rootWithChildPrompt(input: {
+    readonly root: string;
+    readonly counted?: TokenUsage;
+    readonly totals?: readonly TokenUsage[];
+  }) {
+    const f = fixture();
+    f.ctx.set(AuthKey, alice);
+    const requests = (input.totals ?? [usage(45 * M)]).map((total, index) =>
+      createSessionLimitContinuationRequest({
+        sessionId: index === 0 ? "child-session" : `nested-session-${String(index)}`,
+        total,
+        turnSequence: 0,
+        window: total,
+        windowIndex: 0,
+      }),
+    );
+    const request = requests[0]!;
+    const created = createTask(readTaskTable(f.durableSession.state), {
+      callId: "child-call",
+      kind: "agent",
+      name: "child",
+      resumable: true,
+      turnId: "parent-turn",
+    });
+    const run = {
+      hookToken: `${input.root}-run-hook`,
+      runId: `${input.root}-run`,
+      started: true,
+      usage: input.counted,
+    };
+    const table = { tasks: created.table.tasks.map((task) => ({ ...task, run })) };
+    const durableSession = writeTaskTable(f.durableSession, table);
+    enterSessionProjection(f.ctx, durableSession.state);
+    let parked = durableSession;
+    let relayed!: Awaited<ReturnType<typeof emitProxiedSubagentEvent>>;
+    for (const [index, next] of requests.entries()) {
+      enterSessionProjection(f.ctx, parked.state);
+      relayed = await emitProxiedSubagentEvent({
+        ...f,
+        durableSession: parked,
+        hookPayload: {
+          ...f.hookPayload,
+          // Each prompt comes from its own session in the run's tree.
+          childContinuationToken:
+            index === 0 ? f.hookPayload.childContinuationToken : `nested-token-${String(index)}`,
+          childSessionInbox: { sessionId: "child-session" },
+          event: { ...f.hookPayload.event, requests: [next], sequence: index },
+        },
+        runId: `${input.root}-run`,
+      });
+      parked = relayed.sessionState.snapshot.session;
+    }
+    sent.hook.mockClear();
+    sent.session.mockClear();
+    return { f, relayed, request, requests };
+  }
+
+  async function answer(
+    root: Awaited<ReturnType<typeof rootWithChildPrompt>>,
+    delivery: DeliverHookPayload,
+  ) {
+    const values = {
+      history: [],
+      serializedContext: root.relayed.serializedContext,
+      sessionState: root.relayed.sessionState,
+    };
+    const routed = await routeProxiedDeliverStep({
+      delivery,
+      serializedContext: values.serializedContext,
+      sessionState: values.sessionState,
+      sessionWritable: root.f.sessionWritable,
+    });
+    const next = applySessionStateDelta(values, routed.stateDelta);
+    return { next, routed, session: readDurableSession(next.sessionState) };
+  }
+
+  const continueOn = (requestId: string, auth: SessionAuthContext): DeliverHookPayload => ({
+    auth,
+    kind: "deliver",
+    payloads: [{ inputResponses: [{ optionId: "continue", requestId }] }],
+  });
+
+  it("settles Bob's Continue on Alice's relayed prompt without changing the root's auth", async () => {
+    const root = await rootWithChildPrompt({ root: "a" });
+    const bob = { ...alice, principalId: "bob" };
+
+    const { next, routed } = await answer(root, continueOn(root.request.requestId, bob));
+
+    expect(sent.session).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(sent.session.mock.calls[0])).toContain(root.request.requestId);
+    expect(routed.stateDelta.serializedContext).toBeUndefined();
+    expect(next.serializedContext["eve.auth"]).toEqual(root.relayed.serializedContext["eve.auth"]);
+  });
+
+  it("credits the child's unreported spend, so the root asks at 90M, not 45M", async () => {
+    const root = await rootWithChildPrompt({ root: "a" });
+
+    const { session } = await answer(root, continueOn(root.request.requestId, alice));
+
+    const reported = countRunUsage(session, usage(45 * M));
+    expect(getSessionUsage(reported).inputTokens).toBe(45 * M);
+    expect(
+      DEFAULT_SESSION_USAGE_LIMIT({
+        total: usage(45 * M),
+        window: getSessionUsageWindow(reported),
+      } as never),
+    ).toBe(false);
+    const sibling = countRunUsage(reported, usage(90 * M), usage(45 * M));
+    expect(getSessionUsageWindow(sibling).inputTokens).toBe(45 * M);
+    expect(
+      DEFAULT_SESSION_USAGE_LIMIT({
+        total: usage(90 * M),
+        window: getSessionUsageWindow(sibling),
+      } as never),
+    ).toBe(true);
+  });
+
+  it("credits only what the child's run has not reported yet", async () => {
+    const root = await rootWithChildPrompt({ counted: usage(30 * M), root: "a" });
+
+    const { session } = await answer(root, continueOn(root.request.requestId, alice));
+
+    expect(getSessionUsageWindow(session).inputTokens).toBe(0);
+    const reported = countRunUsage(session, usage(45 * M), usage(30 * M));
+    expect(getSessionUsageWindow(reported).inputTokens).toBe(0);
+    expect(
+      getSessionUsageWindow(countRunUsage(reported, usage(46 * M), usage(45 * M))).inputTokens,
+    ).toBe(M);
+  });
+
+  it("credits one run's overlapping prompts once, by the largest", async () => {
+    // A worker at 45M and its nested worker at 45M, which the worker already counted 30M of.
+    const root = await rootWithChildPrompt({ root: "a", totals: [usage(45 * M), usage(45 * M)] });
+    const parked = readDurableSession(root.relayed.sessionState);
+    expect(openInputs(storedProjection(parked.state))).toHaveLength(2);
+    expect(readHitlState(parked.state).relays.size).toBe(2);
+
+    const session = continueSessionUsage(parked, [root.request.requestId]);
+
+    const reported = countRunUsage(session, usage(60 * M));
+    expect(getSessionUsageWindow(reported).inputTokens).toBe(15 * M);
+  });
+
+  it("credits unreported cost, so a cost limit isn't charged twice", async () => {
+    const priced = (costUsd: number) => ({ ...usage(0), costUsd });
+    const root = await rootWithChildPrompt({ counted: priced(2), root: "a", totals: [priced(5)] });
+
+    const { session } = await answer(root, continueOn(root.request.requestId, alice));
+
+    const reported = countRunUsage(session, priced(5), priced(2));
+    expect(getSessionUsageWindow(reported).costUsd).toBe(0);
+  });
+
+  describe("grants a Continue once when it reaches a session as both answer and push", () => {
+    async function pushTo(
+      state: {
+        readonly serializedContext: Record<string, unknown>;
+        readonly sessionState: DurableSessionState;
+      },
+      requestIds: readonly string[],
+    ) {
+      const values = { history: [], ...state };
+      const applied = await applySessionUsageContinuationStep({
+        ...state,
+        requestIds,
+        sessionWritable: new WritableStream(),
+      });
+      return applySessionStateDelta(values, applied.stateDelta);
+    }
+
+    it("answer first, then the push", async () => {
+      const root = await rootWithChildPrompt({ root: "a" });
+      const { next } = await answer(root, continueOn(root.request.requestId, alice));
+      expect(sent.hook).toHaveBeenCalledTimes(1);
+
+      const pushed = await pushTo(next, [root.request.requestId]);
+
+      expect(sent.hook).toHaveBeenCalledTimes(1);
+      expect(getSessionUsageWindowIndex(readDurableSession(pushed.sessionState))).toBe(1);
+    });
+
+    it("push first, then the answer", async () => {
+      const root = await rootWithChildPrompt({ root: "a" });
+      const pushed = await pushTo(root.relayed, [root.request.requestId]);
+      expect(sent.hook).toHaveBeenCalledTimes(1);
+
+      const { session } = await answer(
+        { ...root, relayed: { ...root.relayed, ...pushed } },
+        continueOn(root.request.requestId, alice),
+      );
+
+      expect(sent.hook).toHaveBeenCalledTimes(1);
+      expect(getSessionUsageWindowIndex(session)).toBe(1);
+    });
+  });
+
+  it("pushes every prompt one payload approves, so each asker knows its copy", async () => {
+    const root = await rootWithChildPrompt({ root: "a", totals: [usage(45 * M), usage(45 * M)] });
+    const ids = root.requests.map((request) => request.requestId);
+
+    const { session } = await answer(root, {
+      auth: alice,
+      kind: "deliver",
+      payloads: [{ inputResponses: ids.map((requestId) => ({ optionId: "continue", requestId })) }],
+    });
+
+    expect(sent.hook.mock.calls).toEqual([
+      ["a-run-hook", { kind: "usage-continued", requestIds: ids }],
+    ]);
+    expect(getSessionUsageWindowIndex(session)).toBe(1);
+  });
+
+  it("still renews the root when the push to a run fails, so that child asks itself", async () => {
+    const root = await rootWithChildPrompt({ root: "a" });
+    sent.hook.mockRejectedValueOnce(new Error("hook unreachable"));
+
+    const { session } = await answer(root, continueOn(root.request.requestId, alice));
+
+    expect(sent.hook).toHaveBeenCalledTimes(1);
+    expect(getSessionUsageWindow(countRunUsage(session, usage(45 * M))).inputTokens).toBe(0);
+  });
+
+  it("pushes to this tree's runs only, and only on Continue", async () => {
+    const a = await rootWithChildPrompt({ root: "a" });
+    const b = await rootWithChildPrompt({ root: "b" });
+
+    await answer(a, continueOn(a.request.requestId, alice));
+    expect(sent.hook.mock.calls).toEqual([
+      ["a-run-hook", { kind: "usage-continued", requestIds: [a.request.requestId] }],
+    ]);
+
+    sent.hook.mockClear();
+    const { session } = await answer(b, {
+      auth: alice,
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "maybe", requestId: b.request.requestId }] }],
+    });
+    expect(sent.hook.mock.calls).toEqual([]);
+    expect(getSessionUsageWindow(session)).toEqual(
+      getSessionUsageWindow(readDurableSession(b.relayed.sessionState)),
+    );
   });
 });

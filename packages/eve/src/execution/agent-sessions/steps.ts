@@ -14,6 +14,8 @@ import {
   type SubagentStartTarget,
 } from "#execution/agent-sessions/target.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -244,6 +246,34 @@ export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Pro
       sessionId: address.sessionId,
     });
   }
+}
+
+/**
+ * Passes a session-limit Continue to the local sessions a run opened. Best
+ * effort: one that ended takes nothing, and one that misses it asks once
+ * itself. Remote agents keep their own limits.
+ */
+export async function continueAgentSessionsUsageStep(input: {
+  readonly requestIds: readonly string[];
+  readonly sessions: readonly OpenedAgentSession[];
+}): Promise<void> {
+  "use step";
+  await Promise.all(
+    input.sessions.map(async ({ address }) => {
+      if (address.kind === "remote") return;
+      await ignoreGoneTarget(
+        resumeSessionInbox(address.continuationToken, {
+          kind: "usage-continued",
+          requestIds: input.requestIds,
+        }),
+      ).catch((error: unknown) => {
+        logError(log, "usage continuation not delivered", error, {
+          name: address.name,
+          sessionId: address.sessionId,
+        });
+      });
+    }),
+  );
 }
 
 /** Ends a run's sessions when the run finishes, cancelling any turn still running. */

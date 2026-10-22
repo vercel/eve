@@ -256,16 +256,28 @@ export type WorkflowBodyCommand =
  * inbox. Only the session writes to it, so the run receives commands and
  * decisions in the order the session made them.
  */
-export type WorkflowToolRunControlMessage = WorkflowBodyCommand | WorkflowToolRunAskDecision;
+export type WorkflowToolRunControlMessage =
+  | WorkflowBodyCommand
+  | WorkflowToolRunAskDecision
+  | WorkflowToolRunUsageContinued;
+
+/** A session-limit Continue above raised the run's caller's allowance; its sessions raise theirs. */
+export interface WorkflowToolRunUsageContinued {
+  readonly kind: "usage-continued";
+  /** The prompts the Continue answered: a session already granted them takes nothing. */
+  readonly requestIds: readonly string[];
+}
 
 export function isWorkflowToolRunControlMessage(
   value: unknown,
 ): value is WorkflowToolRunControlMessage {
   if (typeof value !== "object" || value === null) return false;
-  const { call, kind, reason, requestId, response } = value as Record<string, unknown>;
+  const { call, kind, reason, requestId, requestIds, response } = value as Record<string, unknown>;
   switch (kind) {
     case "interrupt":
       return true;
+    case "usage-continued":
+      return Array.isArray(requestIds) && requestIds.every((id) => typeof id === "string");
     case "cancel":
     case "end":
       return typeof reason === "string";

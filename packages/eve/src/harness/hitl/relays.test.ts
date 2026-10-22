@@ -3,7 +3,7 @@ import { withRelays } from "#internal/testing/session-machine.js";
 
 import { readHitlState } from "./requests.js";
 
-import { parseProxyInputRequest, toProxyInputRequestEntries } from "./relays.js";
+import { parseProxyInputRequest, resolvedForParent, toProxyInputRequestEntries } from "./relays.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import { inputOptionSchema, type InputRequest, type InputRequestKind } from "#shared/input.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -391,5 +391,24 @@ describe("parseProxyInputRequest", () => {
         inputOptionSchema.array().safeParse(options).success,
       );
     }
+  });
+});
+
+describe("resolvedForParent", () => {
+  const resolved = (optionId: string) => ({
+    ...REQUEST_EVENT,
+    resolutions: [
+      {
+        kind: "session-limit" as const,
+        outcome: "answered" as const,
+        requestId: "limit",
+        response: { optionId, requestId: "limit" },
+      },
+    ],
+  });
+
+  it("relays a child's Continue but not a Stop the parent already closed", () => {
+    expect(resolvedForParent(resolved("continue"))).toEqual(resolved("continue"));
+    expect(resolvedForParent(resolved("stop"))).toBeUndefined();
   });
 });

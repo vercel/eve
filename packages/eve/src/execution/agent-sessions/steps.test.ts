@@ -5,9 +5,11 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import {
   cancelAgentSessionTurnStep,
+  continueAgentSessionsUsageStep,
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
+  type OpenedAgentSession,
 } from "#execution/agent-sessions/steps.js";
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   dispatch: vi.fn(),
   resolveSessionInbox: vi.fn(),
+  resumeSessionInbox: vi.fn(),
   runtimeConfig: undefined as unknown,
   targetKind: "local" as "local" | "remote",
   waitForCommandHookOwner: vi.fn(),
@@ -38,6 +41,7 @@ vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
 vi.mock("#execution/session-inbox/resume.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-inbox/resume.js")>()),
   resolveSessionInbox: mocks.resolveSessionInbox,
+  resumeSessionInbox: mocks.resumeSessionInbox,
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: async () => ({ graph: {} }),
@@ -231,5 +235,41 @@ describe("commands to a session that opened without waiting", () => {
       'Agent "reviewer" can no longer receive messages; its session ended.',
     );
     expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("continueAgentSessionsUsageStep", () => {
+  const opened = (sessionId: string): OpenedAgentSession => ({
+    address: {
+      continuationToken: `${sessionId}-token`,
+      kind: "local",
+      name: "worker",
+      nodeId: "worker",
+      sessionId,
+    },
+    context: {} as AgentSessionContext,
+    key: sessionId,
+  });
+
+  // A session that misses the push asks once itself, so nothing waits or retries.
+  it("tells every live session once, skipping one that ended and one it can't reach", async () => {
+    mocks.resumeSessionInbox.mockReset();
+    mocks.resumeSessionInbox
+      .mockRejectedValueOnce(new HookNotFoundError("ended-token"))
+      .mockRejectedValueOnce(new Error("inbox unavailable"))
+      .mockResolvedValueOnce({});
+
+    await continueAgentSessionsUsageStep({
+      requestIds: ["asker:0:limit:usage:0"],
+      sessions: [opened("ended"), opened("unreachable"), opened("live")],
+    });
+
+    const sent = { kind: "usage-continued", requestIds: ["asker:0:limit:usage:0"] };
+    expect(mocks.resumeSessionInbox.mock.calls).toEqual([
+      ["ended-token", sent],
+      ["unreachable-token", sent],
+      ["live-token", sent],
+    ]);
+    expect(mocks.waitForSessionInbox).not.toHaveBeenCalled();
   });
 });

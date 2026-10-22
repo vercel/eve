@@ -42,8 +42,18 @@ export interface SessionHandoverPayload {
   readonly payloads: readonly Exclude<SessionInboxPayload, SessionHandoverPayload>[];
 }
 
+/**
+ * The runtime sends this command, like a session failure: a session-limit
+ * Continue above this session raised its allowance.
+ */
+export interface SessionUsageContinuedPayload {
+  readonly kind: "usage-continued";
+  readonly requestIds: readonly string[];
+}
+
 export type SessionInboxPayload =
   | SessionFailurePayload
+  | SessionUsageContinuedPayload
   | SessionHandoverPayload
   | HookPayload
   | SessionCommand

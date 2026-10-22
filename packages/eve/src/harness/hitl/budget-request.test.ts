@@ -132,7 +132,7 @@ describe("resolveSessionLimitContinuation", () => {
         requests: [request],
         responses: [{ optionId: "continue", requestId: request.requestId }],
       }),
-    ).toEqual({ granted: true });
+    ).toEqual({ granted: true, requestId: request.requestId, windowIndex: 0 });
   });
 
   it("declines on the stop option", () => {
@@ -141,7 +141,7 @@ describe("resolveSessionLimitContinuation", () => {
         requests: [request],
         responses: [{ optionId: "stop", requestId: request.requestId }],
       }),
-    ).toEqual({ granted: false });
+    ).toEqual({ granted: false, requestId: request.requestId, windowIndex: 0 });
   });
 
   it("treats an unanswered or unrecognized response as ignored", () => {

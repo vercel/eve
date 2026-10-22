@@ -9,7 +9,9 @@ import {
   addTurnUsage,
   getSessionTokenUsage,
   getSessionUsage,
+  getSessionUsageGrant,
   getSessionUsageWindow,
+  getSessionUsageWindowIndex,
   getTurnUsageState,
   resetSessionUsageWindow,
   setTurnUsageState,
@@ -385,7 +387,7 @@ describe("session usage limit", () => {
       checkSessionUsageLimit({ canAsk: false, limit, session, turnSequence: 0 }),
     ).toMatchObject({ kind: "fail" });
 
-    const reset = resetSessionUsageWindow(session);
+    const reset = resetSessionUsageWindow(session, ["grant-1"]);
     expect(getSessionUsage(reset)).toMatchObject({ inputTokens: 10, outputTokens: 3 });
     expect(getSessionUsageWindow(reset)).toMatchObject({ inputTokens: 0, outputTokens: 0 });
     expect(
@@ -409,12 +411,48 @@ describe("session usage limit", () => {
     });
   });
 
+  it("starts a window at unreported child spend, reading zero until it reports", () => {
+    const session = sessionAfterStep({ inputTokens: 10, outputTokens: 3 });
+    const credited = resetSessionUsageWindow(session, ["child:0"], {
+      inputTokens: 45,
+      outputTokens: 0,
+    });
+
+    // The clamp keeps the limit from seeing negative usage before the child reports.
+    expect(getSessionUsageWindow(credited)).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    const reported = sessionAfterStep({ inputTokens: 50, outputTokens: 3 }, credited, "turn_1");
+    expect(getSessionUsageWindow(reported)).toMatchObject({ inputTokens: 5, outputTokens: 3 });
+  });
+
+  it("grants a Continue once, however many copies of it arrive", () => {
+    const session = sessionAfterStep({ inputTokens: 10, outputTokens: 3 });
+    const granted = resetSessionUsageWindow(session, ["child:0", "sibling:0"]);
+    const later = sessionAfterStep({ inputTokens: 50, outputTokens: 0 }, granted, "turn_1");
+
+    expect(resetSessionUsageWindow(later, ["sibling:0"])).toBe(later);
+    expect(getSessionUsageWindowIndex(later)).toBe(1);
+    expect(getSessionUsageGrant(later)).toEqual(["child:0", "sibling:0"]);
+    expect(resetSessionUsageWindow(later, [])).toBe(later);
+  });
+
+  it("never moves a window's start back when a continuation arrives again", () => {
+    const session = sessionAfterStep({ inputTokens: 10, outputTokens: 3 });
+    const credited = resetSessionUsageWindow(session, ["child:0"], {
+      inputTokens: 45,
+      outputTokens: 0,
+    });
+    const again = resetSessionUsageWindow(credited, ["other:0"]);
+
+    const later = sessionAfterStep({ inputTokens: 50, outputTokens: 0 }, again, "turn_1");
+    expect(getSessionUsageWindow(later)).toMatchObject({ inputTokens: 5 });
+  });
+
   it("passes the total and the window to the limit", () => {
     const limit = vi.fn<SessionUsageLimit>(() => false);
     const session = sessionAfterStep({ inputTokens: 4, outputTokens: 2 }, undefined, "turn_0");
     const later = sessionAfterStep(
       { inputTokens: 5, outputTokens: 1 },
-      resetSessionUsageWindow(session),
+      resetSessionUsageWindow(session, ["grant-2"]),
       "turn_1",
     );
 
@@ -447,7 +485,9 @@ describe("session usage limit", () => {
       checkSessionUsageLimit({ canAsk: false, limit, session: makeSession(), turnSequence: 0 }),
     ).toEqual({ kind: "within" });
     // A fresh window after a grant is empty too, even though the total is not.
-    const reset = resetSessionUsageWindow(sessionAfterStep({ inputTokens: 10, outputTokens: 3 }));
+    const reset = resetSessionUsageWindow(sessionAfterStep({ inputTokens: 10, outputTokens: 3 }), [
+      "grant-3",
+    ]);
     expect(
       checkSessionUsageLimit({ canAsk: false, limit, session: reset, turnSequence: 1 }),
     ).toEqual({ kind: "within" });
@@ -490,7 +530,7 @@ describe("session usage limit", () => {
     const firstId = ask(first);
     expect(ask(first)).toBe(firstId);
 
-    const approved = resetSessionUsageWindow(first);
+    const approved = resetSessionUsageWindow(first, ["grant-4"]);
     expect(
       checkSessionUsageLimit({ canAsk: true, limit, session: approved, turnSequence: 0 }),
     ).toEqual({

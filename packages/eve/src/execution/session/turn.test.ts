@@ -8,7 +8,12 @@ import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { turnStep } from "#execution/session/turn-step.js";
-import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  SessionAuthContext,
+  SessionCapabilities,
+  TurnCaller,
+} from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
@@ -515,6 +520,68 @@ describe("SessionExecution checkpoints", () => {
       ),
     ).resolves.toMatchObject({ caller: correction.caller, kind: "done" });
     expect(turnStep).toHaveBeenCalledTimes(2);
+  });
+
+  // #4923: another person's answer can resume a parked turn; the turn stays
+  // its owner's, so only the owner's text steers it.
+  it("keeps a resumed turn's owner when someone else's answer resumes it", async () => {
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "bob" };
+    let notify: (payload: SessionInboxPayload) => void = () => {};
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      takeLeading: () => [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(),
+      restore: vi.fn(),
+      onInterrupt: () => () => {},
+      onDelivery: (handler) => {
+        notify = handler;
+        return () => {};
+      },
+    };
+    const steered: boolean[] = [];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          for (const auth of [bob, alice]) {
+            notify({ auth, kind: "deliver", payloads: [{ message: "next" }] });
+            steered.push(input.steeringSignal?.aborted === true);
+          }
+          return {
+            action: "done",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+    const parked = createTestSessionState(
+      { continuationToken: "", hasProxyInputRequests: false, sessionId: "session-1" },
+      { sequence: 1, stepIndex: 0, turnId: "turn_1" },
+    );
+
+    await createExecution({
+      inbox,
+      serializedContext: { "eve.auth": alice },
+      sessionState: parked,
+    }).runTurn({
+      delivery: {
+        auth: bob,
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ optionId: "continue", requestId: "limit-1" }] }],
+      },
+    });
+    expect(steered).toEqual([false, true]);
   });
 
   it.each([

@@ -89,6 +89,7 @@ type WaitInput = {
 function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
+    caller: undefined,
     hasWorkingTasks: () => false,
     inbox: inbox,
     cursor,

@@ -177,6 +177,7 @@ describe("routeDeliverPayload", () => {
       {
         childContinuationToken: "child-a",
         payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
+        // Stop cancels this turn at once, so this session closes the prompt itself.
         resolved: {
           event: REQUEST_EVENT,
           resolutions: [
@@ -191,6 +192,32 @@ describe("routeDeliverPayload", () => {
       },
     ]);
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
+    expect(routed.continued).toEqual([]);
+  });
+
+  it.each([
+    { continues: true, response: { optionId: "continue", requestId: "req-limit" } },
+    { continues: false, response: { optionId: "maybe", requestId: "req-limit" } },
+    { continues: false, response: { requestId: "req-limit", text: "Approve" } },
+  ])("raises the allowance only for a real Continue: $response", ({ continues, response }) => {
+    const session = withRelays(createSession(), {
+      entries: [
+        [
+          "req-limit",
+          { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "session-limit" },
+        ],
+      ],
+      forChildContinuationToken: "child-a",
+    });
+
+    const routed = routeDeliverPayload({
+      payload: { inputResponses: [response] },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toMatchObject([{ childContinuationToken: "child-a" }]);
+    expect(routed.continued).toEqual(continues ? ["req-limit"] : []);
+    expect(routed.parentAction).toBeUndefined();
   });
 });
 

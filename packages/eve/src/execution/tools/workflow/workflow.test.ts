@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   deliver: vi.fn(),
   runBody: vi.fn(),
   applyCommand: vi.fn(),
+  continueUsage: vi.fn(),
   usageTotal: vi.fn(),
   body: { runSignal: new AbortController().signal },
   openWorkflowToolRunOwnerInbox: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
   }),
   startCallBody: (input: unknown) => ({
     close: async () => {},
+    continueUsage: mocks.continueUsage,
     control: {
       apply: mocks.applyCommand,
       runSignal: mocks.body.runSignal,
@@ -497,4 +499,44 @@ it("propagates terminal delivery failure instead of replacing the invocation out
   mocks.deliver.mockRejectedValue(new Error("delivery failed"));
   await expect(workflowToolRunWorkflow(input)).rejects.toThrow("delivery failed");
   expect(mocks.deliver).toHaveBeenCalledOnce();
+});
+
+it("passes a usage continuation to the body's agent sessions, and goes on when that fails", async () => {
+  let finish: () => void = () => {};
+  mocks.owner.mockReturnValue({
+    commands: createChannelReader(
+      "control",
+      (async function* (): AsyncGenerator<WorkflowToolRunControlMessage> {
+        yield { kind: "usage-continued", requestIds: ["child:0"] };
+        finish();
+        await new Promise<void>(() => {});
+      })(),
+    ),
+    handleMessage: mocks.deliver,
+    register: async () => true,
+    relay: relayThrough(mocks.deliver),
+  });
+  mocks.body.runSignal = new AbortController().signal;
+  mocks.runBody.mockReturnValue(
+    new Promise((resolve) => {
+      finish = () => resolve({ output: "done", status: "completed" });
+    }),
+  );
+  mocks.continueUsage.mockRejectedValue(new Error("inbox unavailable"));
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { send: vi.fn(), sent: 0 },
+    reader: createChannelReader("workflow", {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+      }),
+    }),
+  });
+
+  await workflowToolRunWorkflow(input);
+
+  expect(mocks.continueUsage).toHaveBeenCalledExactlyOnceWith(["child:0"]);
+  expect(mocks.applyCommand).not.toHaveBeenCalled();
+  expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ kind: "outcome", result: { output: "done", status: "completed" } }),
+  );
 });

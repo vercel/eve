@@ -16,7 +16,10 @@ import {
   type ResolvedInputBatch,
 } from "#harness/input-request-resolution.js";
 import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
-import { resolveSessionLimitContinuation } from "#harness/hitl/budget-request.js";
+import {
+  resolveSessionLimitContinuation,
+  type SessionLimitAnswer,
+} from "#harness/hitl/budget-request.js";
 import type { StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import {
@@ -186,7 +189,7 @@ export interface Answered extends Transition {
   /** The batches the delivery resolved, in order. */
   readonly resolved: readonly ResolvedInputBatch[];
   /** A decision on the session-limit prompt. */
-  readonly limit?: { readonly granted: boolean };
+  readonly limit?: SessionLimitAnswer;
 }
 
 /**

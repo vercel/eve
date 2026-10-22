@@ -15,7 +15,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
 
 /** Option id that starts a new usage window. */
-const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
+export const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
 
 /** Option id that declines continuation and ends the session. */
 export const SESSION_LIMIT_STOP_OPTION_ID = "stop";
@@ -114,7 +114,7 @@ export function isSessionLimitContinuationRequestId(requestId: string): boolean 
 export function resolveSessionLimitContinuation(input: {
   readonly requests: readonly InputRequest[];
   readonly responses: readonly InputResponse[];
-}): { readonly granted: boolean } | undefined {
+}): SessionLimitAnswer | undefined {
   const request = input.requests.find(isSessionLimitContinuationRequest);
   if (request === undefined) {
     return undefined;
@@ -124,13 +124,29 @@ export function resolveSessionLimitContinuation(input: {
   if (response === undefined) {
     return undefined;
   }
+  const granted = sessionLimitDecision(response);
+  if (granted === undefined) return undefined;
+  const windowIndex = /:limit:usage:(\d+)$/u.exec(request.requestId)?.[1];
+  const { requestId } = request;
+  return windowIndex === undefined
+    ? { granted, requestId }
+    : { granted, requestId, windowIndex: Number(windowIndex) };
+}
 
-  if (response.optionId === SESSION_LIMIT_CONTINUE_OPTION_ID) {
-    return { granted: true };
-  }
-  if (response.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
-    return { granted: false };
-  }
+/** An answer to a session-limit prompt, and the usage window the prompt was for. */
+export interface SessionLimitAnswer {
+  readonly granted: boolean;
+  readonly requestId: string;
+  readonly windowIndex?: number;
+}
 
+/**
+ * Whether an answer to a session-limit prompt approves (`true`) or stops
+ * (`false`). Any other answer, such as an unknown option or text alone,
+ * decides nothing.
+ */
+export function sessionLimitDecision(response: InputResponse): boolean | undefined {
+  if (response.optionId === SESSION_LIMIT_CONTINUE_OPTION_ID) return true;
+  if (response.optionId === SESSION_LIMIT_STOP_OPTION_ID) return false;
   return undefined;
 }

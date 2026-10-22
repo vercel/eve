@@ -7,6 +7,7 @@ import {
 } from "#execution/agent-sessions/requests.js";
 import {
   cancelAgentSessionTurnStep,
+  continueAgentSessionsUsageStep,
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
@@ -44,6 +45,7 @@ export function createAgentSessions(
   usage: RunUsageTally,
 ): {
   readonly close: () => Promise<void>;
+  readonly continueUsage: (requestIds: readonly string[]) => Promise<void>;
   readonly open: (name: string, options?: AgentSessionOptions) => AgentSession;
 } {
   const sessions: OpenedAgentSession[] = [];
@@ -56,6 +58,11 @@ export function createAgentSessions(
       const key = `${run.from.runId}:${String(handles)}`;
       handles += 1;
       return new RunAgentSession({ key, name, options, run, sessions, usage });
+    },
+    // A session still opening misses it, and asks once itself.
+    continueUsage: async (requestIds) => {
+      if (sessions.length === 0) return;
+      await continueAgentSessionsUsageStep({ requestIds, sessions: [...sessions] });
     },
     close: async () => {
       if (sessions.length === 0) return;

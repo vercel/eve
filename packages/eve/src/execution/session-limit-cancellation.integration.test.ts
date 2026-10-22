@@ -12,6 +12,8 @@ import {
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { defineHook } from "#public/definitions/hook.js";
 
 /**
  * Declining a session-limit continuation prompt cancels the in-flight turn
@@ -54,12 +56,13 @@ async function deliver(
   continuationToken: string,
   payload: Record<string, unknown>,
   timeout = 15_000,
+  auth: SessionAuthContext | null = null,
 ): Promise<void> {
   const deadline = Date.now() + timeout;
   while (true) {
     try {
       await resumeHook(sessionInboxHookToken(continuationToken), {
-        auth: null,
+        auth,
         kind: "send",
         payload,
       });
@@ -149,6 +152,269 @@ describe("session-limit continuation decline integration", () => {
         stream.dispose();
         await run.cancel();
       }
+    });
+  }, 60_000);
+
+  // #4923: a turn parked on its continuation prompt is still alice's turn, so
+  // bob's message waits for it to end instead of joining it.
+  it("keeps another principal's message out of a turn parked on its prompt", async () => {
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "bob" };
+    const seen: (readonly [string, unknown])[] = [];
+    const runtime = await createTestRuntime({
+      agent: {
+        limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 },
+        name: "limit-foreign-message",
+      },
+      modules: [
+        {
+          logicalPath: "hooks/observe.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "message.received"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.principalId]);
+                },
+                "turn.cancelled"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.principalId]);
+                },
+                "turn.completed"(event, ctx) {
+                  seen.push([event.type, ctx.session.auth.current?.principalId]);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    const continuationToken = "http:limit-foreign-message";
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Hello there" },
+          serializedContext: {
+            ...buildSerializedContext({ channelKind: "http", continuationToken }),
+            "eve.auth": alice,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await stream.nextTurn();
+        await deliver(continuationToken, { message: "keep going please" }, undefined, alice);
+        const promptTurn = await stream.nextTurn();
+        expect(promptTurn.at(-1)?.type).toBe("turn.waiting");
+        const requestId = requestIdFromPromptTurn(promptTurn);
+        seen.length = 0;
+
+        await deliver(continuationToken, { message: "bob here" }, undefined, bob);
+        await deliver(
+          continuationToken,
+          { inputResponses: [{ optionId: "stop", requestId }] },
+          undefined,
+          alice,
+        );
+        const declined = await stream.nextTurn();
+        expectNoFailureEvents(declined);
+        const bobTurn = await stream.nextTurn();
+        expectNoFailureEvents(bobTurn);
+        expect(seen).toEqual([
+          ["turn.cancelled", "alice"],
+          ["message.received", "bob"],
+        ]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+});
+
+// A Continue above a session pushes it a usage continuation. It carries no
+// principal, so it never starts a turn or changes whose turn it is.
+describe("session usage continuation pushed from above", () => {
+  const alice: SessionAuthContext = {
+    attributes: {},
+    authenticator: "test",
+    principalId: "alice",
+    principalType: "user",
+  };
+  const bob: SessionAuthContext = { ...alice, principalId: "bob" };
+
+  async function pushContinuation(
+    continuationToken: string,
+    requestIds: readonly string[] = ["parent-session:0:limit:usage:0"],
+  ): Promise<void> {
+    const deadline = Date.now() + 15_000;
+    while (true) {
+      try {
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          kind: "usage-continued",
+          requestIds,
+        });
+        return;
+      } catch (error) {
+        if (Date.now() > deadline) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+  }
+
+  async function withAliceSession(
+    name: string,
+    test: (input: {
+      readonly continuationToken: string;
+      readonly seen: (readonly [string, unknown])[];
+      readonly stream: ReturnType<typeof captureTurnEvents>;
+    }) => Promise<void>,
+  ): Promise<void> {
+    const seen: (readonly [string, unknown])[] = [];
+    const record = (type: string, principalId: unknown) => seen.push([type, principalId]);
+    const runtime = await createTestRuntime({
+      agent: { limits: { sessionUsage: ({ window }) => window.inputTokens >= 1 }, name },
+      modules: [
+        {
+          logicalPath: "hooks/observe.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "message.received"(event, ctx) {
+                  record(event.type, ctx.session.auth.current?.principalId);
+                },
+                "turn.started"(event, ctx) {
+                  record(event.type, ctx.session.auth.current?.principalId);
+                },
+                "turn.completed"(event, ctx) {
+                  record(event.type, ctx.session.auth.current?.principalId);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    const continuationToken = `http:${name}`;
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Hello there" },
+          serializedContext: {
+            ...buildSerializedContext({ channelKind: "http", continuationToken }),
+            "eve.auth": alice,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        await stream.nextTurn();
+        seen.length = 0;
+        await test({ continuationToken, seen, stream });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }
+
+  it("settles a parked turn's own prompt and keeps the turn its principal's", async () => {
+    await withAliceSession("limit-push-parked", async ({ continuationToken, seen, stream }) => {
+      await deliver(continuationToken, { message: "keep going please" }, undefined, alice);
+      const promptTurn = await stream.nextTurn();
+      expect(promptTurn.at(-1)?.type).toBe("turn.waiting");
+      const requestId = requestIdFromPromptTurn(promptTurn);
+      seen.length = 0;
+
+      await pushContinuation(continuationToken);
+      const resumed = await stream.nextTurn();
+
+      expectNoFailureEvents(resumed);
+      const resolved = filterEventsByType(resumed, "input.resolved");
+      expect(resolved.map((event) => event.data.resolutions[0]?.requestId)).toEqual([requestId]);
+      expect(resumed.at(-1)?.type).toBe("session.waiting");
+      expect(seen).toEqual([["turn.completed", "alice"]]);
+    });
+  }, 60_000);
+
+  it("starts no turn on an idle session and applies before its next model call", async () => {
+    await withAliceSession("limit-push-idle", async ({ continuationToken, seen, stream }) => {
+      await pushContinuation(continuationToken);
+      await deliver(continuationToken, { message: "keep going please" }, undefined, alice);
+      const next = await stream.nextTurn();
+
+      expectNoFailureEvents(next);
+      expect(filterEventsByType(next, "input.requested")).toHaveLength(0);
+      expect(next.at(-1)?.type).toBe("session.waiting");
+      expect(seen).toEqual([
+        ["turn.started", "alice"],
+        ["message.received", "alice"],
+        ["turn.completed", "alice"],
+      ]);
+    });
+  }, 60_000);
+
+  it("ignores a late push for a prompt it already answered itself", async () => {
+    await withAliceSession("limit-push-late", async ({ continuationToken, stream }) => {
+      await deliver(continuationToken, { message: "keep going please" }, undefined, alice);
+      const first = requestIdFromPromptTurn(await stream.nextTurn());
+      const answer = (optionId: string, requestId: string) =>
+        deliver(continuationToken, { inputResponses: [{ optionId, requestId }] }, undefined, alice);
+      await answer("continue", first);
+      expectNoFailureEvents(await stream.nextTurn());
+      await deliver(continuationToken, { message: "and more" }, undefined, alice);
+      const second = requestIdFromPromptTurn(await stream.nextTurn());
+      expect(second).not.toBe(first);
+
+      await pushContinuation(continuationToken, [first]);
+      await answer("stop", second);
+      const stopped = await stream.nextTurn();
+
+      expect(
+        filterEventsByType(stopped, "input.resolved").flatMap((event) =>
+          event.data.resolutions.map((resolution) => resolution.response?.optionId),
+        ),
+      ).toEqual(["stop"]);
+    });
+  }, 60_000);
+
+  it("keeps another principal's typed continue queued while the prompt is open", async () => {
+    await withAliceSession("limit-typed-continue", async ({ continuationToken, seen, stream }) => {
+      await deliver(continuationToken, { message: "keep going please" }, undefined, alice);
+      const promptTurn = await stream.nextTurn();
+      const requestId = requestIdFromPromptTurn(promptTurn);
+      seen.length = 0;
+
+      await deliver(continuationToken, { message: "continue" }, undefined, bob);
+      await deliver(
+        continuationToken,
+        { inputResponses: [{ optionId: "continue", requestId }] },
+        undefined,
+        alice,
+      );
+      const resumed = await stream.nextTurn();
+      expectNoFailureEvents(resumed);
+      expect(
+        filterEventsByType(resumed, "input.resolved").flatMap((event) =>
+          event.data.resolutions.map((resolution) => resolution.response),
+        ),
+      ).toEqual([{ optionId: "continue", requestId }]);
+      const bobTurn = await stream.nextTurn();
+      expectNoFailureEvents(bobTurn);
+      expect(seen.slice(0, 3)).toEqual([
+        ["turn.completed", "alice"],
+        ["turn.started", "bob"],
+        ["message.received", "bob"],
+      ]);
     });
   }, 60_000);
 });
