@@ -100,7 +100,7 @@ describe("workflowEntry integration", () => {
       }
     });
   });
-  it("registers first-turn abort hooks before a prewarmed session receives a message", async () => {
+  it("registers each turn's abort hooks while the session waits for its message", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
 
     await runtime.run(async () => {
@@ -114,33 +114,40 @@ describe("workflowEntry integration", () => {
         },
       ]);
       const stream = captureTurnEvents(run);
+      const world = await getWorld();
+      const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
       try {
-        await waitForHook(
-          { runId: run.runId },
-          { token: sessionInboxHookToken(sessionCommandHookToken(run.runId)) },
-        );
-        let abortTokensBeforeMessage: string[] = [];
-        await vi.waitFor(async () => {
-          abortTokensBeforeMessage = (
-            await (await getWorld()).hooks.list({ runId: run.runId })
-          ).data
-            .map((hook) => hook.token)
-            .filter((token) => token.startsWith("abrt_"));
-          expect(abortTokensBeforeMessage).toHaveLength(2);
-        });
+        await waitForHook({ runId: run.runId }, { token: inboxToken });
+        for (const [turn, message] of ["Say hello.", "Say hello again."].entries()) {
+          await vi.waitFor(async () => {
+            const hooks = (await world.hooks.list({ runId: run.runId })).data;
+            expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(
+              2 * (turn + 1),
+            );
+          });
+          await resumeHook(inboxToken, { kind: "send", payload: { message } });
+          await stream.nextTurn();
+        }
 
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "send",
-          payload: { message: "Say hello." },
-        });
-        await stream.nextTurn();
-
-        const abortTokensAfterTurn = (
-          await (await getWorld()).hooks.list({ runId: run.runId })
-        ).data
-          .map((hook) => hook.token)
-          .filter((token) => token.startsWith("abrt_"));
-        expect(abortTokensAfterTurn).toEqual(abortTokensBeforeMessage);
+        const events = (
+          await world.events.list({
+            pagination: { limit: 1000 },
+            resolveData: "all",
+            runId: run.runId,
+          })
+        ).data;
+        let abortHooks = 0;
+        const abortHooksBeforeEachTurn: number[] = [];
+        for (const event of events) {
+          if (event.eventType === "hook_created" && event.eventData.token.startsWith("abrt_")) {
+            abortHooks++;
+          }
+          if (event.eventType === "step_created" && event.eventData.stepName.endsWith("turnStep")) {
+            abortHooksBeforeEachTurn.push(abortHooks);
+          }
+        }
+        // Each turn uses the pair registered before its message; none starts its own.
+        expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
       } finally {
         stream.dispose();
         await run.cancel();

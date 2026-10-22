@@ -192,11 +192,7 @@ export async function withTimeout<T>(promise: Promise<T>, label: string): Promis
   }
 }
 
-export async function expectHookClaims(
-  runId: string,
-  tokens: string[],
-  options: { readonly turnStarted?: boolean } = {},
-): Promise<void> {
+export async function expectHookClaims(runId: string, tokens: string[]): Promise<void> {
   const events = await (
     await getWorld()
   ).events.list({
@@ -207,8 +203,6 @@ export async function expectHookClaims(
   const claims = events.data.flatMap((event) =>
     event.eventType === "hook_created" ? [event.eventData.token] : [],
   );
-  const signals = claims.filter((token) => token.startsWith("abrt_"));
-  expect(signals).toHaveLength(options.turnStarted === false ? 0 : 2);
   expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual(
     tokens.map(sessionInboxHookToken).sort(),
   );
