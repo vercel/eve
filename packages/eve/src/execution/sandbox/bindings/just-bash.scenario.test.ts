@@ -6,9 +6,9 @@ import { decodeBytesToUtf8, defineCommand, MountableFs, ReadWriteFs } from "just
 import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { createJustBashSandboxProvider } from "#execution/sandbox/bindings/just-bash.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
+import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
+import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { executeBashOnSandbox } from "#execution/sandbox/bash.js";
 import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
 import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
@@ -18,8 +18,12 @@ const createScratchDirectory = useTemporaryDirectories();
 // The whole file exercises the opt-in just-bash provider; the workspace
 // devDependency provides the `just-bash` install that applications opt
 // into explicitly.
-function createJustBashProvider(options: JustBashSandboxCreateOptions = {}) {
-  return createSandboxProviderHarness(createJustBashSandboxProvider(options), undefined);
+function createJustBashProvider(options: JustBashEnvironmentOptions = {}) {
+  const environment = JustBashSandbox.environment(options);
+  return createSandboxProviderHarness(
+    getSandboxEnvironmentRuntime(environment).implementation,
+    undefined,
+  );
 }
 
 async function createTemporaryCacheDirectory(label: string): Promise<string> {
@@ -298,9 +302,9 @@ describe("just-bash sandbox file API", () => {
 
     await firstHandle.onSandboxStop();
 
-    expect(state).toMatchObject({ version: 2 });
+    const { rootPath } = state as { readonly rootPath: string };
     await expect(
-      readFile(join(state.rootPath, "fs", "workspace", "persisted.txt"), "utf8"),
+      readFile(join(rootPath, "fs", "workspace", "persisted.txt"), "utf8"),
     ).resolves.toBe("survives reconnect");
 
     const reconnectedHandle = await provider.openSession({

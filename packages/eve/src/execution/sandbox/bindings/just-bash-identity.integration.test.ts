@@ -69,8 +69,8 @@ describe("just-bash persisted identities", () => {
       noAutoInstall: { templateKey: GOLDEN.templateKeys.noAutoInstall },
       resources: { templateKey: GOLDEN.templateKeys.resources },
     });
-    for (const { templateKey } of Object.values(keys)) {
-      await access(join(appRoot, "just-bash/templates", templateKey as string));
+    for (const templateKey of Object.values(GOLDEN.templateKeys)) {
+      await access(join(appRoot, "just-bash/templates", templateKey));
     }
   });
 
