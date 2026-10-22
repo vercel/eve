@@ -169,13 +169,12 @@ export function createVercelSandbox(
         loadDeleteSandboxModule,
         session,
       });
-      if (
-        session.created &&
-        artifact.snapshotId === undefined &&
-        runtimeOptions.networkPolicy !== undefined
-      ) {
+      // Template-less sessions run base setup with open egress, so the policy
+      // from open() or else the environment applies only once it finishes.
+      const networkPolicy = runtimeOptions.networkPolicy ?? createOptions.networkPolicy;
+      if (session.created && artifact.snapshotId === undefined && networkPolicy !== undefined) {
         try {
-          await applyInitialVercelNetworkPolicy(session.sandbox, runtimeOptions.networkPolicy);
+          await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
         } catch (error) {
           try {
             await deleteVercelSandbox({

@@ -1352,11 +1352,15 @@ describe("createVercelSandbox", () => {
     await expect(handle.onSandboxStop()).rejects.toThrow("provider unreachable");
   });
 
-  it("applies the open-time policy after template-less base setup", async () => {
+  it.each([
+    ["open()", {}, { networkPolicy: "deny-all" as const }],
+    ["the environment", { networkPolicy: "deny-all" as const }, {}],
+  ])("applies the policy from %s after template-less base setup", async (_, environment, open) => {
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi.fn().mockResolvedValue(sessionSandbox);
     const provider = createSandboxProviderHarness(
       createVercelImplementation({
+        createOptions: environment,
         createSandbox: async ({ createOptions }) => {
           await create(createOptions);
           return sessionSandbox as never;
@@ -1364,7 +1368,7 @@ describe("createVercelSandbox", () => {
         loadSandboxModule: async () =>
           ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
       }),
-      { networkPolicy: "deny-all" },
+      open,
       { preparedArtifact: () => ({}) },
     );
 
