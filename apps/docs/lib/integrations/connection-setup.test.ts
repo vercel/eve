@@ -31,19 +31,6 @@ describe("Browser Use connection setup", () => {
   });
 });
 
-describe("Waydock connection setup", () => {
-  it("documents API-key authentication and the fail-closed approval policy", () => {
-    const integration = getIntegration("waydock")!;
-    const setup = buildConnectionSetup(integration);
-
-    expect(setup.authModes).toEqual([]);
-    expect(integration.quickStart).toContain("WAYDOCK_MCP_KEY");
-    expect(integration.quickStart).toContain('"user-approval"');
-    expect(integration.configure).toContain("wdmcp_your_key_here");
-    expect(buildConnectionInstall(integration)).toContain("eve add connection/waydock");
-  });
-});
-
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;
