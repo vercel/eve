@@ -229,9 +229,14 @@
       },
       "files": [
         {
-          "path": "registry/extensions/nimble.ts",
+          "path": "registry/extensions/nimble/extension.ts",
           "type": "registry:file",
-          "target": "agent/extensions/nimble.ts"
+          "target": "agent/extensions/nimble/extension.ts"
+        },
+        {
+          "path": "registry/extensions/nimble/tools/agent_start.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/nimble/tools/agent_start.ts"
         }
       ]
     },
