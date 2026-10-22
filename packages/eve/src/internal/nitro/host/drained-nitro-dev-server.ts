@@ -30,15 +30,27 @@ interface DevelopmentWorkerReplacement {
   readonly workerData: Readonly<Record<string, unknown>>;
 }
 
-interface RunnerSlot {
-  activeExchanges: number;
+/** One built host. Its workspace outlives every runner started from it. */
+interface WorkerHost {
   readonly dispose?: () => Promise<void>;
   disposed: boolean;
   readonly entry: string;
+  /** Runners started from this host that have not been released yet. */
+  runners: number;
+  readonly workerData: Readonly<Record<string, unknown>>;
+}
+
+interface RunnerSlot {
+  activeExchanges: number;
+  readonly host: WorkerHost;
   quietListeners: Array<() => void>;
   releasePromise: Promise<void> | undefined;
   readonly runner: DevelopmentRunner;
-  readonly workerData: Readonly<Record<string, unknown>>;
+}
+
+interface SpareRunner {
+  ready: boolean;
+  readonly slot: RunnerSlot;
 }
 
 interface DevServerLogger {
@@ -66,7 +78,10 @@ export class DrainedNitroDevServer {
   #closed = false;
   #clientAddressSecret: string | undefined;
   #controlHandler: ((request: Request) => Promise<Response | undefined>) | undefined;
+  /** Host of the active worker; its workspace stays until another host replaces it. */
+  #currentHost: WorkerHost | undefined;
   #pendingSlot: RunnerSlot | undefined;
+  #spare: SpareRunner | undefined;
   #replaceChain: Promise<void> = Promise.resolve();
   #runnerCounter = 0;
 
@@ -98,43 +113,82 @@ export class DrainedNitroDevServer {
    * closed at shutdown), so a caller can tie workspace cleanup to it.
    */
   replaceWorker(replacement: DevelopmentWorkerReplacement): Promise<void> {
-    const next = this.#replaceChain
-      .catch(() => undefined)
-      .then(async () => await this.#replaceWorker(replacement));
+    const host: WorkerHost = {
+      dispose: replacement.dispose,
+      disposed: false,
+      entry: replacement.entry,
+      runners: 0,
+      workerData: replacement.workerData,
+    };
+    return this.#enqueueSwap(async () => await this.#swapTo(host, false));
+  }
+
+  /**
+   * Swaps the active worker for a fresh one started from the same host, and
+   * drains the old one. Node never unloads a module, so a worker keeps every
+   * generation it imported; a fresh worker loads only the active one. Uses the
+   * spare from {@link prepareSpareWorker} when it is ready.
+   */
+  recycleWorker(): Promise<void> {
+    return this.#enqueueSwap(async () => {
+      const host = this.#currentHost;
+      if (host === undefined) {
+        throw new Error("Development server has no worker to recycle.");
+      }
+      await this.#swapTo(host, true);
+    });
+  }
+
+  /**
+   * Starts a spare worker from the active host in the background, so the next
+   * {@link recycleWorker} does not wait for a worker to boot. A spare for an
+   * older host is discarded.
+   */
+  prepareSpareWorker(): void {
+    const host = this.#currentHost;
+    if (this.#closed || host === undefined || this.#spare?.slot.host === host) {
+      return;
+    }
+    this.#discardSpare();
+
+    const spare: SpareRunner = { ready: false, slot: this.#createSlot(host) };
+    this.#spare = spare;
+    const forget = () => {
+      if (this.#spare !== spare) return;
+      this.#spare = undefined;
+      void this.#releaseSlot(spare.slot);
+    };
+    spare.slot.runner.onceClosed(forget);
+    void spare.slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS).then(() => {
+      spare.ready = true;
+    }, forget);
+  }
+
+  #enqueueSwap(swap: () => Promise<void>): Promise<void> {
+    const next = this.#replaceChain.catch(() => undefined).then(swap);
     this.#replaceChain = next.catch(() => undefined);
     return next;
   }
 
-  async #replaceWorker(replacement: DevelopmentWorkerReplacement): Promise<void> {
+  async #swapTo(host: WorkerHost, useSpare: boolean): Promise<void> {
     if (this.#closed) {
       throw new Error("Development server is closed.");
     }
 
-    const slot: RunnerSlot = {
-      activeExchanges: 0,
-      dispose: replacement.dispose,
-      disposed: false,
-      entry: replacement.entry,
-      quietListeners: [],
-      releasePromise: undefined,
-      runner: this.#createRunner({
-        entry: replacement.entry,
-        name: `eve-dev-${String(this.#runnerCounter++)}`,
-        workerData: replacement.workerData,
-      }),
-      workerData: replacement.workerData,
-    };
-
-    this.#pendingSlot = slot;
-    try {
-      await slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS);
-    } catch (error) {
-      await slot.runner.close(error).catch(() => undefined);
-      // The candidate never served; its workspace has no further use.
-      await this.#disposeSlot(slot);
-      throw error;
-    } finally {
-      this.#pendingSlot = undefined;
+    let slot = useSpare ? this.#takeReadySpare(host) : undefined;
+    if (slot === undefined) {
+      slot = this.#createSlot(host);
+      this.#pendingSlot = slot;
+      try {
+        await slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS);
+      } catch (error) {
+        await slot.runner.close(error).catch(() => undefined);
+        // A candidate host that never served has no further use for its workspace.
+        await this.#releaseSlot(slot);
+        throw error;
+      } finally {
+        this.#pendingSlot = undefined;
+      }
     }
 
     if (this.#closed) {
@@ -143,14 +197,56 @@ export class DrainedNitroDevServer {
     }
 
     const previous = this.#active;
-    this.#active = slot;
-    slot.runner.onceClosed(() => {
-      void this.#handleRunnerClose(slot);
+    const activeSlot = slot;
+    this.#active = activeSlot;
+    this.#currentHost = host;
+    if (this.#spare !== undefined && this.#spare.slot.host !== host) {
+      this.#discardSpare();
+    }
+    activeSlot.runner.onceClosed(() => {
+      void this.#handleRunnerClose(activeSlot);
     });
     this.#wakeActiveWaiters();
 
     if (previous !== undefined) {
       this.#drainInBackground(previous);
+    }
+  }
+
+  #createSlot(host: WorkerHost): RunnerSlot {
+    host.runners += 1;
+    return {
+      activeExchanges: 0,
+      host,
+      quietListeners: [],
+      releasePromise: undefined,
+      runner: this.#createRunner({
+        entry: host.entry,
+        name: `eve-dev-${String(this.#runnerCounter++)}`,
+        workerData: host.workerData,
+      }),
+    };
+  }
+
+  #takeReadySpare(host: WorkerHost): RunnerSlot | undefined {
+    const spare = this.#spare;
+    if (
+      spare === undefined ||
+      spare.slot.host !== host ||
+      !spare.ready ||
+      spare.slot.runner.closed
+    ) {
+      return undefined;
+    }
+    this.#spare = undefined;
+    return spare.slot;
+  }
+
+  #discardSpare(): void {
+    const spare = this.#spare;
+    this.#spare = undefined;
+    if (spare !== undefined) {
+      void this.#releaseSlot(spare.slot);
     }
   }
 
@@ -258,10 +354,12 @@ export class DrainedNitroDevServer {
     const listeners = [...this.#listeners];
     const listenerClosePromises = listeners.map((listener) => listener.beginClose());
 
-    const slots = [this.#active, ...this.#draining].filter(
+    const slots = [this.#active, this.#spare?.slot, ...this.#draining].filter(
       (slot): slot is RunnerSlot => slot !== undefined,
     );
     this.#active = undefined;
+    this.#currentHost = undefined;
+    this.#spare = undefined;
     this.#draining.clear();
     await Promise.all(slots.map(async (slot) => await this.#releaseSlot(slot)));
 
@@ -278,15 +376,18 @@ export class DrainedNitroDevServer {
 
   async #releaseSlotOnce(slot: RunnerSlot): Promise<void> {
     await slot.runner.close().catch(() => undefined);
-    await this.#disposeSlot(slot);
+    slot.host.runners -= 1;
+    if (slot.host.runners === 0 && slot.host !== this.#currentHost) {
+      await this.#disposeHost(slot.host);
+    }
   }
 
-  async #disposeSlot(slot: RunnerSlot): Promise<void> {
-    if (slot.dispose === undefined || slot.disposed) {
+  async #disposeHost(host: WorkerHost): Promise<void> {
+    if (host.dispose === undefined || host.disposed) {
       return;
     }
-    slot.disposed = true;
-    await slot.dispose().catch((error) => {
+    host.disposed = true;
+    await host.dispose().catch((error) => {
       this.#logger.error(
         `[eve:dev] failed to dispose a retired dev host: ${toErrorMessage(error)}`,
       );
@@ -309,16 +410,9 @@ export class DrainedNitroDevServer {
           await this.#releaseSlot(slot);
           return;
         }
-        // The crashed worker's workspace must survive for the restart, so the
-        // replacement inherits its dispose and the crashed slot releases
-        // nothing itself.
-        slot.disposed = true;
-        slot.releasePromise = Promise.resolve();
-        await this.#replaceWorker({
-          dispose: slot.dispose,
-          entry: slot.entry,
-          workerData: slot.workerData,
-        });
+        // The host stays current, so releasing the crashed runner keeps its workspace.
+        await this.#releaseSlot(slot);
+        await this.#swapTo(slot.host, true);
       });
     this.#replaceChain = next.catch(() => undefined);
     try {

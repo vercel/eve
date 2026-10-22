@@ -237,6 +237,41 @@ describe("drained Nitro dev server", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it("keeps a host's workspace until its last recycled or spare worker retires", async () => {
+    const { createRunner, runners } = createRunnerFactory(
+      async (_request, runnerIndex) => new Response(`runner-${String(runnerIndex)}`),
+    );
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    const listener = await listen(server);
+    const disposeFirst = vi.fn(async () => undefined);
+    const disposeSecond = vi.fn(async () => undefined);
+    const body = async () => await (await fetch(new URL("/", listener.url))).text();
+
+    await server.replaceWorker(replacement("/tmp/first.mjs", disposeFirst));
+    await server.recycleWorker();
+    await expect(body()).resolves.toBe("runner-1");
+    await vi.waitFor(() => expect(runners[0]?.closeMock).toHaveBeenCalled());
+    expect(disposeFirst).not.toHaveBeenCalled();
+
+    server.prepareSpareWorker();
+    await vi.waitFor(() => expect(runners[2]?.waitForReady).toHaveBeenCalled());
+    await server.recycleWorker();
+    await expect(body()).resolves.toBe("runner-2");
+    expect(runners).toHaveLength(3);
+
+    server.prepareSpareWorker();
+    await server.replaceWorker(replacement("/tmp/second.mjs", disposeSecond));
+    await expect(body()).resolves.toBe("runner-4");
+    await vi.waitFor(() => {
+      expect(runners[3]?.closeMock).toHaveBeenCalled();
+      expect(disposeFirst).toHaveBeenCalledOnce();
+    });
+    expect(disposeSecond).not.toHaveBeenCalled();
+
+    await server.close();
+    expect(disposeSecond).toHaveBeenCalledOnce();
+  });
+
   it("destroys the socket when an upgrade fails and closes idempotently", async () => {
     const { createRunner, runners } = createRunnerFactory(async () => new Response("ok"));
     const server = new DrainedNitroDevServer(LOGGER, createRunner);

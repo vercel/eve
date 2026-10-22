@@ -2,13 +2,12 @@ import { handleDevelopmentModelCredentialRequest } from "#internal/model-auth/de
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
 
-import type { Nitro } from "nitro/types";
-
-import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import {
+  beginDevelopmentBuild,
+  closeDevelopmentBuildProcesses,
+} from "#internal/nitro/host/dev-build-host.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
-import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
-import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import {
@@ -243,7 +242,6 @@ async function closeDevelopmentServerResources(input: {
   readonly authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
   readonly devServer: NitroDevelopmentServer | undefined;
   readonly developmentSandboxRunId: string;
-  readonly nitro: Nitro | undefined;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): Promise<{ readonly errors: readonly unknown[]; readonly listenerClosed: boolean }> {
   const errors: unknown[] = [];
@@ -257,6 +255,9 @@ async function closeDevelopmentServerResources(input: {
     }
   };
 
+  // Before the watcher, which waits for an in-flight rebuild: that rebuild's
+  // build process exits, so the rebuild fails instead of finishing first.
+  closeDevelopmentBuildProcesses();
   const authoredSourceWatcher = input.authoredSourceWatcher;
   if (authoredSourceWatcher !== undefined) {
     await attempt(() => authoredSourceWatcher.close());
@@ -267,10 +268,6 @@ async function closeDevelopmentServerResources(input: {
   }
   const devServer = input.devServer;
   const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
-  const nitro = input.nitro;
-  if (nitro !== undefined) {
-    await attempt(() => nitro.close());
-  }
   await attempt(() =>
     stopDevelopmentSandboxResources({
       appRoot: input.appRoot,
@@ -400,7 +397,7 @@ async function startNitroDevelopmentServer(
   const previousDevelopmentSandboxRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
   const developmentSandboxRunId = createDevelopmentSandboxRunId();
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
-  let nitro: Nitro | undefined;
+  const build = beginDevelopmentBuild();
   let devServer: NitroDevelopmentServer | undefined;
   let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
@@ -414,18 +411,12 @@ async function startNitroDevelopmentServer(
   try {
     const preparedHost = await devBootPhase(
       "compiling agent",
-      () => prepareDevelopmentApplicationHost(project.appRoot, { developmentExtensions }),
+      () => build.prepare({ appRoot: project.appRoot, developmentExtensions }),
       options.onBootProgress,
     );
     preparedDevelopmentHost = preparedHost;
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
-    const activeNitro = await devBootPhase(
-      "creating dev server",
-      () => createDevelopmentApplicationNitro(preparedHost),
-      options.onBootProgress,
-    );
-    nitro = activeNitro;
-    devServer = new DrainedNitroDevServer(activeNitro.logger);
+    devServer = new DrainedNitroDevServer();
     const activeDevServer = devServer;
     const workflowTransportSecret = randomBytes(32).toString("base64url");
     activeDevServer.setClientAddressSecret(workflowTransportSecret);
@@ -454,8 +445,7 @@ async function startNitroDevelopmentServer(
       workflowWorld,
       transportSecret: workflowTransportSecret,
     });
-    const hostname =
-      options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
+    const hostname = options.host ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const retryOnAddressInUse = requestedPort === undefined;
     const server = await devBootPhase(
       "binding port",
@@ -484,11 +474,8 @@ async function startNitroDevelopmentServer(
     await devBootPhase(
       "building dev bundle",
       async () => {
-        const payload = await buildDevelopmentHostCandidate({
-          host: preparedHost,
-          nitro: activeNitro,
-        });
-        nitro = undefined;
+        const payload = await build.buildHost(preparedHost);
+        build.close();
         const workspace = preparedHost.workspace;
         initialWorkspaceTransferred = true;
         await activeDevServer.replaceWorker({
@@ -505,6 +492,7 @@ async function startNitroDevelopmentServer(
       },
       options.onBootProgress,
     );
+    activeDevServer.prepareSpareWorker();
     await workflowWorld?.start();
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
@@ -545,7 +533,6 @@ async function startNitroDevelopmentServer(
           authoredSourceWatcher: authoredSourceWatcherOnClose,
           devServer: devServerOnClose,
           developmentSandboxRunId,
-          nitro: undefined,
           workflowWorld: workflowWorldOnClose,
         });
         if (cleanup.listenerClosed) {
@@ -576,9 +563,10 @@ async function startNitroDevelopmentServer(
       authoredSourceWatcher,
       devServer,
       developmentSandboxRunId,
-      nitro,
       workflowWorld,
     });
+    // After cleanup has stopped spares, so closing does not fork a new one.
+    build.close();
     const cleanupErrors = [...cleanup.errors];
     if (preparedDevelopmentHost !== undefined && !initialGenerationPublished) {
       await discardDevelopmentGeneration(preparedDevelopmentHost.generation).catch(

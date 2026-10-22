@@ -151,7 +151,7 @@ describe("eve dev server rebuild transactions", () => {
   );
 
   it(
-    "publishes authored tool removals without replacing the active host",
+    "publishes authored tool removals on a fresh worker without rebuilding the host",
     async () => {
       const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -167,7 +167,8 @@ describe("eve dev server rebuild transactions", () => {
         await forceDevelopmentRebuild(server.url);
 
         await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
-        await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
+        await expect(fetchText(server.url, "/worker-id")).resolves.not.toBe(initialWorkerId);
+        expect(server.stdout()).not.toContain(STRUCTURAL_RELOAD_LOG_LINE);
         expect(
           (await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name),
         ).not.toContain("get_weather");

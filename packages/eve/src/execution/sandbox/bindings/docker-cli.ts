@@ -119,6 +119,19 @@ export function isLinuxDockerDaemonAvailableSync(): boolean {
   return cachedLinuxDockerAvailability;
 }
 
+/** This thread's cached probe result, or `undefined` before the first probe. */
+export function peekLinuxDockerDaemonAvailability(): boolean | undefined {
+  return cachedLinuxDockerAvailability;
+}
+
+/**
+ * Adopts a probe result from an earlier thread of the same process, so a
+ * replacement compile worker keeps the provider selection stable.
+ */
+export function adoptLinuxDockerDaemonAvailability(available: boolean): void {
+  cachedLinuxDockerAvailability ??= available;
+}
+
 function probeLinuxDockerDaemonSync(): boolean {
   try {
     const result = spawnSync(resolveDockerExecutable(), ["version", "--format", "{{.Server.Os}}"], {

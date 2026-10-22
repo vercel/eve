@@ -223,6 +223,39 @@ describe("transactional authored rebuild coordinator", () => {
     await devServer.close();
   });
 
+  it("serves each runtime generation from a fresh worker and retires the previous one", async () => {
+    const runners: Array<ReturnType<DevelopmentRunnerFactory>> = [];
+    const devServer = new DrainedNitroDevServer({ error: () => undefined }, (options) => {
+      const runner = createRunner(options);
+      runners.push(runner);
+      return runner;
+    });
+    mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
+    const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      devServer,
+      initialHost: createHost("initial", "run-1"),
+    });
+    await devServer.replaceWorker({ entry: "/tmp/initial.mjs", workerData: {} });
+
+    for (const [index, id] of ["second", "third"].entries()) {
+      mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(
+        createHost(id, `run-${String(index + 2)}`),
+      );
+      mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
+      await expect(coordinator.rebuild({ changedPaths: [] })).resolves.toMatchObject({
+        kind: "runtime",
+      });
+    }
+
+    // Initial worker, its fresh replacement, then spares: the second rebuild
+    // swaps to the spare the first one prepared instead of booting another.
+    expect(runners).toHaveLength(4);
+    await vi.waitFor(() => {
+      expect(runners.map((runner) => runner.closed)).toEqual([true, true, false, false]);
+    });
+    await devServer.close();
+  });
+
   it("discards the candidate and keeps prior state when the swap itself fails", async () => {
     const failingFactory: DevelopmentRunnerFactory = () => {
       const runner = createRunner({ entry: "/tmp/eve-test/entry.mjs", name: "t", workerData: {} });

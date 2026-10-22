@@ -1,9 +1,11 @@
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
-import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
+import {
+  beginDevelopmentBuild,
+  type DevelopmentBuildSession,
+} from "#internal/nitro/host/dev-build-host.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
-import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import { toErrorMessage } from "#shared/errors.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
@@ -116,10 +118,12 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     // edit are consumed by that attempt — a later retry would otherwise
     // commit without ever reapplying the change.
     const environmentReload = stageDevelopmentEnvironmentFiles(previousHost.appRoot);
+    const build = beginDevelopmentBuild();
     let nextHost: PreparedDevelopmentApplicationHost | undefined;
 
     try {
-      nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot, {
+      nextHost = await build.prepare({
+        appRoot: previousHost.appRoot,
         changedPaths: input.changedPaths,
         developmentExtensions: this.#developmentExtensions,
         previousExtensions: previousHost.workspaceExtensions,
@@ -163,10 +167,14 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         this.#commitState(committedHost, nextHostFingerprint, nextRuntimeFingerprint);
         nextHost = undefined;
         environmentReload.commit();
+        // A worker keeps every generation it imports, so each generation gets a fresh
+        // one. Activating first means the retired worker never loads the new generation.
+        await this.#recycleWorker();
         return { host: committedHost, kind: "runtime" };
       }
 
       const result = await this.#commitStructuralHost({
+        build,
         hasRuntimeChange,
         nextHost,
         nextHostFingerprint,
@@ -174,6 +182,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       });
       nextHost = undefined;
       environmentReload.commit();
+      this.#devServer.prepareSpareWorker();
       return result;
     } catch (error) {
       if (error instanceof PostCommitDevelopmentRebuildError) {
@@ -187,10 +196,25 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         throw error;
       }
       throw await discardFailedHost(error, nextHost);
+    } finally {
+      build.close();
     }
   }
 
+  async #recycleWorker(): Promise<void> {
+    try {
+      await this.#devServer.recycleWorker();
+    } catch (error) {
+      // The new generation is already active, and the current worker serves it too.
+      console.warn(
+        `[eve:dev] could not start a fresh dev worker; the current worker keeps serving: ${toErrorMessage(error)}`,
+      );
+    }
+    this.#devServer.prepareSpareWorker();
+  }
+
   async #commitStructuralHost(input: {
+    readonly build: DevelopmentBuildSession;
     readonly hasRuntimeChange: boolean;
     readonly nextHost: PreparedDevelopmentApplicationHost;
     readonly nextHostFingerprint: string;
@@ -206,8 +230,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       };
     }
 
-    const nitro = await createDevelopmentApplicationNitro(committedHost);
-    const payload = await buildDevelopmentHostCandidate({ host: committedHost, nitro });
+    const payload = await input.build.buildHost(committedHost);
 
     // Worker first, pointer second: a failed candidate leaves both the
     // previous worker and the previous pointer untouched, and the
