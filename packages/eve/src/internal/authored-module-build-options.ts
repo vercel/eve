@@ -6,6 +6,7 @@ import { authoredModuleConditions } from "#internal/authored-module-conditions.j
 import { RESOLVE_EXTENSIONS } from "#internal/authored-package-boundary.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 /** Rolldown options shared by every authored module bundle of one package. */
@@ -18,6 +19,7 @@ export function createAuthoredModuleBuildOptions(input: {
     cwd: input.packageRoot,
     platform: "node",
     plugins: [
+      createPseudoPackagePlugin(),
       ...input.plugins,
       createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
       createAuthoredAssetImportPlugin({ packageRoot: input.packageRoot }),

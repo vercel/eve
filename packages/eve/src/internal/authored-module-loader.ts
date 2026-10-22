@@ -40,6 +40,7 @@ import {
   buildSingleRolldownChunk,
   buildWithNitroRolldown,
 } from "#internal/bundler/nitro-rolldown.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
@@ -258,6 +259,7 @@ export async function bundleExtensionDistributionGraph(input: {
   readonly imports: readonly string[];
 }> {
   const plugins = [
+    createPseudoPackagePlugin(),
     createAuthoredDirectiveGuardPlugin(),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin({ packageRoot: input.packageRoot }),
@@ -367,6 +369,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
+    createPseudoPackagePlugin(),
     createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
     // Before callback stamping, which must see the stub and never the directive.
     createAuthoredWorkflowDirectivePlugin({ appRoot: input.appRoot, recorder: workflowSources }),

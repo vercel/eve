@@ -28,6 +28,7 @@ import { prepareSkillServerAssets } from "#internal/nitro/host/skill-server-asse
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import {
   createExtensionExternalDependencyPlugin,
   resolveExtensionExternalDependencyPaths,
@@ -612,7 +613,10 @@ function createApplicationNitroBundlerConfiguration(
     preparedHost.compileResult.manifest,
     ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
   ].flatMap((node) => node.extensionMounts);
+  // eve's plugins run before Nitro's externals and tracing plugins, so a
+  // pseudo-package never reaches the output as a live import.
   const nitroBundlerPlugins = [
+    createPseudoPackagePlugin(),
     options.development ? null : createDevelopmentRuntimePrunePlugin(),
     compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
