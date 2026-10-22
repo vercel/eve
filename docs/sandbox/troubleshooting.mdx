@@ -3,7 +3,7 @@ title: "Sandbox Troubleshooting"
 description: "Causes and fixes for common eve sandbox errors in the sandbox file, after a build, when a session resumes, and during eve dev."
 ---
 
-Each section below starts with the beginning of the error message, so you can search this page for the text you see. Most sandbox errors come from one of three mismatches: the sandbox file does not match what eve expects, the build output does not match the runtime, or a session's recorded sandbox does not match the current agent.
+Sections whose heading is in code format start with the beginning of an error message, so you can search this page for the text you see. Most sandbox errors come from one of three mismatches: the sandbox file does not match what eve expects, the build output does not match the runtime, or a session's recorded sandbox does not match the current agent.
 
 ## Errors in the sandbox file
 
@@ -30,22 +30,29 @@ Sandbox "sandbox.ts" opened an environment other than the one it exports as `env
 
 The selector called `open()` on a different environment object than the exported `environment`. This happens when the selector creates an environment inline, such as `DefaultSandbox.environment().open()`, or imports another sandbox file's environment. Create the environment once at module scope, export it, and call `environment.open()` on that export.
 
-### `can open only one sandbox` or `already opened this session's sandbox`
+### `can open only one sandbox`
 
 ```text
 A sandbox definition can open only one sandbox.
-Sandbox "sandbox.ts" already opened this session's sandbox.
 ```
 
-The selector called `environment.open()` more than once, or code outside the selector tried to open a sandbox that already exists. Call `environment.open()` once in the `defineSandbox()` selector and return that sandbox. From tools and other runtime code, use `ctx.getSandbox()` to reach the existing sandbox.
+The selector called `environment.open()` more than once. Call `environment.open()` once in the `defineSandbox()` selector and return that sandbox.
 
-### `uses defineParentSandbox(), but this agent has no parent sandbox`
+### `can only open sandboxes inside defineSandbox()`
 
 ```text
-Sandbox "sandbox.ts" uses defineParentSandbox(), but this agent has no parent sandbox to share.
+Sandbox environments can only open sandboxes inside defineSandbox().
 ```
 
-Only a declared subagent can [share its parent's sandbox](/docs/sandbox#share-a-parent-sandbox). If the agent has no parent, give it its own sandbox file with `defineSandbox()` and an exported environment. A related error, `selects parent.sandbox but agent node "..." has no parent`, reports the same problem when eve loads the agent graph.
+Code outside the `defineSandbox()` selector called `environment.open()`, for example a tool or a module's top level. Only the selector opens the sandbox. From tools and other runtime code, use `ctx.getSandbox()` to reach the session's sandbox, or `ctx.getSandbox(environment)` to keep the provider-specific session type.
+
+### `selects parent.sandbox but agent node ... has no parent`
+
+```text
+Sandbox "sandbox.ts" selects parent.sandbox but agent node "..." has no parent.
+```
+
+The sandbox file uses `defineParentSandbox()`, but the agent is not a declared subagent, so it has no parent sandbox to share. eve reports this when it loads the agent graph. Only a declared subagent can [share its parent's sandbox](/docs/sandbox#share-a-parent-sandbox). Give this agent its own sandbox file with `defineSandbox()` and an exported environment.
 
 ## Errors after a build or deploy
 
@@ -59,29 +66,29 @@ No prepared "docker" sandbox environment is recorded for agent node "...".
 
 The deployed build output has no prepared artifact for this agent. This usually means the output came from `eve build --skip-sandbox-prewarm`, which [the CLI reference](/docs/reference/cli) marks as not deployable. Run `eve build` without that flag and deploy its output together with the runtime.
 
-### `The build prepared the sandbox ... but this runtime selects provider`
+### `The prepared sandbox artifact ... was created with provider`
 
 ```text
-The build prepared the sandbox for agent node "..." with provider "just-bash", but this runtime selects provider "docker".
+The prepared sandbox artifact for agent node "..." was created with provider "just-bash", but this process selects provider "docker".
 ```
 
-The build host and the runtime host selected different providers. `DefaultSandbox.environment()` [selects a provider in each process](/docs/sandbox/default#how-eve-selects-the-provider), so a build on a machine without Docker and a server with Docker disagree. Run `eve build` on a host where the runtime's provider is available, or select the provider explicitly, for example with `DockerSandbox.environment()`, so every host uses the same one.
+The process that prepared the sandbox and the process that uses it selected different providers. `DefaultSandbox.environment()` [selects a provider in each process](/docs/sandbox/default#how-eve-selects-the-provider), so a build on a machine without Docker and a server with Docker disagree. Prepare the sandbox where the using process's provider is available: run `eve build` on that host, or restart `eve dev` locally. To make every process use the same provider, select it explicitly, for example with `DockerSandbox.environment()`.
 
-### `Sandbox template ... was not found`
+### `Sandbox template ... is not available to this runtime`
 
 ```text
-Sandbox template "..." for provider "docker" was not found.
+Sandbox template "..." for provider "docker" is not available to this runtime.
 ```
 
-The build recorded an artifact, but the provider can no longer find it:
+The build recorded an artifact, but the provider can no longer use its template. When the provider knows the cause, the message includes it:
 
-| Provider  | Common cause                                                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------- |
-| Docker    | The image was removed, for example by `docker image prune -a`, or the build used another Docker daemon. |
-| Vercel    | The snapshot expired or was deleted.                                                                    |
-| just-bash | The template under `.eve/sandbox-cache/` was deleted, or the build ran on another machine.              |
+| Provider  | Common cause                                                                                                                                    |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker    | The Docker daemon has no image with that name: it was removed, for example by `docker image prune -a`, or the build used another Docker daemon. |
+| Vercel    | The Vercel Sandbox snapshot expired or was deleted.                                                                                             |
+| just-bash | The template directory under `.eve/sandbox-cache/` was deleted, or the build ran on another machine.                                            |
 
-Run `eve build` again where the runtime runs, or redeploy, to recreate the template.
+The runtime never recreates a template. Run `eve build` again and deploy its output.
 
 ### `Invalid prepared ... artifact`
 
@@ -115,13 +122,13 @@ The session's recorded sandbox state does not match the format that this eve ver
 
 During `eve dev`, the first sandbox access prepares every sandbox environment in the current build. See [Prepare a reusable environment](/docs/sandbox#prepare-a-reusable-environment).
 
-### `Timed out after 10 minutes waiting for another eve dev worker`
+### `Timed out after 10 minutes waiting for another request or eve dev worker`
 
 ```text
-Timed out after 10 minutes waiting for another eve dev worker to prepare sandbox environments (this request needs provider "docker").
+Timed out after 10 minutes waiting for another request or eve dev worker to prepare sandbox environments (this request needs provider "docker").
 ```
 
-Another worker is still preparing environments. Check the `eve dev` output, or run `eve logs`, to find the slow step, such as an image pull, a Dockerfile build, or a `prepare` callback. Retry after preparation finishes, or restart `eve dev` to cancel it.
+Another request or `eve dev` worker is still preparing environments. Check the `eve dev` output, or run `eve logs`, to find the slow step, such as an image pull, a Dockerfile build, or a `prepare` callback. Retry after preparation finishes, or restart `eve dev` to cancel it.
 
 ## Provider setup errors
 

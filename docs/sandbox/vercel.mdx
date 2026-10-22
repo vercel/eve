@@ -39,7 +39,7 @@ eve resolves each value from the first source that is set:
 | Team ID    | `teamId` environment option, `VERCEL_TEAM_ID`, `VERCEL_ORG_ID`  |
 | Project ID | `projectId` environment option, `VERCEL_PROJECT_ID`             |
 
-When all three resolve, eve uses them. Otherwise, eve requests a Vercel OIDC token and reads the team and project from the token. On Vercel, the deployment provides that token. Elsewhere, eve reads `VERCEL_OIDC_TOKEN` and, when it is missing or expired, refreshes it with your Vercel CLI login and the project linked in `.vercel/project.json`. If that also fails, eve passes no credentials, and the Vercel Sandbox SDK reports its own authentication error.
+When all three resolve, eve uses them. Otherwise, eve requests a Vercel OIDC token and reads the team and project from the token. On Vercel, the deployment provides that token. Elsewhere, eve reads `VERCEL_OIDC_TOKEN` and, when it is missing or expired, refreshes it with your Vercel CLI login and the project linked in `.vercel/project.json`. If that also fails, eve falls back to the Vercel Sandbox SDK's own credential lookup, which reports an authentication error if it finds none.
 
 For local development, link the app to a Vercel project and pull its environment into `.env.local`:
 
