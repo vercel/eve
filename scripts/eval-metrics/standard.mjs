@@ -7,6 +7,11 @@
 // delegated spend reaches them through rolled-up `usage`. Reliability counts
 // read every captured session, because a failure anywhere matters.
 //
+// Cost: `cost.total_usd` is the rolled-up spend, including delegated work and
+// compaction summaries; `cost.primary_usd` sums the root sessions' model steps;
+// `cost.subagent_usd` is the difference, and is unavailable when a root session
+// compacted, since compaction cost is in the rollup but in no step.
+//
 // Attribution partitions root turn time with a fixed precedence, so the parts
 // add up to the turn total: human wait, then task (delegated work, including
 // time a `task_wait` call blocks on it), tool (any other requested action),
@@ -407,8 +412,15 @@ function costAndTokens(roots) {
       : measured(rollups.reduce((total, usage) => total + usage[field], 0));
   const total = rolled("costUsd", "missing-rolled-up-cost");
 
+  // Compaction summary calls add their cost to the session's rolled-up usage,
+  // but no step event reports it, so total − steps would count it as
+  // subagent spend. Until compaction events carry usage, the split is unknown.
+  const compacted = roots.some(
+    ({ events }) => selectEvents(events, "compaction.completed").length > 0,
+  );
   let subagent;
   if (total.status !== "measured") subagent = total;
+  else if (compacted) subagent = unavailable("compaction-cost-unattributed");
   else if (primary.status === "not-applicable") subagent = total;
   else if (primary.status !== "measured") subagent = primary;
   else {

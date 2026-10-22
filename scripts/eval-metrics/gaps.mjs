@@ -41,8 +41,15 @@ export function classifyOutcome(evalArtifact) {
   const completedSteps = events.filter((event) => event.type === "step.completed").length;
   const error = typeof evalArtifact?.error === "string" ? evalArtifact.error : undefined;
   const timedOut = error !== undefined && TIMEOUT_ERROR.test(error);
-  if (completedSteps === 0 && timedOut) return gap("timeout-before-first-step");
-  if (completedSteps === 0 && error !== undefined) return gap("error-before-first-step");
+  // An eval that never completed a model step is a gap only when nothing in its
+  // sessions failed for a real reason. Infrastructure failures returned above,
+  // so any failure left (a first step rejected for its request, such as a
+  // context too long, or a failed session) is the eval's own failure, even
+  // though the eval then records an error.
+  const realFailure = failures.length > 0;
+  if (completedSteps === 0 && timedOut && !realFailure) return gap("timeout-before-first-step");
+  if (completedSteps === 0 && error !== undefined && !realFailure)
+    return gap("error-before-first-step");
   if (timedOut) return { outcome: "timed_out" };
   if (isParkedOnInput(evalArtifact)) return { outcome: "parked" };
   return { outcome: "completed" };

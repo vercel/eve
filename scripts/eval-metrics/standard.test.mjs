@@ -138,6 +138,22 @@ test("splits cost into primary steps and rolled-up subagent spend", () => {
   assert.equal(v["cost.subagent_usd"], 1.5);
 });
 
+test("compaction cost stays in the total but leaves the subagent split unknown", () => {
+  // Compaction summary calls are paid and roll up into session usage, but no
+  // step reports them: total − steps would misreport them as subagent spend.
+  const artifact = withCosts(fixture("agent-tools-compacted-image"), {
+    stepCost: 0.25,
+    rolledUpCost: 2,
+  });
+  const { metrics } = deriveAttemptMetrics(artifact);
+  assert.equal(values(metrics)["cost.total_usd"], 2);
+  assert.equal(metrics["cost.primary_usd"].status, "measured");
+  assert.deepEqual(metrics["cost.subagent_usd"], {
+    status: "unavailable",
+    reason: "compaction-cost-unattributed",
+  });
+});
+
 test("a single step without cost makes cost unavailable, and inconsistent rollups are flagged", () => {
   const artifact = withCosts(fixture("agent-tools-ends-turn-function"), {
     stepCost: 1,
@@ -326,6 +342,17 @@ test("classifies outcomes and every gap reason", () => {
   assert.deepEqual(classifyOutcome(synthetic([completedStep], { error: timeout })), {
     outcome: "timed_out",
   });
+  // A first step that fails for a real reason is the eval's failure, not a gap,
+  // even though the eval then records an error (e.g. from expectOk()).
+  for (const details of [{ statusCode: 400 }, { statusCode: 413 }]) {
+    const rejected = { ...failed("MODEL_CALL_FAILED", details), error: "expectOk: session failed" };
+    assert.deepEqual(classifyOutcome(rejected), { outcome: "completed" });
+    assert.deepEqual(classifyOutcome({ ...rejected, error: timeout }), { outcome: "timed_out" });
+  }
+  const sessionFailed = synthetic([event("session.failed", 40, { code: "SESSION_FAILED" })], {
+    error: "expectOk: session failed",
+  });
+  assert.deepEqual(classifyOutcome(sessionFailed), { outcome: "completed" });
   const parked = synthetic([
     event("turn.started", 0, { turnId: "t" }),
     completedStep,
