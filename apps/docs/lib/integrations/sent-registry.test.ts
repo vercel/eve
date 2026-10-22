@@ -33,16 +33,18 @@ const APPROVAL_REQUIRED = new Set([
 
 describe("Sent registry connection", () => {
   it("keeps the reviewed tool and approval boundary", () => {
-    expect(sentConnection.tools.allow).toEqual(ALLOWED_TOOLS);
+    const { tools, approval } = sentConnection;
+    if (!tools || !("allow" in tools) || typeof approval !== "function") {
+      throw new Error("Sent requires a tool allowlist and per-tool approval policy.");
+    }
+    expect(tools.allow).toEqual(ALLOWED_TOOLS);
 
     for (const toolName of ALLOWED_TOOLS) {
-      expect(sentConnection.approval({ toolName: `sent__${toolName}` })).toBe(
+      expect(approval({ toolName: `sent__${toolName}` } as never)).toBe(
         APPROVAL_REQUIRED.has(toolName) ? "user-approval" : "not-applicable",
       );
     }
 
-    expect(sentConnection.approval({ toolName: "sent__sender_profiles.create" })).toBe(
-      "not-applicable",
-    );
+    expect(approval({ toolName: "sent__sender_profiles.create" } as never)).toBe("not-applicable");
   });
 });

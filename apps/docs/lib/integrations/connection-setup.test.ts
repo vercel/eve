@@ -75,7 +75,11 @@ describe("Sent connection setup", () => {
     expect(quickStart).toContain('? "user-approval"');
     expect(quickStart).toContain(': "not-applicable"');
 
-    for (const toolName of sentConnection.tools.allow ?? []) {
+    const { tools } = sentConnection;
+    if (!tools || !("allow" in tools)) {
+      throw new Error("Sent requires a tool allowlist.");
+    }
+    for (const toolName of tools.allow) {
       expect(quickStart).toContain(`"${toolName}"`);
     }
 
