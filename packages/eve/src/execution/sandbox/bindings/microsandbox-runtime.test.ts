@@ -730,6 +730,10 @@ function createMockSandboxBuilder(create: (fromSnapshot: string) => unknown) {
       configure(createMockNetworkBuilder());
       return builder;
     },
+    secret(configure: (secret: unknown) => unknown) {
+      configure(createMockSecretBuilder());
+      return builder;
+    },
     pullPolicy() {
       return builder;
     },
@@ -763,13 +767,6 @@ function createMockNetworkBuilder() {
       return builder;
     },
     policyJson() {
-      return builder;
-    },
-    secret(configure: (secret: unknown) => unknown) {
-      configure(createMockSecretBuilder());
-      return builder;
-    },
-    trustHostCAs() {
       return builder;
     },
   };
