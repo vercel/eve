@@ -62,6 +62,8 @@ export interface InternalSession extends Session {
   getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
   getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
+  /** Whether a run that can still execute owns the session; `true` when the runtime can't tell. */
+  hasRunnableOwner?(): Promise<boolean>;
 }
 
 /** HTTP framing and conformance readers operate on framework-created handles. */
@@ -197,6 +199,9 @@ export function createSession(
     },
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);
+    },
+    async hasRunnableOwner() {
+      return (await runtime.hasRunnableOwner?.(id)) ?? true;
     },
     async getChildBinding(childSessionId: string) {
       return await runtime.readChildBinding?.(id, childSessionId);

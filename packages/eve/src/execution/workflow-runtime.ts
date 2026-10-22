@@ -360,6 +360,18 @@ export function createWorkflowRuntime(config: {
       return await readRemoteChildBinding(sessionId, childSessionId);
     },
 
+    async hasRunnableOwner(sessionId: string): Promise<boolean> {
+      const token = sessionInboxHookToken(sessionCommandHookToken(sessionId));
+      if ((await findSessionHookHolder(token)) === undefined) return false;
+      try {
+        await assertRunnableSessionInbox(token);
+        return true;
+      } catch (error) {
+        if (error instanceof StrandedSessionOwnerError) return false;
+        throw error;
+      }
+    },
+
     resolveContinuation,
   };
 }

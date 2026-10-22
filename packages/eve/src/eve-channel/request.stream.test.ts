@@ -124,6 +124,28 @@ describe("createSessionStreamResponse", () => {
     ]);
   });
 
+  it("ends a follow of an earlier eve's session at the tail once nothing owns it", async () => {
+    const v26 = { data: {}, meta: { at }, type: "session.started" };
+    const followed = async (hasRunnableOwner: boolean) => {
+      // A source read without following closes at the tail; a followed one stays open.
+      const { follows, session } = sessionOf([v26], { open: hasRunnableOwner });
+      const response = await createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/session_1/stream"),
+        { ...session, hasRunnableOwner: async () => hasRunnableOwner } as Session,
+      );
+      return { follows, response };
+    };
+
+    const ended = await followed(false);
+    // Read without following, so the source closes at the tail and readers stop.
+    expect(ended.follows.at(-1)).toBe(false);
+    expect((await records(ended.response)).at(-1)).toEqual({ $eve: "stream.ended" });
+
+    const live = await followed(true);
+    expect(live.follows.at(-1)).toBe(true);
+    await live.response.body?.cancel();
+  });
+
   it("serves a fresh stream with no lines yet without a version check failing it", async () => {
     const { session } = sessionOf([]);
     const response = await createSessionStreamResponse(

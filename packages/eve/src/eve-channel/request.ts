@@ -351,11 +351,16 @@ export async function createSessionStreamResponse(
     const from =
       early === undefined ? Math.max(0, tailIndex + 1 + (startIndex ?? 0)) : (startIndex ?? 0);
     let lines: ReadableStream<unknown>;
+    let lineLimit = includeTailIndex ? Math.max(0, tailIndex - from + 1) : undefined;
     if (await earlierEve) {
       // An eve before v27 recorded it: read every v26 line, each in light of those before it.
       void early?.then((opened) => opened.cancel()).catch(() => {});
+      // With no owner left to write to it, following would only reconnect each lease to read the
+      // whole history again: end at the tail with `stream.ended`, so readers stop.
+      const live = follow && ((await internalSession(session).hasRunnableOwner?.()) ?? true);
+      if (follow && !live) lineLimit = undefined;
       lines = v26LineStream(
-        await internalSession(session).getLineStream({ follow, startIndex: 0 }),
+        await internalSession(session).getLineStream({ follow: live, startIndex: 0 }),
         from,
       );
     } else {
@@ -372,14 +377,7 @@ export async function createSessionStreamResponse(
     if (includeTailIndex) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
-    return new Response(
-      serializeLines(
-        lines,
-        request.signal,
-        includeTailIndex ? Math.max(0, tailIndex - from + 1) : undefined,
-      ),
-      { headers },
-    );
+    return new Response(serializeLines(lines, request.signal, lineLimit), { headers });
   } catch (error) {
     const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;

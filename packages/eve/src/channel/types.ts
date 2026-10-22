@@ -700,6 +700,13 @@ export interface Runtime {
     sessionId: string,
     childSessionId: string,
   ): Promise<RemoteChildBinding | undefined>;
+
+  /**
+   * Whether a run that can still execute owns the session: one holds its inbox, on a deployment
+   * that runs. `false` when the session's owner ended or is stranded; its stream gets no more
+   * lines.
+   */
+  hasRunnableOwner?(sessionId: string): Promise<boolean>;
 }
 
 export type { SessionStreamOptions } from "#shared/session.js";
