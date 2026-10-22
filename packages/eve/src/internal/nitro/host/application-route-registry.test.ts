@@ -1,3 +1,4 @@
+import { defineDynamic } from "#public/definitions/connections/dynamic.js";
 import { describe, expect, it } from "vitest";
 
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
@@ -117,3 +118,62 @@ it("mounts only opted-in connection receivers from the compiled manifest", async
     ),
   ).toBe(false);
 });
+
+it("mounts a parameterized receiver for runtime names without evaluating the resolver", async () => {
+  const { manifest } = await compileFromMemory({
+    model: "openai/gpt-5.4",
+    modules: [
+      {
+        logicalPath: "connections/accounts.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "session.started": () => {
+                throw new Error("must not resolve accounts at build time");
+              },
+            },
+          }),
+        }),
+      },
+    ],
+  });
+  const routes = createApplicationRouteRegistry({ compileResult: { manifest } }).routes;
+  expect(routes.filter((route) => route.kind === "connection-event")).toEqual([
+    { kind: "connection-event", method: "POST", path: "/eve/v1/hooks/:connectionName" },
+  ]);
+});
+
+it.each(["/eve/v1/hooks/bird", "/eve/v1/:kind/:name"])(
+  "rejects a POST channel overlapping the dynamic receiver at %s",
+  async (urlPath) => {
+    const { manifest } = await compileFromMemory({
+      model: "openai/gpt-5.4",
+      modules: [
+        {
+          logicalPath: "connections/accounts.ts",
+          loadNamespace: async () => ({
+            default: defineDynamic({ events: { "session.started": () => null } }),
+          }),
+        },
+      ],
+    });
+    const route = { ...manifest.channelRoutes.effective[0]!, method: "POST" as const, urlPath };
+    const withRoute = {
+      ...manifest,
+      channelRoutes: { ...manifest.channelRoutes, effective: [route] },
+    };
+    expect(() =>
+      createApplicationRouteRegistry({ compileResult: { manifest: withRoute } }),
+    ).toThrow("Dynamic connection event receiver conflicts");
+    const withGet = {
+      ...withRoute,
+      channelRoutes: {
+        ...withRoute.channelRoutes,
+        effective: [{ ...route, method: "GET" as const }],
+      },
+    };
+    expect(() =>
+      createApplicationRouteRegistry({ compileResult: { manifest: withGet } }),
+    ).not.toThrow();
+  },
+);

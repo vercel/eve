@@ -215,7 +215,7 @@ An MCP connection can watch the server's events and run your code when one arriv
 
 Requirements:
 
-- A statically authored MCP connection with a static `connect()` auth provider. Dynamic connections and auth resolvers are not supported.
+- A static MCP connection or a root-agent connection returned by a `session.started` dynamic resolver, with a concrete `connect()` auth provider. Auth resolver functions and event-enabled `turn.started` results are not supported.
 - `@vercel/connect@2.5.2` or later.
 - An MCP server that supports events over Streamable HTTP.
 
@@ -309,6 +309,69 @@ There is one subscribe action per event the server offers; its description names
 - **Lifetime.** A watch outlives the session that created it. It ends on stop, at `expiresAt`, or when the upstream subscription terminates.
 
 `tools.allow` and `tools.block` apply to these actions. An allow list hides any event action it does not name, so copy the exact `events_subscribe_<hash>` names from `eve__search`. `toolCall.providedArguments` does not apply to event actions.
+
+### Dynamic accounts
+
+A [`session.started` dynamic connection](../guides/dynamic-capabilities#dynamic-connections)
+can enable events for an account selected at runtime:
+
+```ts title="agent/connections/bird.ts"
+import { defineDynamic, defineMcpClientConnection } from "eve/connections";
+import { connect } from "@vercel/connect/eve";
+import { getBirdAccount } from "../lib/accounts";
+import { handleBirdEvent } from "../lib/bird-events";
+
+export default defineDynamic({
+  events: {
+    "session.started": async (_event, ctx) => {
+      const principal = ctx.session.auth.current;
+      if (principal?.principalType !== "user") return null;
+      const account = await getBirdAccount(principal);
+      if (!account) return null;
+      return defineMcpClientConnection({
+        url: account.mcpUrl,
+        description: "Read email and watch new messages",
+        instanceKey: account.connectionKey,
+        auth: connect(account.connector),
+        experimental_events: { management: "creator", onEvent: handleBirdEvent },
+      });
+    },
+  },
+});
+```
+
+The account lookup and callback are application functions. Authorize the account
+lookup and use an app-controlled, validated MCP URL. Change `instanceKey` when
+the account or auth configuration changes. Use shared module callbacks; do not
+rely on transient variables captured while resolving the connection.
+
+Each watch saves its resolver identity and trusted resolution context. Before subscribing and dispatching each callback, eve reruns that resolver with
+a reconstructed `session.started` event, including after a cold start.
+Original fields such as `predecessor` are not replayed. The callback still runs
+as the watch creator, even if someone else later speaks in the conversation.
+When a delivery triggers resolution, a changed account, connector, endpoint, or
+missing result retires the watch
+without running another account's callback. A thrown lookup retries instead.
+
+With `experimental_events.management: "creator"`, subscribe results include `management.get` (`eve__event_watch_get`) and
+`management.stop` (`eve__event_watch_stop`). Call them through `eve__tool` with
+`{ id }`, using the returned eve watch ID. These are creator-authorized watch
+management operations, independent of the current connection's discovery, auth,
+`tools` filter, and approval callbacks. They remain available when an account is
+removed or another connection reuses its name. Existing connection actions keep
+their normal approval and filtering. Without this explicit opt-in, the housekeeping
+actions reject access and subscribe does not advertise them. The opt-in is saved
+with the watch; changing the definition affects future watches. eve does not add
+a watch-listing API.
+Stop existing watches before deleting the last dynamic resolver from a deployment,
+since that also removes its receiver route. Returning `null` instead keeps the
+route available to retire watches when deliveries arrive.
+It also keeps `eve__tool` available in fresh sessions for saved-watch management.
+For agents with only static connections, stop watches before removing their last
+connection: fresh sessions with no deferred capabilities do not expose `eve__tool`.
+
+The watch records stopping before upstream cleanup and rejects subsequent
+deliveries while cleanup retries. A callback already running may finish.
 
 ### Receiver
 

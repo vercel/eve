@@ -101,6 +101,7 @@ export function connectionEventError(error: unknown): Error {
 }
 
 type EventOperation =
+  | "resolve"
   | "catalog"
   | "subscribe"
   | "get"

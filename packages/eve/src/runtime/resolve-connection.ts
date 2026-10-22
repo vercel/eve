@@ -240,13 +240,24 @@ export function resolveDynamicConnectionValue(
   }
 
   const normalized = normalizeMcpClientConnectionDefinition(value, message);
-  if (normalized.experimental_events !== undefined) {
-    throw new Error(
-      `${message} experimental_events requires a statically authored connection so eve can mount its receiver at build time.`,
-    );
-  }
   assertAuthenticatedDynamicInstanceKey(normalized.auth, normalized.instanceKey, message);
+  const authorization =
+    typeof normalized.auth === "object"
+      ? normalizeAuthorizationSpec(normalized.auth, message)
+      : undefined;
+  const backend = authorization?.vercelConnect?.experimental_events;
   return omitUndefined({
+    experimental_events:
+      normalized.experimental_events === undefined ||
+      authorization === undefined ||
+      backend === undefined
+        ? undefined
+        : {
+            callbacks: normalized.experimental_events,
+            authorization,
+            connector: authorization.vercelConnect!.connector,
+            backend,
+          },
     approval: normalized.approval,
     authorization: normalized.auth as ResolvedConnectionDefinition["authorization"],
     connectionName: source.connectionName,

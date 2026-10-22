@@ -1,3 +1,4 @@
+import type { DynamicEventResolution } from "#runtime/connections/events/resolution.js";
 import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
@@ -107,6 +108,7 @@ export type ResolvedScheduleDefinition = Readonly<
  */
 /** A connection's event watching, checked once when the connection resolves. */
 export interface ResolvedConnectionEvents {
+  readonly resolution?: DynamicEventResolution;
   readonly callbacks: Experimental_ConnectionEvents;
   /** The static Connect authorization every watch subscribes and runs under. */
   readonly authorization: Readonly<AuthorizationDefinition>;

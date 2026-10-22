@@ -1,3 +1,4 @@
+import vercelConnectEvents from "./@vercel/connect-events.mjs";
 /**
  * Aggregates every per-package config in this directory into the flat list
  * the orchestrator passes to `runVendor`. Adding a new vendored package
@@ -101,6 +102,7 @@ export const MODULES = [
   vercelAgentRuns,
   vercelBlob,
   vercelConnect,
+  vercelConnectEvents,
   vercelDetectAgent,
   vercelOidc,
   vercelOtel,

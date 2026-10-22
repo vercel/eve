@@ -103,7 +103,7 @@ export function normalizeMcpClientConnectionDefinition(
       record.experimental_events,
       `${message} experimental_events must be an object.`,
     );
-    expectOnlyKnownKeys(events, ["onEvent", "onGap", "onTerminated"], message);
+    expectOnlyKnownKeys(events, ["onEvent", "onGap", "onTerminated", "management"], message);
     if (
       typeof events.onEvent !== "function" ||
       (events.onGap !== undefined && typeof events.onGap !== "function") ||
@@ -122,8 +122,11 @@ export function normalizeMcpClientConnectionDefinition(
         `${message} experimental_events requires a static Connect auth provider with the events bridge.`,
       );
     }
+    if (events.management !== undefined && events.management !== "creator")
+      throw new Error(`${message} experimental_events.management must be "creator" when provided.`);
     type Events = NonNullable<McpClientConnectionDefinition["experimental_events"]>;
     result.experimental_events = {
+      management: events.management as Events["management"],
       onEvent: events.onEvent as Events["onEvent"],
       onGap: events.onGap as Events["onGap"],
       onTerminated: events.onTerminated as Events["onTerminated"],

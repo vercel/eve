@@ -125,7 +125,7 @@ function derivePreflights(
   return preflights;
 }
 
-function routesOverlap(
+export function routesOverlap(
   left: { readonly method: string; readonly urlPath: string },
   right: { readonly method: string; readonly path?: string; readonly urlPath?: string },
 ): boolean {

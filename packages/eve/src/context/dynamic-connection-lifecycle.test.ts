@@ -565,3 +565,47 @@ function createStaticConnection(name: string): ResolvedConnectionDefinition {
     url: `https://${name}.example.com/mcp`,
   };
 }
+
+it("rejects event-enabled turn results before exposing subscription tools", async () => {
+  const { ctx, registry } = createContext();
+  const resolver = createResolver({
+    eventNames: ["turn.started"],
+    events: {
+      "turn.started": () =>
+        defineMcpClientConnection({
+          url: "https://events.example/mcp",
+          description: "Events",
+          instanceKey: "alice-account",
+          auth: {
+            getToken: async () => ({ token: "fixture" }),
+            vercelConnect: {
+              connector: "oauth/events",
+              experimental_events: {
+                createAdapter: async () => {
+                  throw new Error("not called");
+                },
+                verify: async () => {
+                  throw new Error("not called");
+                },
+              },
+            },
+          },
+          experimental_events: { onEvent() {} },
+        }),
+    },
+  });
+  await expect(
+    dispatchDynamicConnectionEvent({
+      ctx,
+      resolvers: [resolver],
+      event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+    }),
+  ).rejects.toMatchObject({
+    cause: {
+      cause: {
+        message: "Dynamic event subscriptions require a root-agent session.started connection.",
+      },
+    },
+  });
+  expect(registry.getConnectionNames()).toEqual([]);
+});

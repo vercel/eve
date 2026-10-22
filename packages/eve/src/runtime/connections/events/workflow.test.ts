@@ -84,6 +84,7 @@ const world = vi.hoisted(() => {
     expire: () => expire?.(),
     expiresAt: null as string | null,
     followed: [] as string[],
+    stopping: false,
     /** Settles the watch's subscribe step; tests hold it to model a slow Connect. */
     subscribed: Promise.resolve() as Promise<void>,
     refuse: false,
@@ -117,6 +118,9 @@ vi.mock("#runtime/connections/events/lifecycle-step.js", () => ({
   async publishConnectionEventOutcomeStep(outcome: { ownerRunId?: string }) {
     if (outcome.ownerRunId !== undefined) world.followed.push(outcome.ownerRunId);
   },
+  async markConnectionEventStoppingStep() {
+    world.stopping = true;
+  },
   unsubscribeConnectionEventStep: world.unsubscribed,
   startConnectionEventDeliveryStep: world.started,
 }));
@@ -143,6 +147,7 @@ beforeEach(() => {
   world.followed.length = 0;
   world.expiresAt = null;
   world.refuse = false;
+  world.stopping = false;
   world.subscribed = Promise.resolve();
   world.unsubscribed.mockReset().mockResolvedValue("done");
   world.started.mockReset();
@@ -184,6 +189,7 @@ it("keeps the watch through repeated failed unsubscribes until Connect's cleanup
   world.unsubscribed.mockImplementation(async () => {
     // Every failed attempt leaves the watch reachable for get and stop.
     expect(world.owners.has(token)).toBe(true);
+    expect(world.stopping).toBe(true);
     return ++attempts <= 5 ? "pending" : "done";
   });
   const run = connectionEventWorkflow({ binding, serializedContext: {} });

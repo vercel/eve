@@ -1,3 +1,4 @@
+import { unsubscribe } from "#compiled/@vercel/connect-events/index.js";
 import { createHash } from "node:crypto";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -7,6 +8,7 @@ import { startConnectionEventDeliveryRun } from "#runtime/connections/events/own
 import { connectionEventDestination } from "#runtime/connections/events/path.js";
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
+  CONNECTION_EVENT_STOPPING_NAMESPACE,
   type ConnectionEventSubscribeOutcome,
   type ConnectionEventSubscribeResult,
   type EventBinding,
@@ -49,7 +51,7 @@ export async function subscribeConnectionEvent(
   idempotencyKey: string,
 ): Promise<ConnectionEventSubscribeResult> {
   const ctx = await deserializeContext(serializedContext);
-  const resolved = resolveBinding(ctx, binding);
+  const resolved = await resolveBinding(ctx, binding);
   if (resolved === undefined)
     return { error: "This connection no longer accepts the subscription's binding." };
   const { connection } = resolved;
@@ -94,9 +96,25 @@ export async function unsubscribeConnectionEventStep(input: {
 }): Promise<"pending" | "done"> {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
-  const resolved = resolveBinding(ctx, input.binding);
-  if (resolved === undefined) return "pending";
   try {
+    // Connect owns the saved token parameters. Cleanup only needs the subscription
+    // from our trusted watch and fresh project authorization, even after account removal.
+    if (input.binding.resolution !== undefined || input.binding.creatorManagement === true) {
+      const subscription = await withConnectionEventSpan(
+        {
+          ctx,
+          connectionName: input.binding.connectionName,
+          bindingId: input.binding.id,
+          subscriptionId: input.subscriptionId,
+          operation: "unsubscribe",
+        },
+        () =>
+          unsubscribe(input.binding.connector, { id: input.subscriptionId }, { timeout: 30_000 }),
+      );
+      return subscription.cleanupStatus === "pending" ? "pending" : "done";
+    }
+    const resolved = await resolveBinding(ctx, input.binding);
+    if (resolved === undefined) return "pending";
     const subscription = await withConnectionEventSpan(
       {
         ctx,
@@ -132,7 +150,7 @@ function createAdapter({
   connection,
   principal,
   events,
-}: NonNullable<ReturnType<typeof resolveBinding>>) {
+}: NonNullable<Awaited<ReturnType<typeof resolveBinding>>>) {
   return events.backend.createAdapter({
     principal,
     connection: { url: connection.url },
@@ -163,5 +181,18 @@ async function publishOutcome(outcome: ConnectionEventSubscribeOutcome): Promise
     await writer.write(outcome);
   } finally {
     writer.releaseLock();
+  }
+}
+
+/** Publishes local stopping before making any fallible upstream cleanup request. */
+export async function markConnectionEventStoppingStep(): Promise<void> {
+  "use step";
+  const writer = getWritable<boolean>({
+    namespace: CONNECTION_EVENT_STOPPING_NAMESPACE,
+  }).getWriter();
+  try {
+    await writer.write(true);
+  } finally {
+    await writer.releaseLock();
   }
 }

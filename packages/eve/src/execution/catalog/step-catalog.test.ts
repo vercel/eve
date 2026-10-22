@@ -168,14 +168,13 @@ describe("buildStepCatalog", () => {
       ]);
     });
 
-    it("gives an agent no catalog tools for dynamic resolvers that returned nothing they reach", () => {
+    it("gives an agent no catalog tools for empty dynamic skill and tool results", () => {
       const bundle = catalogBundle({ dynamicSubagents: ["helper"] });
       const ctx = new ContextContainer();
       ctx.set(BundleKey, {
         ...bundle,
         resolvedAgent: {
           ...bundle.resolvedAgent,
-          dynamicConnectionResolvers: [{}],
           dynamicSkillResolvers: [{}],
           dynamicToolResolvers: [{}],
         } as never,
@@ -736,4 +735,41 @@ describe("buildStepCatalog", () => {
       await expect(notionCatalog(options).connect()).rejects.toThrow(message);
     });
   });
+});
+
+it.each([false, true])(
+  "keeps saved-watch management callable with a replacement connection: %s",
+  (replacement) => {
+    const { catalog } = catalogContext({
+      connections: replacement ? [fakeConnection({ name: "issues", tools: [] })] : [],
+      offered: { connections: true, tools: true, searchableSkills: false, skills: false },
+    });
+    const call = catalog.resolve({
+      toolCallId: "stop",
+      toolName: CALL_TOOL_NAME,
+      input: { name: "eve__event_watch_stop", input: { id: "a".repeat(64) } },
+    });
+    expect(call?.definition.name).toBe("eve__event_watch_stop");
+    expect(
+      catalog.resolve({
+        toolCallId: "subscribe",
+        toolName: CALL_TOOL_NAME,
+        input: { name: "eve__event_watch_subscribe", input: {} },
+      }),
+    ).toBeUndefined();
+  },
+);
+
+it("does not expose saved-watch management in a subagent", () => {
+  const { catalog } = catalogContext({
+    session: CHILD,
+    offered: { connections: true, tools: true, searchableSkills: false, skills: false },
+  });
+  expect(
+    catalog.resolve({
+      toolCallId: "stop",
+      toolName: CALL_TOOL_NAME,
+      input: { name: "eve__event_watch_stop", input: { id: "a".repeat(64) } },
+    }),
+  ).toBeUndefined();
 });

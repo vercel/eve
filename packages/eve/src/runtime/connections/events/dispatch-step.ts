@@ -1,3 +1,7 @@
+import { createLogger } from "#internal/logging.js";
+import { connectionEventAttributes } from "#tracing/eve/connection-events.js";
+import { sessionStartedForResolvers } from "#harness/session-machine/resolver-events.js";
+import { resolveDynamicConnectionResult } from "#runtime/resolve-dynamic-connection.js";
 import { deserializeContext } from "#context/serialize.js";
 import { AuthKey } from "#context/keys.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
@@ -5,7 +9,10 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { EventBinding } from "#runtime/connections/events/state.js";
-import { retireConnectionEventOwner } from "#runtime/connections/events/owner.js";
+import {
+  retireConnectionEventOwner,
+  findConnectionEventOwner,
+} from "#runtime/connections/events/owner.js";
 import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
 import {
   principalKey,
@@ -14,12 +21,38 @@ import {
 import type { AlsContext } from "#context/container.js";
 
 /** Re-checks the run's saved binding against the deployed connection before any work runs as its creator. */
-export function resolveBinding(ctx: AlsContext, binding: EventBinding) {
-  const connection = ctx
-    .require(BundleKey)
-    .resolvedAgent.connections.find(
-      (connection) => connection.connectionName === binding.connectionName,
-    );
+export async function resolveBinding(ctx: AlsContext, binding: EventBinding) {
+  const agent = ctx.require(BundleKey).resolvedAgent;
+  const saved = binding.resolution;
+  const resolver =
+    saved === undefined
+      ? undefined
+      : agent.dynamicConnectionResolvers?.find(
+          (candidate) => candidate.sourceId === saved.sourceId && candidate.slug === saved.slug,
+        );
+  const connections =
+    saved === undefined
+      ? agent.connections
+      : resolver === undefined
+        ? []
+        : await withConnectionEventSpan(
+            {
+              ctx,
+              connectionName: binding.connectionName,
+              bindingId: binding.id,
+              operation: "resolve",
+            },
+            () =>
+              resolveDynamicConnectionResult({
+                resolver,
+                context: structuredClone(saved.context),
+                event: sessionStartedForResolvers(saved.runtime),
+                nodeId: ctx.require(BundleKey).nodeId,
+              }),
+          );
+  const connection = connections.find(
+    (candidate) => candidate.connectionName === binding.connectionName,
+  );
   const events = connection?.experimental_events;
   if (
     connection === undefined ||
@@ -59,11 +92,37 @@ export async function dispatchConnectionEventStep(input: {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
   const { delivery } = input.payload;
-  // The receiver or the watch's run already matched the delivery's subscription.
-  const resolved = accepts(input.binding, input.payload)
-    ? resolveBinding(ctx, input.binding)
-    : undefined;
-  if (resolved === undefined) return;
+  const watch = await findConnectionEventOwner(input.binding.id);
+  if (watch === undefined || watch.stopping || watch.subscription?.id !== delivery.subscriptionId)
+    return;
+  if (!accepts(input.binding, input.payload)) return;
+  const resolved = await resolveBinding(ctx, input.binding);
+  if (resolved === undefined) {
+    if (input.binding.resolution !== undefined) {
+      createLogger("connection.events").info(
+        "Dynamic event watch no longer resolves to its saved account.",
+        {
+          ...connectionEventAttributes({
+            connectionName: input.binding.connectionName,
+            bindingId: input.binding.id,
+            subscriptionId: delivery.subscriptionId,
+          }),
+          reason: "binding_unavailable",
+        },
+      );
+      await retireConnectionEventOwner(input.binding.id, watch.runId);
+    }
+    return;
+  }
+  // Account resolution can outlast a concurrent stop or completed cleanup.
+  const current = await findConnectionEventOwner(input.binding.id);
+  if (
+    current === undefined ||
+    current.stopping ||
+    current.runId !== watch.runId ||
+    current.subscription?.id !== delivery.subscriptionId
+  )
+    return;
   const { binding, connection } = resolved;
   const bundle = ctx.require(BundleKey);
   const { callbacks } = resolved.events;
@@ -112,5 +171,5 @@ export async function dispatchConnectionEventStep(input: {
     },
   );
   if ("control" in delivery && delivery.control.type === "terminated")
-    await retireConnectionEventOwner(binding.id);
+    await retireConnectionEventOwner(binding.id, watch.runId);
 }

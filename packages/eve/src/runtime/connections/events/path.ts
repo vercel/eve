@@ -5,6 +5,8 @@ import {
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
 
+export const CONNECTION_EVENT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/hooks/:connectionName`;
+
 export function connectionEventRoute(connectionName: string): string {
   return `${EVE_ROUTE_PREFIX}/hooks/${encodeURIComponent(connectionName)}`;
 }

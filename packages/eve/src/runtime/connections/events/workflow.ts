@@ -6,6 +6,7 @@ import { connectionEventHookToken } from "#runtime/connections/events/path.js";
 import type { EventBinding } from "#runtime/connections/events/state.js";
 import { dispatchConnectionEventStep } from "#runtime/connections/events/dispatch-step.js";
 import {
+  markConnectionEventStoppingStep,
   openConnectionEventStep,
   publishConnectionEventOutcomeStep,
   startConnectionEventDeliveryStep,
@@ -68,6 +69,7 @@ export async function connectionEventWorkflow(input: {
         payload: message.payload,
       });
   }
+  await markConnectionEventStoppingStep();
   let retryMs = FIRST_UNSUBSCRIBE_RETRY_MS;
   while (
     (await unsubscribeConnectionEventStep({ serializedContext, binding, subscriptionId })) ===

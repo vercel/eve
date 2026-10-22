@@ -206,6 +206,12 @@ resolved instance identity in durable authorization state. If a parked sign-in
 callback resumes after the resolver selects a different instance, eve rejects
 the callback instead of passing it to the new connection or reusing its token.
 
+Session-scoped MCP connections can also enable
+[Events (experimental)](../connections/mcp#dynamic-accounts) with a concrete
+`connect()` auth provider and shared authored callbacks. Event-enabled results
+from `turn.started` and auth resolver functions are not supported. Their watches
+retain the creator's identity and can outlive the originating conversation.
+
 ### Naming and conflicts
 
 | Return shape                  | File                            | Connection name(s)      |

@@ -7,25 +7,26 @@ import type { ConnectionEventSubscribeOutcome, EventBinding } from "./state.js";
 
 const { hooks, runs, started, resumed } = vi.hoisted(() => ({
   hooks: new Map<string, { runId: string; metadata: unknown }>(),
-  runs: new Map<string, { published: unknown[]; outcome: Promise<unknown> }>(),
+  runs: new Map<string, { published: unknown[]; outcome: Promise<unknown>; stopping?: boolean }>(),
   started: vi.fn(async (_reference: unknown, _args: unknown[]) => ({ runId: "watch-run" })),
-  resumed: vi.fn(async (_token: string, _value: unknown) => ({})),
+  resumed: vi.fn(async (_hook: unknown, _value: unknown) => ({})),
 }));
 vi.mock("#internal/workflow/runtime.js", () => ({
   async getHookByToken(token: string) {
     const hook = hooks.get(token);
     if (hook === undefined) throw new HookNotFoundError(token);
-    return { runId: hook.runId, metadata: Promise.resolve(hook.metadata) };
+    return { token, runId: hook.runId, metadata: Promise.resolve(hook.metadata) };
   },
-  async resumeHook(token: string, value: unknown) {
+  async resumeHook(hook: { token: string; runId: string }, value: unknown) {
+    const { token } = hook;
     if (!hooks.has(token)) throw new HookNotFoundError(token);
-    return resumed(token, value);
+    return resumed(hook, value);
   },
   getRun(runId: string) {
     const run = runs.get(runId)!;
     // The run's published subscribe outcome, as its stream delivers it.
     return {
-      getReadable: () =>
+      getReadable: ({ namespace }: { namespace: string }) =>
         Object.assign(
           new ReadableStream({
             async pull(controller) {
@@ -33,7 +34,14 @@ vi.mock("#internal/workflow/runtime.js", () => ({
               controller.close();
             },
           }),
-          { getTailIndex: async () => run.published.length - 1 },
+          {
+            getTailIndex: async () =>
+              namespace === "eve.connection-event.stopping"
+                ? run.stopping
+                  ? 0
+                  : -1
+                : run.published.length - 1,
+          },
         ),
     };
   },
@@ -122,15 +130,31 @@ it("refuses a delivery when its watch has ended", async () => {
 it("hands a delivery that beats the subscribe response to the watch's own run", async () => {
   holdWatch();
   expect(await startConnectionEventDelivery(payload, bundle)).toBe(true);
-  expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "delivery", payload });
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ token, runId: "watch-run" }),
+    { kind: "delivery", payload },
+  );
   expect(started).not.toHaveBeenCalled();
 });
 
 it("asks a running watch to retire, and reports one that has ended", async () => {
-  expect(await retireConnectionEventOwner(binding.id)).toBe(false);
+  expect(await retireConnectionEventOwner(binding.id, "watch-run")).toBe(false);
   holdWatch();
-  expect(await retireConnectionEventOwner(binding.id)).toBe(true);
-  expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "retire" });
+  expect(await retireConnectionEventOwner(binding.id, "watch-run")).toBe(true);
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ token, runId: "watch-run" }),
+    { kind: "retire" },
+  );
+});
+
+it("does not stop a replacement for a previously authorized pending watch", async () => {
+  holdWatch();
+  hooks.set(token, {
+    runId: "replacement-run",
+    metadata: { ...binding, creatorManagement: false },
+  });
+  expect(await retireConnectionEventOwner(binding.id, "watch-run")).toBe(false);
+  expect(resumed).not.toHaveBeenCalled();
 });
 
 it("reports a subscribe still in flight when the caller stops waiting, then its later result", async () => {
@@ -140,9 +164,26 @@ it("reports a subscribe still in flight when the caller stops waiting, then its 
   caller.abort();
   expect(await subscribing).toBeUndefined();
   expect(await findConnectionEventOwner(binding.id)).toEqual({
+    runId: "watch-run",
     owner: binding,
     subscription: undefined,
   });
   publish({ subscription });
-  expect(await findConnectionEventOwner(binding.id)).toEqual({ owner: binding, subscription });
+  expect(await findConnectionEventOwner(binding.id)).toEqual({
+    runId: "watch-run",
+    owner: binding,
+    subscription,
+  });
+});
+
+it("rejects deliveries after the watch records stopping while cleanup is pending", async () => {
+  const publish = holdWatch();
+  publish({ subscription });
+  runs.get("watch-run")!.stopping = true;
+  expect(await startConnectionEventDelivery(payload, bundle)).toBe(false);
+  expect(started).not.toHaveBeenCalled();
+  expect(await findConnectionEventOwner(binding.id)).toMatchObject({
+    stopping: true,
+    subscription,
+  });
 });

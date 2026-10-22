@@ -2,11 +2,13 @@ import { eventTracing } from "#internal/testing/event-tracing.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { handleConnectionEventRequest } from "#internal/nitro/routes/connection-events.js";
 
-const { verify, start, load } = vi.hoisted(() => ({
+const { verify, genericVerify, start, load } = vi.hoisted(() => ({
   verify: vi.fn(),
+  genericVerify: vi.fn(),
   start: vi.fn(),
   load: vi.fn(),
 }));
+vi.mock("#compiled/@vercel/connect-events/index.js", () => ({ verifyMcpEvent: genericVerify }));
 vi.mock("#runtime/connections/events/owner.js", () => ({
   startConnectionEventDelivery: start,
 }));
@@ -25,8 +27,8 @@ const envelope = {
   subscriptionId: "sub_1",
   deliveryId: "del_1",
 };
-function request() {
-  return new Request("https://agent.example/eve/v1/hooks/issues", {
+function request(connectionName = "issues") {
+  return new Request(`https://agent.example/eve/v1/hooks/${connectionName}`, {
     method: "POST",
     body: "untouched-body",
   });
@@ -50,8 +52,14 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it("verifies the untouched request and acknowledges only durable handler acceptance", async () => {
+it("verifies an extension connection's untouched request and acknowledges only durable acceptance", async () => {
   vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/support");
+  const connectionName = "my_ext__issues";
+  load.mockResolvedValue({
+    resolvedAgent: {
+      connections: [{ connectionName, experimental_events: { backend: { verify } } }],
+    },
+  });
   let accepted!: () => void;
   let accepting!: () => void;
   const started = new Promise<void>((resolve) => {
@@ -63,20 +71,22 @@ it("verifies the untouched request and acknowledges only durable handler accepta
       accepted = () => resolve(true);
     });
   });
-  const req = request();
+  const req = request(connectionName);
   let settled = false;
-  const response = handleConnectionEventRequest(input, req).then((result) => {
-    settled = true;
-    return result;
-  });
-  await started;
+  const response = handleConnectionEventRequest({ ...input, connectionName }, req).then(
+    (result) => {
+      settled = true;
+      return result;
+    },
+  );
+  await Promise.race([started, response.then((result) => expect(result.status).toBe(202))]);
   expect(settled).toBe(false);
-  expect(verify).toHaveBeenCalledWith(req, { path: "/eve/support/v1/hooks/issues" });
+  expect(verify).toHaveBeenCalledWith(req, { path: "/eve/support/v1/hooks/my_ext__issues" });
   expect(start).toHaveBeenCalledWith(
     expect.objectContaining({
       kind: "connection-event",
       bindingId: "a".repeat(64),
-      connectionName: "issues",
+      connectionName,
       delivery: envelope,
     }),
     expect.anything(),
@@ -162,4 +172,31 @@ it("keeps unverified identifiers and error content out of request spans while pr
     logging.mockRestore();
     await tracing.close();
   }
+});
+
+it("verifies a dynamic-only receiver without resolving an account", async () => {
+  const resolver = vi.fn(() => {
+    throw new Error("must not execute during receipt");
+  });
+  load.mockResolvedValue({
+    resolvedAgent: {
+      connections: [],
+      dynamicConnectionResolvers: [{ events: { "session.started": resolver } }],
+    },
+  });
+  genericVerify.mockResolvedValue(envelope);
+  const { connectionName: _name, ...dynamicInput } = input;
+  expect((await handleConnectionEventRequest(dynamicInput, request("CRM__issues"))).status).toBe(
+    202,
+  );
+  expect(genericVerify).toHaveBeenCalledWith(expect.any(Request), {
+    path: "/eve/v1/hooks/CRM__issues",
+  });
+  expect(resolver).not.toHaveBeenCalled();
+  genericVerify.mockRejectedValue({ code: "invalid_delivery" });
+  start.mockClear();
+  expect((await handleConnectionEventRequest(dynamicInput, request("CRM__issues"))).status).toBe(
+    401,
+  );
+  expect(start).not.toHaveBeenCalled();
 });

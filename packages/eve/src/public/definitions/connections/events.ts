@@ -25,8 +25,14 @@ export interface Experimental_ConnectionEvent {
   readonly cursor: string | null;
 }
 
-/** Opts a static Connect-backed MCP connection into managed webhook events. */
+/** Opts a Connect-backed MCP connection into managed webhook events. */
 export interface Experimental_ConnectionEvents {
+  /**
+   * Opts into creator-authorized get/stop tools for saved watches, even when an
+   * account no longer resolves. Keep the dynamic resolver deployed to expose
+   * these calls in fresh sessions. They do not use connection approval or filters.
+   */
+  readonly management?: "creator";
   /** Called durably after verification and subscription binding checks. */
   readonly onEvent: (
     input: Experimental_ConnectionEventContext & {

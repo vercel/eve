@@ -1,4 +1,8 @@
-import { connectionEventRoute } from "#runtime/connections/events/path.js";
+import { routesOverlap } from "#compiler/channel-route-plan.js";
+import {
+  connectionEventRoute,
+  CONNECTION_EVENT_ROUTE_PATTERN,
+} from "#runtime/connections/events/path.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
@@ -33,7 +37,7 @@ export type ApplicationRouteRegistration =
       readonly kind: "connection-event";
       readonly method: "POST";
       readonly path: string;
-      readonly connectionName: string;
+      readonly connectionName?: string;
     }
   | ApplicationChannelPreflightRoute
   | ApplicationChannelRoute
@@ -62,7 +66,7 @@ export interface ApplicationRouteRegistry {
 interface ApplicationRouteRegistryHost {
   readonly compileResult: {
     readonly manifest: Pick<CompiledAgentManifest, "channelRoutes"> &
-      Partial<Pick<CompiledAgentManifest, "connections">>;
+      Partial<Pick<CompiledAgentManifest, "connections" | "dynamicConnections">>;
   };
 }
 
@@ -92,7 +96,21 @@ export function createApplicationRouteRegistry(
     })),
   ];
   const routes: ApplicationRouteRegistration[] = [...channelRoutes];
-  for (const connection of preparedHost.compileResult.manifest.connections ?? []) {
+  const hasDynamic = (preparedHost.compileResult.manifest.dynamicConnections?.length ?? 0) > 0;
+  if (hasDynamic) {
+    if (
+      routes.some((route) =>
+        routesOverlap({ method: "POST", urlPath: CONNECTION_EVENT_ROUTE_PATTERN }, route),
+      )
+    )
+      throw new Error(
+        `Dynamic connection event receiver conflicts with an existing route: ${CONNECTION_EVENT_ROUTE_PATTERN}`,
+      );
+    routes.push({ kind: "connection-event", method: "POST", path: CONNECTION_EVENT_ROUTE_PATTERN });
+  }
+  for (const connection of hasDynamic
+    ? []
+    : (preparedHost.compileResult.manifest.connections ?? [])) {
     if (connection.experimental_events !== true) continue;
     const path = connectionEventRoute(connection.connectionName);
     if (routes.some((route) => route.path === path))

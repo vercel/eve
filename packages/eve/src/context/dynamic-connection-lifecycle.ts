@@ -5,15 +5,13 @@ import { assertNotConnectionOwned } from "#connections/ownership.js";
 import { dynamicToolNames } from "#context/build-dynamic-tools.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ALLOWED_DYNAMIC_CONNECTION_EVENTS } from "#dynamic/definition.js";
-import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
-import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { DynamicConnectionResolveContext } from "#public/definitions/connections/dynamic.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { resolveDynamicConnectionValue } from "#runtime/resolve-connection.js";
+import { resolveDynamicConnectionResult } from "#runtime/resolve-dynamic-connection.js";
 import type {
   ResolvedConnectionDefinition,
   ResolvedDynamicConnectionResolver,
@@ -43,57 +41,6 @@ export function isDynamicConnectionResolutionError(
   );
 }
 
-function qualifyConnectionNames(
-  resolver: ResolvedDynamicConnectionResolver,
-  value: unknown,
-): readonly { readonly name: string; readonly value: unknown }[] {
-  if (readStampedConnectionProtocol(value) !== undefined) {
-    return [{ name: resolver.slug, value }];
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(
-      `Dynamic connection resolver "${resolver.logicalPath}" must return a connection definition, a map of connection definitions, or null.`,
-    );
-  }
-
-  const prefix =
-    resolver.extensionNamespace === undefined ? "" : `${resolver.extensionNamespace}__`;
-  return Object.entries(value).map(([name, entry]) => {
-    if (!CONNECTION_SLUG_PATTERN.test(name)) {
-      throw new Error(
-        `Dynamic connection resolver "${resolver.logicalPath}" returned illegal connection name "${name}". Expected lowercase ASCII letters, digits, and dashes only, starting with a letter, up to 64 characters.`,
-      );
-    }
-    if (readStampedConnectionProtocol(entry) === undefined) {
-      throw new Error(
-        `Dynamic connection resolver "${resolver.logicalPath}" returned "${name}" without defineMcpClientConnection() or defineOpenAPIConnection().`,
-      );
-    }
-    return { name: `${prefix}${name}`, value: entry };
-  });
-}
-
-async function resolveConnections(input: {
-  readonly ctx: ContextContainer;
-  readonly event: UnstampedMessageStreamEvent;
-  readonly resolver: ResolvedDynamicConnectionResolver;
-}): Promise<readonly ResolvedConnectionDefinition[]> {
-  const handler = input.resolver.events[input.event.type];
-  if (handler === undefined) return [];
-  const value = await handler(input.event, buildConnectionResolveContext(input.ctx));
-  if (value === null || value === undefined) return [];
-
-  return qualifyConnectionNames(input.resolver, value).map(({ name, value: definition }) =>
-    resolveDynamicConnectionValue(definition, {
-      connectionName: name,
-      exportName: input.resolver.exportName,
-      logicalPath: input.resolver.logicalPath,
-      sourceId: input.resolver.sourceId,
-      sourceKind: "module",
-    }),
-  );
-}
-
 /** Resolves and replaces the dynamic connection set for one lifecycle scope. */
 export async function dispatchDynamicConnectionEvent(input: {
   readonly ctx: ContextContainer;
@@ -113,7 +60,12 @@ export async function dispatchDynamicConnectionEvent(input: {
 
   const outcomes = await Promise.allSettled(
     matching.map(async (resolver) => ({
-      connections: await resolveConnections({ ...input, resolver }),
+      connections: await resolveDynamicConnectionResult({
+        resolver,
+        event: input.event,
+        context: buildConnectionResolveContext(input.ctx),
+        nodeId: input.ctx.get(BundleKey)?.nodeId,
+      }),
       resolver,
     })),
   );
