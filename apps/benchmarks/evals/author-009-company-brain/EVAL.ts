@@ -185,16 +185,23 @@ test("revenue_forecast reads the quarter's forecast", async () => {
   expect(JSON.stringify(output)).toContain("warehouse-row");
 });
 
-test("the scheduled run can use revenue_forecast", async () => {
+test("the weekly summary gets the revenue forecast", async () => {
   const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
   const tool = forecastTool(await resolveDynamic(definition, "schedule"));
-  expect(tool).toBeDefined();
   const requests = stubWarehouse();
-  const parsed = await parseInput(tool, { quarter: "2027-Q1" });
-  expect(parsed.success).toBe(true);
-  await tool.execute(parsed.data, toolContext("schedule"));
-  expect(requests).toHaveLength(1);
-  expect(new URL(requests[0].url).searchParams.get("quarter")).toBe("2027-Q1");
+  if (tool !== undefined) {
+    // The scheduled turn has no signed-in employee, so the tool resolves for the app.
+    const parsed = await parseInput(tool, { quarter: "2027-Q1" });
+    expect(parsed.success).toBe(true);
+    await tool.execute(parsed.data, toolContext("schedule"));
+    expect(requests).toHaveLength(1);
+    expect(new URL(requests[0].url).searchParams.get("quarter")).toBe("2027-Q1");
+    return;
+  }
+  // Or the schedule fetches the forecast itself and hands it to the summary.
+  const { deliveries } = await runSchedule();
+  expect(requests.map((request) => new URL(request.url).pathname)).toContain("/v1/forecast");
+  expect(deliveries).toHaveLength(1);
 });
 
 test("analyze asks both specialists at the same time and returns both answers", async () => {
@@ -293,17 +300,24 @@ test("researcher reads Notion as the employee and cannot query the warehouse", a
 });
 
 test("keeps metric definitions in a skill loaded on demand", () => {
-  // The definitions may sit in SKILL.md itself or in a file next to it.
-  const skillText = (file: string) =>
-    sourceFiles(relativeToAgent(dirname(file)), /\.md$/)
+  // A single-file skill (`skills/<name>.md`), or a packaged one whose definitions
+  // sit in SKILL.md itself or in a file next to it.
+  const packaged = sourceFiles("skills", /^SKILL\.md$/).map((file) => ({
+    file,
+    text: sourceFiles(relativeToAgent(dirname(file)), /\.md$/)
       .map((path) => readFileSync(path, "utf8"))
-      .join("\n");
-  const skill = sourceFiles("skills", /^SKILL\.md$/).find((file) =>
-    /one-time/i.test(skillText(file)),
-  );
+      .join("\n"),
+  }));
+  const singleFile = sourceFiles("skills", /\.md$/)
+    .filter((file) => dirname(file) === `${agentRoot}/skills` && !file.endsWith("/SKILL.md"))
+    .map((file) => ({ file, text: readFileSync(file, "utf8") }));
+  const skill = [...packaged, ...singleFile].find(({ text }) => /one-time/i.test(text));
   expect(skill).toBeDefined();
-  expect(readFileSync(skill!, "utf8")).toMatch(/^---[\s\S]*?\bdescription\s*:[\s\S]*?---/);
-  const reference = skillText(skill!);
+  // Only a packaged SKILL.md must describe itself; a single file falls back to its name.
+  if (skill!.file.endsWith("/SKILL.md")) {
+    expect(readFileSync(skill!.file, "utf8")).toMatch(/^---[\s\S]*?\bdescription\s*:[\s\S]*?---/);
+  }
+  const reference = skill!.text;
   expect(reference).toMatch(/ARR/);
   // Prose wraps and may spell numbers out: "active 12\nmonths ago", "twelve months".
   expect(reference).toMatch(/\b(?:30|thirty)\s+days\b/i);
@@ -319,8 +333,21 @@ test("posts the weekly metrics summary to Slack", async () => {
   expect(String(schedule.cron).trim()).toMatch(/^0 15 \* \* (?:1|MON)$/i);
   expect(typeof schedule.run).toBe("function");
   const slack = await load(slackChannelFile());
+  // A schedule may look up data before it posts; keep that off the network.
+  stubWarehouse();
+  const { appAuth, deliveries } = await runSchedule();
 
-  const appAuth = { authenticator: "app", principalId: "eve:app", principalType: "runtime" };
+  expect(deliveries).toHaveLength(1);
+  expect(deliveries[0].channel).toBe(slack);
+  expect(deliveries[0].target).toMatchObject({ channelId: "C0ATLAS01" });
+  expect(deliveries[0].auth).toBe(appAuth);
+});
+
+async function runSchedule() {
+  const [file] = sourceFiles("schedules", /\.ts$/);
+  expect(file).toBeDefined();
+  const schedule = await load(file!);
+  const appAuth = { ...scheduleAuth, attributes: {} };
   const deliveries: Array<{ channel: unknown; target: unknown; message: unknown; auth: unknown }> =
     [];
   const pending: Array<Promise<unknown>> = [];
@@ -335,12 +362,8 @@ test("posts the weekly metrics summary to Slack", async () => {
     }),
   });
   await Promise.all(pending);
-
-  expect(deliveries).toHaveLength(1);
-  expect(deliveries[0].channel).toBe(slack);
-  expect(deliveries[0].target).toMatchObject({ channelId: "C0ATLAS01" });
-  expect(deliveries[0].auth).toBe(appAuth);
-});
+  return { appAuth, deliveries };
+}
 
 test("ships an eve eval with run_sql stubbed", { timeout: 120_000 }, () => {
   expect(existsSync(`${projectRoot}/evals/evals.config.ts`)).toBe(true);
@@ -481,13 +504,24 @@ function session(caller: Caller) {
       : caller === undefined
         ? undefined
         : {
-            authenticator: "oidc",
+            authenticator: ssoAuthenticator(),
             principalId: "sso:ada",
             principalType: "user",
             subject: "ada",
             attributes: { groups: caller },
           };
   return { id: "session-1", auth: { current } };
+}
+
+/**
+ * The authenticator name the agent's HTTP channel gives SSO callers: eve's
+ * `oidc()` uses "oidc", and a custom authenticator may relabel it. Code that
+ * trusts groups only from SSO callers then sees the name it checks for.
+ */
+function ssoAuthenticator(): string {
+  const file = `${agentRoot}/channels/eve.ts`;
+  const named = /\bauthenticator\s*:\s*["']([^"']+)["']/.exec(resolvedSource(file))?.[1];
+  return named ?? "oidc";
 }
 
 function toolContext(caller: Caller) {

@@ -202,7 +202,8 @@ function session(principalId = "slack:U01ADA") {
     id: `session-${principalId}`,
     auth: {
       current: {
-        authenticator: "slack",
+        // What eve's Slack channel sets for the person who sent the message.
+        authenticator: "slack-webhook",
         principalId,
         principalType: "user",
         subject: principalId,
