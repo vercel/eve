@@ -331,8 +331,9 @@ runtime
   sandbox.delete() → connection.close?(), onSessionEnd(ctx, state, { reason: "deleted" }),
                      eve clears state
   process exit     → connection.stop(), connection.close?() on the connections the process
-                     still holds, including each session's latest connection without close()
-                     (failures logged, not thrown)
+                     still holds: any connection mid-step, and each session's latest
+                     connection without close() (failures logged, not thrown); a provider
+                     with close() and remote compute bounds idle compute itself
   terminal outcome → connection.close?() for a connection the ending step holds,
                      onSessionEnd(ctx, state | null, { reason })
   (close runs at most once per connection; stop is idempotent and may run again after

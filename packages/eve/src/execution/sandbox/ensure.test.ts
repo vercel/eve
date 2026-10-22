@@ -426,7 +426,18 @@ describe("ensureSandboxAccess", () => {
     expect(value.closeSandbox).toHaveBeenCalledOnce();
   });
 
-  it("stops a stopped sandbox again at shutdown until its session ends", async () => {
+  it("closes a connection it cannot use", async () => {
+    const value = fixture();
+    value.create.mockImplementationOnce(async () => ({
+      ...mockSandbox().connection,
+      close: value.closeSandbox,
+      workspaceRoot: "app",
+    }));
+    await expect(open(value.registry)).rejects.toThrow("workspaceRoot must be an absolute path");
+    expect(value.closeSandbox).toHaveBeenCalledOnce();
+  });
+
+  it("stops a stopped sandbox without close() again at shutdown until its session ends", async () => {
     const value = fixture();
     const { access, sandbox } = await open(value.registry);
     if (sandbox === null) throw new Error("Expected a sandbox.");
@@ -442,6 +453,12 @@ describe("ensureSandboxAccess", () => {
     await ended.access.end("completed");
     await shutdownActiveSandboxConnections();
     expect(value.stopSandbox).toHaveBeenCalledTimes(3);
+
+    // A connection with close() is closed by stop() and cannot resume.
+    const closable = fixture({ closable: true });
+    await (await open(closable.registry, "session-3")).access.stop();
+    await shutdownActiveSandboxConnections();
+    expect(closable.stopSandbox).toHaveBeenCalledOnce();
   });
 
   it.each([

@@ -41,7 +41,7 @@ import {
   runWithSandboxConstructorRuntime,
 } from "#shared/sandbox-environment.js";
 import { isSandboxPreparedArtifact, type SandboxDeleteOptions } from "#shared/sandbox-provider.js";
-import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
+import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
@@ -116,7 +116,7 @@ export async function ensureSandboxAccess(
       : undefined,
   );
   let opened: OpenedSandbox | undefined;
-  // A stopped connection resumes on its next use, so shutdown keeps it until the session lets go.
+  // A stopped connection without `close()` resumes on its next use, so shutdown keeps it until the session lets go.
   let stopped: OpenedSandbox | undefined;
   let opening: Promise<OpenedSandbox> | undefined;
   let requiring: Promise<OpenedSandbox> | undefined;
@@ -214,7 +214,7 @@ export async function ensureSandboxAccess(
           `Sandbox provider "${provider.providerName}" returned non-serializable session state.`,
         );
       }
-      const started = openSandbox(provider, context, result.connection, result.state);
+      const started = await openSandbox(provider, context, result.connection, result.state);
       persisted = {
         generation: randomUUID(),
         providerName: provider.providerName,
@@ -456,16 +456,37 @@ export async function ensureSandboxAccess(
       const current = await requireOpened();
       await current.stop();
       forgetOpened();
-      stopped = current;
+      if (!current.closable) {
+        stopped = current;
+        return;
+      }
+      // A closed connection cannot resume, so shutdown has nothing left to stop.
+      untrackActiveSandboxConnection({
+        connection: current,
+        providerName: current.providerName,
+        sessionId: input.sessionId,
+      });
     },
   };
 
-  function openSandbox(
+  async function openSandbox(
     provider: SandboxProviderRuntime,
     context: SandboxSessionContext,
     connection: SandboxConnection<object>,
     state: SandboxJson,
-  ): OpenedSandbox {
+  ): Promise<OpenedSandbox> {
+    let session: SandboxSession;
+    try {
+      session = createConnectionSession(connection);
+    } catch (error) {
+      await connection.close?.().catch((closeError: unknown) => {
+        log.warn("failed to close a sandbox connection eve could not use", {
+          error: closeError,
+          sessionId: input.sessionId,
+        });
+      });
+      throw error;
+    }
     // A stopped connection can resume on its next use, so a later stop runs
     // again; only a stop already in flight is shared. Close runs once.
     const stopCompute = shared(() => connection.stop());
@@ -485,7 +506,7 @@ export async function ensureSandboxAccess(
       },
       providerName: provider.providerName,
       sandbox: withRuntimeSandboxLifecycle(
-        createConnectionSession(connection),
+        session,
         (options) => current.delete(options),
         () => current.stop(),
       ),
