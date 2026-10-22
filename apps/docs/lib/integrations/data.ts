@@ -2097,8 +2097,25 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
         name: "flora",
       },
     },
+    quickStart: `Create \`agent/connections/flora.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/flora.ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://agents.flora.ai/mcp",
+  description: "FLORA: generate image, video, audio, text, and 3D assets on a canvas.",
+  auth: connect("agents.flora.ai/flora"),
+  approval: always(),
+});
+\`\`\`
+
+Connect owns the OAuth flow, and each end-user authorizes in their own browser before their first tool call.`,
     configureNote:
-      "Each user signs in to their own FLORA account when they first use a tool. Generation is billed to that account; confirm the quoted cost before starting a generation or technique.",
+      "Each user signs in to their own FLORA account when they first use a tool. Every FLORA MCP call requires approval, so confirm the quoted cost before approving a generation or technique.",
   },
   coda: {
     logo: "coda",

@@ -134,25 +134,6 @@
       ]
     },
     {
-      "name": "extension/flora",
-      "type": "registry:item",
-      "title": "FLORA",
-      "description": "Generate image, video, audio, text, and 3D assets on a FLORA canvas.",
-      "dependencies": [
-        "@flora-ai/eve-extension"
-      ],
-      "envVars": {
-        "FLORA_CONNECTOR": ""
-      },
-      "files": [
-        {
-          "path": "registry/extensions/flora.ts",
-          "type": "registry:file",
-          "target": "agent/extensions/flora.ts"
-        }
-      ]
-    },
-    {
       "name": "extension/blitzreels",
       "type": "registry:item",
       "title": "BlitzReels",

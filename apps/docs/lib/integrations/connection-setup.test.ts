@@ -7,6 +7,7 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
+import floraConnection from "../../registry/connections/flora";
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -58,7 +59,7 @@ describe("Context connection setup", () => {
 });
 
 describe("FLORA connection setup", () => {
-  it("uses the published MCP URL and Connect connector name", () => {
+  it("uses the published MCP URL, Connect connector name, and approval gate", () => {
     const integration = getIntegration("flora")!;
     const setup = buildConnectionSetup(integration);
 
@@ -67,6 +68,8 @@ describe("FLORA connection setup", () => {
     expect(setup.configureVariants["mcp:user"]).toContain(
       "vercel connect create https://agents.flora.ai/mcp --name flora",
     );
+    expect(integrationMarkdown(integration)).toContain("approval: always()");
+    expect(floraConnection.approval!({} as never)).toBe("user-approval");
   });
 });
 
