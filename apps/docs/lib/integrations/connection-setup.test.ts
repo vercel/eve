@@ -57,6 +57,21 @@ describe("Context connection setup", () => {
   });
 });
 
+describe("Sent connection setup", () => {
+  it("generates user-scoped OAuth setup for Sent's MCP service", () => {
+    const integration = getIntegration("sent")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.authModes).toEqual(["user"]);
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.sent.dm/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("sent")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create mcp.sent.dm --name sent",
+    );
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/sent");
+  });
+});
+
 describe("Neon connection setup", () => {
   it("generates the registry install and Vercel Connect configuration", () => {
     const integration = getIntegration("neon")!;

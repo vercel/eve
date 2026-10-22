@@ -2025,6 +2025,24 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user", "app"],
     relatedResources: [softwareFactoryGuide],
   },
+  sent: {
+    logo: "sent",
+    docsHref: "https://docs.sent.dm/start/llm-docs/mcp-server",
+    keywords: [
+      "mcp",
+      "sms",
+      "whatsapp",
+      "rcs",
+      "business messaging",
+      "deliverability",
+      "oauth",
+      "connect",
+    ],
+    authModes: ["user"],
+    connectors: { user: { service: "mcp.sent.dm", name: "sent" } },
+    configureNote:
+      "Each authenticated user authorizes Sent in the browser before the first tool call. The connection supports the reviewed messaging, contacts, templates, lookup, analytics, and account tools. It requires approval before sending messages, creating or deleting contacts, or deleting templates. Reauthorize to change the selected organization or Sender Profile. Revoke access by deactivating the connection key in Sent Dashboard → API Keys.",
+  },
   notion: {
     logo: "notion",
     docsHref: "/docs/connections",

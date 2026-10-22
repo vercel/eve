@@ -48,6 +48,7 @@ const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   agentcard: "mcp.agentcard.sh/mcp",
   vercel: "vercel",
   linear: "mcp.linear.app",
+  sent: "mcp.sent.dm",
   notion: "mcp.notion.com",
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",
