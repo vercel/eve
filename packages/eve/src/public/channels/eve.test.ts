@@ -82,6 +82,7 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
     send: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     respond: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     cancel: vi.fn().mockResolvedValue({ status: "no_active_turn" }),
+    prewarm: vi.fn().mockResolvedValue({ status: "ready" }),
     compact: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     clear: vi.fn().mockResolvedValue({ sessionId: "test-session-id", status: "accepted" }),
     reset: vi.fn().mockResolvedValue({

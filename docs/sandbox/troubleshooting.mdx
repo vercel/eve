@@ -69,10 +69,18 @@ The deployed build output has no prepared artifact for this agent. This usually 
 ### `The prepared sandbox artifact ... was created with provider`
 
 ```text
-The prepared sandbox artifact for agent node "..." was created with provider "just-bash", but this process selects provider "docker".
+The prepared sandbox artifact for agent node "..." was created with provider "vercel", but this process selects provider "docker".
 ```
 
-The process that prepared the sandbox and the process that uses it selected different providers. `DefaultSandbox.environment()` [selects a provider in each process](/docs/sandbox/default#how-eve-selects-the-provider), so a build on a machine without Docker and a server with Docker disagree. Prepare the sandbox where the using process's provider is available: run `eve build` on that host, or restart `eve dev` locally. To make every process use the same provider, select it explicitly, for example with `DockerSandbox.environment()`.
+The sandbox file selected one provider when eve prepared the sandbox and a different one in the process that uses it. This happens when the sandbox file chooses a provider by reading the host, for example with `process.env.VERCEL ? VercelSandbox.environment() : DockerSandbox.environment()`, and the build and runtime hosts differ. `DefaultSandbox.environment()` does not cause this, because it [records its choice when it prepares the sandbox](/docs/sandbox/default#the-build-records-the-choice). Select one provider explicitly, or use `DefaultSandbox.environment()`, then rebuild with `eve build`, or restart `eve dev` locally.
+
+### `DefaultSandbox has no sandbox provider for this build`
+
+```text
+DefaultSandbox has no sandbox provider for this build: it did not run on Vercel, no Docker daemon was reachable, and production builds do not fall back to just-bash.
+```
+
+The production `eve build` ran outside Vercel without a reachable Docker daemon, so `DefaultSandbox` recorded no provider, and the first session that opens the sandbox fails. A `RUN eve build` step in a Dockerfile usually has no Docker daemon, even when the running container later mounts `/var/run/docker.sock`. Start Docker and run `eve build` again, deploy to Vercel, or select a provider explicitly in the sandbox file, for example `DockerSandbox.environment()` from `eve/sandbox/docker`. See [How eve selects the provider](/docs/sandbox/default#how-eve-selects-the-provider).
 
 ### `Sandbox template ... is not available to this runtime`
 
@@ -87,6 +95,7 @@ The build recorded an artifact, but the provider can no longer use its template.
 | Docker    | The Docker daemon has no image with that name: it was removed, for example by `docker image prune -a`, or the build used another Docker daemon. |
 | Vercel    | The Vercel Sandbox snapshot expired or was deleted.                                                                                             |
 | just-bash | The template directory under `.eve/sandbox-cache/` was deleted, or the build ran on another machine.                                            |
+| Custom    | The image, snapshot, or template that the artifact names no longer exists, so the provider threw `SandboxTemplateNotProvisionedError`.          |
 
 The runtime never recreates a template. Run `eve build` again and deploy its output.
 
@@ -108,7 +117,15 @@ A session records which provider created its sandbox, and later turns resume tha
 This session's sandbox was created by provider "just-bash", but the agent now selects provider "docker".
 ```
 
-The agent selects a different provider than the one that created this session's sandbox. With `DefaultSandbox`, this happens when Docker starts or stops between processes. eve cannot move a sandbox between providers. Start a new session, or restore the previous provider, for example by starting Docker again. In the `eve dev` terminal, `/new` starts a new session.
+eve logs this warning when a session resumes on a build whose sandbox file selects a different provider than the one that created the session's sandbox, for example after you change providers or `DefaultSandbox` records a different choice in a new build. eve cannot move a sandbox between providers, so the session continues in a fresh sandbox from the current provider, without the old sandbox's files. eve does not delete the old sandbox. Remove it with the old provider's tooling, for example `docker rm` for a Docker container. To keep the session's files instead, restore the previous provider before the session resumes.
+
+### `DefaultSandbox selected just-bash, which always allows network access`
+
+```text
+DefaultSandbox selected just-bash, which always allows network access and accepts only the "allow-all" network policy.
+```
+
+The sandbox passed a `networkPolicy` other than `"allow-all"` to `open()`, or called `setNetworkPolicy()`, while `DefaultSandbox` uses just-bash during `eve dev` or `eve eval` because Docker is not reachable. just-bash cannot restrict network access. Start Docker and restart `eve dev` so `DefaultSandbox` selects Docker, or select `VercelSandbox.environment()` or `DockerSandbox.environment()` explicitly.
 
 ### `Invalid ... session state`
 
@@ -130,6 +147,42 @@ Timed out after 10 minutes waiting for another request or eve dev worker to prep
 
 Another request or `eve dev` worker is still preparing environments. Check the `eve dev` output, or run `eve logs`, to find the slow step, such as an image pull, a Dockerfile build, or a `prepare` callback. Retry after preparation finishes, or restart `eve dev` to cancel it.
 
+## Custom provider errors
+
+These errors come from a provider defined with `defineSandboxProvider()`, or from a keyed tool call on a provider that cannot keep its sandbox. See [Custom sandbox providers](/docs/sandbox/custom-providers).
+
+### `cannot keep a sandbox between invokeTool calls`
+
+```text
+Sandbox provider "acme" cannot keep a sandbox between invokeTool calls, so a call with a key cannot open one.
+```
+
+A keyed `invokeTool` call, such as an MCP tool session, requested the sandbox, and the provider does not keep sandboxes between calls. Call the tool without a key, use Vercel Sandbox or just-bash, or set `toolSessions: true` on a custom provider that bounds how long it keeps those sandboxes. Docker does not support keyed calls. See [Keep sandboxes for keyed tool calls](/docs/sandbox/custom-providers#keep-sandboxes-for-keyed-tool-calls).
+
+### `Sandbox connection extensions cannot replace the session members eve provides`
+
+```text
+Sandbox connection extensions cannot replace the session members eve provides: run. Rename them.
+```
+
+The connection's `extensions` define a member that eve already provides on every sandbox session, such as `run`, `readFile`, `stop`, or `delete`. Rename the extension member.
+
+### `ctx.templateKey() reserves`
+
+```text
+ctx.templateKey() reserves "sourceRevision": eve adds the workspace and skill files and the sandbox source revision itself.
+```
+
+The identity passed to `ctx.templateKey()` in `prepare()` sets `resources` or `sourceRevision`. eve adds both to every template key. Rename that identity field.
+
+### `returned non-serializable session state`
+
+```text
+Sandbox provider "acme" returned non-serializable session state.
+```
+
+`start()` returned state that is not JSON-compatible, such as a class instance, a function, or `undefined`. Return only strings, numbers, booleans, `null`, arrays, and plain objects, and keep live clients in the connection instead.
+
 ## Provider setup errors
 
 ### Docker is not installed or not running
@@ -139,7 +192,7 @@ The Docker sandbox provider requires Docker, but the `docker` CLI was not found.
 The Docker sandbox provider requires a running Docker daemon, but it is not reachable.
 ```
 
-Install and start Docker Desktop, OrbStack, Colima, or another runtime with a Docker-compatible `docker` CLI. To use another compatible CLI, such as Podman, set `EVE_DOCKER_PATH` to its path. If you do not need Docker specifically, use `DefaultSandbox.environment()` so eve selects a provider that the host supports.
+Install and start Docker Desktop, OrbStack, Colima, or another runtime with a Docker-compatible `docker` CLI. To use another compatible CLI, such as Podman, set `EVE_DOCKER_PATH` to its path. If you do not need Docker specifically, use `DefaultSandbox.environment()`, which falls back to just-bash during `eve dev` and `eve eval`.
 
 ### The just-bash package is missing
 

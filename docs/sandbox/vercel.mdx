@@ -1,9 +1,9 @@
 ---
 title: "Vercel Sandbox"
-description: "Create snapshot-backed persistent sandboxes on Vercel."
+description: "Create persistent sandboxes on Vercel, from a prepared snapshot when the environment has build-time setup."
 ---
 
-`VercelSandbox.environment()` prepares a reusable Vercel Sandbox snapshot and creates persistent session sandboxes from its recorded snapshot ID.
+`VercelSandbox.environment()` prepares a reusable Vercel Sandbox snapshot when the environment has build-time setup, and creates persistent session sandboxes from its recorded snapshot ID.
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
@@ -56,6 +56,8 @@ Outside Vercel and without a linked project, such as in CI or on a self-hosted s
 eve creates a temporary persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, runs the authored `prepare` callback, and captures a snapshot. The build artifact records the snapshot ID.
 
 When a live session sandbox does not exist, eve creates it directly from that snapshot ID. Runtime does not need to look up the temporary template Sandbox.
+
+When the environment has no `prepare` callback, no managed workspace or skill files, and no `source`, a snapshot would contain only the base runtime. eve skips it: the build records no snapshot ID, and each new session sandbox starts from the image and installs the base runtime itself. A `source` always produces a snapshot, so sessions start from what the build captured instead of fetching the source again.
 
 ## Initialize after open
 

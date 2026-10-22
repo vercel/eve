@@ -55,6 +55,7 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
         },
         async writeFile() {},
         async writeBinaryFile() {},
+        async writeFiles() {},
         async writeTextFile() {},
       };
     },

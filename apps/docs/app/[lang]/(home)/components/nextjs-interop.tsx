@@ -45,7 +45,10 @@ async function renderCode(file: InteropFile) {
       pre: ({ children, ...props }: ComponentProps<"pre">) => (
         <CodeBlock
           {...props}
-          className={cn(props.className, "rounded-none border-0 bg-transparent px-0 py-4")}
+          className={cn(
+            props.className,
+            "my-0 rounded-none border-0 bg-transparent p-0 [&>[data-section=content]]:rounded-none [&>[data-section=content]]:border-0",
+          )}
         >
           {children}
         </CodeBlock>

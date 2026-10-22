@@ -17,15 +17,17 @@ import type {
   SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-import { SANDBOX_WRITE_FILES } from "#shared/sandbox-write-files.js";
+import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 
 export type { InternalSandboxSession };
 
+const FALLBACK_WRITE_CONCURRENCY = 16;
+
 /**
  * Tells agent-aware CLIs (such as `vercel`) that an automated agent runs
- * the command, so they skip interactive prompts. Built-in providers apply it
- * beneath environment-level and per-call env so authors can override it.
+ * the command, so they skip interactive prompts. Providers apply it beneath
+ * environment-level and per-call env so authors can override it.
  */
 export const SANDBOX_AGENT_ENV: Readonly<Record<string, string>> = { AI_AGENT: "eve" };
 
@@ -118,6 +120,23 @@ export function buildSandboxSession(
         path: primitives.resolvePath(options.path),
       });
     },
+    async writeFiles(options: SandboxWriteFilesOptions) {
+      const files = options.files.map((file) => ({
+        content: file.content,
+        path: primitives.resolvePath(file.path),
+      }));
+      if (primitives.writeFiles !== undefined) {
+        await primitives.writeFiles({ abortSignal: options.abortSignal, files });
+        return;
+      }
+      await mapWithConcurrency(files, FALLBACK_WRITE_CONCURRENCY, async (file) => {
+        await primitives.writeFile({
+          abortSignal: options.abortSignal,
+          content: bufferToStream(file.content),
+          path: file.path,
+        });
+      });
+    },
     async removePath(options: SandboxRemovePathOptions) {
       await primitives.removePath({
         abortSignal: options.abortSignal,
@@ -127,19 +146,6 @@ export function buildSandboxSession(
       });
     },
   };
-  if (primitives.writeFiles !== undefined) {
-    Object.assign(session, {
-      [SANDBOX_WRITE_FILES]: async (options: SandboxWriteFilesOptions) => {
-        await primitives.writeFiles?.({
-          abortSignal: options.abortSignal,
-          files: options.files.map((file) => ({
-            content: file.content,
-            path: primitives.resolvePath(file.path),
-          })),
-        });
-      },
-    });
-  }
   if (setNetworkPolicy === undefined) return session;
   return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
 }

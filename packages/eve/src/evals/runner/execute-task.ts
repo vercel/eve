@@ -13,7 +13,7 @@ import type {
   EveEvalTraceContext,
   EveEvalTurn,
 } from "#evals/types.js";
-import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
+import { createEmptyDerivedFacts, latestUsage } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
@@ -184,7 +184,11 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
 /**
  * The eval's usage: each captured session's latest usage, counted once however often the eval
  * captured it, less the sessions another captured session opened, whose spend that session already
- * counts. No usage when a counted session reported none.
+ * counts. No usage when a counted session reported none, and no cost when a counted session reported
+ * none, so a partial sum never reads as the eval's cost.
+ *
+ * "Latest" is by time across captures, not capture order: an eval can capture a session again with
+ * an earlier snapshot (fewer events) after a fuller capture.
  */
 function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | undefined {
   const opened = new Set(
@@ -194,12 +198,24 @@ function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | unde
       ),
     ),
   );
-  const latestById = new Map(sessions.map((session) => [session.sessionId, session.derived.usage]));
-  const counted = [...latestById].flatMap(([id, usage]) =>
-    id !== undefined && opened.has(id) ? [] : [usage],
+  const latestById = new Map<string | undefined, ReturnType<typeof latestUsage>>();
+  for (const session of sessions) {
+    const latest = latestUsage(session.events);
+    const prior = latestById.get(session.sessionId);
+    // A capture with no usage event never replaces one that has one; on equal times the later
+    // capture wins.
+    if (prior === undefined || (latest !== undefined && latest.at >= prior.at))
+      latestById.set(session.sessionId, latest ?? prior);
+  }
+  const counted = [...latestById].flatMap(([id, latest]) =>
+    id !== undefined && opened.has(id) ? [] : [latest?.usage],
   );
+  if (counted.length === 0) return undefined;
   if (!counted.every((usage): usage is TokenUsage => usage !== undefined)) return undefined;
-  return counted.reduce(addTokenUsage);
+  const total = counted.reduce(addTokenUsage);
+  if (counted.every((usage) => usage.costUsd !== undefined)) return total;
+  const { costUsd: _partial, ...withoutCost } = total;
+  return withoutCost;
 }
 
 function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): string | undefined {

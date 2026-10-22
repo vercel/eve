@@ -64,6 +64,31 @@ describe("buildSandboxSession", () => {
   // resolvePath
   // ---------------------------------------------------------------------------
 
+  it("writes a batch through one primitive call, or several files at once without one", async () => {
+    const writeFiles = vi.fn(async () => {});
+    const files = Array.from({ length: 40 }, (_, i) => ({
+      content: new Uint8Array(),
+      path: `${i}.md`,
+    }));
+    await buildSandboxSession({ ...createTestPrimitives(), writeFiles }).writeFiles({ files });
+    expect(writeFiles).toHaveBeenCalledExactlyOnceWith({
+      abortSignal: undefined,
+      files: files.map((file) => ({ content: file.content, path: `/resolved/${file.path}` })),
+    });
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const writeFile = vi.fn(async () => {
+      maxInFlight = Math.max(maxInFlight, ++inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+    });
+    await buildSandboxSession(createTestPrimitives({ writeFile })).writeFiles({ files });
+    expect(writeFile).toHaveBeenCalledTimes(files.length);
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThan(files.length);
+  });
+
   it("exposes resolvePath through the public session", () => {
     const resolvePath = vi.fn((path: string) => `/resolved/${path}`);
     const session = buildSandboxSession(createTestPrimitives({ resolvePath }));

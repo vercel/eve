@@ -9,8 +9,16 @@
 // (github_run_id, run_attempt, fixture, eval_id, model_id, world, attempt).
 // Results are comparable across runs when (eval_id, fixture_digest, model_id,
 // model_release, world) match. Planned legs that uploaded nothing, and expected
-// evals with no result, become `missing` records so coverage stays honest.
-// Richer measurements can be derived later from the published raw trees.
+// evals with no result, become `missing` records (outcome "gap") so coverage
+// stays honest.
+//
+// Each attempt also carries the standard metric set (latency, attribution,
+// cost, tokens, counts, reliability) derived from its eval detail artifact by
+// scripts/eval-metrics/standard.mjs, and an outcome from
+// scripts/eval-metrics/gaps.mjs that separates infrastructure gaps (provider
+// outages, timeouts before any model step) from real failures. A metric that
+// can't be derived is `unavailable` or `not-applicable` with a reason, never
+// zero.
 //
 // A live leg's eval whose model steps all ran on another model (fixtures script
 // some delegation evals with eve's mock models) says nothing about the leg's
@@ -20,6 +28,13 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { classifyOutcome } from "../eval-metrics/gaps.mjs";
+import {
+  METRICS_VERSION,
+  deriveAttemptMetrics,
+  listEvalArtifacts,
+} from "../eval-metrics/standard.mjs";
 
 export const RECORD_SCHEMA_VERSION = 1;
 export const LEG_ARTIFACT_PREFIX = "benchmark-leg-";
@@ -105,6 +120,14 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
   const records = attempts.map(({ leg, meta, evalId, artifact, missingReason, uploaded }) => {
     const startedAt = artifact?.startedAt ?? null;
     const completedAt = artifact?.completedAt ?? null;
+    const { outcome, gap_reason } =
+      artifact === undefined
+        ? { outcome: "gap", gap_reason: missingReason }
+        : classifyOutcome(artifact);
+    const { metrics_version, metrics, failures } =
+      artifact === undefined
+        ? { metrics_version: METRICS_VERSION, metrics: {}, failures: [] }
+        : deriveAttemptMetrics(artifact);
     return {
       schema_version: RECORD_SCHEMA_VERSION,
       github_run_id: String(githubRunId),
@@ -129,6 +152,11 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
         passed,
       })),
       error: artifact?.error ?? null,
+      outcome,
+      gap_reason: gap_reason ?? null,
+      metrics_version,
+      metrics,
+      failures,
       started_at: startedAt,
       completed_at: completedAt,
       duration_ms:
@@ -148,16 +176,6 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
 function ranOnModel(artifact, modelId) {
   const models = artifact.result?.derived?.models ?? [];
   return models.length === 0 || models.includes(modelId);
-}
-
-/** Find every eval detail artifact under one `.eve/evals/<timestamp>` tree. */
-export function listEvalArtifacts(runDirectory) {
-  const evalsDirectory = join(runDirectory, "evals");
-  if (!existsSync(evalsDirectory)) return [];
-  return readdirSync(evalsDirectory, { withFileTypes: true, recursive: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map((entry) => join(entry.parentPath, entry.name))
-    .sort();
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

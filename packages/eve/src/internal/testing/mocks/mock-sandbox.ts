@@ -10,6 +10,7 @@ import type {
   SandboxSpawnOptions,
   SandboxWriteBinaryFileOptions,
   SandboxWriteFileOptions,
+  SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#public/definitions/sandbox.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
@@ -183,6 +184,18 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     }
   }
 
+  async function writeBinaryFile(options: SandboxWriteBinaryFileOptions): Promise<void> {
+    const resolved = resolveWorkspacePath(options.path);
+    writes.push({ content: options.content, path: resolved });
+    const buf = Buffer.from(
+      options.content.buffer,
+      options.content.byteOffset,
+      options.content.byteLength,
+    );
+    files.set(resolved, buf.toString("utf8"));
+    fileBytes.set(resolved, buf);
+  }
+
   const baseSession: NetworkPolicySandboxSession = {
     name: input.name ?? "sbx_mock",
     resolvePath(path: string): string {
@@ -232,16 +245,9 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       files.set(resolved, buf.toString("utf8"));
       fileBytes.set(resolved, buf);
     },
-    async writeBinaryFile(options: SandboxWriteBinaryFileOptions): Promise<void> {
-      const resolved = resolveWorkspacePath(options.path);
-      writes.push({ content: options.content, path: resolved });
-      const buf = Buffer.from(
-        options.content.buffer,
-        options.content.byteOffset,
-        options.content.byteLength,
-      );
-      files.set(resolved, buf.toString("utf8"));
-      fileBytes.set(resolved, buf);
+    writeBinaryFile,
+    async writeFiles(options: SandboxWriteFilesOptions): Promise<void> {
+      for (const file of options.files) await writeBinaryFile(file);
     },
     async writeTextFile(options: SandboxWriteTextFileOptions): Promise<void> {
       const resolved = resolveWorkspacePath(options.path);

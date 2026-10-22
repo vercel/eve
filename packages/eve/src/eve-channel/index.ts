@@ -64,7 +64,6 @@ import {
   parseCancelTurnBody,
   parseCreateBody,
   parseIncludeTailIndex,
-  parseJsonRequest,
   parseOptionalJsonRequest,
   parseResetBody,
   parseSessionControlBody,
@@ -409,8 +408,26 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
-        const payload = await parseJsonRequest(req);
+        const payload = await parseOptionalJsonRequest(req);
         if (payload instanceof Response) return payload;
+        if (Object.keys(payload).length === 0) {
+          try {
+            const result = await attachSession(sessionId).prewarm();
+            return Response.json(
+              { ok: true, ...result },
+              {
+                headers: { "cache-control": "no-store" },
+                status: result.status === "accepted" ? 202 : 200,
+              },
+            );
+          } catch (error) {
+            const errorId = logError(log, "session-prewarm request failed", error, { sessionId });
+            return Response.json(
+              { ok: false, error: "Failed to prewarm the session.", errorId },
+              { status: 500 },
+            );
+          }
+        }
         const forwarded = await resolveForwardedPrincipal({
           trustedForwarders: input.trustedForwarders,
           forwarder: sessionAuthFromResult(authResult),

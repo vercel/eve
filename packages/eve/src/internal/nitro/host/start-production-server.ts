@@ -1,18 +1,20 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createConnection, createServer } from "node:net";
+import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
 import { EVE_SCHEDULES_DISABLED_ENV } from "#internal/schedules/disabled.js";
+import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 
 const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
 const DEFAULT_PRODUCTION_SERVER_PORT = 3000;
 const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
-const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+)?/;
+// srvx prints this line only after its own listener is bound.
+const LISTENING_URL_PATTERN = /Listening on:?\s+(https?:\/\/\S+)/;
 // Must exceed the server's bounded sandbox shutdown (15s in
 // sandbox-shutdown-plugin.ts) so stopping sandboxes on SIGTERM is not
 // cut short by SIGKILL.
@@ -51,22 +53,6 @@ function normalizeServerClientUrl(serverUrl: string): string {
   return url.toString();
 }
 
-function formatClientHost(host: string): string {
-  if (WILDCARD_LISTEN_HOSTNAMES.has(host)) {
-    return "127.0.0.1";
-  }
-
-  if (host.includes(":") && !host.startsWith("[")) {
-    return `[${host}]`;
-  }
-
-  return host;
-}
-
-function createKnownPortUrl(input: { host: string; port: number }): string | undefined {
-  return `http://${formatClientHost(input.host)}:${String(input.port)}/`;
-}
-
 async function resolveListenPort(input: { host: string; port: number }): Promise<number> {
   if (input.port !== 0) {
     return input.port;
@@ -97,35 +83,21 @@ async function resolveListenPort(input: { host: string; port: number }): Promise
 }
 
 function parseServerUrlFromOutput(output: string): string | undefined {
-  const match = LOCAL_SERVER_URL_PATTERN.exec(output);
+  const match = LISTENING_URL_PATTERN.exec(output);
 
-  if (match === null) {
+  if (match?.[1] === undefined) {
     return undefined;
   }
 
-  return normalizeServerClientUrl(match[0]);
-}
-
-async function isListening(url: string): Promise<boolean> {
-  const target = new URL(url);
-  const port = Number(target.port || (target.protocol === "https:" ? 443 : 80));
-  return await new Promise((resolveReady) => {
-    const socket = createConnection({ host: target.hostname, port });
-    const finish = (ready: boolean) => {
-      socket.destroy();
-      resolveReady(ready);
-    };
-    socket.setTimeout(2_000, () => finish(false));
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
+  return normalizeServerClientUrl(match[1]);
 }
 
 async function waitForReady(input: {
   child: ChildProcess;
   getStartError(): unknown;
   getOutput(): string;
-  knownUrl?: string;
+  host: string;
+  port: number;
 }): Promise<string> {
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
 
@@ -135,11 +107,19 @@ async function waitForReady(input: {
       throw startError;
     }
 
-    const parsedUrl = parseServerUrlFromOutput(input.getOutput());
-    const url = parsedUrl ?? input.knownUrl;
+    const output = input.getOutput();
+    const startFailure = readBuiltServerStartFailure(output, {
+      host: input.host,
+      port: input.port,
+      retryHint: "choose another port with --port or the PORT environment variable",
+    });
+    if (startFailure !== undefined) {
+      throw startFailure;
+    }
 
-    if (url !== undefined && (parsedUrl !== undefined || (await isListening(url)))) {
-      return new URL(url).toString();
+    const url = parseServerUrlFromOutput(output);
+    if (url !== undefined) {
+      return url;
     }
 
     if (input.child.exitCode !== null || input.child.signalCode !== null) {
@@ -212,10 +192,6 @@ export async function startProductionServer(
     host,
     port: options.port ?? readEnvironmentPort() ?? DEFAULT_PRODUCTION_SERVER_PORT,
   });
-  const knownUrl = createKnownPortUrl({
-    host,
-    port,
-  });
   // Startup output is kept only for URL detection and startup diagnostics.
   // After readiness it is dropped so a long-running server does not grow it.
   let output = "";
@@ -230,6 +206,9 @@ export async function startProductionServer(
     NITRO_PORT: String(port),
     PORT: String(port),
   };
+  // srvx hides its listening line when TEST is set, and that line is the only
+  // proof that this child, not another process, owns the port.
+  delete env.TEST;
   if (options.schedules === false) {
     env[EVE_SCHEDULES_DISABLED_ENV] = "1";
   }
@@ -277,7 +256,8 @@ export async function startProductionServer(
       child,
       getStartError: () => startError,
       getOutput: () => output,
-      knownUrl,
+      host,
+      port,
     });
     ready = true;
     output = "";

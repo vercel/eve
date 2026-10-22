@@ -21,7 +21,7 @@ import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import {
@@ -177,7 +177,7 @@ function createTestSandboxProvider() {
     };
   }
 
-  const provider = defineSandboxProvider({
+  const provider = defineLegacySandboxProvider({
     name: TEST_SANDBOX_PROVIDER_NAME,
     environment: () => ({
       async onSessionEnd(context) {

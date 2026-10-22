@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -37,6 +39,26 @@ describe("Browser Use connection setup", () => {
   });
 });
 
+describe("Firecrawl connection setup", () => {
+  it("renders bearer authentication for cost-sensitive tools", () => {
+    const integration = getIntegration("firecrawl")!;
+
+    expect(integration.quickStart).toContain(
+      "Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY!}`",
+    );
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/firecrawl");
+  });
+
+  it("shows the installed connection file in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/firecrawl.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(getIntegration("firecrawl")!.quickStart).toContain(source.trim());
+  });
+});
+
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;
@@ -60,6 +82,29 @@ describe("Context connection setup", () => {
     expect(setup.configureVariants["mcp:user"]).toContain(
       "vercel connect create mcp.context.dev --name context",
     );
+  });
+});
+
+describe("FLORA connection setup", () => {
+  it("uses the published MCP URL, Connect connector name, and approval gate", () => {
+    const integration = getIntegration("flora")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.variants["mcp:user"]).toContain('url: "https://agents.flora.ai/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("agents.flora.ai/flora")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create agents.flora.ai/mcp --name flora",
+    );
+    expect(integrationMarkdown(integration)).toContain("approval: always()");
+  });
+
+  it("shows the installed connection file in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/flora.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(getIntegration("flora")!.quickStart).toContain(source.trim());
   });
 });
 

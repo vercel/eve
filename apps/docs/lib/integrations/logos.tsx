@@ -263,6 +263,20 @@ const hindsightLogo = (props: LogoProps) => (
   </svg>
 );
 
+const memantoLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 96 120" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M24 0h60v24H72V12h-6v12H42V12h-6v12H24Zm-6 24h6v24h-6Zm66 0h6v24h-6ZM24 48h60v12H72v12H36V60H24Z"
+      fill="#5534A5"
+    />
+    <path d="m48 28 4 8-4 8-4-8 4-8Zm12 0 4 8-4 8-4-8 4-8Z" fill="white" />
+    <path
+      d="M18 72h6v36h-6Zm12 0h6v24h-6Zm12 0h6v12h-6Zm18 0h6v12h-6Zm12 0h6v24h-6Zm12 0h6v36h-6Z"
+      fill="#5534A5"
+    />
+  </svg>
+);
+
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
 const honeycombLogo = (props: LogoProps) => (
@@ -406,6 +420,15 @@ const embatLogo = (props: LogoProps) => (
     <path d="M35 187.975L69.191 199.084L48.0598 169.999L35 187.975Z" fill="currentColor" />
     <path d="M35 152.024L48.0598 169.998L69.191 140.915L35 152.024Z" fill="currentColor" />
     <path d="M69.1904 140.915V199.083L90.3191 169.998L69.1904 140.915Z" fill="currentColor" />
+  </svg>
+);
+
+const firecrawlLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 200 284" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M166.862 90.7716C155.812 94.0514 147.483 101.471 141.383 109.53C140.073 111.26 137.343 109.96 137.863 107.841C149.543 59.8136 134.113 19.896 86.0157 0.247269C83.5758 -0.752669 81.0359 1.43719 81.6759 3.99704C103.555 91.8416 11.5294 84.432 23.1588 184.016C23.3588 185.726 21.4389 186.896 20.039 185.896C15.6792 182.766 10.8095 176.236 7.46963 171.647C6.48968 170.297 4.36978 170.677 3.9198 172.287C1.25994 181.906 0 190.965 0 199.965C0 234.963 17.9891 265.771 45.2177 283.63C46.7777 284.65 48.7776 283.19 48.2476 281.4C46.8477 276.7 46.0577 271.74 45.9977 266.611C45.9977 263.461 46.1977 260.241 46.6877 257.241C47.8276 249.702 50.4475 242.522 54.8473 235.983C69.9365 213.334 100.185 191.455 95.3552 161.747C95.0453 159.867 97.2651 158.627 98.6651 159.917C119.974 179.386 124.194 205.575 120.694 229.063C120.394 231.103 122.954 232.193 124.244 230.593C127.504 226.513 131.483 222.933 135.813 220.244C136.893 219.574 138.333 220.084 138.743 221.284C141.153 228.293 144.733 234.873 148.113 241.452C152.152 249.362 154.302 258.391 153.962 267.951C153.792 272.6 153.022 277.1 151.732 281.38C151.182 283.19 153.162 284.7 154.752 283.66C182.001 265.801 200 234.993 200 199.975C200 187.806 197.87 175.876 193.84 164.697C185.391 141.248 163.952 123.64 169.372 93.0815C169.632 91.6216 168.282 90.3517 166.862 90.7716Z"
+      fill="currentColor"
+    />
   </svg>
 );
 
@@ -712,6 +735,15 @@ const blitzreelsLogo = (props: LogoProps) => (
   </svg>
 );
 
+const floraLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M18.241 0H24v5.759c0 3.181-2.579 5.76-5.759 5.76-3.181 0-5.76-2.579-5.76-5.76C12.481 2.579 15.06 0 18.241 0ZM0 18.241c0-3.181 2.579-5.76 5.759-5.76 3.181 0 5.76 2.579 5.76 5.76 0 3.18-2.579 5.759-5.76 5.759H0v-5.759ZM18.241 12.481C21.421 12.481 24 15.06 24 18.241V24h-5.759c-3.181 0-5.76-2.579-5.76-5.759 0-3.181 2.579-5.76 5.76-5.76ZM0 0h5.759c3.181 0 5.76 2.579 5.76 5.759 0 3.181-2.579 5.76-5.76 5.76C2.579 11.519 0 8.94 0 5.759V0Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const muxLogo = (props: LogoProps) => (
   <svg fill="currentColor" viewBox="0 0 1600 500" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -825,6 +857,21 @@ const raindropLogo = (props: LogoProps) => (
   </svg>
 );
 
+const oodleLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      clipRule="evenodd"
+      d="M 5.889 11.293 C 5.19 11.735 4.602 12.264 4.123 12.878 C 3.342 13.864 2.951 15.028 2.951 16.371 C 2.951 17.714 3.342 18.887 4.123 19.889 C 4.905 20.875 5.979 21.64 7.346 22.184 C 8.714 22.728 10.264 23 11.998 23 C 13.756 23 15.306 22.728 16.649 22.184 C 18.016 21.64 19.09 20.875 19.872 19.889 C 20.653 18.887 21.044 17.714 21.044 16.371 C 21.044 15.028 20.653 13.864 19.872 12.878 C 19.394 12.244 18.794 11.703 18.072 11.252 V 14.23 C 18.445 14.772 18.631 15.387 18.631 16.077 C 18.631 16.932 18.345 17.679 17.772 18.318 C 17.199 18.945 16.411 19.433 15.409 19.779 C 15.056 19.903 14.683 20.005 14.291 20.084 C 13.584 20.311 12.82 20.425 11.998 20.425 C 11.173 20.425 10.412 20.311 9.716 20.084 C 9.322 20.005 8.946 19.903 8.587 19.779 C 7.584 19.433 6.796 18.945 6.223 18.318 C 5.65 17.679 5.364 16.932 5.364 16.077 C 5.364 15.409 5.539 14.81 5.889 14.281 V 11.293Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+    <rect fill="currentColor" height="16.882" rx="0.968" width="1.936" x="6.945" y="4.752" />
+    <rect fill="currentColor" height="14.885" rx="0.968" width="1.936" x="9.668" y="6.748" />
+    <rect fill="currentColor" height="16.882" rx="0.968" width="1.936" x="12.391" y="4.752" />
+    <rect fill="currentColor" height="20.634" rx="0.968" width="1.936" x="15.114" y="1" />
+  </svg>
+);
+
 const shopifyLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 109.5 124.5" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -864,11 +911,13 @@ export const logos = {
   braintrust: braintrustLogo,
   jaeger: jaegerLogo,
   raindrop: raindropLogo,
+  oodle: oodleLogo,
   kernel: kernelLogo,
   upstash: upstashLogo,
   arcana: arcanaLogo,
   supermemory: supermemoryLogo,
   hindsight: hindsightLogo,
+  memanto: memantoLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,
   brex: brexLogo,
@@ -878,6 +927,7 @@ export const logos = {
   coda: codaLogo,
   egnyte: egnyteLogo,
   embat: embatLogo,
+  firecrawl: firecrawlLogo,
   "hugging-face": huggingFaceLogo,
   "local-falcon": localFalconLogo,
   make: makeLogo,
@@ -929,6 +979,7 @@ export const logos = {
   messenger: messengerLogo,
   x: xLogo,
   blitzreels: blitzreelsLogo,
+  flora: floraLogo,
   mux: muxLogo,
   browserbase: browserbaseLogo,
   jetty: jettyLogo,

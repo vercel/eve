@@ -4,7 +4,8 @@ import {
   createSandboxProviderResources,
   type SandboxPreparedArtifact,
   type SandboxProviderHandle,
-  type SandboxProviderImplementation,
+  type LegacySandboxProviderImplementation,
+  type SandboxProviderResourceFile,
 } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
@@ -14,7 +15,12 @@ export function createSandboxProviderHarness<
   SessionState,
   Session extends SandboxSession,
 >(
-  implementation: SandboxProviderImplementation<Options, PreparedArtifact, SessionState, Session>,
+  implementation: LegacySandboxProviderImplementation<
+    Options,
+    PreparedArtifact,
+    SessionState,
+    Session
+  >,
   options: Options,
   harnessOptions: {
     readonly preparedArtifact?: () => PreparedArtifact;
@@ -62,23 +68,20 @@ export function createSandboxProviderHarness<
       readonly log?: (message: string) => void;
       readonly resourcesKey?: string;
       readonly resourcesPath?: string;
-      readonly seedFiles?: readonly {
-        readonly content: string | Uint8Array;
-        readonly path: string;
-      }[];
+      readonly skills?: readonly SandboxProviderResourceFile[];
       readonly sourceRevision?: string;
+      readonly workspace?: readonly SandboxProviderResourceFile[];
     }) {
+      const hasFiles = (input.skills?.length ?? 0) + (input.workspace?.length ?? 0) > 0;
       const artifact = await implementation.prepare({
         files: createSandboxProviderFiles(`${input.appRoot}/sandbox`),
         host: createSandboxProviderHost(input.appRoot),
         log: input.log,
         resources: createSandboxProviderResources({
-          ...input,
-          resourcesKey:
-            input.resourcesKey ??
-            (input.seedFiles === undefined || input.seedFiles.length === 0
-              ? undefined
-              : "test-resources"),
+          key: input.resourcesKey ?? (hasFiles ? "test-resources" : undefined),
+          path: input.resourcesPath,
+          skills: input.skills,
+          workspace: input.workspace,
         }),
         sourceRevision: input.sourceRevision ?? "test-source-revision",
         storagePath: input.appRoot,

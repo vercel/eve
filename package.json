@@ -26,7 +26,7 @@
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "test:webchat": "pnpm --filter eve run test:webchat",
-    "test:eval-benchmark": "node --test scripts/eval-benchmark/*.test.mjs",
+    "test:eval-benchmark": "node --test scripts/eval-metrics/*.test.mjs scripts/eval-benchmark/*.test.mjs",
     "test:framework-fixtures": "pnpm --filter eve run test:framework-fixtures",
     "test:integration": "turbo run test:integration --filter=eve && turbo run test:integration --filter=\"!eve\"",
     "test:scenario": "turbo run test:scenario",

@@ -5,7 +5,7 @@ import {
   type SandboxPreparedArtifactStore,
 } from "#execution/sandbox/prewarm.js";
 import {
-  defineSandboxProvider,
+  defineLegacySandboxProvider,
   type SandboxProviderPrepareContext,
 } from "#shared/sandbox-provider.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -15,9 +15,7 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 
 const mocks = vi.hoisted(() => ({
-  materializeWorkspaceDirectory: vi.fn<
-    (path: string) => Promise<readonly { readonly content: Buffer; readonly path: string }[]>
-  >(async () => []),
+  materializeWorkspaceDirectory: vi.fn(async (_path: string) => ({ skills: [], workspace: [] })),
 }));
 
 vi.mock("#runtime/workspace/seed-files.js", () => ({
@@ -27,7 +25,7 @@ vi.mock("#runtime/workspace/seed-files.js", () => ({
 describe("prewarmAppSandboxes", () => {
   afterEach(() => {
     mocks.materializeWorkspaceDirectory.mockReset();
-    mocks.materializeWorkspaceDirectory.mockResolvedValue([]);
+    mocks.materializeWorkspaceDirectory.mockResolvedValue({ skills: [], workspace: [] });
     vi.unstubAllEnvs();
   });
 
@@ -161,7 +159,7 @@ function createGraph(
     };
   } = {},
 ): ResolvedAgentGraphBundle {
-  const provider = defineSandboxProvider({
+  const provider = defineLegacySandboxProvider({
     name: input.providerName ?? "test",
     environment: () => ({
       async onSessionEnd() {},
