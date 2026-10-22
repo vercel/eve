@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 // Each test grades one requirement from the prompt, independently of the others,
 // so the share of passing tests is a partial score for the run.
@@ -13,6 +13,13 @@ const projectRoot = "restock-agent";
 const agentRoot = `${projectRoot}/agent`;
 const apiBaseUrl = "https://api.northstar-fulfillment.com";
 const webhookSecret = "test-webhook-secret";
+
+// Set before any authored module loads: a module may read credentials at import
+// time, and the ESM cache keeps whatever it saw first.
+beforeEach(() => {
+  vi.stubEnv("NORTHSTAR_API_TOKEN", "test-token");
+  vi.stubEnv("NORTHSTAR_WEBHOOK_SECRET", webhookSecret);
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -54,7 +61,6 @@ test("connects to the Northstar API from the bundled contract as the app", async
   expect(typeof connection.spec).toBe("object");
   expect(Object.keys(connection.spec.paths)).toContain("/purchase-orders");
 
-  vi.stubEnv("NORTHSTAR_API_TOKEN", "test-token");
   const auth = typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
   expect(auth?.credentialOwner ?? "app").toBe("app");
   expect(await auth.getToken({})).toMatchObject({ token: "test-token" });
@@ -101,7 +107,6 @@ test("asks a person to approve purchase orders of $5,000 or more", async () => {
 
 test("rejects low-stock alerts with a bad signature", async () => {
   const { route, calls, context, pending } = await webhookRoute();
-  vi.stubEnv("NORTHSTAR_WEBHOOK_SECRET", webhookSecret);
   const body = JSON.stringify({ sku: "NS-1042", onHand: 3, parLevel: 40 });
   for (const signature of [undefined, "0".repeat(64), sign(`${body} `)]) {
     const response = await route.handler(alertRequest(body, signature), context);
@@ -113,7 +118,6 @@ test("rejects low-stock alerts with a bad signature", async () => {
 
 test("hands valid low-stock alerts to the restock Slack channel", async () => {
   const { route, calls, context, pending } = await webhookRoute();
-  vi.stubEnv("NORTHSTAR_WEBHOOK_SECRET", webhookSecret);
   const slack = await load(slackChannelFile());
   const body = JSON.stringify({ sku: "NS-1042", onHand: 3, parLevel: 40 });
   const response = await route.handler(alertRequest(body, sign(body)), context);
@@ -183,7 +187,8 @@ async function load(path: string): Promise<any> {
 
 function session(principalId = "slack:U01ADA") {
   return {
-    id: "session-1",
+    // Distinct per person, so a per-conversation scope cannot pass as team-wide.
+    id: `session-${principalId}`,
     auth: {
       current: {
         authenticator: "slack",

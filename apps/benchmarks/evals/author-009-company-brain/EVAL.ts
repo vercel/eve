@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 // Each test grades one requirement from the prompt, independently of the others,
 // so the share of passing tests is a partial score for the run.
@@ -17,6 +17,14 @@ const scheduleAuth = { authenticator: "app", principalId: "eve:app", principalTy
 
 /** A signed-in employee's groups, the schedule's app principal, or nobody. */
 type Caller = string[] | "schedule" | undefined;
+
+// Set before any authored module loads: a module may read credentials at import
+// time, and the ESM cache keeps whatever it saw first.
+beforeEach(() => {
+  vi.stubEnv("WAREHOUSE_TOKEN", "test-token");
+  vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
+  vi.stubEnv("SLACK_SIGNING_SECRET", "test-signing-secret");
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -45,7 +53,7 @@ test("answers employees in Slack with portable credentials", () => {
     /slackChannel\s*\(/.test(readFileSync(file, "utf8")),
   );
   expect(rest).toHaveLength(0);
-  expect(channel).toBe(`${agentRoot}/channels/slack.ts`);
+  expect(channel).toBeDefined();
   const source = readFileSync(channel, "utf8");
   expect(source).toMatch(/from\s+["']eve\/channels\/slack["']/);
   expect(source).not.toMatch(/connectSlackCredentials/);
@@ -71,7 +79,7 @@ test("run_sql sends read-only queries to the warehouse", async () => {
   const requests = stubWarehouse();
 
   const output = await tool.execute(
-    sqlInput(tool, "SELECT count(*) FROM analytics.customers"),
+    await sqlInput(tool, "SELECT count(*) FROM analytics.customers"),
     toolContext([]),
   );
   expect(requests).toHaveLength(1);
@@ -85,7 +93,10 @@ test("run_sql sends read-only queries to the warehouse", async () => {
   expect(JSON.stringify(output)).toContain("warehouse-row");
 
   await tool.execute(
-    sqlInput(tool, "WITH recent AS (SELECT * FROM analytics.orders) SELECT count(*) FROM recent"),
+    await sqlInput(
+      tool,
+      "WITH recent AS (SELECT * FROM analytics.orders) SELECT count(*) FROM recent",
+    ),
     toolContext([]),
   );
   expect(requests).toHaveLength(2);
@@ -95,7 +106,7 @@ test("run_sql refuses writes without calling the warehouse", async () => {
   const tool = await load(`${agentRoot}/tools/run_sql.ts`);
   const requests = stubWarehouse();
   // A tool that never calls the warehouse would refuse everything trivially.
-  await tool.execute(sqlInput(tool, "SELECT 1"), toolContext([]));
+  await tool.execute(await sqlInput(tool, "SELECT 1"), toolContext([]));
   expect(requests).toHaveLength(1);
 
   for (const query of [
@@ -104,7 +115,7 @@ test("run_sql refuses writes without calling the warehouse", async () => {
     "SELECT 1; DROP TABLE analytics.orders",
     "INSERT INTO analytics.orders (id) VALUES (1)",
   ]) {
-    const parsed = tool.inputSchema.safeParse({ query });
+    const parsed = await parseInput(tool, { query });
     if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
     expect(requests, query).toHaveLength(1);
   }
@@ -120,7 +131,7 @@ test("run_sql asks a person before touching the pii schema", async () => {
         approvedTools: new Set(),
         callId: "sql-call",
         session: session([]),
-        toolInput: sqlInput(tool, query),
+        toolInput: await sqlInput(tool, query),
         toolName: "run_sql",
       }),
     );
@@ -159,7 +170,7 @@ test("revenue_forecast reads the quarter's forecast", async () => {
   const tool = forecastTool(await resolveDynamic(definition, ["finance"]));
   expect(tool).toBeDefined();
   const requests = stubWarehouse();
-  const parsed = tool.inputSchema.safeParse({ quarter: "2026-Q4" });
+  const parsed = await parseInput(tool, { quarter: "2026-Q4" });
   expect(parsed.success).toBe(true);
   // Re-checking the group inside execute is a valid second layer, so run as a finance user.
   const output = await tool.execute(parsed.data, toolContext(["finance"]));
@@ -178,7 +189,9 @@ test("the scheduled run can use revenue_forecast", async () => {
   const tool = forecastTool(await resolveDynamic(definition, "schedule"));
   expect(tool).toBeDefined();
   const requests = stubWarehouse();
-  await tool.execute(tool.inputSchema.parse({ quarter: "2027-Q1" }), toolContext("schedule"));
+  const parsed = await parseInput(tool, { quarter: "2027-Q1" });
+  expect(parsed.success).toBe(true);
+  await tool.execute(parsed.data, toolContext("schedule"));
   expect(requests).toHaveLength(1);
   expect(new URL(requests[0].url).searchParams.get("quarter")).toBe("2027-Q1");
 });
@@ -210,10 +223,12 @@ test("analyze asks both specialists at the same time and returns both answers", 
       },
     }),
   };
-  const output = await tool.execute(
-    tool.inputSchema.parse({ question: "Why did ARR dip in March?" }),
-    ctx,
-  );
+  const parsed = await parseInput(tool, { question: "Why did ARR dip in March?" });
+  expect(parsed.success).toBe(true);
+  // A workflow tool may run its calls as tasks; both entry points take (input, ctx).
+  const run = tool.execute ?? tool.task;
+  expect(typeof run).toBe("function");
+  const output = await run(parsed.data, ctx);
 
   expect(sent.map((entry) => entry.name).sort()).toEqual(["analyst", "researcher"]);
   for (const entry of sent) expect(JSON.stringify(entry.message)).toContain("ARR dip in March");
@@ -241,10 +256,13 @@ test("the specialists are subagents hidden from the main model", async () => {
 test("analyst queries the warehouse read-only and cannot read Notion", async () => {
   const tool = await load(`${agentRoot}/subagents/analyst/tools/run_sql.ts`);
   const requests = stubWarehouse();
-  await tool.execute(sqlInput(tool, "SELECT count(*) FROM analytics.customers"), toolContext([]));
+  await tool.execute(
+    await sqlInput(tool, "SELECT count(*) FROM analytics.customers"),
+    toolContext([]),
+  );
   expect(requests).toHaveLength(1);
   expect(requests[0].url).toBe(`${warehouse}/query`);
-  const parsed = tool.inputSchema.safeParse({ query: "DELETE FROM analytics.orders" });
+  const parsed = await parseInput(tool, { query: "DELETE FROM analytics.orders" });
   if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
   expect(requests).toHaveLength(1);
 
@@ -299,7 +317,7 @@ test("posts the weekly metrics summary to Slack", async () => {
   const schedule = await load(file);
   expect(String(schedule.cron).trim()).toMatch(/^0 15 \* \* (?:1|MON)$/i);
   expect(typeof schedule.run).toBe("function");
-  const slack = await load(`${agentRoot}/channels/slack.ts`);
+  const slack = await load(slackChannelFile());
 
   const appAuth = { authenticator: "app", principalId: "eve:app", principalType: "runtime" };
   const deliveries: Array<{ channel: unknown; target: unknown; message: unknown; auth: unknown }> =
@@ -388,25 +406,49 @@ async function load(path: string): Promise<any> {
   return (await import(pathToFileURL(resolve(path)).href)).default;
 }
 
+function slackChannelFile(): string {
+  const file = sourceFiles("channels", /\.ts$/).find((path) =>
+    /slackChannel\s*\(/.test(readFileSync(path, "utf8")),
+  );
+  if (file === undefined) throw new Error("The agent has no Slack channel.");
+  return file;
+}
+
 function stubWarehouse(): Array<{ url: string; init: RequestInit }> {
-  vi.stubEnv("WAREHOUSE_TOKEN", "test-token");
   const requests: Array<{ url: string; init: RequestInit }> = [];
   vi.stubGlobal("fetch", async (input: string | URL | Request, init: RequestInit = {}) => {
-    const url = input instanceof Request ? input.url : String(input);
-    requests.push({
-      url,
-      init: input instanceof Request ? { ...init, method: input.method } : init,
-    });
+    if (input instanceof Request) {
+      const body = await input.clone().text();
+      requests.push({
+        url: input.url,
+        init: { method: input.method, headers: input.headers, body: body || undefined, ...init },
+      });
+    } else {
+      requests.push({ url: String(input), init });
+    }
     return Response.json({ rows: [{ id: "warehouse-row" }] });
   });
   return requests;
 }
 
-function sqlInput(
-  tool: { inputSchema: { safeParse(input: unknown): { success: boolean; data?: unknown } } },
-  query: string,
-) {
-  const parsed = tool.inputSchema.safeParse({ query });
+/**
+ * Validates input the way eve does for any accepted schema: Standard Schema
+ * (Zod and others), or a plain JSON Schema object, which eve does not validate here.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function parseInput(tool: any, input: unknown): Promise<{ success: boolean; data?: any }> {
+  const standard = tool.inputSchema?.["~standard"];
+  if (typeof standard?.validate === "function") {
+    const result = await standard.validate(input);
+    return result.issues ? { success: false } : { success: true, data: result.value };
+  }
+  if (typeof tool.inputSchema?.safeParse === "function") return tool.inputSchema.safeParse(input);
+  return { success: true, data: input };
+}
+
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function sqlInput(tool: any, query: string) {
+  const parsed = await parseInput(tool, { query });
   if (!parsed.success) throw new Error(`The run_sql schema rejected ${JSON.stringify(query)}.`);
   return parsed.data;
 }
