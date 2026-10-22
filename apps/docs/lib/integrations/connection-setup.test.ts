@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildConnectionInstall,
@@ -9,6 +9,12 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
+import sentConnection from "../../registry/connections/sent";
+
+// Connect's runtime pulls in channel auth; these tests exercise only the authored approval policy.
+vi.mock("@vercel/connect/eve", () => ({
+  connect: () => ({ getToken: async () => ({ token: "" }) }),
+}));
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -99,6 +105,35 @@ describe("FLORA connection setup", () => {
     );
 
     expect(getIntegration("flora")!.quickStart).toContain(source.trim());
+  });
+});
+
+describe("Sent connection setup", () => {
+  it("preserves the installed tool boundary in the gallery setup", () => {
+    const integration = getIntegration("sent")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = integration.quickStart!;
+
+    expect(setup.authModes).toEqual(["user"]);
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.sent.dm/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("sent")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create mcp.sent.dm --name sent",
+    );
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/sent");
+    expect(quickStart).toContain("approval: ({ toolName }) =>");
+    expect(quickStart).toContain('? "user-approval"');
+    expect(quickStart).toContain(': "not-applicable"');
+
+    const { tools } = sentConnection;
+    if (!tools || !("allow" in tools)) {
+      throw new Error("Sent requires a tool allowlist.");
+    }
+    for (const toolName of tools.allow) {
+      expect(quickStart).toContain(`"${toolName}"`);
+    }
+
+    expect(integrationMarkdown(integration)).toContain(quickStart);
   });
 });
 

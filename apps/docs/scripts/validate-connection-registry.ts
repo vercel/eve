@@ -47,11 +47,13 @@ const API_KEY_CONNECTIONS: Readonly<Record<string, readonly string[]>> = {
   "browser-use": ["BROWSER_USE_API_KEY"],
   dataforseo: ["DATAFORSEO_USERNAME", "DATAFORSEO_PASSWORD"],
   firecrawl: ["FIRECRAWL_API_KEY"],
+  waydock: ["WAYDOCK_MCP_KEY"],
 };
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   agentcard: "mcp.agentcard.sh/mcp",
   vercel: "vercel",
   linear: "mcp.linear.app",
+  sent: "mcp.sent.dm",
   notion: "mcp.notion.com",
   datadog: "mcp.datadoghq.com",
   honeycomb: "mcp.honeycomb.io",

@@ -2042,6 +2042,87 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  waydock: {
+    logo: "waydock",
+    docsHref: "https://waydock.ai/docs/quickstart",
+    keywords: ["mcp", "mail", "calendar", "meetings", "tasks", "api key"],
+    authModes: [],
+    quickStart: `Create \`agent/connections/waydock.ts\`:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const READ_ONLY_TOOLS = new Set([
+  "waydock_accounts",
+  "waydock_action_items_list",
+  "waydock_action_items_search",
+  "waydock_agent_activity",
+  "waydock_briefing",
+  "waydock_calendar",
+  "waydock_capabilities",
+  "waydock_card_get",
+  "waydock_follow_up_snoozes_list",
+  "waydock_follow_ups_list",
+  "waydock_health",
+  "waydock_inbox",
+  "waydock_key_info",
+  "waydock_mail_accounts",
+  "waydock_mail_attachments",
+  "waydock_mail_count",
+  "waydock_mail_get",
+  "waydock_mail_list",
+  "waydock_mail_search",
+  "waydock_meeting_get",
+  "waydock_meeting_transcript",
+  "waydock_meetings_list",
+  "waydock_morning_brief_compose",
+  "waydock_morning_context",
+  "waydock_outbound_audit",
+  "waydock_preferences_get",
+  "waydock_projects_list",
+  "waydock_pulse_incidents",
+  "waydock_pulse_keys_list",
+  "waydock_pulse_status",
+  "waydock_quota",
+  "waydock_search",
+  "waydock_suppressions_list",
+  "waydock_sync_history",
+  "waydock_tasks_list",
+  "waydock_teams_get_messages",
+  "waydock_teams_list_chats",
+  "waydock_telemetry",
+  "waydock_version",
+  "waydock_whoami",
+  "waydock_whoop_summary",
+]);
+
+export default defineMcpClientConnection({
+  url: "https://mcp.waydock.ai/mcp",
+  description:
+    "Waydock: access the user's mail, calendar, meetings, tasks, and follow-ups through its MCP server.",
+  auth: {
+    getToken: async () => {
+      const token = process.env.WAYDOCK_MCP_KEY;
+      if (!token) throw new Error("WAYDOCK_MCP_KEY is not set.");
+      return { token };
+    },
+  },
+  approval: ({ toolName }) =>
+    READ_ONLY_TOOLS.has(toolName.split("__").pop() ?? toolName)
+      ? "not-applicable"
+      : "user-approval",
+});
+\`\`\`
+
+The filename supplies the \`waydock\` connection name. Known read-only tools run without an approval prompt. Every other tool, including unknown and future tools, requires user approval.`,
+    configure: `Create a scoped MCP key in [Waydock's MCP settings](https://waydock.ai/settings/account/mcp), then set it as a server-side environment variable:
+
+\`\`\`bash
+WAYDOCK_MCP_KEY=wdmcp_your_key_here
+\`\`\`
+
+The connection sends the key as a bearer token and does not expose it to the model. Waydock enforces the key's scopes on every call. See Waydock's [authentication documentation](https://waydock.ai/docs/authentication) for key scopes and OAuth options.`,
+  },
   agentcard: {
     logo: "agentcard",
     docsHref: "/docs/connections/mcp",
@@ -2078,6 +2159,74 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "issues", "project management", "oauth", "connect"],
     authModes: ["user", "app"],
     relatedResources: [softwareFactoryGuide],
+  },
+  sent: {
+    logo: "sent",
+    docsHref: "https://docs.sent.dm/start/llm-docs/mcp-server",
+    keywords: [
+      "mcp",
+      "sms",
+      "whatsapp",
+      "rcs",
+      "business messaging",
+      "deliverability",
+      "oauth",
+      "connect",
+    ],
+    authModes: ["user"],
+    connectors: { user: { service: "mcp.sent.dm", name: "sent" } },
+    quickStart: `Create \`agent/connections/sent.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/sent.ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+const APPROVAL_REQUIRED = new Set([
+  "messages.send",
+  "contacts.create_many",
+  "contacts.delete",
+  "templates.delete",
+]);
+
+export default defineMcpClientConnection({
+  url: "https://mcp.sent.dm/mcp",
+  description:
+    "Sent business messaging: send and track SMS, WhatsApp, and RCS; manage contacts and templates; inspect analytics, balance, and account readiness.",
+  auth: connect("sent"),
+  tools: {
+    allow: [
+      "account.get",
+      "balance.get",
+      "contacts.create_many",
+      "contacts.delete",
+      "contacts.get",
+      "contacts.list",
+      "contacts.message_summary",
+      "dashboard.contacts",
+      "dashboard.deliverability",
+      "dashboard.messages_sent",
+      "messages.activities.list",
+      "messages.get",
+      "messages.send",
+      "numbers.lookup",
+      "onboarding.status",
+      "templates.delete",
+      "templates.get",
+      "templates.get_by_name",
+      "templates.list",
+    ],
+  },
+  approval: ({ toolName }) =>
+    APPROVAL_REQUIRED.has(toolName.split("__").pop() ?? toolName)
+      ? "user-approval"
+      : "not-applicable",
+});
+\`\`\`
+
+The allowlist limits the connection to the reviewed Sent tools. eve requires user approval before sending a message, creating or deleting contacts, or deleting a template.`,
+    configureNote:
+      "Sends real SMS, WhatsApp, and RCS messages. Sending messages, creating or deleting contacts, and deleting templates require approval; Sender Profile, compliance, and feedback tools aren't exposed. Revoke access by deactivating the connection key in Sent Dashboard → API Keys.",
   },
   notion: {
     logo: "notion",

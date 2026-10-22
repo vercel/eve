@@ -133,6 +133,10 @@ describe("integration catalog", () => {
     );
   });
 
+  it("uses Waydock's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("waydock")!.connection!.mcp!.url).toBe("https://mcp.waydock.ai/mcp");
+  });
+
   it("uses Natural's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("natural")!.connection!.mcp!.url).toBe(
       "https://mcp.natural.com/mcp",

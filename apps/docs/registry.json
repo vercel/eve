@@ -565,6 +565,22 @@
       ]
     },
     {
+      "name": "connection/waydock",
+      "type": "registry:item",
+      "title": "Waydock",
+      "description": "Access mail, calendar, meetings, tasks, and follow-ups through Waydock's MCP server.",
+      "envVars": {
+        "WAYDOCK_MCP_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/waydock.ts",
+          "type": "registry:file",
+          "target": "agent/connections/waydock.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/vercel",
       "type": "registry:item",
       "title": "Vercel",
@@ -629,6 +645,39 @@
           "path": "registry/connections/linear.ts",
           "type": "registry:file",
           "target": "agent/connections/linear.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/sent",
+      "type": "registry:item",
+      "title": "Sent",
+      "description": "Send and track SMS, WhatsApp, and RCS through Sent's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "sent",
+              "mcp.sent.dm",
+              "sent"
+            ]
+          },
+          "requires": ">=0.51.1"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/sent.ts",
+          "type": "registry:file",
+          "target": "agent/connections/sent.ts"
         }
       ]
     },
