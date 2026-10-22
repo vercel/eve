@@ -100,60 +100,75 @@ describe("workflowEntry integration", () => {
       }
     });
   });
-  it("registers each turn's abort hooks while the session waits for its message", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
+  it.each([
+    { firstMessage: undefined, start: "a prewarmed session" },
+    { firstMessage: "Say hello.", start: "a session started with a message" },
+  ])(
+    "registers each turn's abort hooks before its message for $start",
+    async ({ firstMessage }) => {
+      const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
 
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: {},
-          serializedContext: buildSerializedContext({ channelKind: "http" }),
-          sessionTimeoutMs: false,
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-      const world = await getWorld();
-      const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
-      try {
-        await waitForHook({ runId: run.runId }, { token: inboxToken });
-        for (const [turn, message] of ["Say hello.", "Say hello again."].entries()) {
-          await vi.waitFor(async () => {
-            const hooks = (await world.hooks.list({ runId: run.runId })).data;
-            expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(
-              2 * (turn + 1),
-            );
-          });
-          await resumeHook(inboxToken, { kind: "send", payload: { message } });
-          await stream.nextTurn();
-        }
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: firstMessage === undefined ? {} : { message: firstMessage },
+            serializedContext: buildSerializedContext({ channelKind: "http" }),
+            sessionTimeoutMs: false,
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        const world = await getWorld();
+        const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+        try {
+          await waitForHook({ runId: run.runId }, { token: inboxToken });
+          let turns = 0;
+          if (firstMessage !== undefined) {
+            await stream.nextTurn();
+            turns++;
+          }
+          for (const message of ["Say hello.", "Say hello again."].slice(turns)) {
+            await vi.waitFor(async () => {
+              const hooks = (await world.hooks.list({ runId: run.runId })).data;
+              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(
+                2 * (turns + 1),
+              );
+            });
+            await resumeHook(inboxToken, { kind: "send", payload: { message } });
+            await stream.nextTurn();
+            turns++;
+          }
 
-        const events = (
-          await world.events.list({
-            pagination: { limit: 1000 },
-            resolveData: "all",
-            runId: run.runId,
-          })
-        ).data;
-        let abortHooks = 0;
-        const abortHooksBeforeEachTurn: number[] = [];
-        for (const event of events) {
-          if (event.eventType === "hook_created" && event.eventData.token.startsWith("abrt_")) {
-            abortHooks++;
+          const events = (
+            await world.events.list({
+              pagination: { limit: 1000 },
+              resolveData: "all",
+              runId: run.runId,
+            })
+          ).data;
+          let abortHooks = 0;
+          const abortHooksBeforeEachTurn: number[] = [];
+          for (const event of events) {
+            if (event.eventType === "hook_created" && event.eventData.token.startsWith("abrt_")) {
+              abortHooks++;
+            }
+            if (
+              event.eventType === "step_created" &&
+              event.eventData.stepName.endsWith("turnStep")
+            ) {
+              abortHooksBeforeEachTurn.push(abortHooks);
+            }
           }
-          if (event.eventType === "step_created" && event.eventData.stepName.endsWith("turnStep")) {
-            abortHooksBeforeEachTurn.push(abortHooks);
-          }
+          // Each turn uses the pair registered before its message; none starts its own.
+          expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
+        } finally {
+          stream.dispose();
+          await run.cancel();
         }
-        // Each turn uses the pair registered before its message; none starts its own.
-        expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
+      });
+    },
+  );
 
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;

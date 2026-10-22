@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Start a new session's first model step sooner. Session creation now runs in the same Workflow invocation instead of a separately queued one, the idle timer starts alongside the first turn, and each later turn's cancellation hooks are registered while the session waits for its message.
+New sessions start their first model step sooner, and later turns no longer wait for their cancellation hooks to register before their first step. Thanks @Lukavyi for reporting the startup latency in #876.

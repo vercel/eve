@@ -150,13 +150,13 @@ describe("bootInitialOwner", () => {
 
     await vi.waitFor(() => expect(inbox.claimSessionHook).toHaveBeenCalledTimes(2));
     stableClaim.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(booted).toBe(false);
     aliasClaim.resolve();
     await expect(bootPromise).resolves.toBeDefined();
   });
 
-  it("settles an alias conflict without starting a timeout", async () => {
+  it("settles an alias conflict and releases the inbox", async () => {
     const inbox = createInbox();
     inbox.claimSessionHook
       .mockResolvedValueOnce(undefined)
@@ -181,7 +181,6 @@ describe("bootInitialOwner", () => {
       command: continuationConflictCommand,
       continuationToken: "channel:conversation-1",
     });
-    expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     expect(inbox.dispose).toHaveBeenCalledOnce();
   });
 
@@ -197,7 +196,7 @@ describe("bootInitialOwner", () => {
       },
       source: "delegated caller resolution",
     },
-  ])("fails the session without starting a timeout when $source fails", async ({ fail }) => {
+  ])("fails the session and releases the inbox when $source fails", async ({ fail }) => {
     const inbox = createInbox();
     vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
     const failure = new Error("boot failed");
@@ -205,7 +204,6 @@ describe("bootInitialOwner", () => {
 
     await expect(bootInitialOwner(initialInput(), "session-1")).rejects.toBe(failure);
     expect(mocks.failSession).toHaveBeenCalledOnce();
-    expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     expect(inbox.dispose).toHaveBeenCalledOnce();
   });
 
