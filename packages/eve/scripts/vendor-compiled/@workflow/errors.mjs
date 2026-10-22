@@ -30,8 +30,8 @@ function buildMsStub(names, moduleName) {
  * upstream surface without a hand-written stub that has to be kept in
  * sync on every bump.
  *
- * Co-copies `error-codes.d.ts` (re-exported by `index.d.ts` via
- * `./error-codes.js`). The two unused-by-eve entry-point declarations
+ * `error-codes.d.ts` comes along because `index.d.ts` imports it. The two
+ * unused-by-eve entry-point declarations
  * (`ansi.d.ts`, `internal-chalk.d.ts`) are intentionally not copied —
  * they describe sub-paths eve never imports.
  */
@@ -43,6 +43,5 @@ export default {
     rewrites: {
       ms: { kind: "stub", stubBaseName: "_ms", build: buildMsStub },
     },
-    discoverExtraFiles: (distEntries) => distEntries.filter((name) => name === "error-codes.d.ts"),
   }),
 };

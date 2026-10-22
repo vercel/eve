@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { LinqAdapterConfig } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
+
 const {
   createLinqAdapter,
   directMessage,
@@ -10,14 +12,9 @@ const {
   send,
   vercelOidc,
 } = vi.hoisted(() => ({
-  createLinqAdapter: vi.fn(
-    (_config: {
-      credentials?: () => unknown | Promise<unknown>;
-      webhookVerifier?: (request: Request, rawBody: Uint8Array) => unknown;
-    }) => ({
-      name: "linq",
-    }),
-  ),
+  createLinqAdapter: vi.fn((_config: LinqAdapterConfig) => ({
+    name: "linq",
+  })),
   directMessage: vi.fn(),
   fetchMessage: vi.fn(),
   markRead: vi.fn(),
