@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { readdir, readFile, unlink } from "node:fs/promises";
+import { readdir, readFile, stat, unlink } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
@@ -13,6 +13,10 @@ import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 const LEASE_DIRECTORY_NAME = ".leases";
 // Some file systems store mtimes at 1–2 s precision, which can round a touch below its lease.
 const MTIME_PRECISION_MARGIN_MS = 60_000;
+// Live processes refresh their leases, so a lease nobody refreshed belongs to a process that
+// is gone, even when its pid was reused or it ran on another host or in another container.
+const LEASE_HEARTBEAT_MS = 60_000;
+const LEASE_EXPIRY_MS = 10 * 60_000;
 
 interface CacheLease {
   readonly host: string;
@@ -20,7 +24,8 @@ interface CacheLease {
   readonly since: number;
 }
 
-const leases = new Map<string, { readonly path: string; readonly since: number }>();
+const leases = new Map<string, { readonly path: string; readonly lease: CacheLease }>();
+let heartbeat: NodeJS.Timeout | undefined;
 let pruning: Promise<void> | undefined;
 
 /**
@@ -40,8 +45,20 @@ export function writeAuthoredModuleCacheFile(
     const now = new Date();
     utimesSync(filePath, now, now);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return filePath;
-    writeFileSync(filePath, code);
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      // Not ours to touch: replace it with a fresh copy so it stays protected.
+      replaceFile(filePath, code);
+      return filePath;
+    }
+    try {
+      writeFileSync(filePath, code);
+    } catch (writeError) {
+      if ((writeError as NodeJS.ErrnoException).code !== "ENOENT") throw writeError;
+      // The cache directory was removed while this process ran.
+      leases.delete(directoryPath);
+      registerLease(directoryPath);
+      writeFileSync(filePath, code);
+    }
   }
   return filePath;
 }
@@ -59,41 +76,79 @@ export function pruneAuthoredModuleCache(): Promise<void> {
 
 function registerLease(directoryPath: string): void {
   if (leases.has(directoryPath)) return;
-  const leaseDirectory = join(directoryPath, LEASE_DIRECTORY_NAME);
-  mkdirSync(leaseDirectory, { recursive: true });
   const lease: CacheLease = { host: hostname(), pid: process.pid, since: Date.now() };
-  const path = join(leaseDirectory, `${process.pid}-${randomUUID()}.json`);
-  // Renamed into place so a concurrent prune never reads a partial lease.
-  writeFileSync(`${path}.tmp`, JSON.stringify(lease));
-  renameSync(`${path}.tmp`, path);
-  if (leases.size === 0) process.once("exit", releaseLeases);
-  leases.set(directoryPath, { path, since: lease.since });
+  const path = join(directoryPath, LEASE_DIRECTORY_NAME, `${process.pid}-${randomUUID()}.json`);
+  leases.set(directoryPath, { path, lease });
+  try {
+    writeLease(path, lease);
+  } catch {
+    // An unwritable cache still serves existing bundles, and nobody can prune it either.
+  }
+  if (heartbeat === undefined) {
+    heartbeat = setInterval(refreshLeases, LEASE_HEARTBEAT_MS).unref();
+    process.once("exit", releaseLeases);
+  }
+}
+
+function writeLease(path: string, lease: CacheLease): void {
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, JSON.stringify(lease));
+}
+
+function refreshLeases(): void {
+  const now = new Date();
+  for (const { path, lease } of leases.values()) {
+    try {
+      utimesSync(path, now, now);
+    } catch {
+      try {
+        writeLease(path, lease);
+      } catch {}
+    }
+  }
 }
 
 function releaseLeases(): void {
-  for (const lease of leases.values()) {
+  for (const { path } of leases.values()) {
     try {
-      unlinkSync(lease.path);
+      unlinkSync(path);
+    } catch {}
+  }
+}
+
+function replaceFile(filePath: string, code: string): void {
+  const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, code);
+    renameSync(temporaryPath, filePath);
+  } catch {
+    try {
+      unlinkSync(temporaryPath);
     } catch {}
   }
 }
 
 async function pruneLeasedDirectories(): Promise<void> {
-  for (const [directoryPath, lease] of leases) {
+  for (const [directoryPath, { path, lease }] of leases) {
     try {
-      await pruneDirectory(directoryPath, lease.since);
+      await pruneDirectory(directoryPath, path, lease.since);
     } catch {}
   }
 }
 
-async function pruneDirectory(directoryPath: string, ownLeaseSince: number): Promise<void> {
+async function pruneDirectory(
+  directoryPath: string,
+  ownLeasePath: string,
+  ownLeaseSince: number,
+): Promise<void> {
   const oldestLease = await findOldestLiveLease(
     join(directoryPath, LEASE_DIRECTORY_NAME),
+    ownLeasePath,
     ownLeaseSince,
   );
   const cutoff = oldestLease - MTIME_PRECISION_MARGIN_MS;
   for (const fileName of await readdir(directoryPath)) {
-    if (!fileName.endsWith(".mjs")) continue;
+    if (!fileName.endsWith(".mjs") && !fileName.endsWith(".tmp")) continue;
     const filePath = join(directoryPath, fileName);
     // Checked and removed back to back, so a concurrent touch by another process has only
     // microseconds to land in between.
@@ -104,19 +159,34 @@ async function pruneDirectory(directoryPath: string, ownLeaseSince: number): Pro
   }
 }
 
-async function findOldestLiveLease(leaseDirectory: string, ownLeaseSince: number) {
+async function findOldestLiveLease(
+  leaseDirectory: string,
+  ownLeasePath: string,
+  ownLeaseSince: number,
+): Promise<number> {
   let oldest = ownLeaseSince;
-  for (const fileName of await readdir(leaseDirectory)) {
-    if (!fileName.endsWith(".json")) continue;
+  for (const fileName of await readdir(leaseDirectory).catch(() => [])) {
     const leasePath = join(leaseDirectory, fileName);
-    const lease = parseLease(await readFile(leasePath, "utf8").catch(() => undefined));
-    if (lease !== undefined && isRunning(lease)) {
-      oldest = Math.min(oldest, lease.since);
-    } else {
+    if (leasePath === ownLeasePath) continue;
+    const since = await readLiveLeaseSince(leasePath);
+    if (since === undefined) {
       await unlink(leasePath).catch(() => undefined);
+    } else {
+      oldest = Math.min(oldest, since);
     }
   }
   return oldest;
+}
+
+/** The lease's start time while its process may still run, or `undefined` once it is gone. */
+async function readLiveLeaseSince(leasePath: string): Promise<number | undefined> {
+  const refreshedAt = (await stat(leasePath).catch(() => undefined))?.mtimeMs;
+  if (refreshedAt === undefined || Date.now() - refreshedAt > LEASE_EXPIRY_MS) return undefined;
+  const lease = parseLease(await readFile(leasePath, "utf8").catch(() => undefined));
+  // Still being written: its process registered just now.
+  if (lease === undefined) return refreshedAt;
+  if (lease.host === hostname() && !isRunning(lease.pid)) return undefined;
+  return Math.min(lease.since, refreshedAt);
 }
 
 function parseLease(text: string | undefined): CacheLease | undefined {
@@ -133,12 +203,9 @@ function parseLease(text: string | undefined): CacheLease | undefined {
   }
 }
 
-// A lease from another machine cannot be checked. It comes from a restored build cache, such
-// as Vercel restoring node_modules, whose process has finished.
-function isRunning(lease: CacheLease): boolean {
-  if (lease.host !== hostname()) return false;
+function isRunning(pid: number): boolean {
   try {
-    process.kill(lease.pid, 0);
+    process.kill(pid, 0);
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";

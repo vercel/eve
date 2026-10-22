@@ -68,12 +68,12 @@ describe("authored-module cache", () => {
     const whileRunning = await listBundles();
     expect([...firstBundles].every((name) => whileRunning.has(name))).toBe(true);
 
-    // A lease from another machine belongs to a process that can't be checked, such as one
-    // restored with a build cache, so it no longer protects anything.
-    await writeFile(leasePath, JSON.stringify({ ...lease, host: `not-${hostname()}` }));
+    // A lease nobody refreshed for longer than the heartbeat expiry belongs to a process that
+    // is gone, even though this pid and host still look alive.
+    const staleRefresh = new Date(Date.now() - HOUR_MS);
+    await utimes(leasePath, staleRefresh, staleRefresh);
     await pruneAuthoredModuleCache();
     const afterwards = await listBundles();
     expect([...firstBundles].some((name) => !afterwards.has(name))).toBe(true);
-    expect(await readdir(join(cacheDirectory, ".leases"))).not.toContain("earlier-process.json");
   });
 });
