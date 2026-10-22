@@ -5,7 +5,10 @@ import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { EXTENSION_CAPABILITY_VERSIONS } from "../../src/compiler/extension-compatibility.js";
+import {
+  EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+  EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
+} from "../../src/compiler/extension-compatibility.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
 import {
   buildExtensionPackage,
@@ -252,11 +255,8 @@ describe("mounted extension installed under node_modules", () => {
     expect(
       JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
     ).toMatchObject({
-      requires: {
-        channel: EXTENSION_CAPABILITY_VERSIONS.channel,
-        schedule: EXTENSION_CAPABILITY_VERSIONS.schedule,
-        subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
-      },
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+      contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
     });
     const app = await createAppRoot("eve-mounted-extension-installed-", {
       files: {

@@ -7,9 +7,8 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
-  EXTENSION_CAPABILITY_SUPPORT,
-  EXTENSION_CAPABILITY_VERSIONS,
-  findUnsupportedExtensionCapabilities,
+  EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+  EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
   parseExtensionCompatibilityManifest,
 } from "#compiler/extension-compatibility.js";
 import {
@@ -102,9 +101,11 @@ describe("extension build output", () => {
       expect(emitted.includes(join("tools", "__tests__", "setup.d.ts"))).toBe(hasTsConfig);
       const manifestPath = join(outDir, "extension", "_manifest.json");
       expect(
-        parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath)
-          .requires,
-      ).not.toHaveProperty("state");
+        parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath),
+      ).toMatchObject({
+        formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+        contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
+      });
     },
   );
 
@@ -156,105 +157,12 @@ describe("extension build output", () => {
     ).toContain("imported value");
     const manifestPath = join(outDir, "extension", "_manifest.json");
     expect(
-      parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath)
-        .requires.state,
-    ).toBe(EXTENSION_CAPABILITY_VERSIONS.state);
-  });
-
-  it.each([
-    ["static re-export", 'export { decide as assess } from "eve/ai";'],
-    [
-      "namespace import",
-      'import * as decision from "eve/ai"; export const assess = decision.decide;',
-    ],
-    [
-      "dynamic import",
-      'export async function assess(options: Parameters<typeof import("eve/ai").decide>[0]): Promise<void> { await (await import("eve/ai")).decide(options); }',
-    ],
-  ])("stamps the tool capability for a hook-only extension using a %s", async (_name, helper) => {
-    const root = await createExtensionPackage();
-    await rm(join(root, "extension", "tools"), { recursive: true });
-    await mkdir(join(root, "extension", "hooks"));
-    await mkdir(join(root, "extension", "lib"));
-    await writeFile(join(root, "extension", "lib", "decision.ts"), helper);
-    await writeFile(
-      join(root, "extension", "hooks", "decide.ts"),
-      `import { defineHook } from "eve/hooks";
-import { assess } from "../lib/decision";
-export default defineHook({ events: { "turn.started": async () => {
-  await assess({ state: { request: "Alice needs a summary." }, questions: {
-    routine: { type: "boolean", instructions: "Is this routine work?" }
-  } });
-} } });`,
-    );
-    const config = await tryReadExtensionBuildConfig(root);
-    const outDir = await buildExtensionPackage(root, config!);
-    const manifestPath = join(outDir, "extension", "_manifest.json");
-    const manifest = parseExtensionCompatibilityManifest(
-      await readFile(manifestPath, "utf8"),
-      manifestPath,
-    );
-
-    expect(manifest.requires).toEqual({
-      extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-      hook: EXTENSION_CAPABILITY_VERSIONS.hook,
-      tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+      parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath),
+    ).toMatchObject({
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+      contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
     });
-    expect(findUnsupportedExtensionCapabilities(manifest)).toEqual([]);
-    expect(
-      findUnsupportedExtensionCapabilities(manifest, {
-        ...EXTENSION_CAPABILITY_SUPPORT,
-        tool: EXTENSION_CAPABILITY_SUPPORT.tool.filter(
-          (version) => version !== EXTENSION_CAPABILITY_VERSIONS.tool,
-        ),
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        capability: "tool",
-        requiredVersion: EXTENSION_CAPABILITY_VERSIONS.tool,
-      }),
-    ]);
   });
-
-  it.each([
-    [
-      "automatic model selection",
-      'import { auto } from "eve/models"; export const route: ReturnType<typeof auto> = auto({ options: { "openai/small": "Routine work" } });',
-      "dynamicTool",
-    ],
-    [
-      "type-only AI import",
-      'import type { decide } from "eve/ai"; export type Decide = typeof decide;',
-      undefined,
-    ],
-    [
-      "type-only model import",
-      'import type { auto } from "eve/models"; export type Auto = typeof auto;',
-      undefined,
-    ],
-  ] as const)(
-    "tracks runtime AI and model imports in a tool-free helper: %s",
-    async (_name, helper, capability) => {
-      const root = await createExtensionPackage();
-      await rm(join(root, "extension", "tools"), { recursive: true });
-      await mkdir(join(root, "extension", "lib"));
-      await writeFile(join(root, "extension", "lib", "decision.ts"), helper);
-      const config = await tryReadExtensionBuildConfig(root);
-      const outDir = await buildExtensionPackage(root, config!);
-      const manifestPath = join(outDir, "extension", "_manifest.json");
-      const manifest = parseExtensionCompatibilityManifest(
-        await readFile(manifestPath, "utf8"),
-        manifestPath,
-      );
-
-      expect(manifest.requires).toEqual({
-        extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-        ...(capability === undefined
-          ? {}
-          : { [capability]: EXTENSION_CAPABILITY_VERSIONS[capability] }),
-      });
-    },
-  );
 
   it("stamps extension-owned external dependencies into compatibility metadata", async () => {
     const root = await createExtensionPackage({
@@ -274,7 +182,7 @@ export default defineHook({ events: { "turn.started": async () => {
     expect(
       parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath),
     ).toMatchObject({
-      formatVersion: 2,
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       build: { externalDependencies: ["layout-sensitive-runtime"] },
     });
   });
@@ -439,15 +347,9 @@ export const next = () => ++count;
     );
     expect(manifest.kind).toBe("eve-extension");
     expect(manifest.builtWithEve).toMatch(/^\d+\.\d+\.\d+/);
-    // The set of stamped capabilities is the assertion; the versions track
-    // the current contract table so epoch bumps do not break this test.
-    expect(manifest.requires).toEqual({
-      extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-      tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-      dynamicTool: EXTENSION_CAPABILITY_VERSIONS.dynamicTool,
-      skill: EXTENSION_CAPABILITY_VERSIONS.skill,
-      config: EXTENSION_CAPABILITY_VERSIONS.config,
-      state: EXTENSION_CAPABILITY_VERSIONS.state,
+    expect(manifest).toMatchObject({
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+      contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
     });
     const dynamicToolDeclaration = await readFile(
       join(outDir, "extension", "tools", "crm_search.d.ts"),

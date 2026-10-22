@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
-import { EXTENSION_CAPABILITY_VERSIONS } from "#compiler/extension-compatibility.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
@@ -17,12 +16,12 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 
 const createAppRoot = useTemporaryAppRoots();
 
-function compatibilityManifest(requires: Readonly<Record<string, number>>): string {
+function compatibilityManifest(): string {
   return JSON.stringify({
     kind: "eve-extension",
-    formatVersion: 1,
-    builtWithEve: "0.0.0-test",
-    requires,
+    formatVersion: 3,
+    builtWithEve: "0.0.0",
+    contractMajor: 0,
   });
 }
 
@@ -79,11 +78,7 @@ describe("mounted extension via authored-source loader", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-          config: EXTENSION_CAPABILITY_VERSIONS.config,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "const config = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } };",
@@ -197,9 +192,7 @@ describe("mounted extension via authored-source loader", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": "export default { instance: {} };",
       },
     });
@@ -282,10 +275,7 @@ describe("mounted extension via authored-source loader", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": "export default {};",
         "node_modules/@acme/crm/extension/tools/count.mjs": [
           'import { defineState } from "eve/context";',
@@ -350,10 +340,7 @@ describe("mounted extension via authored-source loader", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": "export default {};",
         "node_modules/@acme/crm/extension/tools/count.mjs": [
           'import { defineState } from "eve/context";',
@@ -381,13 +368,8 @@ describe("mounted extension via authored-source loader", () => {
           exports: { ".": "./extension/extension.mjs" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
-          ...JSON.parse(
-            compatibilityManifest({
-              extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-              tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-            }),
-          ),
-          formatVersion: 2,
+          ...JSON.parse(compatibilityManifest()),
+          formatVersion: 3,
           build: { externalDependencies: ["nested-dependency"] },
         }),
         "node_modules/@acme/crm/node_modules/nested-dependency/package.json": JSON.stringify({
@@ -466,11 +448,7 @@ describe("mounted extension via authored-source loader", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-          config: EXTENSION_CAPABILITY_VERSIONS.config,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           // Minimal pass-through Standard Schema — this scenario tests binding, not validation.
@@ -523,10 +501,7 @@ describe("mounted extension without config", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-        }),
+        "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/widget/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "export default defineExtension();",
@@ -557,9 +532,7 @@ describe("mounted extension without config", () => {
 });
 
 describe("mounted extension with an unsupported capability contract", () => {
-  it("fails compilation with the capability diagnostic", async () => {
-    // One past the current epoch is unsupported by construction.
-    const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
+  it("fails compilation when the distribution requires an unsupported generation", async () => {
     const app = await createAppRoot("eve-mounted-extension-incompatible-", {
       files: {
         "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
@@ -573,9 +546,11 @@ describe("mounted extension with an unsupported capability contract", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: unsupportedToolVersion,
+        "node_modules/@acme/widget/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 3,
+          builtWithEve: "0.0.0",
+          contractMajor: 999,
         }),
         "node_modules/@acme/widget/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
@@ -586,7 +561,7 @@ describe("mounted extension with an unsupported capability contract", () => {
     });
 
     await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
-      `Extension "@acme/widget" requires tool contract v${unsupportedToolVersion}`,
+      'Extension "@acme/widget" requires distribution contract 999',
     );
   });
 });
@@ -639,12 +614,7 @@ describe("mounted extension via directory form with override", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-          dynamicTool: EXTENSION_CAPABILITY_VERSIONS.dynamicTool,
-          config: EXTENSION_CAPABILITY_VERSIONS.config,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "const config = { '~standard': { version: 1, vendor: 'scenario', validate: (value) => ({ value }) } };",
@@ -757,10 +727,7 @@ describe("mounted extension via directory form with override", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "export default defineExtension({});",
@@ -821,11 +788,7 @@ describe("nested extension mounts", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/outer/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
-          config: EXTENSION_CAPABILITY_VERSIONS.config,
-        }),
+        "node_modules/@acme/outer/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/outer/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "const config = { '~standard': { version: 1, vendor: 'test', validate: value => typeof value?.label === 'string' ? { value } : { issues: [{ message: 'label is required' }] } } };",
@@ -844,12 +807,7 @@ describe("nested extension mounts", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/inner/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-          config: EXTENSION_CAPABILITY_VERSIONS.config,
-        }),
+        "node_modules/@acme/inner/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/inner/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "const config = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } };",
@@ -873,11 +831,7 @@ describe("nested extension mounts", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/leaf/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-          config: EXTENSION_CAPABILITY_VERSIONS.config,
-        }),
+        "node_modules/@acme/leaf/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/leaf/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "const config = { '~standard': { version: 1, vendor: 'test', validate: value => typeof value?.label === 'string' ? { value } : { issues: [{ message: 'leaf label is required' }] } } };",
@@ -948,10 +902,7 @@ describe("mounted extension subagent resources", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-          subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
-        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest(),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "export default defineExtension();",

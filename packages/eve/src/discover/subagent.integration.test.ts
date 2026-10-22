@@ -3,7 +3,6 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
-import { EXTENSION_CAPABILITY_VERSIONS } from "#compiler/extension-compatibility.js";
 import { DISCOVER_SANDBOX_DIRECTORY_INVALID } from "#discover/grammar.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
@@ -166,12 +165,9 @@ describe("discoverSubagents (memory)", () => {
         }),
         "node_modules/@acme/research/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "test",
-          requires: {
-            extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-            tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-          },
+          formatVersion: 3,
+          builtWithEve: "0.0.0",
+          contractMajor: 0,
         }),
         "node_modules/@acme/research/extension/tools/search.ts": "export default {};",
       },

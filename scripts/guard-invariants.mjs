@@ -78,11 +78,6 @@
  *             `queue-namespace.ts`. The generated agent bootstrap installs the
  *             agent-scoped namespace before queue-producing APIs can run.
  *   rule 34 — `phase` stays a runtime-only dependency. No file under the Eve\n *             logo renderer's GPU/runtime boundary (render/, shaders/, or the\n *             offline render harness) may import the `phase` package. This keeps\n *             the mechanical separation between the lifecycle layer and the GPU\n *             renderer enforceable.
- *   rule 36 — Extension capability epochs have immutable hashed API metadata
- *             and explicit support history. The current hash must match the
- *             authoring roots, every historical epoch must be supported or
- *             dropped, every retained epoch needs a compiling fixture, and
- *             every public authoring value must belong to a capability.
  *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
  *             harness. The lifecycle contract must not import from `ai`, harness
  *             code may import only runtime facade types, and execution may use
@@ -175,7 +170,6 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
-import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
 import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
@@ -1920,11 +1914,6 @@ async function main() {
 
   // Rule 34
   violations.push(...(await checkRule34PhaseBoundary()));
-
-  // Rule 36
-  for (const issue of await checkExtensionCapabilityContracts()) {
-    violations.push({ rule: 36, ...issue });
-  }
 
   // Rule 37
   violations.push(...state.rule37);

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
-import { EXTENSION_CAPABILITY_VERSIONS } from "#compiler/extension-compatibility.js";
 import { buildApplication } from "./build-application.js";
 import { startProductionServer } from "./start-production-server.js";
 
@@ -64,12 +63,9 @@ describe("relocated production applications", () => {
         ].join("\n"),
         "packages/extension/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "0.0.0-test",
-          requires: {
-            extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-            tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-          },
+          formatVersion: 3,
+          builtWithEve: "0.0.0",
+          contractMajor: 0,
         }),
       },
     });

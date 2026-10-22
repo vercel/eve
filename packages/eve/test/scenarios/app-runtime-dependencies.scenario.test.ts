@@ -254,9 +254,9 @@ async function writeMountedExtensionDeclaringExternal(
     `${JSON.stringify({
       build: { externalDependencies: ["fixture-workspace-external"] },
       builtWithEve: "0.0.0",
-      formatVersion: 2,
+      formatVersion: 3,
       kind: "eve-extension",
-      requires: {},
+      contractMajor: 0,
     })}\n`,
   );
   await writeExternalInstallation(
