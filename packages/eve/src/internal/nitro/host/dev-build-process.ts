@@ -1,7 +1,4 @@
-import {
-  adoptLinuxDockerDaemonAvailability,
-  peekLinuxDockerDaemonAvailability,
-} from "#execution/sandbox/bindings/docker-cli.js";
+import { peekLinuxDockerDaemonAvailability } from "#execution/sandbox/bindings/docker-cli.js";
 import {
   DEVELOPMENT_BUILD_MESSAGE_KIND,
   type DevelopmentBuildOutcome,
@@ -24,12 +21,9 @@ process.on("message", async (request: Partial<DevelopmentBuildRequest> | null) =
     return;
   }
 
+  // Also carries an earlier build's Docker probe result, which the probe adopts.
   if (request.environment !== undefined) {
     replaceEnvironment(request.environment);
-  }
-
-  if (request.dockerAvailability !== undefined) {
-    adoptLinuxDockerDaemonAvailability(request.dockerAvailability);
   }
 
   // While a build runs, only its own work keeps this process alive. A build that

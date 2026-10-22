@@ -1,6 +1,6 @@
 import { createFakeVercelOidcToken } from "../../src/internal/testing/vercel-oidc-token.js";
 import { existsSync } from "node:fs";
-import { realpath, rm, writeFile } from "node:fs/promises";
+import { readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -173,6 +173,51 @@ describe("eve dev server rebuild transactions", () => {
           (await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name),
         ).not.toContain("get_weather");
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "fails a build that never settles, then builds with the current .env",
+    async () => {
+      const app = await scenarioApp(DEV_SERVER_AGENT_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+      const output = () => `${server.stdout()}\n${server.stderr()}`;
+      const toolPath = join(app.appRoot, "agent", "tools", "get_weather.ts");
+      const toolSource = await readFile(toolPath, "utf8");
+
+      try {
+        const initialRevision = await readDevelopmentRevision(server.url);
+
+        await writeFile(toolPath, `await new Promise(() => {});\n${toolSource}`);
+        await forceDevelopmentRebuild(server.url);
+        await waitForCondition(
+          async () => output().includes("awaits a promise that never settles"),
+          `Timed out waiting for the stalled build to fail.\n\n${output()}`,
+        );
+        await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
+
+        await writeFile(join(app.appRoot, ".env"), "EVE_SCENARIO_BUILD_GUARD=1\n");
+        await writeFile(
+          toolPath,
+          `if (process.env.EVE_SCENARIO_BUILD_GUARD) throw new Error("guarded build");\n${toolSource}`,
+        );
+        await forceDevelopmentRebuild(server.url);
+        await waitForCondition(
+          async () => output().includes("rebuild failed: Failed to evaluate authored module"),
+          `Timed out waiting for the build to see .env.\n\n${output()}`,
+        );
+        await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
+
+        await rm(join(app.appRoot, ".env"));
+        await forceDevelopmentRebuild(server.url);
+        await waitForCondition(
+          async () => (await readDevelopmentRevision(server.url)) !== initialRevision,
+          `Timed out waiting for the build without .env.\n\n${output()}`,
+        );
       } finally {
         await server.stop();
       }

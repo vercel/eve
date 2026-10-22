@@ -3,8 +3,8 @@ import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
 
 import {
-  beginDevelopmentBuild,
-  closeDevelopmentBuildProcesses,
+  createDevelopmentBuilds,
+  type DevelopmentBuilds,
 } from "#internal/nitro/host/dev-build-host.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
@@ -240,6 +240,7 @@ function addDevelopmentControlHandler(input: {
 async function closeDevelopmentServerResources(input: {
   readonly appRoot: string;
   readonly authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
+  readonly builds: DevelopmentBuilds;
   readonly devServer: NitroDevelopmentServer | undefined;
   readonly developmentSandboxRunId: string;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
@@ -257,7 +258,7 @@ async function closeDevelopmentServerResources(input: {
 
   // Before the watcher, which waits for an in-flight rebuild: that rebuild's
   // build process exits, so the rebuild fails instead of finishing first.
-  closeDevelopmentBuildProcesses();
+  input.builds.close();
   const authoredSourceWatcher = input.authoredSourceWatcher;
   if (authoredSourceWatcher !== undefined) {
     await attempt(() => authoredSourceWatcher.close());
@@ -397,7 +398,8 @@ async function startNitroDevelopmentServer(
   const previousDevelopmentSandboxRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
   const developmentSandboxRunId = createDevelopmentSandboxRunId();
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
-  const build = beginDevelopmentBuild();
+  const builds = createDevelopmentBuilds();
+  const build = builds.begin();
   let devServer: NitroDevelopmentServer | undefined;
   let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
@@ -496,6 +498,7 @@ async function startNitroDevelopmentServer(
     await workflowWorld?.start();
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      builds,
       developmentExtensions,
       devServer: activeDevServer,
       initialHost: preparedHost,
@@ -531,6 +534,7 @@ async function startNitroDevelopmentServer(
         const cleanup = await closeDevelopmentServerResources({
           appRoot: project.appRoot,
           authoredSourceWatcher: authoredSourceWatcherOnClose,
+          builds,
           devServer: devServerOnClose,
           developmentSandboxRunId,
           workflowWorld: workflowWorldOnClose,
@@ -561,11 +565,11 @@ async function startNitroDevelopmentServer(
     const cleanup = await closeDevelopmentServerResources({
       appRoot: project.appRoot,
       authoredSourceWatcher,
+      builds,
       devServer,
       developmentSandboxRunId,
       workflowWorld,
     });
-    // After cleanup has stopped spares, so closing does not fork a new one.
     build.close();
     const cleanupErrors = [...cleanup.errors];
     if (preparedDevelopmentHost !== undefined && !initialGenerationPublished) {

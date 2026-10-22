@@ -92,8 +92,9 @@ Non-goals:
 ### One rebuild
 
 1. The watcher reports changes.
-2. The coordinator takes the spare build process and sends `prepare` with the changed paths, the
-   previous workspace extensions, the current environment, and the cached Docker probe result.
+2. The coordinator creates an empty host workspace, takes the spare build process, and sends
+   `prepare` with the workspace, the changed paths, the previous workspace extensions, and the
+   current environment.
 3. The build process returns the prepared host as plain data.
 4. The coordinator computes the host and runtime fingerprints itself, because it owns the
    authoritative environment.
@@ -109,8 +110,8 @@ Non-goals:
 On structural saves the worker swap comes first and the pointer second, as before. Workers are
 generation-neutral, so the new worker serves the previous generation correctly until the pointer
 moves, and a failed swap leaves the old worker and the old pointer untouched. On runtime saves
-the host is the same, so order does not affect correctness. Activating first means the retired
-worker never loads the new generation.
+the host is the same, so order does not affect correctness. Activating first keeps the retired
+worker from loading the new generation when the spare is ready.
 
 ### Boot
 
@@ -131,8 +132,15 @@ worker never loads the new generation.
   and everything they produce returns as plain data or files in the host workspace.
 - Each request replaces the build process's environment with the dev server's, so staged `.env`
   changes apply and nothing from an earlier build leaks in.
-- The Docker probe that picks the default sandbox runs at most once per dev server. Later build
-  processes adopt the first result, so the sandbox choice stays stable for the session.
+- The Docker probe that picks the default sandbox runs at most once per dev server. The dev
+  server publishes the first result in an internal environment variable. Later build processes
+  receive it with their environment and runtime workers copy it when they start, so the sandbox
+  choice stays stable for the session.
+- Build processes belong to one dev server. Closing it stops its build processes, including the
+  spare, and later rebuilds fail instead of forking new ones.
+- The dev server creates each candidate's host workspace and removes it if `prepare` fails, so a
+  build process that dies mid-build leaves no workspace behind. A generation snapshot it staged is
+  removed later by snapshot retention.
 - A host workspace is removed only after the last runtime worker using it has retired. That
   includes active, draining, and spare workers.
 

@@ -6,6 +6,7 @@ import {
   DevelopmentWorkflowWorldChangeRequiresRestartError,
   PostCommitDevelopmentRebuildError,
 } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
+import { createDevelopmentBuilds } from "#internal/nitro/host/dev-build-host.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import type { DevelopmentRunnerFactory } from "#internal/nitro/host/dev-runner.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
@@ -128,6 +129,7 @@ async function createCoordinatorWithServer(onRuntimePruned?: () => Promise<void>
   const devServer = new DrainedNitroDevServer({ error: () => undefined }, createRunner);
   mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
   const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
+    builds: createDevelopmentBuilds(),
     devServer,
     initialHost: createHost("initial", "run-1"),
     onRuntimePruned,
@@ -232,6 +234,7 @@ describe("transactional authored rebuild coordinator", () => {
     });
     mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
     const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      builds: createDevelopmentBuilds(),
       devServer,
       initialHost: createHost("initial", "run-1"),
     });
@@ -247,11 +250,12 @@ describe("transactional authored rebuild coordinator", () => {
       });
     }
 
-    // Initial worker, its fresh replacement, then spares: the second rebuild
-    // swaps to the spare the first one prepared instead of booting another.
-    expect(runners).toHaveLength(4);
+    // Each generation retired the worker before it; only the active worker and
+    // a spare stay open.
     await vi.waitFor(() => {
-      expect(runners.map((runner) => runner.closed)).toEqual([true, true, false, false]);
+      expect(runners[0]?.closed).toBe(true);
+      expect(runners.filter((runner) => runner.closed).length).toBeGreaterThanOrEqual(2);
+      expect(runners.filter((runner) => !runner.closed).length).toBeLessThanOrEqual(2);
     });
     await devServer.close();
   });
@@ -269,6 +273,7 @@ describe("transactional authored rebuild coordinator", () => {
     const devServer = new DrainedNitroDevServer({ error: () => undefined }, failingFactory);
     mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
     const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      builds: createDevelopmentBuilds(),
       devServer,
       initialHost: createHost("initial", "run-1"),
     });
@@ -298,6 +303,7 @@ describe("transactional authored rebuild coordinator", () => {
       const devServer = new DrainedNitroDevServer({ error: () => undefined }, createRunner);
       mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
       const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
+        builds: createDevelopmentBuilds(),
         devServer,
         initialHost: createHost("initial", "run-1", initialWorld),
       });

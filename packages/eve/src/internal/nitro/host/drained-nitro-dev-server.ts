@@ -49,7 +49,8 @@ interface RunnerSlot {
 }
 
 interface SpareRunner {
-  ready: boolean;
+  /** Resolves to whether the spare became ready. */
+  readonly ready: Promise<boolean>;
   readonly slot: RunnerSlot;
 }
 
@@ -151,17 +152,24 @@ export class DrainedNitroDevServer {
     }
     this.#discardSpare();
 
-    const spare: SpareRunner = { ready: false, slot: this.#createSlot(host) };
-    this.#spare = spare;
+    const slot = this.#createSlot(host);
+    const spare: SpareRunner = {
+      ready: slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS).then(
+        () => true,
+        () => {
+          forget();
+          return false;
+        },
+      ),
+      slot,
+    };
     const forget = () => {
       if (this.#spare !== spare) return;
       this.#spare = undefined;
-      void this.#releaseSlot(spare.slot);
+      void this.#releaseSlot(slot);
     };
-    spare.slot.runner.onceClosed(forget);
-    void spare.slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS).then(() => {
-      spare.ready = true;
-    }, forget);
+    this.#spare = spare;
+    slot.runner.onceClosed(forget);
   }
 
   #enqueueSwap(swap: () => Promise<void>): Promise<void> {
@@ -175,7 +183,7 @@ export class DrainedNitroDevServer {
       throw new Error("Development server is closed.");
     }
 
-    let slot = useSpare ? this.#takeReadySpare(host) : undefined;
+    let slot = useSpare ? await this.#takeSpare(host) : undefined;
     if (slot === undefined) {
       slot = this.#createSlot(host);
       this.#pendingSlot = slot;
@@ -197,11 +205,16 @@ export class DrainedNitroDevServer {
     }
 
     const previous = this.#active;
+    const previousHost = this.#currentHost;
     const activeSlot = slot;
     this.#active = activeSlot;
     this.#currentHost = host;
     if (this.#spare !== undefined && this.#spare.slot.host !== host) {
       this.#discardSpare();
+    }
+    // A host whose restart failed has no runner left to dispose it on release.
+    if (previousHost !== undefined && previousHost !== host && previousHost.runners === 0) {
+      void this.#disposeHost(previousHost);
     }
     activeSlot.runner.onceClosed(() => {
       void this.#handleRunnerClose(activeSlot);
@@ -228,14 +241,13 @@ export class DrainedNitroDevServer {
     };
   }
 
-  #takeReadySpare(host: WorkerHost): RunnerSlot | undefined {
+  // Waits for a spare that is still booting: it started earlier than a new worker would.
+  async #takeSpare(host: WorkerHost): Promise<RunnerSlot | undefined> {
     const spare = this.#spare;
-    if (
-      spare === undefined ||
-      spare.slot.host !== host ||
-      !spare.ready ||
-      spare.slot.runner.closed
-    ) {
+    if (spare === undefined || spare.slot.host !== host || !(await spare.ready)) {
+      return undefined;
+    }
+    if (this.#spare !== spare || spare.slot.runner.closed) {
       return undefined;
     }
     this.#spare = undefined;
@@ -357,11 +369,15 @@ export class DrainedNitroDevServer {
     const slots = [this.#active, this.#spare?.slot, ...this.#draining].filter(
       (slot): slot is RunnerSlot => slot !== undefined,
     );
+    const currentHost = this.#currentHost;
     this.#active = undefined;
     this.#currentHost = undefined;
     this.#spare = undefined;
     this.#draining.clear();
     await Promise.all(slots.map(async (slot) => await this.#releaseSlot(slot)));
+    if (currentHost !== undefined && currentHost.runners === 0) {
+      await this.#disposeHost(currentHost);
+    }
 
     for (const listener of listeners) {
       listener.destroySockets();

@@ -1,7 +1,7 @@
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import {
-  beginDevelopmentBuild,
-  type DevelopmentBuildSession,
+import type {
+  DevelopmentBuilds,
+  DevelopmentBuildSession,
 } from "#internal/nitro/host/dev-build-host.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
@@ -56,12 +56,14 @@ export interface DevelopmentAuthoredRebuildCoordinator {
 }
 
 export async function createDevelopmentAuthoredRebuildCoordinator(input: {
+  readonly builds: DevelopmentBuilds;
   readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly devServer: DrainedNitroDevServer;
   readonly initialHost: PreparedDevelopmentApplicationHost;
   readonly onRuntimePruned?: () => Promise<void>;
 }): Promise<DevelopmentAuthoredRebuildCoordinator> {
   return new TransactionalDevelopmentAuthoredRebuildCoordinator({
+    builds: input.builds,
     currentHostFingerprint: await computeDevelopmentHostFingerprint(input.initialHost),
     developmentExtensions: input.developmentExtensions,
     currentRuntimeFingerprint: input.initialHost.generation.fingerprint,
@@ -74,14 +76,17 @@ export async function createDevelopmentAuthoredRebuildCoordinator(input: {
 /**
  * Serializes authored rebuilds into a transaction whose commit order makes
  * rollback unnecessary: a candidate generation and worker are prepared while
- * the previous worker keeps serving, the ready worker is swapped in first,
- * and the generation pointer is activated second. Workers are
- * generation-neutral (they load authored modules through the pointer), so
+ * the previous worker keeps serving. On a structural change the ready worker
+ * is swapped in first and the generation pointer is activated second. Workers
+ * are generation-neutral (they load authored modules through the pointer), so
  * every intermediate state serves consistent code, and any failure before
  * the swap simply discards the candidate. Failures after the swap must
  * never travel the discard path — see {@link PostCommitDevelopmentRebuildError}.
+ * A runtime change keeps the host, so it activates first and then moves to a
+ * fresh worker on the same host.
  */
 class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentAuthoredRebuildCoordinator {
+  readonly #builds: DevelopmentBuilds;
   #currentHost: PreparedDevelopmentApplicationHost;
   #currentHostFingerprint: string;
   #currentRuntimeFingerprint: string;
@@ -91,6 +96,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   readonly #onRuntimePruned: (() => Promise<void>) | undefined;
 
   constructor(input: {
+    readonly builds: DevelopmentBuilds;
     readonly currentHostFingerprint: string;
     readonly currentRuntimeFingerprint: string;
     readonly developmentExtensions: DevelopmentExtensionSelection | undefined;
@@ -98,6 +104,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     readonly initialHost: PreparedDevelopmentApplicationHost;
     readonly onRuntimePruned?: () => Promise<void>;
   }) {
+    this.#builds = input.builds;
     this.#currentHost = input.initialHost;
     this.#onRuntimePruned = input.onRuntimePruned;
     this.#currentHostFingerprint = input.currentHostFingerprint;
@@ -118,7 +125,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     // edit are consumed by that attempt — a later retry would otherwise
     // commit without ever reapplying the change.
     const environmentReload = stageDevelopmentEnvironmentFiles(previousHost.appRoot);
-    const build = beginDevelopmentBuild();
+    const build = this.#builds.begin();
     let nextHost: PreparedDevelopmentApplicationHost | undefined;
 
     try {
@@ -168,7 +175,8 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         nextHost = undefined;
         environmentReload.commit();
         // A worker keeps every generation it imports, so each generation gets a fresh
-        // one. Activating first means the retired worker never loads the new generation.
+        // one. Activating first keeps the retired worker from loading the new
+        // generation when the spare is ready.
         await this.#recycleWorker();
         return { host: committedHost, kind: "runtime" };
       }

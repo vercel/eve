@@ -15,6 +15,7 @@ export async function prepareDevelopmentBuild(
     changedPaths: input.changedPaths,
     developmentExtensions: input.developmentExtensions,
     previousExtensions: input.previousExtensions,
+    workspace: input.workspace,
   });
 }
 
