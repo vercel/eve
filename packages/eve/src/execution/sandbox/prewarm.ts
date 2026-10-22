@@ -39,7 +39,7 @@ import { materializeWorkspaceDirectory } from "#runtime/workspace/seed-files.js"
 import { toErrorMessage } from "#shared/errors.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { resolveSandboxModelPath } from "#shared/skill-paths.js";
+import { MODEL_SKILL_ROOT, resolveSandboxModelPath } from "#shared/skill-paths.js";
 
 export interface SandboxPreparedArtifactStore {
   write(input: {
@@ -277,9 +277,13 @@ export function createSandboxPrepareContext(input: {
 }): SandboxPrepareContext {
   const { log, resources, storagePath } = input;
   const { prepare } = input.provider;
+  // Workspace paths stay relative so the session resolves them from the connection's root.
   const files = [
-    ...(resources.workspace ?? []).map((file) => ({ ...file, root: "/workspace" })),
-    ...(resources.skills ?? []).map((file) => ({ ...file, root: "$HOME/.agents/skills" })),
+    ...(resources.workspace ?? []).map((file) => ({ ...file, path: file.relativePath })),
+    ...(resources.skills ?? []).map((file) => ({
+      ...file,
+      path: `${MODEL_SKILL_ROOT}/${file.relativePath}`,
+    })),
   ];
   const resourcesPath = resources.key === undefined ? undefined : resources.path;
   return {
@@ -298,10 +302,7 @@ export function createSandboxPrepareContext(input: {
           files: await Promise.all(
             files.map(async (file) => ({
               content: typeof file.content === "string" ? Buffer.from(file.content) : file.content,
-              path: await resolveSandboxModelPath({
-                path: `${file.root}/${file.relativePath}`,
-                sandbox: session,
-              }),
+              path: await resolveSandboxModelPath({ path: file.path, sandbox: session }),
             })),
           ),
         });
@@ -342,10 +343,11 @@ export function createSandboxPrepareContext(input: {
 
 /** `quotedRoot` is interpolated into the shell script, so callers pass it shell-quoted. */
 async function copyMountedResources(session: SandboxSession, quotedRoot: string): Promise<void> {
+  const workspace = shellQuote(session.resolvePath("."));
   const result = await session.run({
     command: [
       "set -e",
-      `if [ -d ${quotedRoot}/workspace ]; then cp -a ${quotedRoot}/workspace/. /workspace/; fi`,
+      `if [ -d ${quotedRoot}/workspace ]; then cp -a ${quotedRoot}/workspace/. ${workspace}/; fi`,
       `if [ -d ${quotedRoot}/skills ]; then`,
       '  mkdir -p "$HOME/.agents"',
       '  rm -rf "$HOME/.agents/skills"',

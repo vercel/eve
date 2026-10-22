@@ -22,9 +22,15 @@ type ReservedSessionMember = keyof SandboxSession | "delete" | "stop";
  * derives the full {@link SandboxSession} from it.
  *
  * Every path a connection receives is absolute, and `workingDirectory` is
- * always set: eve resolves relative paths from `/workspace`.
+ * always set: eve resolves relative paths from {@link workspaceRoot}.
  */
 export interface SandboxConnection<Extensions extends object = {}> {
+  /**
+   * The absolute sandbox directory that relative paths resolve from and
+   * commands start in by default. Defaults to `/workspace`. The directory
+   * must exist when eve first runs a command.
+   */
+  readonly workspaceRoot?: string;
   /**
    * Runs `command` as a Bash login-shell script (`bash -lc`) in
    * `workingDirectory`, with the sandbox's environment plus `env`. `env`
@@ -97,10 +103,11 @@ export interface SandboxPrepareContext {
   /** Reports build progress, such as `eve build` output. */
   log(message: string): void;
   /**
-   * Seeds `/workspace` and `$HOME/.agents/skills`, then runs the authored
-   * `prepare` with a session over `connection`. With `mountedAt`, the
-   * provider has mounted {@link resourcesDirectory} read-only at that
-   * sandbox path, and eve copies from it instead of writing every file.
+   * Seeds the connection's workspace root and `$HOME/.agents/skills`, then
+   * runs the authored `prepare` with a session over `connection`. With
+   * `mountedAt`, the provider has mounted {@link resourcesDirectory}
+   * read-only at that sandbox path, and eve copies from it instead of
+   * writing every file.
    */
   populate(
     connection: SandboxConnection<object>,

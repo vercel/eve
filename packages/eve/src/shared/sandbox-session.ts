@@ -9,7 +9,7 @@ export interface SandboxRunOptions {
   readonly abortSignal?: AbortSignal;
   readonly command: string;
   readonly env?: Readonly<Record<string, string>>;
-  /** Relative directories resolve from `/workspace`, which is also the default. */
+  /** Relative directories resolve from the workspace root, which is also the default. */
   readonly workingDirectory?: string;
 }
 
@@ -89,7 +89,7 @@ export interface SandboxWriteFilesOptions {
 /**
  * Options for removing a path from a sandbox.
  *
- * Relative paths resolve from `/workspace`; absolute paths pass through.
+ * Relative paths resolve from the workspace root; absolute paths pass through.
  * `force` ignores missing paths. `recursive` permits removing non-empty
  * directories.
  */
@@ -103,10 +103,10 @@ export interface SandboxRemovePathOptions {
 /**
  * The sandbox session that authored tools, hooks, and `prepare` receive.
  *
- * Relative paths resolve from `/workspace`, the live working directory for
- * every provider. Absolute paths pass through unchanged. Writes create
- * missing parent directories and overwrite existing files. Reads resolve to
- * `null` only when the path does not exist.
+ * Relative paths resolve from the workspace root, where commands start by
+ * default: `/workspace` on every built-in provider. Absolute paths pass
+ * through unchanged. Writes create missing parent directories and overwrite
+ * existing files. Reads resolve to `null` only when the path does not exist.
  *
  * The method set stays assignable to the AI SDK's
  * `Experimental_SandboxSession`, apart from its `description`.
@@ -126,8 +126,9 @@ export interface SandboxSession {
    */
   writeFiles(options: SandboxWriteFilesOptions): Promise<void>;
   /**
-   * Anchors a sandbox-relative path to `/workspace` and returns the
-   * resulting absolute path. The read and write methods already apply it.
+   * Anchors a sandbox-relative path to the workspace root and returns the
+   * resulting absolute path, so `resolvePath(".")` is the root itself. The
+   * read and write methods already apply it.
    */
   resolvePath(path: string): string;
   /** Removes one file or directory from the sandbox filesystem. */

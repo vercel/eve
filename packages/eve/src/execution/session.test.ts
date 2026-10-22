@@ -111,7 +111,9 @@ describe("createSession", () => {
     });
 
     expect(session.agent.system).toContain("`$HOME/.agents/skills/<skill>/`");
-    expect(session.agent.system).toContain("`/workspace/skills/<skill>/` as the fallback");
+    expect(session.agent.system).toContain(
+      "`skills/<skill>/` under the workspace root as the fallback",
+    );
     expect(session.agent.system).toContain(
       "- research: Research topics. (path: $HOME/.agents/skills/research/SKILL.md)",
     );

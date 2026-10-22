@@ -111,6 +111,8 @@ validator accepts. The Vercel provider type-checks it against
 
 ```ts
 export interface SandboxConnection<Extensions extends object = {}> {
+  /** Absolute; relative paths resolve from it and commands start in it. Defaults to `/workspace`. */
+  readonly workspaceRoot?: string;
   spawn(options: {
     readonly command: string;
     readonly workingDirectory: string;
@@ -145,8 +147,9 @@ Each method has a fixed contract:
   before sending it, so a bytes-only primitive does not regress them.
 - Every path a connection receives is absolute, and `workingDirectory` is
   always set. eve is the only owner of path resolution: relative paths and a
-  relative or missing `workingDirectory` resolve from `/workspace`, which every
-  built-in's `resolvePath` already does.
+  relative or missing `workingDirectory` resolve from the connection's
+  `workspaceRoot`, `/workspace` unless the connection declares another
+  absolute directory. Every built-in keeps the default.
 
 eve derives the rest of `SandboxSession`: `run` over `spawn`, binary and text
 variants, encodings and line ranges, single-file writes over `writeFiles`, path
@@ -217,7 +220,7 @@ export interface SandboxPrepareContext {
   templateKey(identity: SandboxIdentity): string;
   /** A stable read-only host directory with `workspace/` and `skills/`, when one exists. */
   resourcesDirectory(): Promise<string | undefined>;
-  /** Seeds `/workspace` and `$HOME/.agents/skills`, then runs authored `prepare`. */
+  /** Seeds the connection's workspace root and `$HOME/.agents/skills`, then runs authored `prepare`. */
   populate(
     connection: SandboxConnection<object>,
     options?: { readonly mountedAt?: string },
@@ -267,7 +270,7 @@ reproducible.
 `populate()` writes the workspace and skill files through
 `connection.writeFiles()` in one batch. With `mountedAt`, the provider has
 mounted `resourcesDirectory()` read-only at that sandbox path, and `populate()`
-copies `<mountedAt>/workspace/.` into `/workspace` and `<mountedAt>/skills/.`
+copies `<mountedAt>/workspace/.` into the workspace root and `<mountedAt>/skills/.`
 into `$HOME/.agents/skills` instead of writing them, as Docker does today.
 Either way, authored `prepare` runs next, with a logging session over the same
 connection.
@@ -311,8 +314,8 @@ wiring, and Docker CLI and Vercel SDK glue stay internal.
 ```text
 build (eve build, or first access in eve dev)
   eve ─ prepare(ctx) ─▶ provider: create build instance → connection
-                        ctx.populate(connection) ─▶ eve: write /workspace and
-                          $HOME/.agents/skills, then run authored prepare
+                        ctx.populate(connection) ─▶ eve: write the workspace root
+                          and $HOME/.agents/skills, then run authored prepare
                         provider: capture image or snapshot → artifact (JSON)
   eve: store artifact in sandbox-prepared-artifacts.json (ships with deployment)
 
@@ -367,8 +370,10 @@ runtime
   Template retention and pruning stay with the provider.
 - **Seeding.** `populate()` writes workspace and skill files before authored
   `prepare`, and runs only at build time. Runtime never seeds.
-- **Paths.** Relative paths and working directories resolve from `/workspace`;
-  eve resolves `$HOME` in skill targets. This changes one behavior: Vercel
+- **Paths.** Relative paths and working directories resolve from the
+  connection's workspace root; eve resolves `$HOME` in skill targets.
+  `session.resolvePath(".")` returns the root, which is how the file tools,
+  attachment staging, and GitHub checkouts find it. This changes one behavior: Vercel
   passes a relative `workingDirectory` to the SDK unchanged today, while Docker
   and just-bash already resolve it from `/workspace`. The Vercel migration PR
   states this in its changeset.
@@ -546,7 +551,14 @@ the last step. There are no public dual-shape overloads.
    prepared artifact, and records the picked provider wrote still resume. The
    guard is rule 44. The opaque provider runtime on `SandboxEnvironment` bumped
    six extension contract epochs, all retained.
-6. Later: a host provider on the same contract.
+6. Workspace-root paths. Implemented: `SandboxConnection.workspaceRoot`
+   declares the root, defaulting to `/workspace`; eve rejects a relative one
+   when it opens the connection. The built-in file tools accept paths
+   relative to the root, `glob` and `grep` search it by default, and
+   model-facing prompts no longer name `/workspace`, because they are
+   composed before any sandbox opens. The skill root stays
+   `$HOME/.agents/skills`, falling back to `skills/` under the workspace root.
+7. Later: a host provider on the same contract.
 
 ## Open questions
 

@@ -118,8 +118,13 @@ A `SandboxConnection` is the byte-level link to one sandbox. Each method has a f
 - `stop()` releases compute and keeps the sandbox's files.
 - `close()` is optional. It releases what this process holds for the connection, such as a local interpreter or child processes, without touching the sandbox. eve calls it whenever it lets go of a connection: when the step that opened it ends, after `stop()`, and before deletion. A connection lasts at most one step, so the next step resumes the sandbox through a new connection.
 - `extensions` is optional. It is a plain object whose own properties eve merges onto the session, such as `setNetworkPolicy()`. Use closures rather than class methods, because eve does not copy inherited members.
+- `workspaceRoot` is optional. It is the session's workspace root: the absolute sandbox directory where commands start by default. It defaults to `/workspace`, which every built-in provider uses. Set it when your sandbox keeps its working files somewhere else, such as `/home/user/project`. The directory must exist before eve runs a command in it.
 
-Every path a connection receives is absolute, and `workingDirectory` is always set. eve resolves relative paths and a missing or relative working directory from `/workspace` before it calls the connection.
+Every path a connection receives is absolute, and `workingDirectory` is always set. eve resolves relative paths and a missing or relative working directory from the workspace root before it calls the connection, and `session.resolvePath(".")` returns the root. The built-in file tools, attachment staging, and GitHub checkouts use the same root. eve throws when it opens a connection whose `workspaceRoot` is not absolute:
+
+```text
+Sandbox connection workspaceRoot must be an absolute path, but received "project".
+```
 
 eve builds the rest of the session from these methods: `run()` over `spawn()`, the binary and text read and write variants, encodings and line ranges, `writeFiles()`, `resolvePath()`, and abort-signal binding. An extension member named like a session method, or `stop` or `delete`, is a type error, and eve throws when it opens the connection:
 
@@ -174,7 +179,7 @@ Validate the shape of your own state in `resume()`. When you change it incompati
 
 ## Bake files into templates
 
-Call `ctx.populate(connection)` on the build instance before you capture it. `populate()` writes the agent's workspace files to `/workspace` and its skill files to `$HOME/.agents/skills` in one `writeFiles()` batch, then runs the authored `prepare` callback with a session over the same connection. eve finds `$HOME` by running a command through `spawn()`. When the sandbox has no usable home directory, skills go to `/workspace/skills`.
+Call `ctx.populate(connection)` on the build instance before you capture it. `populate()` writes the agent's workspace files to the connection's workspace root and its skill files to `$HOME/.agents/skills` in one `writeFiles()` batch, then runs the authored `prepare` callback with a session over the same connection. eve finds `$HOME` by running a command through `spawn()`. When the sandbox has no usable home directory, skills go to `skills/` under the workspace root.
 
 A provider that can mount host directories can avoid writing every file. `ctx.resourcesDirectory()` resolves to a stable read-only host directory that contains `workspace/` and `skills/`, or to `undefined` when there is none. Mount it in the build instance and pass its sandbox path:
 
@@ -190,7 +195,7 @@ await ctx.populate(
 );
 ```
 
-With `mountedAt`, `populate()` copies `<mountedAt>/workspace/.` into `/workspace` and `<mountedAt>/skills/.` into `$HOME/.agents/skills` with `cp -a`. When eve has no resource directory, `populate()` ignores `mountedAt` and writes the files instead.
+With `mountedAt`, `populate()` copies `<mountedAt>/workspace/.` into the workspace root and `<mountedAt>/skills/.` into `$HOME/.agents/skills` with `cp -a`. When eve has no resource directory, `populate()` ignores `mountedAt` and writes the files instead.
 
 `ctx.templateKey(identity)` returns a SHA-256 hex key that changes whenever `identity`, the workspace files, the skill files, or the sandbox file's source changes. Pass every option that affects the template, such as the base image, and use the key to name or look up a cached template. `identity` accepts JSON values, `undefined` (omitted), plain objects and arrays, and functions (hashed by their source). `resources` and `sourceRevision` are reserved, and eve throws if `identity` sets either one. The source revision covers only the sandbox file, so a `prepare` callback imported from another module does not change the key.
 

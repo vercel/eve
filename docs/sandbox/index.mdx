@@ -3,7 +3,7 @@ title: "Sandbox"
 description: "Configure the isolated filesystem and command environment used by an eve agent."
 ---
 
-Every eve agent has one sandbox rooted at `/workspace`. The built-in `bash`, `read_file`, and `write_file` tools use it. Without an authored sandbox file, eve selects the best available environment automatically.
+Every eve agent has one sandbox. Its workspace root, where commands start and relative paths resolve from, is `/workspace` on every built-in provider. The built-in `bash`, `read_file`, and `write_file` tools use it. Without an authored sandbox file, eve selects the best available environment automatically.
 
 ## Use the sandbox
 
@@ -26,7 +26,7 @@ export default defineTool({
 });
 ```
 
-Relative paths resolve under `/workspace`. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
+Relative paths resolve from the workspace root, and `sandbox.resolvePath(".")` returns its absolute path. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
 
 Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`, so agent-aware CLIs such as `vercel` skip interactive prompts. To use a different value, set `AI_AGENT` in the environment's `env` option or pass it in the `env` of one `run()` or `spawn()` call.
 
@@ -128,7 +128,7 @@ agent/sandbox/
 
 Files under `agent/sandbox/workspace/` seed writable `/workspace`. eve copies the seed into the prepared environment when it prepares a new environment generation, and each new session sandbox starts from that copy. Existing live sandbox state is not overwritten by later seed changes.
 
-Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. eve resolves `$HOME` by reading it inside the sandbox; when a sandbox has no usable home directory, skill paths fall back to `/workspace/skills`. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
+Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. A [custom provider](/docs/sandbox/custom-providers) can declare a different workspace root, so prefer relative paths in code that runs on any provider. eve resolves `$HOME` by reading it inside the sandbox; when a sandbox has no usable home directory, skill paths fall back to `skills/` under the workspace root. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
 
 Providers receive both trees with explicit metadata. `source.kind` is `"none"` when the agent has no managed workspace or skill files, `"materialized"` when eve has also written the compiled files to the host directory at `path`, and `"inline"` when the contents are available only in each tree's `files`:
 
@@ -154,7 +154,7 @@ Docker mounts the compiled trees read-only under `/eve/resources`, copies worksp
 
 ## Inbound attachments
 
-eve writes byte-backed files that reach the agent into the sandbox under `/workspace/.eve/attachments/` and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
+eve writes byte-backed files that reach the agent into the sandbox under `.eve/attachments/` in the workspace root (`/workspace/.eve/attachments/` on built-in providers) and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
 
 Files that tools return by URL with `toolOutputPart.fileUrl` are not staged: the model provider reads the URL directly. See [Send a file by URL](/docs/tools#send-a-file-by-url).
 

@@ -26,13 +26,21 @@ export const SANDBOX_AGENT_ENV: Readonly<Record<string, string>> = { AI_AGENT: "
 
 /**
  * Builds the {@link SandboxSession} eve hands out from a provider's
- * connection: every path and working directory resolves from `/workspace`,
- * `run` collects `spawn`, the read and write variants share the connection's
- * byte primitives, and the connection's extensions merge on top.
+ * connection: every path and working directory resolves from the
+ * connection's workspace root, `run` collects `spawn`, the read and write
+ * variants share the connection's byte primitives, and the connection's
+ * extensions merge on top.
  */
 export function createConnectionSession<Extensions extends object>(
   connection: SandboxConnection<Extensions>,
 ): SandboxSession & Extensions {
+  const workspaceRoot = connection.workspaceRoot ?? WORKSPACE_ROOT;
+  if (!posix.isAbsolute(workspaceRoot)) {
+    throw new Error(
+      `Sandbox connection workspaceRoot must be an absolute path, but received "${workspaceRoot}".`,
+    );
+  }
+  const resolveSandboxPath = (path: string) => posix.resolve(workspaceRoot, path);
   async function read(options: { readonly abortSignal?: AbortSignal; readonly path: string }) {
     return await connection.readFile({
       abortSignal: options.abortSignal,
@@ -58,7 +66,7 @@ export function createConnectionSession<Extensions extends object>(
       abortSignal: options.abortSignal,
       command: options.command,
       env: options.env ?? {},
-      workingDirectory: resolveSandboxPath(options.workingDirectory ?? WORKSPACE_ROOT),
+      workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
     });
   }
   const session: SandboxSession = {
@@ -123,10 +131,6 @@ export function createConnectionSession<Extensions extends object>(
     );
   }
   return { ...extensions, ...session } as SandboxSession & Extensions;
-}
-
-function resolveSandboxPath(path: string): string {
-  return posix.resolve(WORKSPACE_ROOT, path);
 }
 
 /**

@@ -62,6 +62,23 @@ describe("createConnectionSession", () => {
     });
   });
 
+  it("resolves from the connection's declared workspaceRoot, which must be absolute", async () => {
+    const { connection, files } = memoryConnection();
+    const session = createConnectionSession({ ...connection, workspaceRoot: "/srv/app/" });
+
+    await session.writeTextFile({ content: "hi", path: "a.txt" });
+    await session.run({ command: "pwd" });
+
+    expect(session.resolvePath(".")).toBe("/srv/app");
+    expect([...files.keys()]).toEqual(["/srv/app/a.txt"]);
+    expect(connection.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ workingDirectory: "/srv/app" }),
+    );
+    expect(() => createConnectionSession({ ...connection, workspaceRoot: "srv/app" })).toThrow(
+      'Sandbox connection workspaceRoot must be an absolute path, but received "srv/app".',
+    );
+  });
+
   it("implements run over spawn and merges the connection's extensions", async () => {
     const session = createConnectionSession(memoryConnection().connection);
 

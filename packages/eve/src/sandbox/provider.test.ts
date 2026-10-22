@@ -161,21 +161,23 @@ describe("defineSandboxProvider", () => {
     ]);
   });
 
-  it("copies from mounted resources, and writes files when there is no resource directory", async () => {
+  it("seeds the connection's workspace root from mounted resources, or by writing files without a resource directory", async () => {
     const seed = { workspace: [{ content: "seed", relativePath: "seed.txt" }] };
     const mounted = recordingConnection();
-    await prepare(bakingProvider(mounted.connection, "/eve/res ources").environment(), {
+    const mountedConnection = { ...mounted.connection, workspaceRoot: "/srv/app" };
+    await prepare(bakingProvider(mountedConnection, "/eve/res ources").environment(), {
       ...seed,
       path: "/app/.eve/compile/resources",
     });
     const inline = recordingConnection();
-    await prepare(bakingProvider(inline.connection, "/eve/resources").environment(), seed);
+    const inlineConnection = { ...inline.connection, workspaceRoot: "/srv/app" };
+    await prepare(bakingProvider(inlineConnection, "/eve/resources").environment(), seed);
 
     expect(mounted.calls).toEqual([]);
     const copy = mounted.connection.spawn.mock.calls[0]?.[0].command;
-    expect(copy).toContain("cp -a '/eve/res ources'/workspace/. /workspace/");
+    expect(copy).toContain("cp -a '/eve/res ources'/workspace/. '/srv/app'/");
     expect(copy).toContain(`cp -a '/eve/res ources'/skills/. "$HOME/.agents/skills/"`);
-    expect(inline.calls).toEqual(["write /workspace/seed.txt"]);
+    expect(inline.calls).toEqual(["write /srv/app/seed.txt"]);
   });
 });
 

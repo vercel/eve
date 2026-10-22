@@ -272,7 +272,9 @@ describe("Docker provider prewarm", () => {
         (args) =>
           args[0] === "exec" &&
           // The spawn wrapper re-quotes the script for `bash -lc`, escaping its quoted root.
-          (args.at(-1) ?? "").includes("cp -a '\\''/eve/resources'\\''/workspace/. /workspace/"),
+          (args.at(-1) ?? "").includes(
+            "cp -a '\\''/eve/resources'\\''/workspace/. '\\''/workspace'\\''/",
+          ),
       ),
     ).toBeDefined();
   });
