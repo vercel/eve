@@ -98,7 +98,7 @@ export function createJustBashSandboxProvider(
           throw error;
         }
       } finally {
-        await templateSandbox.close();
+        await templateSandbox.stop();
         if (!published) await rm(temporaryTemplateRootPath, { force: true, recursive: true });
       }
       return { templateKey };

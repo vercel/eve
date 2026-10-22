@@ -25,15 +25,10 @@ interface LocalSandboxMetadata {
   readonly version: typeof LOCAL_SANDBOX_METADATA_VERSION;
 }
 
-/**
- * One just-bash interpreter over a session or template root. `stop()` and
- * `close()` both end the interpreter, which lives in this process; the root's
- * files stay.
- */
+/** One just-bash interpreter over a session or template root. The root's files outlive it. */
 export interface BashSandbox extends SandboxConnection {
   /** Records the interpreter's environment, so sessions created from this template start with it. */
   captureState(): Promise<void>;
-  close(): Promise<void>;
 }
 
 /**
@@ -115,7 +110,6 @@ export async function createBashSandbox(input: {
       dangerouslyAllowFullInternetAccess: true,
     },
   });
-  const stop = async () => await sandbox.stop();
 
   return {
     async captureState() {
@@ -124,7 +118,6 @@ export async function createBashSandbox(input: {
         version: LOCAL_SANDBOX_METADATA_VERSION,
       });
     },
-    close: stop,
     async readFile({ path }) {
       try {
         return await filesystem.readFileBuffer(path);
@@ -165,7 +158,9 @@ export async function createBashSandbox(input: {
         getOutput: (log) => log.type,
       });
     },
-    stop,
+    async stop() {
+      await sandbox.stop();
+    },
     async writeFiles({ files }) {
       for (const file of files) {
         await filesystem.mkdir(dirname(file.path), { recursive: true });
