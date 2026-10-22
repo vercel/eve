@@ -4,8 +4,8 @@ import type {
   DockerSandboxEnvironmentOptions,
   DockerSandboxRuntimeOptions,
 } from "#public/sandbox/docker-sandbox.js";
+import { defineSandboxProvider, type SandboxProvider } from "#public/sandbox/provider.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
-import { defineLegacySandboxProvider } from "#shared/sandbox-provider.js";
 
 export type {
   DockerSandboxEnvironmentOptions,
@@ -14,17 +14,14 @@ export type {
 
 type DockerfileEnvironmentInput = Omit<DockerSandboxEnvironmentOptions, "image">;
 
-const provider = defineLegacySandboxProvider<
+const provider: SandboxProvider<
   DockerSandboxEnvironmentOptions,
   DockerSandboxRuntimeOptions,
-  { readonly imageReference: string },
-  { readonly containerName: string; readonly version: 2 },
   DockerSandboxSession
->({
+> = defineSandboxProvider({
   name: "docker",
-  environment(options) {
-    return createDockerSandboxProvider(options);
-  },
+  environment: (options: Omit<DockerSandboxEnvironmentOptions, "prepare">) =>
+    createDockerSandboxProvider(options),
 });
 
 export const DockerSandbox = {

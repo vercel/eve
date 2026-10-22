@@ -1,13 +1,6 @@
 import { join } from "node:path";
 
-import {
-  copyDirectoryAtomically,
-  writeSandboxSeedFiles,
-} from "#execution/sandbox/bindings/local-provider-utils.js";
-import {
-  providerResourceTargetFiles,
-  type SandboxProviderResources,
-} from "#shared/sandbox-provider.js";
+import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const SANDBOX_RESOURCES_ROOT = "/eve/resources";
@@ -29,23 +22,6 @@ export async function prepareImmutableResources(input: {
   const path = resolveImmutableResourcesPath(input);
   await copyDirectoryAtomically(input.sourcePath, path);
   return path;
-}
-
-export async function hydrateSandboxProviderResources(input: {
-  readonly log?: (message: string) => void;
-  readonly resources: SandboxProviderResources;
-  readonly session: SandboxSession;
-}): Promise<void> {
-  switch (input.resources.source.kind) {
-    case "none":
-    case "inline":
-      await writeSandboxSeedFiles(input.session, providerResourceTargetFiles(input.resources));
-      return;
-    case "materialized":
-      input.log?.("hydrating workspace and skills from read-only resources");
-      await hydrateSandboxFromImmutableResources(input.session);
-      return;
-  }
 }
 
 export async function hydrateSandboxFromImmutableResources(

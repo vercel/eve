@@ -9,10 +9,7 @@ import {
   type DockerCommandResult,
   type DockerProcess,
 } from "#execution/sandbox/bindings/docker-cli.js";
-import {
-  createDockerSandboxProvider,
-  pruneDockerSandboxTemplates,
-} from "#execution/sandbox/bindings/docker.js";
+import { pruneDockerSandboxTemplates } from "#execution/sandbox/bindings/docker.js";
 import { EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV } from "#execution/sandbox/development-run.js";
 import {
   createDockerSandboxOptionsHash,
@@ -26,6 +23,7 @@ import type {
 } from "#public/sandbox/docker-sandbox.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import { createDockerSandboxRuntime } from "#internal/testing/docker-sandbox-runtime.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { bufferToStream } from "#execution/sandbox/stream-utils.js";
@@ -111,7 +109,7 @@ function createEngine(input: {
   readonly runtimeOptions?: DockerSandboxRuntimeOptions;
 }) {
   return createSandboxProviderHarness(
-    createDockerSandboxProvider(input.options, input.cli),
+    createDockerSandboxRuntime(input.options, input.cli),
     input.runtimeOptions ?? {},
     { preparedArtifact: () => ({ imageReference: TEMPLATE_IMAGE }) },
   );
@@ -356,7 +354,7 @@ describe("Docker provider prewarm", () => {
         calls,
         (args) =>
           args[0] === "exec" &&
-          (args.at(-1) ?? "").includes("cp -a /eve/resources/workspace/. /workspace/"),
+          /cp -a \S*\/eve\/resources\S*\/workspace\/\. \/workspace\//u.test(args.at(-1) ?? ""),
       ),
     ).toBeDefined();
   });
@@ -758,7 +756,8 @@ describe("Docker provider create", () => {
   it("rejects domain-level network policies with guidance toward the Vercel provider", async () => {
     const { handle } = await createRunningSessionHandle({});
 
-    await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } })).rejects.toThrow(
+    // DefaultSandbox forwards the shared network policy type unchanged.
+    await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } } as never)).rejects.toThrow(
       /Vercel provider/,
     );
   });
@@ -1021,7 +1020,7 @@ describe("Docker template prune", () => {
 
   // Mirrors how prewarm and session start build the provider context.
   async function prepareLikeDevelopment(appRoot: string, cli: DockerCli) {
-    return await createDockerSandboxProvider(undefined, cli).prepare({
+    return await createDockerSandboxRuntime(undefined, cli).prepare({
       files: createSandboxProviderFiles(join(appRoot, "sandbox")),
       host: createSandboxProviderHost(appRoot),
       resources: createSandboxProviderResources({}),

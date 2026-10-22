@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { DockerUnavailableError } from "#execution/sandbox/bindings/docker-cli.js";
-import { createDockerSandboxProvider } from "#execution/sandbox/bindings/docker.js";
+import { createDockerSandboxRuntime } from "#internal/testing/docker-sandbox-runtime.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
@@ -12,7 +12,7 @@ describe("docker CLI resolution", () => {
     vi.stubEnv("EVE_DOCKER_PATH", "/nonexistent/docker-binary");
     try {
       const appRoot = await createScratchDirectory("eve-docker-missing-");
-      const engine = createSandboxProviderHarness(createDockerSandboxProvider(), undefined);
+      const engine = createSandboxProviderHarness(createDockerSandboxRuntime(), undefined);
 
       await expect(engine.prepare({ appRoot })).rejects.toThrow(DockerUnavailableError);
     } finally {
