@@ -39,7 +39,8 @@ export const READ_FILE_INPUT_SCHEMA = defineJsonSchema<ReadFileToolInput>({
   properties: {
     filePath: {
       type: "string",
-      description: "The absolute path to the file to read. A leading $HOME is supported.",
+      description:
+        "The path to the file to read: absolute, relative to the workspace root, or beginning with $HOME/.",
     },
     limit: {
       type: "integer",
@@ -94,7 +95,7 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
       "Read a file from the local filesystem. If the path does not exist, an error is returned.",
       "",
       "Usage:",
-      "- The filePath parameter should be an absolute path or begin with $HOME/.",
+      "- The filePath parameter is an absolute path, a path relative to the workspace root (where `bash` commands start), or a path beginning with $HOME/.",
       "- By default, this tool returns up to 2000 lines from the start of the file.",
       "- The offset parameter is the line number to start from (1-indexed).",
       "- To read later sections, call this tool again with a larger offset.",
