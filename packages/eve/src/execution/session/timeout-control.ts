@@ -40,7 +40,8 @@ export function createSessionTimeoutControl(input: {
   // Workflow's clock is replay-stable. An owner boots right after activity:
   // the session's creation, the delivery a successor runs, or the turn that
   // compacted before a successor took over.
-  let lastActivityAt = input.deadline === undefined ? Date.now() : input.deadline.getTime() - timeoutMs;
+  let lastActivityAt =
+    input.deadline === undefined ? Date.now() : input.deadline.getTime() - timeoutMs;
   let active: { readonly runId: string } | undefined;
   let startup: Promise<void> | undefined;
 

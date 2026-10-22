@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AnyEventRequest } from "@workflow/world";
-import { hydrateStepReturnValue } from "@workflow/core/serialization";
+import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
@@ -23,8 +23,14 @@ async function deadline(runId: string): Promise<Date> {
     const steps = await world.steps.list({ runId, resolveData: "all" });
     const start = steps.data.find((step) => step.stepName.endsWith("//startSessionTimeoutStep"));
     expect(start?.output).toBeDefined();
-    result = ((await hydrateStepReturnValue(start!.output, runId, undefined)) as { deadline: Date })
-      .deadline;
+    const timer = (await hydrateStepReturnValue(start!.output, runId, undefined)) as {
+      runId: string;
+    };
+    const run = await world.runs.get(timer.runId, { resolveData: "all" });
+    const [input] = (await hydrateWorkflowArguments(run.input, run.runId, undefined)) as [
+      { deadline: Date },
+    ];
+    result = input.deadline;
     expect(result).toBeInstanceOf(Date);
   });
   return result!;
@@ -165,7 +171,15 @@ describe("idle session prewarm handoff", () => {
             },
             { timeout: 10_000 },
           );
-          expect(await deadline(successorId!)).toEqual(originalDeadline);
+          const preparedDeadline = await deadline(successorId!);
+          if (conversation) {
+            // Completed turns extend the idle window; preparation itself must not renew it.
+            expect(preparedDeadline.getTime()).toBeGreaterThanOrEqual(originalDeadline.getTime());
+            const successor = await world.runs.get(successorId!);
+            expect(preparedDeadline.getTime()).toBeLessThan(successor.createdAt.getTime() + 60_000);
+          } else {
+            expect(preparedDeadline).toEqual(originalDeadline);
+          }
           const steps = await world.steps.list({ runId: successorId! });
           expect(
             steps.data.some(
@@ -196,7 +210,7 @@ describe("idle session prewarm handoff", () => {
             ),
           ).toBe(true);
           expect((await waitForCommandHookOwner(token)).runId).toBe(successorId);
-          expect(await deadline(successorId!)).toEqual(originalDeadline);
+          expect(await deadline(successorId!)).toEqual(preparedDeadline);
           await workflowRuntime.dispatchSession({
             sessionId: anchor.runId,
             command: { kind: "reset" },
