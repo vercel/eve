@@ -41,13 +41,13 @@ describe("deployed self-modification sandbox", () => {
     expect(isDeployedOnVercel).not.toHaveBeenCalled();
   });
 
-  it("requires Vercel Sandbox when a deployed child opens its sandbox off Vercel", async () => {
+  it("requires a Vercel deployment when a deployed child opens its sandbox", async () => {
     vi.stubEnv("EVE_DEV", "0");
     const selector = defineDeployedSelfModificationSandbox(connectConfig, () => false);
 
     await expect(
       selector({ session: { id: "child", parent: {} } } as SandboxSelectorContext),
-    ).rejects.toThrow("Deployed self-modification requires Vercel Sandbox");
+    ).rejects.toThrow("Deployed self-modification requires deploying on Vercel");
   });
 
   it("does not probe the host during eve dev", () => {
