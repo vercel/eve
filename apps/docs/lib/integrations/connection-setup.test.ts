@@ -93,9 +93,23 @@ describe("TinyFish connection setup", () => {
     if (typeof policy !== "function") throw new Error("TinyFish must define an approval policy.");
     const approvalFor = (toolName: string) => policy({ toolName } as Parameters<typeof policy>[0]);
 
-    expect(approvalFor("tinyfish__search")).toBe("not-applicable");
-    expect(approvalFor("tinyfish__run_web_automation")).toBe("user-approval");
-    expect(approvalFor("tinyfish__future_tool")).toBe("user-approval");
+    for (const toolName of [
+      "search",
+      "fetch_content",
+      "tinyfish__search",
+      "tinyfish__fetch_content",
+    ]) {
+      expect(approvalFor(toolName)).toBe("not-applicable");
+    }
+    for (const toolName of [
+      "run_web_automation",
+      "create_browser_session",
+      "top_up_wallet",
+      "cancel_monitor",
+      "tinyfish__future_tool",
+    ]) {
+      expect(approvalFor(toolName)).toBe("user-approval");
+    }
   });
 });
 
