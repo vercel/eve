@@ -6,6 +6,8 @@ import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-err
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import { createVercelSandbox as createVercelImplementation } from "#execution/sandbox/bindings/vercel.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { VercelSandbox } from "#sandbox/providers/vercel.js";
+import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 
 // The credential fallback consults the developer's Vercel CLI auth and the
 // repo's `.vercel` project link; on a linked, logged-in machine it would
@@ -14,6 +16,13 @@ vi.mock("#compiled/@vercel/oidc/index.js", () => ({
   getVercelOidcToken: vi.fn(async () => {
     throw new Error("No ambient Vercel OIDC token in unit tests.");
   }),
+}));
+
+// The default image is tagged with the installed eve version, and template
+// keys hash it, so pin it for the recorded keys below.
+vi.mock("#execution/sandbox/bindings/eve-image.js", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  VERCEL_EVE_SANDBOX_IMAGE: "vcr.vercel.com/vercel/eve/base:golden",
 }));
 
 function createMockCommandResult() {
@@ -648,6 +657,124 @@ describe("createVercelSandbox", () => {
         mounts: { "/workspace/repos": { drive: "team-drive", mode: "read-write" } },
       }),
     );
+  });
+
+  /*
+   * Literal values recorded by earlier releases. Session state, sandbox names,
+   * and prepared snapshot IDs outlive deployments, and template keys name the
+   * pointers that later builds reuse, so these must never change.
+   */
+  describe("identity recorded by earlier releases", () => {
+    const appRoot = "/tmp/test-app-root";
+
+    it("names session sandboxes and records their state as before", async () => {
+      const fake = createFakeVercelProvider();
+      const provider = createTestVercelSandbox({
+        loadDeleteSandboxModule: async () => fake.sandboxModule as never,
+        loadSandboxModule: async () => fake.sandboxModule as never,
+      });
+
+      const states = [];
+      for (const sessionId of ["session_golden", "tool_session_golden"]) {
+        const { state } = await provider.start({
+          appRoot,
+          prepared: { snapshotId: "snap_golden" },
+          sandboxName: sessionId,
+        });
+        states.push(state);
+      }
+
+      expect(states).toEqual([
+        { sandboxName: "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317", version: 3 },
+        { sandboxName: "eve-sbx-vercel-05f9b7e93088c2627297d73f2e7e04cb", version: 3 },
+      ]);
+      expect(getSandboxEnvironmentRuntime(VercelSandbox.environment())).toMatchObject({
+        providerName: "vercel",
+        stateProtocolVersion: 1,
+      });
+    });
+
+    it("resumes state and a prepared snapshot recorded by an earlier release", async () => {
+      const sandboxName = "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317";
+      const fake = createFakeVercelProvider();
+      fake.seedTemplate(sandboxName, createMockSandbox({ name: sandboxName, status: "stopped" }));
+      const provider = createTestVercelSandbox({
+        loadDeleteSandboxModule: async () => fake.sandboxModule as never,
+        loadSandboxModule: async () => fake.sandboxModule as never,
+      });
+      const prepared = { snapshotId: "snap_previous_release" };
+
+      const resumed = await provider.openSession({
+        appRoot,
+        existing: { sandboxName, version: 3 },
+        prepared,
+        sandboxName: "session_golden",
+      });
+      const started = await provider.start({ appRoot, prepared, sandboxName: "session_golden" });
+
+      expect(resumed.sandbox.name).toBe(sandboxName);
+      expect(started.state).toEqual({ sandboxName, version: 3 });
+      expect(fake.sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+    });
+
+    it("derives template keys from create options, image, resources, and source revision as before", async () => {
+      const keyFor = (input: {
+        readonly createOptions?: NonNullable<
+          Parameters<typeof createVercelImplementation>[0]
+        >["createOptions"];
+        readonly managedFiles?: boolean;
+        readonly sourceRevision?: string;
+      }) =>
+        templateKeyOf(async (sandboxModule) =>
+          createTestVercelSandbox({
+            createOptions: input.createOptions,
+            loadSandboxModule: async () => sandboxModule as never,
+            // Managed files alone need a snapshot; prepare is not part of the key.
+            ...(input.managedFiles === true ? { prepare: undefined } : {}),
+          }).prepare({
+            appRoot,
+            ...(input.managedFiles === true
+              ? {
+                  resourcesKey: "resources-golden",
+                  skills: [{ content: "# Skill", relativePath: "golden/SKILL.md" }],
+                  workspace: [{ content: "notes", relativePath: "notes.md" }],
+                }
+              : {}),
+            sourceRevision: input.sourceRevision ?? "revision-golden",
+          }),
+        );
+      const options = {
+        env: { GOLDEN: "1" },
+        networkPolicy: "deny-all",
+        resources: { vcpus: 4 },
+        tags: { team: "golden" },
+        timeout: 600_000,
+      } as const;
+
+      const keys = {
+        defaults: await keyFor({}),
+        managedFiles: await keyFor({ managedFiles: true }),
+        image: await keyFor({ createOptions: { image: "registry.example/eve:golden" } }),
+        source: await keyFor({
+          createOptions: { source: { type: "git", url: "https://example.test/agent.git" } },
+        }),
+        options: await keyFor({ createOptions: options }),
+        credentials: await keyFor({
+          createOptions: { ...options, projectId: "prj_golden", teamId: "team_golden", token: "t" },
+        }),
+        sourceRevision: await keyFor({ sourceRevision: "revision-other" }),
+      };
+
+      expect(keys).toEqual({
+        defaults: "eve-sbx-tpl-vercel-1f6d699611395741504fc8a4b10df805",
+        managedFiles: "eve-sbx-tpl-vercel-82b4e1f8627add9d53d329878f5bb047",
+        image: "eve-sbx-tpl-vercel-1f48759fa1e48bb0d5af6910a423593a",
+        source: "eve-sbx-tpl-vercel-2f6b04f764532fa85e252b7c80bbfe56",
+        options: "eve-sbx-tpl-vercel-e7a2ead2a2bdd5be4fbbc9025a7cd05b",
+        credentials: "eve-sbx-tpl-vercel-e7a2ead2a2bdd5be4fbbc9025a7cd05b",
+        sourceRevision: "eve-sbx-tpl-vercel-d995fa0bea286a7b26343f99a4c5e0a1",
+      });
+    });
   });
 
   describe("session identity and cleanup", () => {
