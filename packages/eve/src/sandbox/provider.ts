@@ -290,7 +290,9 @@ function adaptSandboxProvider<
     // `sandbox.stop()` and then server shutdown, so each runs once.
     const stop = once(() => connection.stop());
     const close = once(async () => {
-      open.get(sessionId)?.delete(close);
+      const remaining = open.get(sessionId);
+      remaining?.delete(close);
+      if (remaining?.size === 0) open.delete(sessionId);
       await connection.close?.();
     });
     let sessionClosers = open.get(sessionId);
