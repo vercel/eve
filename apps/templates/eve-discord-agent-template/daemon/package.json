@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/connect": "^2.5.2",
+    "eve": "^0.83.0"
+  }
+}
