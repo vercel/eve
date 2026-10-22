@@ -23,8 +23,11 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool("write_file", { output: { path: /^\/.+\/notes\/handoff\.txt$/u } });
-    t.calledTool("read_file", { output: { content: new RegExp(FILE_TOOLS_TOKEN) } });
-    t.calledTool("grep", { output: new RegExp(FILE_TOOLS_TOKEN) });
+    // The scripted model runs every step; a live model may skip the read-back and search.
+    if (process.env.EVE_E2E_MODEL === "mock") {
+      t.calledTool("read_file", { output: { content: new RegExp(FILE_TOOLS_TOKEN) } });
+      t.calledTool("grep", { output: new RegExp(FILE_TOOLS_TOKEN) });
+    }
     t.calledTool("bash", { output: { stdout: new RegExp(FILE_TOOLS_TOKEN) } });
     t.messageIncludes(FILE_TOOLS_TOKEN);
   },
