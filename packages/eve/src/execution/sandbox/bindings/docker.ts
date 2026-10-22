@@ -51,6 +51,10 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import {
+  invalidPreparedSandboxArtifactError,
+  invalidSandboxSessionStateError,
+} from "#shared/sandbox-recorded-data-error.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type {
   DockerSandboxEnvironmentOptions,
@@ -366,11 +370,7 @@ function requirePreparedDockerArtifact(
   artifact: SandboxPreparedArtifact,
 ): DockerSandboxPreparedArtifact {
   if (!isSandboxPreparedArtifactRecord(artifact) || typeof artifact.imageReference !== "string") {
-    throw new Error(
-      "Invalid prepared Docker artifact." +
-        " The artifact recorded by `eve build` does not match the format this eve version expects, usually because the build used a different eve version." +
-        " Run `eve build` with the eve version this runtime uses, then redeploy.",
-    );
+    throw invalidPreparedSandboxArtifactError("Docker sandbox");
   }
   return { imageReference: artifact.imageReference };
 }
@@ -381,11 +381,7 @@ function requireDockerSessionState(state: SandboxPreparedArtifact): DockerSandbo
     state.version !== 2 ||
     typeof state.containerName !== "string"
   ) {
-    throw new Error(
-      "Invalid Docker sandbox session state." +
-        " This session's recorded sandbox state does not match the format this eve version expects, usually because the session started under a different eve version." +
-        " Start a new session to get a fresh sandbox.",
-    );
+    throw invalidSandboxSessionStateError("Docker sandbox");
   }
   return { containerName: state.containerName, version: 2 };
 }

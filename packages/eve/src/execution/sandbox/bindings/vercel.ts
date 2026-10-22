@@ -28,6 +28,10 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import {
+  invalidPreparedSandboxArtifactError,
+  invalidSandboxSessionStateError,
+} from "#shared/sandbox-recorded-data-error.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type {
   VercelSandboxMountOptions,
@@ -310,11 +314,7 @@ function requireVercelSessionState(state: SandboxPreparedArtifact): VercelSandbo
     state.version !== 3 ||
     typeof state.sandboxName !== "string"
   ) {
-    throw new Error(
-      "Invalid Vercel sandbox session state." +
-        " This session's recorded sandbox state does not match the format this eve version expects, usually because the session started under a different eve version." +
-        " Start a new session to get a fresh sandbox.",
-    );
+    throw invalidSandboxSessionStateError("Vercel sandbox");
   }
   return { sandboxName: state.sandboxName, version: 3 };
 }
@@ -326,11 +326,7 @@ function requirePreparedVercelTemplate(
     !isSandboxPreparedArtifactRecord(artifact) ||
     (artifact.snapshotId !== undefined && typeof artifact.snapshotId !== "string")
   ) {
-    throw new Error(
-      "Invalid prepared Vercel sandbox artifact." +
-        " The artifact recorded by `eve build` does not match the format this eve version expects, usually because the build used a different eve version." +
-        " Run `eve build` with the eve version this runtime uses, then redeploy.",
-    );
+    throw invalidPreparedSandboxArtifactError("Vercel sandbox");
   }
   return artifact.snapshotId === undefined ? {} : { snapshotId: artifact.snapshotId };
 }

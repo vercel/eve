@@ -38,6 +38,10 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import {
+  invalidPreparedSandboxArtifactError,
+  invalidSandboxSessionStateError,
+} from "#shared/sandbox-recorded-data-error.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 
 const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
@@ -238,11 +242,7 @@ function requirePreparedJustBashArtifact(
   artifact: SandboxPreparedArtifact,
 ): JustBashPreparedArtifact {
   if (!isSandboxPreparedArtifactRecord(artifact) || typeof artifact.templateKey !== "string") {
-    throw new Error(
-      "Invalid prepared just-bash artifact." +
-        " The artifact recorded by `eve build` does not match the format this eve version expects, usually because the build used a different eve version." +
-        " Run `eve build` with the eve version this runtime uses, then redeploy.",
-    );
+    throw invalidPreparedSandboxArtifactError("just-bash sandbox");
   }
   return { templateKey: artifact.templateKey };
 }
@@ -253,11 +253,7 @@ function requireJustBashSessionState(state: SandboxPreparedArtifact): JustBashSe
     state.version !== 2 ||
     typeof state.rootPath !== "string"
   ) {
-    throw new Error(
-      "Invalid just-bash session state." +
-        " This session's recorded sandbox state does not match the format this eve version expects, usually because the session started under a different eve version." +
-        " Start a new session to get a fresh sandbox.",
-    );
+    throw invalidSandboxSessionStateError("just-bash sandbox");
   }
   return { rootPath: state.rootPath, version: 2 };
 }
