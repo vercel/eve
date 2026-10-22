@@ -157,7 +157,7 @@ describe("session-limit continuation decline integration", () => {
 
   // #4923: a turn parked on its continuation prompt is still alice's turn, so
   // bob's message waits for it to end instead of joining it.
-  it.fails("keeps another principal's message out of a turn parked on its prompt", async () => {
+  it("keeps another principal's message out of a turn parked on its prompt", async () => {
     const alice: SessionAuthContext = {
       attributes: {},
       authenticator: "test",

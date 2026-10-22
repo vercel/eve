@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { principalOf } from "#execution/session/principal.js";
 
 function signInCallback(attemptId: string) {
   return {
@@ -91,5 +92,50 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn)).toBeUndefined();
     expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
+  });
+
+  // #4923: a parked turn stays its principal's; another person's input waits.
+  it("takes only what may join a parked open turn", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob = { ...alice, principalId: "bob" };
+    const openTurn = { callerCallId: undefined, principal: principalOf(alice) };
+    const queue = new SessionInputQueue();
+    const answer = { inputResponses: [{ optionId: "stop", requestId: "limit-1" }] };
+    const bobText = queue.enqueueDelivery({
+      auth: bob,
+      kind: "deliver",
+      payloads: [{ message: "bob here" }],
+    }).sequence;
+    const bobMixed = queue.enqueueDelivery({
+      auth: bob,
+      kind: "deliver",
+      payloads: [answer, { message: "and stop" }],
+    }).sequence;
+    const aliceText = queue.enqueueDelivery({
+      auth: alice,
+      kind: "deliver",
+      payloads: [{ message: "keep going" }],
+    }).sequence;
+
+    expect(queue.takeNext({ openTurn })).toEqual({
+      delivery: { auth: bob, kind: "deliver", payloads: [answer] },
+      handoffEligible: false,
+      kind: "turn",
+      sequences: [bobMixed],
+    });
+    expect(queue.takeNext({ openTurn })).toMatchObject({
+      delivery: { auth: alice, payloads: [{ message: "keep going" }] },
+      sequences: [aliceText],
+    });
+    expect(queue.takeNext({ openTurn })).toBeUndefined();
+    expect(queue.takeNext()).toMatchObject({
+      delivery: { auth: bob, payloads: [{ message: "bob here" }, { message: "and stop" }] },
+      sequences: [bobText, bobMixed],
+    });
   });
 });

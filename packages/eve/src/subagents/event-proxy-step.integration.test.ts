@@ -643,7 +643,7 @@ describe("typed answers to a relayed prompt", () => {
     ],
   ] as const;
 
-  it.fails.each(routes)(
+  it.each(routes)(
     "keeps another principal's text for the parent when %s asked",
     async (_, route) => {
       const f = fixture();

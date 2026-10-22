@@ -7,6 +7,8 @@ import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import { isSteeringDelivery } from "#execution/session/input-queue.js";
+import { continueTurnAuth, resolveTurnPrincipal } from "#execution/session/principal.js";
 import {
   publishSessionEvents,
   type PublishedSessionEvents,
@@ -84,9 +86,16 @@ async function routeProxiedDeliver(
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
-  // Only a person's own message may answer a pending prompt by text.
+  // A typed answer joins the open turn, so only the turn's own principal may
+  // send one, as only they steer it. Anyone else's text waits for the turn to
+  // end; their button answers still settle a request as its responder.
   const resolveMessage =
-    !hasDelegatedSessionContext(serializedContext) && sourceDelivery.caller === undefined;
+    !hasDelegatedSessionContext(serializedContext) &&
+    isSteeringDelivery(
+      sourceDelivery,
+      { callerCallId: undefined, principal: resolveTurnPrincipal(undefined, serializedContext) },
+      { heldOnPerson: true },
+    );
   // Every payload routes against the same state, so a request a `ctx.ask()`
   // answer or typed reply resolved in an earlier payload is hidden from later
   // ones; it takes one answer, and later messages must reach the parent instead.
@@ -164,11 +173,15 @@ async function routeProxiedDeliver(
   };
   if (answerMessages.length > 0) {
     // Like a steering message, the answer joins the open turn, so the turn's
-    // later events carry its delivery ids too. Its hooks run before the answer
-    // goes down, so `ctx.cancel()` stops the turn instead of answering.
+    // later events carry its delivery ids and run as its caller. Its hooks run
+    // before the answer goes down, so `ctx.cancel()` stops the turn instead of
+    // answering.
     published = await publishSessionEvents(
       {
-        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
+        serializedContext: joinAnswerToTurn(published.serializedContext, {
+          auth: sourceDelivery.auth,
+          deliveryIds: answerDeliveryIds,
+        }),
         sessionState: published.sessionState,
         sessionWritable: input.sessionWritable,
       },
@@ -256,17 +269,20 @@ async function routeProxiedDeliver(
   return { ...context, kind: "continue", remainder };
 }
 
-function joinTurnDeliveryIds(
+function joinAnswerToTurn(
   serializedContext: Record<string, unknown>,
-  deliveryIds: readonly string[],
+  answer: { readonly auth: DeliverHookPayload["auth"]; readonly deliveryIds: readonly string[] },
 ): Record<string, unknown> {
-  if (deliveryIds.length === 0) return serializedContext;
-  const current =
-    (serializedContext[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
-  return {
-    ...serializedContext,
-    [TurnDeliveryIdsKey.name]: [...new Set([...current, ...deliveryIds])],
-  };
+  const joined = { ...serializedContext };
+  joined[AuthKey.name] = continueTurnAuth(
+    serializedContext[AuthKey.name] as DeliverHookPayload["auth"],
+    answer.auth,
+  );
+  if (answer.deliveryIds.length > 0) {
+    const current = (joined[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
+    joined[TurnDeliveryIdsKey.name] = [...new Set([...current, ...answer.deliveryIds])];
+  }
+  return joined;
 }
 
 /**

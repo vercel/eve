@@ -1,4 +1,6 @@
-import { storedProjection } from "#harness/session-machine/view.js";
+import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
+import type { TurnCaller } from "#channel/types.js";
+import { resolveTurnPrincipal } from "#execution/session/principal.js";
 import { openInputs } from "#protocol/session-projection.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
@@ -26,6 +28,8 @@ export type NextTurnInstruction =
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
+  /** The delegated caller of the open turn, if it has one. */
+  readonly caller: TurnCaller | undefined;
   readonly cursor: SessionStateCursor;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
@@ -35,8 +39,17 @@ export async function nextTurnDelivery(input: {
   // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
   while (true) {
+    const parkedOpen = !isBetweenTurns(
+      storedProjection(cursor.sessionState.snapshot.session.state),
+    );
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
+      ...(parkedOpen && {
+        openTurn: {
+          callerCallId: input.caller?.callId,
+          principal: resolveTurnPrincipal(undefined, cursor.serializedContext),
+        },
+      }),
     });
     if (selected?.kind === "control") return { kind: selected.control };
     if (selected?.kind === "turn") {

@@ -57,6 +57,7 @@ import {
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
+import { continueTurnAuth } from "#execution/session/principal.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -365,17 +366,23 @@ async function runSessionStepBody(
       // initiator. Adapter state from the answer stays: channels record the
       // responder and their prompt cards there, not the reply destination.
       resolved = answers;
-      if (previousAuth === undefined) ctx.delete(AuthKey);
-      else ctx.set(AuthKey, previousAuth);
       if (!hadInitiator) ctx.delete(InitiatorAuthKey);
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !startedBetweenTurns;
+    // The adapter saw the incoming caller. A responder's answers, an ignored
+    // correction and other input without a message keep a running turn's
+    // identity; a message joining it may update only its principal's claims.
+    let turnAuth = ctx.get(AuthKey);
+    if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
+    else if (delivery !== undefined && !startedBetweenTurns) {
+      turnAuth =
+        resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+    }
+    if (turnAuth === undefined) ctx.delete(AuthKey);
+    else ctx.set(AuthKey, turnAuth);
     if (ignoredActiveDelivery) {
-      // The adapter sees the incoming caller, but an ignored correction must
-      // not change the identity or reply destination of the interrupted work.
-      if (previousAuth === undefined) ctx.delete(AuthKey);
-      else ctx.set(AuthKey, previousAuth);
+      // An ignored correction must not change the reply destination either.
       adapterCtx.state = previousAdapterState!;
     } else {
       if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {

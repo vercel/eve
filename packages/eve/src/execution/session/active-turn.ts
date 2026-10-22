@@ -5,6 +5,7 @@ import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
   isSteeringDelivery,
   isSteeringMessage,
+  splitAnswers,
   type SteeringOptions,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
@@ -342,21 +343,4 @@ function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefi
   // may have no wait left to take the message, and publishing it needs none.
   if (event.message.kind === "agent-started") return event.message;
   return undefined;
-}
-
-function splitAnswers(delivery: DeliverHookPayload): {
-  readonly answers: DeliverHookPayload;
-  readonly rest: DeliverHookPayload | undefined;
-} {
-  const answers = delivery.payloads.flatMap((payload) =>
-    payload.inputResponses === undefined ? [] : [{ inputResponses: payload.inputResponses }],
-  );
-  const rest = delivery.payloads.flatMap((payload) => {
-    const { inputResponses: _answers, ...other } = payload;
-    return Object.keys(other).length === 0 ? [] : [other];
-  });
-  return {
-    answers: { ...delivery, payloads: answers },
-    rest: rest.length === 0 ? undefined : { ...delivery, payloads: rest },
-  };
 }
