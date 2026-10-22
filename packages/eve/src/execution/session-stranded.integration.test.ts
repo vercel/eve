@@ -186,8 +186,10 @@ function httpAddress(runtime: Runtime, continuationToken: string) {
 async function resetSession(runtime: Runtime, sessionId: string | undefined): Promise<void> {
   if (sessionId === undefined) return;
   await runtime.dispatchSession({ command: { kind: "reset" }, sessionId });
-  // Reset acceptance precedes stream flushing; keep the scoped World until the run finishes.
-  await getRun(sessionId).returnValue;
+  // Keep the World through shutdown without reading result data, which may already have expired.
+  await vi.waitFor(async () => {
+    expect(["completed", "cancelled", "failed"]).toContain(await getRun(sessionId).status);
+  });
 }
 
 describe("stranded sessions", () => {
