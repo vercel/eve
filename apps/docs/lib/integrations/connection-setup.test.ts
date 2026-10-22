@@ -69,7 +69,11 @@ describe("FLORA connection setup", () => {
       "vercel connect create https://agents.flora.ai/mcp --name flora",
     );
     expect(integrationMarkdown(integration)).toContain("approval: always()");
-    expect(floraConnection.approval!({} as never)).toBe("user-approval");
+    const { approval } = floraConnection;
+    if (typeof approval !== "function") {
+      throw new Error("FLORA requires an approval policy.");
+    }
+    expect(approval({} as never)).toBe("user-approval");
   });
 });
 
