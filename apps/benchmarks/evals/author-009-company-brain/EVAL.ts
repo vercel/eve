@@ -305,10 +305,11 @@ test("keeps metric definitions in a packaged skill with a reference file", () =>
     .map((path) => readFileSync(path, "utf8"))
     .join("\n");
   expect(reference).toMatch(/ARR/);
-  expect(reference).toMatch(/30 days/i);
-  expect(reference).toMatch(/12 months/i);
+  // Prose wraps and may spell numbers out: "active 12\nmonths ago", "twelve months".
+  expect(reference).toMatch(/\b(?:30|thirty)\s+days\b/i);
+  expect(reference).toMatch(/\b(?:12|twelve)\s+months\b/i);
   // Always-on instructions would carry the definitions on every turn.
-  expect(instructionsSource()).not.toMatch(/one-time|30 days/i);
+  expect(instructionsSource()).not.toMatch(/one-time|\b(?:30|thirty)\s+days\b/i);
 });
 
 test("posts the weekly metrics summary to Slack", async () => {
