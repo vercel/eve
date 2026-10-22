@@ -62,7 +62,7 @@ import {
   withTrailingUserNote,
 } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
-import { runModelCallWithRetries } from "./retry.js";
+import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 import { withUniqueCallIds } from "./unique-call-ids.js";
 import { modelCallErrorInfo } from "./failure.js";
 import { prepareModelTools } from "./tools.js";
@@ -160,7 +160,8 @@ export class ModelCaller {
     return await runModelCallWithRetries(
       async () => await this.attempt(options),
       {
-        canRetry: () => this.compactionFailure === undefined,
+        // A summary that failed already settled the compaction; another attempt can't redo it.
+        policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
         onRetry: async (error) => await this.prepareRetry(error),
         sessionId: this.step.session.sessionId,
         turnId: this.step.position().turnId,
