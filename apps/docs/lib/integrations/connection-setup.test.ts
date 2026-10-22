@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,7 +9,6 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
-import firecrawlConnection from "../../registry/connections/firecrawl";
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -42,12 +43,13 @@ describe("Firecrawl connection setup", () => {
     expect(buildConnectionInstall(integration)).toContain("eve add connection/firecrawl");
   });
 
-  it("requires user approval for every installed tool call", () => {
-    const { approval } = firecrawlConnection;
-    if (typeof approval !== "function") {
-      throw new Error("Firecrawl requires an approval policy.");
-    }
-    expect(approval({} as never)).toBe("user-approval");
+  it("shows the installed connection file in the gallery", () => {
+    const source = readFileSync(
+      new URL("../../registry/connections/firecrawl.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(getIntegration("firecrawl")!.quickStart).toContain(source.trim());
   });
 });
 

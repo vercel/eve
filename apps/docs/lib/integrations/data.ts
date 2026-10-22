@@ -2134,8 +2134,8 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     quickStart: `Create \`agent/connections/firecrawl.ts\`. The filename creates the \`firecrawl\` connection. Firecrawl calls can consume usage or create persistent work, so this connection requires approval for every call:
 
 \`\`\`ts
-import { defineMcpClientConnection } from "eve/connections";
 import { always } from "eve/tools/approval";
+import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
   url: "https://mcp.firecrawl.dev/v2/mcp",
