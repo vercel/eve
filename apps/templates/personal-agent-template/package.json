@@ -56,7 +56,6 @@
     "@iconify-json/lucide": "^1.2.124",
     "@iconify-json/simple-icons": "^1.2.93",
     "@types/node": "26.2.0",
-    "microsandbox": "^0.6.12",
     "rolldown": "~1.2.5",
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.10"

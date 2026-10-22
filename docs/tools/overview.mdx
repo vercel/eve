@@ -339,6 +339,25 @@ eve writes each returned file to the session sandbox and keeps only a reference 
 
 When compaction drops older tool results, each file becomes a text reference such as `Attached file /workspace/.eve/attachments/<hash>/chart.png (image/png)`. The built-in `read_file` tool shows PNG, JPEG, GIF, and WebP images up to 3 MiB and PDFs up to 20 MiB to the model as files, so the agent can open a compacted image or PDF again.
 
+#### Send a file by URL
+
+For large files that already live in object storage, such as PDFs behind a presigned S3 link, return the URL instead of the bytes with `toolOutputPart.fileUrl`:
+
+```ts
+toModelOutput(output) {
+  return toolOutput.content([
+    toolOutputPart.text(`Contract ${output.id}:`),
+    toolOutputPart.fileUrl(output.signedUrl, { mediaType: "application/pdf" }),
+  ]);
+},
+```
+
+eve keeps only the URL in session history and does not write the file to the sandbox. The model provider fetches the URL itself when it supports that for the file's type; otherwise the AI SDK downloads the file before the call. Only `https:` URLs are accepted.
+
+Every later model call sends the same URL again, so it must stay readable for the rest of the session. A presigned URL that expires mid-session makes later model calls fail. The provider still counts the file's input tokens on each call, the same as an inline file.
+
+Unlike a staged file, a URL part has no sandbox path to fall back on. When compaction drops the tool result, the file becomes `Attached file <filename> (<mediaType>)` and the URL is gone. If the agent may need the file again later, also return a text part with an id or path the tool can fetch it by.
+
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 
 ## What to read next

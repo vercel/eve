@@ -355,7 +355,7 @@ function unresumableSandboxContext(): ContextContainer {
   ctx.set(SandboxKey, {
     captureState: async () => ({ session: null }),
     get: async () => {
-      throw new Error('microsandbox session "ses_1" is no longer available to resume.');
+      throw new Error('docker session "ses_1" is no longer available to resume.');
     },
     stop: async () => {},
   });

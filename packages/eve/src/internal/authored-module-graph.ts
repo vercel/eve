@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { createAuthoredModuleBuildOptions } from "#internal/authored-module-build-options.js";
+import {
+  createAuthoredModuleBuildOptions,
+  evaluatedBundleSourcemap,
+} from "#internal/authored-module-build-options.js";
 import {
   AUTHORED_BUNDLED_MODULE_EXTENSION,
   AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
@@ -66,6 +69,9 @@ async function writeAuthoredModuleGraph(
       .filter((modulePath) => resolveAuthoredPackageRoot(modulePath) === packageRoot)
       .map((modulePath, index) => [`entry-${index}`, modulePath]),
   );
+  const sourcemap = evaluatedBundleSourcemap();
+  // The content hash ignores inline maps, so cached chunks with and without one need distinct names.
+  const fileName = sourcemap === false ? "[name]-[hash].mjs" : "[name]-[hash]-mapped.mjs";
   const result = await buildWithNitroRolldown({
     ...createAuthoredModuleBuildOptions({
       packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
@@ -80,12 +86,12 @@ async function writeAuthoredModuleGraph(
     preserveEntrySignatures: "strict",
     write: false,
     output: {
-      chunkFileNames: "[name]-[hash].mjs",
+      chunkFileNames: fileName,
       codeSplitting: true,
       comments: false,
-      entryFileNames: "[name]-[hash].mjs",
+      entryFileNames: fileName,
       format: "esm",
-      sourcemap: "inline",
+      sourcemap,
     },
   });
   const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);

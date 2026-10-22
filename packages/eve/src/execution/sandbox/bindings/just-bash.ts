@@ -38,6 +38,10 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import {
+  invalidPreparedSandboxArtifactError,
+  invalidSandboxSessionStateError,
+} from "#shared/sandbox-recorded-data-error.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 
 const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
@@ -162,6 +166,8 @@ async function ensureSessionRoot(templateRootPath: string, sessionRootPath: stri
   if (!(await pathExists(templateRootPath))) {
     throw new SandboxTemplateNotProvisionedError({
       providerName: JUST_BASH_PROVIDER_NAME,
+      reason:
+        "The template directory does not exist: it was deleted, or the build ran on another machine.",
       templateKey: templateRootPath,
     });
   }
@@ -236,7 +242,7 @@ function requirePreparedJustBashArtifact(
   artifact: SandboxPreparedArtifact,
 ): JustBashPreparedArtifact {
   if (!isSandboxPreparedArtifactRecord(artifact) || typeof artifact.templateKey !== "string") {
-    throw new Error("Invalid prepared just-bash artifact.");
+    throw invalidPreparedSandboxArtifactError("just-bash sandbox");
   }
   return { templateKey: artifact.templateKey };
 }
@@ -247,7 +253,7 @@ function requireJustBashSessionState(state: SandboxPreparedArtifact): JustBashSe
     state.version !== 2 ||
     typeof state.rootPath !== "string"
   ) {
-    throw new Error("Invalid just-bash session state.");
+    throw invalidSandboxSessionStateError("just-bash sandbox");
   }
   return { rootPath: state.rootPath, version: 2 };
 }

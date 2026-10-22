@@ -120,7 +120,7 @@ function collectHostedTraceDependencies(
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
   const merged = new Set<string>([
-    // Optional engine packages (just-bash, microsandbox) join the
+    // Optional engine packages (just-bash) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
     // createOptionalEngineDependencyPlugin pins them as plain externals

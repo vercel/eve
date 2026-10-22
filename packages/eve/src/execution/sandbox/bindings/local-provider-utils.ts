@@ -73,7 +73,8 @@ export async function copyDirectoryAtomically(
   await rm(temporaryTargetPath, { force: true, recursive: true });
   await mkdir(dirname(targetPath), { recursive: true });
   try {
-    await cp(sourcePath, temporaryTargetPath, { recursive: true });
+    // Without verbatimSymlinks, cp rewrites relative links as absolute paths into the source tree.
+    await cp(sourcePath, temporaryTargetPath, { recursive: true, verbatimSymlinks: true });
     await rename(temporaryTargetPath, targetPath);
   } catch (error) {
     await rm(temporaryTargetPath, { force: true, recursive: true }).catch(() => {});
