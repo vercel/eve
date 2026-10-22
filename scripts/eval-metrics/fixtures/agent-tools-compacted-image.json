@@ -1,0 +1,490 @@
+{
+  "id": "static-tools/read-file-reopens-compacted-image",
+  "verdict": "passed",
+  "assertions": [
+    { "name": "calledTool(render-stripes)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "requireToolCall", "severity": "gate", "score": 1, "passed": true },
+    { "name": "event(compaction.completed)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "notEvent(session.failed)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "noFailedActions", "severity": "gate", "score": 1, "passed": true },
+    { "name": "calledTool(read_file)", "severity": "gate", "score": 1, "passed": true },
+    { "name": "notCalledTool(render-stripes)", "severity": "gate", "score": 1, "passed": true },
+    {
+      "name": "eventsSatisfy(the reopened image answers the follow-up)",
+      "severity": "soft",
+      "score": 1,
+      "passed": true
+    }
+  ],
+  "startedAt": "2026-10-05T23:35:48.752Z",
+  "completedAt": "2026-10-05T23:36:12.742Z",
+  "result": {
+    "sessionId": "wrun_01M476RTSMZ429787CBW4VYEF8",
+    "status": "waiting",
+    "runtimeIdentity": {
+      "agentId": "agent-tools",
+      "agentName": "agent-tools",
+      "eveVersion": "0.71.2"
+    },
+    "sessions": [
+      {
+        "sessionId": "wrun_01M476RTSMZ429787CBW4VYEF8",
+        "primary": true,
+        "events": [
+          {
+            "data": {
+              "runtime": {
+                "agentId": "agent-tools",
+                "agentName": "agent-tools",
+                "eveVersion": "0.71.2"
+              }
+            },
+            "type": "session.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.127Z",
+              "id": "evt_01M476RV47J2BQS0D5CDYZA22S",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.127Z",
+              "id": "evt_01M476RV47J2BQS0D5CDYZA22T",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "message": "Call `render-stripes` exactly once, look at the rendered ...",
+              "sequence": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:35:49.127Z",
+              "id": "evt_01M476RV47J2BQS0D5CDYZA22V",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.127Z",
+              "id": "evt_01M476RV47J2BQS0D5CDYZA22W",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "mock-tool-call-1-0-1",
+                  "input": {},
+                  "kind": "tool-call",
+                  "toolName": "render-stripes"
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:35:49.129Z",
+              "id": "evt_01M476RV49FA0N1CTNMT3VDWX2",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "mock-tool-call-1-0-1",
+                "kind": "tool-result",
+                "output": { "colors": ["orange", "green", "red"] },
+                "toolName": "render-stripes"
+              },
+              "sequence": 0,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:35:49.131Z",
+              "id": "evt_01M476RV4B5YSVWM8C9VQZ0VRV",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 349,
+                "outputTokens": 1,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:35:49.131Z",
+              "id": "evt_01M476RV4B5YSVWM8C9VQZ0VRW",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:36:12.463Z",
+              "id": "evt_01M476SHXF25N68JJMMK05VRCX",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "orange, green, red",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:36:12.468Z",
+              "id": "evt_01M476SHXMWNG85J0J0HFFX5AM",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "orange, green, red",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.468Z",
+              "id": "evt_01M476SHXMWNG85J0J0HFFX5AN",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 0,
+              "stepIndex": 1,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 554,
+                "outputTokens": 5,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.469Z",
+              "id": "evt_01M476SHXNBE7EZQ0EX1DJ8329",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.475Z",
+              "id": "evt_01M476SHXV5Q9Y3JCNFDM1JJ9N",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476RTSMZ429787CBW4VYEF8",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 903,
+                "outputTokens": 6
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:36:12.475Z",
+              "id": "evt_01M476SHXV5Q9Y3JCNFDM1JJ9P",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:36:12.710Z",
+              "id": "evt_01M476SJ56X8MVZ260SZZ0WR3S",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "message": "Earlier context was compacted. The `render-stripes` image...",
+              "sequence": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:36:12.710Z",
+              "id": "evt_01M476SJ56X8MVZ260SZZ0WR3T",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:36:12.710Z",
+              "id": "evt_01M476SJ56X8MVZ260SZZ0WR3V",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "mock-tool-call-3-0-1",
+                  "input": {
+                    "filePath": "/workspace/.eve/attachments/73db7807c156ef3e/stripes.png"
+                  },
+                  "kind": "tool-call",
+                  "toolName": "read_file"
+                }
+              ],
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:36:12.712Z",
+              "id": "evt_01M476SJ58NDMKMNJHRGKGK2GG",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "mock-tool-call-3-0-1",
+                "kind": "tool-result",
+                "output": {
+                  "content": "Image /workspace/.eve/attachments/73db7807c156ef3e/stripe...",
+                  "image": { "mediaType": "image/png", "size": 507, "height": 120, "width": 240 },
+                  "path": "/workspace/.eve/attachments/73db7807c156ef3e/stripes.png",
+                  "totalLines": 0,
+                  "truncated": false
+                },
+                "toolName": "read_file"
+              },
+              "sequence": 1,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:36:12.717Z",
+              "id": "evt_01M476SJ5DPQTNMCVK2YAX29J7",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 446,
+                "outputTokens": 18,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.719Z",
+              "id": "evt_01M476SJ5F9N9GY9ZGZNQ0VB3S",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:36:12.731Z",
+              "id": "evt_01M476SJ5VZWADXTQG3SHRX2FR",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "orange, green, red",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:36:12.734Z",
+              "id": "evt_01M476SJ5YMYMVNTYVC38D21SV",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "orange, green, red",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.735Z",
+              "id": "evt_01M476SJ5ZN64X33Y3T1CKVM3H",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 668,
+                "outputTokens": 5,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.735Z",
+              "id": "evt_01M476SJ5ZN64X33Y3T1CKVM3J",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.738Z",
+              "id": "evt_01M476SJ622119T7V1AY0XSG67",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476RTSMZ429787CBW4VYEF8",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 2017,
+                "outputTokens": 29
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:36:12.738Z",
+              "id": "evt_01M476SJ622119T7V1AY0XSG68",
+              "deliveryIds": ["304cb8c1-c82a-49ba-ae31-65bcb7413ae5"]
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "wrun_01M476RTSMZ429787CBW4VYEF8",
+        "primary": false,
+        "events": [
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 1,
+              "sessionId": "wrun_01M476RTSMZ429787CBW4VYEF8",
+              "stepIndex": 0,
+              "turnId": "turn_1",
+              "usageInputTokens": 573.5
+            },
+            "type": "compaction.requested",
+            "meta": {
+              "at": "2026-10-05T23:36:12.533Z",
+              "id": "evt_01M476SHZN5GCNRBNCC3NYQ0X5",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 1,
+              "sessionId": "wrun_01M476RTSMZ429787CBW4VYEF8",
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "compaction.completed",
+            "meta": {
+              "at": "2026-10-05T23:36:12.535Z",
+              "id": "evt_01M476SHZQVY6HWY4S5NE78NSZ",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476RTSMZ429787CBW4VYEF8",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 903,
+                "outputTokens": 6
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:36:12.535Z",
+              "id": "evt_01M476SHZQVY6HWY4S5NE78NT0",
+              "deliveryIds": ["36d81bed-1457-417c-b5d8-3f8ef877532f"]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

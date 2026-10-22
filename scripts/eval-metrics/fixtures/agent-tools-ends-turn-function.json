@@ -1,0 +1,366 @@
+{
+  "id": "static-tools/ends-turn-function",
+  "verdict": "passed",
+  "assertions": [
+    { "name": "requireToolCall", "severity": "gate", "score": 1, "passed": true },
+    {
+      "name": "satisfies(a posted reaction sends no reply)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    { "name": "requireToolCall", "severity": "gate", "score": 1, "passed": true },
+    {
+      "name": "satisfies(a reaction that doesn't post gets a reply)",
+      "severity": "gate",
+      "score": 1,
+      "passed": true
+    },
+    { "name": "succeeded", "severity": "gate", "score": 1, "passed": true }
+  ],
+  "startedAt": "2026-10-05T23:35:48.752Z",
+  "completedAt": "2026-10-05T23:35:49.802Z",
+  "result": {
+    "sessionId": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+    "status": "waiting",
+    "runtimeIdentity": {
+      "agentId": "agent-tools",
+      "agentName": "agent-tools",
+      "eveVersion": "0.71.2"
+    },
+    "sessions": [
+      {
+        "sessionId": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+        "primary": true,
+        "events": [
+          {
+            "data": {
+              "runtime": {
+                "agentId": "agent-tools",
+                "agentName": "agent-tools",
+                "eveVersion": "0.71.2"
+              }
+            },
+            "type": "session.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.107Z",
+              "id": "evt_01M476RV3K4ZKVSF6W5BES4F4E",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.110Z",
+              "id": "evt_01M476RV3PFF8YGR8F46VHK6NW",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": {
+              "message": "Alice shared that the release shipped this morning. Celeb...",
+              "sequence": 0,
+              "turnId": "turn_0"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:35:49.111Z",
+              "id": "evt_01M476RV3QE6HEZ69D6D7MTEX8",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.112Z",
+              "id": "evt_01M476RV3RZCCW92ZXEJWBW8WM",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "mock-tool-call-1-0-1",
+                  "input": { "emoji": "tada" },
+                  "kind": "tool-call",
+                  "toolName": "react_to_note"
+                }
+              ],
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:35:49.121Z",
+              "id": "evt_01M476RV41G16Z7FSF37GAG635",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "mock-tool-call-1-0-1",
+                "kind": "tool-result",
+                "output": { "emoji": "tada", "posted": true },
+                "toolName": "react_to_note"
+              },
+              "sequence": 0,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_0"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:35:49.123Z",
+              "id": "evt_01M476RV4325FKVY9H3VTMBSEW",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 0,
+              "stepIndex": 0,
+              "turnId": "turn_0",
+              "usage": {
+                "inputTokens": 344,
+                "outputTokens": 4,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:35:49.125Z",
+              "id": "evt_01M476RV45DWXA28BBVBFY5HQF",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": { "sequence": 0, "turnId": "turn_0" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:35:49.141Z",
+              "id": "evt_01M476RV4NAD1MEWDF4H2CBQWB",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 344,
+                "outputTokens": 4
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:35:49.141Z",
+              "id": "evt_01M476RV4NAD1MEWDF4H2CBQWC",
+              "deliveryIds": ["640fe784-388f-4d0f-83eb-4ac814750db5"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.709Z",
+              "id": "evt_01M476RVPD601TWZ4WEK2RYKCG",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "message": "Bob would also like to add a rocket reaction to Alice's n...",
+              "sequence": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.received",
+            "meta": {
+              "at": "2026-10-05T23:35:49.709Z",
+              "id": "evt_01M476RVPD601TWZ4WEK2RYKCH",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.709Z",
+              "id": "evt_01M476RVPD601TWZ4WEK2RYKCJ",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "actions": [
+                {
+                  "callId": "mock-tool-call-2-1-1",
+                  "input": { "emoji": "rocket" },
+                  "kind": "tool-call",
+                  "toolName": "react_to_note"
+                }
+              ],
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "actions.requested",
+            "meta": {
+              "at": "2026-10-05T23:35:49.711Z",
+              "id": "evt_01M476RVPFWRV23DNSPJERPZRX",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "result": {
+                "callId": "mock-tool-call-2-1-1",
+                "kind": "tool-result",
+                "output": { "emoji": "rocket", "posted": false },
+                "toolName": "react_to_note"
+              },
+              "sequence": 1,
+              "status": "completed",
+              "stepIndex": 0,
+              "turnId": "turn_1"
+            },
+            "type": "action.result",
+            "meta": {
+              "at": "2026-10-05T23:35:49.712Z",
+              "id": "evt_01M476RVPGVTS0HK0BT3DHYRNB",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "tool-calls",
+              "sequence": 1,
+              "stepIndex": 0,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 382,
+                "outputTokens": 5,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:35:49.712Z",
+              "id": "evt_01M476RVPGVTS0HK0BT3DHYRNC",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "modelId": "eve-mock/model",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "step.started",
+            "meta": {
+              "at": "2026-10-05T23:35:49.780Z",
+              "id": "evt_01M476RVRMAYSTN1F5WH1BDHGM",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "messageDelta": "The rocket reaction isn't allowed in the team channel, so...",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.appended",
+            "meta": {
+              "at": "2026-10-05T23:35:49.784Z",
+              "id": "evt_01M476RVRRACG4V1029E45SH2D",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "message": "The rocket reaction isn't allowed in the team channel, so...",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1"
+            },
+            "type": "message.completed",
+            "meta": {
+              "at": "2026-10-05T23:35:49.784Z",
+              "id": "evt_01M476RVRRACG4V1029E45SH2F",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "finishReason": "stop",
+              "sequence": 1,
+              "stepIndex": 1,
+              "turnId": "turn_1",
+              "usage": {
+                "inputTokens": 391,
+                "outputTokens": 20,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            },
+            "type": "step.completed",
+            "meta": {
+              "at": "2026-10-05T23:35:49.784Z",
+              "id": "evt_01M476RVRRACG4V1029E45SH2H",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": { "sequence": 1, "turnId": "turn_1" },
+            "type": "turn.completed",
+            "meta": {
+              "at": "2026-10-05T23:35:49.794Z",
+              "id": "evt_01M476RVS25WY95VK1961T35DH",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          },
+          {
+            "data": {
+              "continuationToken": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 1117,
+                "outputTokens": 29
+              },
+              "wait": "next-user-message"
+            },
+            "type": "session.waiting",
+            "meta": {
+              "at": "2026-10-05T23:35:49.794Z",
+              "id": "evt_01M476RVS25WY95VK1961T35DJ",
+              "deliveryIds": ["80bb6d77-ce6f-47a4-8096-d50bd640b017"]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
