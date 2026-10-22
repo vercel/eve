@@ -108,11 +108,13 @@ export async function ensureSandboxAccess(
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
+  // The handle this access registered for shutdown. A stopped handle stays
+  // registered, since its connection can resume, until the session lets go.
+  let tracked: Parameters<typeof untrackActiveSandboxHandle>[0] | undefined;
   const track: typeof trackActiveSandboxHandle = (entry) => {
-    if (input.borrowed !== true) trackActiveSandboxHandle(entry);
-  };
-  const untrack: typeof untrackActiveSandboxHandle = (entry) => {
-    if (input.borrowed !== true) untrackActiveSandboxHandle(entry);
+    if (input.borrowed === true) return;
+    trackActiveSandboxHandle(entry);
+    tracked = entry;
   };
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
@@ -366,13 +368,8 @@ export async function ensureSandboxAccess(
 
   function forgetHandle() {
     const current = opened;
-    if (current !== undefined) {
-      untrack({
-        handle: current.handle,
-        providerName: current.providerName,
-        sessionId: input.sessionId,
-      });
-    }
+    if (tracked !== undefined) untrackActiveSandboxHandle(tracked);
+    tracked = undefined;
     opened = undefined;
     opening = undefined;
     requiring = undefined;

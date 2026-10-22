@@ -2,16 +2,14 @@ import { defineEval } from "eve/evals";
 
 import { PREPARATION_MARKER_PATH, PREPARATION_MARKER_TOKEN } from "./shared";
 
-// The prompt directs the model to run the backticked `bash` command; a
-// non-error result containing the marker token proves the preparation-written
-// file is visible inside the sandbox.
 export default defineEval({
   tags: ["real-model"],
-  description:
-    "Sandbox smoke: `VercelSandbox.environment({ prepare })` runs before the first bash call.",
+  description: "Sandbox preparation and Bash process substitution work in a fresh session.",
   async test(t) {
     await t.send(
-      `Run the bash command \`cat ${PREPARATION_MARKER_PATH}\` and reply with the file contents verbatim.`,
+      "Alice is checking her newly prepared workspace. Run the bash command " +
+        `\`cmp <(printf workspace-ready) <(printf workspace-ready) && cat ${PREPARATION_MARKER_PATH}\` ` +
+        "and reply with the file contents verbatim.",
     );
 
     t.succeeded();
