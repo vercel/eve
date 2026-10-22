@@ -30,6 +30,14 @@
   "startedAt": "2026-10-05T23:37:05.534Z",
   "completedAt": "2026-10-05T23:37:08.653Z",
   "result": {
+    "derived": {
+      "usage": {
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "inputTokens": 6006,
+        "outputTokens": 178
+      }
+    },
     "sessionId": "wrun_01M476V5RJPATF4WMMJD3PAX09",
     "status": "waiting",
     "runtimeIdentity": {

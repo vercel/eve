@@ -2,15 +2,18 @@
 // (`.eve/evals/<ts>/evals/<id>.json`). STANDARD_METRICS below lists every
 // metric with its unit and better direction.
 //
-// Scope: latency, attribution, cost, tokens, and efficiency counts read the
-// eval's root sessions (sessions the eval opened, not delegated children);
-// delegated spend reaches them through rolled-up `usage`. Reliability counts
-// read every captured session, because a failure anywhere matters.
+// Scope: latency, attribution, step-level cost, and efficiency counts read the
+// eval's root sessions (sessions the eval opened, not delegated children).
+// Reliability counts read every captured session, because a failure anywhere
+// matters.
 //
-// Cost: `cost.total_usd` is the rolled-up spend, including delegated work and
-// compaction summaries; `cost.primary_usd` sums the root sessions' model steps;
-// `cost.subagent_usd` is the difference, and is unavailable when a root session
-// compacted, since compaction cost is in the rollup but in no step.
+// Cost and tokens: `cost.total_usd` and `tokens.*` (but `tokens.peak_context`)
+// are the runner's `result.derived.usage`, the same totals the eval reporters
+// see: each captured session's latest usage, including delegated work and
+// compaction summaries, less sessions another captured session opened.
+// `cost.primary_usd` sums the root sessions' model steps; `cost.subagent_usd`
+// is the difference, and is unavailable when a root session compacted, since
+// compaction cost is in the total but in no step.
 //
 // Attribution partitions root turn time with a fixed precedence, so the parts
 // add up to the turn total: human wait, then task (delegated work, including
@@ -78,7 +81,6 @@ export const STANDARD_METRICS = Object.freeze({
 });
 
 const TURN_TERMINALS = ["turn.completed", "turn.failed", "turn.cancelled"];
-const USAGE_EVENTS = ["session.waiting", "turn.waiting", "session.completed", "session.failed"];
 const FAILURE_EVENTS = ["step.failed", "turn.failed", "session.failed"];
 const TOOL_ACTION_KINDS = new Set(["tool-call", "workflow-tool-call"]);
 
@@ -116,7 +118,7 @@ export function deriveAttemptMetrics(evalArtifact) {
   const metrics = {
     ...latencyAndAttribution(evalArtifact, roots),
     ...streaming(roots),
-    ...costAndTokens(roots),
+    ...costAndTokens(evalArtifact, roots),
     ...efficiency(capture, roots, rootIds),
     ...reliability(allEvents),
   };
@@ -391,9 +393,11 @@ function median(values) {
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function costAndTokens(roots) {
+function costAndTokens(evalArtifact, roots) {
   const steps = roots.flatMap(({ events }) => selectEvents(events, "step.completed"));
-  const rollups = roots.map(({ events }) => latestUsage(events));
+  // Absent when a counted session reported no usage; `costUsd` is absent when
+  // one reported no cost (eve's evalUsage).
+  const usage = evalArtifact?.result?.derived?.usage;
 
   let primary;
   if (steps.length === 0) primary = notApplicable("no-model-steps");
@@ -402,9 +406,7 @@ function costAndTokens(roots) {
   else primary = measured(steps.reduce((total, step) => total + step.data.usage.costUsd, 0));
 
   const rolled = (field, reason) =>
-    rollups.some((usage) => !isAmount(usage?.[field]))
-      ? unavailable(reason)
-      : measured(rollups.reduce((total, usage) => total + usage[field], 0));
+    isAmount(usage?.[field]) ? measured(usage[field]) : unavailable(reason);
   const total = rolled("costUsd", "missing-rolled-up-cost");
 
   // Compaction summary calls add their cost to the session's rolled-up usage,
@@ -456,25 +458,6 @@ function costAndTokens(roots) {
 
 function isAmount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-/**
- * The session's latest rolled-up usage, which includes delegated spend.
- *
- * Not `result.derived.usage`: the runner keeps the last *capture* of each
- * session, and an eval can capture a session again before its final usage
- * (an earlier snapshot captured last), which undercounts. It also sums a
- * missing cost as zero. This takes the latest usage event by time and makes
- * cost unavailable when any root session reported none.
- */
-function latestUsage(events) {
-  let latest;
-  for (const event of events) {
-    if (!USAGE_EVENTS.includes(event.type) || event.data?.usage === undefined) continue;
-    if (latest === undefined || (timestamp(event) ?? -Infinity) >= (timestamp(latest) ?? -Infinity))
-      latest = event;
-  }
-  return latest?.data.usage;
 }
 
 function efficiency(capture, roots, rootIds) {

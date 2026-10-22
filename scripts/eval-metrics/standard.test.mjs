@@ -117,6 +117,8 @@ test("compaction outside a turn does not count toward turn time", () => {
 
 function withCosts(artifact, { stepCost, rolledUpCost }) {
   const copy = structuredClone(artifact);
+  // The runner's eval total (result.derived.usage) carries the rolled-up cost.
+  copy.result.derived.usage.costUsd = rolledUpCost;
   for (const session of copy.result.sessions) {
     for (const e of session.events) {
       if (session.sessionId !== copy.result.sessionId) continue;
@@ -136,6 +138,42 @@ test("splits cost into primary steps and rolled-up subagent spend", () => {
   assert.equal(v["cost.primary_usd"], 2.5, "ten primary steps");
   assert.equal(v["cost.total_usd"], 4);
   assert.equal(v["cost.subagent_usd"], 1.5);
+});
+
+test("cost and tokens are the runner's eval usage, and unavailable without it", () => {
+  const artifact = fixture("agent-tools-ends-turn-function");
+  artifact.result.derived.usage = {
+    cacheReadTokens: 40,
+    cacheWriteTokens: 5,
+    inputTokens: 200,
+    outputTokens: 12,
+    costUsd: 0.75,
+  };
+  const v = values(deriveAttemptMetrics(artifact).metrics);
+  assert.equal(v["cost.total_usd"], 0.75);
+  assert.equal(v["tokens.input"], 200);
+  assert.equal(v["tokens.output"], 12);
+  assert.equal(v["tokens.cache_read"], 40);
+  assert.equal(v["tokens.cache_write"], 5);
+  assert.equal(v["tokens.cache_hit_ratio"], 0.2);
+  // Peak context is per step, from the events, not the eval total.
+  assert.equal(v["tokens.peak_context"], 391);
+
+  // A counted session reported no cost: the runner leaves costUsd out.
+  delete artifact.result.derived.usage.costUsd;
+  const noCost = deriveAttemptMetrics(artifact).metrics;
+  assert.deepEqual(noCost["cost.total_usd"], {
+    status: "unavailable",
+    reason: "missing-rolled-up-cost",
+  });
+  assert.equal(noCost["tokens.input"].status, "measured");
+
+  // A counted session reported no usage at all: the runner leaves usage out.
+  delete artifact.result.derived.usage;
+  const none = deriveAttemptMetrics(artifact).metrics;
+  for (const key of ["cost.total_usd", "tokens.input", "tokens.output", "tokens.cache_hit_ratio"])
+    assert.equal(none[key].status, "unavailable", key);
+  assert.equal(none["tokens.peak_context"].status, "measured");
 });
 
 test("compaction cost stays in the total but leaves the subagent split unknown", () => {
