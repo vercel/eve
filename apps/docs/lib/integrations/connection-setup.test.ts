@@ -66,7 +66,7 @@ describe("FLORA connection setup", () => {
     expect(setup.variants["mcp:user"]).toContain('url: "https://agents.flora.ai/mcp"');
     expect(setup.variants["mcp:user"]).toContain('auth: connect("agents.flora.ai/flora")');
     expect(setup.configureVariants["mcp:user"]).toContain(
-      "vercel connect create https://agents.flora.ai/mcp --name flora",
+      "vercel connect create agents.flora.ai/mcp --name flora",
     );
     expect(integrationMarkdown(integration)).toContain("approval: always()");
     const { approval } = floraConnection;

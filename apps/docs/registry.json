@@ -1025,7 +1025,7 @@
               "integration",
               "connect",
               "flora",
-              "https://agents.flora.ai/mcp",
+              "agents.flora.ai/mcp",
               "flora"
             ]
           },

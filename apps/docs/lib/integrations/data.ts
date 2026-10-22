@@ -2093,7 +2093,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     connectors: {
       user: {
         uid: "agents.flora.ai/flora",
-        service: "https://agents.flora.ai/mcp",
+        service: "agents.flora.ai/mcp",
         name: "flora",
       },
     },
