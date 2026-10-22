@@ -200,23 +200,36 @@ describe("eve dev server rebuild transactions", () => {
         );
         await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
 
-        await writeFile(join(app.appRoot, ".env"), "EVE_SCENARIO_BUILD_GUARD=1\n");
+        // Converges on the latest files, so intermediate watcher rebuilds cannot make it flaky.
+        const probeDescription = async () =>
+          (await fetchAgentInfo(server.url)).tools.static.find((tool) => tool.name === "env_probe")
+            ?.description;
+        await writeFile(toolPath, toolSource);
+        await writeFile(join(app.appRoot, ".env"), "EVE_SCENARIO_BUILD_VALUE=from-env\n");
         await writeFile(
-          toolPath,
-          `if (process.env.EVE_SCENARIO_BUILD_GUARD) throw new Error("guarded build");\n${toolSource}`,
+          join(app.appRoot, "agent", "tools", "env_probe.ts"),
+          [
+            'import { defineTool } from "eve/tools";',
+            'import { z } from "zod";',
+            "export default defineTool({",
+            '  description: `build saw ${process.env.EVE_SCENARIO_BUILD_VALUE ?? "nothing"}`,',
+            "  inputSchema: z.object({}),",
+            '  execute: async () => "ok",',
+            "});",
+            "",
+          ].join("\n"),
         );
         await forceDevelopmentRebuild(server.url);
         await waitForCondition(
-          async () => output().includes("rebuild failed: Failed to evaluate authored module"),
-          `Timed out waiting for the build to see .env.\n\n${output()}`,
+          async () => (await probeDescription()) === "build saw from-env",
+          () => `Timed out waiting for the build to see .env.\n\n${output()}`,
         );
-        await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
 
         await rm(join(app.appRoot, ".env"));
         await forceDevelopmentRebuild(server.url);
         await waitForCondition(
-          async () => (await readDevelopmentRevision(server.url)) !== initialRevision,
-          `Timed out waiting for the build without .env.\n\n${output()}`,
+          async () => (await probeDescription()) === "build saw nothing",
+          () => `Timed out waiting for the build without .env.\n\n${output()}`,
         );
       } finally {
         await server.stop();
