@@ -60,6 +60,6 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open({ networkPolicy: "deny-all" }));
 ```
 
-Vercel Sandbox accepts every network policy, including domain allow-lists and credential transforms. Docker accepts only `"allow-all"` and `"deny-all"`. just-bash always allows network access, so it accepts only `"allow-all"` and rejects any other policy with an error. Use [Vercel Sandbox](/docs/sandbox/vercel) directly when you need domain-level policies in every environment.
+Vercel Sandbox accepts every network policy, including domain allow-lists and credential transforms. Docker accepts only `"allow-all"` and `"deny-all"` and rejects any other policy with an error. just-bash always allows network access, so it accepts only `"allow-all"` and rejects any other policy with an error. Use [Vercel Sandbox](/docs/sandbox/vercel) directly when you need domain-level policies in every environment.
 
-Use a provider directly when you need its image, compute, or mount options at `open()`.
+Use a provider directly when you need its `open()` options, such as Vercel compute resources or Drive mounts.

@@ -16,7 +16,10 @@ import {
   createDockerCli,
   type DockerCli,
 } from "#execution/sandbox/bindings/docker-cli.js";
-import { setDockerNetworkPolicy } from "#execution/sandbox/bindings/docker-network.js";
+import {
+  assertDockerNetworkPolicy,
+  setDockerNetworkPolicy,
+} from "#execution/sandbox/bindings/docker-network.js";
 import {
   createDockerSandboxOptionsHash,
   resolveDockerSandboxOptions,
@@ -337,6 +340,10 @@ export function createDockerSandboxProvider(
       return await openDockerSession(context, undefined, artifactValue, state.containerName, false);
     },
     async start(context, openOptions, artifactValue) {
+      // Callers that widen the option type, such as DefaultSandbox, reach here unchecked.
+      if (openOptions?.networkPolicy !== undefined) {
+        assertDockerNetworkPolicy(openOptions.networkPolicy);
+      }
       const containerName = dockerSessionName(context);
       return {
         handle: await openDockerSession(context, openOptions, artifactValue, containerName, true),
