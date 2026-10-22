@@ -9,7 +9,11 @@ import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
-import { withAdoptedSandboxSessionStates } from "#sandbox/state.js";
+import {
+  type SandboxSessionEndWithArtifact,
+  withAdoptedSandboxSessionStates,
+  withSessionEndArtifact,
+} from "#sandbox/state.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
@@ -20,6 +24,7 @@ import type {
 } from "#shared/sandbox-network-policy.js";
 import {
   defineSandboxProvider,
+  isSandboxPreparedArtifactRecord,
   type SandboxPreparedArtifact,
   type SandboxProviderHandle,
   type SandboxProviderImplementation,
@@ -56,6 +61,8 @@ type DefaultSandboxPreparedArtifact =
 type DefaultSandboxSessionState = {
   readonly provider: SelectedProvider;
   readonly state: SandboxPreparedArtifact;
+  /** The selected provider's state protocol when it recorded `state`. */
+  readonly stateProtocolVersion: number;
 };
 
 const SELECTED_PROVIDERS: readonly SelectedProvider[] = ["docker", "just-bash", "vercel"];
@@ -125,19 +132,31 @@ export const DefaultSandbox = defineSandboxProvider<
       return inner;
     }
 
+    // Routes to the provider that recorded the state, or else the one this build selected.
+    const endSession = async (
+      context: Parameters<SandboxSessionEndWithArtifact>[0],
+      state: Readonly<DefaultSandboxSessionState> | null,
+      options: {
+        readonly artifact: DefaultSandboxPreparedArtifact | undefined;
+        readonly reason: Parameters<SandboxSessionEndWithArtifact>[2]["reason"];
+      },
+    ) => {
+      const name = state?.provider ?? options.artifact?.provider ?? null;
+      if (name === null) return;
+      const inner = provider(name);
+      const innerState =
+        state?.stateProtocolVersion === inner.stateProtocolVersion ? state.state : null;
+      await inner.implementation.onSessionEnd(context, innerState, { reason: options.reason });
+    };
+
     const implementation: SandboxProviderImplementation<
       DefaultSandboxRuntimeOptions,
       DefaultSandboxPreparedArtifact,
       DefaultSandboxSessionState,
       DefaultSandboxSession
     > = {
-      async onSessionEnd(context, state, { artifact, reason }) {
-        const name = state?.provider ?? artifact?.provider ?? null;
-        if (name === null) return;
-        await provider(name).implementation.onSessionEnd(context, state?.state ?? null, {
-          artifact: artifact?.provider === name ? artifact.artifact : undefined,
-          reason,
-        });
+      async onSessionEnd(context, state, { reason }) {
+        await endSession(context, state, { artifact: undefined, reason });
       },
       async prepare(context) {
         const name = selectProvider();
@@ -154,6 +173,11 @@ export const DefaultSandbox = defineSandboxProvider<
           );
         }
         const inner = requireProvider(state.provider, context.session.id);
+        if (state.stateProtocolVersion !== inner.stateProtocolVersion) {
+          throw new SandboxSessionGoneError(
+            `The session's ${state.provider} sandbox state uses protocol ${state.stateProtocolVersion}, not ${inner.stateProtocolVersion}.`,
+          );
+        }
         const handle = await inner.implementation.resume(context, artifact.artifact, state.state);
         return wrapHandle(inner, handle);
       },
@@ -167,7 +191,11 @@ export const DefaultSandbox = defineSandboxProvider<
         );
         return {
           handle: wrapHandle(inner, result.handle),
-          state: { provider: artifact.provider, state: result.state },
+          state: {
+            provider: artifact.provider,
+            state: result.state,
+            stateProtocolVersion: inner.stateProtocolVersion,
+          },
         };
       },
     };
@@ -175,11 +203,24 @@ export const DefaultSandbox = defineSandboxProvider<
     withToolSessionSandboxes(implementation, {
       releaseHandle: async (handle) => await releases.get(handle)?.(),
     });
-    // Before DefaultSandbox recorded its own state, sessions saved the state of the provider it picked.
+    withSessionEndArtifact(implementation, async (context, state, options) => {
+      await endSession(context, isDefaultSandboxSessionState(state) ? state : null, {
+        artifact: isDefaultSandboxPreparedArtifact(options.artifact) ? options.artifact : undefined,
+        reason: options.reason,
+      });
+    });
+    // Sessions saved before DefaultSandbox recorded its own state hold the state
+    // of the provider it picked. Remove this once eve stops resuming sessions
+    // saved by releases before it, at the next sandbox state reset like eve 0.64's.
+    // `resume` treats a protocol the inner provider no longer speaks as gone.
     return withAdoptedSandboxSessionStates(implementation, (record) => {
-      const name = SELECTED_PROVIDERS.find((candidate) => candidate === record.providerName);
-      if (name === undefined) return undefined;
-      return { provider: name, state: record.state };
+      const name = record.providerName;
+      if (!isSelectedProvider(name)) return undefined;
+      return {
+        provider: name,
+        state: record.state,
+        stateProtocolVersion: record.stateProtocolVersion,
+      };
     });
   },
 });
@@ -219,4 +260,28 @@ async function rejectJustBashNetworkPolicy(policy: SandboxNetworkPolicy): Promis
 
 function hasNetworkPolicy(session: SandboxSession): session is DefaultSandboxSession {
   return typeof Reflect.get(session, "setNetworkPolicy") === "function";
+}
+
+function isSelectedProvider(value: unknown): value is SelectedProvider {
+  return SELECTED_PROVIDERS.some((name) => name === value);
+}
+
+function isDefaultSandboxSessionState(
+  value: SandboxPreparedArtifact | null,
+): value is DefaultSandboxSessionState {
+  return (
+    isSandboxPreparedArtifactRecord(value) &&
+    isSelectedProvider(value.provider) &&
+    typeof value.stateProtocolVersion === "number" &&
+    "state" in value
+  );
+}
+
+function isDefaultSandboxPreparedArtifact(
+  value: SandboxPreparedArtifact | undefined,
+): value is DefaultSandboxPreparedArtifact {
+  return (
+    isSandboxPreparedArtifactRecord(value) &&
+    (value.provider === null || (isSelectedProvider(value.provider) && "artifact" in value))
+  );
 }

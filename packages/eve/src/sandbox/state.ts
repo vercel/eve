@@ -4,6 +4,7 @@ import type {
   SandboxDeleteOptions,
   SandboxPreparedArtifact,
   SandboxProviderRuntime,
+  SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 
 export type SandboxSessionEndReason = "completed" | "expired" | "failed";
@@ -66,6 +67,37 @@ export function resolvePersistedSandboxSessionState(
         state: adopted,
         stateProtocolVersion: provider.stateProtocolVersion,
       };
+}
+
+/** Session-end cleanup that also needs the current build's prepared artifact. */
+export type SandboxSessionEndWithArtifact = (
+  context: SandboxProviderSessionContext,
+  state: SandboxPreparedArtifact | null,
+  options: {
+    readonly artifact: SandboxPreparedArtifact | undefined;
+    readonly reason: SandboxSessionEndReason;
+  },
+) => Promise<void>;
+
+const sessionEndsWithArtifact = new WeakMap<object, SandboxSessionEndWithArtifact>();
+
+/**
+ * Lets an eve-owned provider receive the prepared artifact at session end,
+ * such as `DefaultSandbox`, which finds the provider it selected there when
+ * no state was recorded. Internal, so the public provider API is unchanged.
+ */
+export function withSessionEndArtifact<Implementation extends object>(
+  implementation: Implementation,
+  onSessionEnd: SandboxSessionEndWithArtifact,
+): Implementation {
+  sessionEndsWithArtifact.set(implementation, onSessionEnd);
+  return implementation;
+}
+
+export function getSessionEndWithArtifact(
+  implementation: object,
+): SandboxSessionEndWithArtifact | undefined {
+  return sessionEndsWithArtifact.get(implementation);
 }
 
 export interface SandboxAccess {

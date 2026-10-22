@@ -231,6 +231,22 @@ describe("ensureSandboxAccess", () => {
     });
   });
 
+  it.each([
+    ["another provider", { providerName: "other", stateProtocolVersion: 1 }],
+    ["another state protocol", { providerName: "test", stateProtocolVersion: 2 }],
+  ])("starts a fresh sandbox for state %s recorded", async (_, record) => {
+    const setup = vi.fn();
+    const value = fixture(setup);
+    const { access } = await open(value.registry, "session-1", {
+      session: { ...record, state: { key: "old" } },
+    });
+    expect(setup).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
+    await expect(access.captureState()).resolves.toEqual({
+      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+    });
+  });
+
   it("keeps the persisted sandbox when resume fails for another reason", async () => {
     const value = fixture();
     value.create.mockRejectedValueOnce(new Error("daemon unavailable"));

@@ -198,6 +198,35 @@ describe("DefaultSandbox", () => {
       });
     });
 
+    it("starts a fresh sandbox when its provider no longer speaks the recorded protocol", async () => {
+      const environment = DefaultSandbox.environment();
+      const { appRoot } = await build(environment, true);
+      const first = await access({
+        appRoot,
+        environment,
+        selector: defineSandbox(() => environment.open()),
+      });
+      await first.get();
+      const recorded = (await first.captureState()).session?.state;
+      await first.stop();
+      if (typeof recorded !== "object" || recorded === null || !("state" in recorded)) {
+        throw new Error("Expected DefaultSandbox session state.");
+      }
+
+      const selector = vi.fn(() => environment.open());
+      const sandbox = await access({
+        appRoot,
+        environment,
+        selector: defineSandbox(selector),
+        state: {
+          session: { providerName: "just-bash", state: recorded.state, stateProtocolVersion: 2 },
+        },
+      });
+
+      await expect(sandbox.get()).resolves.toBeTruthy();
+      expect(selector).toHaveBeenCalledOnce();
+    });
+
     it("starts a fresh sandbox when the build selected another provider", async () => {
       const environment = DefaultSandbox.environment();
       const { appRoot } = await build(environment, true);

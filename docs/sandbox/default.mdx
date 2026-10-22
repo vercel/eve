@@ -29,7 +29,7 @@ Production builds never fall back to just-bash, because just-bash runs no native
 
 `eve build` prepares the sandbox and stores the selected provider in the build's prepared sandbox artifact. `eve dev` prepares it the first time a session opens the sandbox. At runtime, `DefaultSandbox` reads the recorded provider and does not probe for Vercel or Docker again, so the build and the server it produces always use the same provider. To change the provider, rebuild in an environment where the provider you want is available.
 
-Each session also records the provider it started with. If a later build selects a different provider, a session that resumes on the new build starts a fresh sandbox from the new provider, without the old sandbox's files.
+Each session also records the provider it started with. If a later build selects a different provider, a session that resumes on the new build starts a fresh sandbox from the new provider, without the old sandbox's files. eve does not delete the old sandbox: a Vercel Sandbox stays in your Vercel project, and a Docker container stays on the Docker host until you remove it.
 
 ## Configure each provider
 

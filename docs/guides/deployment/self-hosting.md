@@ -92,6 +92,8 @@ This adds conversation text as context to the replacement session.
 
 The default sandbox environment selects Docker when `eve build` can reach a Docker daemon and records that choice in the build. A production build never falls back to just-bash: when Docker is unreachable during the build, the build succeeds, but each session fails when it opens the sandbox. Run `eve build` where Docker is reachable, select a provider explicitly, or implement a custom provider with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
 
+A `RUN eve build` step in a Dockerfile usually has no Docker daemon, so the build records no provider even when the running container later mounts `/var/run/docker.sock`. In that setup, select `DockerSandbox.environment()` from `eve/sandbox/docker` explicitly in your sandbox module, or run `eve build` in an environment where Docker is reachable and copy the output into the image.
+
 Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration and selection order.
 
 Self-hosted deployments don’t support deployed self-modification. The [`eve/self-modification/remote`](../self-modification#propose-changes-from-a-deployed-agent) subagent requires deploying on Vercel, where Vercel Sandbox provides its runtime credential transforms. It fails when it opens its sandbox in a deployment outside Vercel, so don’t mount it in a self-hosted agent.
