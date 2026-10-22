@@ -395,10 +395,10 @@ names match.
 | just-bash      | root directory from hash of `{ sessionId, version: 2 }`                  | `{ autoInstall, customCommands, filesystem, version: 2 }`, first 24 hex                                                                                                                     |
 
 Docker mounts `await ctx.resourcesDirectory()` and calls
-`ctx.populate(connection, { mountedAt: "/eve/resources" })`. Vercel's
-`DefaultSandbox` facade skips preparation when `ctx.isEmpty`;
-`VercelSandbox.environment()` does not. Vercel and just-bash set
-`toolSessions: true`; only just-bash needs `close()`.
+`ctx.populate(connection, { mountedAt: "/eve/resources" })`. Vercel skips
+preparation when `ctx.isEmpty` and no `source` is set, in
+`VercelSandbox.environment()` itself and therefore under `DefaultSandbox` too.
+Vercel and just-bash set `toolSessions: true`; only just-bash needs `close()`.
 
 ## Custom provider example
 
