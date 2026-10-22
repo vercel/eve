@@ -84,11 +84,15 @@ function registryFor(
 }
 
 /** A provider that keeps each call's sandbox under its session id; `deleted` records cleanup by id. */
-function sandboxes(options: { readonly startGate?: Promise<void> } = {}) {
+function sandboxes(
+  options: { readonly closeError?: Error; readonly startGate?: Promise<void> } = {},
+) {
   const started: string[] = [];
   const deleted = vi.fn(async (_sessionId: string, _reason: string) => {});
   const shutdown = vi.fn(async () => {});
-  const closed = vi.fn(async () => {});
+  const closed = vi.fn(async () => {
+    if (options.closeError !== undefined) throw options.closeError;
+  });
   const environment = defineSandboxProvider({
     name: "memory",
     environment: () => ({
@@ -298,27 +302,47 @@ describe("invokeTool", () => {
     const { closed, deleted, registry, shutdown } = sandboxes();
     const runtime = runtimeWith(
       [
+        tool("open", async (_input: unknown, ctx) => void (await ctx.getSandbox())),
         tool("pause", async (_input: unknown, ctx) => await (await ctx.getSandbox()).stop()),
         tool("discard", async (_input: unknown, ctx) => await (await ctx.getSandbox()).delete()),
       ],
       registry,
     );
+    const reasons = () => deleted.mock.calls.map(([, reason]) => reason);
 
+    // Session end closes what this process holds for the call's connection.
+    expect(await invokeTool(runtime, "open", {}, { auth: alice })).toMatchObject({
+      status: "completed",
+    });
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(reasons()).toEqual(["completed"]);
+
+    // Stopping stops and closes the connection once, even when shutdown follows.
     expect(await invokeTool(runtime, "pause", {}, { auth: alice })).toMatchObject({
       status: "completed",
     });
+    await shutdownActiveSandboxHandles();
     expect(shutdown).toHaveBeenCalledOnce();
-    expect(deleted.mock.calls.map(([, reason]) => reason)).toEqual(["completed"]);
+    expect(closed).toHaveBeenCalledTimes(2);
 
     expect(await invokeTool(runtime, "discard", {}, { auth: alice })).toMatchObject({
       status: "completed",
     });
-    expect(closed).toHaveBeenCalledOnce();
-    expect(deleted.mock.calls.map(([, reason]) => reason)).toEqual([
-      "completed",
-      "deleted",
-      "completed",
-    ]);
+    expect(closed).toHaveBeenCalledTimes(3);
+    expect(reasons()).toEqual(["completed", "completed", "deleted", "completed"]);
+  });
+
+  it("deletes the sandbox even when closing the connection fails", async () => {
+    const { deleted, registry } = sandboxes({ closeError: new Error("interpreter stuck") });
+    const runtime = runtimeWith(
+      [tool("discard", async (_input: unknown, ctx) => await (await ctx.getSandbox()).delete())],
+      registry,
+    );
+
+    expect(await invokeTool(runtime, "discard", {}, { auth: alice })).toMatchObject({
+      status: "failed",
+    });
+    expect(deleted.mock.calls.map(([, reason]) => reason)).toEqual(["deleted", "completed"]);
   });
 
   it("deletes a sandbox whose start finishes after the call failed", async () => {

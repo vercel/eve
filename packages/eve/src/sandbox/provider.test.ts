@@ -186,6 +186,16 @@ describe("defineSandboxProvider", () => {
           expect(() => ctx.templateKey({ sourceRevision: "mine" })).toThrow(
             'ctx.templateKey() reserves "sourceRevision"',
           );
+          // These would hash like `{}` or overflow the stack, so they reject.
+          expect(() => ctx.templateKey({ builtAt: new Date(0) })).toThrow(
+            "but identity.builtAt is a Date",
+          );
+          expect(() => ctx.templateKey({ layers: [new Map()] })).toThrow(
+            "but identity.layers[0] is a Map",
+          );
+          const loop: unknown[] = [];
+          loop.push(loop);
+          expect(() => ctx.templateKey({ loop })).toThrow("circular value at identity.loop[0]");
           return null;
         },
         start: async () => ({ connection: recordingConnection().connection, state: null }),

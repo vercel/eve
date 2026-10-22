@@ -277,17 +277,35 @@ function adaptSandboxProvider<
   prepare: ((sandbox: SandboxSession & Extensions) => void | Promise<void>) | undefined,
 ): LegacySandboxProviderImplementation<OpenOptions, Artifact, State, SandboxSession & Extensions> {
   const closers = new WeakMap<SandboxProviderHandle, () => Promise<void>>();
+  // Connections this process holds per session, so terminal cleanup can close them.
+  const open = new Map<string, Set<() => Promise<void>>>();
 
   function createHandle(
     context: SandboxSessionContext,
     connection: SandboxConnection<Extensions>,
     state: Readonly<State>,
   ): SandboxProviderHandle<SandboxSession & Extensions> {
-    let closing: Promise<void> | undefined;
-    const close = () => (closing ??= (async () => await connection.close?.())());
+    const sessionId = context.session.id;
+    // eve may stop or close one connection from several paths, such as
+    // `sandbox.stop()` and then server shutdown, so each runs once.
+    const stop = once(() => connection.stop());
+    const close = once(async () => {
+      open.get(sessionId)?.delete(close);
+      await connection.close?.();
+    });
+    let sessionClosers = open.get(sessionId);
+    if (sessionClosers === undefined) open.set(sessionId, (sessionClosers = new Set()));
+    sessionClosers.add(close);
+    const release = async () => {
+      try {
+        await stop();
+      } finally {
+        await close();
+      }
+    };
     const handle: SandboxProviderHandle<SandboxSession & Extensions> = {
       sandbox: createConnectionSession(connection),
-      onRuntimeShutdown: () => connection.stop(),
+      onRuntimeShutdown: release,
       async onSandboxDelete(options) {
         try {
           await close();
@@ -298,10 +316,16 @@ function adaptSandboxProvider<
           });
         }
       },
-      onSandboxStop: () => connection.stop(),
+      onSandboxStop: release,
     };
     closers.set(handle, close);
     return handle;
+  }
+
+  async function closeSession(sessionId: string): Promise<void> {
+    const sessionClosers = [...(open.get(sessionId) ?? [])];
+    open.delete(sessionId);
+    await Promise.allSettled(sessionClosers.map((close) => close()));
   }
 
   const adapted: LegacySandboxProviderImplementation<
@@ -311,6 +335,8 @@ function adaptSandboxProvider<
     SandboxSession & Extensions
   > = {
     async onSessionEnd(context, state, { reason }) {
+      // A failed close of a process-local resource must not block deleting the sandbox.
+      await closeSession(context.session.id);
       await implementation.onSessionEnd(createSessionContext(context), state, { reason });
     },
     async prepare(context) {
@@ -388,6 +414,7 @@ function createPrepareContext<Extensions extends object>(
     },
     storagePath: context.storagePath,
     templateKey(identity) {
+      assertSandboxIdentity(identity, "identity", new WeakSet());
       for (const reserved of ["resources", "sourceRevision"]) {
         if (Object.hasOwn(identity, reserved)) {
           throw new Error(
@@ -440,6 +467,47 @@ function createConnectionSession<Extensions extends object>(
     );
   }
   return { ...extensions, ...session } as SandboxSession & Extensions;
+}
+
+/** Runs `run` at most once while it succeeds; a failed run can be retried. */
+function once(run: () => Promise<void>): () => Promise<void> {
+  let running: Promise<void> | undefined;
+  return () =>
+    (running ??= run().catch((error: unknown) => {
+      running = undefined;
+      throw error;
+    }));
+}
+
+/**
+ * Rejects what the template-key hasher cannot tell apart, such as a `Date` or
+ * `Map` that would hash as `{}`, and circular values, before hashing.
+ */
+function assertSandboxIdentity(value: unknown, path: string, seen: WeakSet<object>): void {
+  if (value === null || value === undefined || typeof value === "function") return;
+  if (typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number" && Number.isFinite(value)) return;
+  const prototype = typeof value === "object" ? Object.getPrototypeOf(value) : undefined;
+  const plain = Array.isArray(value) || prototype === Object.prototype || prototype === null;
+  if (typeof value !== "object" || !plain) {
+    throw new Error(
+      `ctx.templateKey() accepts only JSON values, plain objects, arrays, and functions, but ${path} is ${describeIdentityValue(value)}. Pass a JSON form, such as a string.`,
+    );
+  }
+  if (seen.has(value))
+    throw new Error(`ctx.templateKey() cannot hash a circular value at ${path}.`);
+  seen.add(value);
+  for (const [key, entry] of Object.entries(value)) {
+    assertSandboxIdentity(entry, Array.isArray(value) ? `${path}[${key}]` : `${path}.${key}`, seen);
+  }
+  seen.delete(value);
+}
+
+function describeIdentityValue(value: unknown): string {
+  if (typeof value === "object" && value !== null) {
+    return `a ${value.constructor?.name ?? "non-plain object"}`;
+  }
+  return typeof value === "number" ? String(value) : `a ${typeof value}`;
 }
 
 function resolveSandboxPath(path: string): string {

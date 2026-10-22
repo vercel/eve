@@ -322,12 +322,14 @@ runtime
                  eve checkpoints { providerName, state, stateProtocolVersion }
   later step   ─ resume(ctx, artifact, state) → connection
                  └─ throws SandboxSessionGoneError → eve clears state, reruns selector
-  sandbox.stop()   → connection.stop()
+  sandbox.stop()   → connection.stop(), connection.close?()
   sandbox.delete() → connection.close?(), onSessionEnd(ctx, state, { reason: "deleted" }),
                      eve clears state
-  process exit     → connection.stop() (failures logged, not thrown)
+  process exit     → connection.stop(), connection.close?() (failures logged, not thrown)
   keyed call ends  → connection.close?()
-  terminal outcome → onSessionEnd(ctx, state | null, { reason })
+  terminal outcome → connection.close?() for this process's connections,
+                     onSessionEnd(ctx, state | null, { reason })
+  (stop and close run at most once per connection; a failed close never blocks deletion)
 ```
 
 ## Invariants

@@ -116,7 +116,7 @@ A `SandboxConnection` is the byte-level link to one sandbox. Each method has a f
 - `writeFiles({ files, abortSignal })` writes every file, creating missing parent directories and overwriting existing files. It is the only write primitive.
 - `removePath({ path, force, recursive, abortSignal })` removes a file or directory. `force` ignores a missing path, and `recursive` removes a non-empty directory.
 - `stop()` releases compute and keeps the sandbox's files.
-- `close()` is optional. It releases what this process holds for the connection, such as a local interpreter, without touching the sandbox.
+- `close()` is optional. It releases what this process holds for the connection, such as a local interpreter, without touching the sandbox. eve calls it whenever it lets go of a connection: after `stop()`, before deletion and terminal cleanup, and when a keyed call ends.
 - `extensions` is optional. It is a plain object whose own properties eve merges onto the session, such as `setNetworkPolicy()`. Use closures rather than class methods, because eve does not copy inherited members.
 
 Every path a connection receives is absolute, and `workingDirectory` is always set. eve resolves relative paths and a missing or relative working directory from `/workspace` before it calls the connection.
@@ -133,15 +133,17 @@ Type the connection with its extensions, such as `SandboxConnection<{ setNetwork
 
 eve calls the lifecycle methods at these points:
 
-| When                                                  | eve calls                                                                               |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `eve build`, or the first sandbox access in `eve dev` | `prepare(ctx)`, and stores the artifact it returns with the deployment                  |
-| The first sandbox access in a session                 | `start(ctx, options, artifact)` from `environment.open(options)` in the selector        |
-| A later workflow step or process                      | `resume(ctx, artifact, state)`                                                          |
-| `sandbox.stop()`                                      | `connection.stop()`                                                                     |
-| `sandbox.delete()`                                    | `connection.close()`, then `onSessionEnd(ctx, state, { reason: "deleted" })`            |
-| The eve server shuts down                             | `connection.stop()` on every open connection; eve logs failures and does not throw them |
-| The owning session reaches a terminal outcome         | `onSessionEnd(ctx, state, { reason })` with `"completed"`, `"expired"`, or `"failed"`   |
+| When                                                  | eve calls                                                                                                                                                      |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve build`, or the first sandbox access in `eve dev` | `prepare(ctx)`, and stores the artifact it returns with the deployment                                                                                         |
+| The first sandbox access in a session                 | `start(ctx, options, artifact)` from `environment.open(options)` in the selector                                                                               |
+| A later workflow step or process                      | `resume(ctx, artifact, state)`                                                                                                                                 |
+| `sandbox.stop()`                                      | `connection.stop()`, then `connection.close()`                                                                                                                 |
+| `sandbox.delete()`                                    | `connection.close()`, then `onSessionEnd(ctx, state, { reason: "deleted" })`                                                                                   |
+| The eve server shuts down                             | `connection.stop()`, then `connection.close()`, on every open session connection; eve logs failures and does not throw them                                    |
+| The owning session reaches a terminal outcome         | `connection.close()` on this process's connections for the session, then `onSessionEnd(ctx, state, { reason })` with `"completed"`, `"expired"`, or `"failed"` |
+
+eve calls `stop()` and `close()` at most once per connection, retrying only after a failure. A failed `close()` never prevents `onSessionEnd()` from deleting the sandbox.
 
 ### `prepare()`
 
