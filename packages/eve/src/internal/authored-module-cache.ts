@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -19,13 +19,13 @@ export function writeAuthoredModuleCacheFile(
 ): string {
   cacheDirectories.add(directoryPath);
   const filePath = join(directoryPath, fileName);
-  // Never rewrite an existing file: another load may be importing it.
-  if (existsSync(filePath)) {
-    try {
-      const now = new Date();
-      utimesSync(filePath, now, now);
-    } catch {}
-  } else {
+  // Touch first and write only when missing: another load may be importing an existing file, and a
+  // concurrent prune may delete a stale one between an existence check and its use.
+  try {
+    const now = new Date();
+    utimesSync(filePath, now, now);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return filePath;
     mkdirSync(directoryPath, { recursive: true });
     writeFileSync(filePath, code);
   }
