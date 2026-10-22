@@ -317,12 +317,12 @@ describe("invokeTool", () => {
     expect(closed).toHaveBeenCalledTimes(1);
     expect(reasons()).toEqual(["completed"]);
 
-    // A stopped connection can resume, so shutdown stops it again; it closes only once.
+    // A call that stopped and then ended its sandbox leaves nothing for shutdown to stop.
     expect(await invokeTool(runtime, "pause", {}, { auth: alice })).toMatchObject({
       status: "completed",
     });
     await shutdownActiveSandboxHandles();
-    expect(shutdown).toHaveBeenCalledTimes(2);
+    expect(shutdown).toHaveBeenCalledOnce();
     expect(closed).toHaveBeenCalledTimes(2);
 
     expect(await invokeTool(runtime, "discard", {}, { auth: alice })).toMatchObject({

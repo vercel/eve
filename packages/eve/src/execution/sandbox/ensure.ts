@@ -106,6 +106,8 @@ export async function ensureSandboxAccess(
       : undefined,
   );
   let opened: OpenedSandbox | undefined;
+  // A stopped handle stays tracked so shutdown can stop it if it resumes, until the session lets go.
+  let stopped: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
   const track: typeof trackActiveSandboxHandle = (entry) => {
@@ -366,14 +368,16 @@ export async function ensureSandboxAccess(
 
   function forgetHandle() {
     const current = opened;
-    if (current !== undefined) {
+    for (const entry of [current, stopped]) {
+      if (entry === undefined) continue;
       untrack({
-        handle: current.handle,
-        providerName: current.providerName,
+        handle: entry.handle,
+        providerName: entry.providerName,
         sessionId: input.sessionId,
       });
     }
     opened = undefined;
+    stopped = undefined;
     opening = undefined;
     requiring = undefined;
     return current;
@@ -433,6 +437,7 @@ export async function ensureSandboxAccess(
     async stop() {
       const current = await requireHandle();
       await current.onSandboxStop();
+      stopped = opened;
       opened = undefined;
       opening = undefined;
       requiring = undefined;
