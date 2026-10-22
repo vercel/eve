@@ -351,6 +351,7 @@ describe("createVercelSandbox", () => {
         source: { snapshotId: "prepared-snapshot", type: "snapshot" },
       }),
     );
+    expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
   });
 
   it("creates sandboxes with Vercel API credentials from the environment", async () => {
@@ -729,7 +730,7 @@ describe("createVercelSandbox", () => {
     expect(sessionArgs?.[0]).toMatchObject({ timeout: 30 * 60 * 1_000 });
   });
 
-  it("mounts a Drive read-write by name and passes Drive references through", async () => {
+  it("mounts a Drive read-write by name, passes Drive references through, and checks the overlaid base runtime", async () => {
     // Like the SDK's `Drive`: a `name` getter, with its metadata in a `drive` field.
     class Drive {
       readonly drive = { id: "drv_team" };
@@ -753,6 +754,7 @@ describe("createVercelSandbox", () => {
     );
     await provider.openSession({
       appRoot: "/tmp/test-app-root",
+      prepared: { snapshotId: "prepared-snapshot" },
       sandboxName: "session-key",
     });
     expect(create).toHaveBeenCalledWith(
@@ -763,6 +765,7 @@ describe("createVercelSandbox", () => {
         },
       }),
     );
+    expect(sessionSandbox.runCommand).toHaveBeenCalledTimes(1);
   });
 
   /*
@@ -1060,7 +1063,7 @@ describe("createVercelSandbox", () => {
           source: { snapshotId: "prepared-snapshot", type: "snapshot" },
         }),
       );
-      expect(sandboxes.get(base)?.runCommand).toHaveBeenCalled();
+      expect(sandboxes.get(base)?.runCommand).not.toHaveBeenCalled();
     });
 
     it("adopts the fresh sandbox another instance made first after the same expiry", async () => {
@@ -1105,7 +1108,7 @@ describe("createVercelSandbox", () => {
       expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
         expect.objectContaining({ name: base }),
       );
-      expect(sandboxes.get(base)?.runCommand).toHaveBeenCalled();
+      expect(sandboxes.get(base)?.runCommand).not.toHaveBeenCalled();
     });
 
     it("surfaces any other 410 instead of replacing the sandbox", async () => {
@@ -1886,7 +1889,7 @@ describe("createVercelSandbox", () => {
     ]);
   });
 
-  it("prepares the base runtime during sandbox init", async () => {
+  it("prepares the base runtime in the template rather than its fresh snapshot-backed session", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
     const sandboxModule = {
@@ -1909,31 +1912,130 @@ describe("createVercelSandbox", () => {
       sandboxName: "session-key",
     });
 
-    for (const sandbox of [templateSandbox, sessionSandbox]) {
-      const calls = vi.mocked(sandbox.runCommand).mock.calls;
-      expect(calls).toHaveLength(1);
+    const calls = templateSandbox.runCommand.mock.calls;
+    expect(calls).toHaveLength(2);
 
-      const setupCall = calls[0]?.[0] as {
-        args?: string[];
-        cmd?: string;
-        sudo?: boolean;
-      };
-      expect(setupCall).toMatchObject({ cmd: "bash" });
-      expect(setupCall.sudo).toBeUndefined();
-      const setupScript = setupCall.args?.[1] ?? "";
-      expect(setupScript).toContain("mkdir -p /workspace");
-      expect(setupScript).toContain("command -v bash");
-      expect(setupScript).toContain("ln -s /proc/self/fd /dev/fd");
-      expect(setupScript).toContain("test /dev/fd -ef /proc/self/fd");
-      expect(setupScript).not.toContain("apt-get");
-      expect(setupScript).not.toContain("gpgv");
-      expect(setupScript).not.toContain("node --version");
-      expect(setupScript).not.toContain("npm");
-      expect(setupScript).not.toContain("python3");
-      expect(setupScript).not.toContain("ripgrep");
-      expect(setupScript).not.toContain("sudo mkdir");
-      expect(setupScript).not.toContain("chown");
-    }
+    const setupCall = calls[0]?.[0] as {
+      args?: string[];
+      cmd?: string;
+      sudo?: boolean;
+    };
+    expect(setupCall).toMatchObject({ cmd: "bash" });
+    expect(setupCall.sudo).toBeUndefined();
+    const setupScript = setupCall.args?.[1] ?? "";
+    expect(setupScript).toContain("mkdir -p /workspace");
+    expect(setupScript).toContain("command -v bash");
+    expect(setupScript).toContain("ln -s /proc/self/fd /dev/fd");
+    expect(setupScript).toContain("test /dev/fd -ef /proc/self/fd");
+    expect(setupScript).not.toContain("apt-get");
+    expect(setupScript).not.toContain("gpgv");
+    expect(setupScript).not.toContain("node --version");
+    expect(setupScript).not.toContain("npm");
+    expect(setupScript).not.toContain("python3");
+    expect(setupScript).not.toContain("ripgrep");
+    expect(setupScript).not.toContain("sudo mkdir");
+    expect(setupScript).not.toContain("chown");
+    expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("checks the base runtime again after authored preparation and before capturing the snapshot", async () => {
+    const template = createMockSandbox({ name: "template" });
+    const prepare = vi.fn(async () => {});
+    const provider = createTestVercelSandbox({
+      loadSandboxModule: async () =>
+        ({
+          Sandbox: {
+            create: createSandboxesInOrder(template),
+            get: vi.fn().mockResolvedValue(null),
+          },
+        }) as never,
+      prepare,
+    });
+
+    await provider.prepare({ appRoot: "/tmp/test-app-root" });
+
+    expect(template.runCommand).toHaveBeenCalledTimes(2);
+    const [initial, final] = template.runCommand.mock.invocationCallOrder;
+    expect(initial).toBeLessThan(prepare.mock.invocationCallOrder[0]!);
+    expect(final).toBeGreaterThan(prepare.mock.invocationCallOrder[0]!);
+    expect(final).toBeLessThan(template.snapshot.mock.invocationCallOrder[0]!);
+  });
+
+  it("does not snapshot authored preparation that leaves the base runtime unusable", async () => {
+    const template = createMockSandbox({ name: "template" });
+    template.runCommand.mockResolvedValueOnce(createMockCommandResult()).mockResolvedValue({
+      ...createMockCommandResult(),
+      exitCode: 70,
+    });
+    const prepare = vi.fn(async () => {});
+    const provider = createTestVercelSandbox({
+      loadSandboxModule: async () =>
+        ({
+          Sandbox: {
+            create: createSandboxesInOrder(template),
+            get: vi.fn().mockResolvedValue(null),
+          },
+        }) as never,
+      prepare,
+    });
+
+    await expect(provider.prepare({ appRoot: "/tmp/test-app-root" })).rejects.toThrow(
+      "Failed to initialize Vercel sandbox base runtime",
+    );
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(template.snapshot).not.toHaveBeenCalled();
+    expect(template.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, "custom-image"])(
+    "initializes a fresh image session without a prepared snapshot (%s)",
+    async (image) => {
+      const session = createMockSandbox({ name: "session" });
+      const provider = createTestVercelSandbox({
+        createOptions: { image },
+        loadSandboxModule: async () =>
+          ({
+            Sandbox: {
+              create: vi.fn().mockResolvedValue(session),
+              get: vi.fn().mockResolvedValue(null),
+            },
+          }) as never,
+      });
+
+      await provider.openSession({
+        appRoot: "/tmp/test-app-root",
+        prepared: {},
+        sandboxName: "session-key",
+      });
+
+      expect(session.runCommand).toHaveBeenCalledTimes(1);
+      expect(session.runCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: "bash" }));
+    },
+  );
+
+  it.each([
+    { image: "custom-image" },
+    { source: { snapshotId: "authored-snapshot", type: "snapshot" as const } },
+  ])("keeps base checks for prepared snapshots with custom sources (%j)", async (createOptions) => {
+    const session = createMockSandbox({ name: "session" });
+    const provider = createTestVercelSandbox({
+      createOptions,
+      loadSandboxModule: async () =>
+        ({
+          Sandbox: {
+            create: vi.fn().mockResolvedValue(session),
+            get: vi.fn().mockResolvedValue(null),
+          },
+        }) as never,
+    });
+
+    await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      prepared: { snapshotId: "prepared-snapshot" },
+      sandboxName: "session-key",
+    });
+
+    expect(session.runCommand).toHaveBeenCalledTimes(1);
   });
 
   it("retries base runtime setup through sudo when the default user fails", async () => {
@@ -1961,7 +2063,7 @@ describe("createVercelSandbox", () => {
       appRoot: "/tmp/test-app-root",
     });
 
-    expect(templateSandbox.runCommand).toHaveBeenCalledTimes(2);
+    expect(templateSandbox.runCommand).toHaveBeenCalledTimes(3);
     const firstCall = vi.mocked(templateSandbox.runCommand).mock.calls[0]?.[0] as {
       args?: string[];
       cmd?: string;
