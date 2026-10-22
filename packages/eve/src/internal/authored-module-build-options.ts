@@ -36,6 +36,15 @@ export function createAuthoredModuleBuildOptions(input: {
   };
 }
 
+/**
+ * Source maps for bundles evaluated in this process. Node reads inline maps only
+ * when source maps are enabled; otherwise V8 retains the map comment as part of
+ * every imported module's source text, often most of its size.
+ */
+export function evaluatedBundleSourcemap(): "inline" | false {
+  return process.sourceMapsEnabled ? "inline" : false;
+}
+
 export function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
   for (const fileName of ["tsconfig.json", "jsconfig.json"]) {
     const path = join(packageRoot, fileName);
