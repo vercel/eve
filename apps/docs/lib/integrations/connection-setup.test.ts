@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildConnectionInstall,
@@ -8,6 +8,11 @@ import {
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
 import sentConnection from "../../registry/connections/sent";
+
+// Connect's runtime pulls in channel auth; these tests exercise only the authored approval policy.
+vi.mock("@vercel/connect/eve", () => ({
+  connect: () => ({ getToken: async () => ({ token: "" }) }),
+}));
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {

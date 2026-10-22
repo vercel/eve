@@ -8,16 +8,6 @@ export default defineConfig({
         replacement: new URL("../../packages/eve/src/public/$1/index.ts", import.meta.url).pathname,
       },
       {
-        find: "eve/channels/auth",
-        replacement: new URL("../../packages/eve/src/public/channels/auth.ts", import.meta.url)
-          .pathname,
-      },
-      {
-        find: /^#compiled\/(.+)\.js$/,
-        replacement: new URL("../../packages/eve/.generated/compiled/$1.js", import.meta.url)
-          .pathname,
-      },
-      {
         find: /^#(.+)\.js$/,
         replacement: new URL("../../packages/eve/src/$1.ts", import.meta.url).pathname,
       },
@@ -25,10 +15,5 @@ export default defineConfig({
   },
   test: {
     include: ["lib/**/*.test.ts"],
-    server: {
-      deps: {
-        inline: [/@vercel\/connect/],
-      },
-    },
   },
 });
