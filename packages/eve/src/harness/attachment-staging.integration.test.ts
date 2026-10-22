@@ -9,7 +9,6 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockTool } from "#internal/testing/mocks/mock-tool.js";
 import {
-  ATTACHMENTS_ROOT,
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
   stageToolResultMedia,
@@ -189,7 +188,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(staged).toHaveLength(2);
     const filePart = staged[1] as FilePart;
     expect(filePart.filename).toMatch(
-      new RegExp(`^${ATTACHMENTS_ROOT.replaceAll(".", "\\.")}/[0-9a-f]{16}/report\\.csv$`),
+      /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/report\.csv$/,
     );
     // `data` is replaced with an eve-sandbox: ref — the bytes live in
     // the sandbox and are rehydrated at the model call site. The
