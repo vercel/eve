@@ -154,12 +154,10 @@ export async function createBashSandbox(input: {
       if (options.abortSignal?.aborted) {
         throw new DOMException("The operation was aborted.", "AbortError");
       }
-      // Every command already starts in /workspace. Wrapping it anyway would
-      // let a trailing `# comment` swallow the subshell's closing parenthesis.
-      const wrapped =
-        options.workingDirectory === WORKSPACE_ROOT
-          ? options.command
-          : `( cd ${shellQuote(options.workingDirectory)} && ${options.command} )`;
+      // The command sits on its own lines so a trailing `# comment` cannot
+      // swallow the closing brace. `cd X || exit` would lose cd's error in
+      // just-bash, so the braces keep `&&` applying to the whole command.
+      const wrapped = `( cd ${shellQuote(options.workingDirectory)} && {\n${options.command}\n} )`;
       // just-bash has no separate `bash` executable — it IS the bash
       // interpreter. The `eval` builtin re-parses its single string
       // argument as a shell line, which is the only way to feed an

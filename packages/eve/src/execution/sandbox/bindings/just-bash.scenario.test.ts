@@ -365,6 +365,47 @@ describe("just-bash sandbox file API", () => {
     expect(content).toBe("relative write");
   });
 
+  it("runs commands in any working directory, even with a trailing comment", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("working-directory");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-working-directory",
+    });
+    await handle.sandbox.writeTextFile({ content: "nested", path: "sub/deeper/note.txt" });
+
+    await expect(handle.sandbox.run({ command: "pwd # workspace" })).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "/workspace\n",
+    });
+    await expect(
+      handle.sandbox.run({
+        command: "pwd; exit 4 # subdirectory",
+        workingDirectory: "sub/deeper/..",
+      }),
+    ).resolves.toMatchObject({ exitCode: 4, stdout: "/workspace/sub\n" });
+    await expect(
+      handle.sandbox.run({ command: "echo unreachable", workingDirectory: "missing" }),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("/workspace/missing"),
+      stdout: "",
+    });
+    await expect(handle.sandbox.readTextFile({ path: "sub/../sub/deeper/note.txt" })).resolves.toBe(
+      "nested",
+    );
+  });
+
+  it("rejects reading a directory instead of reporting it missing", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-read-directory",
+    });
+    await handle.sandbox.writeTextFile({ content: "inside", path: "folder/file.txt" });
+
+    await expect(handle.sandbox.readTextFile({ path: "folder" })).rejects.toThrow(/EISDIR/);
+  });
+
   it("preserves Buffer bytes written through the public session", async () => {
     const cacheDirectory = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedLocalHandle({
