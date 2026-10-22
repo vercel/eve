@@ -1,7 +1,7 @@
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
 import { openInputs, openSignIns } from "#protocol/session-projection.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { holdsHitlRequests } from "#harness/hitl/index.js";
+import { holdsHitlRequests } from "#harness/hitl/view.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 
@@ -34,4 +34,3 @@ export function isSessionStateIdleForHandoff(input: {
     queuedInput(state) === undefined
   );
 }
-

@@ -126,8 +126,9 @@
  *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
  *             reached only through its `index.ts`, its request vocabulary
  *             (`approval-prompt`, `budget-request`, `relays`, `sign-ins`) and
- *             read surface via index.ts. Only commit.ts and checkpoint-migrations.ts
- *             import requests.ts for saving and legacy upgrades.
+ *             read surface via index.ts or the Workflow-safe view.ts.
+ *             Only commit.ts and checkpoint-migrations.ts import requests.ts
+ *             for saving and legacy upgrades.
  *   rule 51 — Only the session machine (`harness/session-machine/`) and the
  *             human-in-the-loop lifecycle it delegates to
  *             (`harness/hitl/`) build lifecycle events and read the
@@ -553,7 +554,7 @@ function checkRule47(posix, lines, violations) {
 
 const HUMAN_INPUT_DIR = "packages/eve/src/harness/hitl/";
 const HUMAN_INPUT_PRIVATE_IMPORT_RE =
-  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|budget-request|relays|sign-ins)\.js["'])/;
+  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|view|approval-prompt|budget-request|relays|sign-ins)\.js["'])/;
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule50(posix, lines, violations) {
@@ -577,7 +578,7 @@ function checkRule50(posix, lines, violations) {
       file: posix,
       line: idx + 1,
       message:
-        "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, the one seam the rest of eve meets it at.",
+        "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, or use the read-only `#harness/hitl/view.js` from workflow bodies.",
     });
   });
 }

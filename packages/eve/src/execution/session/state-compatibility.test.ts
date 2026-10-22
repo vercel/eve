@@ -82,6 +82,10 @@ describe("handoff state inspection", () => {
     ["eve.harness.pendingWorkflowInterrupt", {}],
     ["eve.runtime.pendingInputBatches", [null]],
     ["eve.runtime.pendingInputBatches", "corrupt"],
+    ["eve.runtime.hitl.requests", { signIns: false }],
+    ["eve.runtime.hitl.requests", { relays: { request: {} } }],
+    ["eve.runtime.hitl.requests", { relays: null }],
+    ["eve.runtime.hitl.requests", []],
   ] as const)("refuses retained or malformed work in %s", (key, value) => {
     expect(isSessionStateIdleForHandoff(checkpoint({ state: { [key]: value } }))).toBe(false);
   });
