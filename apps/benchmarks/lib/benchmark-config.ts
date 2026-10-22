@@ -146,6 +146,13 @@ export const benchmarkModels = [
     support: "candidate",
   },
   {
+    id: "claude-haiku-5-5",
+    model: "anthropic/claude-haiku-5.5",
+    displayName: "Claude Haiku 5.5",
+    harness: "Claude Code",
+    support: "candidate",
+  },
+  {
     id: "gpt-6-sol-high",
     model: "openai/gpt-6-sol",
     agentModel: "openai/gpt-6-sol?reasoningEffort=high",
