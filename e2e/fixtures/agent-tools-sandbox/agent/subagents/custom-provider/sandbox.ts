@@ -8,6 +8,8 @@ import {
 } from "eve/sandbox/provider";
 
 export const CUSTOM_PROVIDER_TOKEN = "custom-provider-session-ok-P7M";
+/** The machine keeps its working files outside eve's default `/workspace`. */
+export const CUSTOM_WORKSPACE_ROOT = "/srv/app";
 
 /**
  * One in-memory machine per session, standing in for a remote sandbox
@@ -96,6 +98,7 @@ function connect(sessionId: string, machine: Machine): SandboxConnection<CustomE
       for (const file of removed) machine.files.delete(file);
     },
     async stop() {},
+    workspaceRoot: CUSTOM_WORKSPACE_ROOT,
     extensions: {
       machineId: () => machine.id,
       probe: async () => `${CUSTOM_PROVIDER_TOKEN}:${sessionId}`,
