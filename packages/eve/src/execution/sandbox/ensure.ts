@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
@@ -189,6 +191,7 @@ export async function ensureSandboxAccess(
         );
       }
       persisted = {
+        generation: randomUUID(),
         providerName: provider.providerName,
         state: result.state,
         stateProtocolVersion: provider.stateProtocolVersion,

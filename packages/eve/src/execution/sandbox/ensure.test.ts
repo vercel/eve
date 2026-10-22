@@ -214,8 +214,30 @@ describe("ensureSandboxAccess", () => {
     expect(setup).toHaveBeenCalledOnce();
     expect(value.start).toHaveBeenCalledOnce();
     await expect(access.captureState()).resolves.toEqual({
-      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+      session: {
+        generation: expect.any(String),
+        providerName: "test",
+        state: { key: "session-1" },
+        stateProtocolVersion: 1,
+      },
     });
+  });
+
+  it("gives a recreated sandbox a new identity and keeps a resumed sandbox's identity", async () => {
+    const value = fixture();
+    const original = await (await open(value.registry)).access.captureState();
+
+    const resumed = await open(value.registry, "session-1", original);
+    await expect(resumed.access.captureState()).resolves.toEqual(original);
+
+    value.create.mockRejectedValueOnce(new SandboxSessionGoneError("The sandbox was removed."));
+    const recreated = await (
+      await open(value.registry, "session-1", original)
+    ).access.captureState();
+    // The provider names the session's sandbox the same way again, so only the
+    // persisted identity tells dynamic skill files to be written into the new sandbox.
+    expect(recreated.session?.state).toEqual(original.session?.state);
+    expect(recreated).not.toEqual(original);
   });
 
   it("keeps the persisted sandbox when resume fails for another reason", async () => {

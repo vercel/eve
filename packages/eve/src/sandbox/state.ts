@@ -5,6 +5,13 @@ import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sand
 export type SandboxSessionEndReason = "completed" | "expired" | "failed";
 
 export interface SandboxSessionState {
+  /**
+   * Set anew each time `start()` creates the session's sandbox and kept on
+   * resume. Providers name a session's sandbox deterministically, so without it
+   * a sandbox recreated after it was gone would look like the old one. Absent
+   * in state saved by earlier releases.
+   */
+  readonly generation?: string;
   readonly providerName: string;
   readonly state: SandboxPreparedArtifact;
   readonly stateProtocolVersion: number;
