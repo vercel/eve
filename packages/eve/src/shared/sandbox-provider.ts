@@ -253,54 +253,26 @@ function eraseSandboxProviderImplementation<
 }
 
 export function createSandboxProviderResources(input: {
-  readonly resourcesKey?: string;
-  readonly resourcesPath?: string;
-  readonly seedFiles?: readonly {
-    readonly content: string | Uint8Array;
-    readonly path: string;
-  }[];
+  readonly key?: string;
+  readonly path?: string;
+  readonly skills?: readonly SandboxProviderResourceFile[];
+  readonly workspace?: readonly SandboxProviderResourceFile[];
 }): SandboxProviderResources {
-  if (input.resourcesKey === undefined) return { source: { kind: "none" } };
-  const files = input.seedFiles ?? [];
-  const source: SandboxProviderResourceSource =
-    input.resourcesPath !== undefined
-      ? { key: input.resourcesKey, kind: "materialized", path: input.resourcesPath }
-      : { key: input.resourcesKey, kind: "inline" };
+  const { key, path } = input;
+  if (key === undefined) return { source: { kind: "none" } };
   return {
-    skills: createResourceTree({
-      files: files.filter((file) => file.path.startsWith("$HOME/.agents/skills/")),
-      key: `${input.resourcesKey}:skills`,
+    skills: {
+      files: input.skills ?? [],
+      key: `${key}:skills`,
       mountPath: "/eve/resources/skills",
-      prefix: "$HOME/.agents/skills/",
       targetPath: "$HOME/.agents/skills",
-    }),
-    source,
-    workspace: createResourceTree({
-      files: files.filter((file) => !file.path.startsWith("$HOME/.agents/skills/")),
-      key: `${input.resourcesKey}:workspace`,
+    },
+    source: path === undefined ? { key, kind: "inline" } : { key, kind: "materialized", path },
+    workspace: {
+      files: input.workspace ?? [],
+      key: `${key}:workspace`,
       mountPath: "/eve/resources/workspace",
-      prefix: "/workspace/",
       targetPath: "/workspace",
-    }),
-  };
-}
-
-function createResourceTree(input: {
-  readonly files: readonly { readonly content: string | Uint8Array; readonly path: string }[];
-  readonly key: string;
-  readonly mountPath: string;
-  readonly prefix: string;
-  readonly targetPath: string;
-}): SandboxProviderResourceTree {
-  return {
-    files: input.files.map((file) => ({
-      content: file.content,
-      relativePath: file.path.startsWith(input.prefix)
-        ? file.path.slice(input.prefix.length)
-        : file.path,
-    })),
-    key: input.key,
-    mountPath: input.mountPath,
-    targetPath: input.targetPath,
+    },
   };
 }

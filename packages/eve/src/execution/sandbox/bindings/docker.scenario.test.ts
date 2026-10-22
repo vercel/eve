@@ -14,9 +14,7 @@ describe("docker CLI resolution", () => {
       const appRoot = await createScratchDirectory("eve-docker-missing-");
       const engine = createSandboxProviderHarness(createDockerSandboxProvider(), undefined);
 
-      await expect(engine.prepare({ appRoot, seedFiles: [] })).rejects.toThrow(
-        DockerUnavailableError,
-      );
+      await expect(engine.prepare({ appRoot })).rejects.toThrow(DockerUnavailableError);
     } finally {
       vi.unstubAllEnvs();
     }

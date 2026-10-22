@@ -1,6 +1,11 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
-import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
+import type {
+  SandboxDeleteOptions,
+  SandboxPreparedArtifact,
+  SandboxProviderRuntime,
+  SandboxProviderSessionContext,
+} from "#shared/sandbox-provider.js";
 
 export type SandboxSessionEndReason = "completed" | "expired" | "failed";
 
@@ -30,6 +35,80 @@ export interface SandboxState {
  */
 export function isRetiredSandboxSessionState(state: SandboxSessionState): boolean {
   return state.providerName === undefined || state.providerName === "microsandbox";
+}
+
+/** Converts a record another provider wrote into this provider's state, or `undefined`. */
+type SandboxSessionStateAdopter = (
+  state: SandboxSessionState,
+) => SandboxPreparedArtifact | undefined;
+
+const adopters = new WeakMap<object, SandboxSessionStateAdopter>();
+
+/**
+ * Lets an eve-owned provider resume records that another provider name wrote,
+ * such as `DefaultSandbox` for sessions saved when it recorded the provider it
+ * picked. Internal, so the public provider API is unchanged.
+ */
+export function withAdoptedSandboxSessionStates<Implementation extends object>(
+  implementation: Implementation,
+  adopt: SandboxSessionStateAdopter,
+): Implementation {
+  adopters.set(implementation, adopt);
+  return implementation;
+}
+
+/**
+ * The persisted record the current provider should resume, or `null` for no
+ * sandbox. A record the provider cannot adopt is returned as-is; resuming it
+ * starts a fresh sandbox, and handoff rejects it. An adopted record keeps its
+ * `generation`, because it still names the same live sandbox.
+ */
+export function resolvePersistedSandboxSessionState(
+  state: SandboxSessionState | null | undefined,
+  provider: SandboxProviderRuntime | undefined,
+): SandboxSessionState | null {
+  if (state === null || state === undefined || isRetiredSandboxSessionState(state)) return null;
+  if (provider === undefined || state.providerName === provider.providerName) return state;
+  const adopted = adopters.get(provider.implementation)?.(state);
+  return adopted === undefined
+    ? state
+    : {
+        ...state,
+        providerName: provider.providerName,
+        state: adopted,
+        stateProtocolVersion: provider.stateProtocolVersion,
+      };
+}
+
+/** Session-end cleanup that also needs the current build's prepared artifact. */
+export type SandboxSessionEndWithArtifact = (
+  context: SandboxProviderSessionContext,
+  state: SandboxPreparedArtifact | null,
+  options: {
+    readonly artifact: SandboxPreparedArtifact | undefined;
+    readonly reason: SandboxSessionEndReason;
+  },
+) => Promise<void>;
+
+const sessionEndsWithArtifact = new WeakMap<object, SandboxSessionEndWithArtifact>();
+
+/**
+ * Lets an eve-owned provider receive the prepared artifact at session end,
+ * such as `DefaultSandbox`, which finds the provider it selected there when
+ * no state was recorded. Internal, so the public provider API is unchanged.
+ */
+export function withSessionEndArtifact<Implementation extends object>(
+  implementation: Implementation,
+  onSessionEnd: SandboxSessionEndWithArtifact,
+): Implementation {
+  sessionEndsWithArtifact.set(implementation, onSessionEnd);
+  return implementation;
+}
+
+export function getSessionEndWithArtifact(
+  implementation: object,
+): SandboxSessionEndWithArtifact | undefined {
+  return sessionEndsWithArtifact.get(implementation);
 }
 
 export interface SandboxAccess {

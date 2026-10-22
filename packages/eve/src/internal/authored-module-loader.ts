@@ -8,6 +8,7 @@ import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import {
   createAuthoredModuleBuildOptions,
+  evaluatedBundleSourcemap,
   resolveAuthoredTsConfigPath,
 } from "#internal/authored-module-build-options.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
@@ -211,7 +212,7 @@ export async function bundleAuthoredModuleCode(
       createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
       ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
-    sourcemap: "inline",
+    sourcemap: evaluatedBundleSourcemap(),
   });
 }
 

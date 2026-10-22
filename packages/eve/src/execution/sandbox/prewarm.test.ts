@@ -15,9 +15,7 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 
 const mocks = vi.hoisted(() => ({
-  materializeWorkspaceDirectory: vi.fn<
-    (path: string) => Promise<readonly { readonly content: Buffer; readonly path: string }[]>
-  >(async () => []),
+  materializeWorkspaceDirectory: vi.fn(async (_path: string) => ({ skills: [], workspace: [] })),
 }));
 
 vi.mock("#runtime/workspace/seed-files.js", () => ({
@@ -27,7 +25,7 @@ vi.mock("#runtime/workspace/seed-files.js", () => ({
 describe("prewarmAppSandboxes", () => {
   afterEach(() => {
     mocks.materializeWorkspaceDirectory.mockReset();
-    mocks.materializeWorkspaceDirectory.mockResolvedValue([]);
+    mocks.materializeWorkspaceDirectory.mockResolvedValue({ skills: [], workspace: [] });
     vi.unstubAllEnvs();
   });
 
