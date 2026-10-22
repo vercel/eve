@@ -4439,9 +4439,7 @@ function isLowValueSandboxLogLine(message: string): boolean {
     /^initializing (?:\d+ )?sandbox templates?\b/i.test(message) ||
     /^initialized \d+ sandbox\b/i.test(message) ||
     /^reused cached sandbox template\b/i.test(message) ||
-    /^sandbox template "[^"]+" \([^)]+\): (checking|reusing|loading microsandbox runtime|microsandbox runtime ready)\b/i.test(
-      message,
-    )
+    /^sandbox template "[^"]+" \([^)]+\): (checking|reusing)\b/i.test(message)
   );
 }
 

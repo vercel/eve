@@ -56,7 +56,7 @@ export class DockerUnavailableError extends Error {
   readonly hint =
     "Install and start Docker Desktop, OrbStack, Colima, or another runtime exposing a " +
     "Docker-compatible `docker` CLI (or point EVE_DOCKER_PATH at one, e.g. Podman). " +
-    "Alternatively use MicrosandboxSandbox, the dependency-free JustBashSandbox, " +
+    "Alternatively use the dependency-free JustBashSandbox, " +
     "VercelSandbox, or DefaultSandbox to pick by availability.";
 
   constructor(cause?: unknown) {
@@ -74,7 +74,7 @@ export class DockerDaemonUnavailableError extends Error {
   /** Structured remediation, surfaced by the semantic-error catalog. */
   readonly hint =
     "Start Docker Desktop (or your Docker-compatible runtime) and retry. Alternatively use " +
-    "MicrosandboxSandbox, the dependency-free JustBashSandbox (installed automatically " +
+    "the dependency-free JustBashSandbox (installed automatically " +
     "by `eve dev`, or `pnpm add -D just-bash`), VercelSandbox, or DefaultSandbox " +
     "to pick by availability.";
 

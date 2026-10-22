@@ -29,9 +29,9 @@ Top-level workspace entries get advertised to the model automatically, so it kno
 
 ## Install the chart dependencies
 
-Python needs a sandbox that runs real binaries. For local development, start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. eve also supports [microsandbox](../sandbox#microsandbox) on compatible hosts. The `just-bash` fallback cannot run Python or install packages; installing Python on your laptop does not add it to the sandbox. You can [continue to the next chapter](./remember-definitions) if you do not want to set up a local container or VM yet.
+Python needs a sandbox that runs real binaries. For local development, start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. The `just-bash` fallback cannot run Python or install packages; installing Python on your laptop does not add it to the sandbox. You can [continue to the next chapter](./remember-definitions) if you do not want to set up a local container yet.
 
-The default eve images for Docker, microsandbox, and Vercel Sandbox include Python, but not matplotlib. Add this definition alongside `workspace/` to install matplotlib in a virtual environment. It uses the same environment for installation and chart execution, without changing the system Python:
+The default eve images for Docker and Vercel Sandbox include Python, but not matplotlib. Add this definition alongside `workspace/` to install matplotlib in a virtual environment. It uses the same environment for installation and chart execution, without changing the system Python:
 
 ```ts title="agent/sandbox/sandbox.ts"
 import { DefaultSandbox, defineSandbox } from "eve/sandbox";

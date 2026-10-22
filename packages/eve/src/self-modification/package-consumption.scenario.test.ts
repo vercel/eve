@@ -144,7 +144,6 @@ describe("packed package consumption", () => {
             "@vercel/connect": "2.2.0",
             eve: `file:${eveTarball}`,
             "just-bash": "3.1.0",
-            microsandbox: "0.5.5",
           },
         },
         null,
@@ -171,7 +170,6 @@ describe("packed package consumption", () => {
         connector: "github/selfmod-acme-agent",
         directory: ".",
         repository: "github.com/acme/agent",
-        vercelBackend: true,
       }),
     );
 

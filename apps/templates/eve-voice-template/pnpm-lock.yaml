@@ -58,7 +58,7 @@ importers:
         version: 0.45.2(@neondatabase/serverless@1.1.0)(@upstash/redis@1.38.2)(kysely@0.29.6)
       eve:
         specifier: ^0.78.0
-        version: 0.78.0(ai@7.0.139(zod@4.4.3))(microsandbox@0.5.10)
+        version: 0.78.0(ai@7.0.139(zod@4.4.3))
       lucide-react:
         specifier: 1.33.0
         version: 1.33.0(react@19.2.8)
@@ -111,9 +111,6 @@ importers:
       drizzle-kit:
         specifier: 0.31.10
         version: 0.31.10
-      microsandbox:
-        specifier: ^0.5.10
-        version: 0.5.10
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -1827,26 +1824,6 @@ packages:
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
 
-  '@superradcompany/microsandbox-darwin-arm64@0.5.10':
-    resolution: {integrity: sha512-MGEV2SuLzSg3SiQJy2TXRE9SoWnmIUEhCAQno5y0hJ6dsMe7FbaRDFZtHpKiK4XExAstL5WhT1XF+JJWTEfSqg==}
-    engines: {node: '>= 22'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@superradcompany/microsandbox-linux-arm64-gnu@0.5.10':
-    resolution: {integrity: sha512-4FYoAURc1qbNxIbBFK9shMQ9MxklgPRGEsY7tQog8beqvc3U91W34aZyOu90OTRJm0TNsdoLIg3lxKP4LKIJYQ==}
-    engines: {node: '>= 22'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [glibc]
-
-  '@superradcompany/microsandbox-linux-x64-gnu@0.5.10':
-    resolution: {integrity: sha512-M9FjBAQ36dxhfs5S62uVxCTNAZzxjUgprNh41dIG6H6eF+tAEHYMY1lUEf/w1rkQw8SUsVRrtS+wfVyIM4z9fA==}
-    engines: {node: '>= 22'}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
-
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
 
@@ -3237,11 +3214,6 @@ packages:
 
   micromark@4.0.3:
     resolution: {integrity: sha512-oGYfQzHSG5dOMovQcJ3fyTmZlWAWpi0XA0sJwJs+i6OT88o1+Jtw/8z0CmdowSLxGhhFK89rQ/oXph/wN02PNw==}
-
-  microsandbox@0.5.10:
-    resolution: {integrity: sha512-0NVFu8DohPq/hrG76CJ5x2x8wckNQq8KSN/VXxyVLns8WfDyBzfSSYXHUSV2evjdRB3dkA9FUJjnGujb2XRD1Q==}
-    engines: {node: '>= 22'}
-    hasBin: true
 
   motion-dom@12.43.0:
     resolution: {integrity: sha512-azKON4d9S65PEoFUiQTMTgPheEmzf2QngdRc50AKfJp9Q9mmcBVw22c8eMq9k8kxOFHdL7+WZY7N/5F/lwiDag==}
@@ -5142,15 +5114,6 @@ snapshots:
       mermaid: 11.17.2
       react: 19.2.8
 
-  '@superradcompany/microsandbox-darwin-arm64@0.5.10':
-    optional: true
-
-  '@superradcompany/microsandbox-linux-arm64-gnu@0.5.10':
-    optional: true
-
-  '@superradcompany/microsandbox-linux-x64-gnu@0.5.10':
-    optional: true
-
   '@swc/helpers@0.5.23':
     dependencies:
       tslib: 2.8.1
@@ -5924,13 +5887,11 @@ snapshots:
 
   estree-util-is-identifier-name@3.0.0: {}
 
-  eve@0.78.0(ai@7.0.139(zod@4.4.3))(microsandbox@0.5.10):
+  eve@0.78.0(ai@7.0.139(zod@4.4.3)):
     dependencies:
       ai: 7.0.139(zod@4.4.3)
       nitro: 3.0.260903-beta
       undici: 8.10.2
-    optionalDependencies:
-      microsandbox: 0.5.10
 
   eventsource-parser@3.1.1: {}
 
@@ -6672,12 +6633,6 @@ snapshots:
       micromark-util-types: 2.0.3
     transitivePeerDependencies:
       - supports-color
-
-  microsandbox@0.5.10:
-    optionalDependencies:
-      '@superradcompany/microsandbox-darwin-arm64': 0.5.10
-      '@superradcompany/microsandbox-linux-arm64-gnu': 0.5.10
-      '@superradcompany/microsandbox-linux-x64-gnu': 0.5.10
 
   motion-dom@12.43.0:
     dependencies:

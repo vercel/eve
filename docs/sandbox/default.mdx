@@ -12,7 +12,7 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it tries [Docker](/docs/sandbox/docker), [microsandbox](/docs/sandbox/microsandbox), and [just-bash](/docs/sandbox/just-bash), in that order, according to host support.
+On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it selects [Docker](/docs/sandbox/docker) when a Docker daemon is reachable and falls back to [just-bash](/docs/sandbox/just-bash) otherwise.
 
 Use a provider directly when you need options for `open()`, such as a per-sandbox `networkPolicy` or Vercel Drive `mounts`, or a provider-specific session such as one with `setNetworkPolicy()`.
 
@@ -22,7 +22,7 @@ Use a provider directly when you need options for `open()`, such as a per-sandbo
 
 1. If the `VERCEL` environment variable is set, it selects Vercel.
 2. Otherwise, if `docker version` reports a running Linux Docker daemon within five seconds, it selects Docker. eve checks once per process and reuses the answer.
-3. Otherwise, it uses the next supported provider in the order above.
+3. Otherwise, it selects just-bash.
 
 `eve build`, `eve dev`, and each production server process load the sandbox module separately, so each one selects a provider for its own host. If the build host and the runtime host differ, they can select different providers. For example, a build on a CI machine without Docker prepares a different provider's environment than a server with Docker selects, and the server fails with a provider mismatch error. Run `eve build` where the runtime's provider is available, or select that provider explicitly with `DockerSandbox` or `VercelSandbox`. See [Sandbox troubleshooting](/docs/sandbox/troubleshooting) for the exact errors.
 

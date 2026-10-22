@@ -262,11 +262,6 @@
       "import": "./dist/src/public/sandbox/just-bash.js",
       "default": "./dist/src/public/sandbox/just-bash.js"
     },
-    "./sandbox/microsandbox": {
-      "types": "./dist/src/public/sandbox/microsandbox.d.ts",
-      "import": "./dist/src/public/sandbox/microsandbox.js",
-      "default": "./dist/src/public/sandbox/microsandbox.js"
-    },
     "./sandbox/vercel": {
       "types": "./dist/src/public/sandbox/vercel.d.ts",
       "import": "./dist/src/public/sandbox/vercel.js",
@@ -645,7 +640,6 @@
     "just-bash": "3.1.0",
     "just-secrets": "0.0.2",
     "marked": "catalog:",
-    "microsandbox": "0.5.5",
     "next": "catalog:",
     "picocolors": "catalog:",
     "playwright-core": "1.63.0",
@@ -667,8 +661,7 @@
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",
     "dd-trace": "^6.13.0",
-    "just-bash": "^3.1.0",
-    "microsandbox": "^0.5.0"
+    "just-bash": "^3.1.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {
@@ -684,9 +677,6 @@
       "optional": true
     },
     "just-bash": {
-      "optional": true
-    },
-    "microsandbox": {
       "optional": true
     }
   },

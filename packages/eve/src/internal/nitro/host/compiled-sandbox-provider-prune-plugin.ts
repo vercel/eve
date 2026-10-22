@@ -3,10 +3,9 @@ const PRUNED_LOCAL_SANDBOX_MODULE_ID = "\0eve-pruned-local-sandbox-providers";
 const PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID = "\0eve-pruned-local-sandbox-provider-constructors";
 const PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID = "\0eve-pruned-optional-engine-install";
 const DEFAULT_PROVIDER_SOURCE_RE = /(?:^|[/\\#])sandbox[/\\]providers[/\\]default\.(?:js|ts)$/;
-const LOCAL_BINDING_SOURCE_RE =
-  /[/\\]bindings[/\\](?:docker|just-bash|local|microsandbox)\.(?:js|ts)$/;
+const LOCAL_BINDING_SOURCE_RE = /[/\\]bindings[/\\](?:docker|just-bash|local)\.(?:js|ts)$/;
 const LOCAL_PROVIDER_SOURCE_RE =
-  /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|just-bash|microsandbox)\.(?:js|ts)$/;
+  /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|just-bash)\.(?:js|ts)$/;
 const OPTIONAL_ENGINE_INSTALL_SOURCE_RE =
   /[/\\]internal[/\\]application[/\\]optional-package-install\.(?:js|ts)$/;
 
@@ -22,7 +21,7 @@ interface BundlerPluginShape {
 
 /**
  * Creates the bundler plugin that prunes the local sandbox providers
- * (Docker, just-bash, microsandbox) from hosted Nitro server bundles.
+ * (Docker, just-bash) from hosted Nitro server bundles.
  * Stubs both the aggregate local facade and individual provider bindings so
  * framework default selection cannot retain local engine implementations.
  */
@@ -40,7 +39,6 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
           "  return createDefaultVercelEnvironment(vercelOptions);",
           "}",
           'export const DefaultSandbox = { name: "default", environment };',
-          "export const SANDBOX_PROVIDER_PROBES = {};",
           'export function defineDefaultSandboxProvider() { return { name: "default", environment }; }',
           "",
         ].join("\n");
@@ -70,7 +68,6 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
           "}",
           'export const DockerSandbox = { name: "docker", environment: pruned, dockerfile: pruned, image: pruned };',
           'export const JustBashSandbox = { name: "just-bash", environment: pruned };',
-          'export const MicrosandboxSandbox = { name: "microsandbox", environment: pruned, dockerfile: pruned, image: pruned };',
           "",
         ].join("\n");
       }
@@ -84,16 +81,12 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
         "}",
         "export const createDockerSandboxProvider = pruned;",
         "export const createJustBashSandboxProvider = pruned;",
-        "export const createMicrosandboxSandboxProvider = pruned;",
         'export const DOCKER_PROVIDER_NAME = "docker";',
         'export const DOCKER_TEMPLATE_IMAGE_REPOSITORY = "eve-sandbox-template";',
         'export const JUST_BASH_PROVIDER_NAME = "just-bash";',
-        'export const MICROSANDBOX_PROVIDER_NAME = "microsandbox";',
         "export const isLinuxDockerDaemonAvailableSync = () => false;",
-        "export const isMicrosandboxPlatformSupported = () => false;",
         "export const pruneDockerSandboxTemplates = pruned;",
         "export const pruneJustBashSandboxTemplates = pruned;",
-        "export const pruneMicrosandboxTemplates = pruned;",
         "export const pruneLocalSandboxTemplates = pruned;",
         "export const pruneLocalSandboxTemplatesInBackground = pruned;",
         "export const stopDevelopmentSandboxResources = pruned;",

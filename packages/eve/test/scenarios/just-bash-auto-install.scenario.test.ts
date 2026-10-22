@@ -48,7 +48,6 @@ describe("just-bash automatic installation", () => {
     try {
       expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);
       expect(existsSync(join(app.appRoot, "node_modules", "just-bash"))).toBe(false);
-      expect(existsSync(join(app.appRoot, "node_modules", "microsandbox"))).toBe(false);
       expect(await readFile(join(app.appRoot, "pnpm-workspace.yaml"), "utf8")).not.toContain(
         "ignoredOptionalDependencies:",
       );

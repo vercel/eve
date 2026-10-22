@@ -8,15 +8,11 @@ describe("createOptionalEngineDependencyPlugin", () => {
   });
 
   it("pins unconfigured engine packages as plain externals", () => {
-    const plugin = createOptionalEngineDependencyPlugin(["just-bash", "microsandbox"]);
+    const plugin = createOptionalEngineDependencyPlugin(["just-bash"]);
 
     expect(plugin?.resolveId?.("just-bash", undefined)).toEqual({
       external: true,
       id: "just-bash",
-    });
-    expect(plugin?.resolveId?.("microsandbox", undefined)).toEqual({
-      external: true,
-      id: "microsandbox",
     });
   });
 
@@ -24,7 +20,6 @@ describe("createOptionalEngineDependencyPlugin", () => {
     const plugin = createOptionalEngineDependencyPlugin(["just-bash"]);
 
     expect(plugin?.resolveId?.("zod", undefined)).toBeNull();
-    expect(plugin?.resolveId?.("microsandbox", undefined)).toBeNull();
     expect(plugin?.resolveId?.("just-bash/browser", undefined)).toBeNull();
   });
 });

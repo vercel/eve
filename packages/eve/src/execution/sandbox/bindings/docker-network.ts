@@ -16,7 +16,7 @@ export async function setDockerNetworkPolicy(
     throw new Error(
       'The local Docker sandbox provider supports only the "allow-all" and "deny-all" network ' +
         "policies. Domain-level allow-lists and credential brokering require the Vercel provider " +
-        "(VercelSandbox) or MicrosandboxSandbox.",
+        "(VercelSandbox).",
     );
   }
 

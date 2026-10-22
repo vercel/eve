@@ -102,45 +102,42 @@ describe("prewarmAppSandboxes", () => {
     expect(await preparation).toMatchObject({ message: "first provider failed" });
   });
 
-  it.each(["docker", "microsandbox"])(
-    "explains that %s is unavailable during Vercel prewarm",
-    async (providerName) => {
-      vi.stubEnv("VERCEL", "1");
+  it("explains that docker is unavailable during Vercel prewarm", async () => {
+    vi.stubEnv("VERCEL", "1");
 
-      const appRoot = process.cwd();
-      const cause = new Error("provider host check failed");
-      const log = vi.fn();
+    const appRoot = process.cwd();
+    const cause = new Error("provider host check failed");
+    const log = vi.fn();
 
-      await expect(
-        prewarmAppSandboxes({
-          appRoot,
-          compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
-          dispatch: async () => {
-            throw cause;
-          },
-          loadAgentGraph: async () => createGraph({ providerName }),
-          log,
-        }),
-      ).rejects.toMatchObject({
-        cause,
-        message: expect.stringContaining(
-          `The ${providerName} sandbox provider is not available when deploying on Vercel.`,
-        ),
-      });
+    await expect(
+      prewarmAppSandboxes({
+        appRoot,
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+        dispatch: async () => {
+          throw cause;
+        },
+        loadAgentGraph: async () => createGraph({ providerName: "docker" }),
+        log,
+      }),
+    ).rejects.toMatchObject({
+      cause,
+      message: expect.stringContaining(
+        "The docker sandbox provider is not available when deploying on Vercel.",
+      ),
+    });
 
-      const messages = log.mock.calls.map(([message]) => String(message));
-      expect(messages).toEqual([
-        "eve: initializing 1 sandbox template...",
-        expect.stringContaining(
-          `The ${providerName} sandbox provider is not available when deploying on Vercel.`,
-        ),
-      ]);
-      expect(messages[1]).toContain("Use DefaultSandbox.environment()");
-      expect(messages[1]).toContain("VercelSandbox.environment() explicitly");
-      expect(messages[1]).toContain("Original");
-      expect(messages[1]).toContain(cause.message);
-    },
-  );
+    const messages = log.mock.calls.map(([message]) => String(message));
+    expect(messages).toEqual([
+      "eve: initializing 1 sandbox template...",
+      expect.stringContaining(
+        "The docker sandbox provider is not available when deploying on Vercel.",
+      ),
+    ]);
+    expect(messages[1]).toContain("Use DefaultSandbox.environment()");
+    expect(messages[1]).toContain("VercelSandbox.environment() explicitly");
+    expect(messages[1]).toContain("Original");
+    expect(messages[1]).toContain(cause.message);
+  });
 });
 
 function createMemoryArtifactStore(): SandboxPreparedArtifactStore {

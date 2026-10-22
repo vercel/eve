@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
@@ -18,11 +20,12 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import type {
-  SandboxAccess,
-  SandboxSessionEndReason,
-  SandboxSessionState,
-  SandboxState,
+import {
+  isRetiredSandboxSessionState,
+  type SandboxAccess,
+  type SandboxSessionEndReason,
+  type SandboxSessionState,
+  type SandboxState,
 } from "#sandbox/state.js";
 import {
   getSandboxEnvironmentRuntime,
@@ -91,11 +94,10 @@ const log = createLogger("execution.sandbox");
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
 ): Promise<EnsuredSandboxAccess> {
-  // Sessions saved before the provider redesign (eve 0.64) hold a backend
-  // record with no `providerName`. No provider can resume it, so treat it as
-  // no sandbox and let the selector start a fresh one.
+  // A retired record cannot resume, so let the selector start a fresh sandbox.
+  const session = input.state?.session ?? null;
   let persisted: SandboxSessionState | null =
-    input.state?.session?.providerName === undefined ? null : input.state.session;
+    session === null || isRetiredSandboxSessionState(session) ? null : session;
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
@@ -201,6 +203,7 @@ export async function ensureSandboxAccess(
         );
       }
       persisted = {
+        generation: randomUUID(),
         providerName: provider.providerName,
         state: result.state,
         stateProtocolVersion: provider.stateProtocolVersion,
