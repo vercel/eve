@@ -429,6 +429,17 @@ describe("createVercelSandbox", () => {
     expect(explicitImage).not.toBe(first);
   });
 
+  it("reports a create option the template key cannot hash as a Vercel preparation failure", async () => {
+    const provider = createTestVercelSandbox({
+      createOptions: { resources: new Map() } as never,
+      loadSandboxModule: async () => createFakeVercelProvider().sandboxModule as never,
+    });
+
+    await expect(provider.prepare({ appRoot: "/tmp/test-app-root" })).rejects.toThrow(
+      /^Failed to prepare Vercel sandbox snapshot: ctx\.templateKey\(\) accepts only JSON values/,
+    );
+  });
+
   it("uses an author-supplied image for fresh Vercel sandboxes", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const sandboxModule = {
@@ -765,7 +776,6 @@ describe("createVercelSandbox", () => {
     it("names session sandboxes and records their state as before", async () => {
       const fake = createFakeVercelProvider();
       const provider = createTestVercelSandbox({
-        loadDeleteSandboxModule: async () => fake.sandboxModule as never,
         loadSandboxModule: async () => fake.sandboxModule as never,
       });
 
@@ -829,7 +839,6 @@ describe("createVercelSandbox", () => {
       const fake = createFakeVercelProvider();
       fake.seedTemplate(sandboxName, createMockSandbox({ name: sandboxName, status: "stopped" }));
       const provider = createTestVercelSandbox({
-        loadDeleteSandboxModule: async () => fake.sandboxModule as never,
         loadSandboxModule: async () => fake.sandboxModule as never,
       });
       const prepared = { snapshotId: "snap_previous_release" };
@@ -908,7 +917,6 @@ describe("createVercelSandbox", () => {
     function session() {
       const fake = createFakeVercelProvider();
       const provider = createTestVercelSandbox({
-        loadDeleteSandboxModule: async () => fake.sandboxModule as never,
         loadSandboxModule: async () => fake.sandboxModule as never,
       });
       const start = (
@@ -977,7 +985,6 @@ describe("createVercelSandbox", () => {
         },
       };
       const provider = createTestVercelSandbox({
-        loadDeleteSandboxModule: async () => sandboxModule as never,
         loadSandboxModule: async () => sandboxModule as never,
       });
       const open = async (sessionId = "tool_session_abc") =>
@@ -1528,7 +1535,6 @@ describe("createVercelSandbox", () => {
   it("stops the sandbox and asks Vercel to delete orphan snapshots when deleting it", async () => {
     const fake = createFakeVercelProvider();
     const provider = createTestVercelSandbox({
-      loadDeleteSandboxModule: async () => fake.sandboxModule as never,
       loadSandboxModule: async () => fake.sandboxModule as never,
     });
     const handle = await provider.openSession({
@@ -1619,14 +1625,12 @@ describe("createVercelSandbox", () => {
   it("discards a fresh template-less session when applying its policy fails", async () => {
     const sessionSandbox = createMockSandbox({ name: "session" });
     sessionSandbox.update.mockRejectedValueOnce(new Error("policy rejected"));
-    const stableDelete = vi.fn().mockResolvedValue(undefined);
+    const fake = createFakeVercelProvider(sessionSandbox);
     const provider = createSandboxProviderHarness(
       vercelImplementation({
-        createSandbox: async () => sessionSandbox as never,
-        loadDeleteSandboxModule: async () =>
-          ({ Sandbox: { get: vi.fn().mockResolvedValue({ delete: stableDelete }) } }) as never,
-        loadSandboxModule: async () =>
-          ({ Sandbox: { get: vi.fn().mockResolvedValue(null) } }) as never,
+        createSandbox: async ({ createOptions, sandboxModule }) =>
+          await sandboxModule.Sandbox.create(createOptions),
+        loadSandboxModule: async () => fake.sandboxModule as never,
       }),
       { networkPolicy: "deny-all" },
       { preparedArtifact: () => ({}) },
@@ -1636,7 +1640,8 @@ describe("createVercelSandbox", () => {
       provider.start({ appRoot: "/tmp/test-app-root", sandboxName: "session-key" }),
     ).rejects.toThrow("policy rejected");
     expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
-    expect(stableDelete).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.delete).toHaveBeenCalledTimes(1);
+    expect(fake.sandboxes.size).toBe(0);
   });
 
   it("brokers credentials through the session's setNetworkPolicy to sandbox.update", async () => {

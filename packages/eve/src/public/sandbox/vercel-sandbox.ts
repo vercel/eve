@@ -64,15 +64,9 @@ export type VercelSandboxMount =
 /** Drive mounts keyed by absolute sandbox path. */
 export type VercelSandboxMounts = Readonly<Record<string, VercelSandboxMount>>;
 
-/** Options resolved when eve creates a fresh live session sandbox. */
-export interface VercelSandboxMountOptions {
-  readonly mounts?: VercelSandboxMounts;
-}
-
 /** Options accepted when creating one live Vercel sandbox from an environment. */
 export type VercelSandboxRuntimeOptions = Omit<
   VercelSandboxCreateOptions,
   "fetch" | "image" | "projectId" | "source" | "tags" | "teamId" | "token"
 > &
-  SandboxNetworkOptions &
-  VercelSandboxMountOptions;
+  SandboxNetworkOptions & { readonly mounts?: VercelSandboxMounts };

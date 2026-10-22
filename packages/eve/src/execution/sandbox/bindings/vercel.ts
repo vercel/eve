@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 
 import type {
-  SandboxNetworkPolicy,
   SandboxProcess,
   SandboxRemovePathOptions,
   SandboxWriteFilesOptions,
@@ -21,6 +20,7 @@ import type {
   VercelSandboxMounts,
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
+import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
@@ -42,7 +42,6 @@ import {
 import {
   deleteNamedVercelSandbox,
   deleteUnusableVercelSandbox,
-  deleteVercelSandbox,
   stopVercelSandbox,
 } from "#execution/sandbox/bindings/vercel-lifecycle.js";
 import {
@@ -63,6 +62,7 @@ import type {
 import { withToolSessionRetention } from "#execution/sandbox/bindings/vercel-tool-sessions.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
+import { isObject } from "#shared/guards.js";
 import {
   invalidPreparedSandboxArtifactError,
   invalidSandboxSessionStateError,
@@ -78,15 +78,11 @@ export type VercelSandboxSessionState = {
 };
 
 /** Capabilities a Vercel connection adds to the session. */
-export interface VercelSandboxExtensions {
-  readonly name: string;
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
-}
+export type VercelSandboxExtensions = Pick<VercelSandboxSession, "name" | "setNetworkPolicy">;
 
 interface CreateVercelSandboxInput {
   readonly createSandbox?: CreateVercelSandbox;
   readonly createOptions?: VercelCreateOptions;
-  readonly loadDeleteSandboxModule?: () => Promise<VercelModule>;
   readonly loadSandboxModule?: () => Promise<VercelModule>;
 }
 
@@ -100,9 +96,6 @@ export function createVercelSandbox(
 > {
   const loadSandboxModule =
     input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
-  const loadDeleteSandboxModule =
-    input.loadDeleteSandboxModule ??
-    (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const createOptions: ResolvedVercelCreateOptions = {
     ...input.createOptions,
     env: { ...SANDBOX_AGENT_ENV, ...input.createOptions?.env },
@@ -114,7 +107,7 @@ export function createVercelSandbox(
     async onSessionEnd(context, state, { abortSignal }) {
       await deleteNamedVercelSandbox({
         createOptions,
-        loadDeleteSandboxModule,
+        sandboxModule: await loadSandboxModule(),
         sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
         signal: abortSignal,
       });
@@ -124,17 +117,17 @@ export function createVercelSandbox(
       // runs anyway. An authored `source` keeps one, so sessions start from
       // the build's capture instead of fetching the source again.
       if (context.isEmpty && createOptions.source === undefined) return {};
-      const templateKey = `eve-sbx-tpl-vercel-${context
-        .templateKey({
-          createOptions: vercelIdentityOptions(createOptions),
-          resolvedImage:
-            createOptions.source === undefined
-              ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
-              : undefined,
-          version: 3,
-        })
-        .slice(0, 32)}`;
       try {
+        const templateKey = `eve-sbx-tpl-vercel-${context
+          .templateKey({
+            createOptions: vercelIdentityOptions(createOptions),
+            resolvedImage:
+              createOptions.source === undefined
+                ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
+                : undefined,
+            version: 3,
+          })
+          .slice(0, 32)}`;
         const snapshotId = await ensureTemplate({
           context,
           createOptions,
@@ -210,7 +203,6 @@ export function createVercelSandbox(
         // Only an expired snapshot gives a tool session a fresh sandbox.
         expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
         input: ensureSessionInput,
-        loadDeleteSandboxModule,
         session: await ensureSession(ensureSessionInput),
       });
       // Template-less sessions run base setup with open egress, so the policy
@@ -221,10 +213,10 @@ export function createVercelSandbox(
           await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
         } catch (error) {
           try {
-            await deleteVercelSandbox({
+            await deleteNamedVercelSandbox({
               createOptions: sessionCreateOptions,
-              loadDeleteSandboxModule,
-              sandbox: session.sandbox,
+              sandboxModule,
+              sandboxName: session.sandbox.name,
             });
           } catch (cleanupError) {
             throw new AggregateError(
@@ -268,12 +260,8 @@ function vercelIdentityOptions(options: object | undefined): object | undefined 
   return Object.fromEntries(Object.entries(options).filter(([key]) => !excluded.has(key)));
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function requireVercelSessionState(state: SandboxJson): VercelSandboxSessionState {
-  if (!isRecord(state) || state.version !== 3 || typeof state.sandboxName !== "string") {
+  if (!isObject(state) || state.version !== 3 || typeof state.sandboxName !== "string") {
     throw invalidSandboxSessionStateError("Vercel sandbox");
   }
   return { sandboxName: state.sandboxName, version: 3 };
@@ -281,7 +269,7 @@ function requireVercelSessionState(state: SandboxJson): VercelSandboxSessionStat
 
 function requirePreparedVercelTemplate(artifact: SandboxJson): VercelSandboxPreparedArtifact {
   if (
-    !isRecord(artifact) ||
+    !isObject(artifact) ||
     (artifact.snapshotId !== undefined && typeof artifact.snapshotId !== "string")
   ) {
     throw invalidPreparedSandboxArtifactError("Vercel sandbox");
@@ -459,7 +447,6 @@ interface VercelSandboxSessionCreateResult {
 async function ensureUsableSession(input: {
   readonly expired: (error: unknown) => boolean;
   readonly input: EnsureSessionInput;
-  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly session: VercelSandboxSessionCreateResult;
 }): Promise<VercelSandboxSessionCreateResult> {
   try {
@@ -474,8 +461,8 @@ async function ensureUsableSession(input: {
   try {
     await deleteUnusableVercelSandbox({
       createOptions: input.input.createOptions,
-      loadDeleteSandboxModule: input.loadDeleteSandboxModule,
-      sandbox: input.session.sandbox,
+      sandboxModule: input.input.sandboxModule,
+      sandboxName: input.session.sandbox.name,
     });
   } catch (error) {
     // Another instance that saw the same expiry deleted it first.
