@@ -426,6 +426,24 @@ describe("ensureSandboxAccess", () => {
     expect(value.closeSandbox).toHaveBeenCalledOnce();
   });
 
+  it("stops a stopped sandbox again at shutdown until its session ends", async () => {
+    const value = fixture();
+    const { access, sandbox } = await open(value.registry);
+    if (sandbox === null) throw new Error("Expected a sandbox.");
+    await access.stop();
+    // A resumed connection is still running, so shutdown stops it again.
+    await sandbox.run({ command: "true" });
+    expect(value.create).toHaveBeenCalledOnce();
+    await shutdownActiveSandboxConnections();
+    expect(value.stopSandbox).toHaveBeenCalledTimes(2);
+
+    const ended = await open(value.registry, "session-2");
+    await ended.access.stop();
+    await ended.access.end("completed");
+    await shutdownActiveSandboxConnections();
+    expect(value.stopSandbox).toHaveBeenCalledTimes(3);
+  });
+
   it.each([
     ["session", false, { closed: 0, stopped: 1 }],
     ["session", true, { closed: 1, stopped: 0 }],

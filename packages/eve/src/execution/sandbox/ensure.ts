@@ -116,6 +116,8 @@ export async function ensureSandboxAccess(
       : undefined,
   );
   let opened: OpenedSandbox | undefined;
+  // A stopped connection resumes on its next use, so shutdown keeps it until the session lets go.
+  let stopped: OpenedSandbox | undefined;
   let opening: Promise<OpenedSandbox> | undefined;
   let requiring: Promise<OpenedSandbox> | undefined;
   const tracking = input.shutdownTracking ?? "session";
@@ -373,6 +375,7 @@ export async function ensureSandboxAccess(
   /** The sandbox is gone, so shutdown has nothing left to stop for the session. */
   function forgetSandbox(providerName: string) {
     forgetOpened();
+    stopped = undefined;
     untrackActiveSandboxConnection({ providerName, sessionId: input.sessionId });
     persisted = null;
   }
@@ -431,6 +434,15 @@ export async function ensureSandboxAccess(
       // A failed open left nothing to let go of.
       if (requiring !== undefined) await requiring.catch(() => undefined);
       const current = forgetOpened();
+      // A keyed call never ends, so it drops a connection it stopped instead of keeping it for shutdown.
+      if (stopped !== undefined && tracking !== "session") {
+        untrackActiveSandboxConnection({
+          connection: stopped,
+          providerName: stopped.providerName,
+          sessionId: input.sessionId,
+        });
+        stopped = undefined;
+      }
       // Without `close()` there is nothing to free, and shutdown still stops the session's sandbox.
       if (current === undefined || (tracking === "session" && !current.closable)) return;
       untrackActiveSandboxConnection({
@@ -444,11 +456,7 @@ export async function ensureSandboxAccess(
       const current = await requireOpened();
       await current.stop();
       forgetOpened();
-      untrackActiveSandboxConnection({
-        connection: current,
-        providerName: current.providerName,
-        sessionId: input.sessionId,
-      });
+      stopped = current;
     },
   };
 

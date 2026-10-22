@@ -434,7 +434,7 @@ const SANDBOX_CORE_IMPORT_RE =
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule44(posix, lines, violations) {
   if (!SANDBOX_PROVIDER_DIRS.some((dir) => posix.startsWith(dir))) return;
-  if (/\.test\.ts$/.test(posix)) return;
+  if (posix.endsWith(".test.ts")) return;
   lines.forEach((line, index) => {
     if (!SANDBOX_CORE_IMPORT_RE.test(line)) return;
     violations.push({
