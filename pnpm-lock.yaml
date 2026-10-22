@@ -1857,7 +1857,7 @@ importers:
         version: 2.8.0
       '@vercel/connect':
         specifier: 'catalog:'
-        version: 2.5.2(@ai-sdk/mcp@2.0.73(zod@4.5.4))(@chat-adapter/slack@4.42.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.137(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5))
+        version: 2.5.2(@ai-sdk/mcp@2.0.73(zod@4.5.4))(@chat-adapter/slack@4.42.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.137(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2)))
       '@vercel/detect-agent':
         specifier: 1.2.3
         version: 1.2.3
@@ -4454,18 +4454,21 @@ packages:
   '@opentelemetry/sdk-trace-base@2.11.0':
     resolution: {integrity: sha512-H19x/TX/LZdqiYOjM7fqtSxwlplC5pgelavqbQdHbhdq0q/AI/TGkM2dfGuuynTXmJPeF2HoZVoPDu+TGoW78A==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-base@2.6.1':
     resolution: {integrity: sha512-r86ut4T1e8vNwB35CqCcKd45yzqH6/6Wzvpk2/cZB8PsPLlZFTvrh8yfOS3CYZYcUmAx4hHTZJ8AO8Dj8nrdhw==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-base@2.7.1':
     resolution: {integrity: sha512-NAYIlsF8MPUsKqJMiDQJTMPOmlbawC1Iz/omMLygZ1C9am8fTKYjTaI+OZM+WTY3t3Glo0wnOg/6/pac6RGPPw==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
@@ -6630,26 +6633,6 @@ packages:
     engines: {node: '>=24'}
     peerDependencies:
       eve: ^0.47.3
-
-  '@superradcompany/microsandbox-darwin-arm64@0.5.5':
-    resolution: {integrity: sha512-Yy7b2Ak+/WT+Ho3yRrcKclSl+hNVwcEAqtrWFLIQoGIjSCYEsL30r9S21zKFgd7z5o/FMdaGt/sNqWsV47Ar5g==}
-    engines: {node: '>= 22'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@superradcompany/microsandbox-linux-arm64-gnu@0.5.5':
-    resolution: {integrity: sha512-rOTT9yv81gEExbu8FDIyVQtN4wUk734jqWVNSXnMOk8CqLlIHZzLw0wRzkvWvuMUQ59B9GHG7jOzIinIkmnlsw==}
-    engines: {node: '>= 22'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [glibc]
-
-  '@superradcompany/microsandbox-linux-x64-gnu@0.5.5':
-    resolution: {integrity: sha512-ZCrZskoX5wR6nQ42AqDXrJXE2t+2+/N3hb522Wudif+09Sr8OXFB3U2NA2YzN6yvzeL4PFga/DX/BT5jtsRjdg==}
-    engines: {node: '>= 22'}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
 
   '@sveltejs/acorn-typescript@1.0.13':
     resolution: {integrity: sha512-wgKggnhZVL9Bfx1OaKKTrYY9BFRk6C8UAkQNUcIv1+llzYrIqy+RZm5HPKzn0NpEBvTVhTqB4kQyllZywsRBRQ==}
@@ -12141,11 +12124,6 @@ packages:
   micromatch@4.0.8:
     resolution: {integrity: sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA==}
     engines: {node: '>=8.6'}
-
-  microsandbox@0.5.5:
-    resolution: {integrity: sha512-AJBFSIK4TYEO6pNfuXfceq3BcqOj2hxBEQjiXYNv6C4UtGDE2CNSzLwGzT2CCkuucRy+9EWvO8KS/zSZMgd/CA==}
-    engines: {node: '>= 22'}
-    hasBin: true
 
   mime-db@1.52.0:
     resolution: {integrity: sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==}
@@ -20677,15 +20655,6 @@ snapshots:
       supermemory: 4.25.4
       zod: 4.4.3
 
-  '@superradcompany/microsandbox-darwin-arm64@0.5.5':
-    optional: true
-
-  '@superradcompany/microsandbox-linux-arm64-gnu@0.5.5':
-    optional: true
-
-  '@superradcompany/microsandbox-linux-x64-gnu@0.5.5':
-    optional: true
-
   '@sveltejs/acorn-typescript@1.0.13(acorn@8.18.0)':
     dependencies:
       acorn: 8.18.0
@@ -21915,7 +21884,7 @@ snapshots:
       ai: 7.0.128(zod@4.5.4)
       eve: link:packages/eve
 
-  '@vercel/connect@2.5.2(@ai-sdk/mcp@2.0.73(zod@4.5.4))(@chat-adapter/slack@4.42.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.137(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5))':
+  '@vercel/connect@2.5.2(@ai-sdk/mcp@2.0.73(zod@4.5.4))(@chat-adapter/slack@4.42.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.137(zod@4.5.4))(eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2)))':
     dependencies:
       '@vercel/oidc': 4.0.1
     optionalDependencies:
@@ -21923,7 +21892,7 @@ snapshots:
       '@chat-adapter/slack': 4.42.0(ai@7.0.137(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
       '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4)
       ai: 7.0.137(zod@4.5.4)
-      eve: 0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5)
+      eve: 0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))
 
   '@vercel/detect-agent@1.2.3': {}
 
@@ -24631,7 +24600,7 @@ snapshots:
       ai: 7.0.137(zod@4.5.4)
       eve: link:packages/eve
 
-  eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5):
+  eve@0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.137(zod@4.5.4))(braintrust@3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2)):
     dependencies:
       ai: 7.0.137(zod@4.5.4)
       nitro: 3.0.260903-beta
@@ -24642,7 +24611,6 @@ snapshots:
       chat: 4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
       dd-trace: 6.13.0
       just-bash: 3.1.0(supports-color@10.2.2)
-      microsandbox: 0.5.5
     optional: true
 
   event-target-shim@5.0.1: {}
@@ -27292,13 +27260,6 @@ snapshots:
     dependencies:
       braces: 3.0.3
       picomatch: 2.3.2
-
-  microsandbox@0.5.5:
-    optionalDependencies:
-      '@superradcompany/microsandbox-darwin-arm64': 0.5.5
-      '@superradcompany/microsandbox-linux-arm64-gnu': 0.5.5
-      '@superradcompany/microsandbox-linux-x64-gnu': 0.5.5
-    optional: true
 
   mime-db@1.52.0: {}
 
