@@ -106,17 +106,26 @@ describe("normalizeToolModelOutput", () => {
   });
 
   it.each([
-    ["http URL", "http://example.com/a.pdf"],
-    ["sandbox ref", "eve-sandbox:/workspace/.eve/attachments/a.pdf"],
-    ["data URL", "data:application/pdf;base64,aGVsbG8="],
-    ["relative path", "/workspace/a.pdf"],
-  ])("rejects a file url that is a %s", (_label, url) => {
-    expect(() =>
+    ["http URL", "http://minio.internal/a.pdf?X-Amz-Signature=secret", /received a http: URL/u],
+    [
+      "sandbox ref",
+      "eve-sandbox:/workspace/.eve/attachments/a.pdf",
+      /received a eve-sandbox: URL/u,
+    ],
+    ["data URL", "data:application/pdf;base64,aGVsbG8=", /received a data: URL/u],
+    ["relative path", "/workspace/a.pdf", /received a value that is not a URL/u],
+  ])("rejects a file url that is a %s without echoing it", (_label, url, expected) => {
+    let error: unknown;
+    try {
       normalize({
         type: "content",
         value: [{ type: "file", data: { type: "url", url }, mediaType: "application/pdf" }],
-      }),
-    ).toThrow(/https: URL/u);
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(String(error)).toMatch(expected);
+    expect(String(error)).not.toContain(url);
   });
 
   it.each([

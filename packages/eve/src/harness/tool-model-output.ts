@@ -143,11 +143,15 @@ function normalizeContentPart(
 /**
  * Only `https:` URLs are accepted: the provider fetches them, and eve's
  * own attachment refs use internal schemes that must never be authored.
+ * The error names only the scheme, since presigned URLs carry credentials.
  */
 function parseFileUrl(value: string): URL {
   const url = URL.canParse(value) ? new URL(value) : undefined;
   if (url?.protocol !== "https:") {
-    throw new TypeError(`Expected file content part url to be an https: URL, received "${value}".`);
+    const received = url === undefined ? "a value that is not a URL" : `a ${url.protocol} URL`;
+    throw new TypeError(
+      `Expected file content part url to be an https: URL, received ${received}.`,
+    );
   }
   return url;
 }

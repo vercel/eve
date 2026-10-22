@@ -356,6 +356,8 @@ eve keeps only the URL in session history and does not write the file to the san
 
 Every later model call sends the same URL again, so it must stay readable for the rest of the session. A presigned URL that expires mid-session makes later model calls fail. The provider still counts the file's input tokens on each call, the same as an inline file.
 
+Unlike a staged file, a URL part has no sandbox path to fall back on. When compaction drops the tool result, the file becomes `Attached file <filename> (<mediaType>)` and the URL is gone. If the agent may need the file again later, also return a text part with an id or path the tool can fetch it by.
+
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 
 ## What to read next
