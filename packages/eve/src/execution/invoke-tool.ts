@@ -1,7 +1,7 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import { resolveApprovalPolicy } from "#approval/definition.js";
-import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
+import type { ApprovalDecision } from "#approval/status.js";
+import { decideApproval } from "#harness/tools.js";
 import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
 import {
   compiledToolOwner,
@@ -12,7 +12,6 @@ import { isAnonymousPrincipal } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import { buildCallbackContext } from "#context/build-callback-context.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
@@ -302,15 +301,11 @@ async function runCall(input: {
   let approval: ApprovalDecision = { denied: false };
   if (definition.approval !== undefined) {
     try {
-      approval = approvalDecision(
-        await resolveApprovalPolicy(definition.approval)({
-          ...buildCallbackContext(),
-          abortSignal: signal,
-          callId,
-          toolInput: input.input,
-          toolName: definition.name,
-        }),
-      );
+      approval = await decideApproval(definition, {
+        abortSignal: signal,
+        callId,
+        input: input.input,
+      });
     } catch (error) {
       observer.failedWith(error);
       return failedFromError(error, definition.name, "approval policy failed");
