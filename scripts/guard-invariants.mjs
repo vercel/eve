@@ -99,9 +99,12 @@
  *             Files under `src/execution/sandbox/bindings/` and
  *             `src/sandbox/providers/` reach the contract only through
  *             `#public/sandbox/*` and never import core sandbox modules
- *             (session construction, ensure, prewarm, tool sessions, the
- *             runtime sandbox registry, or the shared provider and session
- *             internals). Engine helpers such as other binding modules,
+ *             (session construction, ensure, prewarm, sandbox state, the
+ *             shutdown registry, tool sessions, the runtime sandbox
+ *             registry, or the shared provider and session internals).
+ *             `sandbox/providers/default.ts` may import `#sandbox/state.js`
+ *             for `DefaultSandbox`'s two internal state hooks. Engine
+ *             helpers such as other binding modules,
  *             stream utilities, and the optional-package loader stay
  *             allowed. Every concrete built-in under `src/sandbox/providers/`
  *             is defined through `defineSandboxProvider()`.
@@ -429,14 +432,19 @@ const SANDBOX_PROVIDER_DIRS = [
 ];
 
 const SANDBOX_CORE_IMPORT_RE =
-  /(?:from\s+|import\s*\()["']#(?:sandbox\/provider|execution\/sandbox\/(?:ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
+  /(?:from\s+|import\s*\()["']#(?:sandbox\/(?:provider|state)|execution\/sandbox\/(?:active-connections|ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
+
+const SANDBOX_CORE_IMPORT_EXEMPTIONS = new Map([
+  ["packages/eve/src/sandbox/providers/default.ts", /["']#sandbox\/state\.js["']/],
+]);
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule44(posix, lines, violations) {
   if (!SANDBOX_PROVIDER_DIRS.some((dir) => posix.startsWith(dir))) return;
   if (posix.endsWith(".test.ts")) return;
+  const exemption = SANDBOX_CORE_IMPORT_EXEMPTIONS.get(posix);
   lines.forEach((line, index) => {
-    if (!SANDBOX_CORE_IMPORT_RE.test(line)) return;
+    if (!SANDBOX_CORE_IMPORT_RE.test(line) || exemption?.test(line)) return;
     violations.push({
       rule: 44,
       file: posix,
