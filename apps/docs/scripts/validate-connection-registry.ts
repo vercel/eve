@@ -43,7 +43,11 @@ const expectedSlugs = connectionEntries()
   .filter((entry) => entry.surfaces.registry)
   .map((entry) => entry.slug);
 const actualSlugs = items.map((item) => item.name.slice("connection/".length));
-const NON_CONNECT_SLUGS = new Set(["browser-use", "dataforseo"]);
+const API_KEY_CONNECTIONS: Readonly<Record<string, readonly string[]>> = {
+  "browser-use": ["BROWSER_USE_API_KEY"],
+  dataforseo: ["DATAFORSEO_USERNAME", "DATAFORSEO_PASSWORD"],
+  firecrawl: ["FIRECRAWL_API_KEY"],
+};
 const CONNECT_SERVICES: Readonly<Record<string, string>> = {
   agentcard: "mcp.agentcard.sh/mcp",
   vercel: "vercel",
@@ -75,8 +79,6 @@ if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
 
 for (const item of items) {
   const slug = item.name.slice("connection/".length);
-  if (NON_CONNECT_SLUGS.has(slug)) continue;
-
   const declaredSetup = item.meta?.eve?.setup;
   const setups =
     declaredSetup === undefined
@@ -85,6 +87,7 @@ for (const item of items) {
         ? declaredSetup
         : [declaredSetup];
   if (
+    !(slug in API_KEY_CONNECTIONS) &&
     setups?.some(
       (setup) =>
         setup.command === undefined ||
@@ -124,7 +127,10 @@ for (const item of items) {
             ...(principalType === undefined ? [] : ["--principal-type", principalType]),
           ],
         };
-  if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
+  if (
+    !(slug in API_KEY_CONNECTIONS) &&
+    JSON.stringify(setups) !== JSON.stringify([expectedSetup])
+  ) {
     throw new Error(
       slug === "shopify"
         ? 'Registry item "connection/shopify" must run eve integration setup shopify.'
@@ -155,6 +161,18 @@ for (const item of items) {
       break;
     }
     default: {
+      const requiredEnvVars = API_KEY_CONNECTIONS[slug];
+      if (requiredEnvVars !== undefined) {
+        if (
+          item.dependencies !== undefined ||
+          !requiredEnvVars.every((envVar) => envVar in (item.envVars ?? {}))
+        ) {
+          throw new Error(
+            `Registry item "${item.name}" must declare its API key credentials without Vercel Connect.`,
+          );
+        }
+        break;
+      }
       if (!item.dependencies?.includes("@vercel/connect")) {
         throw new Error(`Registry item "${item.name}" must depend on @vercel/connect.`);
       }

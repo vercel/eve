@@ -1077,6 +1077,22 @@
       ]
     },
     {
+      "name": "connection/firecrawl",
+      "type": "registry:item",
+      "title": "Firecrawl",
+      "description": "Search, scrape, map, crawl, parse, and monitor web content.",
+      "envVars": {
+        "FIRECRAWL_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/firecrawl.ts",
+          "type": "registry:file",
+          "target": "agent/connections/firecrawl.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/hugging-face",
       "type": "registry:item",
       "title": "Hugging Face",

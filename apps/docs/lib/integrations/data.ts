@@ -2122,6 +2122,35 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     keywords: ["mcp", "treasury", "cash", "payments", "accounting", "oauth", "connect"],
     authModes: ["user"],
   },
+  firecrawl: {
+    logo: "firecrawl",
+    docsHref: "https://docs.firecrawl.dev/mcp-server",
+    keywords: ["mcp", "web search", "web scraping", "crawl", "parse", "monitoring"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "FIRECRAWL_API_KEY",
+      header: "Authorization",
+    },
+    quickStart: `Create \`agent/connections/firecrawl.ts\`. The filename creates the \`firecrawl\` connection. Firecrawl calls can consume usage or create persistent work, so this connection requires approval for every call:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.firecrawl.dev/v2/mcp",
+  description: "Firecrawl: search, scrape, map, crawl, parse, and monitor web content.",
+  headers: () => ({
+    Authorization: \`Bearer \${process.env.FIRECRAWL_API_KEY!}\`,
+  }),
+  approval: always(),
+});
+\`\`\`
+
+Keep the API key in a server-side environment variable. eve sends it directly to Firecrawl and does not expose it to the model.`,
+    configureNote:
+      "An API key enables Firecrawl's full tool surface, subject to the plan and team policy. Keep approval enabled, or use tool filters and approval rules that prevent unattended cost-sensitive or persistent actions.",
+  },
   "hugging-face": {
     logo: "hugging-face",
     docsHref: "/docs/connections/mcp",
