@@ -859,7 +859,7 @@ describe("createVercelSandbox", () => {
       expect(fake.sandboxModule.Sandbox.create).not.toHaveBeenCalled();
     });
 
-    it("derives template keys from create options, image, resources, and source revision as before", async () => {
+    it("derives template keys from create options, image, resources, and source revision", async () => {
       const managedFiles = {
         resourcesKey: "resources-golden",
         skills: [{ content: "# Skill", relativePath: "golden/SKILL.md" }],
@@ -905,13 +905,13 @@ describe("createVercelSandbox", () => {
       };
 
       expect(keys).toEqual({
-        defaults: "eve-sbx-tpl-vercel-1f6d699611395741504fc8a4b10df805",
-        managedFiles: "eve-sbx-tpl-vercel-82b4e1f8627add9d53d329878f5bb047",
-        image: "eve-sbx-tpl-vercel-1f48759fa1e48bb0d5af6910a423593a",
-        source: "eve-sbx-tpl-vercel-2f6b04f764532fa85e252b7c80bbfe56",
-        options: "eve-sbx-tpl-vercel-e7a2ead2a2bdd5be4fbbc9025a7cd05b",
-        credentials: "eve-sbx-tpl-vercel-e7a2ead2a2bdd5be4fbbc9025a7cd05b",
-        sourceRevision: "eve-sbx-tpl-vercel-d995fa0bea286a7b26343f99a4c5e0a1",
+        defaults: "eve-sbx-tpl-vercel-554ce4314fb7a0503d92d30c416064d8",
+        managedFiles: "eve-sbx-tpl-vercel-d9abc1ab182ef14873f57fc00a0246c3",
+        image: "eve-sbx-tpl-vercel-64eba2454d7a47c0c897d5e82b365f4f",
+        source: "eve-sbx-tpl-vercel-11097efe04a48959d9420dd8ab306e12",
+        options: "eve-sbx-tpl-vercel-61b688a6c98003848d40c5a13046c703",
+        credentials: "eve-sbx-tpl-vercel-61b688a6c98003848d40c5a13046c703",
+        sourceRevision: "eve-sbx-tpl-vercel-f638671cfec9d0a12db226863fa3ed9f",
       });
     });
   });

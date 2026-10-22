@@ -127,7 +127,7 @@ export function createVercelSandbox(
               createOptions.source === undefined
                 ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
                 : undefined,
-            version: 3,
+            version: 4,
           })
           .slice(0, 32)}`;
         const snapshotId = await ensureTemplate({
