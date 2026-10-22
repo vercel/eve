@@ -102,6 +102,9 @@ export function createVercelSandbox(
     timeout: input.createOptions?.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS,
   };
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
+  const usesEveBase =
+    createOptions.source === undefined &&
+    (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE) === VERCEL_EVE_SANDBOX_IMAGE;
 
   return {
     async onSessionEnd(context, state, { abortSignal }) {
@@ -113,9 +116,8 @@ export function createVercelSandbox(
       });
     },
     async prepare(context) {
-      // Without inputs a snapshot only repeats the base setup every session
-      // runs anyway. An authored `source` keeps one, so sessions start from
-      // the build's capture instead of fetching the source again.
+      // Without build-time inputs, sessions can initialize directly from the image.
+      // An authored `source` keeps a snapshot instead of being fetched again per session.
       if (context.isEmpty && createOptions.source === undefined) return {};
       try {
         const templateKey = `eve-sbx-tpl-vercel-${context
@@ -125,7 +127,7 @@ export function createVercelSandbox(
               createOptions.source === undefined
                 ? (createOptions.image ?? VERCEL_EVE_SANDBOX_IMAGE)
                 : undefined,
-            version: 3,
+            version: 4,
           })
           .slice(0, 32)}`;
         const snapshotId = await ensureTemplate({
@@ -202,6 +204,8 @@ export function createVercelSandbox(
       const session = await ensureUsableSession({
         // Only an expired snapshot gives a tool session a fresh sandbox.
         expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
+        inheritsBaseRuntime:
+          artifact.snapshotId !== undefined && mounts === undefined && usesEveBase,
         input: ensureSessionInput,
         session: await ensureSession(ensureSessionInput),
       });
@@ -371,6 +375,8 @@ async function prepareTemplateSnapshot(
     await ensureVercelSandboxBaseRuntime(sandbox);
     await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
     await input.context.populate(createVercelConnection(sandbox));
+    // Authored preparation can change the base paths inherited by every new session.
+    await ensureVercelSandboxBaseRuntime(sandbox);
     // The returned snapshot, not the handle's cached `currentSnapshotId`, which the SDK may not refresh.
     return (await sandbox.snapshot()).snapshotId;
   } finally {
@@ -446,11 +452,17 @@ interface VercelSandboxSessionCreateResult {
 
 async function ensureUsableSession(input: {
   readonly expired: (error: unknown) => boolean;
+  readonly inheritsBaseRuntime: boolean;
   readonly input: EnsureSessionInput;
   readonly session: VercelSandboxSessionCreateResult;
 }): Promise<VercelSandboxSessionCreateResult> {
+  const ensureBaseRuntime = async (session: VercelSandboxSessionCreateResult) => {
+    // A fresh restore inherits the base runtime checked before the snapshot was captured.
+    if (session.created && input.inheritsBaseRuntime) return;
+    await ensureVercelSandboxBaseRuntime(session.sandbox);
+  };
   try {
-    await ensureVercelSandboxBaseRuntime(input.session.sandbox);
+    await ensureBaseRuntime(input.session);
     return input.session;
   } catch (error) {
     if (input.session.created || !input.expired(error)) {
@@ -469,7 +481,7 @@ async function ensureUsableSession(input: {
     if (!isVercelSandboxMissingError(error)) throw error;
   }
   const replacement = await ensureSession(input.input);
-  await ensureVercelSandboxBaseRuntime(replacement.sandbox);
+  await ensureBaseRuntime(replacement);
   return replacement;
 }
 
