@@ -560,7 +560,7 @@
               "mcp"
             ]
           },
-          "requires": ">=0.29.0"
+          "requires": ">=0.51.1"
         }
       },
       "dependencies": [

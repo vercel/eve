@@ -2040,8 +2040,58 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     ],
     authModes: ["user"],
     connectors: { user: { service: "mcp.sent.dm", name: "sent" } },
+    quickStart: `Create \`agent/connections/sent.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/sent.ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+const APPROVAL_REQUIRED = new Set([
+  "messages.send",
+  "contacts.create_many",
+  "contacts.delete",
+  "templates.delete",
+]);
+
+export default defineMcpClientConnection({
+  url: "https://mcp.sent.dm/mcp",
+  description:
+    "Sent business messaging: send and track SMS, WhatsApp, and RCS; manage contacts and templates; inspect analytics, balance, and account readiness.",
+  auth: connect("sent"),
+  tools: {
+    allow: [
+      "account.get",
+      "balance.get",
+      "contacts.create_many",
+      "contacts.delete",
+      "contacts.get",
+      "contacts.list",
+      "contacts.message_summary",
+      "dashboard.contacts",
+      "dashboard.deliverability",
+      "dashboard.messages_sent",
+      "messages.activities.list",
+      "messages.get",
+      "messages.send",
+      "numbers.lookup",
+      "onboarding.status",
+      "templates.delete",
+      "templates.get",
+      "templates.get_by_name",
+      "templates.list",
+    ],
+  },
+  approval: ({ toolName }) =>
+    APPROVAL_REQUIRED.has(toolName.split("__").pop() ?? toolName)
+      ? "user-approval"
+      : "not-applicable",
+});
+\`\`\`
+
+The allowlist limits the connection to the reviewed Sent tools. eve requires user approval before sending a message, creating or deleting contacts, or deleting a template.`,
     configureNote:
-      "Each authenticated user authorizes Sent in the browser before the first tool call. The connection supports the reviewed messaging, contacts, templates, lookup, analytics, and account tools. It requires approval before sending messages, creating or deleting contacts, or deleting templates. Reauthorize to change the selected organization or Sender Profile. Revoke access by deactivating the connection key in Sent Dashboard → API Keys.",
+      "Sends real SMS, WhatsApp, and RCS messages. Sending messages, creating or deleting contacts, and deleting templates require approval; Sender Profile, compliance, and feedback tools aren't exposed. Revoke access by deactivating the connection key in Sent Dashboard → API Keys.",
   },
   notion: {
     logo: "notion",

@@ -7,6 +7,7 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
+import sentConnection from "../../registry/connections/sent";
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -58,9 +59,10 @@ describe("Context connection setup", () => {
 });
 
 describe("Sent connection setup", () => {
-  it("generates user-scoped OAuth setup for Sent's MCP service", () => {
+  it("preserves the installed tool boundary in the gallery setup", () => {
     const integration = getIntegration("sent")!;
     const setup = buildConnectionSetup(integration);
+    const quickStart = integration.quickStart!;
 
     expect(setup.authModes).toEqual(["user"]);
     expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.sent.dm/mcp"');
@@ -69,6 +71,15 @@ describe("Sent connection setup", () => {
       "vercel connect create mcp.sent.dm --name sent",
     );
     expect(buildConnectionInstall(integration)).toContain("eve add connection/sent");
+    expect(quickStart).toContain("approval: ({ toolName }) =>");
+    expect(quickStart).toContain('? "user-approval"');
+    expect(quickStart).toContain(': "not-applicable"');
+
+    for (const toolName of sentConnection.tools.allow ?? []) {
+      expect(quickStart).toContain(`"${toolName}"`);
+    }
+
+    expect(integrationMarkdown(integration)).toContain(quickStart);
   });
 });
 
