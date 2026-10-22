@@ -166,7 +166,8 @@ export async function compileAgentManifest(
     diagnosticsSummary,
     subagents,
   });
-  await pruneAuthoredModuleCache();
+  // In the background, so pruning never delays a compile.
+  void pruneAuthoredModuleCache();
   return compiled;
 }
 

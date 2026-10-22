@@ -1,20 +1,24 @@
-import { readdir, realpath, stat, utimes, writeFile } from "node:fs/promises";
+import { readdir, realpath, utimes, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
+import { pruneAuthoredModuleCache } from "#internal/authored-module-cache.js";
 import { AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH } from "#internal/authored-module-loader.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 
 const tool = (marker: string) =>
   `export default { description: "Return ${marker}.", inputSchema: { type: "object" }, execute: () => "${marker}" };\n`;
 
+const HOUR_MS = 60 * 60 * 1000;
+
 describe("authored-module cache", () => {
   const createAppRoot = useTemporaryAppRoots();
 
-  it("prunes bundles that an edit superseded once they go stale", async () => {
+  async function createCachedApp() {
     const app = await createAppRoot("eve-authored-module-cache-", {
       files: {
         "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
@@ -23,33 +27,53 @@ describe("authored-module cache", () => {
       },
     });
     const cacheDirectory = join(await realpath(app.appRoot), AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
-    const compile = async () =>
+    const listBundles = async () =>
+      new Set((await readdir(cacheDirectory)).filter((name) => name.endsWith(".mjs")));
+    const compile = async () => {
       await compileAgentManifest(
         (await discoverAgent({ agentRoot: app.agentRoot, appRoot: app.appRoot })).manifest,
       );
-    const listCache = async () => new Set(await readdir(cacheDirectory));
+      // Compiles start pruning without waiting for it.
+      await pruneAuthoredModuleCache();
+    };
 
     await compile();
-    const firstFiles = await listCache();
-    const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    for (const fileName of firstFiles)
-      await utimes(join(cacheDirectory, fileName), longAgo, longAgo);
-    // A bundle another process wrote recently is still in use.
-    await writeFile(join(cacheDirectory, "other-process.mjs"), "export {};\n");
-
+    const firstBundles = await listBundles();
+    // Last used an hour ago: by a process that has since finished, unless a lease says otherwise.
+    const hourAgo = new Date(Date.now() - HOUR_MS);
+    for (const name of firstBundles) await utimes(join(cacheDirectory, name), hourAgo, hourAgo);
     await writeFile(join(app.agentRoot, "tools", "edited.ts"), tool("second"));
-    await compile();
-    const secondFiles = await listCache();
+    return { cacheDirectory, compile, firstBundles, listBundles };
+  }
 
-    const superseded = [...firstFiles].filter((fileName) => !secondFiles.has(fileName));
-    const reused = [...firstFiles].filter((fileName) => secondFiles.has(fileName));
-    expect(superseded.length).toBeGreaterThan(0);
+  it("removes bundles no running process can import and keeps the ones a compile reused", async () => {
+    const { compile, firstBundles, listBundles } = await createCachedApp();
+
+    await compile();
+
+    const secondBundles = await listBundles();
+    const reused = [...firstBundles].filter((name) => secondBundles.has(name));
     expect(reused.length).toBeGreaterThan(0);
-    expect(secondFiles.has("other-process.mjs")).toBe(true);
-    for (const fileName of reused) {
-      expect((await stat(join(cacheDirectory, fileName))).mtimeMs).toBeGreaterThan(
-        longAgo.getTime(),
-      );
-    }
+    expect(reused.length).toBeLessThan(firstBundles.size);
+    expect(secondBundles.size).toBeGreaterThan(reused.length);
+  });
+
+  it("keeps bundles while an earlier process that may import them is still running", async () => {
+    const { cacheDirectory, compile, firstBundles, listBundles } = await createCachedApp();
+    const leasePath = join(cacheDirectory, ".leases", "earlier-process.json");
+    const lease = { host: hostname(), pid: process.pid, since: Date.now() - 2 * HOUR_MS };
+    await writeFile(leasePath, JSON.stringify(lease));
+
+    await compile();
+    const whileRunning = await listBundles();
+    expect([...firstBundles].every((name) => whileRunning.has(name))).toBe(true);
+
+    // A lease from another machine belongs to a process that can't be checked, such as one
+    // restored with a build cache, so it no longer protects anything.
+    await writeFile(leasePath, JSON.stringify({ ...lease, host: `not-${hostname()}` }));
+    await pruneAuthoredModuleCache();
+    const afterwards = await listBundles();
+    expect([...firstBundles].some((name) => !afterwards.has(name))).toBe(true);
+    expect(await readdir(join(cacheDirectory, ".leases"))).not.toContain("earlier-process.json");
   });
 });
