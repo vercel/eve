@@ -14,7 +14,7 @@ import {
   toolCallsStreamResult,
 } from "#internal/testing/approval-resume.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
-import { eachEvent } from "#internal/testing/session-machine.js";
+import { eventsOf } from "#harness/publication.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { always, once } from "#tools/approval/policies.js";
 
@@ -56,10 +56,11 @@ function setup(
   const recorder = createProjectionRecorder();
   const config: ToolLoopHarnessConfig = {
     capabilities: { requestInput: true },
-    handleEvent: eachEvent(async (event) => {
-      recorder.record(event);
-      events.push(event);
-    }),
+    // Each publication commits as one line, as the session's sink writes it.
+    handleEvent: async (publication) => {
+      recorder.record(eventsOf(publication));
+      events.push(...eventsOf(publication));
+    },
     resolveModel: async () => model,
     tools: new Map([tool, ...(options.tools ?? [])].map((entry) => [entry.name, entry])),
   };
@@ -240,6 +241,47 @@ describe("approved call recheck (real AI SDK)", () => {
       if (!remembered) expect(prompts.at(-1)?.data.subject).toEqual({ callId: "later" });
     },
   );
+
+  it.each([
+    [
+      "approves the later prompt, then denies the earlier one",
+      ["right", "approve"],
+      ["left", "deny"],
+    ],
+    [
+      "denies the earlier prompt, then approves the later one",
+      ["left", "deny"],
+      ["right", "approve"],
+    ],
+  ] as const)("keeps a denial when one delivery %s", async (_name, firstAnswer, secondAnswer) => {
+    const execute = vi.fn(() => "deployed");
+    const call = (toolCallId: string) => ({ input: "{}", toolCallId, toolName: "deploy" });
+    const fixture = setup(
+      {
+        name: "deploy",
+        description: "Deploy Alice's release",
+        inputSchema: jsonSchema({ type: "object" }),
+        execute,
+        approval: once(),
+      },
+      { calls: [[call("left"), call("right")], [call("later")]] },
+    );
+    const initial = await fixture.step(fixture.session, {
+      message: "Help Alice deploy her releases.",
+    });
+    const requests = fixture.events.filter((event) => event.type === "interaction.opened");
+    const answer = ([prompt, optionId]: readonly [string, string]) => ({
+      interactionId: requests[prompt === "left" ? 0 : 1]!.data.interactionId,
+      optionId,
+      deliveryId: "answers",
+      responseId: `response-${prompt}`,
+    });
+    await fixture.step(initial.session, { answers: [answer(firstAnswer), answer(secondAnswer)] });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const prompts = fixture.events.filter((event) => event.type === "interaction.opened");
+    expect(prompts).toHaveLength(3);
+    expect(prompts.at(-1)?.data.subject).toEqual({ callId: "later" });
+  });
 
   it("keeps a human-approved call's model output unchanged when its recheck returns a reason", async () => {
     let approved = false;

@@ -13,16 +13,19 @@ import { initialSessionProjection, type SessionProjection } from "#protocol/sess
 
 /**
  * Stands in for the publish sink in tests that drive the harness with their own `handleEvent`:
- * folds each event, as its own line, into the session projection, which survives the fresh context
- * each step gets.
+ * folds each event, or each publication as one line as the sink does, into the session projection,
+ * which survives the fresh context each step gets.
  */
 export function createProjectionRecorder(initial = initialSessionProjection()) {
   let projection: SessionProjection = initial;
   return {
     /** Call from the harness's `handleEvent`. */
-    record(event: SessionEvent): void {
+    record(publication: SessionEvent | readonly SessionEvent[]): void {
       const ctx = contextStorage.getStore();
-      for (const line of linesOf([event as SessionStreamEvent], new Date().toISOString())) {
+      const published = (
+        Array.isArray(publication) ? publication : [publication]
+      ) as SessionStreamEvent[];
+      for (const line of linesOf(published, new Date().toISOString())) {
         const events = "facts" in line ? line.facts : [line.progress];
         projection = advance(projection, line, projection.view.position, events);
         if (ctx !== undefined) recordPublishedLine(ctx, line, nextLinePosition(ctx), events);

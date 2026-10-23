@@ -332,9 +332,12 @@ export function settleApprovals(
     }
     return { ...step, messages };
   });
-  // Decisions settled together apply in the order people gave them; the latest one stands.
+  // Decisions settled together apply in the order people gave them, and the latest one stands.
+  // Answers in one delivery share a position and can't be ordered, so a denial among them stands.
+  const declinedLast = (decision: (typeof decisions)[number]) =>
+    decision.outcome === "declined" ? 1 : 0;
   const remembered = decisions
-    .sort((a, b) => a.at - b.at)
+    .sort((a, b) => a.at - b.at || declinedLast(a) - declinedLast(b))
     .reduce(
       (memory, decision) => rememberDecision(memory, decision.request, decision.outcome),
       view.turn.remembered,

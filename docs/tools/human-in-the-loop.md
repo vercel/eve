@@ -108,7 +108,7 @@ Approval is not an exactly-once guarantee for a charge or email. Give non-idempo
 
 ### Remember approval for a tool
 
-`once()` remembers the latest decision people gave its prompts for the resolved tool name, across turns and context clears, until the session ends. A remembered approval covers later calls to that tool regardless of their input; it does not clear a different tool. A later denial of a `once()` prompt for the tool replaces it, so the next call asks again. Approving a prompt asked by `always()` or by a policy that does not return `once()`'s decision remembers nothing, and consulting `once()` before choosing another branch records nothing. Existing pending prompts still need their own answers.
+`once()` remembers the latest decision people gave its prompts for the resolved tool name, across turns and context clears, until the session ends. A remembered approval covers later calls to that tool regardless of their input; it does not clear a different tool. A later denial of a `once()` prompt for the tool replaces it, so the next call asks again. When one delivery answers several of those prompts, a denial among its answers stands. Approving a prompt asked by `always()` or by a policy that does not return `once()`'s decision remembers nothing, and consulting `once()` before choosing another branch records nothing. Existing pending prompts still need their own answers.
 
 A remembered approval is consent, not authorization. Authorize the current caller on every call. Use `always()` or an input-dependent policy when different tenants, environments, or other inputs need separate approval decisions. When wrapping `once()` in another policy, forward the policy context and return its status object unchanged.
 
