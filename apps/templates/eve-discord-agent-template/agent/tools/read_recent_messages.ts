@@ -2,9 +2,10 @@ import { getToken } from "@vercel/connect";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-// Use the same connector as agent/channels/discord.ts. `eve add channel/discord`
-// rewrites that file and daemon/main.ts, but not this one, so update it to match.
-const DISCORD_CONNECTOR = "discord/my-agent";
+// The connector `eve add channel/discord` creates for this project by default.
+// Setup rewrites agent/channels/discord.ts and daemon/main.ts, but not this
+// file, so keep it in sync if your connector's ID differs.
+const DISCORD_CONNECTOR = "discord/eve-discord-agent-template";
 
 const MAX_CONTENT_LENGTH = 1000;
 

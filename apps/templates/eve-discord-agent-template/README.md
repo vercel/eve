@@ -18,7 +18,7 @@ pnpm install
 pnpm eve add channel/discord --overwrite
 ```
 
-The setup signs you in to Vercel and links a project, asks for your Discord bot token, creates a Vercel Connect connector for it, points the Discord application's Interactions Endpoint URL at the agent, and turns on the bot's Message Content intent. It then rewrites `agent/channels/discord.ts` and `daemon/main.ts` with your connector's ID, replacing the placeholder `discord/my-agent`. Put the same ID in `agent/tools/read_recent_messages.ts`, which setup doesn't know about. If Discord doesn't let setup turn on Message Content, setup sets `messageContent: false` in `daemon/main.ts`, and people must mention the bot in threads.
+The setup signs you in to Vercel and links a project, asks for your Discord bot token, creates a Vercel Connect connector for it, points the Discord application's Interactions Endpoint URL at the agent, and turns on the bot's Message Content intent. It then writes your connector's ID into `agent/channels/discord.ts` and `daemon/main.ts`. Setup names the connector after `package.json`'s `name`, so the ID is usually `discord/eve-discord-agent-template`, which the template already uses. If yours differs, for example because you renamed the project, put it in `agent/tools/read_recent_messages.ts` too. If Discord doesn't let setup turn on Message Content, setup sets `messageContent: false` in `daemon/main.ts`, and people must mention the bot in threads.
 
 Deploy to production to start the relay:
 
