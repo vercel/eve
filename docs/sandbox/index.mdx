@@ -28,6 +28,23 @@ export default defineTool({
 
 Relative paths resolve from the workspace root, and `sandbox.resolvePath(".")` returns its absolute path. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
 
+### Write several files at once
+
+`writeFiles()` writes a batch of files from raw bytes, which is much faster than one call per file:
+
+```ts
+await sandbox.writeFiles({
+  files: [
+    { path: "src/index.ts", content: new TextEncoder().encode(source) },
+    { path: "src/schema.sql", content: new TextEncoder().encode(schema) },
+  ],
+});
+```
+
+Each provider sends the batch in as few calls as it supports: Vercel Sandbox resolves every path and then writes the whole batch natively, while providers without a batch API write with a bounded number of writes in flight.
+
+A batch is not atomic. When the call rejects, files written before the failure stay written, files still in flight may land after it, and eve does not roll any of them back. Retry the whole batch, or clean up explicitly, when a partial write matters. Passing an `abortSignal` that is already aborted rejects before any file is written; aborting later leaves the same partial state.
+
 Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`, so agent-aware CLIs such as `vercel` skip interactive prompts. To use a different value, set `AI_AGENT` in the environment's `env` option or pass it in the `env` of one `run()` or `spawn()` call.
 
 Pass the configured environment to preserve its specific session capabilities in authored runtime code:

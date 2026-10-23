@@ -13,6 +13,13 @@ import type {
 import { SANDBOX_AGENT_ENV, type SandboxConnection } from "#public/sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { isObject } from "#shared/guards.js";
+import { mapConcurrent } from "#shared/map-concurrent.js";
+
+/**
+ * Local writes hit one filesystem, so a few in flight hide each other's
+ * latency without turning a large batch into unbounded fan-out.
+ */
+const LOCAL_WRITE_CONCURRENCY = 16;
 
 const LOCAL_SANDBOX_METADATA_VERSION = 1;
 const LOCAL_SANDBOX_FILESYSTEM_DIRECTORY_NAME = "fs";
@@ -161,11 +168,18 @@ export async function createBashSandbox(input: {
     async stop() {
       await sandbox.stop();
     },
-    async writeFiles({ files }) {
-      for (const file of files) {
-        await filesystem.mkdir(dirname(file.path), { recursive: true });
-        await filesystem.writeFile(file.path, file.content);
-      }
+    async writeFiles({ abortSignal, files }) {
+      abortSignal?.throwIfAborted();
+      // A batch is not atomic: files written before a rejection stay written.
+      await mapConcurrent(
+        files,
+        async (file) => {
+          abortSignal?.throwIfAborted();
+          await filesystem.mkdir(dirname(file.path), { recursive: true });
+          await filesystem.writeFile(file.path, file.content);
+        },
+        LOCAL_WRITE_CONCURRENCY,
+      );
     },
   };
 }
