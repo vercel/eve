@@ -3155,12 +3155,12 @@ describe("turnStep", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
     const lifecycleOrder: string[] = [];
     const originalClearVirtualContext = ContextContainer.prototype.clearVirtualContext;
-    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(
-      function (this: ContextContainer) {
-        lifecycleOrder.push("clear");
-        originalClearVirtualContext.call(this);
-      },
-    );
+    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(function (
+      this: ContextContainer,
+    ) {
+      lifecycleOrder.push("clear");
+      originalClearVirtualContext.call(this);
+    });
     const approval = stampDurableDynamicCallback(() => "not-applicable" as const, {
       callback: () => "not-applicable",
       closure: {},
