@@ -1,4 +1,4 @@
-This is a conversational Discord agent template for [eve](https://eve.dev).
+This is a conversational Discord agent template for [eve](https://eve.dev), set up as a helper for a casual professional community.
 
 People talk to the agent in DMs, by mentioning it in a channel, or by replying in the thread it starts. An experimental [Discord Gateway relay](https://eve.dev/docs/channels/discord#reply-to-dms-and-mentions-experimental) runs as a Vercel Daemon and forwards those messages to the agent, which replies through Discord's API. Credentials go through [Vercel Connect](https://vercel.com/docs), so the bot token stays out of your environment.
 
@@ -7,8 +7,9 @@ The agent comes with:
 - `web_search`, an eve default tool, for current events and facts;
 - `ask_question`, which shows two or three choices as Discord buttons;
 - `no_reply`, so the agent stays quiet when people in its thread talk to each other;
-- `roll_dice`, an example custom tool for games and random picks;
-- a `host_trivia` skill that runs a trivia game in a thread; and
+- `convert_time`, an example custom tool that converts event times between time zones and returns a Discord timestamp, which shows the time in each reader's own time zone;
+- a `plan_an_event` skill for picking a time and drafting an announcement;
+- a `welcome_new_members` skill for onboarding, with community norms to edit in `agent/skills/welcome_new_members.md`; and
 - per-user long-term memory, keyed to each person's Discord account.
 
 ## Getting Started
