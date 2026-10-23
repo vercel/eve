@@ -240,7 +240,6 @@ async function runApproved(
         denied.push(
           ...(
             await publishDenial(approval.call, {
-              approval: "recheck",
               publish: step.publish,
               reason: recheck.reason,
             })

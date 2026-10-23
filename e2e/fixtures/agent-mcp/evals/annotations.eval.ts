@@ -19,7 +19,7 @@ export default defineEval({
     cancelled.calledTool("loopback__agent_cancel", {
       count: 1,
       output: mentions(DESTRUCTIVE_DENIAL),
-      status: "failed",
+      status: "rejected",
     });
   },
 });

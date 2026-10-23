@@ -159,7 +159,7 @@ export async function executeToolCall(
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
         { callId, input: args, toolName },
-        { approval, publish: input.publish, reason: decision.reason },
+        { publish: input.publish, reason: decision.reason },
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
@@ -542,20 +542,15 @@ async function decideDeferredCall(
       clearedBy: decision.clearedBy,
     };
   return await publishDenial(call, {
-    approval: "evaluate",
     publish: input.publish,
     reason: decision.reason,
   });
 }
 
-/**
- * Reports a call its approval policy refused, so it doesn't run. A refusal as the response ends
- * fails the call, as the AI SDK reported it; a refusal of a call a person approved rejects it.
- */
+/** Reports a call its approval policy refused: it settles rejected, without running. */
 export async function publishDenial(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
-    readonly approval: CallApproval;
     readonly publish: HandleEventFn;
     readonly reason: string | undefined;
   },
@@ -567,30 +562,20 @@ export async function publishDenial(
     type: "tool-result",
   } satisfies ToolResultPart;
   await input.publish(
-    input.approval === "evaluate"
-      ? callSettledFrom(
-          createRuntimeToolResultFromValue({
-            callId: call.callId,
-            isError: true,
-            output: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-            toolName: call.toolName,
-          }),
-          {},
-        )
-      : callSettledFrom(
-          {
-            callId: call.callId,
-            isError: true,
-            kind: "tool-result",
-            output: {
-              code: "TOOL_EXECUTION_DENIED",
-              message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-              tool: { result: "not_run" },
-            },
-            toolName: call.toolName,
-          },
-          { rejected: true },
-        ),
+    callSettledFrom(
+      {
+        callId: call.callId,
+        isError: true,
+        kind: "tool-result",
+        output: {
+          code: "TOOL_EXECUTION_DENIED",
+          message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+          tool: { result: "not_run" },
+        },
+        toolName: call.toolName,
+      },
+      { rejected: true },
+    ),
   );
   return { settled: [{ part }], toolResults: [] };
 }

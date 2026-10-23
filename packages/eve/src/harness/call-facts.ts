@@ -82,7 +82,6 @@ export function callSettledFrom(
 ): FactOf<"call.settled"> {
   const { error, outcome } = callOutcomeOf(result);
   // Rejection is an explicit adjudication, never inferred from an output's error code.
-  // Fresh policy denials and failures inside a tool remain failed unless the caller says otherwise.
   const rejected = options.rejected === true;
   return fact("call.settled", {
     callId: result.callId,
