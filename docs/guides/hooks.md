@@ -253,7 +253,7 @@ A plain-text message that answers a pending question, such as one from `ask_ques
 
 The same goes for the `call.progress` a workflow tool reports while the turn waits on it: `ctx.cancel()` from its hook cancels the turn, and the run's result never reaches the model.
 
-`ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: a call from work the handler did not await throws.
+`ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: a call from work the handler did not await throws. A cancel counts only if the handler returns: a handler that calls `ctx.cancel()` and then throws fails the turn instead.
 
 `ctx.cancel()` targets the turn being processed, including while its input is being admitted. Calls between turns without an incoming turn do nothing. Repeated requests cancel that turn only once; they never cancel a later turn. Hook-side `ctx.compact` and `ctx.once` are not available. Client and channel session compaction APIs are unchanged.
 

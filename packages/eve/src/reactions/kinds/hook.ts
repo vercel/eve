@@ -75,6 +75,7 @@ async function runHandler(call: {
     scope: memoScope,
     sessionId,
   });
+  const requested: Command[] = [];
   const command =
     (type: Command["type"]) =>
     (reason?: string): void => {
@@ -83,16 +84,7 @@ async function runHandler(call: {
           `Hook "${label}" called ctx.${type}() after its handler settled. Await the work that calls it before the handler returns.`,
         );
       }
-      if (
-        call.event.type === "delivery.admitted" &&
-        call.input.cancelBeforeTurn !== undefined &&
-        activeTurnIdOf(currentProjection(ctx)) === undefined
-      ) {
-        call.input.cancelBeforeTurn({ hook: label, ...(reason !== undefined && { reason }) });
-        return;
-      }
-      const queued: Command = reason === undefined ? { type } : { reason, type };
-      queueCommands(ctx, id, idempotencyKey, [queued]);
+      requested.push(reason === undefined ? { type } : { reason, type });
     };
   const hookContext: HookContext = {
     ...base,
@@ -107,6 +99,17 @@ async function runHandler(call: {
   try {
     await call.handler(call.event, hookContext);
     keepMemos(ctx, memoScope, memos.used());
+    settled = true;
+    // A handler that throws asks for nothing: its failure fails the turn instead.
+    const beforeTurn =
+      call.event.type === "delivery.admitted" &&
+      activeTurnIdOf(currentProjection(ctx)) === undefined
+        ? call.input.cancelBeforeTurn
+        : undefined;
+    if (beforeTurn === undefined) queueCommands(ctx, id, idempotencyKey, requested);
+    else
+      for (const { reason } of requested)
+        beforeTurn({ hook: label, ...(reason !== undefined && { reason }) });
   } catch (error) {
     mergeMemos(ctx, memoScope, memos.used());
     reportReactionFailure(ctx, call.reaction, error, idempotencyKey);

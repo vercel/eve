@@ -595,6 +595,24 @@ describe("runReactions", () => {
     expect(takeTurnFailure(ctx)).toContain('Hook "hooks/broken.ts" failed: The audit log is down.');
   });
 
+  it("fails the running turn instead of cancelling it for a handler that cancels, then throws", async () => {
+    const ctx = session(noTools, [
+      hook("broken", {
+        "turn.started": (_event, ctx) => {
+          ctx.cancel("Stop.");
+          throw new Error("The audit log is down.");
+        },
+      }),
+    ]);
+    turnRunning(ctx);
+    const cancels: unknown[] = [];
+
+    await commit(ctx, { cancelTurn: (cancel) => cancels.push(cancel), written: written(1) });
+
+    expect(cancels).toEqual([]);
+    expect(takeTurnFailure(ctx)).toContain('Hook "hooks/broken.ts" failed: The audit log is down.');
+  });
+
   it("runs only handlers that name streamed progress for a commit of it", async () => {
     const heard: string[] = [];
     const ctx = session(noTools, [
