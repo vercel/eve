@@ -12,8 +12,21 @@ last_updated: "2026-10-23"
 > replies, session status, stop, and `codeChannels: true` for un-mentioned messages and the manifest.
 > Every member can start turns; the `participants` policy (`"owner"`, `"confirm"`) is deferred,
 > since eve can't read a forked channel's owner before dispatch. Replies follow the thread the user
-> wrote in. Not yet: the membership check, and phases 2 and 3. Phase 2 ships with at-least-once
-> delivery, without `ctx.startInChannel()`.
+> wrote in. Not yet: the membership check, and phase 3.
+>
+> Phase 2 is in, without `ctx.startInChannel()`. It differs from the
+> plan: a workflow body can't capture factory options, and Slack credentials live on the channel,
+> so the Slack channel's `receive()` opens the code channel (a public `codeChannel` target), and the
+> tool is `openCodeChannel()` from `eve/tools/open_code_channel`, with no options, reaching the Slack
+> channel that serves the calling session by `ctx.channel.name`. It reads the origin conversation
+> from `ctx.channel.metadata`, not the session's auth, so hooks that return their own `auth` keep
+> it; the triggering message, installation workspace, and code channel flag are unlisted metadata
+> fields. Authors can build variants from the public `channelId` and `threadTs`. Inbound handlers get
+> `ctx.openCodeChannel()`. No signed binding yet. Creation sends `origin_channel_id` and `origin_message_ts` and leaves origin
+> eligibility to Slack, per Slack's method docs, then confirms a private origin produced a private
+> channel before copying history. A retried step delivers once; a repeated call delivers again
+> rather than joining silently, so a session started early in the channel still gets the thread. There is no `codeChannels.*`
+> fallback.
 
 ## Summary
 
@@ -91,7 +104,7 @@ Phase 2 is a workflow tool. A channel cannot contribute tools to the agent, so t
 tool as a file:
 
 ```ts title="agent/tools/open_code_channel.ts"
-import { openCodeChannel } from "eve/channels/slack/tools";
+import { openCodeChannel } from "eve/tools/open_code_channel";
 
 export default openCodeChannel();
 ```
@@ -219,12 +232,19 @@ Connect connectors need the same scopes and events.
 ```ts
 async execute(input, ctx) {
   "use workflow";
-  const slack = ctx.channel.metadata; // channelId, threadTs, triggeringMessageTs, codeChannel
+  // channelId, threadTs, triggeringMessageTs, installationTeamId, codeChannel; independent of auth
+  const slack = ctx.channel.metadata;
   if (!isSlackConversation(slack)) return { status: "unavailable", reason: "..." };
   if (slack.codeChannel === true) return { status: "unavailable", reason: "..." };
+  const { channelId, threadTs, triggeringMessageTs } = slack;
   const history = await readTranscript(ctx.session.id); // step
-  const { sessionId } = await ctx.sendToChannel<SlackChannel>("slack", input.message, {
-    target: { channelId, codeChannel: { name, originTs: slack.triggeringMessageTs } },
+  // eve passes the calling session to receive() as `caller`; Slack checks it owns the origin thread.
+  const { sessionId } = await ctx.sendToChannel<SlackChannel>(ctx.channel.name, input.message, {
+    target: {
+      channelId,
+      codeChannel: { name: input.name, originTs: triggeringMessageTs ?? threadTs, originThreadTs: threadTs },
+      installationTeamId: slack.installationTeamId,
+    },
     auth: ctx.session.auth.current,
     history,
   });
@@ -260,8 +280,9 @@ async execute(input, ctx) {
 
 ### Retries and races
 
-Delivery is at-least-once. A retried step or a repeated call reaches the same channel and
-delivers the history and the message again, so the first turn can run twice. If someone posts in
+A retried step reaches the same channel and address, and #5096's step-derived idempotency key
+lets the session there drop the redelivery. A repeated call is a new step, so it reaches the same
+channel and delivers the history and the message again, and the first turn can run twice. If someone posts in
 the new channel before the tool's `send()`, their message starts the session, and the tool's
 delivery then adds the history and the model's handoff message to it. Nothing is lost, but the
 imported turns land after the person's first message.

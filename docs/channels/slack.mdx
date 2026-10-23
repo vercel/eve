@@ -323,9 +323,85 @@ Every member of a code channel can start turns, with auth derived from each mess
 
 A code channel session has no single thread, so `ctx.slack.threadTs` is empty, `SlackChannelState.threadTs` is `null`, and its Slack auth has no `thread_ts`. `ctx.slack.codeChannel` and `codeChannel: true` in state say it's a code channel. To address its session yourself, target `{ channelId, codeChannel: true }` in `onEvent` operations, or build its continuation token with `slackCodeChannelContinuationToken(channelId)`.
 
-The session starts without the origin conversation. When Slack opens a code channel from a message, it posts a quote of that message into the channel. eve skips the quote, so it never starts a turn, and doesn't add it to the session either. The agent sees only messages posted in the code channel.
+A code channel someone opens from Slack's UI starts without the origin conversation. When Slack opens a code channel from a message, it posts a quote of that message into the channel. eve skips the quote, so it never starts a turn, and doesn't add it to the session either. To start a code channel with the conversation so far, open it from eve with [`open_code_channel`](#open-a-code-channel-from-a-thread), which copies the conversation, or with [`ctx.openCodeChannel()`](#open-a-code-channel-from-a-message-hook) and pass `history`.
 
-eve detects a code channel with Slack's `conversations.info` API, so the app needs `channels:read` (and `groups:read` for private code channels). If the lookup fails, eve logs an error, serves the channel per thread, and retries the lookup a minute later. With `codeChannels` set, the generated app manifest enables the code channels feature, adds the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, and `groups:read` bot scopes, and subscribes to the `message.session` and `agent_session_stopped` events. For Vercel Connect, add the same scopes and events under **Advanced** when you create the connector.
+eve detects a code channel with Slack's `conversations.info` API, so the app needs `channels:read` (and `groups:read` for private code channels). If the lookup fails, eve logs an error, serves the channel per thread, and retries the lookup a minute later. With `codeChannels` set, the generated app manifest enables the code channels feature, adds the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, and `groups:read` bot scopes (plus `im:read` and `mpim:read`, so `open_code_channel` can read a DM or group DM origin), and subscribes to the `message.session` and `agent_session_stopped` events. For Vercel Connect, add the same scopes and events under **Advanced** when you create the connector. To tell whether you're in a code channel, use `ctx.slack.codeChannel` in message hooks and `channel.state.codeChannel` in [renderers](#customize-rendering).
+
+#### Open a code channel from a thread
+
+Add the `open_code_channel` tool to let the agent move a request that needs more than one message into a new code channel:
+
+```ts title="agent/tools/open_code_channel.ts"
+import { openCodeChannel } from "eve/tools/open_code_channel";
+
+export default openCodeChannel();
+```
+
+The model calls the tool with a channel name and a first message for the new channel. The tool opens the code channel from the message that triggered the turn, and starts the code channel's session with the conversation so far as history. Slack links the new channel in the origin thread, invites the person who wrote the origin message, and gives the channel the origin's privacy. eve reads the origin before creating anything and asks Slack for a private channel when the origin is private. If Slack still returns a public channel, eve archives it and doesn't copy the conversation. The origin thread keeps its own session for quick follow-ups. The tool is available to the root agent only, not subagents. It goes through the Slack channel that serves the conversation, whatever its file is named, using the installation of the workspace the message came from.
+
+It needs `codeChannels: true` on the Slack channel, and it only opens a channel from the message that triggered the calling session's turn. Outside Slack or inside a code channel, the tool returns `{ status: "unavailable", reason }` and the model continues in the thread. When Slack refuses, for example for a Slack Connect conversation, when code channels are disabled, or when a scope is missing, the tool call fails with Slack's error, which the model relays. eve retries transient Slack errors such as rate limits first.
+
+One person gets one code channel per message. A repeated call for the same message reaches the same channel and delivers the conversation to its session again; a retried step delivers it once. That way a session someone started by writing in the new channel first still gets the thread's history.
+
+#### Build your own code channel tool
+
+You can write a variant of `open_code_channel` with your own inputs, description, or behavior. In a [workflow tool](/docs/tools/workflows#start-channel-sessions-ctxsendtochannel), `ctx.channel.name` names the channel serving the conversation, and `ctx.channel.metadata` names the Slack conversation: `channelId` and `threadTs`. In a code channel, `threadTs` is `null`. The metadata doesn't depend on the session's auth, so the tool keeps working when a message hook returns its own `auth`. Send to that channel with a `codeChannel` target:
+
+```ts title="agent/tools/move_to_code_channel.ts"
+import type { SlackChannel } from "eve/channels/slack";
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Move this request into a new Slack code channel.",
+  inputSchema: z.object({ task: z.string() }),
+  async execute({ task }, ctx) {
+    "use workflow";
+    const { metadata, name } = ctx.channel;
+    const channelId = metadata?.channelId;
+    const threadTs = metadata?.threadTs;
+    if (!name || typeof channelId !== "string" || typeof threadTs !== "string") {
+      return { status: "unavailable" };
+    }
+    const { sessionId } = await ctx.sendToChannel<SlackChannel>(name, task, {
+      target: {
+        channelId,
+        // Opens the channel from the thread's root message.
+        codeChannel: { name: task.slice(0, 80), originThreadTs: threadTs, originTs: threadTs },
+      },
+      auth: ctx.session.auth.current,
+    });
+    return { sessionId, status: "opened" };
+  },
+});
+```
+
+`codeChannel` takes the origin message's `originTs`, its thread's `originThreadTs`, and optionally the channel's `name`; without one, Slack names the channel from the message. The new channel gets the origin's privacy, and its session's audience follows it. When a workflow tool sends it, eve passes the calling session to the Slack channel, which opens the channel only if that session is the one at the origin thread, so a tool can't open a channel from a message in another conversation and copy its transcript there. A route, schedule, or `onEvent` handler has no calling session and can open one from any message the app can see. Pass `history` to start the code channel's session with earlier messages; `open_code_channel` passes the calling session's transcript.
+
+#### Open a code channel from a message hook
+
+To open a code channel without the model deciding, call `ctx.openCodeChannel({ name })` in `onAppMention`, `onDirectMessage`, or `onMessage`. It opens the channel from the inbound message and returns the same session operations as `ctx`, bound to the code channel's session. Send the first turn there and return `null`, so the thread gets no turn. For example, an agent that works only in code channels:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  codeChannels: true,
+  async onAppMention(ctx, message) {
+    // Messages in the code channel reach its session as usual.
+    if (ctx.slack.codeChannel) return { auth: defaultSlackAuth(message, ctx) };
+    const codeChannel = await ctx.openCodeChannel({ name: message.text.slice(0, 80) });
+    await codeChannel.send(message.text);
+    return null;
+  },
+});
+```
+
+The returned `send` defaults to the message author's auth and moves Slack auth you pass to the code channel. Omit `name` to let Slack name the channel from the message.
+
+Unlike the tool, `ctx.openCodeChannel()` copies no conversation: the code channel's session starts with only what you send. Pass `history` to `send` if it should see earlier messages, such as the thread's replies. `ctx.openCodeChannel()` opens the channel the same way as a `codeChannel` target: one channel per author and message, the origin's privacy, and the session's audience from it. It throws without `codeChannels: true`, for a message already in a code channel, and when Slack refuses to create the channel, like the other `ctx` operations.
 
 ### Other Events API callbacks
 
@@ -760,12 +836,13 @@ Start a Slack conversation from a [webhook on another channel](./custom#cross-ch
 
 Pass `{ channelId }` as the target to start a new thread. The agent's first post becomes the thread's root message. You can also set these target fields:
 
-| Field                | Use                                                                                       |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| `threadTs`           | Continue an existing thread instead of creating one.                                      |
-| `initialMessage`     | Post a card as the thread root before the agent runs. Cannot be combined with `threadTs`. |
-| `installationTeamId` | Select the app installation workspace when using a function-form bot token.               |
-| `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                 |
+| Field                | Use                                                                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `threadTs`           | Continue an existing thread instead of creating one.                                                                                               |
+| `initialMessage`     | Post a card as the thread root before the agent runs. Cannot be combined with `threadTs`.                                                          |
+| `installationTeamId` | Select the app installation workspace when using a function-form bot token.                                                                        |
+| `codeChannel`        | Open a [code channel](#build-your-own-code-channel-tool) from a message in `channelId` and start the session there. Requires `codeChannels: true`. |
+| `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                                                                          |
 
 The default mention handler lets teammates continue the session by mentioning the app in the thread. To accept replies without a mention, [configure an `onMessage` hook and the required Slack subscriptions and scopes](#continue-conversations-without-repeated-mentions).
 

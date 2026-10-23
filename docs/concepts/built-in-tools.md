@@ -447,6 +447,16 @@ export default noReply();
 
 A root session also accepts a successful model call that returns no text with `finishReason: "stop"`, without retrying or reporting a model-call failure. A turn that settles with no text completes without a final message. Use `no_reply` when the agent should record an explicit choice to stay quiet, including an optional reason. Delegated sessions still retry an empty reply once and report a failure if it remains empty, so the caller can act on the failure.
 
+### `open_code_channel`
+
+`open_code_channel` moves a Slack conversation into a new [Slack code channel](/docs/channels/slack#open-a-code-channel-from-a-thread) and continues the work there with the conversation so far. It needs `codeChannels: true` on the Slack channel that serves the conversation, and returns `{ status: "unavailable", reason }` outside Slack or inside a code channel. When Slack refuses, the call fails with Slack's error. Only root sessions receive it. Add it:
+
+```ts title="agent/tools/open_code_channel.ts"
+import { openCodeChannel } from "eve/tools/open_code_channel";
+
+export default openCodeChannel();
+```
+
 ### `sleep`
 
 `sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message, the default for a new message, ends the wait early: `sleep` returns `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, followed by the message. Add it:

@@ -148,6 +148,11 @@
       "import": "./dist/src/public/tools/no-reply.js",
       "default": "./dist/src/public/tools/no-reply.js"
     },
+    "./tools/open_code_channel": {
+      "types": "./dist/src/public/tools/open-code-channel.d.ts",
+      "import": "./dist/src/public/tools/open-code-channel.js",
+      "default": "./dist/src/public/tools/open-code-channel.js"
+    },
     "./tools": {
       "types": "./dist/src/public/tools/index.d.ts",
       "import": "./dist/src/public/tools/index.js",
