@@ -5,6 +5,8 @@ import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
+import type { JsonObject } from "#shared/json.js";
+import { defineJsonSchema } from "#tools/schema.js";
 
 const EXECUTE_OPTIONS = { callId: "call-1" } as const;
 
@@ -636,6 +638,89 @@ describe("OpenApiConnectionClient", () => {
       for (const value of Object.values(obj)) visit(value);
     };
     visit(inputSchema);
+  });
+
+  // Regression for https://github.com/vercel/eve/issues/3267
+  it.fails("keeps nested union constraints so valid deep input validates", async () => {
+    const property = {
+      oneOf: [
+        {
+          type: "object",
+          required: ["title"],
+          properties: {
+            title: { type: "array", items: { $ref: "#/components/schemas/RichText" } },
+          },
+        },
+        { type: "object", required: ["number"], properties: { number: { type: "number" } } },
+      ],
+    };
+    const spec: Record<string, unknown> = {
+      openapi: "3.1.0",
+      info: { title: "T", version: "1" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {
+        "/v1/pages": {
+          post: {
+            operationId: "createPage",
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["properties"],
+                    properties: {
+                      properties: { type: "object", additionalProperties: property },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Text: {
+            type: "object",
+            required: ["text"],
+            properties: {
+              text: {
+                type: "object",
+                required: ["content"],
+                properties: { content: { type: "string" } },
+              },
+            },
+          },
+          Equation: {
+            type: "object",
+            required: ["equation"],
+            properties: { equation: { type: "string" } },
+          },
+          RichText: {
+            allOf: [
+              { type: "object" },
+              {
+                oneOf: [
+                  { $ref: "#/components/schemas/Text" },
+                  { $ref: "#/components/schemas/Equation" },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    };
+    const client = new OpenApiConnectionClient(makeConnection({ spec }));
+    const createPage = (await client.getToolMetadata()).find((m) => m.name === "createPage");
+    const validate = (content: unknown) =>
+      defineJsonSchema(createPage!.inputSchema as JsonObject)["~standard"].validate({
+        body: { properties: { Name: { title: [{ text: { content } }] } } },
+      });
+
+    expect((await validate("Upload attendee data")).issues).toBeUndefined();
+    expect((await validate(123)).issues).toBeDefined();
   });
 
   it("derives the base URL from the spec servers when baseUrl is omitted", async () => {
