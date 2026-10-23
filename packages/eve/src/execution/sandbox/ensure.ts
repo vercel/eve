@@ -388,17 +388,19 @@ export async function ensureSandboxAccess(
   // fails again is dropped. Its owner must leave a record that redoes it later.
   let preparations: Promise<void> = Promise.resolve();
 
-  function enqueue(job: () => Promise<unknown>): void {
+  function enqueue(job: () => Promise<unknown>, options = { retry: true }): void {
+    const report = (error: unknown) => {
+      log.warn("background sandbox preparation failed; it runs again when it is needed", {
+        error,
+        sessionId: input.sessionId,
+      });
+    };
     preparations = preparations.then(async () => {
       try {
         await job();
-      } catch {
-        await job().catch((error: unknown) => {
-          log.warn("background sandbox preparation failed; it runs again when it is needed", {
-            error,
-            sessionId: input.sessionId,
-          });
-        });
+      } catch (error) {
+        if (options.retry) await job().catch(report);
+        else report(error);
       }
     });
   }
@@ -486,7 +488,11 @@ export async function ensureSandboxAccess(
       enqueue(work === undefined ? requireOpened : () => work(openSession));
     },
     resumeRecorded() {
-      if (persisted !== null) enqueue(() => requireOpened({ resumeOnly: true }));
+      // Not retried: a gone sandbox stays gone, and a retry would hand a
+      // consumer waiting on this open another resume-only attempt.
+      if (persisted !== null) {
+        enqueue(() => requireOpened({ resumeOnly: true }), { retry: false });
+      }
     },
     async settle() {
       await preparations;

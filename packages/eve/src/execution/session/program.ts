@@ -250,8 +250,9 @@ async function runSessionLoop(
           queue.pendingCount === 0 &&
           !inbox.hasPending()
         ) {
-          // Moving the session must not wait for, or later absorb, the prewarm
-          // step; the successor reaches its sandbox through the upserting `start()`.
+          // Moving the session must not wait for, or absorb, the prewarm step
+          // meanwhile; the successor reaches its sandbox through the upserting `start()`.
+          const wasAwaitingFirstInput = awaitingFirstInput;
           awaitingFirstInput = false;
           const deadline = sessionTimeout?.getDeadline();
           const result = await handoff.tryPrewarmTransfer(
@@ -260,6 +261,7 @@ async function runSessionLoop(
             deadline,
           );
           if (result.kind === "transferred") return result;
+          awaitingFirstInput = wasAwaitingFirstInput;
         }
         continue;
       }

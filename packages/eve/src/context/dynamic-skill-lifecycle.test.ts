@@ -605,7 +605,7 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
   });
 
-  it("forgets a changed package even when its queued work fails before writing", async () => {
+  it("forgets a changed package before its queued write runs, so a failure is redone", async () => {
     const { access, ctx, sandbox } = createCtx();
     let content = "A";
     const resolver = createResolver("policy", () =>
@@ -614,11 +614,24 @@ describe("dynamic skill supporting files", () => {
     await dispatch(ctx, resolver);
     expect(ctx.get(DynamicSkillSandboxKey)).toHaveProperty("policy");
 
+    // Fails however often the queue retries, until the provider recovers.
+    let unavailable = true;
+    const captureState = access.captureState;
+    vi.spyOn(access, "captureState").mockImplementation(async () => {
+      if (unavailable) throw new Error("provider unavailable");
+      return await captureState();
+    });
     content = "B";
-    vi.spyOn(access, "captureState").mockRejectedValueOnce(new Error("provider unavailable"));
-    await dispatch(ctx, resolver);
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
     expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+    await settle(ctx);
 
+    unavailable = false;
     await dispatch(ctx, resolver);
     expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("B");
   });
@@ -632,9 +645,15 @@ describe("dynamic skill supporting files", () => {
     await dispatch(ctx, resolver);
 
     content = "B";
-    vi.spyOn(sandbox.session, "writeFiles").mockRejectedValueOnce(new Error("disk full"));
+    let full = true;
+    const writeFiles = sandbox.session.writeFiles;
+    vi.spyOn(sandbox.session, "writeFiles").mockImplementation(async (options) => {
+      if (full) throw new Error("disk full");
+      await writeFiles(options);
+    });
     await dispatch(ctx, resolver);
     expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+    full = false;
 
     content = "A";
     await dispatch(ctx, resolver);

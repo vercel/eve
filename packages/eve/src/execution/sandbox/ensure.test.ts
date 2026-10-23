@@ -33,13 +33,14 @@ function fixture(
     const { connection } = mockSandbox({ stop: stopSandbox });
     return options.closable === true ? { ...connection, close: closeSandbox } : connection;
   });
+  const resume = vi.fn(async () => await create());
   const start = vi.fn(async (context: SandboxSessionContext) => ({
     connection: await create(),
     state: { key: context.session.id },
   }));
   const provider = defineSandboxProvider({
     name: "test",
-    environment: () => ({ onSessionEnd, prepare: async () => null, start, resume: create }),
+    environment: () => ({ onSessionEnd, prepare: async () => null, start, resume }),
   });
   const environment = provider.environment();
   const selector = defineSandbox(async () => {
@@ -61,7 +62,7 @@ function fixture(
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { closeSandbox, create, onSessionEnd, registry, start, stopSandbox };
+  return { closeSandbox, create, onSessionEnd, registry, resume, start, stopSandbox };
 }
 /** A provider that honors the contract: `start` upserts on the session id, and cleanup deletes by it. */
 function upsertingFixture() {
@@ -245,19 +246,40 @@ describe("ensureSandboxAccess", () => {
     await unrecorded.settle();
     expect(value.create).not.toHaveBeenCalled();
 
-    // `resume()` (called with arguments) finds the sandbox gone; `start()` still works.
-    const createNow = value.create.getMockImplementation()!;
-    value.create.mockImplementation((async (...args: unknown[]) => {
-      if (args.length > 0) throw new SandboxSessionGoneError("The sandbox is gone.");
-      return await createNow();
-    }) as typeof createNow);
+    value.resume.mockRejectedValue(new SandboxSessionGoneError("The sandbox is gone."));
     const gone = await build(recorded);
     gone.resumeRecorded();
     await gone.settle();
+    expect(value.resume).toHaveBeenCalledOnce();
     expect(value.start).not.toHaveBeenCalled();
 
     // A consumer that needs the sandbox still gets a fresh one.
     await expect(gone.get()).resolves.toBeTruthy();
+    expect(value.start).toHaveBeenCalledOnce();
+  });
+
+  it("starts a fresh sandbox for an opener that joined a background resume of a gone one", async () => {
+    const value = fixture();
+    const gone = Promise.withResolvers<void>();
+    value.resume.mockImplementation(async () => {
+      await gone.promise;
+      throw new SandboxSessionGoneError("The sandbox is gone.");
+    });
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state: { session: { providerName: "test", state: null, stateProtocolVersion: 1 } },
+    });
+
+    access.resumeRecorded();
+    await vi.waitFor(() => expect(value.resume).toHaveBeenCalledOnce());
+    // Attachment staging opens without waiting for the queue, joining that resume.
+    const opened = access.open();
+    gone.resolve();
+
+    await expect(opened).resolves.toBeTruthy();
     expect(value.start).toHaveBeenCalledOnce();
   });
 
