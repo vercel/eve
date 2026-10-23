@@ -1339,6 +1339,25 @@ describe("compactMessages: fixed kept-tail budget", () => {
     expect(estimateTokens(result)).toBeLessThan(30_000);
   });
 
+  it("keeps the newest tool result whole when no summary is needed", async () => {
+    const history: ModelMessage[] = [
+      user("go"),
+      ...toolExchange({ callId: "call-0", payloadChars: 45_000 }),
+      ...toolExchange({ callId: "call-1", payloadChars: 45_000 }),
+      ...toolExchange({ callId: "call-2", payloadChars: 30_000 }),
+    ];
+    const summarizer = summarizeWith("unused");
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 2, threshold: 30_000 },
+      summarizer,
+    );
+
+    expect(summarizer).not.toHaveBeenCalled();
+    expect(JSON.stringify(result.at(-1))).not.toContain("Truncated by eve");
+  });
+
   it("never keeps more than the budget word for word", async () => {
     const history: ModelMessage[] = [
       user("start"),

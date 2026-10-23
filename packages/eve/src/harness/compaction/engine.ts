@@ -189,33 +189,32 @@ export async function compactMessages(
   forceSummary = false,
   historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
-  const { conversation: fullConversation, previousCheckpoint } =
-    extractPreviousCheckpoint(messages);
-  // Tool results in the kept tail are shortened too: one large file read would
-  // otherwise take the whole tail budget.
-  const conversation = capToolResults(fullConversation);
+  const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
 
   // The current request is replayed after every compaction. One over the tail
   // budget keeps only its newest part; the cut-off start goes to the summarizer.
-  const currentIndex = findLastRealUserIndex(conversation);
-  const current = conversation[currentIndex];
-  const cut = current === undefined ? undefined : fitCurrentMessage(current, budget);
-  const replay = cut?.replay ?? current;
+  const planTail = (history: readonly ModelMessage[]) => {
+    const index = findLastRealUserIndex(history);
+    const current = history[index];
+    const cut = current === undefined ? undefined : fitCurrentMessage(current, budget);
+    const replay = cut?.replay ?? current;
+    let keep = selectRecentWindowSize(history, recentConfig, budget);
+    if (replay !== undefined && index < history.length - keep) {
+      // The window leaves the request out, so it is replayed after the summary.
+      keep = selectRecentWindowSize(
+        history,
+        recentConfig,
+        Math.max(0, budget - estimateTokens([replay])),
+      );
+    }
+    return { currentIndex: index, cut, keep, replay };
+  };
 
-  let keep = selectRecentWindowSize(conversation, recentConfig, budget);
-  if (replay !== undefined && currentIndex < conversation.length - keep) {
-    // The window leaves the request out, so it is replayed after the summary.
-    keep = selectRecentWindowSize(
-      conversation,
-      recentConfig,
-      Math.max(0, budget - estimateTokens([replay])),
-    );
-  }
-
-  if (!forceSummary && cut === undefined) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+  const first = planTail(conversation);
+  if (!forceSummary && first.cut === undefined) {
+    const { older, recent } = splitMessagesForCompaction(conversation, first.keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);
     }
@@ -233,7 +232,7 @@ export async function compactMessages(
         older,
         previousCheckpoint,
         recent,
-        replay,
+        replay: first.replay,
         tokenEstimateAdjustment,
       });
       if (outcome.type === "within-limit") {
@@ -242,8 +241,15 @@ export async function compactMessages(
     }
   }
 
+  // Tool results in the kept tail are shortened on this path only: one large
+  // file read would otherwise take the whole tail budget.
+  const cappedConversation = capToolResults(conversation);
+  const summaryPlan = planTail(cappedConversation);
+  const { currentIndex, cut, replay } = summaryPlan;
+  let { keep } = summaryPlan;
+
   while (true) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+    const { older, recent } = splitMessagesForCompaction(cappedConversation, keep);
 
     const summaryPrompt = createCompactionPrompt({
       messages:
