@@ -59,6 +59,20 @@ Results are written under `apps/benchmarks/results/`. Each run includes the nati
 grader output, summary, copied project files, and validation output. Vercel Sandbox and AI Gateway
 credentials are required.
 
+## See which docs pages agents read
+
+`scripts/analyze.mjs` reports which pages under `node_modules/eve/docs` the coding agent opened in
+each run, for every harness. Pass `--docs` to aggregate across runs: pages are ranked by how many
+runs opened them, and shipped pages that no run opened are listed last.
+
+```sh
+node scripts/analyze.mjs --docs
+node scripts/analyze.mjs results/<experiment>/<timestamp> --docs --json
+```
+
+These counts cover benchmark tasks only, not real usage. The unread list compares against `docs/` in
+the current checkout, which can differ from the canary the runs used.
+
 ## Publish canonical results
 
 Canonical publication compares the `baseline` and `guided` treatments with the same immutable eve
