@@ -20,6 +20,15 @@
 // time a `task_wait` call blocks on it), tool (any other requested action),
 // compaction, model step, and the remainder is framework time. In-process
 // tools run inside their model step, so precedence keeps model ms to model work.
+// A model step ends at durable-harness's `model.done` mark (the tool calls
+// streamed in full, or the step's last output), not at `step.completed`:
+// recording a finished response is framework time, as it is on /compare.
+//
+// Framework overhead (`overhead.*`, `session.*`, `durability.*`) is derived in
+// framework.mjs. Every metric has a scope: `model` metrics trend per model;
+// `framework` metrics trend per world and model class (mock or live), and the
+// `pooled` ones are normalized per unit of work, so live legs may pool them
+// across models.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,56 +37,85 @@ import {
   captureSessions,
   notApplicable,
   selectEvents,
-  timestamp,
   unavailable,
 } from "./measurements/events.mjs";
-import {
-  coveredLengthBetween,
-  firstDeltaInStep,
-  pairIntervals,
-  stepKey,
-} from "./measurements/intervals.mjs";
+import { clientOverheads, durability, median, serverOverheads } from "./framework.mjs";
+import { coveredLengthBetween, pairIntervals, stepKey } from "./measurements/intervals.mjs";
+import { sessionMarks } from "./measurements/marks.mjs";
 
 /** Bump whenever a definition below changes meaning. */
-export const METRICS_VERSION = 1;
+export const METRICS_VERSION = 2;
 
-/** Every metric in the standard set, with its unit and better direction. */
+/**
+ * Where the framework definitions come from. The conformance data in
+ * fixtures/durable-harness/ was generated from this commit.
+ */
+export const METRIC_DEFINITIONS = Object.freeze({
+  repository: "vercel-labs/durable-harness",
+  path: "packages/demo-ui/src/compare-glossary.ts",
+  commit: "ea8aa4060cf4fb8cd39737ce8ab21c4e0f40c741",
+});
+
+const model = (unit, direction) => ({ unit, direction, scope: "model" });
+/** `per`: the value is the attempt's p50 over that occurrence, with `count` and `samples`. */
+const framework = (unit, direction, { per, pooled }) => ({
+  unit,
+  direction,
+  scope: "framework",
+  ...(per === undefined ? {} : { per }),
+  pooled,
+});
+
+/** Every metric in the standard set: unit, better direction, and scope. */
 export const STANDARD_METRICS = Object.freeze({
-  "latency.eval_wall_ms": { unit: "ms", direction: "lower" },
-  "latency.turn_ms": { unit: "ms", direction: "lower" },
-  "latency.turn_ms_mean": { unit: "ms", direction: "lower" },
-  "latency.ttft_ms_p50": { unit: "ms", direction: "lower" },
-  "latency.output_tokens_per_s": { unit: "tokens/s", direction: "higher" },
-  "attribution.model_ms": { unit: "ms", direction: "lower" },
-  "attribution.tool_ms": { unit: "ms", direction: "lower" },
-  "attribution.task_ms": { unit: "ms", direction: "lower" },
-  "attribution.human_wait_ms": { unit: "ms", direction: "neutral" },
-  "attribution.compaction_ms": { unit: "ms", direction: "lower" },
-  "attribution.framework_ms": { unit: "ms", direction: "lower" },
-  "cost.total_usd": { unit: "usd", direction: "lower" },
-  "cost.primary_usd": { unit: "usd", direction: "lower" },
-  "cost.subagent_usd": { unit: "usd", direction: "lower" },
-  "tokens.input": { unit: "tokens", direction: "lower" },
-  "tokens.output": { unit: "tokens", direction: "lower" },
-  "tokens.cache_read": { unit: "tokens", direction: "neutral" },
-  "tokens.cache_write": { unit: "tokens", direction: "neutral" },
-  "tokens.cache_hit_ratio": { unit: "ratio", direction: "higher" },
-  "tokens.peak_context": { unit: "tokens", direction: "lower" },
-  "counts.turns": { unit: "count", direction: "neutral" },
-  "counts.steps": { unit: "count", direction: "lower" },
-  "counts.steps_per_turn": { unit: "ratio", direction: "lower" },
-  "counts.tool_calls": { unit: "count", direction: "neutral" },
-  "counts.tool_calls_per_step": { unit: "ratio", direction: "neutral" },
-  "counts.subagent_fan_out": { unit: "count", direction: "neutral" },
-  "counts.subagent_depth": { unit: "count", direction: "neutral" },
-  "counts.compactions": { unit: "count", direction: "lower" },
-  "counts.context_clears": { unit: "count", direction: "neutral" },
-  "reliability.step_failures": { unit: "count", direction: "lower" },
-  "reliability.turn_failures": { unit: "count", direction: "lower" },
-  "reliability.session_failures": { unit: "count", direction: "lower" },
-  "reliability.tool_errors": { unit: "count", direction: "lower" },
-  "reliability.tool_error_rate": { unit: "ratio", direction: "lower" },
-  "reliability.truncations": { unit: "count", direction: "lower" },
+  "latency.eval_wall_ms": model("ms", "lower"),
+  "latency.turn_ms": model("ms", "lower"),
+  "latency.turn_ms_mean": model("ms", "lower"),
+  "latency.ttft_ms_p50": model("ms", "lower"),
+  "latency.output_tokens_per_s": model("tokens/s", "higher"),
+  "attribution.model_ms": model("ms", "lower"),
+  "attribution.tool_ms": model("ms", "lower"),
+  "attribution.task_ms": model("ms", "lower"),
+  "attribution.human_wait_ms": model("ms", "neutral"),
+  "attribution.compaction_ms": model("ms", "lower"),
+  "attribution.framework_ms": framework("ms", "lower", { pooled: false }),
+  "overhead.pre_model_ms": framework("ms", "lower", { per: "turn", pooled: true }),
+  "overhead.tool_hop_ms": framework("ms", "lower", { per: "call", pooled: true }),
+  "overhead.finalize_ms": framework("ms", "lower", { per: "turn", pooled: true }),
+  "overhead.agent_start_ms": framework("ms", "lower", { per: "call", pooled: true }),
+  "overhead.first_output_ms": framework("ms", "lower", { per: "turn", pooled: true }),
+  "overhead.turn_ms": framework("ms", "lower", { per: "turn", pooled: true }),
+  "overhead.tool_call_ms": framework("ms", "lower", { per: "call", pooled: true }),
+  "session.not_ready_ms": framework("ms", "lower", { per: "send", pooled: true }),
+  "session.create_ms": framework("ms", "lower", { per: "session", pooled: true }),
+  "durability.workflow_steps_per_turn": framework("ratio", "lower", { pooled: true }),
+  "durability.step_input_bytes_per_turn": framework("bytes", "lower", { pooled: true }),
+  "durability.step_output_bytes_per_turn": framework("bytes", "lower", { pooled: true }),
+  "durability.workflow_steps_per_model_step": framework("ratio", "lower", { pooled: true }),
+  "cost.total_usd": model("usd", "lower"),
+  "cost.primary_usd": model("usd", "lower"),
+  "cost.subagent_usd": model("usd", "lower"),
+  "tokens.input": model("tokens", "lower"),
+  "tokens.output": model("tokens", "lower"),
+  "tokens.cache_read": model("tokens", "neutral"),
+  "tokens.cache_write": model("tokens", "neutral"),
+  "tokens.cache_hit_ratio": model("ratio", "higher"),
+  "tokens.peak_context": model("tokens", "lower"),
+  "counts.turns": model("count", "neutral"),
+  "counts.steps": model("count", "lower"),
+  "counts.steps_per_turn": model("ratio", "lower"),
+  "counts.tool_calls": model("count", "neutral"),
+  "counts.tool_calls_per_step": model("ratio", "neutral"),
+  "counts.subagent_fan_out": model("count", "neutral"),
+  "counts.subagent_depth": model("count", "neutral"),
+  "counts.compactions": model("count", "lower"),
+  "counts.context_clears": model("count", "neutral"),
+  "reliability.step_failures": model("count", "lower"),
+  "reliability.turn_failures": model("count", "lower"),
+  "reliability.session_failures": model("count", "lower"),
+  "reliability.tool_errors": model("count", "lower"),
+  "reliability.tool_error_rate": model("ratio", "lower"),
+  "reliability.truncations": model("count", "lower"),
 });
 
 const TURN_TERMINALS = ["turn.completed", "turn.failed", "turn.cancelled"];
@@ -86,13 +124,15 @@ const TOOL_ACTION_KINDS = new Set(["tool-call", "workflow-tool-call"]);
 
 /**
  * @param {object} evalArtifact parsed eval detail JSON
+ * @param {{ world?: Map<string, { events: object[] }> }} [probes] the leg's
+ *   world probe, by session id; absent when the leg exported none
  * @returns {{
  *   metrics_version: number,
  *   metrics: Record<string, import("./measurements/events.mjs").Measurement>,
  *   failures: { type: string, code: string, count: number }[],
  * }}
  */
-export function deriveAttemptMetrics(evalArtifact) {
+export function deriveAttemptMetrics(evalArtifact, { world } = {}) {
   const sessions = evalArtifact?.result?.sessions;
   let capture;
   try {
@@ -109,14 +149,18 @@ export function deriveAttemptMetrics(evalArtifact) {
 
   const rootIds = rootSessionIds(capture);
   if (rootIds.length === 0) return everyMetric(unavailable("missing-root-session"));
-  const roots = rootIds.map((sessionId) => ({
-    events: capture.bySession.get(sessionId),
-    timeline: sessionTimeline(capture, sessionId),
-  }));
+  const roots = rootIds.map((sessionId) => {
+    const events = capture.bySession.get(sessionId);
+    const marks = sessionMarks(events);
+    return { sessionId, events, marks, timeline: sessionTimeline(capture, sessionId, marks) };
+  });
   const allEvents = capture.events;
 
   const metrics = {
     ...latencyAndAttribution(evalArtifact, roots),
+    ...serverOverheads(roots, capture.bySession),
+    ...clientOverheads(sessions, roots),
+    ...durability(roots, world),
     ...streaming(roots),
     ...costAndTokens(evalArtifact, roots),
     ...efficiency(capture, roots, rootIds),
@@ -152,7 +196,7 @@ function rootSessionIds(capture) {
 }
 
 /** Pair every interval family of one session, clipping nothing yet. */
-function sessionTimeline(capture, sessionId) {
+function sessionTimeline(capture, sessionId, marks) {
   const events = capture.bySession.get(sessionId);
   const turnStarts = selectEvents(events, "turn.started");
   const turnKey = (e) => [e.data?.turnId];
@@ -173,10 +217,13 @@ function sessionTimeline(capture, sessionId) {
   // limit) ends with that turn.
   const closeOpen = (start) => terminals.get(start.data?.turnId);
 
-  const steps = pairIntervals(
-    selectEvents(events, "step.started"),
-    [...selectEvents(events, "step.completed"), ...selectEvents(events, "step.failed")],
-    { startKeys: (e) => [stepKey(e)], endKeys: (e) => [stepKey(e)], subject: "step", closeOpen },
+  const steps = endStepsAtModelDone(
+    pairIntervals(
+      selectEvents(events, "step.started"),
+      [...selectEvents(events, "step.completed"), ...selectEvents(events, "step.failed")],
+      { startKeys: (e) => [stepKey(e)], endKeys: (e) => [stepKey(e)], subject: "step", closeOpen },
+    ),
+    marks,
   );
   const actions = pairIntervals(
     selectEvents(events, "actions.requested"),
@@ -214,6 +261,23 @@ function sessionTimeline(capture, sessionId) {
     tasks,
     compactions,
     human: humanWait(events, closeOpen),
+  };
+}
+
+function endStepsAtModelDone(steps, marks) {
+  if (steps.status !== "ready") return steps;
+  if (marks.status !== "ready") return marks;
+  const done = new Map(
+    [...marks.turns.values()].flatMap((turn) => turn.steps.map((step) => [step.key, step.done])),
+  );
+  return {
+    status: "ready",
+    intervals: steps.intervals.map((interval) => {
+      const doneAt = done.get(interval.key)?.t;
+      return doneAt === undefined || doneAt < interval.startAt || doneAt > interval.endAt
+        ? interval
+        : { ...interval, endAt: doneAt };
+    }),
   };
 }
 
@@ -351,26 +415,30 @@ function evalWall(evalArtifact, humanIntervals) {
   return measured(endAt - startAt - human);
 }
 
+/** Time to first token and output rate per model step, from its marks. */
 function streaming(roots) {
+  const broken = roots.find(({ marks }) => marks.status !== "ready");
+  if (broken !== undefined)
+    return { "latency.ttft_ms_p50": broken.marks, "latency.output_tokens_per_s": broken.marks };
   const ttfts = [];
   let tokens = 0;
   let streamMs = 0;
   let missingTokens = false;
-  for (const { events } of roots) {
+  for (const { events, marks } of roots) {
     const completions = new Map(
       selectEvents(events, "step.completed").map((event) => [stepKey(event), event]),
     );
-    for (const [key, { start, firstDelta }] of firstDeltaInStep(events)) {
-      const startAt = timestamp(start);
-      if (firstDelta === undefined || startAt === undefined) continue;
-      const deltaAt = timestamp(firstDelta);
-      ttfts.push(deltaAt - startAt);
-      const completed = completions.get(key);
-      if (completed === undefined) continue;
-      const outputTokens = completed.data?.usage?.outputTokens;
-      if (typeof outputTokens !== "number") missingTokens = true;
-      else tokens += outputTokens;
-      streamMs += (timestamp(completed) ?? deltaAt) - deltaAt;
+    for (const turn of marks.turns.values()) {
+      for (const step of turn.steps) {
+        if (step.firstToken === undefined) continue;
+        ttfts.push(step.firstToken.t - step.request.t);
+        const completed = completions.get(step.key);
+        if (completed === undefined || step.done === undefined) continue;
+        const outputTokens = completed.data?.usage?.outputTokens;
+        if (typeof outputTokens !== "number") missingTokens = true;
+        else tokens += outputTokens;
+        streamMs += Math.max(0, step.done.t - step.firstToken.t);
+      }
     }
   }
   if (ttfts.length === 0) {
@@ -385,12 +453,6 @@ function streaming(roots) {
         ? unavailable("zero-stream-duration")
         : measured((tokens / streamMs) * 1000),
   };
-}
-
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function costAndTokens(evalArtifact, roots) {

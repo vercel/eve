@@ -4,6 +4,20 @@ import { summarizeTurnEvents } from "#client/session-utils.js";
 import type { CancelSessionResult, MessageResult } from "#client/types.js";
 
 /**
+ * @internal What the server accepted for a message or answer, and when the
+ * client sent it, in epoch milliseconds on the client's clock.
+ */
+export interface ClientSendReceipt {
+  readonly deliveryId?: string;
+  /** The first attempt was issued. */
+  readonly startedAt: number;
+  /** Retrying `409 session_not_ready` before the accepted attempt was issued. */
+  readonly notReadyMs: number;
+  /** The accepted response arrived. */
+  readonly acceptedAt: number;
+}
+
+/**
  * Internal configuration passed to construct a {@link MessageResponse}.
  */
 interface MessageResponseInput {
@@ -15,10 +29,12 @@ interface MessageResponseInput {
   /** Answers resume a turn that started before their stream, so its `input.resolved` names it. */
   readonly resumesTurn?: boolean;
   readonly sessionId: string;
+  readonly receipt?: ClientSendReceipt;
 }
 
 const consumeResponse = Symbol("consumeMessageResponse");
 const acceptedDeliveryId = Symbol("acceptedDeliveryId");
+const sendReceipt = Symbol("sendReceipt");
 
 /**
  * The response from {@link ClientSession.send}.
@@ -33,6 +49,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
    */
   readonly sessionId: string;
   readonly [acceptedDeliveryId]: string | undefined;
+  readonly [sendReceipt]: ClientSendReceipt | undefined;
 
   readonly #cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
   #cancellation: Promise<CancelSessionResult> | undefined;
@@ -47,6 +64,7 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
     this.#cancelTurn = input.cancelTurn;
     this.sessionId = input.sessionId;
     this[acceptedDeliveryId] = input.deliveryId;
+    this[sendReceipt] = input.receipt;
     this.#createStream = input.createStream;
     this.#resumesTurn = input.resumesTurn ?? false;
   }
@@ -138,6 +156,13 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
 /** @internal Returns the accepted message identity without consuming its response stream. */
 export function getMessageResponseDeliveryId(response: MessageResponse): string | undefined {
   return response[acceptedDeliveryId];
+}
+
+/** @internal Returns what the server accepted for the response's request, and when. */
+export function getMessageResponseReceipt(
+  response: MessageResponse,
+): ClientSendReceipt | undefined {
+  return response[sendReceipt];
 }
 
 /** @internal Observe a turn through the frontend's existing session stream. */

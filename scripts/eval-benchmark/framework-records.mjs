@@ -1,0 +1,214 @@
+// Derives framework-records.jsonl: run-level framework metrics that belong to
+// a commit and a fixture, not to an eval attempt. Each record is one probe
+// sample, keyed by (github_run_id, run_attempt, probe, subject, world,
+// attempt), and comparable across runs when (probe, subject, world,
+// runner_os) match. Records carry no model fields.
+//
+//   build        `eve build --profile` on mock legs with a production server
+//                (leg probes/build-profile.json), and the dev-startup job's
+//                builds of its benchmark agents
+//   start        `eve start` → first `/eve/v1/health` 200 on the same legs
+//                (leg probes/start.json: { readyMs })
+//   dev-startup  `eve dev` ready and idle session accepted, from
+//                packages/eve/scripts/benchmark-startup.mjs
+//                (<dev-startup-dir>/<subject>.jsonl: its stdout)
+//
+// A planned probe without data is a `missing` record, as in records.jsonl.
+//
+// Usage: node scripts/eval-benchmark/framework-records.mjs <plan.json> <legs-dir> <dev-startup-dir> <framework-records.jsonl>
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { readBuildProfile } from "../build-profile-report.mjs";
+import { legArtifactPath, readLegs } from "./records.mjs";
+
+export const FRAMEWORK_RECORD_SCHEMA_VERSION = 1;
+export const DEV_STARTUP_ARTIFACT_PATH = "raw/dev-startup";
+
+const framework = (unit) => ({ unit, direction: "lower", scope: "framework", pooled: false });
+
+/** Every run-level metric; `*` stands for a build phase name. */
+export const FRAMEWORK_RECORD_METRICS = Object.freeze({
+  "build.total_ms": framework("ms"),
+  "build.phase_ms.*": framework("ms"),
+  "start.ready_ms": framework("ms"),
+  "dev_startup.ready_ms": framework("ms"),
+  "dev_startup.session_accepted_ms": framework("ms"),
+});
+
+/** Legs that build and start a production server, and so carry build and start probes. */
+export function probedLegs(legs) {
+  return legs.filter(({ leg }) => leg.kind === "mock" && leg.world !== "local");
+}
+
+/**
+ * @param {{
+ *   plan: any,
+ *   legs: ReturnType<typeof readLegs>,
+ *   devStartupDir: string | undefined,
+ *   githubRunId: string,
+ *   runAttempt: number,
+ * }} input
+ */
+export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, runAttempt }) {
+  const record = ({ probe, subject, world, attempt, runnerOs, missing, metrics, path }) => ({
+    schema_version: FRAMEWORK_RECORD_SCHEMA_VERSION,
+    github_run_id: String(githubRunId),
+    run_attempt: runAttempt,
+    probe,
+    subject,
+    world,
+    attempt,
+    sha: plan.sha,
+    runner_os: runnerOs ?? null,
+    missing: missing ?? null,
+    metrics: metrics ?? {},
+    artifact_path: path ?? null,
+  });
+
+  const records = [];
+  for (const { leg, dir, meta } of probedLegs(legs)) {
+    const base = { subject: leg.fixture, world: leg.world, attempt: leg.attempt };
+    const runnerOs = meta?.runner_os;
+    const path = dir === undefined ? undefined : legArtifactPath(leg);
+    const read = (name) => {
+      const file = dir === undefined ? undefined : join(dir, "probes", name);
+      return file !== undefined && existsSync(file)
+        ? JSON.parse(readFileSync(file, "utf8"))
+        : undefined;
+    };
+    const missing = (probe) =>
+      record({
+        ...base,
+        probe,
+        runnerOs,
+        missing: dir === undefined ? "job-missing" : "probe-missing",
+      });
+
+    const profile = read("build-profile.json");
+    records.push(
+      profile === undefined
+        ? missing("build")
+        : record({ ...base, probe: "build", runnerOs, path, metrics: buildMetrics(profile) }),
+    );
+    const start = read("start.json");
+    records.push(
+      start === undefined
+        ? missing("start")
+        : record({
+            ...base,
+            probe: "start",
+            runnerOs,
+            path,
+            metrics: { "start.ready_ms": duration(start.readyMs) },
+          }),
+    );
+  }
+
+  const devStartup = plan.registry.dev_startup;
+  if (devStartup) {
+    const meta = readOptionalJson(devStartupDir && join(devStartupDir, "meta.json"));
+    if (meta !== undefined && meta.sha !== plan.sha)
+      throw new Error(`dev-startup ran at ${meta.sha}, but the plan is for ${plan.sha}.`);
+    for (const { name } of devStartup.subjects) {
+      const lines = readJsonLines(devStartupDir && join(devStartupDir, `${name}.jsonl`));
+      for (let run = 1; run <= devStartup.runs; run += 1) {
+        const base = { subject: name, world: "local", attempt: run, runnerOs: meta?.runner_os };
+        const missingReason =
+          meta === undefined
+            ? "job-missing"
+            : lines === undefined
+              ? "probe-missing"
+              : "run-missing";
+        const dev = lines?.find((line) => line.mode === "dev" && line.run === run);
+        records.push(
+          dev === undefined
+            ? record({ ...base, probe: "dev-startup", missing: missingReason })
+            : record({
+                ...base,
+                probe: "dev-startup",
+                path: DEV_STARTUP_ARTIFACT_PATH,
+                metrics: {
+                  "dev_startup.ready_ms": duration(dev.wallMs),
+                  "dev_startup.session_accepted_ms": duration(dev.sessionAcceptedMs),
+                },
+              }),
+        );
+        const build = lines?.find((line) => line.mode === "build" && line.run === run);
+        records.push(
+          build === undefined
+            ? record({ ...base, probe: "build", missing: missingReason })
+            : record({
+                ...base,
+                probe: "build",
+                path: DEV_STARTUP_ARTIFACT_PATH,
+                metrics: buildMetrics(build.profile),
+              }),
+        );
+      }
+    }
+  }
+  return records;
+}
+
+function buildMetrics(value) {
+  let profile;
+  try {
+    profile = readBuildProfile(value, "build profile");
+  } catch {
+    return { "build.total_ms": { status: "unavailable", reason: "invalid-build-profile" } };
+  }
+  return {
+    "build.total_ms": duration(profile.durationMs),
+    ...Object.fromEntries(
+      profile.phases.map((phase) => [`build.phase_ms.${phase.name}`, duration(phase.durationMs)]),
+    ),
+  };
+}
+
+function duration(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? { status: "measured", value }
+    : { status: "unavailable", reason: "missing-duration" };
+}
+
+function readOptionalJson(path) {
+  return path !== undefined && existsSync(path)
+    ? JSON.parse(readFileSync(path, "utf8"))
+    : undefined;
+}
+
+/** benchmark-startup.mjs prints one JSON object per line; only result lines carry `run`. */
+function readJsonLines(path) {
+  if (path === undefined || !existsSync(path)) return undefined;
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line.trim().startsWith("{"))
+    .map((line) => JSON.parse(line))
+    .filter((line) => Number.isInteger(line.run));
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const [planPath, legsDir, devStartupDir, outPath] = process.argv.slice(2);
+  if (outPath === undefined) {
+    console.error(
+      "Usage: node scripts/eval-benchmark/framework-records.mjs <plan.json> <legs-dir> <dev-startup-dir> <framework-records.jsonl>",
+    );
+    process.exit(1);
+  }
+  const githubRunId = process.env.GITHUB_RUN_ID;
+  if (githubRunId === undefined)
+    throw new Error("GITHUB_RUN_ID is required to key benchmark records.");
+  const plan = JSON.parse(readFileSync(planPath, "utf8"));
+  const records = buildFrameworkRecords({
+    plan,
+    legs: readLegs(plan, legsDir),
+    devStartupDir,
+    githubRunId,
+    runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? "1"),
+  });
+  writeFileSync(outPath, records.map((record) => `${JSON.stringify(record)}\n`).join(""));
+  const missing = records.filter((record) => record.missing !== null).length;
+  console.error(`Wrote ${records.length} framework records (${missing} missing) to ${outPath}.`);
+}

@@ -53,7 +53,9 @@
                   "callId": "notebook-remember",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_0",
+              "stepIndex": 0
             }
           },
           {
@@ -121,7 +123,9 @@
                   "callId": "notebook-remember-wait",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_0",
+              "stepIndex": 1
             }
           },
           {
@@ -149,6 +153,9 @@
               "at": "2026-10-05T23:37:06.057Z"
             },
             "data": {
+              "callId": "notebook-remember",
+              "turnId": "turn_0",
+              "taskId": "notebook-keeper-eqtna6",
               "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0"
             }
           },
@@ -259,7 +266,9 @@
                   "callId": "notebook-review",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_1",
+              "stepIndex": 0
             }
           },
           {
@@ -327,7 +336,9 @@
                   "callId": "notebook-review-wait",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_1",
+              "stepIndex": 1
             }
           },
           {
@@ -384,7 +395,9 @@
                   "callId": "notebook-cancel",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_1",
+              "stepIndex": 2
             }
           },
           {
@@ -512,7 +525,9 @@
                   "callId": "notebook-recall",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_2",
+              "stepIndex": 0
             }
           },
           {
@@ -580,7 +595,9 @@
                   "callId": "notebook-recall-wait",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_2",
+              "stepIndex": 1
             }
           },
           {
@@ -778,7 +795,9 @@
                   "callId": "notebook-review-2",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_1",
+              "stepIndex": 0
             }
           },
           {

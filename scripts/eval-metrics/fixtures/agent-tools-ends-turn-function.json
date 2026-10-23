@@ -53,7 +53,9 @@
                   "callId": "mock-tool-call-1-0-1",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_0",
+              "stepIndex": 0
             }
           },
           {
@@ -130,7 +132,9 @@
                   "callId": "mock-tool-call-2-1-1",
                   "kind": "tool-call"
                 }
-              ]
+              ],
+              "turnId": "turn_1",
+              "stepIndex": 0
             }
           },
           {

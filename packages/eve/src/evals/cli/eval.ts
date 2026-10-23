@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
@@ -42,6 +42,7 @@ export interface EvalCliOptions {
   list?: boolean;
   tag?: string[];
   excludeTag?: string[];
+  keepState?: boolean;
   verbose?: boolean;
 }
 
@@ -146,6 +147,11 @@ export async function runEvalCommand(
     setupContext = await config.setup?.();
 
     if (options.url) {
+      if (options.keepState === true) {
+        logger.error(
+          "--keep-state has no effect with --url: the remote server keeps its own state.",
+        );
+      }
       client = await createEvalClient(
         { kind: "remote", url: options.url },
         { workspaceRoot: appRoot },
@@ -222,7 +228,11 @@ export async function runEvalCommand(
       () => devServer?.close(),
       () =>
         devServer && shutdownActiveSandboxConnections({ log: (message) => logger.error(message) }),
-      () => devStateDirectory && removeEvalStateDirectory(devStateDirectory),
+      async () => {
+        if (devStateDirectory === undefined) return;
+        if (options.keepState !== true) return await removeEvalStateDirectory(devStateDirectory);
+        logger.error(`Kept the eval server's state in ${relative(appRoot, devStateDirectory)}.`);
+      },
       () => config.teardown?.(setupContext),
     ]) {
       try {

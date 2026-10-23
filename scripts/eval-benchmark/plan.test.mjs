@@ -12,6 +12,8 @@ const registry = {
   fixtures: ["agent-one", "agent-two"],
   mockWorlds: ["local", "postgres"],
   attempts: 2,
+  mockAttempts: 2,
+  devStartup: { runs: 3, toolCounts: [0, 20] },
   concurrency: { legs: 3, evalsPerLeg: 1 },
 };
 const matrix = {
@@ -36,6 +38,13 @@ const select = (overrides = {}, narrow = {}) =>
 test("expands fixtures × models × attempts and mock worlds the fixture selects", () => {
   const selection = select();
   assert.deepEqual(selection.concurrency, { legs: 3, evalsPerLeg: 1 });
+  assert.deepEqual(selection.devStartup, {
+    runs: 3,
+    subjects: [
+      { name: "minimal", tools: 0 },
+      { name: "tools-20", tools: 20 },
+    ],
+  });
   const { live, mock } = planLegs(selection);
   assert.equal(live.length, 2 * 2 * 2);
   // Models vary fastest so legs started together spread across models, and
@@ -68,6 +77,9 @@ test("expands fixtures × models × attempts and mock worlds the fixture selects
       ["mock__agent-one__mock__local__1", ""],
       ["mock__agent-one__mock__postgres__1", "@workflow/world-postgres"],
       ["mock__agent-two__mock__local__1", ""],
+      ["mock__agent-one__mock__local__2", ""],
+      ["mock__agent-one__mock__postgres__2", "@workflow/world-postgres"],
+      ["mock__agent-two__mock__local__2", ""],
     ],
   );
 });
@@ -93,6 +105,21 @@ test("dispatch inputs narrow every dimension and reject unknown names", () => {
   );
 });
 
+test("mockFixtures limits mock legs without touching live legs", () => {
+  const selection = select({ mockFixtures: ["agent-two"] });
+  const { live, mock } = planLegs(selection);
+  assert.equal(live.length, 2 * 2 * 2);
+  assert.deepEqual(
+    mock.map((leg) => leg.leg_id),
+    ["mock__agent-two__mock__local__1", "mock__agent-two__mock__local__2"],
+  );
+  // Dispatch narrowing still applies to mock fixtures.
+  assert.deepEqual(
+    planLegs(select({ mockFixtures: ["agent-two"] }, { fixtures: "agent-one" })).mock,
+    [],
+  );
+});
+
 test("registry errors name the offending entry", () => {
   for (const [overrides, message] of [
     [{ fixtures: ["agent-missing"] }, /fixture "agent-missing" was not found/],
@@ -108,6 +135,9 @@ test("registry errors name the offending entry", () => {
       /duplicate "models" entry "alpha"/,
     ],
     [{ concurrency: undefined }, /"concurrency.legs" must be an integer from 1 to 50/],
+    [{ mockAttempts: 0 }, /"mockAttempts" must be an integer from 1 to 10/],
+    [{ mockFixtures: ["agent-three"] }, /"mockFixtures" entries must be listed in "fixtures"/],
+    [{ devStartup: { runs: 1, toolCounts: [0, 0] } }, /"devStartup.toolCounts" must be distinct/],
     [
       { concurrency: { legs: 5, evalsPerLeg: 0 } },
       /"concurrency.evalsPerLeg" must be an integer from 1 to 16/,

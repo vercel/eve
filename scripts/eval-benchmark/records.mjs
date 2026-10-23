@@ -4,13 +4,17 @@
 //   meta.json      { leg_id, sha, runner_os } written by the run job
 //   expected.json  `eve eval --list --json` under the leg's tag filters
 //   run/           the leg's single `.eve/evals/<timestamp>` tree
+//   world/         the world probe: <sessionId>.json workflow event logs
+//                  (export-world.mjs), when the leg exported one
+//   probes/        run-level probes (framework-records.mjs), when the leg ran any
 //
 // Each record is one attempt of one eval on one model and world, keyed by
 // (github_run_id, run_attempt, fixture, eval_id, model_id, world, attempt).
-// Results are comparable across runs when (eval_id, fixture_digest, model_id,
-// model_release, world) match. Planned legs that uploaded nothing, and expected
-// evals with no result, become `missing` records (outcome "gap") so coverage
-// stays honest.
+// Model-scope metrics are comparable across runs when (eval_id,
+// fixture_digest, model_id, model_release, world) match; framework-scope
+// metrics when (eval_id, fixture_digest, world, runner_os, model_class) match.
+// Planned legs that uploaded nothing, and expected evals with no result,
+// become `missing` records (outcome "gap") so coverage stays honest.
 //
 // Each attempt also carries the standard metric set (latency, attribution,
 // cost, tokens, counts, reliability) derived from its eval detail artifact by
@@ -19,6 +23,9 @@
 // outages, timeouts before any model step) from real failures. A metric that
 // can't be derived is `unavailable` or `not-applicable` with a reason, never
 // zero.
+//
+// The world probe feeds the `durability.*` metrics; an eval on a leg without
+// one records them as unavailable.
 //
 // A live leg's eval whose model steps all ran on another model (fixtures script
 // some delegation evals with eve's mock models) says nothing about the leg's
@@ -63,12 +70,27 @@ export function readLegs(plan, legsDir) {
     found.set(meta.leg_id, {
       dir,
       meta,
+      world: readWorldProbe(join(dir, "world")),
       expected: existsSync(expectedPath)
         ? JSON.parse(readFileSync(expectedPath, "utf8")).map((entry) => entry.id)
         : undefined,
     });
   }
   return plan.legs.map((leg) => ({ leg, ...found.get(leg.leg_id) }));
+}
+
+/** A leg's exported workflow runs by session id, or undefined when it exported none. */
+function readWorldProbe(dir) {
+  if (!existsSync(dir)) return undefined;
+  const runs = new Map();
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const run = JSON.parse(readFileSync(join(dir, name), "utf8"));
+    if (`${run.runId}.json` !== name)
+      throw new Error(`${join(dir, name)}: run "${run.runId}" does not match its file name.`);
+    runs.set(run.runId, run);
+  }
+  return runs;
 }
 
 /** Path of a leg's raw tree, relative to the run's Blob prefix. */
@@ -89,7 +111,7 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
   const fixtures = new Map(plan.registry.fixtures.map((fixture) => [fixture.name, fixture]));
   const releases = new Map(plan.registry.models.map((model) => [model.id, model.release]));
   const attempts = [];
-  for (const { leg, dir, meta, expected } of legs) {
+  for (const { leg, dir, meta, expected, world } of legs) {
     const fixture = fixtures.get(leg.fixture);
     const artifacts = dir === undefined ? [] : listEvalArtifacts(join(dir, "run"));
     const results = new Map(
@@ -111,13 +133,13 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
         meta,
         evalId,
         artifact,
+        world,
         missingReason,
-        uploaded: dir !== undefined,
       });
     }
   }
 
-  const records = attempts.map(({ leg, meta, evalId, artifact, missingReason, uploaded }) => {
+  const records = attempts.map(({ leg, meta, evalId, artifact, world, missingReason }) => {
     const startedAt = artifact?.startedAt ?? null;
     const completedAt = artifact?.completedAt ?? null;
     const { outcome, gap_reason } =
@@ -127,7 +149,7 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
     const { metrics_version, metrics, failures } =
       artifact === undefined
         ? { metrics_version: METRICS_VERSION, metrics: {}, failures: [] }
-        : deriveAttemptMetrics(artifact);
+        : deriveAttemptMetrics(artifact, { world });
     return {
       schema_version: RECORD_SCHEMA_VERSION,
       github_run_id: String(githubRunId),
@@ -137,6 +159,8 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
       model_id: leg.model_id,
       model_slot: leg.model_name,
       model_release: leg.kind === "mock" ? null : (releases.get(leg.model_id) ?? null),
+      // Framework-scope metrics trend per model class, never per model.
+      model_class: leg.kind,
       world: leg.world,
       attempt: leg.attempt,
       fixture_digest: fixtures.get(leg.fixture).digest,
@@ -163,7 +187,7 @@ export function buildRecords({ plan, legs, githubRunId, runAttempt }) {
         startedAt !== null && completedAt !== null
           ? Date.parse(completedAt) - Date.parse(startedAt)
           : null,
-      artifact_path: uploaded ? legArtifactPath(leg) : null,
+      artifact_path: missingReason === "job-missing" ? null : legArtifactPath(leg),
     };
   });
   return { records, excluded };

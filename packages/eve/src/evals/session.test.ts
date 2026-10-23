@@ -119,6 +119,38 @@ describe("eval session compact", () => {
   });
 });
 
+describe("eval session clock", () => {
+  it("records when each send was accepted and when each event arrived", async () => {
+    const { session } = await setup();
+    const receipt = { deliveryId: "delivery_1", startedAt: 10, notReadyMs: 5, acceptedAt: 20 };
+    vi.mocked(ClientSession.prototype.send).mockImplementationOnce(
+      async () =>
+        new MessageResponse({
+          sessionId: "session_1",
+          cancelTurn: async () => ({ status: "no_active_turn" }),
+          createStream: events,
+          receipt,
+        }),
+    );
+
+    await session.send("Find Alice's order status.");
+
+    const { clock, events: captured } = session.snapshot();
+    expect(clock?.sends).toEqual([
+      {
+        kind: "prewarm",
+        startedAt: expect.any(Number),
+        notReadyMs: 0,
+        acceptedAt: expect.any(Number),
+      },
+      { kind: "message", ...receipt },
+    ]);
+    expect(captured.length).toBeGreaterThan(0);
+    expect(clock?.receivedAt).toHaveLength(captured.length);
+    expect(clock?.receivedAt.every(Number.isFinite)).toBe(true);
+  });
+});
+
 async function setup() {
   mocks.decide.mockResolvedValue({
     answers: { judgment: { type: "boolean", probability: 1 } },

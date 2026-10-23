@@ -459,22 +459,23 @@ eve eval [evalId...] [--url <url>] [options]
 
 Runs all discovered evals when no eval ids are given; ids match exactly or by directory prefix (`eve eval weather` runs everything under `evals/weather/`). Exits `0` when every eval passed its checks, `1` when any eval failed (a failed check, an execution error, or a `--strict` threshold miss), `2` on configuration errors.
 
-Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed when the run ends. It runs beside an `eve dev` session for the same agent without attaching to it or changing it.
+Without `--url`, `eve eval` starts its own local server on a free port with state under `.eve/eval-servers/<run id>/`, removed when the run ends unless you pass `--keep-state`. A kept directory, including the server's Workflow data in `.workflow-data/`, stays until a later `eve eval` in the same app cleans it up. The local server runs beside an `eve dev` session for the same agent without attaching to it or changing it.
 
-| Flag                     | Type   | Default | Description                                                   |
-| ------------------------ | ------ | ------- | ------------------------------------------------------------- |
-| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                    |
-| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                 |
-| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                     |
-| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                |
-| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them |
-| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                              |
-| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                |
-| `--repeat <n>`           | number | 1       | Run every eval n times to measure repeatability               |
-| `--json`                 | flag   | off     | Output results as JSON                                        |
-| `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
-| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |
-| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout           |
+| Flag                     | Type   | Default | Description                                                    |
+| ------------------------ | ------ | ------- | -------------------------------------------------------------- |
+| `--url <url>`            | string | none    | Remote agent URL (skip local host startup)                     |
+| `--tag <tag...>`         | string | none    | Run only evals carrying a tag                                  |
+| `--exclude-tag <tag...>` | string | none    | Skip evals carrying a tag                                      |
+| `--strict`               | flag   | off     | Below-threshold scores also fail the exit code                 |
+| `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them  |
+| `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                               |
+| `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                 |
+| `--repeat <n>`           | number | 1       | Run every eval n times to measure repeatability                |
+| `--json`                 | flag   | off     | Output results as JSON                                         |
+| `--junit <path>`         | string | none    | Write JUnit XML results to a file                              |
+| `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                  |
+| `--keep-state`           | flag   | off     | Keep the local eval server's state after the run (not `--url`) |
+| `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout            |
 
 See [Evals](../evals/overview) for authoring evals.
 

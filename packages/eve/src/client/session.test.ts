@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
+import { getMessageResponseReceipt } from "#client/message-response.js";
 import { ClientSession } from "#client/session.js";
 import type { ClientSessionState } from "#client/types.js";
 import {
@@ -354,6 +355,7 @@ describe("ClientSession", () => {
     );
 
     vi.useFakeTimers();
+    const startedAt = Date.now();
     try {
       const sent = session.send("ready soon");
       await vi.advanceTimersByTimeAsync(0);
@@ -377,7 +379,15 @@ describe("ClientSession", () => {
       await vi.advanceTimersByTimeAsync(1_999);
       expect(fetchMock).toHaveBeenCalledTimes(4);
       await vi.advanceTimersByTimeAsync(1);
-      await expect(sent).resolves.toMatchObject({ sessionId: "session_1" });
+      const response = await sent;
+      expect(response).toMatchObject({ sessionId: "session_1" });
+      // The retries are the session starting, reported apart from the accepted send.
+      expect(getMessageResponseReceipt(response)).toEqual({
+        deliveryId: "delivery_1",
+        startedAt,
+        notReadyMs: 3_750,
+        acceptedAt: startedAt + 3_750,
+      });
     } finally {
       vi.useRealTimers();
     }

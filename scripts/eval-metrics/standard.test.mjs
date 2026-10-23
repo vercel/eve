@@ -2,7 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { classifyOutcome } from "./gaps.mjs";
-import { METRICS_VERSION, STANDARD_METRICS, deriveAttemptMetrics } from "./standard.mjs";
+import { listMarks, sessionMarks } from "./measurements/marks.mjs";
+import {
+  METRICS_VERSION,
+  METRIC_DEFINITIONS,
+  STANDARD_METRICS,
+  deriveAttemptMetrics,
+} from "./standard.mjs";
 
 // Fixtures are trimmed `eve eval` detail artifacts captured from mock-model
 // runs of e2e/fixtures/agent-tools and agent-subagents (mock models report
@@ -54,6 +60,17 @@ const compactedArtifact = () => {
   return artifact;
 };
 
+// Recorded eve streams from durable-harness, with the marks and /compare
+// breakdown its own code computes (fixtures/durable-harness/generate.mjs).
+const durableHarness = JSON.parse(
+  readFileSync(new URL("./fixtures/durable-harness/expected.json", import.meta.url), "utf8"),
+);
+const recordedStream = (name) =>
+  readFileSync(new URL(`./fixtures/durable-harness/${name}.ndjson`, import.meta.url), "utf8")
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+
 function assertPartition(metrics) {
   const v = values(metrics);
   const parts =
@@ -76,9 +93,22 @@ test("derives representative metrics from a captured tool eval", () => {
   assert.equal(v["latency.eval_wall_ms"], 1050);
   assert.equal(v["latency.turn_ms"], 116);
   assert.equal(v["latency.ttft_ms_p50"], 4);
-  assert.equal(v["attribution.model_ms"], 17);
+  // Model steps end at model.done (here, the tool calls), not step.completed.
+  assert.equal(v["attribution.model_ms"], 15);
   assert.equal(v["attribution.tool_ms"], 3);
-  assert.equal(v["attribution.framework_ms"], 96);
+  assert.equal(v["attribution.framework_ms"], 98);
+  assert.deepEqual(metrics["overhead.pre_model_ms"], {
+    status: "measured",
+    value: 1,
+    count: 2,
+    samples: [2, 0],
+  });
+  // The first turn's tool ends its turn, so only the second has a next model call.
+  assert.deepEqual(metrics["overhead.tool_hop_ms"].samples, [68]);
+  assert.deepEqual(metrics["overhead.finalize_ms"].samples, [18, 10]);
+  // Artifacts from before eve recorded client timing, and legs with no world probe.
+  assert.equal(metrics["overhead.turn_ms"].reason, "missing-client-clock");
+  assert.equal(metrics["durability.workflow_steps_per_turn"].reason, "missing-world-probe");
   assert.equal(v["tokens.input"], 1117);
   assert.equal(v["tokens.peak_context"], 391);
   assert.equal(v["counts.turns"], 2);
@@ -98,6 +128,8 @@ test("attributes delegated work to tasks across repeated captures of one session
   assert.equal(v["counts.turns"], 3, "child sessions are not root turns");
   assert.equal(v["counts.subagent_fan_out"], 1);
   assert.equal(v["counts.subagent_depth"], 1);
+  // The task call's request to the child session's first turn.
+  assert.deepEqual(metrics["overhead.agent_start_ms"].samples, [141]);
   // Rolled-up usage includes the child's spend.
   assert.equal(v["tokens.input"], 6006);
   assertPartition(metrics);
@@ -223,7 +255,7 @@ test("a single step without cost makes cost unavailable, and inconsistent rollup
   assert.equal(metrics["cost.total_usd"].status, "measured");
 });
 
-test("overlapping parallel tools count once and streaming metrics use first deltas", () => {
+test("overlapping parallel tools count once and streaming metrics use model marks", () => {
   const step = { turnId: "t", stepIndex: 0 };
   const events = turn(0, 1000, [
     event("step.started", 100, step),
@@ -242,10 +274,11 @@ test("overlapping parallel tools count once and streaming metrics use first delt
   ]);
   const v = values(deriveAttemptMetrics(synthetic(events)).metrics);
   assert.equal(v["attribution.tool_ms"], 300);
-  assert.equal(v["attribution.model_ms"], 350);
-  assert.equal(v["attribution.framework_ms"], 350);
+  assert.equal(v["attribution.model_ms"], 300);
+  assert.equal(v["attribution.framework_ms"], 400);
   assert.equal(v["latency.ttft_ms_p50"], 50);
-  assert.equal(v["latency.output_tokens_per_s"], 100);
+  // 60 tokens from the first delta to model.done (the tool calls).
+  assert.equal(v["latency.output_tokens_per_s"], 240);
   assert.equal(v["reliability.tool_error_rate"], 0.5);
   assert.equal(v["counts.tool_calls_per_step"], 2);
 });
@@ -387,4 +420,57 @@ test("classifies outcomes and every gap reason", () => {
   const parked = synthetic([completedStep]);
   parked.result.derived = { parked: true };
   assert.deepEqual(classifyOutcome(parked), { outcome: "parked" });
+});
+
+for (const [name, expected] of Object.entries(durableHarness.fixtures)) {
+  test(`matches durable-harness's marks and /compare overheads on ${name}`, () => {
+    assert.equal(durableHarness.commit, METRIC_DEFINITIONS.commit);
+    const events = recordedStream(name);
+    const byTime = (a, b) => a.t - b.t || a.name.localeCompare(b.name);
+    assert.deepEqual(
+      listMarks(sessionMarks(events)).sort(byTime),
+      expected.marks
+        .map((mark) => ({ ...mark, key: mark.key?.replace(/:(\d+)$/, "/$1") ?? null }))
+        .sort(byTime),
+    );
+
+    const artifact = synthetic(events);
+    artifact.result.sessions[0].clock = expected.clock;
+    const { metrics } = deriveAttemptMetrics(artifact);
+    const samples = (key) => metrics[key].samples;
+    const { turn, clock } = expected;
+    assert.deepEqual(samples("overhead.first_output_ms"), [turn.firstOutputOverheadMs]);
+    assert.deepEqual(samples("overhead.turn_ms"), [turn.turnOverheadMs]);
+    assert.deepEqual(
+      samples("overhead.tool_call_ms"),
+      turn.tools.map((tool) => tool.overheadMs),
+    );
+    assert.deepEqual(
+      samples("overhead.tool_hop_ms"),
+      turn.tools.map((tool) => tool.oursMs),
+    );
+    assert.equal(metrics["attribution.model_ms"].value, turn.turnModelMs);
+    const [prewarm, ...messages] = clock.sends;
+    assert.deepEqual(
+      samples("session.not_ready_ms"),
+      messages.map((send) => send.notReadyMs),
+    );
+    assert.deepEqual(samples("session.create_ms"), [prewarm.acceptedAt - prewarm.startedAt]);
+  });
+}
+
+test("a session created with its first message times that turn from the create request", () => {
+  const { clock, turn } = durableHarness.fixtures["eve-tool-turn"];
+  const message = clock.sends.find((send) => send.kind === "message");
+  const artifact = synthetic(recordedStream("eve-tool-turn"));
+  // The create request carries no delivery id; its turn is the session's first.
+  const startedAt = message.startedAt - 30;
+  artifact.result.sessions[0].clock = {
+    receivedAt: clock.receivedAt,
+    sends: [{ kind: "create", startedAt, notReadyMs: 0, acceptedAt: message.acceptedAt }],
+  };
+  const { metrics } = deriveAttemptMetrics(artifact);
+  assert.deepEqual(metrics["overhead.first_output_ms"].samples, [turn.firstOutputOverheadMs + 30]);
+  assert.deepEqual(metrics["session.create_ms"].samples, [message.acceptedAt - startedAt]);
+  assert.equal(metrics["session.not_ready_ms"].reason, "no-message-sends");
 });

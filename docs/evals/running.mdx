@@ -20,6 +20,7 @@ eve eval --list                # print discovered evals without running
 eve eval --verbose             # stream per-eval logs and workflow run IDs
 eve eval --json                # machine-readable output
 eve eval --skip-report         # skip config and eval-defined reporters (e.g. Braintrust)
+eve eval --keep-state          # keep the local server's state and Workflow data after the run
 ```
 
 Positional ids match exactly or by directory prefix: `eve eval weather` runs `evals/weather.eval.ts`, every eval under `evals/weather/`, and every entry of an array-exported `weather.eval.ts`.
@@ -58,7 +59,7 @@ Attempts share the `--max-concurrency` pool with every other eval, so attempts o
 
 ## Artifacts
 
-Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, start and completion times, captured event streams, and `t.log` lines under `evals/`. In a repeated run, each attempt's detail and event files get an `.attempt-<n>` suffix, such as `evals/weather.attempt-2.json`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
+Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, start and completion times, captured event streams with the client's send and arrival times for each session, and `t.log` lines under `evals/`. In a repeated run, each attempt's detail and event files get an `.attempt-<n>` suffix, such as `evals/weather.attempt-2.json`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
 
 ## CI
 

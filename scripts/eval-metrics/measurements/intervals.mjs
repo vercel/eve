@@ -1,4 +1,4 @@
-import { selectEvents, timestamp, unavailable } from "./events.mjs";
+import { timestamp, unavailable } from "./events.mjs";
 
 /**
  * @typedef {{ key: string, start: object, end: object, startAt: number, endAt: number }} Interval
@@ -114,31 +114,6 @@ function intersect(left, right) {
 
 function lengthOf(disjoint) {
   return disjoint.reduce((total, { startAt, endAt }) => total + endAt - startAt, 0);
-}
-
-/**
- * For each started model step, find the first streamed text or reasoning
- * delta of that step. Steps that stream no delta (e.g. tool-call only) map to
- * `undefined`; callers decide whether that is not-applicable.
- *
- * @param {object[]} events one session's events
- * @returns {Map<string, { start: object, firstDelta: object | undefined }>} keyed by `turnId/stepIndex`
- */
-export function firstDeltaInStep(events) {
-  const steps = new Map();
-  for (const start of selectEvents(events, "step.started")) {
-    const key = stepKey(start);
-    if (key !== undefined) steps.set(key, { start, firstDelta: undefined });
-  }
-  for (const event of events) {
-    if (event.type !== "message.appended" && event.type !== "reasoning.appended") continue;
-    const step = steps.get(stepKey(event));
-    if (step === undefined) continue;
-    const at = timestamp(event);
-    if (at === undefined) continue;
-    if (step.firstDelta === undefined || at < timestamp(step.firstDelta)) step.firstDelta = event;
-  }
-  return steps;
 }
 
 /** Identity of one model step within a session. */

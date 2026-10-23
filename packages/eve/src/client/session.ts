@@ -9,7 +9,7 @@ import {
 } from "#protocol/routes.js";
 import { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError, createClientError } from "#client/client-error.js";
-import { MessageResponse } from "#client/message-response.js";
+import { MessageResponse, type ClientSendReceipt } from "#client/message-response.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
 import {
   cancelClientSession,
@@ -75,12 +75,15 @@ export class ClientSession {
     context: ClientSessionContext,
     input: SendTurnInput<TOutput> & CreateSessionOptions,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
+    const startedAt = Date.now();
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true, input.stubs);
-    const { sessionId } = await readAcceptedMessage(response);
+    const acceptedAt = Date.now();
+    const { sessionId, deliveryId } = await readAcceptedMessage(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
+    const receipt = { deliveryId, startedAt, notReadyMs: 0, acceptedAt };
 
     return {
-      response: session.#messageResponse<TOutput>(response, input, 0),
+      response: session.#messageResponse<TOutput>(response, input, 0, undefined, receipt),
       session,
     };
   }
@@ -145,9 +148,12 @@ export class ClientSession {
   ): Promise<MessageResponse<TOutput>> {
     const initialStreamIndex = this.#state.streamIndex;
     const path = createEveSessionRoutePath(this.#state.sessionId);
-    const response = retrySessionNotReady
-      ? await postSessionSend(this.#context, path, input)
-      : await postTurn(this.#context, path, input, false);
+    const { response, timing } = await postSessionSend(
+      this.#context,
+      path,
+      input,
+      retrySessionNotReady,
+    );
     const { sessionId: responseSessionId, deliveryId } = await readAcceptedMessage(
       response,
       this.#state.sessionId,
@@ -167,6 +173,7 @@ export class ClientSession {
       input,
       initialStreamIndex,
       input.message === undefined ? undefined : deliveryId,
+      { ...timing, deliveryId },
     );
   }
 
@@ -243,7 +250,8 @@ export class ClientSession {
     response: Response,
     input: SendTurnPayload,
     initialStreamIndex: number,
-    deliveryId?: string,
+    deliveryId: string | undefined,
+    receipt: ClientSendReceipt,
   ): MessageResponse<TOutput> {
     response.body?.cancel().catch(() => {});
     return new MessageResponse<TOutput>({
@@ -251,6 +259,7 @@ export class ClientSession {
       createStream: (source) =>
         this.#createEventStream(initialStreamIndex, input, deliveryId, source),
       deliveryId,
+      receipt,
       resumesTurn: input.inputResponses !== undefined,
       sessionId: this.#state.sessionId,
     });
@@ -373,14 +382,22 @@ async function postSessionSend(
   context: ClientSessionContext,
   path: string,
   input: SendTurnPayload,
-): Promise<Response> {
-  const readyDeadline = Date.now() + SESSION_SEND_READY_TIMEOUT_MS;
+  retrySessionNotReady: boolean,
+): Promise<{
+  readonly response: Response;
+  readonly timing: Omit<ClientSendReceipt, "deliveryId">;
+}> {
+  const startedAt = Date.now();
+  const readyDeadline = startedAt + SESSION_SEND_READY_TIMEOUT_MS;
   let retryDelayMs = SESSION_SEND_RETRY_BASE_DELAY_MS;
   for (;;) {
+    const attemptAt = Date.now();
     try {
-      return await postTurn(context, path, input, false);
+      const response = await postTurn(context, path, input, false);
+      const timing = { startedAt, notReadyMs: attemptAt - startedAt, acceptedAt: Date.now() };
+      return { response, timing };
     } catch (error) {
-      if (!isSessionNotReady(error)) throw error;
+      if (!retrySessionNotReady || !isSessionNotReady(error)) throw error;
       const remainingMs = readyDeadline - Date.now();
       if (remainingMs <= 0) throw error;
       await sleep(Math.min(retryDelayMs, remainingMs), input.signal);
