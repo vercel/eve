@@ -454,6 +454,9 @@ importers:
       '@moorcheh-ai/memanto':
         specifier: 0.2.29
         version: 0.2.29(ai@7.0.137(zod@4.5.4))(eve@packages+eve)(openai@6.49.0(@smithy/signature-v4@5.7.3)(ws@8.21.3(bufferutil@4.1.0))(zod@4.5.4))(zod@4.5.4)
+      '@nimble-way/eve':
+        specifier: 0.1.1
+        version: 0.1.1(eve@packages+eve)
       '@novu/chat-sdk-adapter':
         specifier: 0.1.0
         version: 0.1.0(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react@19.2.6)(supports-color@10.2.2)(zod@4.5.4)
@@ -3999,6 +4002,15 @@ packages:
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
+
+  '@nimble-way/eve@0.1.1':
+    resolution: {integrity: sha512-Jvz6wQqM3HN168HWod6kn8LxywORWXmPXl95lkLFC7lnwWlOMeLyDzBdOAkvEhi3x/GUM+zZSXyRLeqXdspkxg==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      eve: '*'
+
+  '@nimble-way/nimble-js@1.5.0':
+    resolution: {integrity: sha512-qpiBt3cziPxPSrSJpTrv8jDYFQt3h6Y6vTjZC4EMXgZPZkS+JLJJbp5332k4euHRduRkoN6ZXR65l2eDhQhbcQ==}
 
   '@nodable/entities@3.0.0':
     resolution: {integrity: sha512-8L9xFeTYKhm49xfIypoe2W5wV1m/3Z58kT+7kR9A8OyFxcPduI4VmxaUMQyKYrRjUoLLSXv6EKKID5Tvj9cUVw==}
@@ -17638,6 +17650,14 @@ snapshots:
 
   '@next/swc-win32-x64-msvc@16.3.8':
     optional: true
+
+  '@nimble-way/eve@0.1.1(eve@packages+eve)':
+    dependencies:
+      '@nimble-way/nimble-js': 1.5.0
+      eve: link:packages/eve
+      zod: 4.5.4
+
+  '@nimble-way/nimble-js@1.5.0': {}
 
   '@nodable/entities@3.0.0': {}
 

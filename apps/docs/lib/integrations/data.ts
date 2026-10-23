@@ -1632,6 +1632,36 @@ export default githubExtension({
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
     relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
+  nimble: {
+    logo: "nimble",
+    docsHref: "https://docs.nimbleway.com/integrations/connectors/vercel-eve",
+    keywords: ["web search", "web extraction", "research", "citations", "Nimble"],
+    install: `Install the Nimble extension for eve:
+
+\`\`\`bash
+eve add extension/nimble
+\`\`\`
+
+The extension requires Node.js 24 or later and a Nimble API key. It adds web search, page extraction, and long-running research tools.`,
+    quickStart: `Add your Nimble API key to the agent's environment:
+
+\`\`\`bash title=".env.local"
+NIMBLE_API_KEY=your_api_key
+\`\`\`
+
+The registry mounts Nimble as a directory under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/nimble/extension.ts"
+import nimble from "@nimble-way/eve";
+
+export default nimble({});
+\`\`\`
+
+The directory name supplies the \`nimble\` namespace. The extension adds \`nimble__search\`, \`nimble__extract\`, \`nimble__agent_start\`, and \`nimble__agent_result\`, plus the \`nimble__web-research\` skill. The registry overrides \`nimble__agent_start\` to require approval for every Agent API run.`,
+    configure: `Keep \`NIMBLE_API_KEY\` in the environment rather than prompts or source control. Search queries, URLs, and Agent API inputs are sent to Nimble. Search results and extracted pages are untrusted third-party content, not instructions for the agent.
+
+\`nimble__agent_start\` creates a billable, non-idempotent Agent API run. The registry requires approval for every call. Retain the returned identifiers for \`nimble__agent_result\` instead of starting a replacement run. See the [Nimble eve guide](https://docs.nimbleway.com/integrations/connectors/vercel-eve) for built-in tool overrides, configuration, data handling, and the complete tool reference.`,
+  },
 };
 
 const memoryPresentations: Record<string, MemoryPresentation> = {

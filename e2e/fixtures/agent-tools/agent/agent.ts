@@ -63,11 +63,14 @@ const base = e2eAgentConfig({
       // Reached only if `no_reply` failed to end the turn; the eval then sees a reply.
       return "Replied after no_reply.";
     }
-    if (request.lastUserMessage?.includes("`react_to_note`")) {
+    const reactTool = ["dynamic_react_to_note", "react_to_note"].find((name) =>
+      request.lastUserMessage?.includes(`\`${name}\``),
+    );
+    if (reactTool !== undefined) {
       const roles = request.messages.map((message) => message.role);
       if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {
-        const emoji = request.lastUserMessage.includes("rocket") ? "rocket" : "tada";
-        return { toolCalls: [{ name: "react_to_note", input: { emoji } }] };
+        const emoji = request.lastUserMessage?.includes("rocket") ? "rocket" : "tada";
+        return { toolCalls: [{ name: reactTool, input: { emoji } }] };
       }
       return "The rocket reaction isn't allowed in the team channel, so nothing was posted.";
     }

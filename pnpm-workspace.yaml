@@ -88,6 +88,7 @@ minimumReleaseAgeExclude:
   - "@chat-adapter/twilio@4.42.0"
   - "@chat-adapter/whatsapp@4.42.0"
   - "@chat-adapter/x@4.42.0"
+  - "@nimble-way/eve@0.1.1"
   - "@shadcn/registry@0.1.3"
   - "@stripe/link-integrations-eve@0.2.0"
   - "@stripe/link-sdk@0.9.0"

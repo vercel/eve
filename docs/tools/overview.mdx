@@ -123,7 +123,7 @@ eve does not append the sentence for a function, because whether the call ends t
 
 The turn ends only when every tool call in the model's step can end the turn and succeeds, and every `endsTurn` function returns `true`. Otherwise the model receives the results and continues as usual. Text the model writes before the call is narration, so channels do not post it as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
 
-eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there, and eve does not call an `endsTurn` function. `defineWorkflowTool` rejects `endsTurn` at build time. Dynamic tool entries accept `endsTurn: true` or `false`; eve rejects a function when the resolver returns the entry, because dynamic tool metadata is stored durably. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there, and eve does not call an `endsTurn` function. `defineWorkflowTool` rejects `endsTurn` at build time. Dynamic tool entries accept `endsTurn` too, including a function. eve replays the function from a durable descriptor, as it does `execute`. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
 ### Label tool activity
 

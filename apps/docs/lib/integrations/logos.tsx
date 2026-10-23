@@ -846,6 +846,31 @@ const agentBrowserLogo = (props: LogoProps) => (
   </svg>
 );
 
+const nimbleLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 170 144" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M169.877 57.1777V143.489L72.6543 68.9795V143.502L0 86.2119V0L97.2471 74.8311V0L169.877 57.1777Z"
+      fill="currentColor"
+    />
+    <path
+      d="M36.821 47.5725V43.0004L10.4609 23.4414V53.6052L36.821 73.6511V47.5725Z"
+      fill="white"
+    />
+    <path
+      d="M62.344 96.3458V91.8858L36.4023 72.8066V102.222L62.344 121.761V96.3458Z"
+      fill="white"
+    />
+    <path
+      d="M133.872 47.5725V43.0004L107.512 23.4414V53.6052L133.872 73.6511V47.5725Z"
+      fill="white"
+    />
+    <path
+      d="M159.408 96.3458V91.8858L133.467 72.8066V102.222L159.408 121.761V96.3458Z"
+      fill="white"
+    />
+  </svg>
+);
+
 const braintrustLogo = (props: LogoProps) => <SiBraintrust {...props} />;
 
 const jaegerLogo = (props: LogoProps) => <SiJaeger color="default" {...props} />;
@@ -1000,6 +1025,7 @@ export const logos = {
   browserbase: browserbaseLogo,
   jetty: jettyLogo,
   "agent-browser": agentBrowserLogo,
+  nimble: nimbleLogo,
 } as const;
 
 export type LogoKey = keyof typeof logos;
