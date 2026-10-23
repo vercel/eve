@@ -559,7 +559,7 @@ describe("buildStepCatalog", () => {
     });
 
     // #4977: a server that lists its tools but never answers a call held the turn.
-    it.fails("fails and cancels a call the connection doesn't answer within 5 minutes", async () => {
+    it("fails and cancels a call the connection doesn't answer within 5 minutes", async () => {
       vi.useFakeTimers();
       try {
         const { catalog, linear, run } = linearCatalog();
@@ -584,9 +584,14 @@ describe("buildStepCatalog", () => {
           }),
         );
 
+        // Observe the outcome before advancing: the call rejects while the timers run.
+        const outcome = Promise.resolve(calling).then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
         await vi.advanceTimersByTimeAsync(5 * 60_000);
         // Racing a settled value reports a call that is still pending instead of hanging the test.
-        await expect(Promise.race([calling, "still waiting"])).rejects.toThrow(
+        expect(await Promise.race([outcome, "still waiting"])).toBe(
           '"linear" did not answer list_issues within 5 minutes. Try again later.',
         );
         expect(request?.aborted).toBe(true);
