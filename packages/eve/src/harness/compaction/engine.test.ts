@@ -1244,7 +1244,10 @@ describe("compactMessages: current message larger than its share of the threshol
         { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN },
         summarizeWith("s".repeat(40_000)),
       ),
-    ).rejects.toThrow(/start a new session, or send a smaller message/i);
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/start a new session, or send a smaller message/i),
+      name: "FatalError",
+    });
   });
 
   it("throws when compaction shrinks the history but leaves it over the threshold", async () => {
