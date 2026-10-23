@@ -38,7 +38,28 @@ export default defineConfig({
 });
 ```
 
-The plugin accepts only two options, `eveRoot` and `eveBuildCommand`.
+### `eveSvelteKit` options
+
+All fields are optional.
+
+| Option               | Type     | Default                | Purpose                                                                                                                |
+| -------------------- | -------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `eveRoot`            | `string` | SvelteKit project root | eve project root, relative to the SvelteKit project root unless absolute.                                              |
+| `eveBuildCommand`    | `string` | generated              | Build command for the generated eve Vercel service.                                                                    |
+| `devServerTimeoutMs` | `number` | `180000`               | Maximum time to wait for the eve development server to start, including when another SvelteKit process is starting it. |
+
+For slow cold starts, increase the development timeout:
+
+```ts
+export default defineConfig({
+  plugins: [
+    eveSvelteKit({
+      devServerTimeoutMs: 300_000,
+    }),
+    sveltekit(),
+  ],
+});
+```
 
 ## Call the binding
 

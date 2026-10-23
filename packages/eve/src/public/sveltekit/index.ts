@@ -5,19 +5,32 @@ import type { Plugin, ResolvedConfig, UserConfig } from "vite";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import {
+  resolveDevServerTimeout,
+  resolveSharedEveDevServer,
+  type EveFrameworkHost,
+} from "#shared/framework-eve-server.js";
+import {
   ensureEveVercelServicesConfig,
   mergeEveVercelConfig,
   type EnsureEveVercelServicesConfigResult,
   type VercelBuildConfig,
 } from "#shared/vercel-services.js";
 
-import { EVE_BASE_URL_ENV, resolveSharedEveDevServer } from "./dev-server.js";
 import { normalizeOrigin } from "./routing.js";
+
+const EVE_BASE_URL_ENV = "EVE_BASE_URL";
+const EVE_SVELTEKIT_HOST: EveFrameworkHost = { label: "SvelteKit", slug: "sveltekit" };
 
 /**
  * Options for the eve SvelteKit Vite plugin.
  */
 export interface EveSvelteKitPluginOptions {
+  /**
+   * Maximum time in milliseconds to wait for the eve development server to
+   * start, including waiting for another SvelteKit process to start it.
+   * Defaults to 180000 (three minutes).
+   */
+  readonly devServerTimeoutMs?: number;
   /**
    * Path to the eve application root, relative to the SvelteKit project root
    * unless absolute. Defaults to the SvelteKit project root.
@@ -51,13 +64,22 @@ function mergeProxyConfig(
   };
 }
 
-async function resolveEveDevProxyTarget(appRoot: string): Promise<string> {
+async function resolveEveDevProxyTarget(input: {
+  readonly appRoot: string;
+  readonly timeoutMs?: number;
+}): Promise<string> {
   const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
   if (configuredEveBaseUrl && configuredEveBaseUrl.length > 0) {
     return normalizeOrigin(configuredEveBaseUrl);
   }
 
-  return (await resolveSharedEveDevServer(appRoot)).origin;
+  return (
+    await resolveSharedEveDevServer({
+      appRoot: input.appRoot,
+      host: EVE_SVELTEKIT_HOST,
+      timeoutMs: input.timeoutMs,
+    })
+  ).origin;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,6 +128,10 @@ export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
   let svelteKitRoot = process.cwd();
   let appRoot = resolveApplicationRoot(svelteKitRoot, options.eveRoot);
   let isSsrBuild = false;
+  const devServerTimeoutMs = resolveDevServerTimeout(
+    options.devServerTimeoutMs,
+    EVE_SVELTEKIT_HOST,
+  );
   let generatedVercelServices:
     | Extract<EnsureEveVercelServicesConfigResult, { mode: "generated" }>
     | undefined;
@@ -133,7 +159,10 @@ export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
         return {};
       }
 
-      const proxyTarget = await resolveEveDevProxyTarget(appRoot);
+      const proxyTarget = await resolveEveDevProxyTarget({
+        appRoot,
+        timeoutMs: devServerTimeoutMs,
+      });
 
       if (env.isPreview) {
         return {
