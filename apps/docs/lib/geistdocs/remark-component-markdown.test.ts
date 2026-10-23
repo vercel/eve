@@ -1,7 +1,6 @@
 import { createProcessor } from "@mdx-js/mdx";
 import { toMarkdown, type Options } from "mdast-util-to-markdown";
 import { describe, expect, it } from "vitest";
-import { remarkComponentMarkdown } from "./remark-component-markdown";
 import config from "../../source.config";
 
 describe("component Markdown export", () => {

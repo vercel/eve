@@ -133,9 +133,7 @@ function AgentMessageParts({
 }
 
 function AgentMessagePart({
-  canRespond,
   isUser,
-  onInputResponses,
   part,
   showCaret,
   streamKey,
