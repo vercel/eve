@@ -21,7 +21,7 @@ import { isTurnFailureEvent } from "#protocol/message.js";
 import { summarizeTurnEvents, TurnSegment } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { deriveRunFacts, openInputRequests } from "#evals/runner/derive-run-facts.js";
 import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
@@ -339,7 +339,7 @@ export class EvalSessionDriver implements EveEvalSession {
     readonly status: "completed" | "failed" | "waiting";
   }): EveEvalTurn {
     this.#events.push(...input.events);
-    this.#pendingInputRequests = input.status === "waiting" ? input.inputRequests : [];
+    this.#pendingInputRequests = input.status === "waiting" ? openInputRequests(this.#events) : [];
 
     const derived = deriveRunFacts(input.events, { sessionId: input.sessionId });
     const turn = new EvalTurn({

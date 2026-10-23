@@ -122,7 +122,7 @@ describe("eval session compact", () => {
 
 describe("eval session partial respond", () => {
   // https://github.com/vercel/eve/issues/5157
-  it.fails("keeps the unanswered request pending", async () => {
+  it("keeps the unanswered request pending", async () => {
     const session = await answerOneOfTwoApprovals();
 
     expect(session.pendingInputRequests.map((request) => request.requestId)).toEqual([
@@ -131,7 +131,7 @@ describe("eval session partial respond", () => {
   });
 
   // https://github.com/vercel/eve/issues/5157
-  it.fails("reports the run as parked on the unanswered request", async () => {
+  it("reports the run as parked on the unanswered request", async () => {
     const session = await answerOneOfTwoApprovals();
 
     expect(session.snapshot().derived.parked).toBe(true);

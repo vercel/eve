@@ -3,6 +3,7 @@ import type {
   MessageStreamEvent,
   TaskSettledStreamEvent,
 } from "#protocol/message.js";
+import { foldSession, initialSessionProjection, openInputs } from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -41,9 +42,8 @@ export interface DeriveRunFactsOptions {
 }
 
 /**
- * Event types that only park or close out a turn. When the last meaningful
- * event before them is `input.requested`, the run ended parked on unanswered
- * HITL input.
+ * Event types that only park or close out a turn. A run that ends on one while
+ * a request is open ended parked on unanswered HITL input.
  */
 const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
   "turn.waiting",
@@ -281,16 +281,40 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
 }
 
 /**
- * A run ended parked when the last event before its parking events is
- * `input.requested`: either the turn ended on the request (`turn.completed` →
- * `session.waiting`), or a call the turn runs asked and the open turn parked
- * (`turn.waiting`).
+ * Input requests the last started turn raised that nobody has answered yet. A
+ * partial answer settles only the requests it answers; the rest stay open.
+ *
+ * An eval may watch how a request ends outside the session (for example
+ * through `t.target`), so two kinds of open request don't count: ones from
+ * earlier turns, which the runtime withdraws before a new turn starts, and
+ * answered ones whose responder still has to sign in.
+ */
+export function openInputRequests(events: readonly MessageStreamEvent[]): InputRequest[] {
+  let projection = initialSessionProjection();
+  let lastTurnId: string | undefined;
+  for (const event of events) {
+    projection = foldSession(projection, event);
+    if (event.type === "turn.started") lastTurnId = event.data.turnId;
+  }
+  const awaitingSignIn = new Set(
+    Object.values(projection.candidates)
+      .filter((candidate) => candidate.outcome === "pending")
+      .map((candidate) => candidate.requestId),
+  );
+  return openInputs(projection)
+    .filter((input) => lastTurnId === undefined || input.turnId === lastTurnId)
+    .filter((input) => !awaitingSignIn.has(input.request.requestId))
+    .map((input) => input.request);
+}
+
+/**
+ * A run ended parked when it ends on a parking event while a request is still
+ * open: the turn ended on the request (`turn.completed` → `session.waiting`),
+ * or the open turn parked on it (`turn.waiting`), also after a partial answer.
  */
 function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event === undefined || PARKING_EVENT_TYPES.has(event.type)) continue;
-    return event.type === "input.requested";
-  }
-  return false;
+  const last = events.at(-1);
+  return (
+    last !== undefined && PARKING_EVENT_TYPES.has(last.type) && openInputRequests(events).length > 0
+  );
 }
