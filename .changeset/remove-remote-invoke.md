@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
-Remove `eve remote invoke` and its non-interactive JSON resume workflow. Use `eve remote connect` to interact with an existing agent through the terminal UI.
+Breaking: replace `eve remote invoke` and its resumable JSON workflow with `eve remote connect --print <prompt>` for one-shot remote requests. The new mode prints the final assistant text to stdout and exits; interactive `eve remote connect` remains unchanged. Use the `eve/client` API for scripted multi-turn sessions and input responses.
