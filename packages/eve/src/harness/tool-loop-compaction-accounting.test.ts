@@ -211,7 +211,7 @@ describe("tool-loop structured compaction accounting", () => {
 
     const result = await runStep(
       createTestSession({
-        compaction: { recentWindowSize: 0, threshold: 100 },
+        compaction: { recentWindowSize: 0, threshold: 700 },
         history: [
           ...validateHarnessModelMessages(recalled.history),
           { content: `ordinary ${"conversation ".repeat(100)}`, kind: "user", role: "user" },
@@ -372,12 +372,15 @@ describe("tool-loop structured compaction accounting", () => {
     const session = withParkedStep(
       createTestSession({
         compaction: {
-          lastKnownInputTokens: 100,
-          lastKnownPromptMessageCount: 1,
+          lastKnownInputTokens: 4_100,
+          lastKnownPromptMessageCount: 2,
           recentWindowSize: 10,
-          threshold: 101,
+          threshold: 4_535,
         },
-        history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
+        history: [
+          { content: "Previous exact prompt", kind: "user", role: "user" },
+          { content: `Earlier answer ${"w".repeat(16_000)}`, role: "assistant" },
+        ],
       }),
       {
         messages: [
@@ -559,6 +562,11 @@ describe("final request envelope compaction", () => {
     toolResults: [],
     usage: { inputTokens: 8_000 },
   });
+  const earlierConversation = () => ({
+    content: "earlier ".repeat(2_000),
+    kind: "user" as const,
+    role: "user" as const,
+  });
 
   it("does not double-count stable instructions on later turns", async () => {
     const { ContextContainer, contextStorage } = await import("#context/container.js");
@@ -574,6 +582,7 @@ describe("final request envelope compaction", () => {
       runStep(
         createTestSession({
           compaction: { recentWindowSize: 0, threshold: 10_000 },
+          history: [earlierConversation()],
         }),
         { message: "First" },
       ),
@@ -630,7 +639,7 @@ describe("final request envelope compaction", () => {
             recentWindowSize: 0,
             threshold: 10_000,
           },
-          history: [{ role: "user", kind: "user", content: "earlier" }],
+          history: [{ role: "user", kind: "user", content: "earlier ".repeat(1_000) }],
         }),
         { message: "continue" },
       ),

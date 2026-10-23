@@ -336,8 +336,9 @@ describe("shouldCompact", () => {
 //
 // - The tool-result cap heuristic is accepted only when the capped history
 //   PLUS the fixed compaction prompt envelope fits the threshold.
-//   `HEURISTICS_FORBIDDEN` sits below the envelope estimate, so no heuristic
-//   can be accepted and the summarization fallback always runs.
+//   `HEURISTICS_FORBIDDEN` leaves only a little room above the envelope, and
+//   `compact` prepends `OLD_BULK` to a history at that threshold, so no
+//   heuristic can be accepted and the summarization fallback always runs.
 // - `ROOMY` accepts capping whenever the history's bulk is tool output.
 //
 // Every result is checked against `expectWellFormedCompaction`: no orphaned
@@ -349,7 +350,11 @@ const ENVELOPE_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
-const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS);
+const HEURISTICS_FORBIDDEN = Math.floor(ENVELOPE_TOKENS) + 200;
+const OLD_BULK: ModelMessage[] = [
+  { content: "background ".repeat(150), role: "user" },
+  { content: "noted", role: "assistant" },
+];
 const ROOMY = 100_000;
 
 const CHECKPOINT_MARKER = "Summary of our conversation so far:";
@@ -420,6 +425,10 @@ function toolResultValue(message: ModelMessage | undefined): string {
   return output?.type === "text" ? output.value : "";
 }
 
+function isCheckpointHead(messages: readonly ModelMessage[]): boolean {
+  return messages[0]?.content === CHECKPOINT_MARKER;
+}
+
 function checkpointHead(text: string): ModelMessage[] {
   return [compactionMarker(CHECKPOINT_MARKER), assistant(text)];
 }
@@ -455,7 +464,11 @@ async function compact(
     recentWindowSize: overrides.recentWindowSize ?? 4,
     threshold: overrides.threshold ?? ROOMY,
   };
-  const result = await compactMessages(messages, compactionConfig, summarizer);
+  const history =
+    compactionConfig.threshold === HEURISTICS_FORBIDDEN && !isCheckpointHead(messages)
+      ? [...OLD_BULK, ...messages]
+      : messages;
+  const result = await compactMessages(history, compactionConfig, summarizer);
 
   expectWellFormedCompaction(result, compactionConfig.threshold);
   return { result, summarizer };
@@ -480,7 +493,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
         user("Continue the investigation."),
       ];
       const measuredConfig = {
-        lastKnownInputTokens: 30_000,
+        lastKnownInputTokens: 60_000,
         lastKnownPromptMessageCount: messages.length - 1,
         recentWindowSize: 1,
         threshold: 20_000,
@@ -552,12 +565,14 @@ describe("compactMessages: tool-result cap heuristic", () => {
 
   it("summarizes when a no-op cannot satisfy the explicit history-only token floor", async () => {
     const summarize = summarizeWith("summary");
+    const messages = [user("earlier ".repeat(1_500)), assistant("reply"), user("continue")];
+    const history = estimateTokens(messages);
     await compactMessages(
-      [user("earlier"), assistant("reply"), user("continue")],
-      { threshold: 2_000, recentWindowSize: 0 },
+      messages,
+      { threshold: Math.floor(history * 1.5), recentWindowSize: 0 },
       summarize,
       false,
-      8_000,
+      history * 2,
     );
     expect(summarize).toHaveBeenCalledOnce();
   });
@@ -974,7 +989,7 @@ describe("compactMessages: summarization fallback", () => {
     const previousCheckpoint = `${"completed work ".repeat(24)}${markerPast280}`;
     const messages = [
       ...checkpointHead(previousCheckpoint),
-      user("new evidence"),
+      user(`new evidence ${"findings ".repeat(60)}`),
       assistant("latest response"),
     ];
 
@@ -1023,9 +1038,10 @@ describe("compactMessages: summarization fallback", () => {
     const [call, resultMsg] = toolExchange({ callId: "call-1", payloadChars: 600 });
     const summary = "s".repeat(2_800);
     const head = checkpointHead(summary);
-    const threshold = Math.floor(
-      (estimateTokens([...head, task]) + estimateTokens([...head, call, resultMsg, task])) / 2,
-    );
+    const threshold =
+      Math.floor(
+        (estimateTokens([...head, task]) + estimateTokens([...head, call, resultMsg, task])) / 2,
+      ) + ENVELOPE_TOKENS;
     const { result } = await compact([user("old notes ".repeat(4_000)), task, call, resultMsg], {
       recentWindowSize: 2,
       summary,
@@ -1058,9 +1074,9 @@ describe("compactMessages: summarization fallback", () => {
       user("do the thing"),
       assistant("Running the tool."),
     ]);
-    const threshold = Math.floor((verbatimSize + strippedSize) / 2);
-    expect(strippedSize).toBeLessThan(threshold);
-    expect(verbatimSize).toBeGreaterThan(threshold);
+    const threshold = Math.floor((verbatimSize + strippedSize) / 2) + ENVELOPE_TOKENS;
+    expect(strippedSize + ENVELOPE_TOKENS).toBeLessThan(threshold);
+    expect(verbatimSize + ENVELOPE_TOKENS).toBeGreaterThan(threshold);
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 3,
@@ -1143,10 +1159,14 @@ describe("compactMessages: current message larger than its share of the threshol
   const PROVIDER_RATIO = 1.6;
   const THRESHOLD = 10_000;
 
-  function bigTask(): ModelMessage {
+  function bigTaskText(): string {
     // About 6,500 estimated tokens: fits the recent-window reserve, but is
     // 10,400 tokens to the provider, over the threshold on its own.
-    return user(`${"task context line. ".repeat(1_370)}FINAL SENTINEL`);
+    return "task context line. ".repeat(1_370);
+  }
+
+  function bigTask(): ModelMessage {
+    return user(`${bigTaskText()}FINAL SENTINEL`);
   }
 
   function providerConfig(history: readonly ModelMessage[]): CompactionConfig {
@@ -1210,8 +1230,13 @@ describe("compactMessages: current message larger than its share of the threshol
     expect(result).toContainEqual(task);
   });
 
-  it("throws instead of compacting again when the history cannot get under the threshold", async () => {
-    const history = [user("do the thing"), assistant("working on it"), user("still there?")];
+  it("throws, and says what to do, when the summary alone is over the threshold", async () => {
+    const history = [
+      ...OLD_BULK,
+      user("do the thing"),
+      assistant("working on it"),
+      user("still there?"),
+    ];
 
     await expect(
       compactMessages(
@@ -1219,7 +1244,75 @@ describe("compactMessages: current message larger than its share of the threshol
         { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN },
         summarizeWith("s".repeat(40_000)),
       ),
-    ).rejects.toThrow(/freed no space/);
+    ).rejects.toThrow(/start a new session, or send a smaller message/i);
+  });
+
+  it("throws when compaction shrinks the history but leaves it over the threshold", async () => {
+    // Threshold 10k, a 45k-character summary: every compaction used to
+    // shrink the history a little, stay over the limit, and run again.
+    const history = [user("notes ".repeat(9_000)), assistant("ok"), user("go on")];
+
+    await expect(
+      compactMessages(
+        history,
+        { recentWindowSize: 1, threshold: THRESHOLD },
+        summarizeWith("s".repeat(45_000)),
+      ),
+    ).rejects.toThrow(/under its limit/);
+  });
+
+  it("rejects a result that only fits without the compaction prompt overhead", async () => {
+    // The result is under the threshold, but shouldCompact adds the prompt
+    // overhead and would fire again on the next step.
+    const history = [user("notes ".repeat(2_000)), assistant("ok"), user("go on")];
+    const threshold = estimateTokens(history) - 500;
+
+    await expect(
+      compactMessages(
+        history,
+        { recentWindowSize: 1, threshold },
+        summarizeWith("s".repeat((threshold - 200) * 4)),
+      ),
+    ).rejects.toThrow(/under its limit/);
+  });
+
+  it("sends the whole cut-off head of the message to the summarizer", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const task = user(`${"a".repeat(14_000)}MIDDLE MARKER${"b".repeat(14_000)}END SENTINEL`);
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(history, providerConfig(history), summarizer);
+
+    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+    expect(prompt).toContain("MIDDLE MARKER");
+    expect(prompt).not.toContain("END SENTINEL");
+    expect(JSON.stringify(result)).toContain("END SENTINEL");
+  });
+
+  it("cuts the text part of a message that carries an attachment", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const file = {
+      data: new URL("https://example.com/spec.pdf"),
+      mediaType: "application/pdf",
+      type: "file" as const,
+    };
+    const task: ModelMessage = {
+      content: [{ text: `${bigTaskText()}FINAL SENTINEL`, type: "text" }, file],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(history, providerConfig(history), summarizer);
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const parts = Array.isArray(kept?.content) ? kept.content : [];
+    expect(parts.find((part) => part.type === "text")).toMatchObject({
+      text: expect.stringContaining("FINAL SENTINEL"),
+    });
+    expect(parts).toContainEqual(file);
+    expect(estimateTokens(result) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
   });
 });
 
