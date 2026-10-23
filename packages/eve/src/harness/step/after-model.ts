@@ -1,7 +1,7 @@
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
-import type { CompactionConfig, StepResult } from "#harness/types.js";
+import type { StepResult } from "#harness/types.js";
 import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import {
@@ -37,7 +37,7 @@ import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { setRequestEnvelopeTokens } from "#harness/request-envelope.js";
+import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("harness.tool-loop");
@@ -98,19 +98,14 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   });
   const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
 
-  step.session = setRequestEnvelopeTokens(
-    {
-      ...step.session,
-      compaction: createNextCompactionConfig(
-        step.session.compaction,
-        input.durableModelPromptMessageCount,
-        result,
-      ),
-    },
-    result.usage?.inputTokens !== undefined && input.durableModelPromptMessageCount !== undefined
-      ? input.requestEnvelopeTokens
-      : undefined,
-  );
+  step.session = {
+    ...step.session,
+    compaction: withPromptMeasurement(step.session.compaction, {
+      inputTokens: result.usage?.inputTokens,
+      promptMessageCount: input.durableModelPromptMessageCount,
+      requestEnvelopeTokens: input.requestEnvelopeTokens,
+    }),
+  };
 
   const approvalRequests = result.approvalRequests ?? [];
   // Only unanswered calls can dispatch: automatic denials already have results.
@@ -371,29 +366,4 @@ async function settleTurn(
     step.session.history,
   );
   return { next: null, session: step.session, settledTurn: { output: structured } };
-}
-
-function createNextCompactionConfig(
-  current: CompactionConfig,
-  durablePromptMessageCount: number | undefined,
-  result: HarnessStepResult,
-): CompactionConfig {
-  const next: {
-    lastKnownInputTokens?: number;
-    lastKnownPromptMessageCount?: number;
-    recentWindowSize: number;
-    threshold: number;
-    thresholdPercent?: number;
-  } = {
-    recentWindowSize: current.recentWindowSize,
-    threshold: current.threshold,
-    thresholdPercent: current.thresholdPercent,
-  };
-
-  if (result.usage?.inputTokens !== undefined && durablePromptMessageCount !== undefined) {
-    next.lastKnownInputTokens = result.usage.inputTokens;
-    next.lastKnownPromptMessageCount = durablePromptMessageCount;
-  }
-
-  return next;
 }

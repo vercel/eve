@@ -61,6 +61,36 @@ export function getInputTokenCount(
   );
 }
 
+/** The settings without the last measured prompt, which a rewritten history no longer matches. */
+export function withoutPromptMeasurement(config: CompactionConfig): CompactionConfig {
+  const { lastKnownInputTokens: _input, lastKnownPromptMessageCount: _count, ...rest } = config;
+  return rest;
+}
+
+/**
+ * The settings with a model-reported prompt measurement and the envelope around it. Without a
+ * usable measurement, the next count is an estimate, and no envelope baseline applies.
+ */
+export function withPromptMeasurement(
+  config: CompactionConfig,
+  measured: {
+    readonly inputTokens?: number;
+    readonly promptMessageCount?: number;
+    readonly requestEnvelopeTokens?: number;
+  },
+): CompactionConfig {
+  const { requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
+  if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return next;
+  return {
+    ...next,
+    lastKnownInputTokens: measured.inputTokens,
+    lastKnownPromptMessageCount: measured.promptMessageCount,
+    ...(measured.requestEnvelopeTokens !== undefined && {
+      requestEnvelopeTokens: measured.requestEnvelopeTokens,
+    }),
+  };
+}
+
 /**
  * Returns true when the message history and fixed compaction-prompt envelope
  * exceed the compaction threshold.

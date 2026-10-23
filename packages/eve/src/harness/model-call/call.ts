@@ -1,3 +1,4 @@
+import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import {
   isStepCount,
@@ -322,14 +323,9 @@ export class ModelCaller {
     }
     if (!compaction.compacted) return tools;
     compactPrompt(step, prompt, compaction.messages);
-    const { compaction: settings } = step.session;
     step.session = {
       ...step.session,
-      compaction: {
-        recentWindowSize: settings.recentWindowSize,
-        threshold: settings.threshold,
-        thresholdPercent: settings.thresholdPercent,
-      },
+      compaction: withoutPromptMeasurement(step.session.compaction),
     };
     this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);

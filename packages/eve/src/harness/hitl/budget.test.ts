@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "#harness/hitl/budget.js";
-import { NO_USAGE, resetSessionUsageWindow } from "#harness/session-usage.js";
+import { NO_USAGE } from "#harness/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionUsageLimit } from "#shared/agent-definition.js";
-import { withSessionUsage } from "#internal/testing/session-usage.js";
+import { acceptSessionBudget, withSessionUsage } from "#internal/testing/session-usage.js";
 
 const session = { sessionId: "alice", state: {} } as HarnessSession;
 
@@ -43,7 +43,7 @@ describe("session usage policy", () => {
     (canAsk) => {
       const prior = { ...NO_USAGE, inputTokens: 35, costUsd: 0.25 };
       const current = { ...NO_USAGE, inputTokens: 45, costUsd: 0.5 };
-      const reset = resetSessionUsageWindow(withSessionUsage(session, prior));
+      const reset = acceptSessionBudget(withSessionUsage(session, prior));
       const limit = vi.fn<SessionUsageLimit>(({ window }) => (window.costUsd ?? 0) >= 0.25);
       const result = checkSessionUsageLimit({
         canAsk,

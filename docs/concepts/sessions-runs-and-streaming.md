@@ -148,7 +148,7 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 A model often writes text before it calls a tool. Each text part's `content.completed.data.phase` tells you which it is: `"narration"` for text written on the way to more work, `"reply"` for the turn's answer. `turn.settled.data.reply` lists the reply's part ids, so a reader that only needs the answer can wait for the turn to settle and read those parts. `reply(ctx.view, turnId)` returns those parts in a hook or channel handler without exposing the backing table. When a turn requested an output schema, the structured result is a `content.completed` with `kind: "result"`.
 
-Spend is recorded on `usage.recorded`, once per model run (`owner: { runId }`), once per delegated call for what the agent it called spent (`owner: { callId }`), and once per compaction (`owner: { changeId }`). Spend a task reports after its calls settled has no owner and `kind: "delegated-late"`. A session's total is the sum of its records; `usage(view).total` returns it.
+Spend is recorded on `usage.recorded`, once per model run (`owner: { runId }`), once per delegated call for what the agent it called spent (`owner: { callId }`), and once per compaction (`owner: { changeId }`). Spend a task reports after its calls settled has no owner and `kind: "delegated-late"`. A session's total is the sum of its records; `usage(view).total` returns it. The usage window that [`limits.sessionUsage`](../agent-config#runtime-limits) reads starts at that total on the line where the session's own budget prompt settles `accepted`.
 
 ### Deliveries and responses
 

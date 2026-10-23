@@ -1,12 +1,13 @@
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
 import { activeTurn } from "#protocol/session-projection/selectors.js";
 import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 // What the session knows of its own lifecycle: the public view every reader folds, with
-// operational retention, and the two things it can't hold. Run and context-change ids are
-// minted from counters that outlive the rows retention drops, and whether the open turn streamed
-// output comes from deltas, which are progress, not facts. Everything else (the open turn, its
+// operational retention, and observations that outlive its rows: minted ids, budget renewals,
+// and whether the open turn streamed output (from deltas, which are progress, not facts).
+// Everything else (the open turn, its
 // step and run, the line position) is read from the view. It reads only the protocol and stays
 // free of runtime dependencies, so workflow bodies import it.
 
@@ -17,40 +18,68 @@ export interface SessionProjection {
   readonly counters: { readonly runs: number; readonly changes: number };
   /** The turn that streamed output, so steering can no longer restart it. */
   readonly outputStarted?: string;
+  /** The latest own budget acceptance, anchored at its commit's spend; retained after rows prune. */
+  readonly usageWindow?: {
+    readonly interactionId: string;
+    readonly index: number;
+    readonly start: Usage;
+  };
 }
 
 export function initialSessionProjection(): SessionProjection {
   return { counters: { changes: 0, runs: 0 }, view: emptySessionView() };
 }
 
-/**
- * Folds one event into what the view can't hold. Events this fold doesn't track return `state`
- * unchanged, so callers may pass any event through it; the view folds lines separately.
- */
+/** Folds a line's observations beside its already-folded view. */
 export function foldSession<S extends SessionProjection>(
   state: S,
-  event: SessionEvent | { readonly type: string },
+  events: readonly SessionEvent[],
 ): S {
-  const typed = event as SessionEvent;
-  switch (typed.type) {
-    case "model.requested":
-      return { ...state, counters: { ...state.counters, runs: state.counters.runs + 1 } };
-    case "context.started":
-      return { ...state, counters: { ...state.counters, changes: state.counters.changes + 1 } };
-    case "content.delta": {
-      const { delta, kind } = typed.data;
-      if (kind !== "text" || delta.length === 0) return state;
-      return markOutputStarted(state, typed.scope?.runId);
+  const settled = new Set<string>();
+  for (const event of events) {
+    switch (event.type) {
+      case "model.requested":
+        state = { ...state, counters: { ...state.counters, runs: state.counters.runs + 1 } };
+        break;
+      case "context.started":
+        state = { ...state, counters: { ...state.counters, changes: state.counters.changes + 1 } };
+        break;
+      case "interaction.settled": {
+        const row = state.view.interactions[event.data.interactionId];
+        if (
+          row?.request.kind !== "budget" ||
+          row.origin !== undefined ||
+          !("turnId" in row.subject) ||
+          row.outcome !== "accepted" ||
+          event.data.outcome !== "accepted" ||
+          row.closedAt !== state.view.position - 1 ||
+          settled.has(row.interactionId)
+        )
+          break;
+        settled.add(row.interactionId);
+        state = {
+          ...state,
+          usageWindow: {
+            interactionId: row.interactionId,
+            index: (state.usageWindow?.index ?? 0) + 1,
+            start: state.view.usage.total,
+          },
+        };
+        break;
+      }
+      case "content.delta":
+        if (event.data.kind === "text" && event.data.delta.length > 0)
+          state = markOutputStarted(state, event.scope?.runId);
+        break;
+      case "content.completed": {
+        const { kind, runId, value } = event.data;
+        if (kind === "result" || (kind === "text" && typeof value === "string" && value.length > 0))
+          state = markOutputStarted(state, runId);
+        break;
+      }
     }
-    case "content.completed": {
-      const { kind, runId, value } = typed.data;
-      const output =
-        kind === "result" || (kind === "text" && typeof value === "string" && value.length > 0);
-      return output ? markOutputStarted(state, runId) : state;
-    }
-    default:
-      return state;
   }
+  return state;
 }
 
 function markOutputStarted<S extends SessionProjection>(state: S, runId: string | undefined): S {

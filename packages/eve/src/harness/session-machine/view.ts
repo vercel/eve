@@ -58,6 +58,7 @@ export function storedProjection(state: SessionStateMap | undefined): SessionPro
   const projection: SessionProjection = {
     counters: stored.counters ?? initial.counters,
     view: stored.view ?? initial.view,
+    usageWindow: stored.usageWindow,
   };
   return stored.outputStarted === undefined
     ? projection

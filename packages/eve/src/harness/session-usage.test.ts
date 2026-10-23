@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { advance } from "#harness/session-machine/current.js";
+import { usageSince } from "#shared/token-usage-math.js";
 import {
-  getSessionUsageWindow,
-  getSessionUsageWindowIndex,
   markUsageReported,
   NO_USAGE,
-  resetSessionUsageWindow,
   sessionUsage,
   takeSessionUsageDelta,
   turnUsage,
 } from "#harness/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
-import { withSessionUsage } from "#internal/testing/session-usage.js";
+import { acceptSessionBudget, withSessionUsage } from "#internal/testing/session-usage.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 
@@ -73,25 +73,76 @@ describe("what a session spent", () => {
 });
 
 describe("usage windows", () => {
+  it("retains its anchor after pruning, and neither replay nor a child's acceptance renews it", () => {
+    const session = acceptSessionBudget(withSessionUsage(makeSession(), spent(35)));
+    let projection = storedProjection(structuredClone(session.state));
+    const anchor = projection.usageWindow;
+    const interactionId = anchor!.interactionId;
+    const facts: SessionEvent[] = [
+      { type: "interaction.settled", data: { interactionId, outcome: "accepted" } },
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "child-budget",
+          subject: { turnId: "turn_0" },
+          origin: { sessionId: "child", interactionId: "child-budget" },
+          request: { kind: "budget", prompt: "Continue?" },
+        },
+      },
+      { type: "interaction.settled", data: { interactionId: "child-budget", outcome: "accepted" } },
+    ];
+    projection = advance(projection, { at: "later", facts }, projection.view.position, facts);
+    expect(projection.view.interactions[interactionId]).toBeUndefined();
+    expect(projection.usageWindow).toEqual(anchor);
+    expect(projection.usageWindow).toMatchObject({ index: 1, start: spent(35) });
+    const accepted: SessionEvent = {
+      type: "interaction.settled",
+      data: { interactionId: "own", outcome: "accepted" },
+    };
+    const own: SessionEvent[] = [
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "own",
+          subject: { turnId: "turn_0" },
+          request: { kind: "budget", prompt: "Continue?" },
+        },
+      },
+      accepted,
+      accepted,
+    ];
+    const position = projection.view.position;
+    const line = { at: "later", facts: own };
+    projection = advance(projection, line, position, own);
+    expect(projection.usageWindow?.index).toBe(2);
+    expect(advance(projection, line, position, own).usageWindow?.index).toBe(2);
+  });
+
   it("anchors approval at the live committed total without changing lifetime usage or reporting", () => {
     const first = takeSessionUsageDelta(withSessionUsage(makeSession(), spent(10)));
-    const reset = structuredClone(resetSessionUsageWindow(first.session, spent(35)));
-    expect(getSessionUsageWindow(reset, spent(35))).toEqual({ ...spent(0), costUsd: undefined });
-    expect(getSessionUsageWindowIndex(reset)).toBe(1);
+    const reset = structuredClone(acceptSessionBudget(withSessionUsage(first.session, spent(35))));
+    const window = storedProjection(reset.state).usageWindow!;
+    expect(usageSince(spent(35), window.start)).toEqual({ ...spent(0), costUsd: undefined });
+    expect(window.index).toBe(1);
     const later = withSessionUsage(reset, spent(45));
     expect(sessionUsage(later)).toEqual(spent(45));
-    expect(getSessionUsageWindow(later)).toEqual({ ...spent(10), costUsd: undefined });
+    expect(
+      usageSince(sessionUsage(later), storedProjection(later.state).usageWindow?.start),
+    ).toEqual({ ...spent(10), costUsd: undefined });
     expect(takeSessionUsageDelta(later).delta.inputTokens).toBe(35);
   });
 
   it("starts distinct cost-only windows even when token counts never change", () => {
     const session = withSessionUsage(makeSession(), { costUsd: 0.25 });
-    const reset = resetSessionUsageWindow(session);
+    const reset = acceptSessionBudget(session);
     const later = withSessionUsage(reset, { costUsd: 0.5 });
-    expect(getSessionUsageWindow(later)).toMatchObject({ inputTokens: 0, costUsd: 0.25 });
-    const second = resetSessionUsageWindow(later);
-    expect(getSessionUsageWindowIndex(second)).toBe(2);
-    expect(getSessionUsageWindow(second).costUsd).toBe(0);
+    expect(
+      usageSince(sessionUsage(later), storedProjection(later.state).usageWindow?.start),
+    ).toMatchObject({ inputTokens: 0, costUsd: 0.25 });
+    const second = acceptSessionBudget(later);
+    const window = storedProjection(second.state).usageWindow!;
+    expect(window.index).toBe(2);
+    expect(usageSince(sessionUsage(second), window.start).costUsd).toBe(0);
     expect(sessionUsage(second).costUsd).toBe(0.5);
   });
 });

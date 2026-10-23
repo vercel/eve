@@ -3,7 +3,9 @@ import {
   type LimitAsk,
   toJsonUsage,
 } from "#harness/hitl/budget-request.js";
-import { getSessionUsageWindow, getSessionUsageWindowIndex } from "#harness/session-usage.js";
+import { usageSince } from "#shared/token-usage-math.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -29,9 +31,12 @@ export function checkSessionUsageLimit(input: {
   readonly session: Pick<HarnessSession, "sessionId" | "state">;
   readonly turnSequence: number;
   readonly usage: TokenUsage;
+  /** The window the last accepted budget prompt started; the stored one by default. */
+  readonly window?: SessionProjection["usageWindow"];
 }): SessionUsageLimitCheck {
   const total = input.usage;
-  const window = getSessionUsageWindow(input.session, total);
+  const started = input.window ?? storedProjection(input.session.state).usageWindow;
+  const window = usageSince(total, started?.start);
   if (
     (window.inputTokens === 0 && window.outputTokens === 0 && !window.costUsd) ||
     !input.limit({ total: { ...total }, window: { ...window } })
@@ -43,7 +48,7 @@ export function checkSessionUsageLimit(input: {
       ask: createSessionLimitContinuationRequest({
         sessionId: input.session.sessionId,
         turnSequence: input.turnSequence,
-        windowIndex: getSessionUsageWindowIndex(input.session),
+        windowIndex: started?.index ?? 0,
       }),
     };
   return {

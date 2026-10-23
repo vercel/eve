@@ -31,12 +31,16 @@ export type SessionToolDefinition = Readonly<InternalToolDefinition>;
 /** Authored-key → opaque-value map stored on `session.state`. */
 export type SessionStateMap = Readonly<Record<string, unknown>>;
 
-/**
- * Compaction configuration stored on the session.
- */
-export interface CompactionConfig {
+/** Prompt observations that survive rebuilding the agent's settings on each turn. */
+export interface CompactionState {
   readonly lastKnownInputTokens?: number;
   readonly lastKnownPromptMessageCount?: number;
+  /** The previous request's non-history estimate, also used before the next request is built. */
+  readonly requestEnvelopeTokens?: number;
+}
+
+/** Compaction configuration stored on the session. */
+export interface CompactionConfig extends CompactionState {
   readonly recentWindowSize: number;
   readonly threshold: number;
   readonly thresholdPercent?: number;

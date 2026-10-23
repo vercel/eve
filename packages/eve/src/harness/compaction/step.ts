@@ -1,3 +1,4 @@
+import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
 import { createLogger, logError } from "#internal/logging.js";
@@ -42,7 +43,6 @@ import {
 import { resolveModelProfile } from "#harness/model-profile.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
 import { addTokenUsage } from "#shared/token-usage-math.js";
-import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { controlDeliveryFor } from "#harness/session-machine/transitions.js";
 import {
   contextStarted,
@@ -111,7 +111,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       model: resolvedModel.model,
       publish: step.publish,
       view: () => step.view().projection.view,
-      requestEnvelopeTokens: getRequestEnvelopeTokens(step.session),
+      requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session: step.session,
@@ -186,11 +186,7 @@ export function replaceSessionHistory(
   return {
     ...session,
     history,
-    compaction: {
-      recentWindowSize: session.compaction.recentWindowSize,
-      threshold: session.compaction.threshold,
-      thresholdPercent: session.compaction.thresholdPercent,
-    },
+    compaction: withoutPromptMeasurement(session.compaction),
   };
 }
 
@@ -268,7 +264,7 @@ async function compactOnce(input: {
       projectedPromptMessages,
       session.compaction,
       input.requestEnvelopeTokens,
-      getRequestEnvelopeTokens(session),
+      session.compaction.requestEnvelopeTokens,
     );
   if (!needsSummary) {
     return { compacted: false, messages, session };
@@ -336,7 +332,7 @@ async function compactOnce(input: {
         projectedPromptMessages,
         session.compaction,
         input.requestEnvelopeTokens,
-        getRequestEnvelopeTokens(session),
+        session.compaction.requestEnvelopeTokens,
       );
       await publish(
         contextStarted({
@@ -364,7 +360,7 @@ async function compactOnce(input: {
         : Math.max(
             0,
             session.compaction.lastKnownInputTokens -
-              Math.min(getRequestEnvelopeTokens(session) ?? 0, requestEnvelopeTokens),
+              Math.min(session.compaction.requestEnvelopeTokens ?? 0, requestEnvelopeTokens),
           ),
   };
   let compactedOrdinary: ModelMessage[] = [...ordinary];
@@ -388,7 +384,7 @@ async function compactOnce(input: {
                 projectedPromptMessages,
                 session.compaction,
                 requestEnvelopeTokens,
-                getRequestEnvelopeTokens(session),
+                session.compaction.requestEnvelopeTokens,
               ) - requestEnvelopeTokens,
             ),
       );

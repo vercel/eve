@@ -5,8 +5,6 @@ import { addTokenUsage, usageSince } from "#shared/token-usage-math.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
-const SESSION_USAGE_WINDOW_START_KEY = "eve.harness.sessionUsageWindowStart";
-const SESSION_USAGE_WINDOW_INDEX_KEY = "eve.harness.sessionUsageWindowIndex";
 
 export const NO_USAGE: TokenUsage = {
   cacheReadTokens: 0,
@@ -30,36 +28,6 @@ export function turnUsage(view: SessionView, turnId: string): TokenUsage {
     if (turn === turnId) total = addTokenUsage(total, run.usage);
   }
   return total;
-}
-
-/** The current step can supply its live, committed view before the state snapshot is saved. */
-export function getSessionUsageWindow(
-  session: { readonly state?: SessionStateMap },
-  total = sessionUsage(session),
-): TokenUsage {
-  return usageSince(
-    total,
-    session.state?.[SESSION_USAGE_WINDOW_START_KEY] as TokenUsage | undefined,
-  );
-}
-
-export function getSessionUsageWindowIndex(session: { readonly state?: SessionStateMap }): number {
-  return (session.state?.[SESSION_USAGE_WINDOW_INDEX_KEY] as number | undefined) ?? 0;
-}
-
-/** A continuation changes the window, never the lifetime facts or child reporting cursor. */
-export function resetSessionUsageWindow<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  total = sessionUsage(session),
-): T {
-  return {
-    ...session,
-    state: {
-      ...session.state,
-      [SESSION_USAGE_WINDOW_START_KEY]: total,
-      [SESSION_USAGE_WINDOW_INDEX_KEY]: getSessionUsageWindowIndex(session) + 1,
-    },
-  };
 }
 
 /** A persistent child reports each committed unit of spend to its parent exactly once. */

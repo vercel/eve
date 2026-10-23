@@ -123,12 +123,14 @@ export function advance(
   position: number,
   events: readonly SessionEvent[],
 ): SessionProjection {
-  let next: SessionProjection = {
-    ...projection,
-    view: advanceView(projection.view, line, position),
-  };
-  for (const event of events) next = foldSession(next, event);
-  return next;
+  if (position < projection.view.position) return projection;
+  return foldSession(
+    {
+      ...projection,
+      view: advanceView(projection.view, line, position),
+    },
+    events,
+  );
 }
 
 /** The public view as of the last line the step wrote. */

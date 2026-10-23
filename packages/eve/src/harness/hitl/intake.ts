@@ -15,7 +15,6 @@ import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { resetSessionUsageWindow } from "#harness/session-usage.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
@@ -189,10 +188,8 @@ export async function applyHumanDecisions(
   step: Step,
   decided: HumanDecisions,
 ): Promise<StepResult | undefined> {
-  if (decided.limit !== undefined) {
-    if (!decided.limit.granted) throw new SessionLimitDeclinedError();
-    step.session = resetSessionUsageWindow(step.session, step.view().projection.view.usage.total);
-  }
+  // A grant needs no write: its accepted budget prompt started the new window.
+  if (decided.limit?.granted === false) throw new SessionLimitDeclinedError();
   await step.apply(settle(step.view(), { results: [] }));
   return runApproved(step, decided.approved);
 }

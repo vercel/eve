@@ -106,6 +106,7 @@ export async function enforceBudget(
     session: step.session,
     turnSequence: step.position().sequence,
     usage: step.view().projection.view.usage.total,
+    window: step.view().projection.usageWindow,
   });
   if (limit.kind === "within") return undefined;
   if (limit.kind === "ask") {
