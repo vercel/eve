@@ -10,6 +10,7 @@ import { createEvalContext } from "#evals/context.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import { stampTestEvents } from "#internal/testing/events.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 const mocks = vi.hoisted(() => ({ decide: vi.fn() }));
 
@@ -119,6 +120,80 @@ describe("eval session compact", () => {
   });
 });
 
+describe("eval session partial respond", () => {
+  // https://github.com/vercel/eve/issues/5157
+  it.fails("keeps the unanswered request pending", async () => {
+    const session = await answerOneOfTwoApprovals();
+
+    expect(session.pendingInputRequests.map((request) => request.requestId)).toEqual([
+      "approval_web",
+    ]);
+  });
+
+  // https://github.com/vercel/eve/issues/5157
+  it.fails("reports the run as parked on the unanswered request", async () => {
+    const session = await answerOneOfTwoApprovals();
+
+    expect(session.snapshot().derived.parked).toBe(true);
+  });
+});
+
+/**
+ * Parks on two approvals, then answers only the first. The runtime settles it and parks the
+ * same turn again on the second without re-raising it: `approval.settled`, `turn.waiting`.
+ */
+async function answerOneOfTwoApprovals() {
+  const { session } = await setup();
+  vi.mocked(ClientSession.prototype.send).mockImplementation(async () =>
+    response(async function* () {
+      yield* stampTestEvents([
+        {
+          type: "input.requested",
+          data: {
+            requests: ["api", "web"].map((service) => ({
+              action: {
+                callId: `call_${service}`,
+                input: { service },
+                kind: "tool-call" as const,
+                toolName: "deploy_service",
+              },
+              kind: "tool-approval" as const,
+              prompt: `Deploy ${service}?`,
+              requestId: `approval_${service}`,
+            })),
+            sequence: 1,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+        },
+        { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "turn_1" } },
+      ]);
+    }),
+  );
+  vi.mocked(ClientSession.prototype.respond).mockImplementation(async () =>
+    response(async function* () {
+      yield* stampTestEvents([
+        {
+          type: "approval.settled",
+          data: {
+            outcome: "approved",
+            requestId: "approval_api",
+            responderPrincipalId: "alice",
+            sequence: 3,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+        },
+        { type: "turn.waiting", data: { on: "input", sequence: 4, turnId: "turn_1" } },
+      ]);
+    }),
+  );
+
+  await session.send("Deploy Alice's api and web services.");
+  await session.respond([{ requestId: "approval_api", optionId: "approve" }]);
+  return session;
+}
+
 async function setup() {
   mocks.decide.mockResolvedValue({
     answers: { judgment: { type: "boolean", probability: 1 } },
@@ -149,11 +224,11 @@ async function setup() {
   return { context, session: await manager.session() };
 }
 
-function response() {
+function response(createStream: () => AsyncGenerator<MessageStreamEvent> = events) {
   return new MessageResponse({
     sessionId: "session_1",
     cancelTurn: async () => ({ status: "no_active_turn" }),
-    createStream: events,
+    createStream,
   });
 }
 
