@@ -1,5 +1,6 @@
 [
   "AgentObservation",
+  "AgentObservationReason",
   "AskedCall",
   "ConversationAgentSession",
   "ConversationState",
@@ -8,6 +9,8 @@
   "EveMessageMetadata",
   "EveMessagePart",
   "EveToolPart",
+  "FollowAgents",
+  "FollowedChild",
   "Interaction",
   "PrepareSend",
   "UseEveAgentOptions",

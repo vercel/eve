@@ -41,7 +41,7 @@ const attachStore = Symbol("attachSessionStore");
 export class SessionStore {
   readonly #client: Client | undefined;
   readonly #autoPrewarm: boolean;
-  readonly #followChildStreams: boolean;
+  readonly #followChildStreams: NonNullable<SessionStoreInit["followAgents"]>;
   readonly #followWhile: NonNullable<SessionStoreInit["followWhile"]>;
   readonly #externalSession: boolean;
   readonly #subscribers = new Set<() => void>();
@@ -51,6 +51,8 @@ export class SessionStore {
   readonly #pending = new Set<Promise<string | undefined>>();
   readonly #accepted = new Set<string>();
   #attached = false;
+  #mounted = false;
+  #observers = 0;
   #streamingWhenDetached = false;
   #callbacks: SessionStoreCallbacks = {};
   #controller = new AbortController();
@@ -105,6 +107,19 @@ export class SessionStore {
 
   get snapshot(): SessionStoreSnapshot {
     return this.#snapshot;
+  }
+
+  /** Activates observation outside a framework. Release the scope to stop reads, not execution. */
+  observe(): () => void {
+    this.#observers += 1;
+    this.#activateObservation();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#observers -= 1;
+      if (!this.#mounted && this.#observers === 0) this.#deactivateObservation();
+    };
   }
 
   setCallbacks(callbacks: SessionStoreCallbacks): void {
@@ -333,6 +348,12 @@ export class SessionStore {
   }
 
   [attachStore](): void {
+    this.#mounted = true;
+    this.#activateObservation();
+  }
+
+  #activateObservation(): void {
+    if (this.#attached) return;
     this.#attached = true;
     this.#followAgents();
     const resumeFollowing =
@@ -344,6 +365,11 @@ export class SessionStore {
   }
 
   [detachStore](): void {
+    this.#mounted = false;
+    if (this.#observers === 0) this.#deactivateObservation();
+  }
+
+  #deactivateObservation(): void {
     this.#attached = false;
     this.#streamingWhenDetached = this.#conversationClient.streaming;
     this.#stop();
@@ -479,7 +505,7 @@ export class SessionStore {
 
   #followAgents(): void {
     if (this.#followChildStreams && this.#session && !this.#conversationClient.following)
-      this.#conversationClient.follow(this.#session, this.#events);
+      this.#conversationClient.follow(this.#session, this.#followChildStreams);
   }
 
   #acceptServerEvent(event: SessionStreamEvent, historical: boolean): void {
@@ -519,6 +545,9 @@ export class SessionStore {
     this.#callbacks.onSessionChange?.(this.#sessionState);
     if (lifetime !== this.#controller) return;
     this.#publish();
+    if (lifetime !== this.#controller) return;
+    this.#conversationClient.reconcileFollowing();
+    if (lifetime !== this.#controller) return;
     this.#closeStreamWhenIdle();
   }
 

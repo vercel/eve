@@ -1,4 +1,5 @@
 import type { SessionStore, SessionStoreSnapshot } from "eve/client";
+export { interceptFetchOrigin } from "./fetch-interceptor.js";
 
 /** Waits on the frontend's own stream, not another reader's progress or HTTP acceptance. */
 export async function waitForStore(

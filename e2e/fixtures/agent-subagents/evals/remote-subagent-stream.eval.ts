@@ -1,6 +1,6 @@
 import { emptySessionView, foldEvents, calls } from "eve/events";
 import { endsTurn, type SessionStreamEvent } from "eve/client";
-import { type ChildOpened } from "eve/events";
+type ChildOpened = Extract<SessionStreamEvent, { type: "child.opened" }>;
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 

@@ -2,19 +2,50 @@ import type { EveMessage } from "#client/message-types.js";
 import type { CallRow, DeliveryRow, TaskRow } from "#protocol/session-projection/tables.js";
 import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 import { activeTurn } from "#protocol/session-projection/selectors.js";
-import { openSignIns } from "#protocol/session-projection/reader.js";
+
+export interface FollowedChild {
+  /** Root depth is zero; its immediate children have depth one. */
+  readonly depth: number;
+  readonly name: string;
+  readonly sessionId: string;
+  readonly owner: { readonly callId: string } | { readonly taskId: string };
+}
+
+/** A synchronous selection policy, evaluated once per recorded relationship. */
+export type FollowAgents = boolean | ((child: FollowedChild) => boolean);
+
+export type AgentObservationReason =
+  | "predicate"
+  | "depth-limit"
+  | "session-limit"
+  | "cycle"
+  | "unauthorized"
+  | "expired"
+  | "unsupported"
+  | "transport"
+  | "detached";
 
 export type AgentObservation =
-  | { readonly status: "not-followed" }
-  | { readonly status: "following" | "idle"; readonly conversation: ConversationState }
-  | { readonly status: "unavailable"; readonly conversation?: ConversationState };
+  | { readonly status: "not-followed"; readonly reason?: AgentObservationReason }
+  | {
+      readonly status: "queued" | "following" | "idle" | "interrupted" | "unavailable";
+      /** Identity in this store's authorized reader scope, established by the server. */
+      readonly key?: string;
+      readonly conversation?: ConversationState;
+      /** Committed source-line position, coherent with conversation. */
+      readonly position: number;
+      /** Reached the tail captured when this read opened, not execution completion. */
+      readonly caughtUp: boolean;
+      readonly reason?: AgentObservationReason;
+    };
 
 /** A child session linked by the root's `child.opened`, with its independent observation state. */
 export interface ConversationAgentSession {
   readonly sessionId: string;
   readonly name: string;
-  readonly callId: string;
-  readonly turnId: string;
+  readonly owner: FollowedChild["owner"];
+  readonly callId?: string;
+  readonly turnId?: string;
   readonly taskId?: string;
   readonly observation: AgentObservation;
 }
@@ -24,12 +55,6 @@ export interface ConversationState {
   readonly view: SessionView;
   readonly messages: readonly EveMessage[];
   readonly agents: Readonly<Record<string, ConversationAgentSession>>;
-}
-
-export function hasPendingAuthorizations(state: ConversationState): boolean {
-  return openSignIns(sessionTables(state.view)).some(
-    (row) => row.request.signIn?.callbackUrl !== undefined,
-  );
 }
 
 export function agentToolTask(
@@ -53,28 +78,6 @@ export function agentToolSession(
 /** Direct model calls served by this task, in call order. */
 export function taskCalls(view: SessionView, taskId: string): readonly CallRow[] {
   return Object.values(sessionTables(view).calls).filter((call) => call.taskId === taskId);
-}
-
-/** Root completion can precede the child's last committed line. */
-export function isAgentSessionCaughtUp(
-  state: ConversationState,
-  agent: ConversationAgentSession,
-): boolean {
-  if (agent.observation.status !== "following" && agent.observation.status !== "idle") return false;
-  const task = agentToolTask(state, agent);
-  if (task === undefined) return false;
-  const calls = taskCalls(state.view, task.taskId);
-  if (calls.some((call) => call.status !== "settled")) return false;
-  const child = agent.observation.conversation;
-  if (activeTurn(sessionTables(child.view)) !== undefined) return false;
-  if (
-    Object.values(sessionTables(child.view).interactions).some(
-      (input) => input.status !== "settled",
-    )
-  )
-    return false;
-  if (hasPendingAuthorizations(child)) return false;
-  return !calls.some((call) => isAgentCallContentPending(calls, call, child));
 }
 
 /** Named deliveries are authoritative; unnamed remote sessions retain their in-order mapping. */

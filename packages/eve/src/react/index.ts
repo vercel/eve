@@ -15,6 +15,9 @@ export {
 
 export type {
   AgentObservation,
+  AgentObservationReason,
+  FollowAgents,
+  FollowedChild,
   ConversationAgentSession,
   ConversationState,
 } from "#client/conversation-state.js";

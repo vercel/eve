@@ -7,6 +7,7 @@ import {
   detachSessionStore,
   SessionStore,
   type SessionStoreCallbacks,
+  type SessionStoreInit,
   type SessionStoreSnapshot,
   type SessionStoreStatus,
   type PrepareSend,
@@ -121,8 +122,8 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Follow each subagent call's session into `agents` while mounted. @default false */
-  readonly followAgents?: boolean;
+  /** Recursively observe recorded children, or select relationships with a predicate, within store safety limits. @default false */
+  readonly followAgents?: SessionStoreInit["followAgents"];
   /** Keep following while the committed view matches; local obligations always keep the stream open. @default () => true */
   readonly followWhile?: (view: SessionStoreSnapshot["view"]) => boolean;
   /**

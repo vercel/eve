@@ -84,6 +84,8 @@ function resolveStreamReconnectPolicy(
  * Internal configuration for following a durable event stream.
  */
 interface FollowStreamInput {
+  /** Validates reader provenance before consuming any stream data. */
+  readonly onOpen?: (headers: Headers) => void;
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly baseUrl: string;
@@ -95,6 +97,7 @@ interface FollowStreamInput {
   readonly redirect?: ClientRedirectPolicy;
   /** eve stream route path, such as a session stream or a parent-origin subagent stream. */
   readonly path: string;
+  readonly searchParams?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
   /** The position of the first line to read. Negative values count back from the tail. */
   readonly startIndex: number;
@@ -173,6 +176,12 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
         );
       }
       if (startIndex < 0) startIndex = Math.max(0, tailIndex + 1 + startIndex);
+    }
+    try {
+      input.onOpen?.(connection.headers);
+    } catch (error) {
+      connection.close();
+      throw error;
     }
     if (noteProgress()) {
       connection.close();
@@ -275,6 +284,7 @@ export async function* followStreamIterable(
 
 /** An opened connection: the response body plus the tail index from the response header, if any. */
 interface OpenedStream {
+  readonly headers: Headers;
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
   readonly tailIndex: number | undefined;
@@ -297,7 +307,7 @@ export async function openStreamBody(
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
 
-  const searchParams: Record<string, string> = {};
+  const searchParams: Record<string, string> = { ...input.searchParams };
   if (input.startIndex !== 0) {
     searchParams.startIndex = String(input.startIndex);
   }
@@ -358,6 +368,7 @@ export async function openStreamBody(
       }
       let closed = false;
       return {
+        headers: response.headers,
         body: response.body,
         close: () => {
           if (closed) return;

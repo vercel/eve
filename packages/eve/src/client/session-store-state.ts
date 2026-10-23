@@ -1,7 +1,7 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { Client } from "#client/client.js";
 import type { SessionView } from "#protocol/session-projection/session-view.js";
-import type { ConversationState } from "#client/conversation-state.js";
+import type { ConversationState, FollowAgents } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
 import type {
   ClientAuth,
@@ -66,10 +66,13 @@ export interface SessionStoreInit {
   readonly initialSession?: ClientSessionState;
   readonly optimistic?: boolean;
   /**
-   * Follow each agent tool's session into `agents` while the store streams its session or a
-   * framework binding has it mounted.
+   * Recursively observe recorded child sessions, including workflow-created children, while
+   * mounted or programmatically streaming. A predicate selects relationships once, at discovery;
+   * `true` is equivalent to `() => true`. Returning false also excludes that child's descendants.
+   * Observation is bounded to depth 8, 128 admitted children, and 8 simultaneous descendant reads.
+   * Call results and root callbacks never wait for descendant catch-up. Off by default.
    */
-  readonly followAgents?: boolean;
+  readonly followAgents?: FollowAgents;
   /**
    * Keep following while this predicate accepts the last committed view. Local POSTs, unsettled
    * receipts, and resume catch-up keep the stream open regardless. Evaluated only at complete

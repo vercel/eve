@@ -43,13 +43,6 @@ export interface LocalSubmission {
   readonly error?: { readonly message: string };
 }
 
-type FollowStatus = Exclude<AgentObservation["status"], "not-followed">;
-
-interface FollowedAgent {
-  readonly status: FollowStatus;
-  readonly conversation: Conversation;
-}
-
 /**
  * One session as a client shows it: the shared tables its stream folds into, with the previews
  * of what is still streaming, and what this client did that the stream hasn't confirmed yet (the
@@ -67,7 +60,7 @@ export class Conversation {
   readonly #pendingAnswers = new Map<string, { readonly answer: Answer; deliveryId?: string }>();
   #submissions: readonly LocalSubmission[] = [];
   #holdUnconfirmedMessages = false;
-  readonly #agents = new Map<string, FollowedAgent>();
+  readonly #agents = new Map<string, AgentObservation>();
   #messages = new Map<string, readonly PlacedMessage[]>();
   readonly #users = new Map<string, EveMessage>();
   /** The earlier conversation each consumed delivery imported, by delivery. */
@@ -166,22 +159,10 @@ export class Conversation {
     return this.#submissions;
   }
 
-  /** Records how this client follows a session one of this session's calls opened. */
-  follow(sessionId: string, status: FollowStatus): void {
-    const followed = this.#agents.get(sessionId);
-    if (followed?.status === status) return;
-    this.#agents.set(sessionId, {
-      conversation: followed?.conversation ?? new Conversation(),
-      status,
-    });
+  /** Updates a child observation without mixing its facts into this session's projection. */
+  observeAgent(sessionId: string, observation: AgentObservation): void {
+    this.#agents.set(sessionId, observation);
     this.#state = undefined;
-  }
-
-  /** Folds an event from a followed session's stream. */
-  observeAgent(sessionId: string, event: SessionStreamEvent): void {
-    const followed = this.#agents.get(sessionId);
-    if (followed?.status !== "following") return;
-    if (followed.conversation.observe(event)) this.#state = undefined;
   }
 
   /** The conversation as the tables and this client's own state now show it. */
@@ -318,23 +299,18 @@ export class Conversation {
   #agentSessions(): ConversationState["agents"] {
     const agents: Record<string, ConversationAgentSession> = {};
     for (const child of Object.values(this.view.children)) {
-      if (!("callId" in child.owner)) continue;
-      const { callId } = child.owner;
-      const turnId = callPlace(this.view, callId)?.turnId;
-      if (turnId === undefined) continue;
-      const followed = this.#agents.get(child.sessionId);
+      const callId = "callId" in child.owner ? child.owner.callId : undefined;
       const agent: Mutable<ConversationAgentSession> = {
-        callId,
+        owner: child.owner,
         name: child.name,
-        observation:
-          followed === undefined
-            ? { status: "not-followed" }
-            : { conversation: followed.conversation.state, status: followed.status },
+        observation: this.#agents.get(child.sessionId) ?? { status: "not-followed" },
         sessionId: child.sessionId,
-        turnId,
       };
-      const taskId = this.view.calls[callId]?.taskId;
-      if (taskId !== undefined) agent.taskId = taskId;
+      if (callId !== undefined) {
+        agent.callId = callId;
+        agent.turnId = callPlace(this.view, callId)?.turnId;
+        agent.taskId = this.view.calls[callId]?.taskId;
+      } else if ("taskId" in child.owner) agent.taskId = child.owner.taskId;
       agents[child.sessionId] = agent;
     }
     return agents;

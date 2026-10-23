@@ -2,7 +2,7 @@ import { Client } from "eve/client";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 import { delivery as deliveryState, emptySessionView, foldEvents } from "eve/events";
-import { interceptFetchOrigin } from "../lib/fetch-interceptor";
+import { interceptFetchOrigin } from "@eve-e2e/config/frontend";
 
 export default defineEval({
   description: "Alice can stop observing a request, read it again, and obtain its settled result.",

@@ -215,7 +215,34 @@ A call your stream stopped following stays open; decide yourself what an open ca
 
 A delegated call stays running until `call.settled`; its child's detailed events live on a separate stream. Query `call(view, callId)` for the call outcome, and `agents[sessionId]` for the opened child session.
 
-Detailed child progress lives on the child session's stream, not in the root `messages`. Pass `followAgents: true` to follow the session each subagent call reaches while the component is mounted; following is off by default. Narrow `agents[sessionId].observation.status` before reading its `conversation`: `"not-followed"` has no child detail, `"following"` has live detail, and `"idle"` has everything the calls so far produced and resumes when another call reaches the task. `"unavailable"` means the stream failed, not that the child failed. Calls that continue a task with its `taskId` reach the same session, so one session's `conversation.messages` and its opaque `view` span all of them. Sessions that a custom task opens with `ctx.agent` are recorded but not followed.
+Detailed child progress lives on the child session's stream, not in the root `messages`. Pass `followAgents: true` to recursively observe recorded children, including children opened inside workflow tools. Following is off by default. React, Vue, and Svelte use the same store-owned traversal.
+
+To select relationships, pass a synchronous predicate. `true` and `() => true` have the same meaning; an excluded child's descendants are not discovered:
+
+```tsx
+const agent = useEveAgent({
+  followAgents: ({ depth }) => depth <= 3,
+});
+```
+
+Root depth is zero. eve admits at most 128 child observations per root generation, follows to depth 8, and allows 8 simultaneous descendant reads independently of the root stream. Each read stops at its captured durable tail or yields its slot after 10 seconds. Idle observations are refreshed with delays from 1 to 10 seconds. These bounds do not limit execution or the root transcript. `newSession()` resets admission accounting. The policy is read at store creation and evaluated once per relationship; unrelated renders do not replace followers.
+
+Each `agents[sessionId]` describes an opening, with an `owner` naming its call or task. A followed `observation.conversation` has its own `agents`, `messages`, and opaque `view`. Calls that continue a task reuse its child conversation; the opening owner does not change. Read the particular call or delivery's settled result for its outcome, not the child's latest message.
+
+| Observation status | Meaning                                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `"not-followed"`   | Following is disabled, or `reason` identifies a predicate, depth/session limit, or cycle.                                    |
+| `"queued"`         | Admitted and waiting for a read slot.                                                                                        |
+| `"following"`      | Reading a finite captured prefix. Silence does not imply settlement.                                                         |
+| `"idle"`           | Reached the tail captured for this read; another read can discover more activity.                                            |
+| `"interrupted"`    | A retryable read failure or detached observation scope.                                                                      |
+| `"unavailable"`    | History cannot currently be read. `reason` distinguishes authorization, expiry, unsupported readers, and transport failures. |
+
+Except for `"not-followed"`, an observation exposes `position` and `caughtUp`, plus any retained `conversation`. Its server-established `key` identifies the session within this store's authorized reader scope, not across principals or stores. Equal session IDs reached through different remote reader namespaces are not merged. Cursors use source-line positions and remain independent across sessions.
+
+`caughtUp` describes the tail captured when that read opened, not execution completion or exhaustive subtree coverage. The next read establishes a new horizon. Root call results, `status`, `resume()`, `events`, and callbacks keep their root-session meaning; descendant failures remain on their observations. Parent-relayed interactions remain the source of actionable prompts, so do not render a second set of controls from child observations.
+
+For headless capture, use [`SessionStore.observe()`](../client/streaming#observe-nested-traces-without-a-framework). Archive observed prefixes with their per-session cursors and your own versioned schema, not as atomic or exhaustive execution audits. Preserve prior archives when history expires; later successful reads can enrich them.
 
 If you manage your own session rather than using the hook, pass a `child.opened` event from `events` to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
@@ -458,7 +485,7 @@ in `onFinish`: a turn paused on an interaction has not finished, but its events 
 
 `initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. Catch-up starts at the next complete line in the saved log, using line positions rather than the number of materialized events. A partial line is replayed from its start; already observed events are skipped. Every event carries a stable [`meta.position`](/docs/concepts/sessions-runs-and-streaming#positions), and the store drops any event whose position it has already applied, so an overlapping replay renders once and `onEvent` only fires for events your UI has not seen.
 
-For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `baseUrl`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`. React reads `prewarm` and `followWhile` on every render.
+For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `baseUrl`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `followAgents`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`. React reads `prewarm` and `followWhile` on every render.
 
 Pass `resume: true` with `initialSession` to rebuild the projection from the durable stream after mount. While `status` is `"resuming"`, render hydrated `messages` but disable message and HITL submission; do not present cancellation or active-turn progress controls. `resume()` resolves when catch-up reaches the durable tail, even if a turn is still running. The binding then reports `"busy"` while the session has running or queued work. The stream reports its initial durable tail so catch-up can finish without closing the connection or waiting for an idle timeout. A settled tail, or a turn waiting only on a person, changes directly to `"idle"`; running or queued work remains `"busy"`. By default, the connection stays open to follow the turn and receive later events. A `followWhile` predicate can close it after catch-up once local obligations clear. A terminal session failure sets `error`.
 

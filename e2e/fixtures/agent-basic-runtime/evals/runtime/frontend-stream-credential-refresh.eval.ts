@@ -1,9 +1,8 @@
-import { waitForStore } from "@eve-e2e/config/frontend";
+import { waitForStore, interceptFetchOrigin } from "@eve-e2e/config/frontend";
 import { SessionStore } from "eve/client";
 import { delivery } from "eve/events";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
-import { interceptFetchOrigin } from "../lib/fetch-interceptor";
 
 export default defineEval({
   description: "A frontend stream reconnect uses the latest send's authorization header.",

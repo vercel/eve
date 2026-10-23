@@ -23,7 +23,6 @@ import type {
   SessionStreamOptions,
 } from "#client/types.js";
 import type { TraceContext } from "#protocol/session-events/families/session.js";
-import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { failureOf, ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
 import { deliveryEvents } from "#client/delivery-events.js";
 import type { Answer } from "#shared/input.js";
@@ -176,7 +175,7 @@ export class EvalSessionDriver implements EveEvalSession {
     }).result();
   }
 
-  agent(opened: ChildOpened): EveEvalAgentSession {
+  agent(opened: Extract<SessionStreamEvent, { type: "child.opened" }>): EveEvalAgentSession {
     const child = this.#session.agent(opened);
     const signal = this.#signal;
     return {

@@ -1,5 +1,5 @@
 import { endsTurn, type SessionStreamEvent } from "eve/client";
-import type { ChildOpened } from "eve/events";
+type ChildOpened = Extract<SessionStreamEvent, { type: "child.opened" }>;
 import { defineEval, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 

@@ -226,6 +226,26 @@ describe("SessionStore acceptance and observation", () => {
     }
   });
 
+  it("publishes matching root event prefixes while recursive following is active", async () => {
+    const server = agent();
+    const current = store({ initialSession, followAgents: true });
+    const positions: { cursor: number; prefix: number }[] = [];
+    current.subscribe(() => {
+      const snapshot = current.snapshot;
+      const last = snapshot.events.filter((event) => event.meta.endOfLine !== false).at(-1);
+      positions.push({
+        cursor: snapshot.session?.streamIndex ?? 0,
+        prefix: last === undefined ? 0 : last.meta.position.line + 1,
+      });
+    });
+    server.append(testTurnFacts(0, "Earlier.", ["earlier"]));
+    await current.resume();
+    server.append(testTurnFacts(1, "Later.", ["later"]));
+    await vi.waitFor(() => expect(current.snapshot.session?.streamIndex).toBe(server.log.length));
+    expect(positions.length).toBeGreaterThan(0);
+    expect(positions.every(({ cursor, prefix }) => cursor === prefix)).toBe(true);
+  });
+
   it("keeps identical messages distinct when the stream beats reversed POST acknowledgements", async () => {
     const first = Promise.withResolvers<void>();
     const second = Promise.withResolvers<void>();

@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { isFactType, isProgressType } from "#protocol/session-events/catalog.js";
-import type { ConversationState } from "#client/conversation-state.js";
+import type { ConversationState, FollowAgents } from "#client/conversation-state.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
 import { Conversation, type LocalSubmission } from "#client/conversation.js";
 import { assertAnswerable } from "#client/session-store-helpers.js";
@@ -16,7 +16,6 @@ import type { ClientSession } from "#client/session.js";
 /** Owns one client session's conversation and its root and agent-session transports. */
 export class ConversationClient {
   #conversation = new Conversation();
-  readonly #cursors = new Map<string, number>();
   #follower?: AgentStreamFollower;
   #stream?: SessionEventStream;
   readonly #onChange: () => void;
@@ -46,7 +45,7 @@ export class ConversationClient {
   }
 
   get following(): boolean {
-    return this.#follower !== undefined;
+    return this.#follower?.active ?? false;
   }
 
   /** Shows the messages this client sent that eve hasn't consumed. */
@@ -98,10 +97,16 @@ export class ConversationClient {
     if (!this.#conversation.observe(event)) return false;
     options.onAccepted?.(event);
     options.reconcile?.(event);
-    if (options.notify !== false) this.#onChange();
-    this.#follower?.acceptParentEvent(event);
-    if (event.meta.endOfLine !== false) this.#follower?.reconcile();
+    if (options.notify !== false) {
+      this.#onChange();
+      if (event.meta.endOfLine !== false) this.reconcileFollowing();
+    }
     return true;
+  }
+
+  /** Called after the store has published the root's matching event prefix and lifecycle. */
+  reconcileFollowing(): void {
+    this.#follower?.reconcile();
   }
 
   /** Admits and folds a saved root event without notifying subscribers. */
@@ -111,27 +116,14 @@ export class ConversationClient {
   }
 
   /** Starts following the agent sessions the root stream has announced so far. */
-  follow(session: ClientSession, events: readonly SessionStreamEvent[] = []): void {
-    this.#follower?.abortAll();
-    const changed = (update: (conversation: Conversation) => void) => {
-      update(this.#conversation);
-      this.#onChange();
-    };
-    const follower = new AgentStreamFollower({
+  follow(session: ClientSession, policy: FollowAgents): void {
+    this.#follower ??= new AgentStreamFollower({
       session,
-      cursors: this.#cursors,
-      getState: () => this.conversation,
-      onFollowing: (sessionId) => changed((c) => c.follow(sessionId, "following")),
-      onEvent: (sessionId, event) => {
-        this.#conversation.observeAgent(sessionId, event);
-        if (event.meta.endOfLine !== false) this.#onChange();
-      },
-      onIdle: (sessionId) => changed((c) => c.follow(sessionId, "idle")),
-      onUnavailable: (sessionId) => changed((c) => c.follow(sessionId, "unavailable")),
+      policy,
+      conversation: this.#conversation,
+      onChange: this.#onChange,
     });
-    this.#follower = follower;
-    for (const event of events) follower.acceptParentEvent(event);
-    follower.reconcile();
+    this.#follower.start();
   }
 
   /** Follows the root session continuously; operation readers subscribe to this one stream. */
@@ -156,13 +148,12 @@ export class ConversationClient {
 
   stop(): void {
     this.#follower?.abortAll();
-    this.#follower = undefined;
     this.closeStream();
   }
 
   reset(): void {
     this.stop();
-    this.#cursors.clear();
+    this.#follower = undefined;
     this.#conversation = new Conversation();
   }
 }

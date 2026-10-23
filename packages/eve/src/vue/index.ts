@@ -14,6 +14,9 @@ export {
 } from "#protocol/session-projection/reader.js";
 export type {
   AgentObservation,
+  AgentObservationReason,
+  FollowAgents,
+  FollowedChild,
   ConversationAgentSession,
   ConversationState,
 } from "#client/conversation-state.js";

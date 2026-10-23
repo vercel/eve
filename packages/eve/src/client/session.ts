@@ -1,7 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { deliveryEvents } from "#client/delivery-events.js";
-import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
   EVE_SESSION_ROUTE_PATH,
@@ -234,8 +233,8 @@ export class ClientSession {
    * with `stream()`; reads use this session's base URL and credentials, for local
    * and remote agents alike.
    */
-  agent(opened: ChildOpened): ClientAgentSession {
-    return new ClientAgentSession(this.#context, opened);
+  agent(opened: Extract<SessionStreamEvent, { type: "child.opened" }>): ClientAgentSession {
+    return new ClientAgentSession(this.#context, this.id, opened);
   }
 
   [followSession](options: FollowSessionOptions): AsyncIterable<SessionStreamEvent> {

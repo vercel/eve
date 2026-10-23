@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { interceptFetchOrigin } from "./fetch-interceptor";
+import { interceptFetchOrigin } from "@eve-e2e/config/frontend";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -38,13 +38,13 @@ it("shares registrations across independently loaded helper copies", async () =>
   const baseFetch = vi.fn(async () => new Response("base"));
   vi.stubGlobal("fetch", baseFetch);
   vi.resetModules();
-  const firstCopy = await import("./fetch-interceptor");
+  const firstCopy = await import("@eve-e2e/config/frontend");
   const unregisterFirst = firstCopy.interceptFetchOrigin(
     "https://alice.invalid",
     async () => new Response("alice"),
   );
   vi.resetModules();
-  const secondCopy = await import("./fetch-interceptor");
+  const secondCopy = await import("@eve-e2e/config/frontend");
   const unregisterSecond = secondCopy.interceptFetchOrigin(
     "https://bob.invalid",
     async () => new Response("bob"),

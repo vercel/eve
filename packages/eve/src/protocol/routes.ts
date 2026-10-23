@@ -43,6 +43,13 @@ export const EVE_SESSION_STUBS_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 /** Stable event-stream route pattern for one exact session ID. */
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
+/** Reads a recorded descendant path through its root's authorized reader. */
+export const EVE_DESCENDANT_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/descendants/stream`;
+
+export function createEveDescendantStreamRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/descendants/stream`;
+}
+
 /**
  * Parent-origin proxy route for one remotely executed child session stream.
  */

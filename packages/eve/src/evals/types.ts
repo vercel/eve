@@ -3,7 +3,6 @@ import type { DeliveryOutcome } from "#protocol/session-events/families/delivery
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { SessionView } from "#protocol/session-projection/session-view.js";
 import type { RequestStatus } from "#protocol/session-projection/request-status.js";
-import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { DecisionModel } from "#ai/decision-types.js";
@@ -408,7 +407,7 @@ interface EveEvalSessionDriver {
    * `child.opened`. Its `stream()` follows the child through this parent session
    * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
-  agent(opened: ChildOpened): EveEvalAgentSession;
+  agent(opened: Extract<SessionStreamEvent, { type: "child.opened" }>): EveEvalAgentSession;
 }
 
 /** A session an agent run opened, reached through the parent eval session. */

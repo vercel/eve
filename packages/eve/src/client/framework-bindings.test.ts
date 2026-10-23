@@ -11,7 +11,11 @@ import {
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import { linesOf } from "#protocol/session-lines.js";
+import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
+import {
+  EVE_OBSERVATION_KEY_HEADER,
+  localObservationKey,
+} from "#protocol/descendant-observation.js";
 import { useEveAgent as useReactAgent, type UseEveAgentReturn } from "#react/use-eve-agent.js";
 import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
 import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
@@ -29,6 +33,7 @@ afterEach(() => {
   mounts.splice(0);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 /** An agent whose session stream stays open, serving what `append` writes. */
@@ -162,6 +167,108 @@ describe("the framework bindings", () => {
 });
 
 describe("the React binding", () => {
+  it("retains recursive followers across inline-policy renders, retries a silent disconnect, and cleans up", async () => {
+    vi.useFakeTimers();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const at = "2026-10-10T00:00:00.000Z";
+    const initialEvents = linesOf(
+      [
+        {
+          type: "child.opened",
+          data: {
+            sessionId: "child",
+            name: "reviewer",
+            owner: { callId: "workflow" },
+            stream: "/ignored",
+          },
+        },
+      ],
+      at,
+    ).flatMap((line, position) => eventsOfLine(line, position, at));
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const log = [...linesOf([{ type: "session.started", data: {} }], at)];
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      signals.push(init?.signal);
+      const cursor = Number(url.searchParams.get("startIndex") ?? 0);
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controllers.push(controller);
+            controller.enqueue(
+              new TextEncoder().encode(
+                log
+                  .slice(cursor)
+                  .map((line) => JSON.stringify(line) + "\n")
+                  .join(""),
+              ),
+            );
+          },
+        }),
+        {
+          headers: {
+            [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+            [EVE_STREAM_TAIL_INDEX_HEADER]: "1",
+            [EVE_OBSERVATION_KEY_HEADER]: localObservationKey("child"),
+          },
+        },
+      );
+    });
+    let helpers: UseEveAgentReturn | undefined;
+    const finished = vi.fn();
+    function Probe({ render }: { render: number }) {
+      void render;
+      helpers = useReactAgent({
+        baseUrl: "https://eve.test",
+        initialSession: { sessionId: "root", streamIndex: 0 },
+        initialEvents,
+        followAgents: () => true,
+        onFinish: finished,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof createRenderer> | undefined;
+    try {
+      await act(async () => {
+        renderer = createRenderer(createElement(Probe, { render: 1 }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => renderer?.update(createElement(Probe, { render: 2 })));
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(helpers?.agents.child?.observation).toMatchObject({
+        status: "following",
+        caughtUp: false,
+      });
+      controllers[0]!.close();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(helpers?.agents.child?.observation).toMatchObject({
+        status: "interrupted",
+        caughtUp: false,
+      });
+      log.push(...linesOf(testTurnFacts(0, "Reviewed.", ["review"]), at));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(helpers?.agents.child?.observation).toMatchObject({
+        status: "idle",
+        caughtUp: true,
+        position: 2,
+      });
+      expect(finished).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => renderer?.unmount());
+    }
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    const count = request.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(request).toHaveBeenCalledTimes(count);
+  });
+
   it("prepares its restored session when prewarm turns on, without replacing it", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     agent();

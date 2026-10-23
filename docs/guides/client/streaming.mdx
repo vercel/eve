@@ -276,12 +276,52 @@ if (opened?.type === "child.opened") {
 }
 ```
 
-`stream()` reads the event's `stream` path with the parent session's base URL and credentials, so the same client works for local and [remote](../remote-agents) children:
+Pass the received event, including its source position. The reader asks the parent's server to verify the opening at that committed line before returning child history. Cached events and their `stream` strings are not authority to access another session or destination.
 
-- A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
-- A remote child's path is a proxy route on the parent deployment. The parent checks that its session recorded the child for that tool call, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.
+- Local children are read only after verifying the recorded relationship on the same deployment.
+- Remote children use the parent deployment's proxy and the remote agent's authored `auth` and `headers`. The browser never needs the remote URL or its credentials. Foreign redirects are not followed.
 
-The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `endsTurn` when you only need the current turn. A parent follows only a child that speaks the current remote agent protocol; an earlier remote child's result still arrives, but its live stream route answers `409`.
+To read a deeper child, pass its received `child.opened` event to `child.agent(opened)`. Each hop verifies its own recorded relationship, including through remote proxies. Unsupported or unavailable relationships fail rather than attaching by ID. Paths are limited to eight hops.
+
+The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `endsTurn` when you only need the current turn. A parent follows only a child that speaks the current remote agent protocol; an earlier remote child's result still arrives, but its descendant reader reports unsupported history.
+
+## Observe nested traces without a framework
+
+Use `SessionStore` when you need projected nested conversations rather than managing readers yourself:
+
+```ts
+import { SessionStore } from "eve/client";
+
+const store = new SessionStore({
+  baseUrl: "https://agent.example.com",
+  initialSession: { sessionId, streamIndex: 0 },
+  followAgents: true,
+  followWhile: () => false,
+});
+const stop = store.observe();
+const unsubscribe = store.subscribe(() => {
+  for (const child of Object.values(store.snapshot.agents)) {
+    if (child.observation.status === "not-followed") continue;
+    console.log(child.observation.key, child.observation.position, child.observation.caughtUp);
+  }
+});
+
+try {
+  await store.resume(); // Root catch-up only; descendants progress through subscriptions.
+  await new Promise<void>((resolve) => setTimeout(resolve, 5_000)); // Bounded capture window.
+} finally {
+  unsubscribe();
+  stop(); // Abort observation, not accepted execution.
+}
+```
+
+Construction does not start reads. `observe()` activates a reference-counted scope and returns an idempotent cleanup function. Root streaming also activates child following; framework bindings activate and release scopes after mount. The store continues refreshing admitted children within an active scope even if `followWhile` closes the root stream. There is no full-tree catch-up barrier.
+
+`followAgents: true` recursively follows all eligible recorded children within fixed depth, admission, and request limits. A predicate such as `({ depth }) => depth === 1` selects only immediate children. See [child observations](../frontend/overview#returned-state) for limits, states, and cursor semantics. Child conversations are whole-session views; their messages do not replace authoritative call results.
+
+Stop the old scope and construct a new store when the principal or tenant changes. Token refresh callbacks resolve again for each request without changing observation identity. For a cross-origin browser connection, expose `x-eve-observation-key` in the channel's CORS configuration alongside the stream version and tail headers.
+
+Archive projected messages and their per-node positions in an application-owned, versioned format. `SessionView` is opaque and is not a serialized archive format. Descendants can advance while the root position stays unchanged. A failed observation retains its last committed data; do not replace an existing archive with an empty failed read.
 
 ## Abort a request
 

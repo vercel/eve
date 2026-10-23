@@ -1,4 +1,6 @@
 import { defineEval } from "eve/evals";
+import { SessionStore } from "eve/client";
+import { waitForStore, interceptFetchOrigin } from "@eve-e2e/config/frontend";
 
 import { readHookAudit, recordsEveryAgentStart } from "./subagent-hook-audit.shared";
 
@@ -61,6 +63,50 @@ export default defineEval({
       );
       return called.length === 2 && toolResult >= 0 && Math.max(...called) < toolResult;
     });
+
+    const origin = `https://${crypto.randomUUID()}.invalid`;
+    const restoreFetch = interceptFetchOrigin(origin, async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      return t.target.fetch(`${url.pathname}${url.search}`, init);
+    });
+    const store = new SessionStore({
+      baseUrl: origin,
+      initialSession: { sessionId: turn.sessionId, streamIndex: 0 },
+      initialEvents: turn.events,
+      followAgents: true,
+    });
+    const stop = store.observe();
+    try {
+      await waitForStore(
+        store,
+        (snapshot) => {
+          const children = Object.values(snapshot.agents);
+          return (
+            children.length === 2 &&
+            children.every(
+              ({ observation }) =>
+                observation.status === "idle" &&
+                observation.caughtUp &&
+                observation.position > 0 &&
+                observation.conversation?.messages.some((message) =>
+                  message.parts.some(
+                    (part) =>
+                      part.type === "text" && part.text.includes("WORKFLOW-CHILD:api:replica-"),
+                  ),
+                ),
+            )
+          );
+        },
+        t.abortSignal,
+      );
+      turn.eventsSatisfy(
+        "the headless store observes workflow children without replaying the root",
+        () => store.snapshot.events.length === turn.events.length,
+      );
+    } finally {
+      stop();
+      restoreFetch();
+    }
 
     const audit = await turn.session.send(
       "Bob reviews the recorded hook observations for both planners. SUBAGENT-HOOKS:AUDIT",
