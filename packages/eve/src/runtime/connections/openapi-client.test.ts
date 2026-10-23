@@ -641,7 +641,7 @@ describe("OpenApiConnectionClient", () => {
   });
 
   // Regression for https://github.com/vercel/eve/issues/3267
-  it.fails("keeps nested union constraints so valid deep input validates", async () => {
+  it("keeps nested union constraints so valid deep input validates", async () => {
     const property = {
       oneOf: [
         {
