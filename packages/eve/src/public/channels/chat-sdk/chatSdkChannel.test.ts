@@ -9,6 +9,7 @@ import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import { enterSessionProjection, recordPublishedEvent } from "#harness/session-machine/current.js";
 import { fail } from "#harness/session-machine/transitions.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 import {
   callChannelEvent as callEvent,
   channelEvent as makeEvent,
@@ -928,6 +929,157 @@ describe("chatSdkChannel", () => {
       threadId: THREAD_ID,
     });
     expect(state.anchorMessageId).toBeNull();
+  });
+
+  // #4801: a streamed reply ends showing the full text, or the app reports it
+  // undelivered; it is never posted a second time.
+  describe("completing a streamed reply", () => {
+    function streamedReply(adapter: TestAdapter & Adapter, streamingEditIntervalMs = 0) {
+      const bridge = chatSdkChannel({
+        adapters: { test: adapter },
+        state: memoryState(),
+        streamingEditIntervalMs,
+        userName: "bot",
+      });
+      const open = (state: ChatSdkChannelState) => {
+        const channelAdapter = withState(getAdapter(bridge.channel), state);
+        return { channelAdapter, ctx: buildAdapterContext(channelAdapter, stubAccessor()), state };
+      };
+      return { ...open({ thread: serializedThread() }), open };
+    }
+
+    function appended(messageDelta: string, sequence: number) {
+      return makeEvent("message.appended", {
+        messageDelta,
+        sequence,
+        stepIndex: 0,
+        turnId: "turn-1",
+      });
+    }
+
+    function completed(message: string) {
+      return makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 9,
+        stepIndex: 0,
+        turnId: "turn-1",
+      });
+    }
+
+    function undeliveredErrorId(logs: { records: { message: string; fields?: unknown }[] }) {
+      const record = logs.records.find(
+        (entry) => entry.message === "final reply was not delivered to this chat",
+      );
+      return (record?.fields as { error: { errorId: string } } | undefined)?.error.errorId;
+    }
+
+    function notice(errorId: string | undefined) {
+      return `I finished, but couldn't deliver my answer in this chat (error id \`${errorId}\`). Please ask me to resend it.`;
+    }
+
+    // Telegram rejects an edit that changes nothing ("message is not modified").
+    it.fails("does not repeat an edit the streamed reply already shows", async () => {
+      const adapter = testAdapter();
+      const { channelAdapter, ctx } = streamedReply(adapter);
+
+      await callEvent(channelAdapter, appended("Hel", 0), ctx);
+      await callEvent(channelAdapter, appended("lo", 1), ctx);
+      await callEvent(channelAdapter, completed("Hello"), ctx);
+
+      expect(adapter.edited).toEqual([
+        { message: { markdown: "Hello" }, messageId: "posted-1", threadId: THREAD_ID },
+      ]);
+    });
+
+    it.fails("does not repeat that edit after channel state is restored from JSON", async () => {
+      const adapter = testAdapter();
+      const { channelAdapter, ctx, open, state } = streamedReply(adapter);
+      await callEvent(channelAdapter, appended("Hel", 0), ctx);
+      await callEvent(channelAdapter, appended("lo", 1), ctx);
+
+      const restored = open(JSON.parse(JSON.stringify(state)) as ChatSdkChannelState);
+      await callEvent(restored.channelAdapter, completed("Hello"), restored.ctx);
+
+      expect(adapter.posted).toEqual([{ message: { markdown: "Hel" }, threadId: THREAD_ID }]);
+      expect(adapter.edited).toHaveLength(1);
+    });
+
+    it.fails("reports a failed final edit once, without reposting, and tells the model next turn", async () => {
+      const logs = captureLogRecords();
+      const adapter = testAdapter();
+      const { channelAdapter, ctx, state } = streamedReply(adapter);
+      await callEvent(channelAdapter, appended("Hel", 0), ctx);
+      adapter.editError = new Error("Network error calling Telegram editMessageText");
+
+      await callEvent(channelAdapter, completed("Hello"), ctx);
+
+      const errorId = undeliveredErrorId(logs);
+      expect(errorId).toEqual(expect.any(String));
+      expect(adapter.posted).toEqual([
+        { message: { markdown: "Hel" }, threadId: THREAD_ID },
+        { message: notice(errorId), threadId: THREAD_ID },
+      ]);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          fields: expect.objectContaining({ turnId: "turn-1" }),
+          level: "error",
+          message: "final reply was not delivered to this chat",
+        }),
+      );
+      expect(state.undeliveredReplyErrorId).toBe(errorId);
+
+      const session = { auth: { current: null, initiator: null } };
+      const next = await channelAdapter.deliver!(
+        { context: ["thread context"], message: "Hello?" },
+        { ...ctx, session } as never,
+      );
+      expect(next?.context).toEqual([
+        expect.stringContaining(
+          `Your previous reply was not delivered to this chat (error id ${errorId})`,
+        ),
+        "thread context",
+      ]);
+      const after = await channelAdapter.deliver!({ message: "And now?" }, {
+        ...ctx,
+        session,
+      } as never);
+      expect(after?.context).toBeUndefined();
+    });
+
+    it.fails("reports a posted reply whose final edit is not implemented, without reposting", async () => {
+      const logs = captureLogRecords();
+      const adapter = testAdapter();
+      const { channelAdapter, ctx, state } = streamedReply(adapter, 60_000);
+      await callEvent(channelAdapter, appended("Hel", 0), ctx);
+      await callEvent(channelAdapter, appended("lo", 1), ctx);
+      adapter.editError = new NotImplementedError("editMessage");
+
+      await callEvent(channelAdapter, completed("Hello"), ctx);
+
+      expect(adapter.posted).toEqual([
+        { message: { markdown: "Hel" }, threadId: THREAD_ID },
+        { message: notice(undeliveredErrorId(logs)), threadId: THREAD_ID },
+      ]);
+      expect(state.editSupported).toBe(false);
+    });
+
+    it.fails("reports a posted reply whose streamed edit is not implemented, without reposting", async () => {
+      const logs = captureLogRecords();
+      const adapter = testAdapter();
+      const { channelAdapter, ctx, state } = streamedReply(adapter);
+      await callEvent(channelAdapter, appended("Hel", 0), ctx);
+      adapter.editError = new NotImplementedError("editMessage");
+      await callEvent(channelAdapter, appended("lo", 1), ctx);
+
+      await callEvent(channelAdapter, completed("Hello"), ctx);
+
+      expect(adapter.posted).toEqual([
+        { message: { markdown: "Hel" }, threadId: THREAD_ID },
+        { message: notice(undeliveredErrorId(logs)), threadId: THREAD_ID },
+      ]);
+      expect(state.editSupported).toBe(false);
+    });
   });
 
   it("falls back to a fresh post when streaming edits are not implemented", async () => {
