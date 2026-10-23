@@ -48,20 +48,16 @@ describe("version-based extension compatibility", () => {
     });
   });
 
-  it("rejects pre-1.0 distributions when 1.0 does not retain their generation", () => {
-    expect(
-      checkExtensionVersionCompatibility(
-        { ...manifest, builtWithEve: "0.82.0", contractMajor: 0 },
-        "1.0.0",
-        [1],
-      ),
-    ).toEqual({
+  it("retains RC builds at 1.0 unless the distribution generation is dropped", () => {
+    const rc = { ...manifest, builtWithEve: "0.85.0", contractMajor: 0 };
+    expect(checkExtensionVersionCompatibility(rc, "1.0.0", [0])).toBeUndefined();
+    expect(checkExtensionVersionCompatibility(rc, "1.0.0", [1])).toEqual({
       kind: "unsupported-contract",
       contractMajor: 0,
     });
   });
 
-  it.each([1, 2])("rejects pre-1.0 format %i with rebuild guidance", (formatVersion) => {
+  it.each([1, 2])("rejects old epoch format %i with rebuild guidance", (formatVersion) => {
     expect(() =>
       parseExtensionCompatibilityManifest(
         JSON.stringify({
@@ -72,7 +68,7 @@ describe("version-based extension compatibility", () => {
         }),
         path,
       ),
-    ).toThrow(/pre-1\.0.*Rebuild the extension with eve 1\.0/);
+    ).toThrow(/old epoch format.*Rebuild the extension with this eve release/);
   });
 
   it("rejects invalid versions and unexpected fields", () => {

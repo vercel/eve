@@ -1282,7 +1282,7 @@ describe("discoverAgent (memory)", () => {
     );
   });
 
-  it("rejects a pre-1.0 extension before loading its contributions", async () => {
+  it("rejects an epoch-format extension before loading its contributions", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -1312,7 +1312,7 @@ describe("discoverAgent (memory)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           code: DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
-          message: expect.stringMatching(/pre-1\.0.*Rebuild the extension/),
+          message: expect.stringMatching(/old epoch format.*Rebuild the extension/),
         }),
       ]),
     );

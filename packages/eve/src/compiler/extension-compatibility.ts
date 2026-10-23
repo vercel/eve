@@ -9,8 +9,9 @@ export const EXTENSION_COMPATIBILITY_MANIFEST_KIND = "eve-extension";
 export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 3;
 export const EXTENSION_COMPATIBILITY_MANIFEST_FILENAME = "_manifest.json";
 
-// This PR is still version 0.x. The 1.0 cutover must change both values to 1
-// so even distributions built against this release candidate require a rebuild.
+// Generation 0 starts with the new manifest format. Retain it at 1.0 if the
+// release candidate's distribution contract remains compatible; otherwise
+// advance the producer generation and explicitly choose consumer support.
 export const EXTENSION_DISTRIBUTION_CONTRACT_MAJOR = 0;
 export const SUPPORTED_EXTENSION_DISTRIBUTION_CONTRACT_MAJORS: readonly number[] = [0];
 
@@ -95,7 +96,7 @@ export function parseExtensionCompatibilityManifest(
     (value.formatVersion === 1 || value.formatVersion === 2)
   ) {
     throw new Error(
-      `Extension compatibility manifest "${manifestPath}" was built with a pre-1.0 eve release. Rebuild the extension with eve 1.0 or install a 1.0-compatible extension release.`,
+      `Extension compatibility manifest "${manifestPath}" uses the old epoch format. Rebuild the extension with this eve release or install a compatible extension release.`,
     );
   }
 

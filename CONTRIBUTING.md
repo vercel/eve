@@ -122,8 +122,10 @@ contract generation in `_manifest.json`. Build against the oldest eve release
 your extension intends to support, then test that same distribution against
 newer releases. A consumer rejects distributions built by a newer eve release
 or against an unsupported distribution generation before executing extension
-code. The 1.0 distribution generation does not accept pre-1.0 extension builds;
-extension authors must rebuild and publish a 1.0-compatible release.
+code. The first release of this manifest format rejects older epoch-based
+distributions. If the release candidate's distribution contract remains
+compatible, 1.0 continues to support its generation without a rebuild; a
+breaking change requires an explicit generation change and rebuild guidance.
 
 Review changes to extension-facing APIs and runtime behavior for backwards
 compatibility within a supported generation. An API change does not require an
