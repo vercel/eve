@@ -42,7 +42,7 @@
     "pngjs": "^7.0.0",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "sonner": "2.0.7",
+    "sonner": "2.0.8",
     "streamdown": "catalog:",
     "tailwind-merge": "3.6.0",
     "three": "0.184.0",
