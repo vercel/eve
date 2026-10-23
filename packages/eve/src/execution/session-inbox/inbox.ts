@@ -43,6 +43,14 @@ export interface SessionHandoverPayload {
   readonly payloads: readonly Exclude<SessionInboxPayload, SessionHandoverPayload>[];
 }
 
+/** Replay-stable evidence that every buffered part and the final marker were applied. */
+export interface SessionHandoverObservation {
+  readonly attemptKey: string;
+  readonly payloadCount: number;
+  /** Workflow event time, not the host wall clock when replay reached this point. */
+  readonly appliedAtMs: number;
+}
+
 export type SessionInboxPayload =
   | SessionPrewarmPayload
   | SessionFailurePayload
@@ -67,6 +75,7 @@ interface Source {
  * reads expose nothing; interrupt handlers still fire on arrival.
  */
 export interface SessionInboxReader {
+  readonly handoverObservation?: SessionHandoverObservation;
   /**
    * Waits for and removes the next accepted payload in arrival order, or
    * `undefined` once no hook can deliver any more (released or taken over).
@@ -201,6 +210,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         readonly parts: Map<number, SessionHandoverPayload>;
       }
     | undefined;
+  let handoverObservation: SessionHandoverObservation | undefined;
   const blockedWaiters = new Set<() => void>();
   const arrivalWaiters = new Set<() => void>();
   let takenOver = false;
@@ -251,6 +261,11 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const next = current.parts.get(current.nextPart);
       if (next === undefined) break;
       if (next.final === true) {
+        handoverObservation = {
+          attemptKey: current.attemptKey,
+          payloadCount: current.nextPart,
+          appliedAtMs: Date.now(),
+        };
         observe(interruptHandlers, restored, isInterrupt);
         openHandover();
         return;
@@ -374,6 +389,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 
   return {
+    get handoverObservation() {
+      return handoverObservation;
+    },
     get claimedTokens() {
       return sources.map(({ token }) => token);
     },

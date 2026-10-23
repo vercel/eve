@@ -388,11 +388,17 @@ describe("createSessionInbox", () => {
     await pumped;
     // The final part has arrived, but part 0 has not.
     expect(inbox.awaitingHandover).toBe(true);
+    expect(inbox.handoverObservation).toBeUndefined();
     expect(inbox.drain()).toEqual([]);
 
     first.resolve(resolved(part("owner-a:1", 0, send("a"))));
 
     await vi.waitFor(() => expect(inbox.awaitingHandover).toBe(false));
+    expect(inbox.handoverObservation).toEqual({
+      attemptKey: "owner-a:1",
+      payloadCount: 2,
+      appliedAtMs: expect.any(Number),
+    });
     expect(inbox.drain()).toEqual([send("a"), send("b"), send("direct"), cancel]);
     await inbox.dispose();
   });
@@ -415,6 +421,7 @@ describe("createSessionInbox", () => {
     inbox.abandonHandover("owner-a:1");
 
     await settled;
+    expect(inbox.handoverObservation).toBeUndefined();
     expect(inbox.drain()).toEqual([send("direct"), cancel]);
     await inbox.dispose();
   });

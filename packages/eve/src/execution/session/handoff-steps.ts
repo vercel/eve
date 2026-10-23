@@ -47,6 +47,7 @@ import {
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { walkCauseChain } from "#shared/errors.js";
+import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 
 const log = createLogger("execution.handoff");
 
@@ -335,15 +336,29 @@ export async function reportHandoverPartStuckStep(input: {
  * for the caller to retry until it is delivered.
  */
 export async function sendSessionHandoverPartStep(input: {
+  readonly bufferedPayloadCount: number;
   readonly part: Omit<SessionHandoverPayload, "kind">;
   readonly sessionId: string;
 }): Promise<"delivered" | "session-ended"> {
   "use step";
+  const attributes = {
+    "eve.handoff.buffered_payload_count": input.bufferedPayloadCount,
+    "eve.handoff.part_index": input.part.index,
+  };
+  if (input.part.index === 0) {
+    traceSessionHandover("forwarding_started", input.sessionId, input.part.attemptKey, attributes);
+  }
   try {
-    await resumeHook(sessionInboxHookToken(sessionCommandHookToken(input.sessionId)), {
+    const hook = await resumeHook(sessionInboxHookToken(sessionCommandHookToken(input.sessionId)), {
       ...input.part,
       kind: "handover",
     } satisfies SessionHandoverPayload);
+    traceSessionHandover(
+      input.part.final === true ? "final_submitted" : "part_submitted",
+      input.sessionId,
+      input.part.attemptKey,
+      { ...attributes, "eve.handoff.destination_run_id": hook.runId },
+    );
     return "delivered";
   } catch (error) {
     // The session has ended, so nothing waits for these payloads.

@@ -176,22 +176,28 @@ export async function sendSessionHandover(input: {
     (payload): payload is SessionHandoverPayload["payloads"][number] => payload.kind !== "handover",
   );
   for (const [index, payload] of payloads.entries()) {
-    const sent = await sendHandoverPart({ attemptKey, index, payloads: [payload] }, sessionId);
+    const sent = await sendHandoverPart(
+      { attemptKey, index, payloads: [payload] },
+      sessionId,
+      payloads.length,
+    );
     if (sent === "session-ended") return;
   }
   await sendHandoverPart(
     { attemptKey, final: true, index: payloads.length, payloads: [] },
     sessionId,
+    payloads.length,
   );
 }
 
 async function sendHandoverPart(
   part: Omit<SessionHandoverPayload, "kind">,
   sessionId: string,
+  bufferedPayloadCount: number,
 ): Promise<"delivered" | "session-ended"> {
   for (let failures = 1, delaySeconds = 1; ; failures++) {
     try {
-      return await sendSessionHandoverPartStep({ part, sessionId });
+      return await sendSessionHandoverPartStep({ bufferedPayloadCount, part, sessionId });
     } catch (error) {
       if (failures === HANDOVER_PART_FAILURES_BEFORE_REPORT) {
         await reportHandoverPartStuckStep({

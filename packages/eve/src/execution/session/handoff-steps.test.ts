@@ -1,5 +1,6 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { trace } from "#compiled/@opentelemetry/api/index.js";
 
 import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { IncompatibleStateLayoutError } from "#context/serialize.js";
@@ -8,6 +9,7 @@ import {
   prepareSuccessorStep,
   signalSessionOwnerActivationStep,
   startSuccessorStep,
+  sendSessionHandoverPartStep,
   stopUntrackedChildSessionsStep,
   type SuccessorStartInput,
 } from "#execution/session/handoff-steps.js";
@@ -29,7 +31,72 @@ const startWorkflowOnDeploymentMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   setAttributes: (...args: unknown[]) => setAttributesMock(...args),
+  getWorkflowMetadata: () => ({ workflowRunId: "source-run" }),
+  getStepMetadata: () => ({ stepId: "handover-step", attempt: 2 }),
 }));
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("handover trace events", () => {
+  it.each([0, 2])(
+    "traces the first submission and final marker for %i buffered payloads",
+    async (count) => {
+      const span = Object.assign(
+        trace.wrapSpanContext({ traceId: "a".repeat(32), spanId: "b".repeat(16), traceFlags: 1 }),
+        {
+          setAttribute: vi.fn(),
+          addEvent: vi.fn(),
+        },
+      );
+      vi.spyOn(trace, "getActiveSpan").mockReturnValue(span);
+      resumeHookMock.mockResolvedValue({ runId: "successor-run" });
+      const input = { bufferedPayloadCount: count, sessionId: "session-1" };
+      if (count > 0) {
+        await sendSessionHandoverPartStep({
+          ...input,
+          part: {
+            attemptKey: "source-run:0",
+            index: 0,
+            payloads: [{ kind: "send", payload: { message: "private message" } }],
+          },
+        });
+      }
+      await sendSessionHandoverPartStep({
+        ...input,
+        part: { attemptKey: "source-run:0", index: count, payloads: [], final: true },
+      });
+      expect(span.addEvent.mock.calls.map(([name]) => name)).toEqual(
+        count === 0
+          ? ["eve.session.handover.forwarding_started", "eve.session.handover.final_submitted"]
+          : [
+              "eve.session.handover.forwarding_started",
+              "eve.session.handover.part_submitted",
+              "eve.session.handover.final_submitted",
+            ],
+      );
+      expect(span.addEvent).toHaveBeenLastCalledWith("eve.session.handover.final_submitted", {
+        "eve.session.id": "session-1",
+        "eve.handoff.attempt_key": "source-run:0",
+        "workflow.run.id": "source-run",
+        "workflow.step.id": "handover-step",
+        "eve.handoff.step_attempt": 2,
+        "eve.handoff.buffered_payload_count": count,
+        "eve.handoff.part_index": count,
+        "eve.handoff.destination_run_id": "successor-run",
+      });
+      expect(JSON.stringify(span.addEvent.mock.calls)).not.toContain("private message");
+      span.addEvent.mockImplementation(() => {
+        throw new Error("exporter failed");
+      });
+      await expect(
+        sendSessionHandoverPartStep({
+          ...input,
+          part: { attemptKey: "source-run:0", index: count, payloads: [], final: true },
+        }),
+      ).resolves.toBe("delivered");
+    },
+  );
+});
 
 vi.mock("#context/serialize.js", async (importOriginal) => ({
   ...(await importOriginal()),

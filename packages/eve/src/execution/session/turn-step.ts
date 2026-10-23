@@ -1,4 +1,5 @@
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { recoverDynamicConnectionRehydration } from "#execution/dynamic-connection-recovery.js";
@@ -110,6 +111,18 @@ interface PendingStepAttributes {
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
+  if (input.handover !== undefined) {
+    traceSessionHandover(
+      "inbox_unblocked",
+      input.sessionState.sessionId,
+      input.handover.attemptKey,
+      {
+        "eve.handoff.buffered_payload_count": input.handover.payloadCount,
+        "eve.handoff.applied_at_ms": input.handover.appliedAtMs,
+        "eve.handoff.applied_at_clock": "workflow",
+      },
+    );
+  }
   return await withSessionStateDelta(input, (state) =>
     runSessionStep({
       ...state,
