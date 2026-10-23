@@ -2728,8 +2728,7 @@ describe("EveAgentStore cancellation", () => {
       });
     }
 
-    // https://github.com/vercel/eve/issues/3102
-    it.fails("settles a submission cancelled before the server received it", async () => {
+    it("settles a submission cancelled before the server received it", async () => {
       vi.spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(
           streamResponse(
@@ -2756,7 +2755,7 @@ describe("EveAgentStore cancellation", () => {
       ]);
     });
 
-    it.fails("settles a submission whose turn failed before the server received it", async () => {
+    it("settles a submission whose turn failed before the server received it", async () => {
       vi.spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(
           streamResponse(
@@ -2796,7 +2795,7 @@ describe("EveAgentStore cancellation", () => {
       ]);
     });
 
-    it.fails("keeps a cancelled bubble failed when the cancel streams after the server accepted it", async () => {
+    it("keeps a cancelled bubble failed when the cancel streams after the server accepted it", async () => {
       const live = controlledStreamResponse();
       const accepted = Promise.withResolvers<Response>();
       vi.spyOn(globalThis, "fetch")
@@ -2884,7 +2883,7 @@ describe("EveAgentStore cancellation", () => {
       return { first, instead, live, store };
     }
 
-    it.fails("settles a steered message that the cancelled turn never read", async () => {
+    it("settles a steered message that the cancelled turn never read", async () => {
       const { first, instead, live, store } = await steerWhileRunning();
 
       for (const event of deliveredEvents(
