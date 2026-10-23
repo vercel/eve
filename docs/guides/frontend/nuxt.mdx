@@ -96,13 +96,21 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** The module does not start eve in production; run the eve service yourself. `nuxt build` writes a proxy rule that sends `/eve/v1/**` to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. Override the local port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
+- **Non-Vercel hosts.** `nuxt build` writes a proxy rule that sends `/eve/v1/**` to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. Override the local port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
 
   ```bash
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
   ```
 
   `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, build and serve eve from a separate directory (set `eveRoot` to it) so the two outputs do not overwrite each other. See [Self-host eve](../deployment/self-hosting) for running the eve service.
+
+  When `EVE_NUXT_PRODUCTION_ORIGIN` is unset, the Nuxt server starts the built eve service itself on the loopback port, so `nuxt build && node .output/server/index.mjs` serves `/eve/v1/**` without a second process. It serves the eve build output in the working directory of the Nuxt server process, and refuses to start when that output is the Nuxt server itself. Set `EVE_NUXT_PRODUCTION_ROOT` when the agent builds into another directory:
+
+  ```bash
+  EVE_NUXT_PRODUCTION_ROOT=./agent node .output/server/index.mjs
+  ```
+
+  Set `EVE_NUXT_PRODUCTION_ORIGIN` to run the eve service yourself instead.
 
 ## Managing vercel.json yourself
 

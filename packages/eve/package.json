@@ -98,6 +98,11 @@
       "import": "./dist/src/public/nuxt/index.js",
       "default": "./dist/src/public/nuxt/index.js"
     },
+    "./nuxt/production-server": {
+      "types": "./dist/src/public/nuxt/production-server.d.ts",
+      "import": "./dist/src/public/nuxt/production-server.js",
+      "default": "./dist/src/public/nuxt/production-server.js"
+    },
     "./sveltekit": {
       "types": "./dist/src/public/sveltekit/index.d.ts",
       "import": "./dist/src/public/sveltekit/index.js",

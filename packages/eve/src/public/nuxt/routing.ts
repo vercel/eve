@@ -36,6 +36,14 @@ export function readLocalProductionPort(): number {
 }
 
 /**
+ * Loopback origin the module proxies eve routes to, and the eve server the
+ * Nuxt server process starts listens on, in non-Vercel production.
+ */
+export function readLocalProductionOrigin(): string {
+  return `http://127.0.0.1:${String(readLocalProductionPort())}`;
+}
+
+/**
  * Resolve the proxy destination for eve routes in non-Vercel production: an
  * explicit origin override (`EVE_NUXT_PRODUCTION_ORIGIN`) or a local port. On
  * Vercel the module routes at the edge via a Build Output service route
@@ -47,6 +55,5 @@ export function resolveProductionTarget(): string {
     return joinRoutePrefix(normalizeOrigin(configuredOrigin), EVE_ROUTE_PREFIX);
   }
 
-  const localOrigin = `http://127.0.0.1:${String(readLocalProductionPort())}`;
-  return joinRoutePrefix(localOrigin, EVE_ROUTE_PREFIX);
+  return joinRoutePrefix(readLocalProductionOrigin(), EVE_ROUTE_PREFIX);
 }

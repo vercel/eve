@@ -1,7 +1,13 @@
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 
-import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
+import {
+  addImports,
+  addServerPlugin,
+  createResolver,
+  defineNuxtModule,
+  extendRouteRules,
+} from "@nuxt/kit";
 import type { NuxtModule } from "@nuxt/schema";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
@@ -54,16 +60,23 @@ function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): 
 }
 
 /**
- * Minimal view of the Nitro Vercel build-output config the module merges the
- * eve service into. The full `nitro` typing lives behind the nitropack/Nuxt
- * augmentation, which is not loaded in this package's build, so model only the
- * surface we touch.
+ * Minimal view of the Nitro config the module writes to. The full `nitro`
+ * typing lives behind the nitropack/Nuxt augmentation, which is not loaded in
+ * this package's build, so model only the surface we touch.
  */
-interface NitroVercelConfigHost {
+interface NitroConfigHost {
+  externals?: {
+    traceInclude?: string[];
+    [key: string]: unknown;
+  };
   vercel?: {
     config?: VercelBuildConfig;
     [key: string]: unknown;
   };
+}
+
+function readNitroConfig(nuxtOptions: object): NitroConfigHost {
+  return (nuxtOptions as { nitro: NitroConfigHost }).nitro;
 }
 
 /**
@@ -106,8 +119,9 @@ async function resolveEveProxyTarget(input: {
  * (configured via the `eve` config key). It auto-imports the `useEveAgent()`
  * composable and routes eve transport requests (`/eve/v1/**`) to the eve
  * service: a shared dev server spawned on demand in dev, a generated Vercel
- * service on Vercel deployments, and a configured origin/port in non-Vercel
- * production. Requires Nuxt >= 4.0.0. Configure via
+ * service on Vercel deployments, and a loopback eve server the Nuxt server
+ * process starts, or a configured origin, in non-Vercel production. Requires
+ * Nuxt >= 4.0.0. Configure via
  * {@link EveNuxtModuleOptions}.
  */
 const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxtModuleOptions>({
@@ -142,8 +156,7 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
       });
 
       if (configured.mode === "generated") {
-        const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroVercelConfigHost })
-          .nitro;
+        const nitro = readNitroConfig(nuxt.options);
         nitro.vercel = {
           ...nitro.vercel,
           config: mergeEveVercelConfig(nitro.vercel?.config, configured),
@@ -155,6 +168,21 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
       // module setup. `modules:done` still runs before Nitro is configured, so
       // the proxy route rule is registered in time while other modules' setup
       // isn't blocked behind the spawn.
+      if (!nuxt.options.dev) {
+        // `node .output/server/index.mjs` never runs module setup, so the
+        // built eve server has to start from a Nitro plugin at boot. The
+        // plugin imports eve at runtime, so Nitro has to trace the package
+        // into the server output.
+        addServerPlugin(
+          createResolver(import.meta.url).resolve("./runtime/production-server-plugin.js"),
+        );
+        const nitro = readNitroConfig(nuxt.options);
+        nitro.externals = {
+          ...nitro.externals,
+          traceInclude: [...(nitro.externals?.traceInclude ?? []), "eve"],
+        };
+      }
+
       nuxt.hook("modules:done", async () => {
         const proxyTarget = await resolveEveProxyTarget({
           appRoot,
