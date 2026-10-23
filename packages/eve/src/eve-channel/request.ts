@@ -357,7 +357,7 @@ export async function createSessionStreamResponse(
       void early?.then((opened) => opened.cancel()).catch(() => {});
       // With no owner left to write to it, following would only reconnect each lease to read the
       // whole history again: end at the tail with `stream.ended`, so readers stop.
-      const live = follow && ((await internalSession(session).hasRunnableOwner?.()) ?? true);
+      const live = follow && (await internalSession(session).hasRunnableOwner());
       if (follow && !live) lineLimit = undefined;
       lines = v26LineStream(
         await internalSession(session).getLineStream({ follow: live, startIndex: 0 }),

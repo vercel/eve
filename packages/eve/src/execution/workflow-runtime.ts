@@ -80,6 +80,7 @@ import {
 } from "#execution/session-inbox/resume.js";
 import {
   assertRunnableSessionInbox,
+  assertRunnableSessionOwner,
   findSessionHookHolder,
   StrandedSessionOwnerError,
 } from "#execution/session-inbox/owner.js";
@@ -362,9 +363,10 @@ export function createWorkflowRuntime(config: {
 
     async hasRunnableOwner(sessionId: string): Promise<boolean> {
       const token = sessionInboxHookToken(sessionCommandHookToken(sessionId));
-      if ((await findSessionHookHolder(token)) === undefined) return false;
+      const holder = await findSessionHookHolder(token);
+      if (holder === undefined) return false;
       try {
-        await assertRunnableSessionInbox(token);
+        await assertRunnableSessionOwner(holder);
         return true;
       } catch (error) {
         if (error instanceof StrandedSessionOwnerError) return false;

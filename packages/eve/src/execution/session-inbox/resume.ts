@@ -154,7 +154,7 @@ async function waitWhileHandoffInProgress(token: string, deadline: number): Prom
   }
   if (Date.now() >= deadline) {
     // A releasing owner that cannot execute never finishes its handoff.
-    await assertRunnableSessionOwner(marker);
+    await assertRunnableSessionOwner({ hook: marker, runId: marker.runId });
     throw new SessionHandoffPendingError(token);
   }
   await new Promise<void>((resolve) => setTimeout(resolve, HANDOFF_RETRY_INTERVAL_MS));

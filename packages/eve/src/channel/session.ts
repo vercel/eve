@@ -63,7 +63,7 @@ export interface InternalSession extends Session {
   getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
   /** Whether a run that can still execute owns the session; `true` when the runtime can't tell. */
-  hasRunnableOwner?(): Promise<boolean>;
+  hasRunnableOwner(): Promise<boolean>;
 }
 
 /** HTTP framing and conformance readers operate on framework-created handles. */
