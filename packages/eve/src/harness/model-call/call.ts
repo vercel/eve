@@ -86,6 +86,7 @@ const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 export interface ModelCallOptions {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
+  readonly imagesAsPaths?: boolean;
   readonly retryReason?: "empty-response";
   readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
@@ -316,7 +317,9 @@ export class ModelCaller {
     );
     generation.begin();
     // Hydrate `eve-sandbox:` file refs for this call only; history keeps the refs.
-    this.modelMessages = await hydrateSandboxAttachments(this.request.nonSystemMessages);
+    this.modelMessages = await hydrateSandboxAttachments(this.request.nonSystemMessages, {
+      imagesAsPaths: options.imagesAsPaths,
+    });
     if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
     }

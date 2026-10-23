@@ -14,7 +14,11 @@ import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.j
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
-import { readMediaMetadata, verifyMediaType } from "#internal/attachments/media-metadata.js";
+import {
+  INLINE_IMAGE_MEDIA_TYPES,
+  readMediaMetadata,
+  verifyMediaType,
+} from "#internal/attachments/media-metadata.js";
 import {
   DEFAULT_UPLOAD_POLICY,
   isMediaTypeAllowed,
@@ -178,9 +182,13 @@ export async function stageToolResultMedia<T extends ModelMessage>(
  * decision is pure in the ref, so each message renders identically on every
  * call and the provider's prompt cache stays valid. The returned messages
  * must not be written back to session history, which stays ref-only.
+ *
+ * With `imagesAsPaths`, images render as their label alone: the recovery
+ * for a provider that rejected an image.
  */
 export async function hydrateSandboxAttachments(
   input: readonly ModelMessage[],
+  options: { readonly imagesAsPaths?: boolean } = {},
 ): Promise<ModelMessage[]> {
   const messages = replaceUnresolvedFileParts(input);
   if (!messagesContainSandboxRef(messages)) {
@@ -196,12 +204,15 @@ export async function hydrateSandboxAttachments(
   }
 
   const sandbox = await activeSandbox(sandboxAccess);
+  const inlines = (ref: SandboxRef) =>
+    inlinesSandboxRefAsBytes(ref) &&
+    !(options.imagesAsPaths === true && INLINE_IMAGE_MEDIA_TYPES.has(ref.mediaType));
   return Promise.all(
     messages.map(async (message) => {
       if (!messageContainsSandboxRef(message)) {
         return message;
       }
-      const content = await hydrateMessageContent(message.content, sandbox);
+      const content = await hydrateMessageContent(message.content, sandbox, inlines);
       return { ...message, content } as ModelMessage;
     }),
   );
@@ -352,6 +363,7 @@ function isSandboxRefFilePart(part: unknown): part is FilePart {
 async function hydrateMessageContent(
   content: unknown,
   sandbox: SandboxSession | null,
+  inlines: (ref: SandboxRef) => boolean,
 ): Promise<unknown> {
   if (!Array.isArray(content)) {
     return content;
@@ -361,7 +373,7 @@ async function hydrateMessageContent(
       if (isSandboxRefFilePart(part)) {
         const ref = decodeSandboxRef(part.data as URL);
         const label = renderSandboxRefAsTextPart(ref);
-        if (!inlinesSandboxRefAsBytes(ref)) {
+        if (!inlines(ref)) {
           return [label];
         }
         const bytes = await readSandboxRefBytes(ref, sandbox);
@@ -371,7 +383,9 @@ async function hydrateMessageContent(
       }
       if ((part as { type?: unknown }).type === "tool-result") {
         const toolResult = part as ToolResultPart;
-        return [{ ...toolResult, output: await hydrateToolOutput(toolResult.output, sandbox) }];
+        return [
+          { ...toolResult, output: await hydrateToolOutput(toolResult.output, sandbox, inlines) },
+        ];
       }
       return [part];
     }),
@@ -382,6 +396,7 @@ async function hydrateMessageContent(
 async function hydrateToolOutput(
   output: ToolResultOutput,
   sandbox: SandboxSession | null,
+  inlines: (ref: SandboxRef) => boolean,
 ): Promise<ToolResultOutput> {
   if (output.type !== "content" || !output.value.some(isToolOutputRefFile)) {
     return output;
@@ -391,7 +406,7 @@ async function hydrateToolOutput(
       if (!isToolOutputRefFile(part) || part.data.type !== "url") return [part];
       const ref = decodeSandboxRef(part.data.url);
       const label = renderSandboxRefAsTextPart(ref);
-      if (!inlinesSandboxRefAsBytes(ref)) return [label];
+      if (!inlines(ref)) return [label];
       const bytes = await readSandboxRefBytes(ref, sandbox);
       if (bytes === null) return [renderMissingSandboxRef(ref)];
       return [

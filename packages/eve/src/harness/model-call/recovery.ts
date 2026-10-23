@@ -1,7 +1,9 @@
 import { createLogger } from "#internal/logging.js";
 import {
   EmptyModelResponseError,
+  extractUpstreamRejectionMessage,
   extractUnsupportedProviderToolTypes,
+  isImageRejection,
   isNoOutputGeneratedError,
 } from "#harness/model-call/errors.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
@@ -13,6 +15,7 @@ const log = createLogger("harness.tool-loop");
 type RecoveryCall = (options: {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
+  readonly imagesAsPaths?: boolean;
   readonly retryReason?: "empty-response";
   readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
@@ -29,6 +32,9 @@ type RecoveryCall = (options: {
  * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
  *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
  *    recovery removed.
+ * 3. The provider rejected an image (see {@link isImageRejection}): the call is reissued with
+ *    every image shown as its sandbox path, and a system note tells the model why, so the turn
+ *    continues instead of failing on an image that stays in history.
  *
  * Each reissue goes through `call` so it gets fresh step hooks: the failed attempt's one-shot
  * `stepResult` already resolved. Returns the error that remains when nothing recovered.
@@ -81,6 +87,27 @@ export async function recoverModelCall(input: {
       error = retryError;
     }
   }
+
+  if (isImageRejection(error)) {
+    log.warn("model provider rejected an image; retrying step once with images as paths", {
+      ...diagnostics,
+    });
+    try {
+      return {
+        result: await input.call({
+          ...options,
+          extraSystemNote: joinNotes(
+            options.extraSystemNote,
+            buildImageRejectedNote(extractUpstreamRejectionMessage(error)?.message),
+          ),
+          imagesAsPaths: true,
+          suppressStepStartedEmission: true,
+        }),
+      };
+    } catch (retryError) {
+      error = retryError;
+    }
+  }
   return { error };
 }
 
@@ -97,6 +124,20 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
     `has been removed: ${list}. Proceed using the remaining tools or your ` +
     `training knowledge.`
   );
+}
+
+/** The one-shot system note for the image-rejected retry. */
+function buildImageRejectedNote(message: string | undefined): string {
+  const reason = message === undefined ? "" : ` (${message})`;
+  return (
+    `The model provider rejected an image in this conversation${reason}, so images are shown ` +
+    "only as their sandbox file paths. Proceed without viewing them, or resize or convert one " +
+    "in the sandbox if you need to see it."
+  );
+}
+
+function joinNotes(...notes: readonly (string | undefined)[]): string {
+  return notes.filter((note) => note !== undefined).join("\n\n");
 }
 
 /**

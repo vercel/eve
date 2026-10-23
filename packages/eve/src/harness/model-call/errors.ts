@@ -88,6 +88,18 @@ export function extractUpstreamRejectionMessage(error: unknown): UpstreamRejecti
   return null;
 }
 
+/**
+ * The provider rejected an image in the request, such as one over a size or dimension limit.
+ * The image stays in history, so the same rejection would fail every later call.
+ */
+export function isImageRejection(error: unknown): boolean {
+  if (hasRetryableFlag(error) || summarizeKnownError(error) !== null) return false;
+  const { statusCode } = readModelCallErrorSignals(error);
+  if (statusCode !== 400 && statusCode !== 413 && statusCode !== 422) return false;
+  const message = extractUpstreamRejectionMessage(error)?.message;
+  return message !== undefined && /\bimages?\b/i.test(message);
+}
+
 function upstreamRejectionName(signals: ModelCallErrorSignals): string {
   return isGatewayErrorSignal(signals)
     ? "AI Gateway model request rejected"

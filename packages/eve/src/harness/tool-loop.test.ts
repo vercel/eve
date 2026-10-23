@@ -5553,6 +5553,94 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  describe("rejected image recovery", () => {
+    const rejection =
+      "messages.1.content.1.image.source.base64.data: At least one of the image dimensions exceed max allowed size";
+
+    function createRejectionError(message: string): Error {
+      const body = { error: { message, type: "invalid_request_error" } };
+      const upstream = Object.assign(new Error("[object Object]"), {
+        data: body,
+        isRetryable: false,
+        name: "AI_APICallError",
+        responseBody: JSON.stringify(body),
+        statusCode: 400,
+      });
+      return Object.assign(new Error("Invalid request", { cause: upstream }), {
+        isRetryable: false,
+        name: "GatewayInvalidRequestError",
+        statusCode: 400,
+        type: "invalid_request_error",
+      });
+    }
+
+    function setupRejectThenSucceed(error: Error): void {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Recovered.", role: "assistant" }] },
+        text: "Recovered.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const succeed = vi.mocked(ToolLoopAgent).getMockImplementation();
+      setupMockAgentError(error);
+      const reject = vi.mocked(ToolLoopAgent).getMockImplementation();
+      vi.mocked(ToolLoopAgent).mockImplementation(succeed!);
+      vi.mocked(ToolLoopAgent).mockImplementationOnce(reject!);
+    }
+
+    afterEach(() => {
+      vi.mocked(ToolLoopAgent).mockReset();
+    });
+
+    it("retries once with images as paths and continues the turn", async () => {
+      setupRejectThenSucceed(createRejectionError(rejection));
+      const sandbox = mockSandbox({ id: "sbx_rejected_image" });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, sandbox.access);
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig(emit));
+      const userContent: UserContent = [
+        { text: "make this square", type: "text" },
+        { data: pngBytes(64, 64), filename: "icon.png", mediaType: "image/png", type: "file" },
+      ];
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: userContent }),
+      );
+
+      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
+      expect(result.session.history).toContainEqual({ content: "Recovered.", role: "assistant" });
+      const types = events.map((event) => event.type);
+      expect(types).not.toContain("step.failed");
+      expect(types).not.toContain("turn.failed");
+      expect(JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[1]?.[0].instructions)).toContain(
+        "rejected an image",
+      );
+
+      const firstMessage = (index: number) =>
+        (
+          vi.mocked(ToolLoopAgent).mock.results[index]!.value as {
+            stream: ReturnType<typeof vi.fn>;
+          }
+        ).stream.mock.calls[0]?.[0]?.messages[0] as { content: Array<{ type: string }> };
+      expect(firstMessage(0).content.some((part) => part.type === "file")).toBe(true);
+      const retried = firstMessage(1).content;
+      expect(retried.some((part) => part.type === "file")).toBe(false);
+      expect(JSON.stringify(retried)).toMatch(/Attached file .*icon\.png \(image\/png\)/);
+    });
+
+    it("does not retry a rejection that is not about an image", async () => {
+      setupRejectThenSucceed(createRejectionError("prompt is too long"));
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig(emit));
+
+      await runStep(createTestSession(), { message: "Hi" });
+
+      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
+    });
+  });
+
   describe("empty model response recovery", () => {
     const emptyResult: Record<string, unknown> = {
       content: [],
