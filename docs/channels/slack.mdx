@@ -438,7 +438,7 @@ When a final reply still doesn't reach Slack, because the upload fails, Slack re
 
 This applies to the turn's final reply only. A failed status update, tool-call narration, or other event is logged and skipped. Delivery failures don't trigger a model retry.
 
-When the model replies while its tasks keep working, that reply posts like any other, and the reply after the results posts as another message. A schedule's session posts only the final reply.
+When the model replies while its tasks keep working, including text it writes before `eve__task_wait` in the same step, that reply posts like any other, and the reply after the results posts as another message. A schedule's session posts only the final reply.
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 

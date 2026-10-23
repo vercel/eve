@@ -21,6 +21,7 @@ import {
   createReasoningAppendedEvent,
   createReasoningCompletedEvent,
 } from "#protocol/message.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
@@ -66,11 +67,16 @@ interface EmittedStreamContent {
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
   /**
-   * A child's or schedule's turn is held while its tasks work, so a text step
-   * can't end it: the step reports `"tool-calls"` and channels don't post it
-   * as the reply.
+   * The session is a child or a schedule, whose caller hears only the turn's
+   * real end: text before `eve__task_wait` reports `"tool-calls"`, and
+   * channels don't post it as the reply.
    */
   readonly hidesHeldText?: boolean;
+  /**
+   * A task is working, so the turn is held and a text step can't end it. For a
+   * session that `hidesHeldText`, the step reports `"tool-calls"`.
+   */
+  readonly tasksWorking?: boolean;
   readonly tools: HarnessToolLookup;
   readonly unsettledActionToolNames?: Map<string, string>;
 }
@@ -125,6 +131,14 @@ function reportedFinishReason(
   return finishReason;
 }
 
+/** A root session's text before `eve__task_wait` is a reply the person reads while the turn waits. */
+function textFinishReasonBefore(
+  toolName: string,
+  hidesHeldText: boolean,
+): AssistantStepFinishReason {
+  return toolName === TASK_WAIT_TOOL_NAME && !hidesHeldText ? "stop" : "tool-calls";
+}
+
 async function consumeStreamContent(
   emitFn: HarnessEmitFn,
   state: TurnPosition,
@@ -147,13 +161,15 @@ async function consumeStreamContent(
   const actionInputs = new Map<string, JsonObject>();
   const streamingActionInputs = new Map<string, { toolName: string }>();
 
-  const flushCurrentMessage = async (): Promise<void> => {
+  const flushCurrentMessage = async (
+    finishReason: AssistantStepFinishReason = "tool-calls",
+  ): Promise<void> => {
     if (currentMessage.length === 0) {
       return;
     }
     await emitFn(
       createMessageCompletedEvent({
-        finishReason: "tool-calls",
+        finishReason,
         message: currentMessage,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
@@ -191,7 +207,7 @@ async function consumeStreamContent(
     }
 
     if (currentMessage.trim().length > 0) {
-      await flushCurrentMessage();
+      await flushCurrentMessage(textFinishReasonBefore(toolName, options?.hidesHeldText === true));
     }
 
     emittedActionCallIds.add(action.callId);
@@ -373,7 +389,9 @@ async function consumeStreamContent(
         }
         await providerActionBatch.flush();
         if (currentMessage.trim().length > 0) {
-          await flushCurrentMessage();
+          await flushCurrentMessage(
+            textFinishReasonBefore(part.toolName, options.hidesHeldText === true),
+          );
         }
         streamingActionInputs.set(part.id, { toolName: part.toolName });
         break;
@@ -502,7 +520,10 @@ async function consumeStreamContent(
   if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
-        finishReason: reportedFinishReason(finishReason, options?.hidesHeldText === true),
+        finishReason: reportedFinishReason(
+          finishReason,
+          options?.hidesHeldText === true && options.tasksWorking === true,
+        ),
         message: currentMessage,
         sequence: state.sequence,
         stepIndex: state.stepIndex,

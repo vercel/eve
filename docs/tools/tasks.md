@@ -221,8 +221,8 @@ yet, the stream emits `turn.waiting` with the turn's `turnId`. The next `step.st
 same `turnId` means the turn resumed, and `session.waiting` comes only after the turn ends. The
 model's text before the wait depends on the session:
 
-- **Root sessions:** the text completes as an ordinary message. The person can keep writing, and
-  the turn resumes under the same id.
+- **Root sessions:** the text completes as an ordinary message, including text written before
+  `eve__task_wait` in the same step. The person can keep writing, and the turn resumes under the same id.
 - **Child sessions and a schedule's sessions:** the held text step reports
   `finishReason: "tool-calls"` on `message.completed`, so channels post only the final reply.
 

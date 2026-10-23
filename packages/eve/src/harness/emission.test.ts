@@ -400,6 +400,35 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
+  it.each([
+    { finishReason: "stop", hidesHeldText: false },
+    { finishReason: "tool-calls", hidesHeldText: true },
+  ])(
+    "completes text before a streamed eve__task_wait with $finishReason when hidesHeldText is $hidesHeldText",
+    async ({ finishReason, hidesHeldText }) => {
+      const emit = createEmitStub();
+
+      await emitStreamContent(
+        emit,
+        EMISSION_STATE,
+        streamOf([
+          { id: "message-1", text: "One moment.", type: "text-delta" },
+          { id: "call-wait", toolName: "eve__task_wait", type: "tool-input-start" },
+          { delta: "{}", id: "call-wait", type: "tool-input-delta" },
+          { id: "call-wait", type: "tool-input-end" },
+          { input: {}, toolCallId: "call-wait", toolName: "eve__task_wait", type: "tool-call" },
+          { finishReason: "tool-calls", type: "finish-step" },
+        ] as TextStreamPart<ToolSet>[]),
+        { excludedActionToolNames: new Set(), hidesHeldText, tools: new Map() },
+      );
+
+      const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+      expect(events.filter((event) => event.type === "message.completed")).toEqual([
+        expect.objectContaining({ data: expect.objectContaining({ finishReason }) }),
+      ]);
+    },
+  );
+
   it("emits local preliminary results and drops provider preliminary results", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [
