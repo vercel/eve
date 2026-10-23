@@ -2256,6 +2256,7 @@ describe("turnStep", () => {
       ...sandbox.access,
       end: async () => {},
       release: async () => {},
+      warm: async () => {},
     });
     const controller = new AbortController();
     controller.abort(new TurnCancelledError());

@@ -15,6 +15,7 @@ import {
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
+import { defineHook } from "#public/definitions/hook.js";
 
 async function deadline(runId: string): Promise<Date> {
   const world = await getWorld();
@@ -35,6 +36,59 @@ async function deadline(runId: string): Promise<Date> {
   });
   return result!;
 }
+
+describe("session prewarmers", () => {
+  it("starts a prewarmed session's sandbox before its first message, which the turn resumes", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "prewarm-sandbox" },
+      modules: [
+        {
+          logicalPath: "hooks/sandbox.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "turn.started"(_event, ctx) {
+                  await ctx.getSandbox();
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          sessionTimeoutMs: false,
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const token = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+      const prewarmed = [`definition:${run.runId}`, `start:${run.runId}`];
+      try {
+        await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual(prewarmed), {
+          timeout: 10_000,
+        });
+        await resumeHook(token, {
+          kind: "send",
+          payload: { message: "Alice opens the project notes." },
+        });
+        await stream.nextTurn();
+        expect(runtime.sandboxEvents).toEqual([...prewarmed, `resume:${run.runId}`]);
+        await resumeHook(token, { kind: "reset" });
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+        expect(runtime.sandboxCleanups).toEqual([run.runId]);
+      } finally {
+        stream.dispose();
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+  });
+});
 
 describe("idle session prewarm handoff", () => {
   it("delivers a message exactly once when Send arrives while the successor starts", async () => {

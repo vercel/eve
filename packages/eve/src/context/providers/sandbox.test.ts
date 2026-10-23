@@ -63,6 +63,7 @@ describe("sandboxProvider", () => {
       end: vi.fn().mockResolvedValue(undefined),
       get: vi.fn().mockResolvedValue(null),
       stop: vi.fn().mockResolvedValue(undefined),
+      warm: vi.fn().mockResolvedValue(undefined),
     });
   });
 
@@ -99,6 +100,7 @@ describe("sandboxProvider", () => {
       end,
       get: vi.fn().mockResolvedValue(null),
       stop: vi.fn().mockResolvedValue(undefined),
+      warm: vi.fn().mockResolvedValue(undefined),
     });
     ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
     ctx.set(ChannelKey, { kind: "slack" });
@@ -144,6 +146,7 @@ describe("sandboxProvider", () => {
       end: vi.fn(),
       get: vi.fn(),
       release,
+      warm: vi.fn(),
       stop: vi.fn(),
     });
     const created = await sandboxProvider.create(ctx, createHarnessSession());

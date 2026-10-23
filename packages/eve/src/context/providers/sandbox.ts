@@ -6,9 +6,19 @@ import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/ke
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getActiveRuntimeNode } from "#context/node.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
+import type { SessionPrewarmer } from "#context/prewarm.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("context.sandbox");
+
+/** Starts the session's own sandbox; the provider's commit records it for the first turn to resume. */
+export const sandboxPrewarmer: SessionPrewarmer = {
+  name: "sandbox",
+  async prewarm(ctx) {
+    // `sandboxProvider.create` built this step's access.
+    await (ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined)?.warm();
+  },
+};
 
 export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   key: SandboxKey,

@@ -23,6 +23,7 @@ import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
+import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
 /** The run's own failure never carries internals; the terminal event already logged them. */
@@ -49,7 +50,10 @@ export type SessionAnchor =
 export type SessionStart =
   /** Runs a turn first; `input` is absent for a session started without a message. */
   | { readonly kind: "turn"; readonly input: DeliverHookPayload | undefined }
-  /** A prewarmed session parks on the inbox before any session-scoped lifecycle work. */
+  /**
+   * A prewarmed session runs its session prewarmers, then parks on the inbox
+   * before any turn, session event, or session hook.
+   */
   | { readonly kind: "first-message" }
   /** A successor that received a settled session waits for its next input. */
   | { readonly kind: "parked" };
@@ -348,6 +352,11 @@ async function runSessionLoop(
   const runInitialAction = async (): Promise<SessionActionResult> => {
     switch (boot.start.kind) {
       case "first-message":
+        // Before the wait, so no other step advances the cursor meanwhile;
+        // input that arrives during it waits in the inbox.
+        await cursor.advance(({ serializedContext, sessionState }) =>
+          prewarmSessionStep({ serializedContext, sessionState }),
+        );
         return await awaitPrewarmedAction();
       case "parked":
         return { action: { kind: "park" }, kind: "action" };

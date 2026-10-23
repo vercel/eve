@@ -81,6 +81,12 @@ export interface EnsuredSandboxAccess extends SandboxAccess {
    * leaves that connection behind.
    */
   release(): Promise<void>;
+  /**
+   * Opens the sandbox this session owns before anything needs it, so its
+   * state is recorded when the step commits. Does nothing when the agent has
+   * no sandbox or the session borrows another session's.
+   */
+  warm(): Promise<void>;
 }
 
 /** A connection this access opened, with the lifecycle eve maps onto it. */
@@ -135,6 +141,7 @@ export async function ensureSandboxAccess(
       },
       async release() {},
       async stop() {},
+      async warm() {},
     };
   }
   const ownerDefinition = owningSandboxDefinition(registered);
@@ -466,6 +473,10 @@ export async function ensureSandboxAccess(
         providerName: current.providerName,
         sessionId: input.sessionId,
       });
+    },
+    async warm() {
+      if (input.ownsSandbox === false || ownerDefinition.kind !== "independent") return;
+      await requireOpened();
     },
   };
 

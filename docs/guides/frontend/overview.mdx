@@ -137,9 +137,12 @@ Prewarming defaults to `false`: the first send creates the session. Set it to `t
 your application's auth, headers, and any chat-record binding are ready. Applications that
 prepare those in the submit handler should keep the default until then.
 
-Prewarming starts the workflow and establishes its inbox, then parks before session hooks,
-dynamic definitions, or sandbox setup run. The first message passes through the channel's
-`onMessage` hook and supplies the identity and context for initialization and `turn_0`.
+Prewarming starts the workflow, establishes its inbox, and starts the agent's
+[sandbox](/docs/sandbox), then parks before session hooks or dynamic definitions run. The first
+message passes through the channel's `onMessage` hook and supplies the identity and context for
+initialization and `turn_0`. A message sent while the sandbox is still starting waits for it. If
+the sandbox fails to start during prewarming, the first turn that uses it starts it instead. eve
+deletes the sandbox when the session ends, including when an unused prewarmed session times out.
 
 For an existing session, `prewarm()` checks the owner against the exact deployment accepting
 that request. On Vercel, an idle owner on another deployment can transfer in the background

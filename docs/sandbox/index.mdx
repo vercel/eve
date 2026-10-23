@@ -69,6 +69,8 @@ export default defineSandbox(async ({ session }) => {
 });
 ```
 
+When a client prewarms a session, for example with `useEveAgent({ prewarm: true })`, eve runs the selector before the first message arrives. `session.auth` then describes the request that created the session, and the first message's `onMessage` hook can return a different identity. Do not derive per-user sandbox options from `session.auth` in an agent whose clients prewarm sessions. See [prewarming](/docs/guides/frontend/overview#returned-state) for when eve prewarms a session.
+
 The environment export is required because `eve build` prepares immutable environment inputs before a session exists.
 
 ### Prepare a reusable environment
