@@ -39,7 +39,7 @@ catalog:
   "@opentelemetry/context-async-hooks": "2.6.1"
   "@opentelemetry/core": "2.6.1"
   "@opentelemetry/sdk-trace-base": "2.6.1"
-  "@types/node": "24.13.3"
+  "@types/node": "26.6.5"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
   "@vercel/connect": "2.5.2"
