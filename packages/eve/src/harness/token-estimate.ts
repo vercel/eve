@@ -141,15 +141,25 @@ export const MAX_TEXT_SCALE = 4;
 
 /**
  * Counts the file parts the estimate cannot size: remote non-image files the
- * provider fetches and bills itself. The estimate counts them as a few bytes
- * of JSON, so any gap between it and a provider count sits on them.
+ * provider fetches and bills itself ({@link estimateRemoteTokens} has no cost
+ * for them). The estimate counts them as a few bytes of JSON, so any gap
+ * between it and a provider count sits on them. Only message content parts
+ * and `content` tool outputs are visited, so file data is never serialized.
  */
-export function countUnsizedParts(value: unknown): number {
+export function countUnsizedParts(messages: readonly { readonly content: unknown }[]): number {
   let count = 0;
-  JSON.stringify(value, (_key, candidate: unknown) => {
-    if (isUnsizedRemoteFilePart(candidate)) count += 1;
-    return candidate;
-  });
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content as readonly unknown[]) {
+      count += isUnsizedRemoteFilePart(part) ? 1 : 0;
+      const output = (
+        part as { readonly output?: { readonly type?: unknown; readonly value?: unknown } } | null
+      )?.output;
+      if (output?.type === "content" && Array.isArray(output.value)) {
+        count += output.value.filter(isUnsizedRemoteFilePart).length;
+      }
+    }
+  }
   return count;
 }
 
@@ -163,7 +173,7 @@ function isUnsizedRemoteFilePart(value: unknown): boolean {
   if ((part.type !== "file" && part.type !== "media") || typeof part.mediaType !== "string") {
     return false;
   }
-  return !part.mediaType.startsWith("image/") && isRemoteFileData(part.data);
+  return estimateRemoteTokens(part.mediaType) === undefined && isRemoteFileData(part.data);
 }
 
 function isRemoteFileData(data: unknown): boolean {

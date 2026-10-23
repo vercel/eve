@@ -253,7 +253,24 @@ export async function compactMessages(
   forceSummary = false,
 ): Promise<ModelMessage[]> {
   const calibration = calibrate(messages, config);
-  const compacted = await compactWithScale(messages, config, summarize, forceSummary, calibration);
+  // The current request is replayed whole when it fits next to the summary;
+  // it is cut only when that does not fit.
+  const whole = await compactWithScale(
+    messages,
+    config,
+    summarize,
+    forceSummary,
+    calibration,
+    false,
+  );
+  const compacted =
+    whole !== undefined && fitsThreshold(whole, config, calibration)
+      ? whole
+      : ((await compactWithScale(messages, config, summarize, forceSummary, calibration, true)) ??
+        whole);
+  if (compacted === undefined) {
+    throw new Error("Compaction produced no history.");
+  }
   if (!fitsThreshold(compacted, config, calibration)) {
     const remaining = Math.round(
       calibratedTokens(compacted, calibration) + COMPACTION_PROMPT_OVERHEAD_TOKENS,
@@ -271,31 +288,47 @@ async function compactWithScale(
   summarize: CompactionSummarizer,
   forceSummary: boolean,
   calibration: Calibration,
-): Promise<ModelMessage[]> {
+  cutCurrent: boolean,
+): Promise<ModelMessage[] | undefined> {
   const { checkpointHead, conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
   let keep = selectRecentWindowSize(conversation, recentConfig);
 
   // A current message that alone takes most of the budget would be kept word
   // for word after every compaction, so compaction could never get under the
-  // threshold. Replay only its newest part and summarize the cut-off head.
+  // threshold. Replay only its newest part and summarize the cut-off head,
+  // but only once the whole message has been found not to fit.
   const currentIndex = findLastRealUserIndex(conversation, hasText);
   const current = conversation[currentIndex];
-  const cut =
-    !fitsThreshold(conversation, config, calibration) && current !== undefined
-      ? fitCurrentMessage(
+  const fittedCut =
+    current === undefined
+      ? undefined
+      : fitCurrentMessage(
           current,
           config.threshold,
           calibration.measured.has(current) ? calibration.scale : 1,
           unsizedCharge(current, calibration),
-        )
-      : undefined;
+        );
+  const cut = cutCurrent ? fittedCut : undefined;
+  // `undefined` hands over to the other pass: a cut that cannot be made, or a
+  // current message that does not fit even next to an empty summary.
+  if (
+    cutCurrent
+      ? cut === undefined
+      : fittedCut !== undefined &&
+        current !== undefined &&
+        !fitsThreshold([current], config, calibration)
+  ) {
+    return undefined;
+  }
   const replay = cut?.replay;
   if (cut !== undefined) {
     // The replay is the measured message's newest part: it keeps that message's ratio.
     if (current !== undefined && calibration.measured.has(current)) {
       calibration.measured.add(cut.replay);
     }
+  }
+  if (cut !== undefined) {
     keep = Math.min(keep, conversation.length - 1 - currentIndex);
   }
   const olderToSummarize = (older: readonly ModelMessage[]): readonly ModelMessage[] =>
@@ -363,7 +396,14 @@ async function compactWithScale(
       config.threshold,
       replay,
     );
-    if (fitsThreshold(stripped, config, calibration) || keep === 0) {
+    // Whole, the current message is kept while a smaller window can still make
+    // room; once the window is down to it, a cut is the next step.
+    const wholeFloor = fittedCut === undefined ? 0 : conversation.length - currentIndex;
+    if (
+      fitsThreshold(stripped, config, calibration) ||
+      keep === 0 ||
+      (!cutCurrent && keep <= wholeFloor)
+    ) {
       return stripped;
     }
 
@@ -579,9 +619,7 @@ function splitMessageText(
  * Latest user message authored by the user rather than the framework.
  */
 function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
-  return conversation[
-    findLastRealUserIndex(conversation, (message) => typeof message.content === "string")
-  ];
+  return conversation[findLastRealUserIndex(conversation, () => true)];
 }
 
 function findLastRealUserIndex(

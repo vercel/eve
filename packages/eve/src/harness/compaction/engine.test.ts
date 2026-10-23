@@ -1479,7 +1479,7 @@ describe("compactMessages: current message larger than its share of the threshol
     expect(result.at(-1)).toEqual(request);
   });
 
-  it("does not cut text that shares a message with the attachment holding the gap", async () => {
+  it("replays the whole request when the summary and the whole message fit, whatever its attachment costs", async () => {
     const request: ModelMessage = {
       content: [
         { text: "plain request text ".repeat(2_100), type: "text" },
@@ -1491,7 +1491,7 @@ describe("compactMessages: current message larger than its share of the threshol
       ],
       role: "user",
     };
-    const history: ModelMessage[] = [assistant("Ready."), request];
+    const history: ModelMessage[] = [assistant("older text ".repeat(5_500)), request];
 
     const result = await compactMessages(
       history,
@@ -1505,13 +1505,15 @@ describe("compactMessages: current message larger than its share of the threshol
     );
 
     expect(JSON.stringify(result)).not.toContain("were cut during context compaction");
+    expect(result).toContainEqual(request);
   });
 
-  it("does not keep an attachment that alone holds the history over the limit", async () => {
+  it("throws instead of summarizing away a request whose attachment alone is over the limit", async () => {
     const history: ModelMessage[] = [
       ...toolExchange({ callId: "call-0", payloadChars: 50 }),
       {
         content: [
+          { text: "summarize this", type: "text" },
           {
             data: new URL("https://example.com/report.pdf"),
             mediaType: "application/pdf",
@@ -1522,17 +1524,35 @@ describe("compactMessages: current message larger than its share of the threshol
       },
     ];
 
+    await expect(
+      compactMessages(
+        history,
+        {
+          lastKnownInputTokens: 185_000,
+          lastKnownPromptMessageCount: history.length,
+          recentWindowSize: 1,
+          threshold: 80_000,
+        },
+        summarizeWith("checkpoint text"),
+      ),
+    ).rejects.toMatchObject({ name: "CompactionOverLimitError" });
+  });
+
+  it("replays a folded-away request whose content is an array of parts", async () => {
+    const request: ModelMessage = {
+      content: [{ text: "review the storefront", type: "text" }],
+      role: "user",
+    };
+    const history: ModelMessage[] = [request, assistant("Working on it.")];
+
     const result = await compactMessages(
       history,
-      {
-        lastKnownInputTokens: 185_000,
-        lastKnownPromptMessageCount: history.length,
-        recentWindowSize: 1,
-        threshold: 80_000,
-      },
+      { recentWindowSize: 1, threshold: 10_000 },
       summarizeWith("checkpoint text"),
+      true,
     );
-    expect(JSON.stringify(result)).not.toContain("report.pdf");
+
+    expect(result.at(-1)).toEqual(request);
   });
 });
 
