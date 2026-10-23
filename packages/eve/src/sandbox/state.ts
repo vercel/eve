@@ -121,6 +121,11 @@ export interface SandboxAccess {
   /** Resolves once the sandbox is open and every queued preparation has run. */
   get(): Promise<SandboxSession | null>;
   /**
+   * Opens the sandbox without waiting for queued preparation, for framework
+   * work that needs only the connection, such as staging attachments.
+   */
+  open(): Promise<SandboxSession | null>;
+  /**
    * Queues `work` to run in the background, in order; without `work`, opens
    * the sandbox in the background. Returns at once and never throws.
    */

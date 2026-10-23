@@ -1,6 +1,6 @@
 import { startSessionPrewarmers } from "#context/prewarm.js";
 import { withContextScope } from "#context/run-step.js";
-import { deserializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -34,9 +34,10 @@ export async function prewarmSessionStep(
   return await withSessionStateDelta(input, prewarmSession);
 }
 
-async function prewarmSession(
-  input: SessionPrewarmInput,
-): Promise<{ readonly sessionState?: DurableSessionState }> {
+async function prewarmSession(input: SessionPrewarmInput): Promise<{
+  readonly serializedContext?: Record<string, unknown>;
+  readonly sessionState?: DurableSessionState;
+}> {
   try {
     const ctx = await deserializeContext(input.serializedContext);
     const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
@@ -50,7 +51,9 @@ async function prewarmSession(
       startSessionPrewarmers(ctx, "session");
       return { result: undefined, session: current };
     });
+    // The selector may update `defineState()` handles, which live in the context.
     return {
+      serializedContext: serializeContext(ctx),
       sessionState: replaceDurableSessionSnapshot({
         session: projectToDurableSession(scoped.session),
         state: input.sessionState,

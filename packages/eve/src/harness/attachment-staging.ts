@@ -287,7 +287,8 @@ function cacheRefBytes(key: string, bytes: Uint8Array): void {
 async function activeSandbox(access: SandboxAccess | undefined): Promise<SandboxSession | null> {
   if (access === undefined) return null;
   try {
-    return await access.get();
+    // Attachments need only the connection, not the skill files queued behind the open.
+    return await access.open();
   } catch (error) {
     log.warn("session sandbox unavailable, degrading attachments to text", { error });
     return null;

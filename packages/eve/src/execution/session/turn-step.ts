@@ -543,7 +543,9 @@ async function runSessionStepBody(
         runStep: async ({ firstCall, session, stepInput }) => {
           const result = await runStep(ctx, session, async (enrichedSession) => {
             // Races session resources against the model call; their users wait for what remains.
-            if (firstCall) startSessionPrewarmers(ctx, "turn");
+            if (firstCall && input.input?.control === undefined) {
+              startSessionPrewarmers(ctx, "turn");
+            }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
             let schemaSession =

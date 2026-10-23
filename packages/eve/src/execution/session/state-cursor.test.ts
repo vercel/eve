@@ -140,16 +140,18 @@ describe("SessionStateCursor", () => {
   });
 
   it.each([
-    { meanwhile: "nothing", expected: "channel:beside" },
-    { meanwhile: "a completed step", expected: "channel:step" },
-    { meanwhile: "a running step", expected: "channel:step" },
-    { meanwhile: "losing interest", expected: "channel:initial" },
+    { meanwhile: "nothing", adopted: true },
+    { meanwhile: "a completed step", adopted: false },
+    { meanwhile: "a running step", adopted: false },
+    { meanwhile: "losing interest", adopted: false },
+    { meanwhile: "a new session address in its delta", adopted: false },
   ])(
     "adopts a step run beside the others only after $meanwhile",
-    async ({ meanwhile, expected }) => {
+    async ({ meanwhile, adopted }) => {
+      const claimSessionHooks = vi.fn(async () => {});
       const cursor = new SessionStateCursor({
         history: [],
-        inbox: { claimSessionHooks: vi.fn(async () => {}) },
+        inbox: { claimSessionHooks },
         sessionWritable: new WritableStream<Uint8Array>(),
         serializedContext: {},
         sessionState: state("channel:initial"),
@@ -157,11 +159,15 @@ describe("SessionStateCursor", () => {
       const beside = Promise.withResolvers<void>();
       const step = Promise.withResolvers<void>();
       let wanted = true;
-      const adopted = cursor.advanceBeside(
+      const besideState =
+        meanwhile === "a new session address in its delta"
+          ? state("channel:beside")
+          : { ...state("channel:initial"), hasProxyInputRequests: true };
+      const result = cursor.advanceBeside(
         (input) =>
           withSessionStateDelta(input, async () => {
             await beside.promise;
-            return { sessionState: state("channel:beside") };
+            return { sessionState: besideState };
           }),
         () => wanted,
       );
@@ -182,10 +188,12 @@ describe("SessionStateCursor", () => {
       if (meanwhile === "losing interest") wanted = false;
       beside.resolve();
 
-      await expect(adopted).resolves.toBe(expected === "channel:beside");
+      await expect(result).resolves.toBe(adopted);
       step.resolve();
       await running;
-      expect(cursor.sessionState.continuationToken).toBe(expected);
+      expect(cursor.sessionState.hasProxyInputRequests).toBe(adopted);
+      // Only the owner's own steps claim addresses.
+      if (meanwhile === "nothing") expect(claimSessionHooks).not.toHaveBeenCalled();
     },
   );
 });

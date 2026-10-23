@@ -356,6 +356,9 @@ function unresumableSandboxContext(): ContextContainer {
     get: async () => {
       throw new Error('docker session "ses_1" is no longer available to resume.');
     },
+    open: async () => {
+      throw new Error('docker session "ses_1" is no longer available to resume.');
+    },
     prepare() {},
     stop: async () => {},
   });
@@ -472,14 +475,14 @@ describe("hydrateSandboxAttachments", () => {
       mediaType: "text/csv",
       type: "file",
     });
-    const get = vi.spyOn(sandbox.access, "get");
+    const open = vi.spyOn(sandbox.access, "open");
 
     const hydrated = await hydrate(sessionContext("ses_label_only", sandbox), [csv]);
 
     expect(hydrated[0]?.content).toEqual([
       { text: `Attached file ${csv.filename} (text/csv)`, type: "text" },
     ]);
-    expect(get).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("hydrates an image staged in this session without resuming the sandbox", async () => {
@@ -487,7 +490,7 @@ describe("hydrateSandboxAttachments", () => {
     const ctx = sessionContext("ses_staged_here", sandbox);
     const bytes = pngBytes(32, 32, 64);
     const image = await stageInSession(ctx, png("logo.png", bytes));
-    const get = vi.spyOn(sandbox.access, "get");
+    const open = vi.spyOn(sandbox.access, "open");
 
     const hydrated = await hydrate(ctx, [image]);
 
@@ -495,7 +498,7 @@ describe("hydrateSandboxAttachments", () => {
       { text: `Attached file ${image.filename} (image/png)`, type: "text" },
       { ...image, data: bytes, mediaType: "image/png" },
     ]);
-    expect(get).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("does not serve bytes cached for one session to another", async () => {
@@ -517,7 +520,7 @@ describe("hydrateSandboxAttachments", () => {
     const first = await stageElsewhere(sandbox, png("first.png", firstBytes));
     const second = await stageElsewhere(sandbox, png("second.png", secondBytes));
     const ctx = sessionContext("ses_cold_process", sandbox);
-    const get = vi.spyOn(sandbox.access, "get");
+    const open = vi.spyOn(sandbox.access, "open");
 
     const calls = [await hydrate(ctx, [first, second]), await hydrate(ctx, [first, second])];
 
@@ -529,7 +532,7 @@ describe("hydrateSandboxAttachments", () => {
         { ...second, data: secondBytes, mediaType: "image/png" },
       ]);
     }
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledTimes(1);
   });
 
   it("never caches bytes that changed since staging", async () => {

@@ -1145,6 +1145,9 @@ describe("hydrateSandboxAttachments (integration)", () => {
           async get() {
             throw new Error('just-bash session root "/tmp/sessions/lost" no longer exists.');
           },
+          async open() {
+            throw new Error('just-bash session root "/tmp/sessions/lost" no longer exists.');
+          },
         },
       },
       async () => hydrateSandboxAttachments(staged),

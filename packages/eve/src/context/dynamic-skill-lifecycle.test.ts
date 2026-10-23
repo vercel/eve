@@ -113,38 +113,34 @@ function recreatableSandbox() {
   return { registry, removeOutsideEve: () => void (gone = true), sandboxes };
 }
 
-/** Mirrors ensureSandboxAccess: queued work runs in order, and `get()` and `drain()` wait for it. */
+/**
+ * Mirrors ensureSandboxAccess: queued work runs in order, and `get()` and
+ * `settle()` wait for it. A failed job is dropped; retrying it is the queue's
+ * concern, not this file's.
+ */
 function createAccess(
   open: () => Promise<SandboxSession>,
   captureState: () => Promise<SandboxState>,
 ) {
-  let queue: Promise<unknown> = Promise.resolve();
-  let failure: unknown;
-  const drain = async () => {
-    await queue;
-    const error = failure;
-    failure = undefined;
-    if (error !== undefined) throw error;
-  };
+  let queue: Promise<void> = Promise.resolve();
   return {
     captureState,
-    drain,
     async get() {
-      await drain();
+      await queue;
       return await open();
     },
+    open,
     prepare(work?: SandboxPreparation) {
       queue = queue
         .then(async () => {
           if (work === undefined) await open();
           else await work(open);
         })
-        .catch((error: unknown) => {
-          failure ??= error;
-        });
+        .catch(() => undefined);
     },
+    settle: () => queue,
     stop: async () => {},
-  } satisfies SandboxAccess & { drain(): Promise<void> };
+  } satisfies SandboxAccess & { settle(): Promise<void> };
 }
 
 /** The persisted state appears once the sandbox opens. */
@@ -206,10 +202,15 @@ function makeSkill(
   return defineSkill({ description, files, markdown });
 }
 
+/** Waits for the sandbox work queued on the context's access, as a step's commit does. */
+async function settle(ctx: ContextContainer): Promise<void> {
+  await (ctx.require(SandboxKey) as SandboxAccess & { settle(): Promise<void> }).settle();
+}
+
 /** Dispatches, then waits for the sandbox work it queued, as a step's commit does. */
 async function dispatch(ctx: ContextContainer, ...resolvers: ResolvedDynamicSkillResolver[]) {
   await dispatchDynamicSkillEvent({ ctx, event: makeEvent(), messages: [], resolvers });
-  await (ctx.require(SandboxKey) as ReturnType<typeof createAccess>).drain();
+  await settle(ctx);
 }
 
 function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
@@ -413,7 +414,7 @@ describe("dynamic skill supporting files", () => {
     expect(ctx.get(DynamicSkillManifestKey)?.policy?.[0]?.markdown).toBe("# Policy");
     expect(sandbox.writes).toEqual([]);
     opened();
-    await (ctx.require(SandboxKey) as ReturnType<typeof createAccess>).drain();
+    await settle(ctx);
     expect(writtenPaths(sandbox)).toContain(`${SKILL_ROOT}/policy/rules.md`);
   });
 
@@ -520,7 +521,7 @@ describe("dynamic skill supporting files", () => {
         resolvers: [resolver],
       });
       await work?.(access);
-      await access.drain();
+      await access.settle();
       state = await access.captureState();
     };
     const rules = (index: number) => sandboxes[index]?.files.get(`${SKILL_ROOT}/policy/rules.md`);
@@ -604,6 +605,24 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
   });
 
+  it("forgets a changed package even when its queued work fails before writing", async () => {
+    const { access, ctx, sandbox } = createCtx();
+    let content = "A";
+    const resolver = createResolver("policy", () =>
+      makeSkill("Policy", "# Policy", { "a.md": content }),
+    );
+    await dispatch(ctx, resolver);
+    expect(ctx.get(DynamicSkillSandboxKey)).toHaveProperty("policy");
+
+    content = "B";
+    vi.spyOn(access, "captureState").mockRejectedValueOnce(new Error("provider unavailable"));
+    await dispatch(ctx, resolver);
+    expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+
+    await dispatch(ctx, resolver);
+    expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("B");
+  });
+
   it("rewrites a package after a failed write", async () => {
     const { ctx, sandbox } = createCtx();
     let content = "A";
@@ -614,7 +633,7 @@ describe("dynamic skill supporting files", () => {
 
     content = "B";
     vi.spyOn(sandbox.session, "writeFiles").mockRejectedValueOnce(new Error("disk full"));
-    await expect(dispatch(ctx, resolver)).rejects.toThrow("disk full");
+    await dispatch(ctx, resolver);
     expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
 
     content = "A";

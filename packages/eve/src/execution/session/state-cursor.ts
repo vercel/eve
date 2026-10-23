@@ -27,8 +27,6 @@ export class SessionStateCursor {
   /** Session steps adopted so far, and those still running. */
   private adopted = 0;
   private running = 0;
-  /** A step that ran beside the session's own steps, while its delta applies. */
-  private sideAdoption: Promise<void> | undefined;
 
   constructor(
     input: SessionStateValues & {
@@ -66,7 +64,6 @@ export class SessionStateCursor {
   async advance<T extends SessionStateTransition>(
     step: (state: SessionStepState) => Promise<T>,
   ): Promise<T> {
-    if (this.sideAdoption !== undefined) await this.sideAdoption;
     const { serializedContext, sessionState } = this.values;
     return await this.adopt(
       () => step({ serializedContext, sessionState, sessionWritable: this.sessionWritable }),
@@ -78,7 +75,6 @@ export class SessionStateCursor {
   async advanceWithHistory<T extends SessionStateTransition>(
     step: (state: SessionHistoryStepState) => Promise<T>,
   ): Promise<T> {
-    if (this.sideAdoption !== undefined) await this.sideAdoption;
     return await this.adopt(() => step({ ...this.values, sessionWritable: this.sessionWritable }), {
       withHistory: true,
     });
@@ -86,10 +82,10 @@ export class SessionStateCursor {
 
   /**
    * Runs a step beside the session's own steps, which do not wait for it.
-   * Its delta applies only while `wanted()` holds and no other step ran or is
-   * running meanwhile; otherwise it is dropped and this returns `false`. A
-   * step run this way must leave nothing that dropping its delta would lose
-   * for good.
+   * Its delta applies only while `wanted()` holds, no other step ran or is
+   * running meanwhile, and it adds no session address; otherwise it is
+   * dropped and this returns `false`. A step run this way must leave nothing
+   * that dropping its delta would lose for good.
    */
   async advanceBeside<T extends SessionStateTransition>(
     step: (state: SessionStepState) => Promise<T>,
@@ -102,26 +98,17 @@ export class SessionStateCursor {
       sessionState: base.sessionState,
       sessionWritable: this.sessionWritable,
     });
-    if (
-      !wanted() ||
-      this.adopted !== adopted ||
-      this.running > 0 ||
-      this.sideAdoption !== undefined
-    ) {
-      return false;
-    }
+    if (!wanted() || this.adopted !== adopted || this.running > 0) return false;
     if (result.stateDelta.history !== undefined) {
       throw new Error("A session step that was not given the history cannot change it.");
     }
     const next = applySessionStateDelta(base, result.stateDelta);
-    const adoption = this.inbox.claimSessionHooks(sessionHookTokens(next)).then(() => {
-      this.values = next;
-      this.adopted++;
-    });
-    this.sideAdoption = adoption.finally(() => {
-      this.sideAdoption = undefined;
-    });
-    await adoption;
+    // Applied synchronously, so no session step can start between the checks and the change;
+    // claiming a new address would need an await.
+    const tokens = new Set(sessionHookTokens(base));
+    if (sessionHookTokens(next).some((token) => !tokens.has(token))) return false;
+    this.values = next;
+    this.adopted++;
     return true;
   }
 

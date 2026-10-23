@@ -198,7 +198,7 @@ describe("ensureSandboxAccess", () => {
     expect(value.start).toHaveBeenCalledOnce();
   });
 
-  it("retries failed queued work when the sandbox is used, and drain throws when it fails again", async () => {
+  it("retries failed queued work once before later work, then drops it without failing", async () => {
     const value = fixture();
     const access = await ensureSandboxAccess({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
@@ -207,19 +207,58 @@ describe("ensureSandboxAccess", () => {
       sessionId: "session-1",
       state: null,
     });
-    const work = vi
-      .fn(async (_open: () => Promise<unknown>) => {})
-      .mockRejectedValueOnce(new Error("disk full"))
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValue(new Error("disk still full"));
+    const order: string[] = [];
+    const flaky = vi
+      .fn(async (_open: () => Promise<unknown>) => {
+        order.push("flaky");
+      })
+      .mockRejectedValueOnce(new Error("disk full"));
+    const broken = vi.fn(async (_open: () => Promise<unknown>) => {
+      order.push("broken");
+      throw new Error("disk still full");
+    });
 
-    access.prepare(work);
+    access.prepare(flaky);
+    access.prepare(broken);
+    access.prepare(async () => void order.push("later"));
+
+    await expect(access.settle()).resolves.toBeUndefined();
     await expect(access.get()).resolves.toBeTruthy();
-    expect(work).toHaveBeenCalledTimes(2);
+    expect(flaky).toHaveBeenCalledTimes(2);
+    expect(order).toEqual(["flaky", "broken", "broken", "later"]);
+  });
 
-    access.prepare(work);
-    await expect(access.drain()).rejects.toThrow("disk still full");
-    expect(work).toHaveBeenCalledTimes(4);
+  it("resumes a recorded sandbox in the background but never starts one", async () => {
+    const value = fixture();
+    const recorded = { session: { providerName: "test", state: null, stateProtocolVersion: 1 } };
+    const build = (state: typeof recorded | null) =>
+      ensureSandboxAccess({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        nodeId: "__root__",
+        registry: value.registry,
+        sessionId: "session-1",
+        state,
+      });
+
+    const unrecorded = await build(null);
+    unrecorded.resumeRecorded();
+    await unrecorded.settle();
+    expect(value.create).not.toHaveBeenCalled();
+
+    // `resume()` (called with arguments) finds the sandbox gone; `start()` still works.
+    const createNow = value.create.getMockImplementation()!;
+    value.create.mockImplementation((async (...args: unknown[]) => {
+      if (args.length > 0) throw new SandboxSessionGoneError("The sandbox is gone.");
+      return await createNow();
+    }) as typeof createNow);
+    const gone = await build(recorded);
+    gone.resumeRecorded();
+    await gone.settle();
+    expect(value.start).not.toHaveBeenCalled();
+
+    // A consumer that needs the sandbox still gets a fresh one.
+    await expect(gone.get()).resolves.toBeTruthy();
+    expect(value.start).toHaveBeenCalledOnce();
   });
 
   it("keeps missing production artifacts fatal without starting a sandbox", async () => {

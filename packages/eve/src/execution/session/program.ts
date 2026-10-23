@@ -250,8 +250,9 @@ async function runSessionLoop(
           queue.pendingCount === 0 &&
           !inbox.hasPending()
         ) {
-          // The successor then resumes the sandbox this owner's prewarm started.
-          await prewarming;
+          // Moving the session must not wait for, or later absorb, the prewarm
+          // step; the successor reaches its sandbox through the upserting `start()`.
+          awaitingFirstInput = false;
           const deadline = sessionTimeout?.getDeadline();
           const result = await handoff.tryPrewarmTransfer(
             transferState(),

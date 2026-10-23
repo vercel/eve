@@ -111,12 +111,23 @@ function syncDynamicSkillFiles(input: {
   readonly next: ReadonlyMap<string, SandboxSkillPackage>;
 }): void {
   const { ctx, kept, previous, next } = input;
-  const hasWithdrawn = Object.keys(ctx.get(DynamicSkillSandboxKey) ?? {}).some(
-    (name) => !kept.has(name),
+  // Forget changed packages before the write is queued: the manifest already
+  // names the new revision, and if the write never lands, this keeps the next
+  // dispatch from counting the old files as current.
+  const recorded = ctx.get(DynamicSkillSandboxKey) ?? {};
+  const changed = [...next.values()].filter(
+    ({ revision, skill }) => previous.get(skill.name) !== revision && skill.name in recorded,
   );
-  if (!hasWithdrawn && next.size === 0) return;
+  if (changed.length > 0) {
+    const forgotten = { ...recorded };
+    for (const { skill } of changed) delete forgotten[skill.name];
+    ctx.set(DynamicSkillSandboxKey, forgotten);
+  }
 
-  const access = ctx.require(SandboxKey);
+  // Markdown-only skills never need a sandbox; work queued earlier in this
+  // step implies one exists, so without one there is nothing to withdraw.
+  const access = next.size === 0 ? ctx.get(SandboxKey) : ctx.require(SandboxKey);
+  if (access === undefined) return;
   access.prepare(async (open) => {
     // Read when the work runs: earlier work queued in this step may have changed it.
     // The written record, not the manifest, finds withdrawn files: a skill that

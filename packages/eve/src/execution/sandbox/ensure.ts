@@ -40,7 +40,6 @@ import {
   getSandboxEnvironmentRuntime,
   runWithSandboxConstructorRuntime,
 } from "#shared/sandbox-environment.js";
-import type { SandboxPreparation } from "#sandbox/state.js";
 import { isSandboxPreparedArtifact, type SandboxDeleteOptions } from "#shared/sandbox-provider.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
@@ -83,13 +82,13 @@ export interface EnsuredSandboxAccess extends SandboxAccess {
    */
   release(): Promise<void>;
   /**
-   * Waits for the work `prepare()` queued. Failed work is retried once, and a
-   * second failure throws, so a step never commits a sandbox missing what it
-   * queued. A failed open with no queued work is left for the next `get()`.
+   * Resumes the sandbox the session recorded, in the background, so a turn
+   * that needs it waits only for the rest. Never starts one: does nothing
+   * when nothing is recorded, and leaves a gone sandbox for `get()`.
    */
-  drain(): Promise<void>;
-  /** Whether the session recorded a sandbox it can resume. */
-  hasRecordedSandbox(): boolean;
+  resumeRecorded(): void;
+  /** Waits for the work `prepare()` and `resumeRecorded()` queued; never throws. */
+  settle(): Promise<void>;
 }
 
 /** A connection this access opened, with the lifecycle eve maps onto it. */
@@ -142,10 +141,13 @@ export async function ensureSandboxAccess(
       async get() {
         return null;
       },
-      async drain() {},
-      hasRecordedSandbox: () => false,
+      async open() {
+        return null;
+      },
       prepare() {},
       async release() {},
+      resumeRecorded() {},
+      async settle() {},
       async stop() {},
     };
   }
@@ -273,7 +275,7 @@ export async function ensureSandboxAccess(
     return opened;
   }
 
-  async function resolveOpened(): Promise<OpenedSandbox> {
+  async function resolveOpened(options: { readonly resumeOnly: boolean }): Promise<OpenedSandbox> {
     const definition = activeDefinition();
     const provider = getSandboxEnvironmentRuntime(definition.environment);
     const context = providerContext("sandbox-initialization");
@@ -288,11 +290,14 @@ export async function ensureSandboxAccess(
       });
     }
 
+    if (persisted === null && options.resumeOnly) {
+      throw new Error("This session has not recorded a sandbox to resume.");
+    }
     if (persisted !== null) {
       try {
         return await resumePersisted(context);
       } catch (error) {
-        if (!SandboxSessionGoneError.is(error)) throw error;
+        if (!SandboxSessionGoneError.is(error) || options.resumeOnly) throw error;
         log.warn("session sandbox is gone, starting a fresh one", {
           error,
           providerName: persisted.providerName,
@@ -358,39 +363,44 @@ export async function ensureSandboxAccess(
     return opened;
   }
 
-  function requireOpened(): Promise<OpenedSandbox> {
+  function requireOpened(options = { resumeOnly: false }): Promise<OpenedSandbox> {
     if (requiring !== undefined) return requiring;
-    requiring = resolveOpened().catch((error: unknown) => {
+    requiring = resolveOpened(options).catch((error: unknown) => {
       requiring = undefined;
       throw error;
     });
     return requiring;
   }
 
-  // Background work runs in order and shares one open; the chain settles even when a job fails.
-  let preparations: Promise<void> = Promise.resolve();
-  const failedPreparations: SandboxPreparation[] = [];
-  const openForPreparation = async () => (await requireOpened()).sandbox;
-
-  function enqueue(work: SandboxPreparation | undefined): Promise<void> {
-    const job = preparations.then(async () => {
-      if (work === undefined) await requireOpened();
-      else await work(openForPreparation);
-    });
-    preparations = job.catch((error: unknown) => {
-      if (work !== undefined) failedPreparations.push(work);
-      log.warn("background sandbox preparation failed; eve retries it when the sandbox is used", {
-        error,
-        sessionId: input.sessionId,
-      });
-    });
-    return job;
+  /** Opens the sandbox, starting a fresh one when a background resume found it gone. */
+  async function openSession(): Promise<RuntimeSandboxSession> {
+    try {
+      return (await requireOpened()).sandbox;
+    } catch (error) {
+      // Joined a resume-only open from `resumeRecorded()`; this one may start a sandbox.
+      if (!SandboxSessionGoneError.is(error)) throw error;
+      return (await requireOpened()).sandbox;
+    }
   }
 
-  async function drain(): Promise<void> {
-    await preparations;
-    const retries = failedPreparations.splice(0).map((work) => enqueue(work));
-    await Promise.all(retries);
+  // Background work runs in order and shares one open. A failed job is retried
+  // once before later work runs, so work never lands out of order; a job that
+  // fails again is dropped. Its owner must leave a record that redoes it later.
+  let preparations: Promise<void> = Promise.resolve();
+
+  function enqueue(job: () => Promise<unknown>): void {
+    preparations = preparations.then(async () => {
+      try {
+        await job();
+      } catch {
+        await job().catch((error: unknown) => {
+          log.warn("background sandbox preparation failed; it runs again when it is needed", {
+            error,
+            sessionId: input.sessionId,
+          });
+        });
+      }
+    });
   }
 
   function track(current: OpenedSandbox) {
@@ -467,14 +477,19 @@ export async function ensureSandboxAccess(
       }
       forgetSandbox(provider.providerName);
     },
-    drain,
     async get() {
-      await drain();
-      return (await requireOpened()).sandbox;
+      await preparations;
+      return await openSession();
     },
-    hasRecordedSandbox: () => persisted !== null,
+    open: openSession,
     prepare(work) {
-      void enqueue(work).catch(() => undefined);
+      enqueue(work === undefined ? requireOpened : () => work(openSession));
+    },
+    resumeRecorded() {
+      if (persisted !== null) enqueue(() => requireOpened({ resumeOnly: true }));
+    },
+    async settle() {
+      await preparations;
     },
     async release() {
       await preparations;

@@ -287,6 +287,9 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       await preparations;
       return session;
     },
+    async open(): Promise<NetworkPolicySandboxSession> {
+      return session;
+    },
     prepare(work) {
       preparations = preparations.then(() => work?.(async () => session)).catch(() => undefined);
     },
