@@ -1068,10 +1068,9 @@ describe("compactMessages: summarization fallback", () => {
     const tail = [user("do the thing"), recentCall, recentResult];
     const messages = [oldProse, ...tail];
 
-    // Derive a threshold between the stripped and verbatim tail sizes so the
-    // regime is explicit rather than encoded in magic numbers. The summary is
-    // sized to exceed the window-selection reserve, which is what makes the
-    // verbatim tail overshoot after the summary head is added.
+    // The threshold sits between the stripped and verbatim sizes, and half of
+    // it still holds the whole tail, so the window keeps it and only the
+    // summary head pushes the verbatim candidate over.
     const summary = "s".repeat(2_400);
     const summaryHead = [compactionMarker(CHECKPOINT_MARKER), assistant(summary)];
     const verbatimSize = estimateTokens([...summaryHead, ...tail]);
@@ -1080,9 +1079,10 @@ describe("compactMessages: summarization fallback", () => {
       user("do the thing"),
       assistant("Running the tool."),
     ]);
-    const threshold = Math.floor((verbatimSize + strippedSize) / 2) + ENVELOPE_TOKENS;
-    expect(strippedSize + ENVELOPE_TOKENS).toBeLessThan(threshold);
-    expect(verbatimSize + ENVELOPE_TOKENS).toBeGreaterThan(threshold);
+    const threshold = Math.floor(verbatimSize) - 50;
+    expect(strippedSize).toBeLessThan(threshold);
+    expect(verbatimSize).toBeGreaterThan(threshold);
+    expect(estimateTokens(tail)).toBeLessThanOrEqual(threshold / 2);
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 3,
@@ -1159,71 +1159,42 @@ describe("compactMessages: summarization fallback", () => {
   });
 });
 
-describe("compactMessages: current message larger than its share of the threshold", () => {
-  // The provider counts 1.6x what the character estimate does for URL- and
-  // JSON-heavy text, so a history eve thinks fits can still be over the limit.
-  const PROVIDER_RATIO = 1.6;
+describe("compactMessages: fixed kept-tail budget", () => {
   const THRESHOLD = 10_000;
+  const BUDGET = THRESHOLD / 2;
 
   function bigTaskText(): string {
-    // About 6,500 estimated tokens: fits the recent-window reserve, but is
-    // 10,400 tokens to the provider, over the threshold on its own.
     return "task context line. ".repeat(1_370);
   }
 
-  function bigTask(): ModelMessage {
-    return user(`${bigTaskText()}FINAL SENTINEL`);
-  }
-
-  function providerConfig(history: readonly ModelMessage[]): CompactionConfig {
+  function config(history: readonly ModelMessage[], threshold = THRESHOLD): CompactionConfig {
     return {
-      lastKnownInputTokens: Math.round(estimateTokens(history) * PROVIDER_RATIO),
+      lastKnownInputTokens: Math.round(estimateTokens(history)),
       lastKnownPromptMessageCount: history.length,
       recentWindowSize: 4,
-      threshold: THRESHOLD,
+      threshold,
     };
   }
 
-  it("compacts once and stays under the threshold on the provider's count", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    let history: ModelMessage[] = [
-      bigTask(),
-      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
-    ];
-    let compactions = 0;
-
-    for (let step = 1; step <= 4; step += 1) {
-      const stepConfig = providerConfig(history);
-      if (shouldCompact(history, stepConfig)) {
-        compactions += 1;
-        history = await compactMessages(history, stepConfig, summarizer);
-      }
-      history.push(...toolExchange({ callId: `call-${step}`, payloadChars: 50 }));
-    }
-
-    expect(compactions).toBe(1);
-    expect(estimateTokens(history) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
-  });
-
-  it("keeps the newest part of the message and says the rest was cut", async () => {
+  it("keeps the newest part of an oversized request and says the rest was cut", async () => {
     const summarizer = summarizeWith("checkpoint text");
     const history: ModelMessage[] = [
-      bigTask(),
+      user(bigTaskText().repeat(2) + "FINAL SENTINEL"),
       ...toolExchange({ callId: "call-0", payloadChars: 50 }),
     ];
 
-    const result = await compactMessages(history, providerConfig(history), summarizer);
+    const result = await compactMessages(history, config(history), summarizer);
 
     const kept = result.filter((message) => message.role === "user" && !isCheckpoint(message));
     expect(kept).toHaveLength(1);
     const content = String(kept[0]?.content);
     expect(content).toContain("FINAL SENTINEL");
     expect(content).toMatch(/^\[eve: the first \d+ characters of this message were cut/);
-    expect(content.length).toBeLessThan(String(bigTask().content).length / 2);
+    expect(estimateTokens(kept)).toBeLessThanOrEqual(BUDGET);
     expect(summarizer).toHaveBeenCalledOnce();
   });
 
-  it("leaves a message that fits its share untouched", async () => {
+  it("leaves a request that fits the budget untouched", async () => {
     const task = user("Keep these requirements. ".repeat(40));
     const history: ModelMessage[] = [
       user("old notes ".repeat(4_000)),
@@ -1231,9 +1202,88 @@ describe("compactMessages: current message larger than its share of the threshol
       ...toolExchange({ callId: "call-0", payloadChars: 50 }),
     ];
 
-    const result = await compactMessages(history, providerConfig(history), summarizeWith("s"));
+    const result = await compactMessages(history, config(history), summarizeWith("s"));
 
     expect(result).toContainEqual(task);
+  });
+
+  it("sends the whole cut-off head of the request to the summarizer", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const task = user(`${"a".repeat(8_000)}MIDDLE MARKER${"b".repeat(26_000)}END SENTINEL`);
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(history, config(history), summarizer);
+
+    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+    expect(prompt).toContain("MIDDLE MARKER");
+    expect(prompt).not.toContain("END SENTINEL");
+    expect(JSON.stringify(result)).toContain("END SENTINEL");
+  });
+
+  it("gives the summarizer as much of an oversized head as the budget holds", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const task = user(`${"a ".repeat(5_000)}EARLY MARKER ${"b ".repeat(40_000)}END SENTINEL`);
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    await compactMessages(history, config(history), summarizer);
+
+    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+    expect(prompt).toContain("EARLY MARKER");
+    expect(prompt).not.toContain("END SENTINEL");
+  });
+
+  it("cuts the text part of a request that carries an attachment", async () => {
+    const file = {
+      data: new URL("https://example.com/spec.pdf"),
+      mediaType: "application/pdf",
+      type: "file" as const,
+    };
+    const task: ModelMessage = {
+      content: [{ text: `${bigTaskText().repeat(2)}FINAL SENTINEL`, type: "text" }, file],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(
+      history,
+      config(history),
+      summarizeWith("checkpoint text"),
+    );
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const parts = Array.isArray(kept?.content) ? kept.content : [];
+    expect(parts.find((part) => part.type === "text")).toMatchObject({
+      text: expect.stringContaining("FINAL SENTINEL"),
+    });
+    expect(parts).toContainEqual(file);
+  });
+
+  it("cuts across every text part of a request", async () => {
+    const task: ModelMessage = {
+      content: [
+        { text: bigTaskText().repeat(2), type: "text" },
+        { text: `${bigTaskText()}FINAL SENTINEL`, type: "text" },
+      ],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(
+      history,
+      config(history),
+      summarizeWith("checkpoint text"),
+    );
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const texts = (Array.isArray(kept?.content) ? kept.content : []).flatMap((part) =>
+      part.type === "text" ? [part.text] : [],
+    );
+    expect(texts[0]).toContain("were cut during context compaction");
+    expect(texts.join("")).toContain("FINAL SENTINEL");
   });
 
   it("throws, and says what to do, when the summary alone is over the threshold", async () => {
@@ -1257,8 +1307,6 @@ describe("compactMessages: current message larger than its share of the threshol
   });
 
   it("throws when compaction shrinks the history but leaves it over the threshold", async () => {
-    // Threshold 10k, a 45k-character summary: every compaction used to
-    // shrink the history a little, stay over the limit, and run again.
     const history = [user("notes ".repeat(9_000)), assistant("ok"), user("go on")];
 
     await expect(
@@ -1270,243 +1318,43 @@ describe("compactMessages: current message larger than its share of the threshol
     ).rejects.toThrow(/under its limit/);
   });
 
-  it("rejects a result that only fits without the compaction prompt overhead", async () => {
-    // The result is under the threshold, but shouldCompact adds the prompt
-    // overhead and would fire again on the next step.
-    const history = [user("notes ".repeat(2_000)), assistant("ok"), user("go on")];
-    const threshold = estimateTokens(history) - 500;
-
-    await expect(
-      compactMessages(
-        history,
-        { recentWindowSize: 1, threshold },
-        summarizeWith("s".repeat((threshold - 200) * 4)),
-      ),
-    ).rejects.toThrow(/under its limit/);
-  });
-
-  it("sends the whole cut-off head of the message to the summarizer", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    const task = user(`${"a".repeat(14_000)}MIDDLE MARKER${"b".repeat(14_000)}END SENTINEL`);
-    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
-
-    const result = await compactMessages(history, providerConfig(history), summarizer);
-
-    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
-    expect(prompt).toContain("MIDDLE MARKER");
-    expect(prompt).not.toContain("END SENTINEL");
-    expect(JSON.stringify(result)).toContain("END SENTINEL");
-  });
-
-  it("cuts the text part of a message that carries an attachment", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    const file = {
-      data: new URL("https://example.com/spec.pdf"),
-      mediaType: "application/pdf",
-      type: "file" as const,
-    };
-    const task: ModelMessage = {
-      content: [{ text: `${bigTaskText()}FINAL SENTINEL`, type: "text" }, file],
-      role: "user",
-    };
-    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
-
-    const result = await compactMessages(history, providerConfig(history), summarizer);
-
-    const kept = result.find(
-      (message) => message.role === "user" && Array.isArray(message.content),
-    );
-    const parts = Array.isArray(kept?.content) ? kept.content : [];
-    expect(parts.find((part) => part.type === "text")).toMatchObject({
-      text: expect.stringContaining("FINAL SENTINEL"),
-    });
-    expect(parts).toContainEqual(file);
-    expect(estimateTokens(result) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
-  });
-
-  it("still summarizes the measured message when a big tool result arrives after the last provider count", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    const measured: ModelMessage[] = [
-      bigTask(),
-      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
-    ];
-    const history = [
-      ...measured,
-      ...toolExchange({ callId: "call-1", payloadChars: 30_000 }),
-      user("go on"),
+  it("shortens a huge tool result in the kept tail instead of cutting the request or throwing", async () => {
+    const request = user("Read the file and report what is in it.");
+    const history: ModelMessage[] = [
+      user("old notes ".repeat(6_000)),
+      assistant("Done."),
+      request,
+      ...toolExchange({ callId: "call-0", payloadChars: 100_000 }),
     ];
 
     const result = await compactMessages(
       history,
-      { ...providerConfig(measured), recentWindowSize: 1 },
-      summarizer,
+      { recentWindowSize: 4, threshold: 30_000 },
+      summarizeWith("checkpoint text"),
     );
 
-    expect(summarizer).toHaveBeenCalledOnce();
-    expect(JSON.stringify(result)).not.toContain("task context line");
-    expect(result.at(-1)).toEqual(user("go on"));
+    expect(result).toContainEqual(request);
+    expect(JSON.stringify(result)).toContain("Truncated by eve");
+    expect(JSON.stringify(result)).not.toContain("cut during context compaction");
+    expect(estimateTokens(result)).toBeLessThan(30_000);
   });
 
-  it("counts the cut replay at the provider's ratio", async () => {
-    // The replay is 3,125 estimated tokens, 5,000 to the provider. With a
-    // 5,000-token summary that is over the limit, though 3,125 + 5,000 is not.
-    const history: ModelMessage[] = [
-      bigTask(),
-      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
-    ];
-
-    await expect(
-      compactMessages(history, providerConfig(history), summarizeWith("s".repeat(20_000))),
-    ).rejects.toThrow(/under its limit/);
-  });
-
-  it("keeps the provider's ratio on assistant text that survives with its tool calls stripped", async () => {
-    const prose = "word ".repeat(4_400);
+  it("never keeps more than the budget word for word", async () => {
     const history: ModelMessage[] = [
       user("start"),
-      ...toolExchange({ callId: "call-0", payloadChars: 6_000, prose }),
-      user("go on"),
+      ...Array.from({ length: 12 }, (_, index) =>
+        toolExchange({ callId: `call-${index}`, payloadChars: 1_800 }),
+      ).flat(),
     ];
 
     const result = await compactMessages(
       history,
-      {
-        lastKnownInputTokens: Math.round(estimateTokens(history) * 2),
-        lastKnownPromptMessageCount: history.length,
-        recentWindowSize: 3,
-        threshold: 10_000,
-      },
+      { recentWindowSize: 40, threshold: 10_000 },
       summarizeWith("checkpoint text"),
+      true,
     );
 
-    expect(JSON.stringify(result)).not.toContain("word word");
-  });
-
-  it("does not read an unseen attachment's tokens as a reason to refuse a small summary", async () => {
-    // The provider counted a 60k-token remote PDF that the character estimate
-    // cannot see. The summary replaces it, so it is counted at its own size.
-    const pdf = {
-      data: new URL("https://example.com/big.pdf"),
-      mediaType: "application/pdf",
-      type: "file" as const,
-    };
-    const history: ModelMessage[] = [
-      { content: [{ text: "old context ".repeat(400), type: "text" }, pdf], role: "user" },
-      assistant("noted"),
-      user("continue"),
-    ];
-
-    const result = await compactMessages(
-      history,
-      {
-        lastKnownInputTokens: 60_000,
-        lastKnownPromptMessageCount: 2,
-        recentWindowSize: 1,
-        threshold: 50_000,
-      },
-      summarizeWith("s".repeat(6_000)),
-    );
-
-    expect(result[1]).toEqual(assistant("s".repeat(6_000)));
-    expect(result.at(-1)).toEqual(user("continue"));
-  });
-
-  it("gives the summarizer as much of an oversized head as the budget holds", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    const task = user(`${"a ".repeat(5_000)}EARLY MARKER ${"b ".repeat(40_000)}END SENTINEL`);
-    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
-
-    await compactMessages(history, providerConfig(history), summarizer);
-
-    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
-    expect(prompt).toContain("EARLY MARKER");
-    expect(prompt).not.toContain("END SENTINEL");
-  });
-
-  it("cuts across every text part of a message", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    const task: ModelMessage = {
-      content: [
-        { text: bigTaskText(), type: "text" },
-        { text: `${bigTaskText()}FINAL SENTINEL`, type: "text" },
-      ],
-      role: "user",
-    };
-    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
-
-    const result = await compactMessages(history, providerConfig(history), summarizer);
-
-    const kept = result.find(
-      (message) => message.role === "user" && Array.isArray(message.content),
-    );
-    const texts = (Array.isArray(kept?.content) ? kept.content : []).flatMap((part) =>
-      part.type === "text" ? [part.text] : [],
-    );
-    expect(texts[0]).toContain("were cut during context compaction");
-    expect(texts.join("")).toContain("FINAL SENTINEL");
-    expect(estimateTokens(result) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
-  });
-
-  it("does not cut a request for the gap an unseen attachment leaves", async () => {
-    const request = user(`${"plain request text ".repeat(2_100)}`);
-    const history: ModelMessage[] = [
-      {
-        content: [
-          { text: "See the attached report.", type: "text" },
-          {
-            data: new URL("https://example.com/report.pdf"),
-            mediaType: "application/pdf",
-            type: "file",
-          },
-        ],
-        role: "user",
-      },
-      assistant("Read it."),
-      request,
-    ];
-
-    const result = await compactMessages(
-      history,
-      {
-        lastKnownInputTokens: 185_000,
-        lastKnownPromptMessageCount: history.length,
-        recentWindowSize: 1,
-        threshold: 180_000,
-      },
-      summarizeWith("checkpoint text"),
-    );
-
-    expect(result.at(-1)).toEqual(request);
-  });
-
-  it("throws instead of summarizing away a request whose attachment alone is over the limit", async () => {
-    const history: ModelMessage[] = [
-      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
-      {
-        content: [
-          { text: "summarize this", type: "text" },
-          {
-            data: new URL("https://example.com/report.pdf"),
-            mediaType: "application/pdf",
-            type: "file",
-          },
-        ],
-        role: "user",
-      },
-    ];
-
-    await expect(
-      compactMessages(
-        history,
-        {
-          lastKnownInputTokens: 185_000,
-          lastKnownPromptMessageCount: history.length,
-          recentWindowSize: 1,
-          threshold: 80_000,
-        },
-        summarizeWith("checkpoint text"),
-      ),
-    ).rejects.toMatchObject({ name: "CompactionOverLimitError" });
+    expect(estimateTokens(result.slice(2))).toBeLessThanOrEqual(BUDGET);
   });
 
   it("replays the latest request, not an older oversized task, when the latest has no text", async () => {
@@ -1537,25 +1385,6 @@ describe("compactMessages: current message larger than its share of the threshol
     expect(result).toContainEqual(pdfRequest);
   });
 
-  it("summarizes once and replays a request within its share whole", async () => {
-    const summarizer = summarizeWith("checkpoint text");
-    const request: ModelMessage = { content: "request text ".repeat(750), role: "user" };
-    const history: ModelMessage[] = [
-      assistant("older text ".repeat(1_100)),
-      request,
-      assistant("later text ".repeat(550)),
-    ];
-
-    const result = await compactMessages(
-      history,
-      { recentWindowSize: 4, threshold: 5_000 },
-      summarizer,
-    );
-
-    expect(summarizer).toHaveBeenCalledOnce();
-    expect(result).toContainEqual(request);
-  });
-
   it.each([0.8, 0.9])(
     "compacts a few times, not on every step, when the request takes %s of the threshold",
     async (share) => {
@@ -1573,19 +1402,14 @@ describe("compactMessages: current message larger than its share of the threshol
             payloadChars: Math.floor(threshold * 0.06 * 4),
           }),
         );
-        const config: CompactionConfig = {
-          lastKnownInputTokens: Math.round(estimateTokens(history)),
-          lastKnownPromptMessageCount: history.length,
-          recentWindowSize: 4,
-          threshold,
-        };
-        if (shouldCompact(history, config)) {
+        const stepConfig = config(history, threshold);
+        if (shouldCompact(history, stepConfig)) {
           compactions += 1;
-          history = await compactMessages(history, config, summarizer);
+          history = await compactMessages(history, stepConfig, summarizer);
         }
       }
 
-      expect(compactions).toBeLessThanOrEqual(6);
+      expect(compactions).toBeLessThanOrEqual(5);
     },
   );
 

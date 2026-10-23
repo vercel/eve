@@ -26,7 +26,6 @@ import {
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
 import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
-import { estimateTokens, MAX_TEXT_SCALE } from "#harness/token-estimate.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -129,86 +128,6 @@ export function replaceSessionHistory(
       threshold: session.compaction.threshold,
       thresholdPercent: session.compaction.thresholdPercent,
     },
-  };
-}
-
-/**
- * Restates the provider's last token count for the history `compactMessages`
- * sees. The count covers the whole projected prompt, memory records included,
- * but compaction works on the ordinary messages only, and memory records stay
- * in the history verbatim. So: find the provider-to-estimate ratio over the
- * prompt it measured, then hand compaction (1) how many ordinary messages that
- * covered and the tokens they cost at that ratio, and (2) a threshold with the
- * memory records' tokens, at that ratio, and the request envelope taken off.
- */
-export function describeHistoryForCompaction(input: {
-  readonly compaction: CompactionConfig;
-  readonly memory: readonly ModelMessage[];
-  readonly ordinary: readonly ModelMessage[];
-  readonly previousEnvelopeTokens: number;
-  /** The history the prompt was projected from, before memory attribution was stripped. */
-  readonly promptSource: readonly ModelMessage[];
-  readonly projectedPrompt: readonly HarnessModelMessage[];
-  readonly requestEnvelopeTokens: number;
-}): CompactionConfig {
-  const { compaction, ordinary, projectedPrompt, requestEnvelopeTokens } = input;
-  const providerTokens =
-    compaction.lastKnownInputTokens === undefined
-      ? undefined
-      : Math.max(
-          0,
-          compaction.lastKnownInputTokens -
-            Math.min(input.previousEnvelopeTokens, requestEnvelopeTokens),
-        );
-  const count = compaction.lastKnownPromptMessageCount;
-  const measuredPrompt =
-    providerTokens !== undefined &&
-    count !== undefined &&
-    Number.isInteger(count) &&
-    count > 0 &&
-    count <= projectedPrompt.length
-      ? projectedPrompt.slice(0, count)
-      : undefined;
-  const promptEstimate = measuredPrompt === undefined ? 0 : estimateTokens(measuredPrompt);
-  const scale =
-    providerTokens !== undefined && promptEstimate > 0
-      ? Math.max(1, providerTokens / promptEstimate)
-      : 1;
-  // Projection passes ordinary messages through as they are and rebuilds the
-  // memory records it keeps, so the ordinary messages the provider measured
-  // are the ones still in the source history.
-  const source = new Set<ModelMessage>(input.promptSource);
-  const measuredCount =
-    measuredPrompt === undefined
-      ? undefined
-      : Math.min(measuredPrompt.filter((message) => source.has(message)).length, ordinary.length);
-  // Memory records are text, so they cost at most the text ratio; whatever gap
-  // is left stays with the ordinary messages.
-  const memoryTokens = estimateTokens(input.memory) * Math.min(scale, MAX_TEXT_SCALE);
-  const threshold = Math.max(1, compaction.threshold - requestEnvelopeTokens - memoryTokens);
-  if (providerTokens !== undefined && measuredPrompt !== undefined && measuredCount === 0) {
-    if (input.memory.length === 0) {
-      throw new Error(
-        "Compaction could not match the provider's token count to the history it measured.",
-      );
-    }
-  }
-  if (measuredCount === undefined || measuredCount === 0) {
-    return {
-      ...compaction,
-      lastKnownInputTokens: undefined,
-      lastKnownPromptMessageCount: undefined,
-      threshold,
-    };
-  }
-  return {
-    ...compaction,
-    lastKnownInputTokens: Math.max(
-      estimateTokens(ordinary.slice(0, measuredCount)),
-      (providerTokens ?? 0) - memoryTokens,
-    ),
-    lastKnownPromptMessageCount: measuredCount,
-    threshold,
   };
 }
 
@@ -332,15 +251,19 @@ export async function maybeCompact(input: {
     input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
       canonical.ordinary,
   );
-  const historyCompaction = describeHistoryForCompaction({
-    compaction: session.compaction,
-    memory: canonical.memory,
-    ordinary,
-    previousEnvelopeTokens: getRequestEnvelopeTokens(session) ?? 0,
-    promptSource: promptMessages,
-    projectedPrompt: projectedPromptMessages,
-    requestEnvelopeTokens: input.requestEnvelopeTokens ?? 0,
-  });
+  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
+  const historyCompaction: CompactionConfig = {
+    ...session.compaction,
+    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens),
+    lastKnownInputTokens:
+      session.compaction.lastKnownInputTokens === undefined
+        ? undefined
+        : Math.max(
+            0,
+            session.compaction.lastKnownInputTokens -
+              Math.min(getRequestEnvelopeTokens(session) ?? 0, requestEnvelopeTokens),
+          ),
+  };
   let compactedOrdinary: ModelMessage[] = [...ordinary];
   let failure: { readonly error: unknown } | undefined;
   try {
@@ -350,6 +273,17 @@ export async function maybeCompact(input: {
         historyCompaction,
         summarize,
         input.force === true,
+        input.requestEnvelopeTokens === undefined
+          ? undefined
+          : Math.max(
+              0,
+              getInputTokenCount(
+                projectedPromptMessages,
+                session.compaction,
+                requestEnvelopeTokens,
+                getRequestEnvelopeTokens(session),
+              ) - requestEnvelopeTokens,
+            ),
       );
     }
   } catch (error) {

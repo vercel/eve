@@ -12,10 +12,17 @@ import {
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { countUnsizedParts, estimateTokens, MAX_TEXT_SCALE } from "#harness/token-estimate.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
-const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
+/**
+ * Most of the conversation kept word for word next to a compaction summary.
+ * A fixed budget, not a share of the context window: the history after a
+ * compaction is the summary plus at most this much, however far the character
+ * estimate sits below the provider's count (about 1.6x on URL- and JSON-heavy
+ * text), so the next compaction is far off.
+ */
+const KEPT_TAIL_TOKENS = 20_000;
 
 /**
  * Element type of a non-string `ModelMessage.content` array.
@@ -87,13 +94,12 @@ export type CompactionSummarizer = (prompt: {
 
 /** Conversation regions and config handed to each compaction heuristic. */
 interface CompactionHeuristicInput {
-  readonly calibration: Calibration;
-  readonly checkpointHead: readonly ModelMessage[];
   readonly config: CompactionConfig;
-  readonly conversation: readonly ModelMessage[];
   readonly older: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
+  readonly replay: ModelMessage | undefined;
+  readonly tokenEstimateAdjustment: number;
 }
 
 /**
@@ -122,115 +128,52 @@ const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolResultCapHeur
  * usually suffices with no model call and no rewriting.
  */
 function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
-  const cappedOlder = capToolResults(input.older);
+  const checkpointHead: ModelMessage[] =
+    input.previousCheckpoint === undefined
+      ? []
+      : [
+          createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
+          { content: input.previousCheckpoint, role: "assistant" },
+        ];
   const capped = withResumptionGuard(
-    [...input.checkpointHead, ...cappedOlder, ...input.recent],
-    findLastRealUserMessage(input.conversation),
+    [...checkpointHead, ...capToolResults(input.older), ...input.recent],
+    input.replay,
     input.config.threshold,
   );
 
-  // A capped result is still measured text, only shorter, so it keeps its original's ratio.
-  const measured = new Set(input.calibration.measured);
-  input.older.forEach((message, index) => {
-    const replacement = cappedOlder[index];
-    if (replacement !== undefined && measured.has(message)) {
-      measured.add(replacement);
-    }
-  });
-
-  // Capping can be a near no-op when the older region holds few large
-  // results; accepting one that still trips shouldCompact would let it
+  // Evaluate on the same ruler shouldCompact uses (envelope included):
+  // capping can be a near no-op when the older region holds few large
+  // results, and accepting one on a looser ruler would let shouldCompact
   // re-fire every step without compaction ever making progress.
-  return fitsThreshold(capped, input.config, { ...input.calibration, measured })
+  const evaluation = evaluateThreshold(
+    capped,
+    input.config,
+    "should-compact",
+    input.tokenEstimateAdjustment,
+  );
+  return evaluation.type === "within-limit"
     ? { messages: capped, type: "within-limit" }
     : { type: "insufficient" };
 }
 
 /**
- * How far the character estimate sits below the provider's count, learned from
- * the messages the provider last measured. It applies only to those messages
- * (tracked by identity, and carried to the rebuilt copies of them): a
- * summary, a cut note or a message appended after the measurement is new text
- * the provider has not counted, so it stays at the estimate.
+ * Measures a candidate history against the compaction threshold.
+ * The "should-compact" ruler includes the fixed prompt-envelope overhead that
+ * {@link shouldCompact} adds, so a history accepted on it cannot immediately
+ * re-trigger compaction; "estimate" is the bare history size.
  */
-interface Calibration {
-  readonly measured: Set<ModelMessage>;
-  /** The provider-to-estimate ratio for measured messages' text. */
-  readonly scale: number;
-  /** Tokens added per file part the estimate cannot size: the gap text cannot explain. */
-  readonly tokensPerUnsizedPart: number;
-}
-
-const UNCALIBRATED: Omit<Calibration, "measured"> = { scale: 1, tokensPerUnsizedPart: 0 };
-
-function calibrate(messages: readonly ModelMessage[], config: CompactionConfig): Calibration {
-  const provider = config.lastKnownInputTokens;
-  const count = config.lastKnownPromptMessageCount;
-  if (
-    provider === undefined ||
-    count === undefined ||
-    !Number.isInteger(count) ||
-    count <= 0 ||
-    count > messages.length
-  ) {
-    return { measured: new Set(), ...UNCALIBRATED };
-  }
-  const prefix = messages.slice(0, count);
-  const estimated = estimateTokens(prefix);
-  if (estimated <= 0) {
-    return { measured: new Set(prefix), ...UNCALIBRATED };
-  }
-  const ratio = Math.max(1, provider / estimated);
-  const unsized = countUnsizedParts(prefix);
-  // Text cannot cost more than its bytes, so a larger gap belongs to the parts
-  // the estimate cannot size. With none of those, the ratio is all there is.
-  if (unsized === 0) {
-    return { measured: new Set(prefix), scale: ratio, tokensPerUnsizedPart: 0 };
-  }
-  const scale = Math.min(ratio, MAX_TEXT_SCALE);
-  return {
-    measured: new Set(prefix),
-    scale,
-    tokensPerUnsizedPart: Math.max(0, provider - estimated * scale) / unsized,
-  };
-}
-
-function calibratedTokens(messages: readonly ModelMessage[], calibration: Calibration): number {
-  let total = 0;
-  for (const message of messages) {
-    total += messageTokens(message, calibration);
-  }
-  return total;
-}
-
-function messageTokens(message: ModelMessage, calibration: Calibration): number {
-  const estimate = estimateTokens([message]);
-  return calibration.measured.has(message)
-    ? estimate * calibration.scale + unsizedCharge(message, calibration)
-    : estimate;
-}
-
-/** What a measured message's unsized file parts cost, which cutting its text cannot reduce. */
-function unsizedCharge(message: ModelMessage, calibration: Calibration): number {
-  return calibration.measured.has(message)
-    ? countUnsizedParts([message]) * calibration.tokensPerUnsizedPart
-    : 0;
-}
-
-/**
- * The one test every candidate history must pass: on the ruler
- * {@link shouldCompact} uses (fixed prompt-envelope overhead included), with
- * the provider-measured messages scaled to the provider's count. A history
- * that passes cannot re-trigger compaction on the next step.
- */
-function fitsThreshold(
+function evaluateThreshold(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
-  calibration: Calibration,
-): boolean {
-  return (
-    calibratedTokens(messages, calibration) + COMPACTION_PROMPT_OVERHEAD_TOKENS <= config.threshold
-  );
+  ruler: "estimate" | "should-compact",
+  tokenEstimateAdjustment = 0,
+): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
+  const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
+  const estimatedTokens = estimateTokens(messages) + overhead + tokenEstimateAdjustment;
+  return {
+    estimatedTokens,
+    type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
+  };
 }
 
 /**
@@ -238,97 +181,60 @@ function fitsThreshold(
  * order, then fall back to summarizing the older region with the compaction
  * model — keeping the recent tail verbatim when it fits, degrading it to
  * text-only, then shrinking the window.
- *
- * `estimateTokens` is a character ruler and can sit well below the provider's
- * count (1.6x on URL- and JSON-heavy text). Acceptance checks therefore scale
- * the messages the provider last measured by that provider-to-estimate ratio:
- * a result accepted here must not re-trigger {@link shouldCompact} on the
- * next step. A compaction that frees nothing and stays over the threshold
- * throws, so the caller stops instead of compacting again on every step.
  */
 export async function compactMessages(
   messages: ModelMessage[],
   config: CompactionConfig,
   summarize: CompactionSummarizer,
   forceSummary = false,
+  historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
-  const calibration = calibrate(messages, config);
-  // The current request is replayed whole when it fits next to the summary;
-  // it is cut only when that does not fit.
-  const compacted = await compactWithScale(messages, config, summarize, forceSummary, calibration);
-  if (!fitsThreshold(compacted, config, calibration)) {
-    const remaining = Math.round(
-      calibratedTokens(compacted, calibration) + COMPACTION_PROMPT_OVERHEAD_TOKENS,
-    );
-    throw new CompactionOverLimitError(
-      `Context compaction could not bring the conversation under its limit: it is still about ${remaining} tokens against a ${config.threshold}-token limit. Start a new session, or send a smaller message.`,
-    );
-  }
-  return compacted;
-}
-
-async function compactWithScale(
-  messages: ModelMessage[],
-  config: CompactionConfig,
-  summarize: CompactionSummarizer,
-  forceSummary: boolean,
-  calibration: Calibration,
-): Promise<ModelMessage[]> {
-  const { checkpointHead, conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const { conversation: fullConversation, previousCheckpoint } =
+    extractPreviousCheckpoint(messages);
+  // Tool results in the kept tail are shortened too: one large file read would
+  // otherwise take the whole tail budget.
+  const conversation = capToolResults(fullConversation);
+  const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
-  let keep = selectRecentWindowSize(conversation, recentConfig);
 
-  // The current request is replayed whole after every compaction. One that
-  // takes more than half the threshold leaves no room for the summary and the
-  // next steps' tool results, so compaction would fire again on every step:
-  // replay only its newest part and summarize the cut-off head.
+  // The current request is replayed after every compaction. One over the tail
+  // budget keeps only its newest part; the cut-off start goes to the summarizer.
   const currentIndex = findLastRealUserIndex(conversation);
   const current = conversation[currentIndex];
-  const cut =
-    !fitsThreshold(messages, config, calibration) && current !== undefined
-      ? fitCurrentMessage(
-          current,
-          config.threshold,
-          calibration.measured.has(current) ? calibration.scale : 1,
-          unsizedCharge(current, calibration),
-        )
-      : undefined;
-  if (cut !== undefined) {
-    // The replay is the measured message's newest part: it keeps that message's ratio.
-    if (current !== undefined && calibration.measured.has(current)) {
-      calibration.measured.add(cut.replay);
-    }
-    keep = Math.min(keep, conversation.length - 1 - currentIndex);
-  }
-  // A request the window leaves out is replayed after the summary: the window
-  // has to leave room for it.
-  const replayed = cut?.replay ?? current;
-  if (replayed !== undefined && currentIndex < conversation.length - keep) {
-    keep = Math.min(
-      keep,
-      selectRecentWindowSize(conversation, recentConfig, messageTokens(replayed, calibration)),
+  const cut = current === undefined ? undefined : fitCurrentMessage(current, budget);
+  const replay = cut?.replay ?? current;
+
+  let keep = selectRecentWindowSize(conversation, recentConfig, budget);
+  if (replay !== undefined && currentIndex < conversation.length - keep) {
+    // The window leaves the request out, so it is replayed after the summary.
+    keep = selectRecentWindowSize(
+      conversation,
+      recentConfig,
+      Math.max(0, budget - estimateTokens([replay])),
     );
   }
-  const olderToSummarize = (older: readonly ModelMessage[]): readonly ModelMessage[] =>
-    cut === undefined
-      ? older
-      : older.map((message, index) => (index === currentIndex ? cut.head : message));
 
-  if (!forceSummary) {
+  if (!forceSummary && cut === undefined) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
-      return keepNonToolResultMessages(recent, calibration);
+      return keepNonToolResultMessages(recent);
     }
 
+    // Capping preserves most of the measured prompt. Retain any known
+    // underestimate while crediting only the estimated tokens it removes.
+    // A new summary replaces that prompt, so it uses its own estimate below.
+    const tokenEstimateAdjustment = Math.max(
+      0,
+      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
+    );
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
-        calibration,
-        checkpointHead,
         config,
-        conversation,
         older,
         previousCheckpoint,
         recent,
+        replay,
+        tokenEstimateAdjustment,
       });
       if (outcome.type === "within-limit") {
         return outcome.messages;
@@ -340,9 +246,12 @@ async function compactWithScale(
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
 
     const summaryPrompt = createCompactionPrompt({
-      messages: olderToSummarize(older),
+      messages:
+        cut === undefined
+          ? older
+          : older.map((message, index) => (index === currentIndex ? cut.head : message)),
       previousCheckpoint,
-      transcriptBudgetTokens: config.threshold / calibration.scale,
+      transcriptBudgetTokens: config.threshold,
     });
 
     const summary = await summarize({
@@ -358,18 +267,25 @@ async function compactWithScale(
     // Prefer keeping the recent tail verbatim — surviving tool results are the
     // model's evidence that work already ran. Degrade to text-only, then to a
     // smaller window, only under threshold pressure.
-    const verbatim = withResumptionGuard([...summaryHead, ...recent], replayed, config.threshold);
-    if (fitsThreshold(verbatim, config, calibration)) {
+    const verbatim = withResumptionGuard([...summaryHead, ...recent], replay, config.threshold);
+    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
       return verbatim;
     }
 
     const stripped = withResumptionGuard(
-      [...summaryHead, ...keepNonToolResultMessages(recent, calibration)],
-      replayed,
+      [...summaryHead, ...keepNonToolResultMessages(recent)],
+      replay,
       config.threshold,
     );
-    if (fitsThreshold(stripped, config, calibration) || keep === 0) {
+    const evaluation = evaluateThreshold(stripped, config, "estimate");
+    if (evaluation.type === "within-limit") {
       return stripped;
+    }
+    if (keep === 0) {
+      // Retrying would summarize the same history again: end the step with the reason.
+      throw new CompactionOverLimitError(
+        `Context compaction could not bring the conversation under its limit: it is still about ${Math.round(evaluation.estimatedTokens)} tokens against a ${config.threshold}-token limit. Start a new session, or send a smaller message.`,
+      );
     }
 
     keep -= 1;
@@ -472,28 +388,18 @@ function withResumptionGuard(
 }
 
 /**
- * A current user message may take at most this share of the compaction
- * threshold (calibrated to the provider's count), leaving the rest for the
- * checkpoint summary, the recent tail, and the next steps' tool results.
- */
-const CURRENT_MESSAGE_THRESHOLD_SHARE = 0.5;
-
-/**
- * Splits `message` when it exceeds its share of the threshold, or returns
+ * Splits `message` when it exceeds the tail budget, or returns
  * `undefined` when it already fits. `replay` keeps its newest text, behind a
  * note that the start was cut; `head` is the cut-off start, which the
  * summarizer receives in full. Non-text parts (files) stay on the replay.
  */
 function fitCurrentMessage(
   message: ModelMessage,
-  threshold: number,
-  scale: number,
-  fixedTokens: number,
+  budget: number,
 ): { readonly head: ModelMessage; readonly replay: ModelMessage } | undefined {
   const text = messageText(message);
-  const budget = (threshold * CURRENT_MESSAGE_THRESHOLD_SHARE - fixedTokens) / scale;
   // The replay keeps the message's file parts, so when they alone take the
-  // share, cutting its text frees nothing.
+  // budget, cutting its text frees nothing.
   if (text === undefined || budget <= 0 || estimateTokens([message]) <= budget) {
     return undefined;
   }
@@ -574,27 +480,18 @@ function splitMessageText(
   };
 }
 
-/**
- * Latest user message authored by the user rather than the framework.
- */
-function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
-  return conversation[findLastRealUserIndex(conversation)];
-}
-
 function findLastRealUserIndex(conversation: readonly ModelMessage[]): number {
   for (let index = conversation.length - 1; index >= 0; index -= 1) {
     const message = conversation[index];
-    if (message?.role !== "user" || isFrameworkUserMessage(message)) {
-      continue;
+    if (message?.role === "user" && !isFrameworkUserMessage(message)) {
+      return index;
     }
-    return index;
   }
 
   return -1;
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
-  readonly checkpointHead: ModelMessage[];
   readonly conversation: ModelMessage[];
   readonly previousCheckpoint: string | undefined;
 } {
@@ -605,11 +502,10 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
     marker.content !== COMPACTION_CHECKPOINT_MARKER ||
     checkpoint?.role !== "assistant"
   ) {
-    return { checkpointHead: [], conversation: [...messages], previousCheckpoint: undefined };
+    return { conversation: [...messages], previousCheckpoint: undefined };
   }
 
   return {
-    checkpointHead: [marker, checkpoint],
     conversation: messages.slice(2),
     previousCheckpoint: assistantMessageText(checkpoint),
   };
@@ -623,10 +519,7 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
  * Assistant messages with no remaining text are dropped; user messages are kept
  * verbatim.
  */
-function keepNonToolResultMessages(
-  messages: readonly ModelMessage[],
-  calibration: Calibration,
-): ModelMessage[] {
+function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMessage[] {
   const kept: ModelMessage[] = [];
 
   for (const message of messages) {
@@ -637,11 +530,7 @@ function keepNonToolResultMessages(
     if (message.role === "assistant") {
       const text = assistantMessageText(message);
       if (text.length > 0) {
-        const textOnly: ModelMessage = { content: text, role: "assistant" };
-        if (calibration.measured.has(message)) {
-          calibration.measured.add(textOnly);
-        }
-        kept.push(textOnly);
+        kept.push({ content: text, role: "assistant" });
       }
       continue;
     }
@@ -670,13 +559,16 @@ function assistantMessageText(message: ModelMessage): string {
     .trim();
 }
 
+function keptTailBudget(config: CompactionConfig): number {
+  return Math.min(KEPT_TAIL_TOKENS, Math.floor(config.threshold / 2));
+}
+
 function selectRecentWindowSize(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
-  replayTokens = 0,
+  budget: number,
 ): number {
   const maxKeep = Math.min(config.recentWindowSize, Math.max(messages.length - 1, 0));
-  const reserve = resolveCompactionSummaryReserve(config) + replayTokens;
   let keep = 0;
   let recentTokens = 0;
 
@@ -687,7 +579,7 @@ function selectRecentWindowSize(
     }
 
     const messageTokens = estimateTokens([message]);
-    if (recentTokens + messageTokens + reserve > config.threshold) {
+    if (recentTokens + messageTokens > budget) {
       break;
     }
 
@@ -696,13 +588,6 @@ function selectRecentWindowSize(
   }
 
   return keep;
-}
-
-function resolveCompactionSummaryReserve(config: CompactionConfig): number {
-  return Math.min(
-    COMPACTION_SUMMARY_RESERVE_TOKENS,
-    Math.max(64, Math.floor(config.threshold / 4)),
-  );
 }
 
 function splitMessagesForCompaction(
