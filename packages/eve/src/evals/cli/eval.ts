@@ -34,6 +34,7 @@ export interface EvalCliOptions {
   url?: string;
   timeout?: string;
   maxConcurrency?: string;
+  repeat?: string;
   json?: boolean;
   junit?: string;
   skipReport?: boolean;
@@ -114,9 +115,11 @@ export async function runEvalCommand(
 
   let maxConcurrency: number | undefined;
   let timeoutMs: number | undefined;
+  let repeat: number | undefined;
   try {
     maxConcurrency = parsePositiveInteger(options.maxConcurrency, "--max-concurrency");
     timeoutMs = parseNonNegativeInteger(options.timeout, "--timeout");
+    repeat = parsePositiveInteger(options.repeat, "--repeat");
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
@@ -195,6 +198,7 @@ export async function runEvalCommand(
       includeEvalReporters: options.skipReport !== true,
       maxConcurrency,
       timeoutMs,
+      repeat,
       onEvalLog:
         options.verbose === true
           ? (evalId, message) => logger.log(`[${evalId}] ${message}`)
@@ -265,7 +269,7 @@ async function flushStream(stream: NodeJS.WriteStream): Promise<void> {
 // Option parsing
 // ---------------------------------------------------------------------------
 
-/** Parses an integer CLI option that must be >= 1 (e.g. `--max-concurrency`). */
+/** Parses an integer CLI option that must be >= 1 (e.g. `--max-concurrency`, `--repeat`). */
 function parsePositiveInteger(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);

@@ -55,7 +55,7 @@ function renderJUnit(summary: EveEvalRunSummary, input: { readonly suiteName?: s
 }
 
 function renderTestCase(result: EveEvalResult): string {
-  const attrs = `classname="eve.eval" name="${escapeXml(result.id)}" time="${formatSeconds(durationSeconds(result))}"`;
+  const attrs = `classname="eve.eval" name="${escapeXml(result.attempt === undefined ? result.id : `${result.id}#${result.attempt}`)}" time="${formatSeconds(durationSeconds(result))}"`;
 
   if (result.verdict === "passed") {
     return `  <testcase ${attrs}/>`;

@@ -662,6 +662,8 @@ export type EveEvalVerdict = "passed" | "failed" | "scored" | "skipped";
  */
 export interface EveEvalResult {
   readonly id: string;
+  /** 1-based attempt number, present only when the run repeats evals. */
+  readonly attempt?: number;
   readonly result: EveEvalTaskResult;
   /** Every assertion recorded by the eval's `test(t)`, in record order. */
   readonly assertions: readonly AssertionResult[];
@@ -739,6 +741,12 @@ export interface EveEvalConfigInput<TContext = unknown> {
    * overrides it, and `eve eval --timeout` overrides both.
    */
   readonly timeoutMs?: number;
+  /**
+   * Number of times to run every eval, to measure repeatability. Must be a
+   * positive integer. `eve eval --repeat` overrides it; defaults to 1. Each
+   * attempt is a separate result tagged with its 1-based `attempt`.
+   */
+  readonly repeat?: number;
 }
 
 /**

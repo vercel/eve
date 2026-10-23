@@ -73,9 +73,8 @@ class ConsoleReporter implements EvalReporter {
       )
       .join("  ");
 
-    const line = [icon, this.#colors.dim(result.id), gateText, scoreText]
-      .filter(Boolean)
-      .join("  ");
+    const label = result.attempt === undefined ? result.id : `${result.id} #${result.attempt}`;
+    const line = [icon, this.#colors.dim(label), gateText, scoreText].filter(Boolean).join("  ");
     this.#log(line);
 
     for (const assertion of assertions) {
@@ -140,6 +139,22 @@ class ConsoleReporter implements EvalReporter {
       const failedText =
         gateTotals.failed > 0 ? `, ${this.#colors.red(`${gateTotals.failed} failed`)}` : "";
       this.#log(`${this.#colors.bold("Gates:")} ${passedText}${failedText}`);
+    }
+
+    const repeatability = aggregateAttempts(results);
+    if (repeatability.length > 0) {
+      this.#log("");
+      this.#log(this.#colors.bold("Repeatability:"));
+      for (const { id, passed, total } of repeatability) {
+        const text = `${passed}/${total} passed`;
+        const colored =
+          passed === total
+            ? this.#colors.green(text)
+            : passed === 0
+              ? this.#colors.red(text)
+              : this.#colors.yellow(text);
+        this.#log(`  ${colored}  ${this.#colors.dim(id)}`);
+      }
     }
 
     const scoreAggregates = this.#aggregateScores(results);
@@ -227,6 +242,21 @@ class ConsoleReporter implements EvalReporter {
       count,
     }));
   }
+}
+
+/** Per-eval pass counts across attempts, for repeated runs only. */
+function aggregateAttempts(
+  results: readonly EveEvalResult[],
+): { id: string; passed: number; total: number }[] {
+  const totals = new Map<string, { passed: number; total: number }>();
+  for (const result of results) {
+    if (result.attempt === undefined) continue;
+    const entry = totals.get(result.id) ?? { passed: 0, total: 0 };
+    entry.total += 1;
+    if (result.verdict === "passed") entry.passed += 1;
+    totals.set(result.id, entry);
+  }
+  return [...totals.entries()].map(([id, counts]) => ({ id, ...counts }));
 }
 
 function gatesOf(result: EveEvalResult): readonly AssertionResult[] {
