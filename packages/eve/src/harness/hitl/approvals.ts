@@ -1,6 +1,10 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
-import type { ApprovalGrant } from "#approval/evaluation.js";
+import {
+  type ApprovalGrant,
+  availableApprovalGrants,
+  rememberAcceptedApproval,
+} from "#approval/evaluation.js";
 
 import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -236,8 +240,9 @@ export interface RunnableCall {
 /**
  * A step's approvals settle together, once each has a standing answer. A message steers past
  * them instead: the answers given stand, and the approvals nobody answered are withdrawn.
- * Approved calls are returned to run; denied ones get their denial as a result, and `once()`
- * approvals remember their tool. `answered` says a step settled on its answers rather than a message.
+ * Approved calls are returned to run; denied ones get their denial as a result.
+ * Accepted answers establish any requested grants. `answered` says a step settled on its answers
+ * rather than a message.
  */
 export function settleApprovals(
   view: SessionView,
@@ -250,7 +255,7 @@ export function settleApprovals(
   const answerOf = (request: ApprovalAsk) =>
     responseOf(request.interactionId, standing.get(request.interactionId));
   const responses = responseLedger(tables);
-  let grants = [...view.turn.grants];
+  let grants = view.turn.grants;
   const approved: RunnableCall[] = [];
   let answered = false;
   const events: SessionEvent[] = [];
@@ -279,10 +284,7 @@ export function settleApprovals(
       const { callId, toolName } = request.call;
       const { approved: approves, reason, status } = resolveApprovalOutcome(answerOf(request));
       if (approves) {
-        if (request.once?.grantable === true) {
-          grants = grants.filter((grant) => grant.toolName !== toolName);
-          grants.push({ toolName, interactionId: request.interactionId });
-        }
+        grants = rememberAcceptedApproval(grants, request);
         const responder = view.responders[standing.get(request.interactionId)?.responseId ?? ""];
         approved.push({
           approval: {
@@ -367,13 +369,10 @@ export function withdrawUnavailable(
   return { events: [...responses.facts(), ...events], turn: { ...view.turn, suspended } };
 }
 
-/** Remembered approvals, excluding tools still awaiting an independent once() decision. */
 export function grantedApprovals(view: SessionView): readonly ApprovalGrant[] {
-  const pending = view.turn.suspended.flatMap((step) =>
-    pendingApprovals(view, step).filter((request) => request.once !== undefined),
-  );
-  return view.turn.grants.filter(
-    (grant) => !pending.some((request) => request.call.toolName === grant.toolName),
+  return availableApprovalGrants(
+    view.turn.grants,
+    view.turn.suspended.flatMap((step) => pendingApprovals(view, step)),
   );
 }
 

@@ -1,12 +1,14 @@
-import type { ApprovalContext } from "#approval/definition.js";
+import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
 
 export interface ApprovalGrant {
   readonly toolName: string;
   readonly interactionId: string;
 }
 
-export interface OnceApproval {
-  readonly grantable: boolean;
+/** An accepted answer establishes a session grant for this tool. */
+export interface ApprovalGrantRequest {
+  readonly toolName: string;
 }
 
 // Bundles may load the once() helper and the harness from separate copies of this module.
@@ -46,18 +48,56 @@ export function evaluateOnce(context: ApprovalContext): OnceStatus {
   return approvalEvaluation(context)?.once() ?? onceRequired;
 }
 
-/** Which once() decision a policy returned, if its result is one. */
-export function onceOutcome(status: unknown): "granted" | "required" | undefined {
-  if (status === onceGranted) return "granted";
-  if (status === onceRequired) return "required";
-  return undefined;
+export async function evaluateApproval(
+  policy: ApprovalPolicy,
+  context: ApprovalContext,
+  grants: readonly ApprovalGrant[],
+  recheck: boolean,
+): Promise<ApprovalDecision> {
+  const { toolName } = context;
+  const evaluation = withApprovalGrants(context, grants);
+  const status = await policy(recheck ? markApprovalRecheck(evaluation) : evaluation);
+  const decision = approvalDecision(status);
+  if (recheck && decision.awaitsPerson === true) return { denied: false };
+  if (status === onceRequired) return { ...decision, grantOnAcceptance: { toolName } };
+  const grant =
+    status === onceGranted ? grants.find((entry) => entry.toolName === toolName) : undefined;
+  return grant === undefined
+    ? decision
+    : { ...decision, clearedBy: { grant: { interactionId: grant.interactionId } } };
+}
+
+export function rememberAcceptedApproval(
+  grants: readonly ApprovalGrant[],
+  request: {
+    readonly interactionId: string;
+    readonly grantOnAcceptance?: ApprovalGrantRequest;
+  },
+): readonly ApprovalGrant[] {
+  const grant = request.grantOnAcceptance;
+  return grant === undefined
+    ? grants
+    : [
+        ...grants.filter((entry) => entry.toolName !== grant.toolName),
+        { ...grant, interactionId: request.interactionId },
+      ];
+}
+
+/** An outstanding independent question must not be bypassed by another answer's grant. */
+export function availableApprovalGrants(
+  grants: readonly ApprovalGrant[],
+  pending: readonly { readonly grantOnAcceptance?: ApprovalGrantRequest }[],
+): readonly ApprovalGrant[] {
+  return grants.filter(
+    (grant) => !pending.some((request) => request.grantOnAcceptance?.toolName === grant.toolName),
+  );
 }
 
 function approvalEvaluation(context: ApprovalContext): Evaluation | undefined {
   return (context as EvaluatedContext)[evaluationKey];
 }
 
-export function markApprovalRecheck<T extends ApprovalContext>(context: T): T {
+function markApprovalRecheck<T extends ApprovalContext>(context: T): T {
   return withEvaluation(context, {
     once: approvalEvaluation(context)?.once ?? (() => onceRequired),
     recheck: true,

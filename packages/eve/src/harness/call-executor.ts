@@ -1,4 +1,4 @@
-import type { ApprovalGrant, OnceApproval } from "#approval/evaluation.js";
+import type { ApprovalGrant, ApprovalGrantRequest } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
@@ -69,7 +69,7 @@ export interface ToolSignIn {
 
 /** How one call came out: its result for the model, or what it waits on instead. */
 export interface CallOutcome {
-  readonly once?: OnceApproval;
+  readonly grantOnAcceptance?: ApprovalGrantRequest;
   readonly clearedBy?: ClearedBy;
   readonly settled: readonly CallResult[];
   /** What `execute` returned, for `endsTurn`. */
@@ -154,7 +154,12 @@ export async function executeToolCall(
       recheck: approval === "recheck",
     });
     if (decision.awaitsPerson === true)
-      return { awaitsApproval: true, once: decision.once, settled, toolResults };
+      return {
+        awaitsApproval: true,
+        grantOnAcceptance: decision.grantOnAcceptance,
+        settled,
+        toolResults,
+      };
     if (decision.denied) {
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
@@ -486,7 +491,10 @@ export async function executeInlineCalls(input: {
             : await decideDeferredCall(action, definition, input);
           const approval =
             executed.awaitsApproval === true
-              ? { ...approvalRequest(call, definition), once: executed.once }
+              ? {
+                  ...approvalRequest(call, definition),
+                  grantOnAcceptance: executed.grantOnAcceptance,
+                }
               : undefined;
           return { call, executed, approval };
         } catch (error) {
@@ -534,7 +542,12 @@ async function decideDeferredCall(
     input: call.input,
   });
   if (decision.awaitsPerson === true)
-    return { awaitsApproval: true, once: decision.once, settled: [], toolResults: [] };
+    return {
+      awaitsApproval: true,
+      grantOnAcceptance: decision.grantOnAcceptance,
+      settled: [],
+      toolResults: [],
+    };
   if (!decision.denied)
     return {
       settled: [],

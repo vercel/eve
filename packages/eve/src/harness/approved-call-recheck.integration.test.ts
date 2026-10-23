@@ -265,7 +265,7 @@ describe("approved call recheck (real AI SDK)", () => {
     });
     expect(execute).not.toHaveBeenCalled();
     expect(fixture.events.filter((event) => event.type === "interaction.settled")).toHaveLength(0);
-    await fixture.step(partial.session, {
+    await fixture.step(JSON.parse(JSON.stringify(partial.session)) as HarnessSession, {
       answers: [
         {
           interactionId: requests[1]!.data.interactionId,

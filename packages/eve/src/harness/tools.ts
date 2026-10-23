@@ -8,13 +8,8 @@ import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { isAuthorizationSignal } from "#harness/authorization.js";
-import {
-  type ApprovalGrant,
-  markApprovalRecheck,
-  onceOutcome,
-  withApprovalGrants,
-} from "#approval/evaluation.js";
-import { approvalDecision, callApprovalDecision, type ApprovalDecision } from "#approval/status.js";
+import { type ApprovalGrant, evaluateApproval } from "#approval/evaluation.js";
+import type { ApprovalDecision } from "#approval/status.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import { createLogger } from "#internal/logging.js";
@@ -185,7 +180,8 @@ export async function decideApproval(
   call: ApprovalCall,
 ): Promise<ApprovalDecision> {
   if (definition.approval === undefined) return { denied: false };
-  const context = withApprovalGrants(
+  return await evaluateApproval(
+    resolveApprovalPolicy(definition.approval),
     {
       ...buildCallbackContext(),
       abortSignal: call.abortSignal ?? new AbortController().signal,
@@ -194,14 +190,6 @@ export async function decideApproval(
       toolName: definition.name,
     },
     call.approvalGrants ?? [],
+    call.recheck === true,
   );
-  const status = await resolveApprovalPolicy(definition.approval)(
-    call.recheck === true ? markApprovalRecheck(context) : context,
-  );
-  const decision = approvalDecision(status);
-  return callApprovalDecision(decision, {
-    grant: call.approvalGrants?.find((entry) => entry.toolName === definition.name),
-    once: onceOutcome(status),
-    recheck: call.recheck === true,
-  });
 }

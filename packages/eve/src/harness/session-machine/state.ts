@@ -1,5 +1,5 @@
 import type { ModelMessage } from "ai";
-import type { ApprovalGrant, OnceApproval } from "#approval/evaluation.js";
+import type { ApprovalGrant, ApprovalGrantRequest } from "#approval/evaluation.js";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -23,7 +23,7 @@ export interface StepCoordinates {
 
 /** A call that needs a person's approval, and what they're asked. */
 export interface ApprovalAsk {
-  readonly once?: OnceApproval;
+  readonly grantOnAcceptance?: ApprovalGrantRequest;
   readonly interactionId: string;
   readonly call: {
     readonly callId: string;
@@ -86,7 +86,7 @@ export interface TurnState {
    */
   readonly queued?: HarnessStepInput;
   readonly suspended: readonly SuspendedStep[];
-  /** Human approvals remembered by `once()` for the rest of the session. */
+  /** Human approvals remembered for the rest of the session. */
   readonly grants: readonly ApprovalGrant[];
 }
 

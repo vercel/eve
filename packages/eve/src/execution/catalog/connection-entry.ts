@@ -310,7 +310,7 @@ async function requestApproval(
   if (isApprovalRecheck(context) && !matchesApprovalPin(context.callId, connection)) {
     markApprovalPinChanged(context.callId);
   }
-  // Returned as-is: decideApproval recognizes once() decisions by identity.
+  // Preserve result identity for the approval evaluator's private metadata.
   const status = await policy(context);
   if (!isApprovalRecheck(context) && approvalDecision(status).awaitsPerson === true) {
     pinApprovedInstance(context.callId, connection);

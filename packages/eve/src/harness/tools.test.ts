@@ -945,7 +945,7 @@ describe("buildToolSet", () => {
       await expect(resolveApproval(bashWith(approval), "bash", {})).resolves.toEqual({
         denied: false,
         awaitsPerson: true,
-        once: { grantable: true },
+        grantOnAcceptance: { toolName: "bash" },
       });
     });
 
@@ -960,7 +960,7 @@ describe("buildToolSet", () => {
       await expect(resolveApproval(bashWith(copy.once()), "bash", {})).resolves.toEqual({
         denied: false,
         awaitsPerson: true,
-        once: { grantable: true },
+        grantOnAcceptance: { toolName: "bash" },
       });
     });
 
@@ -1029,7 +1029,11 @@ describe("buildToolSet", () => {
         resolveApproval(bashWith(approval), "bash", {}, undefined, {
           approvalGrants: [{ toolName: "other", interactionId: "approval-1" }],
         }),
-      ).resolves.toEqual({ denied: false, awaitsPerson: true, once: { grantable: true } });
+      ).resolves.toEqual({
+        denied: false,
+        awaitsPerson: true,
+        grantOnAcceptance: { toolName: "bash" },
+      });
     });
 
     it("tool without approval defaults to false when another tool has an override", async () => {

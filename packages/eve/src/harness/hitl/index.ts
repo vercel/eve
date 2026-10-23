@@ -128,7 +128,7 @@ export async function enforceBudget(
 }
 
 /**
- * What a model call needs from the approvals: the remembered `once()` approvals of `tools`, and
+ * What a model call needs from the approvals: available remembered grants, and
  * a note on the calls still awaiting approval, which a message may revise.
  */
 export function humanInputContext(step: Step): {
