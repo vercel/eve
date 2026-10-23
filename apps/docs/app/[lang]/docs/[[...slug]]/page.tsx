@@ -9,7 +9,7 @@ import { canonicalAlternates } from "@/lib/geistdocs/canonical";
 import { config } from "@/lib/geistdocs/config";
 import { defaultLanguage } from "@/lib/geistdocs/languages";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
-import { staticOgImage } from "@/lib/geistdocs/og";
+import { docsOgImage } from "@/lib/geistdocs/og";
 import { resolveDocsPageTitle } from "@/lib/geistdocs/page-title";
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { docsArticleStructuredData, docsBreadcrumbs } from "@/lib/geistdocs/structured-data";
@@ -38,7 +38,7 @@ const DocsStructuredData = ({ page }: { page: DocsPageEntry }) => {
       tree: geistdocsSource.source.getPageTree(lang),
     }),
     description: page.data.description,
-    image: staticOgImage,
+    image: new URL(docsOgImage(page.slugs), getSiteOrigin()).href,
     lang,
     pathname,
     title,
@@ -60,6 +60,7 @@ const docsPage = createDocsPage({
   metadata: ({ metadata, page, params }) => {
     const titleMetadata = pageTitleMetadata(resolveTitle(page, params.lang));
     const pathname = getPublicPath(page.url, config.basePath);
+    const ogImage = docsOgImage(page.slugs);
 
     return {
       ...metadata,
@@ -74,13 +75,13 @@ const docsPage = createDocsPage({
         // Override with the static OG image for now. To restore dynamic per-page
         // OG generation, swap the line below back to:
         // images: geistdocsSource.getPageImage(page).url,
-        images: [staticOgImage],
+        images: [ogImage],
       },
       twitter: {
         ...metadata.twitter,
         ...titleMetadata.twitter,
         card: "summary_large_image",
-        images: [staticOgImage],
+        images: [ogImage],
       },
     };
   },
