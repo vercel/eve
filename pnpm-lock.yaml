@@ -326,8 +326,8 @@ importers:
         specifier: 2.0.1
         version: 2.0.1(81a45996e726c352edb608aa8ed932c0)
       '@vercel/geistdocs':
-        specifier: 2.9.3
-        version: 2.9.3(7eb82b335cccccda73811972c8fed49f)
+        specifier: 2.13.1-canary.87d00b3
+        version: 2.13.1-canary.87d00b3(7eb82b335cccccda73811972c8fed49f)
       '@vercel/speed-insights':
         specifier: 2.0.0
         version: 2.0.0(81a45996e726c352edb608aa8ed932c0)
@@ -377,8 +377,8 @@ importers:
         specifier: 'catalog:'
         version: 19.2.6(react@19.2.6)
       sonner:
-        specifier: 2.0.7
-        version: 2.0.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+        specifier: 2.0.8
+        version: 2.0.8(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       streamdown:
         specifier: 'catalog:'
         version: 2.5.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
@@ -7886,8 +7886,8 @@ packages:
       ws:
         optional: true
 
-  '@vercel/geistdocs@2.9.3':
-    resolution: {integrity: sha512-f7ljUkPqef8RFjyCcXx6qMiePa6aM1f/kEj5xvbyEDzFkbSQ7AUjvnVm+VZNWUUldynyccid0X/4XYWoeHu5PA==}
+  '@vercel/geistdocs@2.13.1-canary.87d00b3':
+    resolution: {integrity: sha512-OrmvZ4O7Ezi5idvA9ISl5SV7zEj6Tl9ZLPsHyp7sK9NkGUGMwZrVDmZa5NRiqpvJRO84c9jbJgRrFCUIdl41qA==}
     hasBin: true
     peerDependencies:
       next: ^16.3.3
@@ -13894,11 +13894,15 @@ packages:
   sonic-boom@4.2.1:
     resolution: {integrity: sha512-w6AxtubXa2wTXAUsZMMWERrsIRAdrK0Sc+FUytWvYAhBJLyuI4llrMIC1DtlNSdI99EI86KZum2MMq3EAZlF9Q==}
 
-  sonner@2.0.7:
-    resolution: {integrity: sha512-W6ZN4p58k8aDKA4XPcx2hpIQXBRAgyiWVkYhT7CvK6D3iAu7xjvVyhQHg2/iaKJZ1XVJ4r7XuwGL+WGEK37i9w==}
+  sonner@2.0.8:
+    resolution: {integrity: sha512-UM/ByIoFra8yzV75n1o0Puu0bw5U/9UNnDacrJNspekBewIfsQ3D6ez1nvlWpt7aTsO6rujQtifBpycwIivqlg==}
     peerDependencies:
+      '@types/react': ^18.0.0 || ^19.0.0
       react: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
       react-dom: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -21724,7 +21728,7 @@ snapshots:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       ws: 8.21.3(bufferutil@4.1.0)
 
-  '@vercel/geistdocs@2.9.3(7eb82b335cccccda73811972c8fed49f)':
+  '@vercel/geistdocs@2.13.1-canary.87d00b3(7eb82b335cccccda73811972c8fed49f)':
     dependencies:
       '@ai-sdk/react': 3.0.288(react@19.2.6)(zod@4.6.5)
       '@clack/prompts': 0.11.0
@@ -21762,7 +21766,7 @@ snapshots:
       remark-mdx: 3.1.1(supports-color@10.2.2)
       remark-parse: 11.0.0(supports-color@10.2.2)
       remark-stringify: 11.0.0
-      sonner: 2.0.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      sonner: 2.0.8(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       streamdown: 2.5.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
       tailwind-merge: 3.6.0
       tailwindcss: 4.3.0
@@ -29721,10 +29725,12 @@ snapshots:
     dependencies:
       atomic-sleep: 1.0.0
 
-  sonner@2.0.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
+  sonner@2.0.8(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
     dependencies:
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
+    optionalDependencies:
+      '@types/react': 19.2.15
 
   source-map-js@1.2.1: {}
 
