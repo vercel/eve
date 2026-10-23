@@ -947,6 +947,37 @@ describe("dispatchChannelRequest tracing", () => {
     expect(span!.attributes["eve.channel.kind"]).toBe("channel:support");
   });
 
+  // https://github.com/vercel/eve/issues/4256
+  it.fails("keeps the request span open until a streamed response body is consumed", async () => {
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        slackChannel(
+          async () =>
+            new Response(
+              new ReadableStream({
+                pull(controller) {
+                  controller.enqueue(new TextEncoder().encode("event"));
+                  controller.close();
+                },
+              }),
+            ),
+        ),
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+
+    expect((await finishedSpans()).map((span) => span.name)).toEqual([]);
+    expect(await response.text()).toBe("event");
+    expect((await finishedSpans()).map((span) => span.name)).toEqual(["agent.channel.request"]);
+  });
+
   it("makes a span created inside the handler a child of the request span", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
