@@ -1478,6 +1478,62 @@ describe("compactMessages: current message larger than its share of the threshol
 
     expect(result.at(-1)).toEqual(request);
   });
+
+  it("does not cut text that shares a message with the attachment holding the gap", async () => {
+    const request: ModelMessage = {
+      content: [
+        { text: "plain request text ".repeat(2_100), type: "text" },
+        {
+          data: new URL("https://example.com/report.pdf"),
+          mediaType: "application/pdf",
+          type: "file",
+        },
+      ],
+      role: "user",
+    };
+    const history: ModelMessage[] = [assistant("Ready."), request];
+
+    const result = await compactMessages(
+      history,
+      {
+        lastKnownInputTokens: 185_000,
+        lastKnownPromptMessageCount: history.length,
+        recentWindowSize: 1,
+        threshold: 180_000,
+      },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(JSON.stringify(result)).not.toContain("were cut during context compaction");
+  });
+
+  it("does not keep an attachment that alone holds the history over the limit", async () => {
+    const history: ModelMessage[] = [
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+      {
+        content: [
+          {
+            data: new URL("https://example.com/report.pdf"),
+            mediaType: "application/pdf",
+            type: "file",
+          },
+        ],
+        role: "user",
+      },
+    ];
+
+    const result = await compactMessages(
+      history,
+      {
+        lastKnownInputTokens: 185_000,
+        lastKnownPromptMessageCount: history.length,
+        recentWindowSize: 1,
+        threshold: 80_000,
+      },
+      summarizeWith("checkpoint text"),
+    );
+    expect(JSON.stringify(result)).not.toContain("report.pdf");
+  });
 });
 
 function isCheckpoint(message: ModelMessage): boolean {

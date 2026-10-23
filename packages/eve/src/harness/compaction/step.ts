@@ -182,12 +182,17 @@ export function describeHistoryForCompaction(input: {
     measuredPrompt === undefined
       ? undefined
       : Math.min(measuredPrompt.filter((message) => source.has(message)).length, ordinary.length);
-  const threshold = Math.max(
-    1,
-    compaction.threshold -
-      requestEnvelopeTokens -
-      estimateTokens(input.memory) * Math.min(scale, MAX_TEXT_SCALE),
-  );
+  // Memory records are text, so they cost at most the text ratio; whatever gap
+  // is left stays with the ordinary messages.
+  const memoryTokens = estimateTokens(input.memory) * Math.min(scale, MAX_TEXT_SCALE);
+  const threshold = Math.max(1, compaction.threshold - requestEnvelopeTokens - memoryTokens);
+  if (providerTokens !== undefined && measuredPrompt !== undefined && measuredCount === 0) {
+    if (input.memory.length === 0) {
+      throw new Error(
+        "Compaction could not match the provider's token count to the history it measured.",
+      );
+    }
+  }
   if (measuredCount === undefined || measuredCount === 0) {
     return {
       ...compaction,
@@ -198,7 +203,10 @@ export function describeHistoryForCompaction(input: {
   }
   return {
     ...compaction,
-    lastKnownInputTokens: estimateTokens(ordinary.slice(0, measuredCount)) * scale,
+    lastKnownInputTokens: Math.max(
+      estimateTokens(ordinary.slice(0, measuredCount)),
+      (providerTokens ?? 0) - memoryTokens,
+    ),
     lastKnownPromptMessageCount: measuredCount,
     threshold,
   };

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { describeHistoryForCompaction } from "#harness/compaction/step.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
+import { estimateTokens, MAX_TEXT_SCALE } from "#harness/token-estimate.js";
 
 const text = (content: string): ModelMessage => ({ content, role: "user" });
 
@@ -29,5 +30,29 @@ describe("describeHistoryForCompaction", () => {
     });
 
     expect(described.lastKnownPromptMessageCount).toBe(1);
+  });
+
+  it("leaves the gap the capped memory charge does not explain with the ordinary messages", () => {
+    const records = [text("note ".repeat(2_000))];
+    const request = text("plain request text ".repeat(2_100));
+
+    const described = describeHistoryForCompaction({
+      compaction: {
+        lastKnownInputTokens: 185_000,
+        lastKnownPromptMessageCount: 2,
+        recentWindowSize: 1,
+        threshold: 180_000,
+      },
+      memory: records,
+      ordinary: [request],
+      previousEnvelopeTokens: 0,
+      projectedPrompt: [{ ...records[0]! }, request] as HarnessModelMessage[],
+      promptSource: [...records, request],
+      requestEnvelopeTokens: 0,
+    });
+
+    const memoryCharge = estimateTokens(records) * MAX_TEXT_SCALE;
+    expect(described.lastKnownInputTokens).toBeCloseTo(185_000 - memoryCharge, 0);
+    expect(described.threshold).toBeCloseTo(180_000 - memoryCharge, 0);
   });
 });

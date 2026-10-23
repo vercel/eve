@@ -134,7 +134,45 @@ function withHeaderMetadata(header: Uint8Array, mediaType: string, size: number)
 
 /**
  * Text cannot cost more tokens than its UTF-8 bytes, and the estimate is
- * bytes / 4. A larger ratio means the provider counted something the estimate
- * cannot see (a remote file, an image), not that the text is denser.
+ * bytes / 4. A larger provider-to-estimate ratio means the provider counted
+ * something the estimate cannot see, not that the text is denser.
  */
 export const MAX_TEXT_SCALE = 4;
+
+/**
+ * Counts the file parts the estimate cannot size: remote non-image files the
+ * provider fetches and bills itself. The estimate counts them as a few bytes
+ * of JSON, so any gap between it and a provider count sits on them.
+ */
+export function countUnsizedParts(value: unknown): number {
+  let count = 0;
+  JSON.stringify(value, (_key, candidate: unknown) => {
+    if (isUnsizedRemoteFilePart(candidate)) count += 1;
+    return candidate;
+  });
+  return count;
+}
+
+function isUnsizedRemoteFilePart(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const part = value as {
+    readonly data?: unknown;
+    readonly mediaType?: unknown;
+    readonly type?: unknown;
+  };
+  if ((part.type !== "file" && part.type !== "media") || typeof part.mediaType !== "string") {
+    return false;
+  }
+  return !part.mediaType.startsWith("image/") && isRemoteFileData(part.data);
+}
+
+function isRemoteFileData(data: unknown): boolean {
+  if (isSandboxRefUrl(data)) return false;
+  if (data instanceof URL) return true;
+  if (typeof data === "string") return REMOTE_URL.test(data);
+  if (isTaggedFileData(data)) {
+    if (data.type === "reference") return true;
+    return data.type === "url" && !isSandboxRefUrl(data.url);
+  }
+  return false;
+}

@@ -32,8 +32,9 @@ const handoffEntries = [
   "After the release checks are recorded, publish the concise handoff with the completed review result and checkpoint status. Link each recorded release check to the journey it covers so later reviewers can trace every result back to this plan.",
 ];
 
-// Each record is several times the fixture's history budget, so a compaction
-// has to summarize it into the checkpoint rather than keep it in the tail.
+// Each record is about 4,400 tokens, nearly the whole history budget, so the
+// task and a record never fit together: a compaction has to summarize the
+// record into the checkpoint rather than keep it in the tail.
 const RECORD_PASSES = 5;
 
 function repeatPasses(notes: readonly string[]): string[] {

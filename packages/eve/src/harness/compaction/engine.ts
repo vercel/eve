@@ -12,7 +12,7 @@ import {
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { estimateTokens, MAX_TEXT_SCALE } from "#harness/token-estimate.js";
+import { countUnsizedParts, estimateTokens, MAX_TEXT_SCALE } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
 
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
@@ -155,21 +155,13 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
  */
 interface Calibration {
   readonly measured: Set<ModelMessage>;
-  /** The whole-history provider-to-estimate ratio. */
+  /** The provider-to-estimate ratio for measured messages' text. */
   readonly scale: number;
-  /** The ratio for text-only messages, bounded by what text can cost. */
-  readonly textScale: number;
-  /** The ratio for messages with parts the estimate cannot size: the rest of the gap. */
-  readonly otherScale: number;
+  /** Tokens added per file part the estimate cannot size: the gap text cannot explain. */
+  readonly tokensPerUnsizedPart: number;
 }
 
-const UNCALIBRATED: Omit<Calibration, "measured"> = { otherScale: 1, scale: 1, textScale: 1 };
-
-function isTextOnly(message: ModelMessage): boolean {
-  return (
-    typeof message.content === "string" || message.content.every((part) => part.type === "text")
-  );
-}
+const UNCALIBRATED: Omit<Calibration, "measured"> = { scale: 1, tokensPerUnsizedPart: 0 };
 
 function calibrate(messages: readonly ModelMessage[], config: CompactionConfig): Calibration {
   const provider = config.lastKnownInputTokens;
@@ -188,31 +180,41 @@ function calibrate(messages: readonly ModelMessage[], config: CompactionConfig):
   if (estimated <= 0) {
     return { measured: new Set(prefix), ...UNCALIBRATED };
   }
-  const scale = Math.max(1, provider / estimated);
-  const textEstimate = estimateTokens(prefix.filter(isTextOnly));
-  const otherEstimate = estimated - textEstimate;
-  // With only text in the measured history, nothing else can hold the gap.
-  if (otherEstimate <= 0) {
-    return { measured: new Set(prefix), otherScale: scale, scale, textScale: scale };
+  const ratio = Math.max(1, provider / estimated);
+  const unsized = countUnsizedParts(prefix);
+  // Text cannot cost more than its bytes, so a larger gap belongs to the parts
+  // the estimate cannot size. With none of those, the ratio is all there is.
+  if (unsized === 0) {
+    return { measured: new Set(prefix), scale: ratio, tokensPerUnsizedPart: 0 };
   }
-  const textScale = Math.min(scale, MAX_TEXT_SCALE);
-  const otherScale = Math.max(1, (provider - textEstimate * textScale) / otherEstimate);
-  return { measured: new Set(prefix), otherScale, scale, textScale };
+  const scale = Math.min(ratio, MAX_TEXT_SCALE);
+  return {
+    measured: new Set(prefix),
+    scale,
+    tokensPerUnsizedPart: Math.max(0, provider - estimated * scale) / unsized,
+  };
 }
 
 function calibratedTokens(messages: readonly ModelMessage[], calibration: Calibration): number {
   let total = 0;
   for (const message of messages) {
-    total += estimateTokens([message]) * scaleOf(message, calibration);
+    total += messageTokens(message, calibration);
   }
   return total;
 }
 
-function scaleOf(message: ModelMessage, calibration: Calibration): number {
-  if (!calibration.measured.has(message)) {
-    return 1;
-  }
-  return isTextOnly(message) ? calibration.textScale : calibration.otherScale;
+function messageTokens(message: ModelMessage, calibration: Calibration): number {
+  const estimate = estimateTokens([message]);
+  return calibration.measured.has(message)
+    ? estimate * calibration.scale + unsizedCharge(message, calibration)
+    : estimate;
+}
+
+/** What a measured message's unsized file parts cost, which cutting its text cannot reduce. */
+function unsizedCharge(message: ModelMessage, calibration: Calibration): number {
+  return calibration.measured.has(message)
+    ? countUnsizedParts([message]) * calibration.tokensPerUnsizedPart
+    : 0;
 }
 
 /**
@@ -281,7 +283,12 @@ async function compactWithScale(
   const current = conversation[currentIndex];
   const cut =
     !fitsThreshold(conversation, config, calibration) && current !== undefined
-      ? fitCurrentMessage(current, config.threshold, scaleOf(current, calibration))
+      ? fitCurrentMessage(
+          current,
+          config.threshold,
+          calibration.measured.has(current) ? calibration.scale : 1,
+          unsizedCharge(current, calibration),
+        )
       : undefined;
   const replay = cut?.replay;
   if (cut !== undefined) {
@@ -478,10 +485,13 @@ function fitCurrentMessage(
   message: ModelMessage,
   threshold: number,
   scale: number,
+  fixedTokens: number,
 ): { readonly head: ModelMessage; readonly replay: ModelMessage } | undefined {
   const text = messageText(message);
-  const budget = (threshold * CURRENT_MESSAGE_THRESHOLD_SHARE) / scale;
-  if (text === undefined || estimateTokens([message]) <= budget) {
+  const budget = (threshold * CURRENT_MESSAGE_THRESHOLD_SHARE - fixedTokens) / scale;
+  // The replay keeps the message's file parts, so when they alone take the
+  // share, cutting its text frees nothing.
+  if (text === undefined || budget <= 0 || estimateTokens([message]) <= budget) {
     return undefined;
   }
 
