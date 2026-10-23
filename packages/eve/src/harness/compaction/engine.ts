@@ -87,12 +87,13 @@ export type CompactionSummarizer = (prompt: {
 
 /** Conversation regions and config handed to each compaction heuristic. */
 interface CompactionHeuristicInput {
+  readonly calibration: Calibration;
+  readonly checkpointHead: readonly ModelMessage[];
   readonly config: CompactionConfig;
   readonly conversation: readonly ModelMessage[];
   readonly older: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
-  readonly estimateScale: number;
 }
 
 /**
@@ -121,40 +122,87 @@ const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [toolResultCapHeur
  * usually suffices with no model call and no rewriting.
  */
 function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeuristicOutcome {
-  const checkpointHead: ModelMessage[] =
-    input.previousCheckpoint === undefined
-      ? []
-      : [
-          createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
-          { content: input.previousCheckpoint, role: "assistant" },
-        ];
+  const cappedOlder = capToolResults(input.older);
   const capped = withResumptionGuard(
-    [...checkpointHead, ...capToolResults(input.older), ...input.recent],
+    [...input.checkpointHead, ...cappedOlder, ...input.recent],
     input.conversation,
     input.config.threshold,
   );
 
+  // A capped result is still measured text, only shorter, so it keeps its original's ratio.
+  const measured = new Set(input.calibration.measured);
+  input.older.forEach((message, index) => {
+    const replacement = cappedOlder[index];
+    if (replacement !== undefined && measured.has(message)) {
+      measured.add(replacement);
+    }
+  });
+
   // Capping can be a near no-op when the older region holds few large
   // results; accepting one that still trips shouldCompact would let it
   // re-fire every step without compaction ever making progress.
-  return fitsThreshold(capped, input.config, input.estimateScale)
+  return fitsThreshold(capped, input.config, { ...input.calibration, measured })
     ? { messages: capped, type: "within-limit" }
     : { type: "insufficient" };
 }
 
 /**
+ * How far the character estimate sits below the provider's count, learned from
+ * the messages the provider last measured. It applies only to those messages
+ * (by identity): a summary, a cut note or a message appended after the
+ * measurement is new text the provider has not counted, so it stays at the
+ * estimate.
+ */
+interface Calibration {
+  readonly measured: ReadonlySet<ModelMessage>;
+  readonly scale: number;
+}
+
+function calibrate(messages: readonly ModelMessage[], config: CompactionConfig): Calibration {
+  const provider = config.lastKnownInputTokens;
+  const count = config.lastKnownPromptMessageCount;
+  if (
+    provider === undefined ||
+    count === undefined ||
+    !Number.isInteger(count) ||
+    count <= 0 ||
+    count > messages.length
+  ) {
+    return { measured: new Set(), scale: 1 };
+  }
+  const prefix = messages.slice(0, count);
+  const estimated = estimateTokens(prefix);
+  return {
+    measured: new Set(prefix),
+    scale: estimated > 0 ? Math.max(1, provider / estimated) : 1,
+  };
+}
+
+function calibratedTokens(messages: readonly ModelMessage[], calibration: Calibration): number {
+  let total = 0;
+  for (const message of messages) {
+    total += estimateTokens([message]) * scaleOf(message, calibration);
+  }
+  return total;
+}
+
+function scaleOf(message: ModelMessage, calibration: Calibration): number {
+  return calibration.measured.has(message) ? calibration.scale : 1;
+}
+
+/**
  * The one test every candidate history must pass: on the ruler
  * {@link shouldCompact} uses (fixed prompt-envelope overhead included), with
- * the character estimate scaled to the provider's count. A history that
- * passes cannot re-trigger compaction on the next step.
+ * the provider-measured messages scaled to the provider's count. A history
+ * that passes cannot re-trigger compaction on the next step.
  */
 function fitsThreshold(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
-  estimateScale: number,
+  calibration: Calibration,
 ): boolean {
   return (
-    estimateTokens(messages) * estimateScale + COMPACTION_PROMPT_OVERHEAD_TOKENS <= config.threshold
+    calibratedTokens(messages, calibration) + COMPACTION_PROMPT_OVERHEAD_TOKENS <= config.threshold
   );
 }
 
@@ -166,7 +214,7 @@ function fitsThreshold(
  *
  * `estimateTokens` is a character ruler and can sit well below the provider's
  * count (1.6x on URL- and JSON-heavy text). Acceptance checks therefore scale
- * the estimate by the provider-to-estimate ratio measured on this history:
+ * the messages the provider last measured by that provider-to-estimate ratio:
  * a result accepted here must not re-trigger {@link shouldCompact} on the
  * next step. A compaction that frees nothing and stays over the threshold
  * throws, so the caller stops instead of compacting again on every step.
@@ -176,21 +224,12 @@ export async function compactMessages(
   config: CompactionConfig,
   summarize: CompactionSummarizer,
   forceSummary = false,
-  historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
-  const providerTokens = historyInputTokenCount ?? getInputTokenCount(messages, config);
-  const estimatedTokens = estimateTokens(messages);
-  const estimateScale = estimatedTokens > 0 ? Math.max(1, providerTokens / estimatedTokens) : 1;
-  const compacted = await compactWithScale(
-    messages,
-    config,
-    summarize,
-    forceSummary,
-    estimateScale,
-  );
-  if (!fitsThreshold(compacted, config, estimateScale)) {
+  const calibration = calibrate(messages, config);
+  const compacted = await compactWithScale(messages, config, summarize, forceSummary, calibration);
+  if (!fitsThreshold(compacted, config, calibration)) {
     const remaining = Math.round(
-      estimateTokens(compacted) * estimateScale + COMPACTION_PROMPT_OVERHEAD_TOKENS,
+      calibratedTokens(compacted, calibration) + COMPACTION_PROMPT_OVERHEAD_TOKENS,
     );
     // Fatal: retrying the step would summarize the same history again and fail the same way.
     throw new FatalError(
@@ -205,9 +244,9 @@ async function compactWithScale(
   config: CompactionConfig,
   summarize: CompactionSummarizer,
   forceSummary: boolean,
-  estimateScale: number,
+  calibration: Calibration,
 ): Promise<ModelMessage[]> {
-  const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const { checkpointHead, conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
   let keep = selectRecentWindowSize(conversation, recentConfig);
 
@@ -217,8 +256,8 @@ async function compactWithScale(
   const currentIndex = findLastRealUserIndex(conversation, hasText);
   const current = conversation[currentIndex];
   const cut =
-    !fitsThreshold(conversation, config, estimateScale) && current !== undefined
-      ? fitCurrentMessage(current, config.threshold, estimateScale)
+    !fitsThreshold(conversation, config, calibration) && current !== undefined
+      ? fitCurrentMessage(current, config.threshold, scaleOf(current, calibration))
       : undefined;
   const replay = cut?.replay;
   if (cut !== undefined) {
@@ -237,12 +276,13 @@ async function compactWithScale(
 
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
+        calibration,
+        checkpointHead,
         config,
         conversation,
         older,
         previousCheckpoint,
         recent,
-        estimateScale,
       });
       if (outcome.type === "within-limit") {
         return outcome.messages;
@@ -256,7 +296,7 @@ async function compactWithScale(
     const summaryPrompt = createCompactionPrompt({
       messages: olderToSummarize(older),
       previousCheckpoint,
-      transcriptBudgetTokens: config.threshold / estimateScale,
+      transcriptBudgetTokens: config.threshold / calibration.scale,
     });
 
     const summary = await summarize({
@@ -278,7 +318,7 @@ async function compactWithScale(
       config.threshold,
       replay,
     );
-    if (fitsThreshold(verbatim, config, estimateScale)) {
+    if (fitsThreshold(verbatim, config, calibration)) {
       return verbatim;
     }
 
@@ -288,7 +328,7 @@ async function compactWithScale(
       config.threshold,
       replay,
     );
-    if (fitsThreshold(stripped, config, estimateScale) || keep === 0) {
+    if (fitsThreshold(stripped, config, calibration) || keep === 0) {
       return stripped;
     }
 
@@ -409,20 +449,17 @@ const CURRENT_MESSAGE_THRESHOLD_SHARE = 0.5;
 function fitCurrentMessage(
   message: ModelMessage,
   threshold: number,
-  estimateScale: number,
+  scale: number,
 ): { readonly head: ModelMessage; readonly replay: ModelMessage } | undefined {
   const text = messageText(message);
-  const budget = (threshold * CURRENT_MESSAGE_THRESHOLD_SHARE) / estimateScale;
+  const budget = (threshold * CURRENT_MESSAGE_THRESHOLD_SHARE) / scale;
   if (text === undefined || estimateTokens([message]) <= budget) {
     return undefined;
   }
 
   const note = (omitted: number) =>
     `[eve: the first ${omitted} characters of this message were cut during context compaction to fit the context window. Only its newest part follows.]\n\n`;
-  const split = (start: number) => ({
-    head: withText(message, text.slice(0, start)),
-    replay: withText(message, `${note(start)}${text.slice(start)}`),
-  });
+  const split = (start: number) => splitMessageText(message, start, note(start));
   let keptChars = Math.floor(budget * 4);
   while (keptChars > 0) {
     keptChars = Math.min(keptChars, text.length);
@@ -440,27 +477,64 @@ function fitCurrentMessage(
   return split(text.length);
 }
 
-/** The text a user message can be cut by: its string content or its last text part. */
+/** The text a user message can be cut by: its string content, or its text parts joined in order. */
 function messageText(message: ModelMessage): string | undefined {
   if (typeof message.content === "string") {
     return message.content;
   }
-  return message.content.findLast((part) => part.type === "text")?.text;
+  const texts = message.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
+  return texts.length === 0 ? undefined : texts.join("");
 }
 
 function hasText(message: ModelMessage): boolean {
   return messageText(message) !== undefined;
 }
 
-function withText(message: ModelMessage, text: string): ModelMessage {
+type MessagePart = Exclude<ModelMessage["content"], string>[number];
+
+/**
+ * Cuts the first `start` characters of {@link messageText}: `head` keeps them,
+ * `replay` keeps the rest behind `note`. Non-text parts stay on both.
+ */
+function splitMessageText(
+  message: ModelMessage,
+  start: number,
+  note: string,
+): { readonly head: ModelMessage; readonly replay: ModelMessage } {
   if (typeof message.content === "string") {
-    return { ...message, content: text } as ModelMessage;
+    return {
+      head: { ...message, content: message.content.slice(0, start) } as ModelMessage,
+      replay: { ...message, content: `${note}${message.content.slice(start)}` } as ModelMessage,
+    };
   }
-  const index = message.content.findLastIndex((part) => part.type === "text");
+  let offset = 0;
+  let noted = false;
+  const head: MessagePart[] = [];
+  const replay: MessagePart[] = [];
+  for (const part of message.content) {
+    if (part.type !== "text") {
+      head.push(part);
+      replay.push(part);
+      continue;
+    }
+    const cut = Math.max(0, Math.min(part.text.length, start - offset));
+    offset += part.text.length;
+    if (cut > 0) {
+      head.push({ ...part, text: part.text.slice(0, cut) });
+    }
+    if (cut < part.text.length) {
+      const kept = part.text.slice(cut);
+      replay.push({ ...part, text: noted ? kept : `${note}${kept}` });
+      noted = true;
+    }
+  }
+  if (!noted) {
+    replay.push({ type: "text", text: note });
+  }
   return {
-    ...message,
-    content: message.content.map((part, i) => (i === index ? { ...part, text } : part)),
-  } as ModelMessage;
+    head: { ...message, content: head } as ModelMessage,
+    replay: { ...message, content: replay } as ModelMessage,
+  };
 }
 
 /**
@@ -488,6 +562,7 @@ function findLastRealUserIndex(
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
+  readonly checkpointHead: ModelMessage[];
   readonly conversation: ModelMessage[];
   readonly previousCheckpoint: string | undefined;
 } {
@@ -498,10 +573,11 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
     marker.content !== COMPACTION_CHECKPOINT_MARKER ||
     checkpoint?.role !== "assistant"
   ) {
-    return { conversation: [...messages], previousCheckpoint: undefined };
+    return { checkpointHead: [], conversation: [...messages], previousCheckpoint: undefined };
   }
 
   return {
+    checkpointHead: [marker, checkpoint],
     conversation: messages.slice(2),
     previousCheckpoint: assistantMessageText(checkpoint),
   };

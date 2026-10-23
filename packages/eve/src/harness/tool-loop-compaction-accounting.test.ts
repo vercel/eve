@@ -562,11 +562,6 @@ describe("final request envelope compaction", () => {
     toolResults: [],
     usage: { inputTokens: 8_000 },
   });
-  const earlierConversation = () => ({
-    content: "earlier ".repeat(2_000),
-    kind: "user" as const,
-    role: "user" as const,
-  });
 
   it("does not double-count stable instructions on later turns", async () => {
     const { ContextContainer, contextStorage } = await import("#context/container.js");
@@ -582,7 +577,6 @@ describe("final request envelope compaction", () => {
       runStep(
         createTestSession({
           compaction: { recentWindowSize: 0, threshold: 10_000 },
-          history: [earlierConversation()],
         }),
         { message: "First" },
       ),
@@ -639,7 +633,7 @@ describe("final request envelope compaction", () => {
             recentWindowSize: 0,
             threshold: 10_000,
           },
-          history: [{ role: "user", kind: "user", content: "earlier ".repeat(1_000) }],
+          history: [{ role: "user", kind: "user", content: "earlier" }],
         }),
         { message: "continue" },
       ),

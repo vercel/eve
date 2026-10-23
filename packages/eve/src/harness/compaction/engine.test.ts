@@ -547,32 +547,38 @@ describe("compactMessages: tool-result cap heuristic", () => {
       expect(summarizer).not.toHaveBeenCalled();
     },
   );
-  it("credits removed history against an explicit history-only token floor", async () => {
+  it("credits removed history against the provider count of the measured messages", async () => {
     const summarize = summarizeWith("summary");
     const [call, resultMsg] = toolExchange({ callId: "large", payloadChars: 40_000 });
     const messages = [user("investigate"), call, resultMsg, user("continue")];
     const result = await compactMessages(
       messages,
-      { threshold: 10_000, recentWindowSize: 1 },
+      {
+        lastKnownInputTokens: 15_000,
+        lastKnownPromptMessageCount: messages.length,
+        recentWindowSize: 1,
+        threshold: 10_000,
+      },
       summarize,
-      false,
-      15_000,
     );
     expect(summarize).not.toHaveBeenCalled();
     expect(estimateTokens(result)).toBeLessThan(2_000);
     expect(result.map((entry) => entry.role)).toEqual(messages.map((entry) => entry.role));
   });
 
-  it("summarizes when a no-op cannot satisfy the explicit history-only token floor", async () => {
+  it("summarizes when a no-op cannot satisfy the provider count of the measured messages", async () => {
     const summarize = summarizeWith("summary");
     const messages = [user("earlier ".repeat(1_500)), assistant("reply"), user("continue")];
     const history = estimateTokens(messages);
     await compactMessages(
       messages,
-      { threshold: Math.floor(history * 1.5), recentWindowSize: 0 },
+      {
+        lastKnownInputTokens: history * 2,
+        lastKnownPromptMessageCount: messages.length,
+        recentWindowSize: 0,
+        threshold: Math.floor(history * 1.5),
+      },
       summarize,
-      false,
-      history * 2,
     );
     expect(summarize).toHaveBeenCalledOnce();
   });
@@ -1315,6 +1321,94 @@ describe("compactMessages: current message larger than its share of the threshol
       text: expect.stringContaining("FINAL SENTINEL"),
     });
     expect(parts).toContainEqual(file);
+    expect(estimateTokens(result) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
+  });
+
+  it("still summarizes the measured message when a big tool result arrives after the last provider count", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const measured: ModelMessage[] = [
+      bigTask(),
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+    const history = [
+      ...measured,
+      ...toolExchange({ callId: "call-1", payloadChars: 30_000 }),
+      user("go on"),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { ...providerConfig(measured), recentWindowSize: 1 },
+      summarizer,
+    );
+
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(JSON.stringify(result)).not.toContain("task context line");
+    expect(result.at(-1)).toEqual(user("go on"));
+  });
+
+  it("does not read an unseen attachment's tokens as a reason to refuse a small summary", async () => {
+    // The provider counted a 60k-token remote PDF that the character estimate
+    // cannot see. The summary replaces it, so it is counted at its own size.
+    const pdf = {
+      data: new URL("https://example.com/big.pdf"),
+      mediaType: "application/pdf",
+      type: "file" as const,
+    };
+    const history: ModelMessage[] = [
+      { content: [{ text: "old context ".repeat(400), type: "text" }, pdf], role: "user" },
+      assistant("noted"),
+      user("continue"),
+    ];
+
+    const result = await compactMessages(
+      history,
+      {
+        lastKnownInputTokens: 60_000,
+        lastKnownPromptMessageCount: 2,
+        recentWindowSize: 1,
+        threshold: 50_000,
+      },
+      summarizeWith("s".repeat(6_000)),
+    );
+
+    expect(result[1]).toEqual(assistant("s".repeat(6_000)));
+    expect(result.at(-1)).toEqual(user("continue"));
+  });
+
+  it("gives the summarizer as much of an oversized head as the budget holds", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const task = user(`${"a ".repeat(5_000)}EARLY MARKER ${"b ".repeat(40_000)}END SENTINEL`);
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    await compactMessages(history, providerConfig(history), summarizer);
+
+    const prompt = String(summarizer.mock.calls[0]?.[0]?.messages?.[0]?.content);
+    expect(prompt).toContain("EARLY MARKER");
+    expect(prompt).not.toContain("END SENTINEL");
+  });
+
+  it("cuts across every text part of a message", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const task: ModelMessage = {
+      content: [
+        { text: bigTaskText(), type: "text" },
+        { text: `${bigTaskText()}FINAL SENTINEL`, type: "text" },
+      ],
+      role: "user",
+    };
+    const history: ModelMessage[] = [task, ...toolExchange({ callId: "call-0", payloadChars: 50 })];
+
+    const result = await compactMessages(history, providerConfig(history), summarizer);
+
+    const kept = result.find(
+      (message) => message.role === "user" && Array.isArray(message.content),
+    );
+    const texts = (Array.isArray(kept?.content) ? kept.content : []).flatMap((part) =>
+      part.type === "text" ? [part.text] : [],
+    );
+    expect(texts[0]).toContain("were cut during context compaction");
+    expect(texts.join("")).toContain("FINAL SENTINEL");
     expect(estimateTokens(result) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
   });
 });

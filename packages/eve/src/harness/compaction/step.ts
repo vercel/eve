@@ -273,17 +273,6 @@ export async function maybeCompact(input: {
         historyCompaction,
         summarize,
         input.force === true,
-        input.requestEnvelopeTokens === undefined
-          ? undefined
-          : Math.max(
-              0,
-              getInputTokenCount(
-                projectedPromptMessages,
-                session.compaction,
-                requestEnvelopeTokens,
-                getRequestEnvelopeTokens(session),
-              ) - requestEnvelopeTokens,
-            ),
       );
     }
   } catch (error) {
