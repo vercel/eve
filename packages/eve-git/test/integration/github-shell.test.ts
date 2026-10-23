@@ -400,6 +400,51 @@ test("rejects repositories outside the configured organization before minting", 
   assert.equal(tokenRequested, false);
 });
 
+test("mints tokens for whichever configured organization owns the repository", async () => {
+  const config = { ...CONFIG, org: ["vercel", "Vercel-Security"] };
+  const orgs: string[] = [];
+  const dependencies = {
+    sessionId: "session-orgs",
+    async getConnectToken(_connector: string, params: ConnectTokenParams) {
+      orgs.push(...(params.authorizationDetails ?? []).map((detail) => String(detail.org)));
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
+    },
+  };
+
+  await executeGitHubShell(CLONE, config, dependencies);
+  await executeGitHubShell(
+    {
+      ...CLONE,
+      command: "gh repo clone vercel-security/hacker /workspace/hacker",
+      permissions: [
+        { provider: "github", repositories: ["vercel-security/hacker"], access: "write" },
+      ],
+    },
+    config,
+    dependencies,
+  );
+  assert.deepEqual(orgs, ["vercel", "Vercel-Security"]);
+
+  await assert.rejects(
+    executeGitHubShell(
+      {
+        ...READ,
+        command: "gh pr view 1 --repo other/internal-agents",
+        permissions: [
+          { provider: "github", repositories: ["other/internal-agents"], access: "write" },
+        ],
+      },
+      config,
+      dependencies,
+    ),
+    /outside vercel, Vercel-Security/u,
+  );
+  assert.equal(orgs.length, 2);
+});
+
 test("attributes pull requests to the person the tool context resolves", async () => {
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const contexts: unknown[] = [];

@@ -220,14 +220,23 @@ function githubTokenParams(org: string, repoName: string) {
   };
 }
 
+function configuredOrgs(org: string | readonly string[]): readonly string[] {
+  return typeof org === "string" ? [org] : org;
+}
+
+function watchOrg(org: string | readonly string[], owner: string): string | undefined {
+  return configuredOrgs(org).find((candidate) => candidate.toLowerCase() === owner.toLowerCase());
+}
+
 async function mintWatchToken(repo: string): Promise<string> {
   const github = extension.config.github;
   if (github === undefined) throw new Error("GitHub is not configured for this agent.");
   const parts = repoParts(repo);
-  if (parts.owner !== github.org.toLowerCase()) {
-    throw new Error(`Repository ${repo} is outside ${github.org}.`);
+  const org = watchOrg(github.org, parts.owner);
+  if (org === undefined) {
+    throw new Error(`Repository ${repo} is outside ${configuredOrgs(github.org).join(", ")}.`);
   }
-  const token = await getToken(github.connector, githubTokenParams(github.org, parts.name));
+  const token = await getToken(github.connector, githubTokenParams(org, parts.name));
   if (token.length === 0) {
     throw new Error(`Connect returned an empty GitHub token for ${repo}.`);
   }
@@ -238,7 +247,9 @@ async function invalidateWatchToken(repo: string): Promise<void> {
   const github = extension.config.github;
   if (github === undefined) return;
   const parts = repoParts(repo);
-  deleteTokenCacheEntry(github.connector, githubTokenParams(github.org, parts.name));
+  const org = watchOrg(github.org, parts.owner);
+  if (org === undefined) return;
+  deleteTokenCacheEntry(github.connector, githubTokenParams(org, parts.name));
 }
 
 async function githubJson(url: string, token: string): Promise<unknown> {

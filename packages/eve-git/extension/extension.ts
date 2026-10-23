@@ -21,7 +21,8 @@ export default defineExtension({
     github: z
       .object({
         connector: z.string().min(1),
-        org: z.string().min(1),
+        /** Organization, or organizations, whose repositories the `gh` tool can access. */
+        org: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
         broker: fn<GitHubLeaseBroker>(),
         /**
          * Resolves the person each turn publishes for. Their
