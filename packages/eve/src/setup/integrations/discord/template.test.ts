@@ -76,5 +76,9 @@ describe("eve-discord-agent-template", () => {
       }
       expect(await readTemplateFile(path), path).toBe(expected);
     }
+    // Setup doesn't rewrite the tool, so it has to start on the same placeholder.
+    expect(await readTemplateFile("agent/tools/read_recent_messages.ts")).toContain(
+      'const DISCORD_CONNECTOR = "discord/my-agent";',
+    );
   });
 });

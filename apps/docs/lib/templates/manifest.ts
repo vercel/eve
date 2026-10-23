@@ -171,7 +171,7 @@ export const templateManifest: TemplateManifestEntry[] = [
     setupPrompt:
       "Set up the eve Discord agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-discord-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the Discord bot, Vercel Connect, and Vercel Daemon setup steps.",
     description:
-      "A conversational Discord agent that answers DMs, mentions, and threads through a Discord Gateway relay on Vercel Daemons, with event planning, member onboarding, web search, and per-user memory.",
+      "A Discord community agent that answers questions in threads, catches people up on what they missed, and stays quiet while they talk, through a Discord Gateway relay on Vercel Daemons.",
     sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-discord-agent-template",
     category: "Collaboration",
     model: "anthropic/claude-sonnet-5",
@@ -187,10 +187,8 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/agent.ts",
       "agent/channels/discord.ts",
       "agent/instructions.md",
-      "agent/memory/profile.ts",
-      "agent/skills/plan_an_event.md",
-      "agent/skills/welcome_new_members.md",
-      "agent/tools/convert_time.ts",
+      "agent/skills/catch_up.md",
+      "agent/tools/read_recent_messages.ts",
       "daemon/main.ts",
       "vercel.json",
     ],
