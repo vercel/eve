@@ -1360,6 +1360,28 @@ describe("compactMessages: current message larger than its share of the threshol
     ).rejects.toThrow(/under its limit/);
   });
 
+  it("keeps the provider's ratio on assistant text that survives with its tool calls stripped", async () => {
+    const prose = "word ".repeat(4_400);
+    const history: ModelMessage[] = [
+      user("start"),
+      ...toolExchange({ callId: "call-0", payloadChars: 6_000, prose }),
+      user("go on"),
+    ];
+
+    const result = await compactMessages(
+      history,
+      {
+        lastKnownInputTokens: Math.round(estimateTokens(history) * 2),
+        lastKnownPromptMessageCount: history.length,
+        recentWindowSize: 3,
+        threshold: 10_000,
+      },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(JSON.stringify(result)).not.toContain("word word");
+  });
+
   it("does not read an unseen attachment's tokens as a reason to refuse a small summary", async () => {
     // The provider counted a 60k-token remote PDF that the character estimate
     // cannot see. The summary replaces it, so it is counted at its own size.

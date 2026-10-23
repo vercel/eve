@@ -26,6 +26,7 @@ import {
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
 import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -128,6 +129,70 @@ export function replaceSessionHistory(
       threshold: session.compaction.threshold,
       thresholdPercent: session.compaction.thresholdPercent,
     },
+  };
+}
+
+/**
+ * Restates the provider's last token count for the history `compactMessages`
+ * sees. The count covers the whole projected prompt, memory records included,
+ * but compaction works on the ordinary messages only, and memory records stay
+ * in the history verbatim. So: find the provider-to-estimate ratio over the
+ * prompt it measured, then hand compaction (1) how many ordinary messages that
+ * covered and the tokens they cost at that ratio, and (2) a threshold with the
+ * memory records' tokens, at that ratio, and the request envelope taken off.
+ */
+function describeHistoryForCompaction(input: {
+  readonly compaction: CompactionConfig;
+  readonly memory: readonly ModelMessage[];
+  readonly ordinary: readonly ModelMessage[];
+  readonly previousEnvelopeTokens: number;
+  readonly projectedPrompt: readonly HarnessModelMessage[];
+  readonly requestEnvelopeTokens: number;
+}): CompactionConfig {
+  const { compaction, ordinary, projectedPrompt, requestEnvelopeTokens } = input;
+  const providerTokens =
+    compaction.lastKnownInputTokens === undefined
+      ? undefined
+      : Math.max(
+          0,
+          compaction.lastKnownInputTokens -
+            Math.min(input.previousEnvelopeTokens, requestEnvelopeTokens),
+        );
+  const count = compaction.lastKnownPromptMessageCount;
+  const measuredPrompt =
+    providerTokens !== undefined &&
+    count !== undefined &&
+    Number.isInteger(count) &&
+    count > 0 &&
+    count <= projectedPrompt.length
+      ? projectedPrompt.slice(0, count)
+      : undefined;
+  const promptEstimate = measuredPrompt === undefined ? 0 : estimateTokens(measuredPrompt);
+  const scale =
+    providerTokens !== undefined && promptEstimate > 0
+      ? Math.max(1, providerTokens / promptEstimate)
+      : 1;
+  const measuredCount =
+    measuredPrompt === undefined
+      ? undefined
+      : Math.min(canonicalizeMemoryRecords(measuredPrompt).ordinary.length, ordinary.length);
+  const threshold = Math.max(
+    1,
+    compaction.threshold - requestEnvelopeTokens - estimateTokens(input.memory) * scale,
+  );
+  if (measuredCount === undefined || measuredCount === 0) {
+    return {
+      ...compaction,
+      lastKnownInputTokens: undefined,
+      lastKnownPromptMessageCount: undefined,
+      threshold,
+    };
+  }
+  return {
+    ...compaction,
+    lastKnownInputTokens: estimateTokens(ordinary.slice(0, measuredCount)) * scale,
+    lastKnownPromptMessageCount: measuredCount,
+    threshold,
   };
 }
 
@@ -251,19 +316,14 @@ export async function maybeCompact(input: {
     input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
       canonical.ordinary,
   );
-  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
-  const historyCompaction: CompactionConfig = {
-    ...session.compaction,
-    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens),
-    lastKnownInputTokens:
-      session.compaction.lastKnownInputTokens === undefined
-        ? undefined
-        : Math.max(
-            0,
-            session.compaction.lastKnownInputTokens -
-              Math.min(getRequestEnvelopeTokens(session) ?? 0, requestEnvelopeTokens),
-          ),
-  };
+  const historyCompaction = describeHistoryForCompaction({
+    compaction: session.compaction,
+    memory: canonical.memory,
+    ordinary,
+    previousEnvelopeTokens: getRequestEnvelopeTokens(session) ?? 0,
+    projectedPrompt: projectedPromptMessages,
+    requestEnvelopeTokens: input.requestEnvelopeTokens ?? 0,
+  });
   let compactedOrdinary: ModelMessage[] = [...ordinary];
   let failure: { readonly error: unknown } | undefined;
   try {

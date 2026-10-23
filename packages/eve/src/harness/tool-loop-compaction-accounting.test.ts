@@ -229,6 +229,78 @@ describe("tool-loop structured compaction accounting", () => {
     expect(JSON.stringify(result.session.history)).toContain("eve.memory");
   });
 
+  it("applies the provider's count to a history that carries memory records", async () => {
+    mockSummary("ordinary summary");
+    setupMockAgentSequence([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const recalled = applyMemoryRecallBatches({
+      batches: [
+        {
+          lock: createMemoryLock({
+            namespace: "app",
+            scope: "user_1",
+            slot: "profile",
+            turn: { id: "turn_0", input: [], sequence: 0 },
+            visibility: "scope",
+          }),
+          messages: validateMemoryRecallResult(
+            {
+              messages: [
+                { content: "profile note", id: "profile" },
+                { content: "style note", id: "style" },
+                { content: "team note", id: "team" },
+              ],
+            },
+            "profile",
+          ),
+          operationId: "recall_1",
+        },
+      ],
+      history: [],
+      state: undefined,
+    });
+    const promptCount = recalled.history.length + 1;
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        historyProjector: projectMemoryHistoryFromSessionState,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ provider: "test", modelId: "test-model" } as LanguageModel),
+      }),
+    );
+
+    // The message alone estimates under the threshold; the provider counted
+    // it at 2.2x, over it. The count covers the memory records too, so it
+    // is longer than the ordinary history compaction works on.
+    const result = await runStep(
+      createTestSession({
+        compaction: {
+          lastKnownInputTokens: 5_500,
+          lastKnownPromptMessageCount: promptCount,
+          recentWindowSize: 0,
+          threshold: 4_000,
+        },
+        history: [
+          ...validateHarnessModelMessages(recalled.history),
+          { content: `big ${"data ".repeat(2_000)}`, kind: "user", role: "user" },
+        ],
+        state: recalled.state,
+      }),
+      { message: "continue" },
+    );
+
+    expect(vi.mocked(streamText)).toHaveBeenCalledOnce();
+    expect(JSON.stringify(result.session.history)).toContain("profile note");
+    expect(JSON.stringify(result.session.history).length).toBeLessThan(9_000);
+  });
+
   it("compacts before the continuation step when structured tool results were appended", async () => {
     mockSummary("summary");
 

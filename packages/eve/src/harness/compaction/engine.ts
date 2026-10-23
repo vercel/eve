@@ -149,9 +149,9 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
 /**
  * How far the character estimate sits below the provider's count, learned from
  * the messages the provider last measured. It applies only to those messages
- * (by identity): a summary, a cut note or a message appended after the
- * measurement is new text the provider has not counted, so it stays at the
- * estimate.
+ * (tracked by identity, and carried to the rebuilt copies of them): a
+ * summary, a cut note or a message appended after the measurement is new text
+ * the provider has not counted, so it stays at the estimate.
  */
 interface Calibration {
   readonly measured: Set<ModelMessage>;
@@ -274,7 +274,7 @@ async function compactWithScale(
   if (!forceSummary) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
     if (older.length === 0 && previousCheckpoint === undefined) {
-      return keepNonToolResultMessages(recent);
+      return keepNonToolResultMessages(recent, calibration);
     }
 
     for (const heuristic of COMPACTION_HEURISTICS) {
@@ -326,7 +326,7 @@ async function compactWithScale(
     }
 
     const stripped = withResumptionGuard(
-      [...summaryHead, ...keepNonToolResultMessages(recent)],
+      [...summaryHead, ...keepNonToolResultMessages(recent, calibration)],
       conversation,
       config.threshold,
       replay,
@@ -594,7 +594,10 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
  * Assistant messages with no remaining text are dropped; user messages are kept
  * verbatim.
  */
-function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+function keepNonToolResultMessages(
+  messages: readonly ModelMessage[],
+  calibration: Calibration,
+): ModelMessage[] {
   const kept: ModelMessage[] = [];
 
   for (const message of messages) {
@@ -605,7 +608,11 @@ function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMess
     if (message.role === "assistant") {
       const text = assistantMessageText(message);
       if (text.length > 0) {
-        kept.push({ content: text, role: "assistant" });
+        const textOnly: ModelMessage = { content: text, role: "assistant" };
+        if (calibration.measured.has(message)) {
+          calibration.measured.add(textOnly);
+        }
+        kept.push(textOnly);
       }
       continue;
     }
