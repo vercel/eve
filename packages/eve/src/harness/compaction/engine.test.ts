@@ -1538,6 +1538,53 @@ describe("compactMessages: current message larger than its share of the threshol
     ).rejects.toMatchObject({ name: "CompactionOverLimitError" });
   });
 
+  it("replays the latest request, not an older oversized task, when the latest has no text", async () => {
+    const pdfRequest: ModelMessage = {
+      content: [
+        {
+          data: new URL("https://example.com/report.pdf"),
+          mediaType: "application/pdf",
+          type: "file",
+        },
+      ],
+      role: "user",
+    };
+    const history: ModelMessage[] = [
+      { content: "OBSOLETE TASK ".repeat(4_000), role: "user" },
+      assistant("Done."),
+      pdfRequest,
+      assistant("Working"),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 1, threshold: 10_000 },
+      summarizeWith("checkpoint text"),
+    );
+
+    expect(JSON.stringify(result)).not.toContain("OBSOLETE TASK");
+    expect(result).toContainEqual(pdfRequest);
+  });
+
+  it("summarizes once and replays a request whole when the checkpoint and the whole request fit", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const request: ModelMessage = { content: "request text ".repeat(2_000), role: "user" };
+    const history: ModelMessage[] = [
+      assistant("older text ".repeat(1_900)),
+      request,
+      assistant("later text ".repeat(1_300)),
+    ];
+
+    const result = await compactMessages(
+      history,
+      { recentWindowSize: 4, threshold: 10_000 },
+      summarizer,
+    );
+
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(result).toContainEqual(request);
+  });
+
   it("replays a folded-away request whose content is an array of parts", async () => {
     const request: ModelMessage = {
       content: [{ text: "review the storefront", type: "text" }],

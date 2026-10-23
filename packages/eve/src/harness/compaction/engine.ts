@@ -255,22 +255,7 @@ export async function compactMessages(
   const calibration = calibrate(messages, config);
   // The current request is replayed whole when it fits next to the summary;
   // it is cut only when that does not fit.
-  const whole = await compactWithScale(
-    messages,
-    config,
-    summarize,
-    forceSummary,
-    calibration,
-    false,
-  );
-  const compacted =
-    whole !== undefined && fitsThreshold(whole, config, calibration)
-      ? whole
-      : ((await compactWithScale(messages, config, summarize, forceSummary, calibration, true)) ??
-        whole);
-  if (compacted === undefined) {
-    throw new Error("Compaction produced no history.");
-  }
+  const compacted = await compactWithScale(messages, config, summarize, forceSummary, calibration);
   if (!fitsThreshold(compacted, config, calibration)) {
     const remaining = Math.round(
       calibratedTokens(compacted, calibration) + COMPACTION_PROMPT_OVERHEAD_TOKENS,
@@ -288,48 +273,46 @@ async function compactWithScale(
   summarize: CompactionSummarizer,
   forceSummary: boolean,
   calibration: Calibration,
-  cutCurrent: boolean,
-): Promise<ModelMessage[] | undefined> {
+): Promise<ModelMessage[]> {
   const { checkpointHead, conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
   let keep = selectRecentWindowSize(conversation, recentConfig);
 
-  // A current message that alone takes most of the budget would be kept word
-  // for word after every compaction, so compaction could never get under the
-  // threshold. Replay only its newest part and summarize the cut-off head,
-  // but only once the whole message has been found not to fit.
-  const currentIndex = findLastRealUserIndex(conversation, hasText);
+  // The current request is replayed whole after every compaction, so one that
+  // cannot fit next to the summary would keep compaction from ever getting
+  // under the threshold. Replay only its newest part and summarize the
+  // cut-off head.
+  const currentIndex = findLastRealUserIndex(conversation, () => true);
   const current = conversation[currentIndex];
-  const fittedCut =
-    current === undefined
-      ? undefined
-      : fitCurrentMessage(
+  const cut =
+    current !== undefined &&
+    messageTokens(current, calibration) +
+      resolveCompactionSummaryReserve(config) +
+      COMPACTION_PROMPT_OVERHEAD_TOKENS >
+      config.threshold
+      ? fitCurrentMessage(
           current,
           config.threshold,
           calibration.measured.has(current) ? calibration.scale : 1,
           unsizedCharge(current, calibration),
-        );
-  const cut = cutCurrent ? fittedCut : undefined;
-  // `undefined` hands over to the other pass: a cut that cannot be made, or a
-  // current message that does not fit even next to an empty summary.
-  if (
-    cutCurrent
-      ? cut === undefined
-      : fittedCut !== undefined &&
-        current !== undefined &&
-        !fitsThreshold([current], config, calibration)
-  ) {
-    return undefined;
-  }
+        )
+      : undefined;
   const replay = cut?.replay;
   if (cut !== undefined) {
     // The replay is the measured message's newest part: it keeps that message's ratio.
     if (current !== undefined && calibration.measured.has(current)) {
       calibration.measured.add(cut.replay);
     }
-  }
-  if (cut !== undefined) {
     keep = Math.min(keep, conversation.length - 1 - currentIndex);
+  }
+  // A request the window leaves out is replayed after the summary: the window
+  // has to leave room for it.
+  const replayed = replay ?? current;
+  if (replayed !== undefined && currentIndex < conversation.length - keep) {
+    keep = Math.min(
+      keep,
+      selectRecentWindowSize(conversation, recentConfig, estimateTokens([replayed])),
+    );
   }
   const olderToSummarize = (older: readonly ModelMessage[]): readonly ModelMessage[] =>
     cut === undefined
@@ -396,14 +379,7 @@ async function compactWithScale(
       config.threshold,
       replay,
     );
-    // Whole, the current message is kept while a smaller window can still make
-    // room; once the window is down to it, a cut is the next step.
-    const wholeFloor = fittedCut === undefined ? 0 : conversation.length - currentIndex;
-    if (
-      fitsThreshold(stripped, config, calibration) ||
-      keep === 0 ||
-      (!cutCurrent && keep <= wholeFloor)
-    ) {
+    if (fitsThreshold(stripped, config, calibration) || keep === 0) {
       return stripped;
     }
 
@@ -564,10 +540,6 @@ function messageText(message: ModelMessage): string | undefined {
   return texts.length === 0 ? undefined : texts.join("");
 }
 
-function hasText(message: ModelMessage): boolean {
-  return messageText(message) !== undefined;
-}
-
 type MessagePart = Exclude<ModelMessage["content"], string>[number];
 
 /**
@@ -717,9 +689,10 @@ function assistantMessageText(message: ModelMessage): string {
 function selectRecentWindowSize(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
+  replayTokens = 0,
 ): number {
   const maxKeep = Math.min(config.recentWindowSize, Math.max(messages.length - 1, 0));
-  const reserve = resolveCompactionSummaryReserve(config);
+  const reserve = resolveCompactionSummaryReserve(config) + replayTokens;
   let keep = 0;
   let recentTokens = 0;
 
