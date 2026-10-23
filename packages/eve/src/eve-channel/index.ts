@@ -1,7 +1,7 @@
 import { InvalidToolStubTargetError } from "#tool-stubs/validate-targets.js";
 import { readStubFailure, readMatchedStubRules } from "#execution/tool-stubs/steps.js";
 import { getRun } from "#internal/workflow/runtime.js";
-import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
+import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
 import { descendantStreamResponse } from "#eve-channel/descendant-stream.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
@@ -744,12 +744,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           redirect: "manual",
           signal: req.signal,
         });
-        const responseHeaders = proxyStreamHeaders(upstream.headers);
-        return new Response(upstream.body, {
-          headers: responseHeaders,
-          status: upstream.status,
-          statusText: upstream.statusText,
-        });
+        return proxyStreamResponse(upstream);
       }),
     ],
     events: input.events,

@@ -12,7 +12,7 @@ import {
 } from "#protocol/descendant-observation.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import { findRemoteAgentBinding, type RemoteAgentBinding } from "#eve-channel/support.js";
-import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
+import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 import { isObject } from "#shared/guards.js";
 import { isExpiredWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
@@ -101,8 +101,8 @@ export async function descendantStreamResponse(input: {
         void upstream.body?.cancel().catch(() => {});
         return unavailable("unsupported", 422);
       }
-      const responseHeaders = proxyStreamHeaders(upstream.headers);
-      if (upstream.ok) {
+      const response = proxyStreamResponse(upstream);
+      if (response.ok) {
         const key =
           remaining.length === 0
             ? localObservationKey(childId)
@@ -111,12 +111,12 @@ export async function descendantStreamResponse(input: {
           void upstream.body?.cancel().catch(() => {});
           return unavailable("unsupported", 422);
         }
-        responseHeaders.set(
+        response.headers.set(
           EVE_OBSERVATION_KEY_HEADER,
           JSON.stringify(["remote", parent.id, childId, key]),
         );
       }
-      return new Response(upstream.body, { headers: responseHeaders, status: upstream.status });
+      return response;
     }
   } catch (error) {
     if (isExpiredWorkflowRunError(error)) return unavailable("session_expired", 410);

@@ -13,7 +13,9 @@ import {
   createEveSubagentStreamRoutePath,
   EVE_DESCENDANT_STREAM_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
+  EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
+import { EVE_MESSAGE_STREAM_CONTENT_TYPE } from "#protocol/session-http.js";
 import { EVE_OBSERVATION_KEY_HEADER } from "#protocol/descendant-observation.js";
 import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
 import { convertLegacyEvents } from "#execution/v26-history.js";
@@ -74,11 +76,16 @@ function deployment(origin: string, token: string) {
     const url = new URL(request.url);
     const id = decodeURIComponent(url.pathname.split("/")[4]!);
     const descendant = url.pathname.endsWith("/descendants/stream");
+    const subagent = url.pathname.includes("/subagents/");
     const route = channel.routes!.find(
       (route) =>
         route.method === "GET" &&
         route.path ===
-          (descendant ? EVE_DESCENDANT_STREAM_ROUTE_PATTERN : EVE_SESSION_STREAM_ROUTE_PATTERN),
+          (descendant
+            ? EVE_DESCENDANT_STREAM_ROUTE_PATTERN
+            : subagent
+              ? EVE_SUBAGENT_STREAM_ROUTE_PATTERN
+              : EVE_SESSION_STREAM_ROUTE_PATTERN),
     )!;
     const attachSession = (sessionId: string): InternalSession => {
       attached.push(sessionId);
@@ -112,7 +119,12 @@ function deployment(origin: string, token: string) {
       ...mockChannelContext(() => {
         throw new Error("Unexpected execution");
       }),
-      params: { sessionId: id },
+      params: {
+        sessionId: id,
+        parentSessionId: id,
+        callId: decodeURIComponent(url.pathname.split("/")[6] ?? ""),
+        childSessionId: decodeURIComponent(url.pathname.split("/")[7] ?? ""),
+      },
       attachSession,
       waitUntil: () => undefined,
       requestIp: "127.0.0.1",
@@ -183,6 +195,122 @@ describe("authorized descendant readers", () => {
     expect(desk.attached).toEqual(["desk", "workflow-child"]);
     expect(home.authorization).toHaveBeenCalledTimes(1);
     expect(desk.authorization).toHaveBeenCalledTimes(1);
+    const response = await requests.mock.results[0]!.value;
+    expect(response.headers.get("content-type")).toBe(EVE_MESSAGE_STREAM_CONTENT_TYPE);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it.each([
+    {
+      name: "nested HTML success",
+      nested: true,
+      contentType: "text/html",
+      status: 200,
+      expectedStatus: 502,
+      forwarded: false,
+    },
+    {
+      name: "terminal HTML success",
+      nested: false,
+      contentType: "text/html",
+      status: 200,
+      expectedStatus: 502,
+      forwarded: false,
+    },
+    {
+      name: "missing content type",
+      nested: true,
+      contentType: undefined,
+      status: 200,
+      expectedStatus: 502,
+      forwarded: false,
+    },
+    {
+      name: "HTML authorization error",
+      nested: true,
+      contentType: "text/html",
+      status: 401,
+      expectedStatus: 401,
+      forwarded: false,
+    },
+    {
+      name: "JSON expiry error",
+      nested: true,
+      contentType: "Application/JSON; charset=utf-8",
+      status: 410,
+      expectedStatus: 410,
+      forwarded: true,
+    },
+  ])(
+    "enforces safe upstream response types: $name",
+    async ({ nested, contentType, status, expectedStatus, forwarded }) => {
+      const home = deployment("https://home.test", "browser");
+      home.link("root", "desk", "https://remote.test");
+      home.tokens.set("https://remote.test", "remote-reader");
+      const cancel = vi.fn();
+      const headers = new Headers({
+        [EVE_OBSERVATION_KEY_HEADER]: JSON.stringify(["local", "nested"]),
+      });
+      if (contentType !== undefined) headers.set("content-type", contentType);
+      const body = JSON.stringify({
+        code: "session_expired",
+        error: "Remote maintenance response.",
+      });
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(body));
+              controller.close();
+            },
+            cancel,
+          }),
+          { status, headers },
+        ),
+      );
+      const children = [
+        { sessionId: "desk", position: 0 },
+        ...(nested ? [{ sessionId: "nested", position: 0 }] : []),
+      ];
+      const response = await home.serve(
+        new Request(
+          `https://home.test/eve/v1/session/root/descendants/stream?children=${encodeURIComponent(JSON.stringify(children))}`,
+          { headers: { authorization: "Bearer browser" } },
+        ),
+      );
+      expect(response.status).toBe(expectedStatus);
+      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      if (forwarded) {
+        expect(await response.text()).toBe(body);
+        expect(cancel).not.toHaveBeenCalled();
+      } else {
+        expect(await response.text()).not.toContain("Remote maintenance response.");
+        expect(cancel).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
+  it("sanitizes upstream errors on the recorded direct subagent stream route too", async () => {
+    const home = deployment("https://home.test", "browser");
+    const child = home.link("root", "desk", "https://remote.test");
+    home.tokens.set("https://remote.test", "remote-reader");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Remote maintenance response.", {
+        status: 403,
+        headers: { "content-type": "text/html" },
+      }),
+    );
+    const response = await home.serve(
+      new Request(new URL(child.data.stream, home.origin), {
+        headers: { authorization: "Bearer browser" },
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await response.text()).not.toContain("Remote maintenance response.");
   });
 
   it("reads a child opening translated from v26 history through its recorded source position", async () => {
@@ -333,7 +461,9 @@ describe("authorized descendant readers", () => {
     let signal: AbortSignal | null | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
       signal = init?.signal;
-      return new Response(new ReadableStream());
+      return new Response(new ReadableStream(), {
+        headers: { "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE },
+      });
     });
     const controller = new AbortController();
     const response = await home.serve(
