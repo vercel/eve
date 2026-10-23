@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { requireSignIn, settleLimit } from "#harness/hitl/approvals.js";
 import { cascade } from "#harness/session-machine/cascade.js";
-import { sessionView } from "#harness/session-machine/commit.js";
+import { dropClosedRecords, saveTransition, sessionView } from "#harness/session-machine/commit.js";
+import { readHitlState } from "#harness/hitl/requests.js";
 import {
   awaitSignIns,
   callSignInsSettled,
@@ -366,12 +367,12 @@ describe("controls and callbacks as deliveries", () => {
 
   it("clears by closing the turn and withdrawing its requests before an empty selection", () => {
     const session = waitingTurn();
-    const events = committed(viewOf(session), (view) =>
-      clear(view, {
-        cause: { deliveryId: "clear-1" },
-        sessionId: "session-1",
-      }),
-    );
+    const transition = clear(viewOf(session), { cause: { deliveryId: "clear-1" } });
+    const events = cascade(viewOf(session).projection.view, transition.events);
+    const saved = saveTransition(withPublished(session, events), transition);
+    const cleared = dropClosedRecords(saved, storedProjection(saved.state));
+    expect(readHitlState(cleared.state).signIns).toEqual([]);
+    expect(readHitlState(cleared.state).responders).toEqual({});
 
     expect(settledBy(events)).toMatchObject({
       "interaction.settled:approval-1": "interrupted",
@@ -401,8 +402,7 @@ describe("controls and callbacks as deliveries", () => {
         message: "approve",
       });
       const view = viewOf(queued);
-      const transition =
-        control === "cancel" ? cancel(view) : clear(view, { sessionId: BASE.sessionId });
+      const transition = control === "cancel" ? cancel(view) : clear(view);
       const events = cascade(view.projection.view, transition.events);
 
       expect(settledBy(events)).toMatchObject({

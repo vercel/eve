@@ -4,7 +4,6 @@ import { StaticModelReferenceKey } from "#context/keys.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory, replaceSessionHistory } from "#harness/compaction/step.js";
 import { runModelStep } from "#harness/model-call/run.js";
-import { handleStepResult } from "#harness/step/after-model.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import {
   saveProjection,
@@ -15,7 +14,6 @@ import {
   admitHumanInput,
   applyHumanDecisions,
   compactInput,
-  discardClearedHumanInput,
   openDeferredApprovals,
   queueInput,
   settleHumanInput,
@@ -149,7 +147,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: step.runStep, session: step.session };
     }
     return runModelStep(step, {
-      onResponse: (response) => handleStepResult(step, response),
       generation,
       turn,
     });
@@ -233,13 +230,8 @@ async function turnInput(
  */
 async function clearContext(step: Step): Promise<StepResult> {
   const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
-  await step.apply(
-    controlled(delivery, "clear", (cause) =>
-      clear(step.view(), { cause, sessionId: step.session.sessionId }),
-    ),
-  );
-  const cleared = discardClearedHumanInput(step.session);
-  return { next: null, session: replaceSessionHistory(cleared, []) };
+  await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
+  return { next: null, session: replaceSessionHistory(step.session, []) };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

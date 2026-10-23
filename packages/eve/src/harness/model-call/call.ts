@@ -54,7 +54,11 @@ import { createLogger, logError } from "#internal/logging.js";
 import { maybeCompact } from "#harness/compaction/step.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
-import { isEmptyModelResponse, rethrowNoOutputAsEmptyResponse } from "./recovery.js";
+import {
+  isEmptyModelResponse,
+  recoverModelCall,
+  rethrowNoOutputAsEmptyResponse,
+} from "./recovery.js";
 import {
   modelInstructions,
   requestMessages,
@@ -156,18 +160,32 @@ export class ModelCaller {
   }
 
   /** Calls the model, retrying transient failures. */
-  async call(options: ModelCallOptions): Promise<HarnessStepResult> {
-    return await runModelCallWithRetries(
-      async () => await this.attempt(options),
-      {
-        // A summary that failed already settled the compaction; another attempt can't redo it.
-        policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
-        onRetry: async (error) => await this.prepareRetry(error),
-        sessionId: this.step.session.sessionId,
-        turnId: this.step.position().turnId,
-      },
-      this.input.generation.signal,
-    );
+  async call(): Promise<HarnessStepResult> {
+    let options: ModelCallOptions = {};
+    const diagnostics = {
+      // A summary that failed already settled the compaction; another attempt can't redo it.
+      policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
+      onRetry: (error: unknown) => this.prepareRetry(error),
+      sessionId: this.step.session.sessionId,
+      turnId: this.step.position().turnId,
+    };
+    for (;;) {
+      try {
+        return await runModelCallWithRetries(
+          () => this.attempt(options),
+          diagnostics,
+          this.input.generation.signal,
+        );
+      } catch (error) {
+        if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
+        throwIfTurnAborted(this.step.config.abortSignal);
+        this.input.generation.check();
+        const recovery = recoverModelCall(error, options, diagnostics);
+        if (recovery === undefined) throw error;
+        await this.prepareRetry(error);
+        options = recovery;
+      }
+    }
   }
 
   /**
@@ -175,7 +193,7 @@ export class ModelCaller {
    * new one: the calls it announced settle `abandoned`, since eve can't tell whether they ran. One
    * that published nothing retries in the same run, and the stream hears why.
    */
-  async prepareRetry(error: unknown): Promise<void> {
+  private async prepareRetry(error: unknown): Promise<void> {
     const { step } = this;
     const runId = step.position().runId;
     const attempt = this.started;
@@ -191,7 +209,7 @@ export class ModelCaller {
     await step.apply([fact("model.retried", { attempt, error: modelCallErrorInfo(error), runId })]);
   }
 
-  /** A failed compaction fails the step, whatever recovery the call attempted. */
+  /** Summary failures belong to the history transition, not model-call recovery. */
   throwIfCompactionFailed(): void {
     if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
   }

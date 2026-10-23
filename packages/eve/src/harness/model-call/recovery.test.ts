@@ -1,10 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { HarnessStepResult } from "#harness/step-hooks.js";
+import { EmptyModelResponseError } from "#harness/model-call/errors.js";
 import { recoverModelCall } from "#harness/model-call/recovery.js";
-
-/** What a recovery reissues its call with. */
-type RecoveryOptions = Parameters<Parameters<typeof recoverModelCall>[0]["call"]>[0];
 
 /** Bedrock Mantle's response when a request carries OpenAI web search. */
 function includeRejection(): Error {
@@ -24,29 +21,24 @@ function includeRejection(): Error {
   });
 }
 
-describe("recoverModelCall", () => {
-  it("reissues the call without web search when an OpenAI-compatible endpoint rejects it", async () => {
-    const result = {} as HarnessStepResult;
-    const call = vi.fn(async (_options: RecoveryOptions) => result);
+const diagnostics = { sessionId: "s", turnId: "turn_0" };
 
-    await expect(
-      recoverModelCall({ call, error: includeRejection(), sessionId: "s", turnId: "turn_0" }),
-    ).resolves.toEqual({ result });
-    expect(call).toHaveBeenCalledOnce();
-    const [options] = call.mock.calls[0]!;
-    expect([...(options.disabledProviderTools ?? [])]).toEqual(["web_search"]);
-    expect(options.extraSystemNote).toContain("web_search");
+describe("recoverModelCall", () => {
+  it("removes rejected web search once, retaining that removal through an empty-response recovery", () => {
+    const disabled = recoverModelCall(includeRejection(), {}, diagnostics)!;
+    expect([...disabled.disabledProviderTools!]).toEqual(["web_search"]);
+    expect(disabled.extraSystemNote).toContain("web_search");
+    expect(recoverModelCall(includeRejection(), disabled, diagnostics)).toBeUndefined();
+
+    const nudged = recoverModelCall(new EmptyModelResponseError(), disabled, diagnostics)!;
+    expect([...nudged.disabledProviderTools!]).toEqual(["web_search"]);
+    expect(nudged.extraSystemNote).toBe(disabled.extraSystemNote);
+    expect(nudged.trailingUserNote).toContain("Do not repeat writes");
+    expect(recoverModelCall(new EmptyModelResponseError(), nudged, diagnostics)).toBeUndefined();
+    expect(recoverModelCall(includeRejection(), nudged, diagnostics)).toBeUndefined();
   });
 
-  it("returns the error when the reissue fails too", async () => {
-    const retryError = includeRejection();
-    const call = vi.fn(async () => {
-      throw retryError;
-    });
-
-    await expect(
-      recoverModelCall({ call, error: includeRejection(), sessionId: "s", turnId: "turn_0" }),
-    ).resolves.toEqual({ error: retryError });
-    expect(call).toHaveBeenCalledOnce();
+  it("does not change a request to recover an unrelated failure", () => {
+    expect(recoverModelCall(new Error("broken"), {}, diagnostics)).toBeUndefined();
   });
 });

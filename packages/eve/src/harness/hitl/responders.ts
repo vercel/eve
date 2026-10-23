@@ -13,7 +13,12 @@ import {
 } from "#harness/authorization.js";
 import { responseAdmitted, responseSettled } from "#harness/interaction-facts.js";
 import type { Transition } from "#harness/session-machine/commit.js";
-import type { ApprovalAsk, SessionView, SuspendedStep } from "#harness/session-machine/view.js";
+import {
+  stepForRequest,
+  type ApprovalAsk,
+  type SessionView,
+  type SuspendedStep,
+} from "#harness/session-machine/view.js";
 import type { HarnessStepInput, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -81,7 +86,7 @@ export function checkResponders(
     // A repeated delivery brings back an answer the session holds: it changes nothing, whoever
     // carried it, and a response policy already weighs it or has.
     if (view.projection.view.responses[responseId] !== undefined) continue;
-    const step = stepAsking(view, response.interactionId);
+    const step = stepForRequest(view, response.interactionId);
     const request = step?.requests.find((asked) => asked.interactionId === response.interactionId);
     if (step === undefined || request === undefined) {
       if (responseId !== undefined) admit.push(responseId);
@@ -165,7 +170,7 @@ export async function weighResponders(
       !pending.challenges!.some((challenge) => getAuthorizationResult(challenge.name) !== undefined)
     )
       continue;
-    const step = stepAsking(view, row.interactionId);
+    const step = stepForRequest(view, row.interactionId);
     const request = step?.requests.find((asked) => asked.interactionId === row.interactionId);
     const decision = row.value?.optionId === "approve" ? "approve" : "deny";
     if (step === undefined || request === undefined) continue;
@@ -211,7 +216,7 @@ export async function weighResponders(
   return {
     challenges,
     events,
-    responders: { upsert },
+    responders: upsert,
     turn: view.turn,
     unavailable,
   };
@@ -312,13 +317,6 @@ async function weigh(input: {
       return { challenges: authorization.challenges, kind: "sign-in" };
     return { kind: "failed", reason: FAILED_REASON };
   }
-}
-
-/** The suspended step that asked `interactionId`. */
-function stepAsking(view: SessionView, interactionId: string): SuspendedStep | undefined {
-  return view.turn.suspended.find((step) =>
-    step.requests.some((request) => request.interactionId === interactionId),
-  );
 }
 
 function currentResponder(): SessionAuthContext | null {

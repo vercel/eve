@@ -1,4 +1,5 @@
 import type { LanguageModel } from "ai";
+import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
 import {
@@ -33,7 +34,6 @@ import { ModelCaller } from "./call.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
-import { recoverModelCall } from "./recovery.js";
 import { recordModelUsage } from "./usage.js";
 
 /** A model step's response, for the session to act on. */
@@ -51,7 +51,7 @@ export interface ModelResponse {
 
 /**
  * One model step of the open turn: the prompt it reads, the model that serves it, and the call
- * with its retries and recoveries. `onResponse` decides what the session does with the response.
+ * with its retries and recoveries. The response handler applies what it returned.
  *
  * The budget gate passes first, after the session's dynamic values are evaluated with the
  * conversation the call reads, which fixes its model, tools, and context. Then the turn requests
@@ -60,7 +60,6 @@ export interface ModelResponse {
 export async function runModelStep(
   step: Step,
   input: {
-    readonly onResponse: (response: ModelResponse) => Promise<StepResult>;
     readonly turn: TurnInput;
     readonly generation: GenerationSteering;
   },
@@ -105,25 +104,12 @@ export async function runModelStep(
 
   let result: HarnessStepResult;
   try {
-    result = await caller.call({});
+    result = await caller.call();
   } catch (error) {
     caller.throwIfCompactionFailed();
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
-    const recovery = await recoverModelCall({
-      call: async (options, failure) => {
-        await caller.prepareRetry(failure);
-        return await caller.call(options);
-      },
-      error,
-      sessionId: step.session.sessionId,
-      turnId: step.position().turnId,
-    });
-    caller.throwIfCompactionFailed();
-    throwIfTurnAborted(step.config.abortSignal);
-    if (generation.interrupted) return caller.steered();
-    if (!("result" in recovery)) return reportModelCallFailure(step, recovery.error);
-    result = recovery.result;
+    return reportModelCallFailure(step, error);
   }
 
   await recordModelUsage(step, { model: run.model });
@@ -132,7 +118,7 @@ export async function runModelStep(
   let stepResult: StepResult;
   try {
     generation.check();
-    stepResult = await input.onResponse({
+    stepResult = await handleStepResult(step, {
       catalog,
       // Usage measures what the model read only when no client context was spliced in.
       durableModelPromptMessageCount:

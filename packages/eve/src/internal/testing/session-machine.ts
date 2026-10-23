@@ -8,7 +8,7 @@ import { contextStorage } from "#context/container.js";
 import { askApprovals } from "#harness/hitl/approvals.js";
 import { suspendStep } from "#harness/session-machine/transitions.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
+import { writeHitlState, type HitlStateChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import { eventsOf } from "#harness/publication.js";
 import {
@@ -207,9 +207,9 @@ export function positionOf(session: Pick<HarnessSession, "state">): TurnPosition
 /** `session` relaying requests for a child, as the session machine records them. */
 export function withRelays<T extends { readonly state?: SessionStateMap }>(
   session: T,
-  upsert: NonNullable<RelayChange["upsert"]>,
+  relays: NonNullable<HitlStateChange["relays"]>,
 ): T {
-  return writeHitlState(session, { relays: { upsert } });
+  return writeHitlState(session, { relays });
 }
 
 /** The public tables `events` fold into, each event its own line, as a reader receives them. */

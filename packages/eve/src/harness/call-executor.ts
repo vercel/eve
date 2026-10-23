@@ -21,10 +21,9 @@ import {
 } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { failedCall, TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/approval-outcome.js";
-import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
+import { resolveToolCallInputObject } from "#harness/coordination.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
-import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
 import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
@@ -33,9 +32,8 @@ import { callProgress, callSettledFrom, callStarted } from "#harness/call-facts.
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
-import { parseJsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";
-import { projectToolStartLabel } from "#harness/action-presentation.js";
+import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 // eve runs every local call itself: the AI SDK only calls the model. The calls a model response
@@ -201,13 +199,7 @@ export async function executeToolCall(
               output = partial;
               const visible = withoutSignInSecrets(partial);
               await input.publish(
-                callProgress(
-                  callId,
-                  visible,
-                  projectDeltaPresentation(definition, callId, parseJsonObject(args), visible)?.[
-                    callId
-                  ]?.label,
-                ),
+                callProgress(callId, visible, projectToolLabel(definition, "delta", args, visible)),
               );
             }
           } else {
@@ -278,10 +270,7 @@ export async function executeToolCall(
           toolName,
         }),
         {
-          label: failed
-            ? undefined
-            : projectResultPresentation(definition, callId, parseJsonObject(args), output)?.[callId]
-                ?.label,
+          label: failed ? undefined : projectToolLabel(definition, "complete", args, output),
         },
       ),
     );
@@ -614,8 +603,9 @@ function approvalRequest(
   call: TypedToolCall<ToolSet>,
   definition: HarnessToolDefinition | undefined,
 ): ApprovalAsk {
-  const { callId, input, toolName } = createRuntimeToolCallActionFromToolCall({ toolCall: call });
-  const label = projectToolStartLabel(definition, input) ?? displayTitle(toolName);
+  const { toolCallId: callId, toolName } = call;
+  const input = resolveToolCallInputObject(call.input, { callId, toolName });
+  const label = projectToolLabel(definition, "start", input) ?? displayTitle(toolName);
   const prompt = authoredApprovalPrompt(call, definition);
   return {
     call: {

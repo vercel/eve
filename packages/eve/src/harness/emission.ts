@@ -29,7 +29,7 @@ import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
 } from "#harness/action-presentation.js";
-import { projectResultPresentation } from "#harness/tool-presentation.js";
+import { projectToolLabel } from "#harness/action-presentation.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -220,7 +220,7 @@ async function consumeStreamContent(
     }
 
     actionInputs.set(resolved.request.action.callId, resolved.request.action.input);
-    providerActionBatch.observe(resolved.request, toolCall.toolName);
+    providerActionBatch.observe(resolved.request);
   };
 
   /** A call whose input didn't validate is introduced with its error, and fails at once. */
@@ -249,13 +249,13 @@ async function consumeStreamContent(
     const resultPresentation =
       result.isError === true
         ? undefined
-        : projectResultPresentation(
+        : projectToolLabel(
             options?.tools.get(result.toolName),
-            result.callId,
+            "complete",
             actionInputs.get(result.callId),
             result.output,
           );
-    await emitFn(callSettledFrom(result, { label: resultPresentation?.[result.callId]?.label }));
+    await emitFn(callSettledFrom(result, { label: resultPresentation }));
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {

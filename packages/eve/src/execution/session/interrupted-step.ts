@@ -19,7 +19,6 @@ import { currentProjection, saveSessionProjection } from "#harness/session-machi
 import { fail, receive, stopInterruptedSteps } from "#harness/session-machine/transitions.js";
 import { replaceSessionHistory } from "#harness/compaction/step.js";
 import { controlAdmitted, fact } from "#harness/facts.js";
-import { discardClearedHumanInput } from "#harness/hitl/index.js";
 import type {
   ControlDelivery,
   HarnessSession,
@@ -199,9 +198,10 @@ export async function recoverInterruptedStep(input: {
       const cleared = saveTransition(session, {
         clearsHistory: true,
         events: [],
+        signIns: [],
         turn: { grants: view().turn.grants, suspended: [] },
       });
-      session = replaceSessionHistory(discardClearedHumanInput(cleared), []);
+      session = replaceSessionHistory(cleared, []);
     }
     const { delivery, kind } = input.control;
     const status =

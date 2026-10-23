@@ -200,7 +200,7 @@ export function admitAnswers(
         }));
   return {
     events: [...responses.facts(), ...refused],
-    responders: { upsert: check.weigh },
+    responders: check.weigh,
     turn: view.turn,
   };
 }
@@ -374,16 +374,6 @@ export function grantedApprovals(view: SessionView): readonly ApprovalGrant[] {
   );
   return view.turn.grants.filter(
     (grant) => !pending.some((request) => request.call.toolName === grant.toolName),
-  );
-}
-
-/** The suspended step that holds `interactionId`. */
-export function stepForRequest(
-  view: SessionView,
-  interactionId: string,
-): SuspendedStep | undefined {
-  return view.turn.suspended.find((step) =>
-    step.requests.some((request) => request.interactionId === interactionId),
   );
 }
 

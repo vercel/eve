@@ -8,24 +8,18 @@ interface ActionEventCoordinates {
   readonly turnId: string;
 }
 
-interface EmittedProviderAction {
-  readonly request: RuntimeActionRequestProjection;
-  readonly toolName: string;
-}
-
 interface ProviderStreamActionBatch {
   cancel(): Promise<void>;
   flush(): Promise<void>;
-  observe(action: RuntimeActionRequestProjection, toolName: string): void;
+  observe(action: RuntimeActionRequestProjection): void;
 }
 
 /** Batches provider-managed calls that arrive in one streamed model response. */
 export function createProviderStreamActionBatch(input: {
   readonly emitFn: HarnessEmitFn;
-  readonly onActionsEmitted?: (actions: readonly EmittedProviderAction[]) => void;
   readonly state: ActionEventCoordinates;
 }): ProviderStreamActionBatch {
-  const pendingActions = new Map<string, EmittedProviderAction>();
+  const pendingActions = new Map<string, RuntimeActionRequestProjection>();
   let actionFlush: Promise<void> = Promise.resolve();
   let actionFlushError: unknown;
   let actionFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -43,17 +37,11 @@ export function createProviderStreamActionBatch(input: {
     pendingActions.clear();
     // The provider runs these as it streams: each is requested and started in one commit.
     const runId = input.state.runId ?? `${input.state.turnId}.run`;
-    const commit: SessionEvent[] = actions.flatMap(({ request }) => [
-      callRequested({
-        action: request.action,
-        owner: { runId },
-
-        label: request.presentationLabel,
-      }),
-      callStarted(request.action.callId, { clearedBy: { policy: "provider" } }),
+    const commit: SessionEvent[] = actions.flatMap(({ action, presentationLabel }) => [
+      callRequested({ action, owner: { runId }, label: presentationLabel }),
+      callStarted(action.callId, { clearedBy: { policy: "provider" } }),
     ]);
     await input.emitFn(commit);
-    input.onActionsEmitted?.(actions);
   };
 
   const scheduleFlush = (): void => {
@@ -95,9 +83,9 @@ export function createProviderStreamActionBatch(input: {
       releaseFlushTimer();
       await actionFlush;
     },
-    observe(action, toolName) {
+    observe(action) {
       if (cancelled) return;
-      pendingActions.set(action.action.callId, { request: action, toolName });
+      pendingActions.set(action.action.callId, action);
       scheduleFlush();
     },
     async flush() {

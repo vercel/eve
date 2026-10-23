@@ -241,7 +241,7 @@ export async function failModelSelection(step: Step, error: unknown): Promise<St
       code: "MODEL_SELECTION_FAILED",
       details: { errorId },
       message,
-      terminal: { sessionId: session.sessionId },
+      terminal: true,
     }),
   );
   return {

@@ -4,7 +4,12 @@ import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
-import type { ApprovedCall, SessionView, SuspendedStep } from "#harness/session-machine/view.js";
+import {
+  stepForRequest,
+  type ApprovedCall,
+  type SessionView,
+  type SuspendedStep,
+} from "#harness/session-machine/view.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
@@ -24,7 +29,6 @@ import {
   type RunnableCall,
   settleApprovals,
   settleLimit,
-  stepForRequest,
   withdrawSignIns,
   withdrawUnavailable,
 } from "./approvals.js";

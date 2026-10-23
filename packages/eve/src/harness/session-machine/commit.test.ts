@@ -112,7 +112,7 @@ it("keeps a relay answerable until its asker settles the interaction", () => {
       sessionId: "session-1",
       state: undefined,
     },
-    { relays: { upsert: { approval: { childContinuationToken: "child" } } } },
+    { relays: { approval: { childContinuationToken: "child" } } },
   );
   const projection = { counters: { changes: 0, runs: 0 }, view };
   const pending = dropClosedRecords(session, projection);

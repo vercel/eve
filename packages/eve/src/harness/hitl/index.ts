@@ -46,7 +46,6 @@ export {
 export { openDeferredApprovals, queueInput } from "./approvals.js";
 export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
-export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
 
 /**
  * A model step made calls that need a person's approval: the step's response waits on them
@@ -122,7 +121,7 @@ export async function enforceBudget(
       code: limit.code,
       details: limit.details,
       message: limit.message,
-      terminal: { sessionId: step.session.sessionId },
+      terminal: true,
     }),
   );
   return { next: { done: true, output: "" }, session: step.session };

@@ -1,17 +1,11 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 
-import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
-import {
-  readHitlState,
-  writeHitlState,
-  type RelayChange,
-  type ResponderChange,
-} from "#harness/hitl/requests.js";
+import { readHitlState, writeHitlState, type HitlStateChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import type { SessionView } from "./view.js";
 
@@ -22,19 +16,13 @@ import type { SessionView } from "./view.js";
 // one event: a transition reports it, and the save drops the record here.
 
 /** What a machine transition returns; approval storage still has direct writers. */
-export interface Transition {
+export interface Transition extends HitlStateChange {
   readonly turn: TurnState;
   readonly events: readonly SessionEvent[];
   /** Messages the transition commits to the end of history. */
   readonly commit?: readonly ModelMessage[];
   /** The transition empties history, as `clear` does. */
   readonly clearsHistory?: true;
-  /** Every sign-in the session waits on once the transition applies; `[]` withdraws them all. */
-  readonly signIns?: readonly AuthorizationChallenge[];
-  /** Relay routes the transition records or retires. */
-  readonly relays?: RelayChange;
-  /** Responder records the transition writes or retires. */
-  readonly responders?: ResponderChange;
 }
 
 /**
@@ -75,17 +63,8 @@ export async function applyTransition<T extends { readonly state?: SessionStateM
   publish: Publish,
   messages?: readonly ModelMessage[],
 ): Promise<T> {
-  await publishTransition(transition, publish, messages);
-  return saveTransition(session, transition);
-}
-
-/** Publishes a transition's events as one commit. */
-export async function publishTransition(
-  transition: Transition,
-  publish: Publish,
-  messages?: readonly ModelMessage[],
-): Promise<void> {
   if (transition.events.length > 0) await publish(transition.events, messages);
+  return saveTransition(session, transition);
 }
 
 /** Saves what a transition changes once its events are published. */
@@ -115,16 +94,5 @@ export function dropClosedRecords<T extends HarnessSessionBase>(
   session: T,
   projection: SessionProjection,
 ): T {
-  const hitl = readHitlState(session.state);
-  if (hitl.relays.size === 0 && Object.keys(hitl.responders).length === 0) return session;
-  const closed = [...hitl.relays.keys()].filter((requestId) => {
-    const row = projection.view?.interactions[requestId];
-    return row === undefined || row.status === "settled";
-  });
-  // A responder's record lives while their answer stands: a policy weighs it, or it waits to
-  // decide its approval, whose call reads who approved it.
-  const weighed = Object.keys(hitl.responders).filter(
-    (responseId) => (projection.view?.responses[responseId]?.status ?? "settled") === "settled",
-  );
-  return writeHitlState(session, { relays: { retire: closed }, responders: { retire: weighed } });
+  return writeHitlState(session, {}, projection.view);
 }

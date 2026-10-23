@@ -308,7 +308,7 @@ function taskSettled(
   outcome: TaskOutcome,
 ): readonly Decision[] {
   if (record === undefined) return [];
-  return [(view) => settleTask(view, { calls, outcome, task: record })];
+  return [(view) => settleTask(view, { calls, outcome })];
 }
 
 /**

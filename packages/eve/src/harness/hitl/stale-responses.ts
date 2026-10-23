@@ -68,12 +68,16 @@ export function convertStaleResponsesToUserMessage(input: {
   const currentResponses = answers.filter(({ interactionId }) =>
     input.pendingRequestIds.has(interactionId),
   );
-  const staleResponses = answers.filter(
-    ({ interactionId }) => !input.pendingRequestIds.has(interactionId),
-  );
-  if (staleResponses.length === 0) {
+  if (currentResponses.length === answers.length)
     return { kind: "unchanged", stepInput: input.stepInput };
-  }
+  const staleResponses = answers.filter(
+    ({ interactionId }) =>
+      !input.pendingRequestIds.has(interactionId) &&
+      input.view.interactions[interactionId]?.request.kind !== "budget",
+  );
+  const { answers: _answers, ...rest } = input.stepInput;
+  const retained = currentResponses.length === 0 ? rest : { ...rest, answers: currentResponses };
+  if (staleResponses.length === 0) return { kind: "unchanged", stepInput: retained };
 
   const { view } = input;
   const modelMessage = appendOptionalUserContent(
@@ -84,13 +88,7 @@ export function convertStaleResponsesToUserMessage(input: {
     input.stepInput.message,
     formatDisplayMessage(staleResponses, view),
   );
-  const { answers: _answers, ...rest } = input.stepInput;
-  const stepInput: HarnessStepInput =
-    currentResponses.length === 0
-      ? { ...rest, message: modelMessage }
-      : { ...rest, answers: currentResponses, message: modelMessage };
-
-  return { displayMessage, kind: "converted", stepInput };
+  return { displayMessage, kind: "converted", stepInput: { ...retained, message: modelMessage } };
 }
 
 function formatModelMessage(responses: readonly Answer[], view: SessionView): string {
@@ -99,44 +97,23 @@ function formatModelMessage(responses: readonly Answer[], view: SessionView): st
     const request = row?.request;
     const option = request?.options?.find((candidate) => candidate.id === response.optionId);
 
-    const responseDetails: {
-      optionId?: string;
-      selectedOption?: { description?: string; id: string; label: string };
-      text?: string;
-    } = {};
-    if (response.optionId !== undefined) {
-      responseDetails.optionId = response.optionId;
-    }
-    if (option !== undefined) {
-      const selectedOption: { description?: string; id: string; label: string } = {
-        id: option.id,
-        label: option.label,
-      };
-      if (option.description !== undefined) {
-        selectedOption.description = option.description;
-      }
-      responseDetails.selectedOption = selectedOption;
-    }
-    if (response.text !== undefined) {
-      responseDetails.text = response.text;
-    }
-
-    const resolved: {
-      prompt?: string;
-      requestId: string;
-      requestType?: "approval";
-      response: typeof responseDetails;
-      toolName?: string;
-    } = { requestId: response.interactionId, response: responseDetails };
-    if (row !== undefined && row.request.kind === "approval") {
-      resolved.prompt = row.request.prompt;
-      resolved.requestType = "approval";
-      // The prompt is display text; the model needs the tool's real name.
-      const toolName = askedCall(view, row)?.name;
-      if (toolName !== undefined) resolved.toolName = toolName;
-    }
-
-    return resolved;
+    return {
+      requestId: response.interactionId,
+      response: {
+        optionId: response.optionId,
+        selectedOption:
+          option === undefined
+            ? undefined
+            : { id: option.id, label: option.label, description: option.description },
+        text: response.text,
+      },
+      ...(request?.kind === "approval" && {
+        prompt: request.prompt,
+        requestType: "approval",
+        // The prompt is display text; the model needs the tool's real name.
+        toolName: askedCall(view, row!)?.name,
+      }),
+    };
   });
 
   // A response without known metadata may still answer an approval, so the notice always applies.

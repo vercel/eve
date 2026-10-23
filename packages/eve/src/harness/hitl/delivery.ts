@@ -94,15 +94,7 @@ export function resolveTextInput(
   const response = first === undefined ? undefined : answerFromText(text, first);
   const answers = typedAnswers(stepInput, response === undefined ? [] : [response]);
   if (answers === undefined) return stepInput;
-  return compactInput({
-    ...stepInput,
-    context: undefined,
-    answers: [...(stepInput.answers ?? []), ...answers],
-    deliveries: withoutHistory(stepInput.deliveries),
-    history: undefined,
-    message: undefined,
-    messageConsumed: true,
-  });
+  return compactInput(consumeTypedMessage(stepInput, answers));
 }
 
 /**
@@ -128,11 +120,18 @@ export function resolveTypedApproval(
   const response = answerFromText(text, first);
   const answers = typedAnswers(stepInput, response === undefined ? [] : [response]);
   if (answers === undefined) return stepInput;
+  return consumeTypedMessage(stepInput, answers);
+}
+
+function consumeTypedMessage(
+  input: HarnessStepInput,
+  answers: readonly SubmittedAnswer[],
+): ResolvedStepInput {
   return {
-    ...stepInput,
+    ...input,
+    answers: [...(input.answers ?? []), ...answers],
     context: undefined,
-    answers: [...(stepInput.answers ?? []), ...answers],
-    deliveries: withoutHistory(stepInput.deliveries),
+    deliveries: withoutHistory(input.deliveries),
     history: undefined,
     message: undefined,
     messageConsumed: true,

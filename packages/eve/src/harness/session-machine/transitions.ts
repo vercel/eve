@@ -192,7 +192,7 @@ export function fail(
     readonly code: string;
     readonly details?: JsonObject;
     readonly message: string;
-    readonly terminal?: { readonly sessionId: string };
+    readonly terminal?: true;
   },
 ): Transition {
   // The calls a sign-in stopped never run: the model reads that they stopped.
@@ -211,14 +211,7 @@ export function fail(
           outcome: "failed",
         })),
   ];
-  return {
-    commit: stopped.flatMap(cancelledTranscript),
-    events,
-    turn: {
-      ...view.turn,
-      suspended: view.turn.suspended.filter((step) => !stopped.includes(step)),
-    },
-  };
+  return { ...commitSteps(view.turn, stopped, cancelledTranscript), events };
 }
 
 // ---------------------------------------------------------------------------
@@ -265,11 +258,7 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
     }
   }
   const complete = steps.filter(isComplete);
-  return {
-    commit: complete.flatMap((step) => step.messages),
-    events,
-    turn: { ...view.turn, suspended: steps.filter((step) => !complete.includes(step)) },
-  } satisfies Transition;
+  return { ...commitSteps({ ...view.turn, suspended: steps }, complete), events };
 }
 
 /**
@@ -386,12 +375,7 @@ export type TaskCallOutcome =
 export function settleTask(
   view: SessionView,
   input: {
-    readonly task: {
-      readonly id: string;
-      readonly kind?: TaskCallStart["kind"];
-      readonly name?: string;
-    };
-    readonly calls: readonly { readonly callId: string; readonly turnId: string }[];
+    readonly calls: readonly { readonly callId: string }[];
     readonly outcome: TaskCallOutcome;
   },
 ): Transition {
@@ -552,7 +536,7 @@ export function relay(
   }
   // A route retires once its request closes, with the records of every closed row.
   return Object.keys(upsert).length > 0
-    ? { ...unchanged(view, events), relays: { upsert } }
+    ? { ...unchanged(view, events), relays: upsert }
     : unchanged(view, events);
 }
 
@@ -899,14 +883,9 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
   );
   const { queued: _queued, ...turn } = view.turn;
   return {
-    commit: stopped.flatMap(cancelledTranscript),
+    ...commitSteps(turn, stopped, cancelledTranscript),
     events,
-    // Every sign-in the turn held ends with it.
     signIns: [],
-    turn: {
-      ...turn,
-      suspended: view.turn.suspended.filter((step) => !stopped.includes(step)),
-    },
   };
 }
 
@@ -941,14 +920,22 @@ export function stopInterruptedSteps(
       [...stepCallIds(step)].some((callId) => input.calls.get(callId)?.started === true),
   );
   return {
-    commit: stopped.flatMap((step) =>
+    ...commitSteps(view.turn, stopped, (step) =>
       stoppedTranscript(step, (callId) => interruptedCallResult(input.calls.get(callId))),
     ),
     events: [],
-    turn: {
-      ...view.turn,
-      suspended: view.turn.suspended.filter((step) => !stopped.includes(step)),
-    },
+  };
+}
+
+function commitSteps(
+  turn: TurnState,
+  completed: readonly SuspendedStep[],
+  messages: (step: SuspendedStep) => readonly ModelMessage[] = (step) => step.messages,
+): { readonly commit: readonly ModelMessage[]; readonly turn: TurnState } {
+  const removed = new Set(completed);
+  return {
+    commit: completed.flatMap(messages),
+    turn: { ...turn, suspended: turn.suspended.filter((step) => !removed.has(step)) },
   };
 }
 
@@ -980,14 +967,12 @@ function stoppedTranscript(
  * the session-limit prompt and every sign-in, and the calls awaiting them stop. Requests relayed
  * from live tasks stay: clearing doesn't stop the work that asked them.
  */
-export function clear(
-  view: SessionView,
-  input: { readonly sessionId: string; readonly cause?: Cause },
-): Transition {
+export function clear(view: SessionView, input: { readonly cause?: Cause } = {}): Transition {
   const { projection } = view;
   const changeId = nextChangeId(projection);
   return {
     clearsHistory: true,
+    signIns: [],
     events: [
       ...clearedInteractions(view),
       // Clear runs between turns. A paused turn still owns a lifecycle; end it and its
