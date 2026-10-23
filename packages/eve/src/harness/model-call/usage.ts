@@ -1,7 +1,8 @@
 import type { LanguageModel, ProviderMetadata } from "ai";
 
 import type { HarnessStepResult } from "#harness/step-hooks.js";
-import { addTurnUsage, getTurnUsageState, type TokenUsageDelta } from "#harness/turn-tag-state.js";
+import { addStepUsage } from "#harness/session-machine/current.js";
+import { getTurnUsageState, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type { Step } from "#harness/step/context.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
@@ -66,7 +67,7 @@ export async function recordModelUsage(
   step: Step,
   input: { readonly model: LanguageModel; readonly result: HarnessStepResult },
 ): Promise<void> {
-  step.session = addTurnUsage(
+  step.session = addStepUsage(
     step.session,
     step.position().turnId,
     extractTokenUsageDelta({

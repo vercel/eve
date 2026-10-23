@@ -8,6 +8,7 @@ import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import { getTurnUsageState, setTurnUsageState } from "#harness/turn-tag-state.js";
 import { appliedSession, saveSessionProjection } from "#harness/session-machine/current.js";
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
@@ -61,6 +62,14 @@ function hasFileParts(message: StepInput["message"]): boolean {
   return Array.isArray(message) && message.some((part) => part.type === "file");
 }
 
+function keepAppliedTurnUsage(
+  checkpoint: HarnessSession,
+  applied: HarnessSession | undefined,
+): HarnessSession {
+  const usage = getTurnUsageState(applied?.state);
+  return usage === undefined ? checkpoint : setTurnUsageState(checkpoint, usage);
+}
+
 /** Builds the successful step result that commits a cancelled batch's completed model calls. */
 export async function createCancelledModelCallBatchResult(input: {
   readonly beforeBatchContext: Record<string, unknown>;
@@ -72,9 +81,12 @@ export async function createCancelledModelCallBatchResult(input: {
   const interruptedContext = serializeContext(input.ctx);
   // Without a completed call, the batch keeps what its last call applied before the cut, such as
   // answers it resolved and published, so the session never rolls back past its own events.
+  // With one, the batch keeps the completed call's session and the usage the cut call recorded on
+  // top of it: the provider served that call, so the session counts it.
   const cancelledSession =
-    input.checkpoint?.result.session ??
-    (await cancelledWithoutCheckpoint(input.ctx, input.initialSession, input.stepInput));
+    input.checkpoint === undefined
+      ? await cancelledWithoutCheckpoint(input.ctx, input.initialSession, input.stepInput)
+      : keepAppliedTurnUsage(input.checkpoint.result.session, appliedSession(input.ctx));
   // The stream keeps every event the cancelled batch published, so the projection does too.
   const checkpointContext = {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),

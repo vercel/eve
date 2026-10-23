@@ -1,5 +1,6 @@
 import { contextStorage } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
+import { addTurnUsage, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import {
   foldSession,
@@ -86,6 +87,23 @@ export function recordAppliedSession(ctx: ContextReader, session: HarnessSession
 /** The session the step's last applied transition produced, if it applied any. */
 export function appliedSession<T extends HarnessSessionBase>(ctx: ContextReader): T | undefined {
   return appliedSessions.get(ctx) as T | undefined;
+}
+
+/**
+ * Counts a model call's usage on `session` and on the session the step last applied. The provider
+ * already served the call, so a hook that cancels the turn before the step applies again keeps it.
+ */
+export function addStepUsage<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  turnId: string,
+  usage: TokenUsageDelta | undefined,
+): T {
+  const ctx = contextStorage.getStore();
+  const applied = ctx === undefined ? undefined : appliedSessions.get(ctx);
+  if (ctx !== undefined && applied !== undefined) {
+    appliedSessions.set(ctx, addTurnUsage(applied, turnId, usage));
+  }
+  return addTurnUsage(session, turnId, usage);
 }
 
 export function saveSessionProjection<T extends HarnessSessionBase>(

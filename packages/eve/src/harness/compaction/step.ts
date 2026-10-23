@@ -46,12 +46,9 @@ import {
   gatewayModelId,
 } from "#harness/model-call/usage.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
-import {
-  addTurnUsage,
-  addUsageOutsideTurns,
-  type TokenUsageDelta,
-} from "#harness/turn-tag-state.js";
+import { addUsageOutsideTurns, type TokenUsageDelta } from "#harness/turn-tag-state.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
+import { addStepUsage } from "#harness/session-machine/current.js";
 import { idle } from "#harness/session-machine/transitions.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 
@@ -293,7 +290,7 @@ export async function maybeCompact(input: {
     session =
       input.betweenTurns === true
         ? addUsageOutsideTurns(session, usage)
-        : addTurnUsage(session, emissionState.turnId, usage);
+        : addStepUsage(session, emissionState.turnId, usage);
   }
   if (failure !== undefined) {
     return { compacted: false, failure, messages: input.messages, session };
