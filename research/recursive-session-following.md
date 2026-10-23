@@ -1,12 +1,12 @@
 ---
-issue: https://github.com/vercel/eve/pull/5281
+issue: https://github.com/vercel/eve/pull/4855
 status: in-progress
 last_updated: "2026-10-23"
 ---
 
 # Recursive session following
 
-Stacked on #5281, which builds on #4855. Nested activity should not require an
+Stacked on #4855, which now includes #5281. Nested activity should not require an
 application-owned recursive reducer. Observation does not establish execution completeness or grant
 commands on descendants.
 
