@@ -264,6 +264,12 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
       { root: "/tmp/x", toolCount: 0 },
       { run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, status: 200 },
       { run: 1, mode: "build", wallMs: 3000, profile: profile(2800) },
+      {
+        run: 1,
+        mode: "start",
+        wallMs: 600,
+        probes: { attempts: 20, timedOut: 0, refused: 19, stalledMs: 0 },
+      },
       { mode: "dev", medianMs: 900 },
     ]
       .map((line) => JSON.stringify(line))
@@ -283,9 +289,12 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     ["start", "agent-tools", "postgres", 1, "probe-missing"],
     ["dev-startup", "minimal", "local", 1, null],
     ["build", "minimal", "local", 1, null],
+    ["start", "minimal", "local", 1, null],
     ["dev-startup", "minimal", "local", 2, "run-missing"],
     ["build", "minimal", "local", 2, "run-missing"],
+    ["start", "minimal", "local", 2, "run-missing"],
   ]);
+  assert.deepEqual(records[4].metrics, { "start.ready_ms": { status: "measured", value: 600 } });
   assert.deepEqual(records[0].metrics, {
     "build.total_ms": { status: "measured", value: 4000 },
     "build.phase_ms.compile": { status: "measured", value: 2000 },

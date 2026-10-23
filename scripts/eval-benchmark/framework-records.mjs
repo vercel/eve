@@ -8,7 +8,8 @@
 //                (leg probes/build-profile.json), and the dev-startup job's
 //                builds of its benchmark agents
 //   start        `eve start` → first `/eve/v1/health` 200 on the same legs
-//                (leg probes/start.json: { readyMs })
+//                (leg probes/start.json: { readyMs }), and on the
+//                dev-startup job's builds of its benchmark agents
 //   dev-startup  `eve dev` ready and idle session accepted, from
 //                packages/eve/scripts/benchmark-startup.mjs
 //                (<dev-startup-dir>/<subject>.jsonl: its stdout)
@@ -144,6 +145,19 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
                 probe: "build",
                 path: DEV_STARTUP_ARTIFACT_PATH,
                 metrics: buildMetrics(build.profile),
+              }),
+        );
+        // `eve start` on the build above, to /eve/v1/health (same metric as
+        // the mock legs' start probe, on a fixed agent instead of a fixture).
+        const start = lines?.find((line) => line.mode === "start" && line.run === run);
+        records.push(
+          start === undefined
+            ? record({ ...base, probe: "start", missing: missingReason })
+            : record({
+                ...base,
+                probe: "start",
+                path: DEV_STARTUP_ARTIFACT_PATH,
+                metrics: { "start.ready_ms": duration(start.wallMs) },
               }),
         );
       }

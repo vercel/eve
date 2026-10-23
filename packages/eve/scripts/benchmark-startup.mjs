@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 // Run against two separately built package directories, sequentially, on the same machine.
 // Each process is fresh; subsequent runs retain the fixture's caches and build output.
+// Per run: `eve dev` to /eve/v1/info and a first session, `eve build --profile`,
+// then `eve start` on that build to /eve/v1/health. One JSON result per line.
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 5);
 const toolCount = Number(process.argv[4] ?? 0);
@@ -59,14 +61,23 @@ console.log(
   }),
 );
 
+// Each readiness request gets a short deadline of its own. If an early request
+// is accepted but never answered (the port can open before the server serves),
+// a long deadline would stall the probe and be measured as startup time.
+const PROBE_TIMEOUT_MS = 1000;
+const PROBE_INTERVAL_MS = 20;
+
 for (let run = 1; run <= runs; run++) {
-  for (const mode of ["dev", "build"]) {
+  // `start` serves the output `build` just wrote, so it runs after it.
+  for (const mode of ["dev", "build", "start"]) {
     const port = await availablePort();
     const profilePath = join(root, `build-${run}.json`);
     const args =
       mode === "dev"
         ? ["dev", "--no-ui", "--host", "127.0.0.1", "--port", String(port)]
-        : ["build", "--profile", profilePath];
+        : mode === "start"
+          ? ["start", "--host", "127.0.0.1", "--port", String(port)]
+          : ["build", "--profile", profilePath];
     let log = "";
     const start = performance.now();
     const child = spawn(process.execPath, [join(packageRoot, "bin", "eve.js"), ...args], {
@@ -87,23 +98,7 @@ for (let run = 1; run <= runs; run++) {
     const timeout = setTimeout(() => child.kill("SIGKILL"), 60000);
     try {
       if (mode === "dev") {
-        let ready = false;
-        while (performance.now() - start < 60000) {
-          if (child.exitCode !== null || child.signalCode !== null) throw new Error(log);
-          try {
-            const response = await fetch(`http://127.0.0.1:${port}/eve/v1/info`, {
-              signal: AbortSignal.timeout(5000),
-            });
-            const body = await response.text();
-            if (response.ok) {
-              JSON.parse(body);
-              ready = true;
-              break;
-            }
-          } catch {}
-          await delay(20);
-        }
-        if (!ready) throw new Error(`Readiness timeout: ${log}`);
+        const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
         const wallMs = Math.round(performance.now() - start);
         const accepted = await fetch(`http://127.0.0.1:${port}/eve/v1/session`, {
           method: "POST",
@@ -121,7 +116,11 @@ for (let run = 1; run <= runs; run++) {
           wallMs,
           sessionAcceptedMs: Math.round(performance.now() - start),
           status: 200,
+          probes,
         });
+      } else if (mode === "start") {
+        const probes = await waitReady(child, port, "/eve/v1/health", start, () => log);
+        results.push({ run, mode, wallMs: Math.round(performance.now() - start), probes });
       } else {
         const { code } = await exited;
         if (code !== 0) throw new Error(log);
@@ -144,7 +143,7 @@ for (let run = 1; run <= runs; run++) {
   }
 }
 await writeFile(join(root, "results.json"), JSON.stringify(results, null, 2));
-for (const mode of ["dev", "build"]) {
+for (const mode of ["dev", "build", "start"]) {
   const times = results
     .filter((result) => result.mode === mode)
     .map((result) => result.wallMs)
@@ -157,6 +156,39 @@ for (const mode of ["dev", "build"]) {
       maxMs: times.at(-1),
     }),
   );
+}
+
+/**
+ * Polls `path` until it answers 200 with JSON. Returns how the probes went, so
+ * a measurement that includes stalled requests is visible in the results:
+ * `attempts` requests in all, `timedOut` that hit the per-request deadline,
+ * `refused` that failed to connect, and `stalledMs`, the time spent in
+ * requests that timed out.
+ */
+async function waitReady(child, port, path, start, readLog) {
+  const probes = { attempts: 0, timedOut: 0, refused: 0, stalledMs: 0 };
+  while (performance.now() - start < 60000) {
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(readLog());
+    probes.attempts += 1;
+    const sent = performance.now();
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      const body = await response.text();
+      if (response.ok) {
+        JSON.parse(body);
+        return probes;
+      }
+    } catch (error) {
+      if (error?.name === "TimeoutError") {
+        probes.timedOut += 1;
+        probes.stalledMs += Math.round(performance.now() - sent);
+      } else if (error?.cause?.code === "ECONNREFUSED") probes.refused += 1;
+    }
+    await delay(PROBE_INTERVAL_MS);
+  }
+  throw new Error(`Readiness timeout: ${readLog()}`);
 }
 
 async function availablePort() {

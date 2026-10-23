@@ -17,6 +17,6 @@
   "mockWorlds": ["local", "postgres", { "name": "vercel", "fixtures": ["agent-workflow-stress"] }],
   "attempts": 3,
   "mockAttempts": 5,
-  "devStartup": { "runs": 5, "toolCounts": [0, 20] },
+  "devStartup": { "runs": 5, "toolCounts": [0] },
   "concurrency": { "legs": 8, "evalsPerLeg": 1 }
 }
