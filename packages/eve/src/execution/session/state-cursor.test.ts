@@ -138,6 +138,56 @@ describe("SessionStateCursor", () => {
     await expect(slow).rejects.toThrow("Session state changed while a step ran");
     expect(cursor.sessionState.continuationToken).toBe("channel:fast");
   });
+
+  it.each([
+    { meanwhile: "nothing", expected: "channel:beside" },
+    { meanwhile: "a completed step", expected: "channel:step" },
+    { meanwhile: "a running step", expected: "channel:step" },
+    { meanwhile: "losing interest", expected: "channel:initial" },
+  ])(
+    "adopts a step run beside the others only after $meanwhile",
+    async ({ meanwhile, expected }) => {
+      const cursor = new SessionStateCursor({
+        history: [],
+        inbox: { claimSessionHooks: vi.fn(async () => {}) },
+        sessionWritable: new WritableStream<Uint8Array>(),
+        serializedContext: {},
+        sessionState: state("channel:initial"),
+      });
+      const beside = Promise.withResolvers<void>();
+      const step = Promise.withResolvers<void>();
+      let wanted = true;
+      const adopted = cursor.advanceBeside(
+        (input) =>
+          withSessionStateDelta(input, async () => {
+            await beside.promise;
+            return { sessionState: state("channel:beside") };
+          }),
+        () => wanted,
+      );
+      const ownStep = () =>
+        cursor.advance((input) =>
+          withSessionStateDelta(input, async () => {
+            await step.promise;
+            return { sessionState: state("channel:step") };
+          }),
+        );
+
+      let running: Promise<unknown> | undefined;
+      if (meanwhile === "a completed step") {
+        step.resolve();
+        await ownStep();
+      }
+      if (meanwhile === "a running step") running = ownStep();
+      if (meanwhile === "losing interest") wanted = false;
+      beside.resolve();
+
+      await expect(adopted).resolves.toBe(expected === "channel:beside");
+      step.resolve();
+      await running;
+      expect(cursor.sessionState.continuationToken).toBe(expected);
+    },
+  );
 });
 
 function state(continuationToken: string): DurableSessionState {

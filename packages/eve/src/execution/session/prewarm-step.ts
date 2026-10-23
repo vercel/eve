@@ -1,4 +1,4 @@
-import { runSessionPrewarmers } from "#context/prewarm.js";
+import { startSessionPrewarmers } from "#context/prewarm.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext } from "#context/serialize.js";
 import {
@@ -23,8 +23,9 @@ interface SessionPrewarmInput {
 }
 
 /**
- * Runs the session prewarmers for a session started without a message,
- * before it waits for that message. Never fails: prewarming is best effort.
+ * Starts the session prewarmers for a session started without a message and
+ * records what they prepared, such as the sandbox state, once their work
+ * settles. Runs beside the wait for the first message and never fails.
  */
 export async function prewarmSessionStep(
   input: SessionPrewarmInput,
@@ -44,8 +45,9 @@ async function prewarmSession(
       durable: readDurableSession(input.sessionState),
       turnAgent: effectiveAgent.turnAgent,
     });
+    // The providers' commit waits for the work the prewarmers started.
     const scoped = await withContextScope(ctx, session, async (current) => {
-      await runSessionPrewarmers(ctx);
+      startSessionPrewarmers(ctx, "session");
       return { result: undefined, session: current };
     });
     return {

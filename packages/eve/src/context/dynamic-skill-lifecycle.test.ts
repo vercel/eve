@@ -21,7 +21,13 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
-import type { SandboxAccess, SandboxSessionState, SandboxState } from "#sandbox/state.js";
+import type {
+  SandboxAccess,
+  SandboxPreparation,
+  SandboxSessionState,
+  SandboxState,
+} from "#sandbox/state.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -107,7 +113,41 @@ function recreatableSandbox() {
   return { registry, removeOutsideEve: () => void (gone = true), sandboxes };
 }
 
-/** Mirrors ensureSandboxAccess: the persisted state appears once the sandbox starts. */
+/** Mirrors ensureSandboxAccess: queued work runs in order, and `get()` and `drain()` wait for it. */
+function createAccess(
+  open: () => Promise<SandboxSession>,
+  captureState: () => Promise<SandboxState>,
+) {
+  let queue: Promise<unknown> = Promise.resolve();
+  let failure: unknown;
+  const drain = async () => {
+    await queue;
+    const error = failure;
+    failure = undefined;
+    if (error !== undefined) throw error;
+  };
+  return {
+    captureState,
+    drain,
+    async get() {
+      await drain();
+      return await open();
+    },
+    prepare(work?: SandboxPreparation) {
+      queue = queue
+        .then(async () => {
+          if (work === undefined) await open();
+          else await work(open);
+        })
+        .catch((error: unknown) => {
+          failure ??= error;
+        });
+    },
+    stop: async () => {},
+  } satisfies SandboxAccess & { drain(): Promise<void> };
+}
+
+/** The persisted state appears once the sandbox opens. */
 function createCtx(authoredSkillNames: readonly string[] = []) {
   const ctx = new ContextContainer();
   const sandbox = mockSandbox({
@@ -119,20 +159,16 @@ function createCtx(authoredSkillNames: readonly string[] = []) {
     next: "sandbox-1",
     session: null,
   };
-  const get = vi.fn(async () => {
+  const open = vi.fn(async () => {
     state.session ??= persistedSandbox(state.next);
     return sandbox.session;
   });
   ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
   ctx.set(SessionIdKey, "test-session");
-  const access = {
-    captureState: async () => ({ session: state.session }),
-    get,
-    stop: async () => {},
-  };
+  const access = createAccess(open, async () => ({ session: state.session }));
   ctx.setVirtualContext(SandboxKey, access);
   ctx.set(BundleKey, createMockBundle(authoredSkillNames));
-  return { access, ctx, get, sandbox, state };
+  return { access, ctx, open, sandbox, state };
 }
 
 function createResolver(
@@ -170,8 +206,10 @@ function makeSkill(
   return defineSkill({ description, files, markdown });
 }
 
+/** Dispatches, then waits for the sandbox work it queued, as a step's commit does. */
 async function dispatch(ctx: ContextContainer, ...resolvers: ResolvedDynamicSkillResolver[]) {
   await dispatchDynamicSkillEvent({ ctx, event: makeEvent(), messages: [], resolvers });
+  await (ctx.require(SandboxKey) as ReturnType<typeof createAccess>).drain();
 }
 
 function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
@@ -350,15 +388,44 @@ describe("dispatchDynamicSkillEvent", () => {
 });
 
 describe("dynamic skill supporting files", () => {
+  it("returns before the sandbox opens, and writes the files once it does", async () => {
+    const { ctx, open, sandbox } = createCtx();
+    let opened!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      opened = resolve;
+    });
+    const openNow = open.getMockImplementation()!;
+    open.mockImplementationOnce(async () => {
+      await gate;
+      return await openNow();
+    });
+    const resolver = createResolver("policy", () =>
+      makeSkill("Policy", "# Policy", { "rules.md": "Rules" }),
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)?.policy?.[0]?.markdown).toBe("# Policy");
+    expect(sandbox.writes).toEqual([]);
+    opened();
+    await (ctx.require(SandboxKey) as ReturnType<typeof createAccess>).drain();
+    expect(writtenPaths(sandbox)).toContain(`${SKILL_ROOT}/policy/rules.md`);
+  });
+
   it("writes a package with supporting files once and skips unchanged refreshes", async () => {
-    const { ctx, get, sandbox } = createCtx();
+    const { ctx, open, sandbox } = createCtx();
     const resolver = createResolver("policy", () =>
       makeSkill("Policy", "# Policy", { "references/rules.md": "Rules" }),
     );
 
     await dispatch(ctx, resolver);
 
-    expect(get).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledOnce();
     expect(writtenPaths(sandbox)).toEqual([
       `${SKILL_ROOT}/policy/SKILL.md`,
       `${SKILL_ROOT}/policy/references/rules.md`,
@@ -367,7 +434,7 @@ describe("dynamic skill supporting files", () => {
 
     await dispatch(ctx, resolver);
 
-    expect(get).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledOnce();
     expect(sandbox.writes).toHaveLength(2);
   });
 
@@ -386,16 +453,15 @@ describe("dynamic skill supporting files", () => {
         }),
       ),
     );
-    const get = vi.fn(async () => first.sandbox.session);
+    const open = vi.fn(async () => first.sandbox.session);
     resumed.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
-    resumed.set(SandboxKey, {
-      captureState: async () => ({ session: first.state.session }),
-      get,
-      stop: async () => {},
-    });
+    resumed.set(
+      SandboxKey,
+      createAccess(open, async () => ({ session: first.state.session })),
+    );
     await dispatch(resumed, resolver);
 
-    expect(get).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("replaces a changed package so omitted files disappear", async () => {
@@ -454,6 +520,7 @@ describe("dynamic skill supporting files", () => {
         resolvers: [resolver],
       });
       await work?.(access);
+      await access.drain();
       state = await access.captureState();
     };
     const rules = (index: number) => sandboxes[index]?.files.get(`${SKILL_ROOT}/policy/rules.md`);
@@ -492,7 +559,7 @@ describe("dynamic skill supporting files", () => {
   });
 
   it("keeps files when a package loses its supporting files", async () => {
-    const { ctx, get, sandbox } = createCtx();
+    const { ctx, open, sandbox } = createCtx();
     let result = makeSkill("Policy", "# Policy", { "a.md": "A" });
     const resolver = createResolver("policy", () => result);
 
@@ -500,7 +567,7 @@ describe("dynamic skill supporting files", () => {
     result = makeSkill("Policy", "# Inline policy");
     await dispatch(ctx, resolver);
 
-    expect(get).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledOnce();
     expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
     expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("A");
   });
@@ -522,7 +589,7 @@ describe("dynamic skill supporting files", () => {
   });
 
   it("does not remove withdrawn files from a sandbox that never received them", async () => {
-    const { ctx, get, sandbox, state } = createCtx();
+    const { ctx, open, sandbox, state } = createCtx();
     let enabled = true;
     const resolver = createResolver("policy", () =>
       enabled ? makeSkill("Policy", "# Policy", { "a.md": "A" }) : null,
@@ -533,23 +600,21 @@ describe("dynamic skill supporting files", () => {
     enabled = false;
     await dispatch(ctx, resolver);
 
-    expect(get).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledOnce();
     expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
   });
 
-  it("keeps the previous manifest and rewrites a package after a failed write", async () => {
+  it("rewrites a package after a failed write", async () => {
     const { ctx, sandbox } = createCtx();
     let content = "A";
     const resolver = createResolver("policy", () =>
       makeSkill("Policy", "# Policy", { "a.md": content }),
     );
     await dispatch(ctx, resolver);
-    const manifest = ctx.get(DynamicSkillManifestKey);
 
     content = "B";
     vi.spyOn(sandbox.session, "writeFiles").mockRejectedValueOnce(new Error("disk full"));
     await expect(dispatch(ctx, resolver)).rejects.toThrow("disk full");
-    expect(ctx.get(DynamicSkillManifestKey)).toBe(manifest);
     expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
 
     content = "A";

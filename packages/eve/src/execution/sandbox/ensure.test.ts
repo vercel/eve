@@ -160,6 +160,68 @@ describe("ensureSandboxAccess", () => {
     expect(value.create).not.toHaveBeenCalled();
   });
 
+  it("opens on prepare without waiting, and get waits for the work queued behind it", async () => {
+    const value = fixture();
+    let opened!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      opened = resolve;
+    });
+    const createNow = value.create.getMockImplementation()!;
+    value.create.mockImplementationOnce(async () => {
+      await gate;
+      return await createNow();
+    });
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state: null,
+    });
+    const order: string[] = [];
+
+    access.prepare();
+    access.prepare(async (openSandbox) => {
+      await openSandbox();
+      order.push("work");
+    });
+    const sandbox = access.get().then((result) => {
+      order.push("get");
+      return result;
+    });
+    await vi.waitFor(() => expect(value.create).toHaveBeenCalledOnce());
+    expect(order).toEqual([]);
+
+    opened();
+    await expect(sandbox).resolves.toBeTruthy();
+    expect(order).toEqual(["work", "get"]);
+    expect(value.start).toHaveBeenCalledOnce();
+  });
+
+  it("retries failed queued work when the sandbox is used, and drain throws when it fails again", async () => {
+    const value = fixture();
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      state: null,
+    });
+    const work = vi
+      .fn(async (_open: () => Promise<unknown>) => {})
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error("disk still full"));
+
+    access.prepare(work);
+    await expect(access.get()).resolves.toBeTruthy();
+    expect(work).toHaveBeenCalledTimes(2);
+
+    access.prepare(work);
+    await expect(access.drain()).rejects.toThrow("disk still full");
+    expect(work).toHaveBeenCalledTimes(4);
+  });
+
   it("keeps missing production artifacts fatal without starting a sandbox", async () => {
     vi.mocked(loadSandboxPreparedArtifact).mockResolvedValueOnce(undefined);
     const value = fixture();

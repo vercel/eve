@@ -55,6 +55,8 @@ interface TestAppDescriptor {
   readonly tools?: readonly ResolvedToolDefinition[];
   /** Additional authored modules compiled into the synthetic application. */
   readonly modules?: readonly ProgrammaticAgentModule[];
+  /** Awaited before the in-memory sandbox provider starts a session's sandbox. */
+  readonly beforeSandboxStart?: (sessionId: string) => Promise<void>;
 }
 
 /**
@@ -119,7 +121,8 @@ export interface TestRuntime {
   readonly sandboxCleanups: readonly string[];
   /**
    * What happened to the sessions' sandboxes, in order, as `<event>:<session id>`:
-   * `definition` when `sandbox.ts` runs, then `start`, `resume`, or `delete`.
+   * `definition` when `sandbox.ts` runs, then `start`, `resume`, `delete`, or
+   * `end` when session-end cleanup runs.
    */
   readonly sandboxEvents: readonly string[];
   /**
@@ -150,7 +153,7 @@ const TEST_SANDBOX_PROVIDER_NAME = "eve-test-memory";
  * staged attachment, say, is read back on the next model call. `start` is an
  * upsert on the session id, and session-end cleanup deletes by it.
  */
-function createTestSandboxProvider() {
+function createTestSandboxProvider(beforeStart?: (sessionId: string) => Promise<void>) {
   const sessionSandboxes = new Map<string, MockSandbox>();
   const endedSessionIds: string[] = [];
   const events: string[] = [];
@@ -169,13 +172,17 @@ function createTestSandboxProvider() {
     environment: () => ({
       async onSessionEnd(context, _state, { reason }) {
         if (reason === "deleted") events.push(`delete:${context.session.id}`);
-        else endedSessionIds.push(context.session.id);
+        else {
+          events.push(`end:${context.session.id}`);
+          endedSessionIds.push(context.session.id);
+        }
         sessionSandboxes.delete(context.session.id);
       },
       async prepare() {
         return null;
       },
       async start(context) {
+        await beforeStart?.(context.session.id);
         events.push(`start:${context.session.id}`);
         return { connection: connect(context.session.id), state: null };
       },
@@ -198,7 +205,7 @@ function createTestSandboxProvider() {
 }
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
-  const sandboxes = createTestSandboxProvider();
+  const sandboxes = createTestSandboxProvider(descriptor.beforeSandboxStart);
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,

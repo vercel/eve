@@ -6,38 +6,45 @@ import { createLogger } from "#internal/logging.js";
 const log = createLogger("context.prewarm");
 
 /**
- * Work a session started without a message does before that message arrives.
+ * Why prewarmers run: `"session"` for a session created without a message,
+ * before that message; `"turn"` when a turn's step opens its first model call.
+ */
+export type SessionPrewarmPhase = "session" | "turn";
+
+/**
+ * Starts session work in the background so it races the model call instead
+ * of delaying it, and whatever needs the result waits only for what remains.
  *
- * A prewarmer runs in the context scope a turn's steps get, so it reaches
- * session resources through the framework providers, and the durable state
- * those providers own is committed with the prewarm step. No turn has started
- * and no session event is published: the session's auth is its creator's, not
- * the first message's, which may differ.
+ * `start` runs inside a framework context scope and must return without
+ * awaiting the work. It hands the work to a framework provider, which lets a
+ * consumer wait for it and settles it before the scope commits. No turn has
+ * started in the `"session"` phase: auth is the session creator's, not the
+ * first message's.
  *
- * Prewarming only moves work earlier. A prewarmer that fails is logged and
- * skipped, and the first turn does that work lazily as it would have anyway,
- * so a prewarmer must leave nothing behind that the lazy path cannot reuse
- * or session end cannot clean up.
+ * Starting early only moves work earlier. Work that fails is redone when it
+ * is needed, as it would have been without prewarming, so it must leave
+ * nothing that the lazy path cannot reuse or session end cannot clean up.
  */
 export interface SessionPrewarmer {
   /** Names the prewarmer in logs. */
   readonly name: string;
-  prewarm(ctx: ContextContainer): Promise<void>;
+  start(ctx: ContextContainer, phase: SessionPrewarmPhase): void;
 }
 
 const sessionPrewarmers: readonly SessionPrewarmer[] = [sandboxPrewarmer];
 
-/** Runs every prewarmer concurrently; must be called inside a framework context scope. */
-export async function runSessionPrewarmers(ctx: ContextContainer): Promise<void> {
-  const results = await Promise.allSettled(
-    sessionPrewarmers.map(async (prewarmer) => await prewarmer.prewarm(ctx)),
-  );
-  results.forEach((result, index) => {
-    if (result.status === "fulfilled") return;
-    log.warn("session prewarm failed; the first turn does this work instead", {
-      error: result.reason,
-      prewarmer: sessionPrewarmers[index]?.name,
-      sessionId: ctx.get(SessionIdKey),
-    });
-  });
+/** Starts every prewarmer; returns without waiting for their work. */
+export function startSessionPrewarmers(ctx: ContextContainer, phase: SessionPrewarmPhase): void {
+  for (const prewarmer of sessionPrewarmers) {
+    try {
+      prewarmer.start(ctx, phase);
+    } catch (error) {
+      log.warn("session prewarmer failed to start; its work runs when needed", {
+        error,
+        phase,
+        prewarmer: prewarmer.name,
+        sessionId: ctx.get(SessionIdKey),
+      });
+    }
+  }
 }

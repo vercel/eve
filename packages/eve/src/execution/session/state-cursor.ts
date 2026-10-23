@@ -24,6 +24,11 @@ export class SessionStateCursor {
 
   private readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
   private values: SessionStateValues;
+  /** Session steps adopted so far, and those still running. */
+  private adopted = 0;
+  private running = 0;
+  /** A step that ran beside the session's own steps, while its delta applies. */
+  private sideAdoption: Promise<void> | undefined;
 
   constructor(
     input: SessionStateValues & {
@@ -61,6 +66,7 @@ export class SessionStateCursor {
   async advance<T extends SessionStateTransition>(
     step: (state: SessionStepState) => Promise<T>,
   ): Promise<T> {
+    if (this.sideAdoption !== undefined) await this.sideAdoption;
     const { serializedContext, sessionState } = this.values;
     return await this.adopt(
       () => step({ serializedContext, sessionState, sessionWritable: this.sessionWritable }),
@@ -72,9 +78,51 @@ export class SessionStateCursor {
   async advanceWithHistory<T extends SessionStateTransition>(
     step: (state: SessionHistoryStepState) => Promise<T>,
   ): Promise<T> {
+    if (this.sideAdoption !== undefined) await this.sideAdoption;
     return await this.adopt(() => step({ ...this.values, sessionWritable: this.sessionWritable }), {
       withHistory: true,
     });
+  }
+
+  /**
+   * Runs a step beside the session's own steps, which do not wait for it.
+   * Its delta applies only while `wanted()` holds and no other step ran or is
+   * running meanwhile; otherwise it is dropped and this returns `false`. A
+   * step run this way must leave nothing that dropping its delta would lose
+   * for good.
+   */
+  async advanceBeside<T extends SessionStateTransition>(
+    step: (state: SessionStepState) => Promise<T>,
+    wanted: () => boolean,
+  ): Promise<boolean> {
+    const base = this.values;
+    const adopted = this.adopted;
+    const result = await step({
+      serializedContext: base.serializedContext,
+      sessionState: base.sessionState,
+      sessionWritable: this.sessionWritable,
+    });
+    if (
+      !wanted() ||
+      this.adopted !== adopted ||
+      this.running > 0 ||
+      this.sideAdoption !== undefined
+    ) {
+      return false;
+    }
+    if (result.stateDelta.history !== undefined) {
+      throw new Error("A session step that was not given the history cannot change it.");
+    }
+    const next = applySessionStateDelta(base, result.stateDelta);
+    const adoption = this.inbox.claimSessionHooks(sessionHookTokens(next)).then(() => {
+      this.values = next;
+      this.adopted++;
+    });
+    this.sideAdoption = adoption.finally(() => {
+      this.sideAdoption = undefined;
+    });
+    await adoption;
+    return true;
   }
 
   /**
@@ -87,17 +135,23 @@ export class SessionStateCursor {
     options: { readonly withHistory: boolean },
   ): Promise<T> {
     const base = this.values;
-    const result = await run();
-    // Diffed against a history it never had, the delta would replace the whole history.
-    if (!options.withHistory && result.stateDelta.history !== undefined) {
-      throw new Error("A session step that was not given the history cannot change it.");
+    this.running++;
+    try {
+      const result = await run();
+      // Diffed against a history it never had, the delta would replace the whole history.
+      if (!options.withHistory && result.stateDelta.history !== undefined) {
+        throw new Error("A session step that was not given the history cannot change it.");
+      }
+      const next = applySessionStateDelta(base, result.stateDelta);
+      await this.inbox.claimSessionHooks(sessionHookTokens(next));
+      if (this.values !== base) {
+        throw new Error("Session state changed while a step ran, so its state delta cannot apply.");
+      }
+      this.values = next;
+      this.adopted++;
+      return result;
+    } finally {
+      this.running--;
     }
-    const next = applySessionStateDelta(base, result.stateDelta);
-    await this.inbox.claimSessionHooks(sessionHookTokens(next));
-    if (this.values !== base) {
-      throw new Error("Session state changed while a step ran, so its state delta cannot apply.");
-    }
-    this.values = next;
-    return result;
   }
 }

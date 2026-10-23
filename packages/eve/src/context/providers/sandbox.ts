@@ -11,12 +11,18 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("context.sandbox");
 
-/** Starts the session's own sandbox; the provider's commit records it for the first turn to resume. */
+/**
+ * Starts a prewarmed session's sandbox, and resumes a sandbox the session
+ * already recorded when a turn begins. A turn never starts a sandbox the
+ * session has not used: every agent has one, and most turns may not need it.
+ */
 export const sandboxPrewarmer: SessionPrewarmer = {
   name: "sandbox",
-  async prewarm(ctx) {
+  start(ctx, phase) {
     // `sandboxProvider.create` built this step's access.
-    await (ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined)?.warm();
+    const access = ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined;
+    if (access === undefined) return;
+    if (phase === "session" || access.hasRecordedSandbox()) access.prepare();
   },
 };
 
@@ -50,6 +56,7 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   },
 
   async commit(access, session) {
+    await (access as EnsuredSandboxAccess).drain();
     const state = await access.captureState();
     return { ...session, sandboxState: state };
   },

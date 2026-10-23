@@ -37,24 +37,38 @@ async function deadline(runId: string): Promise<Date> {
   return result!;
 }
 
+async function waitForPrewarmStep(runId: string): Promise<void> {
+  const world = await getWorld();
+  await vi.waitFor(
+    async () => {
+      const steps = await world.steps.list({ runId });
+      const step = steps.data.find((entry) => entry.stepName.endsWith("//prewarmSessionStep"));
+      expect(step?.status).toBe("completed");
+    },
+    { timeout: 10_000 },
+  );
+}
+
+function sandboxHook() {
+  return {
+    logicalPath: "hooks/sandbox.ts",
+    loadNamespace: async () => ({
+      default: defineHook({
+        events: {
+          async "turn.started"(_event, ctx) {
+            await ctx.getSandbox();
+          },
+        },
+      }),
+    }),
+  };
+}
+
 describe("session prewarmers", () => {
   it("starts a prewarmed session's sandbox before its first message, which the turn resumes", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "prewarm-sandbox" },
-      modules: [
-        {
-          logicalPath: "hooks/sandbox.ts",
-          loadNamespace: async () => ({
-            default: defineHook({
-              events: {
-                async "turn.started"(_event, ctx) {
-                  await ctx.getSandbox();
-                },
-              },
-            }),
-          }),
-        },
-      ],
+      modules: [sandboxHook()],
     });
     await runtime.run(async () => {
       const run = await startSessionOwner(workflowEntry, [
@@ -70,9 +84,8 @@ describe("session prewarmers", () => {
       const token = sessionInboxHookToken(sessionCommandHookToken(run.runId));
       const prewarmed = [`definition:${run.runId}`, `start:${run.runId}`];
       try {
-        await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual(prewarmed), {
-          timeout: 10_000,
-        });
+        await waitForPrewarmStep(run.runId);
+        expect(runtime.sandboxEvents).toEqual(prewarmed);
         await resumeHook(token, {
           kind: "send",
           payload: { message: "Alice opens the project notes." },
@@ -83,6 +96,59 @@ describe("session prewarmers", () => {
         await expect(run.returnValue).resolves.toEqual({ output: "" });
         expect(runtime.sandboxCleanups).toEqual([run.runId]);
       } finally {
+        stream.dispose();
+        if ((await run.status) === "running") await run.cancel();
+      }
+    });
+  });
+
+  it("runs a first message sent while the sandbox starts without waiting, and cleans up after it", async () => {
+    const started = Promise.withResolvers<void>();
+    const runtime = await createTestRuntime({
+      agent: { name: "prewarm-sandbox-race" },
+      beforeSandboxStart: () => started.promise,
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          sessionTimeoutMs: false,
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const token = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+      try {
+        await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]), {
+          timeout: 10_000,
+        });
+        await resumeHook(token, {
+          kind: "send",
+          payload: { message: "Alice asks for a short greeting." },
+        });
+        const turn = await stream.nextTurn();
+        expect(turn.some((event) => event.type === "message.completed")).toBe(true);
+        expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]);
+
+        await resumeHook(token, { kind: "reset" });
+        // Cleanup that did not wait for the prewarm step would run while start is held.
+        await vi
+          .waitFor(() => expect(runtime.sandboxEvents).toContain(`end:${run.runId}`), {
+            timeout: 2_000,
+          })
+          .catch(() => undefined);
+        started.resolve();
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+        // Session end waited for the prewarm step, so its cleanup removed the started sandbox.
+        expect(runtime.sandboxEvents).toEqual([
+          `definition:${run.runId}`,
+          `start:${run.runId}`,
+          `end:${run.runId}`,
+        ]);
+      } finally {
+        started.resolve();
         stream.dispose();
         if ((await run.status) === "running") await run.cancel();
       }

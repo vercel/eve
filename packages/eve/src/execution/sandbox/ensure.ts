@@ -40,6 +40,7 @@ import {
   getSandboxEnvironmentRuntime,
   runWithSandboxConstructorRuntime,
 } from "#shared/sandbox-environment.js";
+import type { SandboxPreparation } from "#sandbox/state.js";
 import { isSandboxPreparedArtifact, type SandboxDeleteOptions } from "#shared/sandbox-provider.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
@@ -82,11 +83,13 @@ export interface EnsuredSandboxAccess extends SandboxAccess {
    */
   release(): Promise<void>;
   /**
-   * Opens the sandbox this session owns before anything needs it, so its
-   * state is recorded when the step commits. Does nothing when the agent has
-   * no sandbox or the session borrows another session's.
+   * Waits for the work `prepare()` queued. Failed work is retried once, and a
+   * second failure throws, so a step never commits a sandbox missing what it
+   * queued. A failed open with no queued work is left for the next `get()`.
    */
-  warm(): Promise<void>;
+  drain(): Promise<void>;
+  /** Whether the session recorded a sandbox it can resume. */
+  hasRecordedSandbox(): boolean;
 }
 
 /** A connection this access opened, with the lifecycle eve maps onto it. */
@@ -139,9 +142,11 @@ export async function ensureSandboxAccess(
       async get() {
         return null;
       },
+      async drain() {},
+      hasRecordedSandbox: () => false,
+      prepare() {},
       async release() {},
       async stop() {},
-      async warm() {},
     };
   }
   const ownerDefinition = owningSandboxDefinition(registered);
@@ -362,6 +367,32 @@ export async function ensureSandboxAccess(
     return requiring;
   }
 
+  // Background work runs in order and shares one open; the chain settles even when a job fails.
+  let preparations: Promise<void> = Promise.resolve();
+  const failedPreparations: SandboxPreparation[] = [];
+  const openForPreparation = async () => (await requireOpened()).sandbox;
+
+  function enqueue(work: SandboxPreparation | undefined): Promise<void> {
+    const job = preparations.then(async () => {
+      if (work === undefined) await requireOpened();
+      else await work(openForPreparation);
+    });
+    preparations = job.catch((error: unknown) => {
+      if (work !== undefined) failedPreparations.push(work);
+      log.warn("background sandbox preparation failed; eve retries it when the sandbox is used", {
+        error,
+        sessionId: input.sessionId,
+      });
+    });
+    return job;
+  }
+
+  async function drain(): Promise<void> {
+    await preparations;
+    const retries = failedPreparations.splice(0).map((work) => enqueue(work));
+    await Promise.all(retries);
+  }
+
   function track(current: OpenedSandbox) {
     if (tracking === "none") return;
     trackActiveSandboxConnection({
@@ -396,12 +427,14 @@ export async function ensureSandboxAccess(
     async delete(deleteOptions) {
       if (input.ownsSandbox === false)
         throw new Error("Only the owning session can delete this sandbox.");
+      await preparations;
       const current = await requireOpened();
       await current.delete(deleteOptions);
       forgetSandbox(current.providerName);
     },
     async end(reason: SandboxSessionEndReason) {
       if (input.ownsSandbox === false) return;
+      await preparations;
       if (requiring !== undefined) await requiring.catch(() => undefined);
       // A failed close of a process-local resource must not block deleting the sandbox.
       await opened?.close().catch((error: unknown) => {
@@ -434,10 +467,17 @@ export async function ensureSandboxAccess(
       }
       forgetSandbox(provider.providerName);
     },
+    drain,
     async get() {
+      await drain();
       return (await requireOpened()).sandbox;
     },
+    hasRecordedSandbox: () => persisted !== null,
+    prepare(work) {
+      void enqueue(work).catch(() => undefined);
+    },
     async release() {
+      await preparations;
       // A failed open left nothing to let go of.
       if (requiring !== undefined) await requiring.catch(() => undefined);
       const current = forgetOpened();
@@ -460,6 +500,7 @@ export async function ensureSandboxAccess(
       await current.close();
     },
     async stop() {
+      await preparations;
       const current = await requireOpened();
       await current.stop();
       forgetOpened();
@@ -473,10 +514,6 @@ export async function ensureSandboxAccess(
         providerName: current.providerName,
         sessionId: input.sessionId,
       });
-    },
-    async warm() {
-      if (input.ownsSandbox === false || ownerDefinition.kind !== "independent") return;
-      await requireOpened();
     },
   };
 

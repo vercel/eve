@@ -33,8 +33,8 @@ session remains the primary ID in report metadata.
 ## Runtime boundary
 
 Prewarming starts Workflow, creates the initial durable snapshot, and claims the existing inbox.
-It then runs the [session prewarmers](./session-prewarmers.md), which start the sandbox, and
-parks before channel delivery, session hooks, dynamic definitions, and tracing of the first turn.
+It parks before channel delivery, session hooks, dynamic definitions, and tracing of the first
+turn, while the [session prewarmers](./session-prewarmers.md) start the sandbox beside the wait.
 No initial `session.started` or `session.waiting` event is emitted.
 
 The first message runs `onMessage`, then resumes the inbox. The normal turn step initializes the

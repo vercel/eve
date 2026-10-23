@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Prewarmed sessions now start the agent's sandbox before the first message, so the first turn resumes a running sandbox instead of creating one. The `defineSandbox()` selector of a prewarmed session runs with the auth of the request that created the session, and a failed start falls back to starting the sandbox on first use.
+Sandbox work no longer delays the model call. Prewarmed sessions start the sandbox in the background, turns resume a sandbox the session already uses as they begin, and dynamic skill files are written in the background; a tool that uses the sandbox waits only for what remains. A first message sent to a prewarmed session no longer waits for prewarming, and its `defineSandbox()` selector runs with the auth of the request that created the session.

@@ -2256,7 +2256,8 @@ describe("turnStep", () => {
       ...sandbox.access,
       end: async () => {},
       release: async () => {},
-      warm: async () => {},
+      drain: async () => {},
+      hasRecordedSandbox: () => false,
     });
     const controller = new AbortController();
     controller.abort(new TurnCancelledError());

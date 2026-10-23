@@ -274,6 +274,8 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     writeFiles: session.writeFiles,
   };
 
+  // Queued preparation runs in order; `get()` waits for it, as the runtime's does.
+  let preparations: Promise<unknown> = Promise.resolve();
   const access: SandboxAccess = {
     async captureState(): Promise<SandboxState> {
       return { session: null };
@@ -282,7 +284,11 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       await input.delete?.();
     },
     async get(): Promise<NetworkPolicySandboxSession> {
+      await preparations;
       return session;
+    },
+    prepare(work) {
+      preparations = preparations.then(() => work?.(async () => session)).catch(() => undefined);
     },
     async stop(): Promise<void> {
       await input.stop?.();

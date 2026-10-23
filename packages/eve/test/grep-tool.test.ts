@@ -40,6 +40,7 @@ function createFakeAccess(
       return { initialized: false, session: null };
     },
 
+    prepare() {},
     async stop() {},
 
     async get() {

@@ -24,6 +24,7 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
       return { initialized: false, session: null };
     },
 
+    prepare() {},
     async stop() {},
 
     async get() {
