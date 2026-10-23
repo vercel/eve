@@ -286,6 +286,26 @@ describe("deriveRunFacts", () => {
     expect(derive(events).toolCalls).toHaveLength(1);
   });
 
+  // Fails until #4900 is fixed: a result delivered first records the call with `input: {}`.
+  it.fails("keeps a tool call's input when its result is delivered before its request", () => {
+    const events: UnstampedMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      actionResult({ callId: "c1", toolName: "lookup", output: { ok: true } }),
+      actionsRequested([{ callId: "c1", toolName: "lookup", input: { topic: "sources" } }]),
+    ];
+
+    expect(derive(events).toolCalls).toEqual([
+      {
+        name: "lookup",
+        input: { topic: "sources" },
+        output: { ok: true },
+        status: "completed",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
+  });
+
   it("stamps the turn index from turn.started boundaries", () => {
     const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
