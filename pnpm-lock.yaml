@@ -326,8 +326,8 @@ importers:
         specifier: 2.0.1
         version: 2.0.1(81a45996e726c352edb608aa8ed932c0)
       '@vercel/geistdocs':
-        specifier: 2.13.1
-        version: 2.13.1(7eb82b335cccccda73811972c8fed49f)
+        specifier: 2.13.1-canary.87d00b3
+        version: 2.13.1-canary.87d00b3(7eb82b335cccccda73811972c8fed49f)
       '@vercel/speed-insights':
         specifier: 2.0.0
         version: 2.0.0(81a45996e726c352edb608aa8ed932c0)
@@ -7886,8 +7886,8 @@ packages:
       ws:
         optional: true
 
-  '@vercel/geistdocs@2.13.1':
-    resolution: {integrity: sha512-xnt2dwZjK7B0ons4JGlJ458dDvt44/fv5KSIrwbCBY2JY1VUcmjKc+L6FWIrGUng2VbXOLNlss0Qvr3yndWR9g==}
+  '@vercel/geistdocs@2.13.1-canary.87d00b3':
+    resolution: {integrity: sha512-OrmvZ4O7Ezi5idvA9ISl5SV7zEj6Tl9ZLPsHyp7sK9NkGUGMwZrVDmZa5NRiqpvJRO84c9jbJgRrFCUIdl41qA==}
     hasBin: true
     peerDependencies:
       next: ^16.3.3
@@ -21728,7 +21728,7 @@ snapshots:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       ws: 8.21.3(bufferutil@4.1.0)
 
-  '@vercel/geistdocs@2.13.1(7eb82b335cccccda73811972c8fed49f)':
+  '@vercel/geistdocs@2.13.1-canary.87d00b3(7eb82b335cccccda73811972c8fed49f)':
     dependencies:
       '@ai-sdk/react': 3.0.288(react@19.2.6)(zod@4.6.5)
       '@clack/prompts': 0.11.0

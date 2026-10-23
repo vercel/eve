@@ -1,7 +1,7 @@
 import "../global.css";
 import { Footer } from "@vercel/geistdocs/footer";
 import { Navbar } from "@vercel/geistdocs/navbar";
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import { GeistdocsProvider } from "@/components/geistdocs/provider";
 import { config } from "@/lib/geistdocs/config";
 import { mono, sans } from "@/lib/geistdocs/fonts";
@@ -26,14 +26,6 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     images: [staticOgImage],
   },
-};
-
-// iOS Safari zooms into inputs with text smaller than 16px on focus, such as
-// the Ask AI textarea. It still allows pinch zoom with a maximum scale set.
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
 };
 
 export const generateStaticParams = () => supportedLanguages.map((lang) => ({ lang }));
