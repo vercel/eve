@@ -1136,3 +1136,93 @@ describe("compactMessages: summarization fallback", () => {
     expect(result.filter((m) => m.content === "Continue.")).toHaveLength(0);
   });
 });
+
+describe("compactMessages: current message larger than its share of the threshold", () => {
+  // The provider counts 1.6x what the character estimate does for URL- and
+  // JSON-heavy text, so a history eve thinks fits can still be over the limit.
+  const PROVIDER_RATIO = 1.6;
+  const THRESHOLD = 10_000;
+
+  function bigTask(): ModelMessage {
+    // About 6,500 estimated tokens: fits the recent-window reserve, but is
+    // 10,400 tokens to the provider, over the threshold on its own.
+    return user(`${"task context line. ".repeat(1_370)}FINAL SENTINEL`);
+  }
+
+  function providerConfig(history: readonly ModelMessage[]): CompactionConfig {
+    return {
+      lastKnownInputTokens: Math.round(estimateTokens(history) * PROVIDER_RATIO),
+      lastKnownPromptMessageCount: history.length,
+      recentWindowSize: 4,
+      threshold: THRESHOLD,
+    };
+  }
+
+  it("compacts once and stays under the threshold on the provider's count", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    let history: ModelMessage[] = [
+      bigTask(),
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+    let compactions = 0;
+
+    for (let step = 1; step <= 4; step += 1) {
+      const stepConfig = providerConfig(history);
+      if (shouldCompact(history, stepConfig)) {
+        compactions += 1;
+        history = await compactMessages(history, stepConfig, summarizer);
+      }
+      history.push(...toolExchange({ callId: `call-${step}`, payloadChars: 50 }));
+    }
+
+    expect(compactions).toBe(1);
+    expect(estimateTokens(history) * PROVIDER_RATIO).toBeLessThan(THRESHOLD);
+  });
+
+  it("keeps the newest part of the message and says the rest was cut", async () => {
+    const summarizer = summarizeWith("checkpoint text");
+    const history: ModelMessage[] = [
+      bigTask(),
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+
+    const result = await compactMessages(history, providerConfig(history), summarizer);
+
+    const kept = result.filter((message) => message.role === "user" && !isCheckpoint(message));
+    expect(kept).toHaveLength(1);
+    const content = String(kept[0]?.content);
+    expect(content).toContain("FINAL SENTINEL");
+    expect(content).toMatch(/^\[eve: the first \d+ characters of this message were cut/);
+    expect(content.length).toBeLessThan(String(bigTask().content).length / 2);
+    expect(summarizer).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a message that fits its share untouched", async () => {
+    const task = user("Keep these requirements. ".repeat(40));
+    const history: ModelMessage[] = [
+      user("old notes ".repeat(4_000)),
+      task,
+      ...toolExchange({ callId: "call-0", payloadChars: 50 }),
+    ];
+
+    const result = await compactMessages(history, providerConfig(history), summarizeWith("s"));
+
+    expect(result).toContainEqual(task);
+  });
+
+  it("throws instead of compacting again when the history cannot get under the threshold", async () => {
+    const history = [user("do the thing"), assistant("working on it"), user("still there?")];
+
+    await expect(
+      compactMessages(
+        history,
+        { recentWindowSize: 1, threshold: HEURISTICS_FORBIDDEN },
+        summarizeWith("s".repeat(40_000)),
+      ),
+    ).rejects.toThrow(/freed no space/);
+  });
+});
+
+function isCheckpoint(message: ModelMessage): boolean {
+  return message.content === CHECKPOINT_MARKER;
+}

@@ -16,6 +16,10 @@ import type { CompactionConfig } from "#harness/types.js";
 
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 
+// The estimate is UTF-8 bytes / 4 and a token is at least one byte, so the
+// provider can count at most 4x the estimate.
+const MAX_ESTIMATE_SCALE = 4;
+
 /**
  * Element type of a non-string `ModelMessage.content` array.
  */
@@ -159,9 +163,11 @@ function evaluateThreshold(
   config: CompactionConfig,
   ruler: "estimate" | "should-compact",
   tokenEstimateAdjustment = 0,
+  estimateScale = 1,
 ): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
   const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
-  const estimatedTokens = estimateTokens(messages) + overhead + tokenEstimateAdjustment;
+  const estimatedTokens =
+    estimateTokens(messages) * estimateScale + overhead + tokenEstimateAdjustment;
   return {
     estimatedTokens,
     type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
@@ -173,6 +179,13 @@ function evaluateThreshold(
  * order, then fall back to summarizing the older region with the compaction
  * model — keeping the recent tail verbatim when it fits, degrading it to
  * text-only, then shrinking the window.
+ *
+ * `estimateTokens` is a character ruler and can sit well below the provider's
+ * count (1.6x on URL- and JSON-heavy text). Acceptance checks therefore scale
+ * the estimate by the provider-to-estimate ratio measured on this history:
+ * a result accepted here must not re-trigger {@link shouldCompact} on the
+ * next step. A compaction that frees nothing and stays over the threshold
+ * throws, so the caller stops instead of compacting again on every step.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -181,9 +194,58 @@ export async function compactMessages(
   forceSummary = false,
   historyInputTokenCount?: number,
 ): Promise<ModelMessage[]> {
+  const providerTokens = historyInputTokenCount ?? getInputTokenCount(messages, config);
+  const estimatedTokens = estimateTokens(messages);
+  const estimateScale =
+    estimatedTokens > 0
+      ? Math.min(MAX_ESTIMATE_SCALE, Math.max(1, providerTokens / estimatedTokens))
+      : 1;
+  const compacted = await compactWithScale(
+    messages,
+    config,
+    summarize,
+    forceSummary,
+    providerTokens,
+    estimateScale,
+  );
+  if (
+    estimateTokens(compacted) >= estimatedTokens &&
+    estimateTokens(compacted) * estimateScale > config.threshold
+  ) {
+    throw new Error(
+      `Context compaction freed no space: the history is still about ${Math.round(estimateTokens(compacted) * estimateScale)} tokens against a ${config.threshold}-token limit.`,
+    );
+  }
+  return compacted;
+}
+
+async function compactWithScale(
+  messages: ModelMessage[],
+  config: CompactionConfig,
+  summarize: CompactionSummarizer,
+  forceSummary: boolean,
+  providerTokens: number,
+  estimateScale: number,
+): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
   let keep = selectRecentWindowSize(conversation, recentConfig);
+
+  // A current message that alone takes most of the budget would be kept word
+  // for word after every compaction, so compaction could never get under the
+  // threshold. Fold it into the older region and replay only its newest part.
+  const currentIndex = findLastRealUserIndex(conversation);
+  const current = conversation[currentIndex];
+  const overThreshold =
+    estimateTokens(conversation) * estimateScale + COMPACTION_PROMPT_OVERHEAD_TOKENS >
+    config.threshold;
+  const replay =
+    overThreshold && current !== undefined
+      ? fitCurrentMessage(current, config.threshold, estimateScale)
+      : undefined;
+  if (replay !== undefined) {
+    keep = Math.min(keep, conversation.length - 1 - currentIndex);
+  }
 
   if (!forceSummary) {
     const { older, recent } = splitMessagesForCompaction(conversation, keep);
@@ -194,10 +256,7 @@ export async function compactMessages(
     // Capping preserves most of the measured prompt. Retain any known
     // underestimate while crediting only the estimated tokens it removes.
     // A new summary replaces that prompt, so it uses its own estimate below.
-    const tokenEstimateAdjustment = Math.max(
-      0,
-      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
-    );
+    const tokenEstimateAdjustment = Math.max(0, providerTokens - estimateTokens(messages));
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
         config,
@@ -219,7 +278,7 @@ export async function compactMessages(
     const summaryPrompt = createCompactionPrompt({
       messages: older,
       previousCheckpoint,
-      transcriptBudgetTokens: config.threshold,
+      transcriptBudgetTokens: config.threshold / estimateScale,
     });
 
     const summary = await summarize({
@@ -239,8 +298,9 @@ export async function compactMessages(
       [...summaryHead, ...recent],
       conversation,
       config.threshold,
+      replay,
     );
-    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
+    if (evaluateThreshold(verbatim, config, "estimate", 0, estimateScale).type === "within-limit") {
       return verbatim;
     }
 
@@ -248,8 +308,12 @@ export async function compactMessages(
       [...summaryHead, ...keepNonToolResultMessages(recent)],
       conversation,
       config.threshold,
+      replay,
     );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
+    if (
+      evaluateThreshold(stripped, config, "estimate", 0, estimateScale).type === "within-limit" ||
+      keep === 0
+    ) {
       return stripped;
     }
 
@@ -324,9 +388,10 @@ function withResumptionGuard(
   messages: ModelMessage[],
   conversation: readonly ModelMessage[],
   threshold: number,
+  fittedReplay?: ModelMessage,
 ): ModelMessage[] {
   const lastRole = messages.at(-1)?.role;
-  const replay = findLastRealUserMessage(conversation);
+  const replay = fittedReplay ?? findLastRealUserMessage(conversation);
   const alreadyKept =
     replay !== undefined &&
     messages.some((message) => message.role === "user" && message.content === replay.content);
@@ -354,9 +419,55 @@ function withResumptionGuard(
 }
 
 /**
+ * A current user message may take at most this share of the compaction
+ * threshold (calibrated to the provider's count), leaving the rest for the
+ * checkpoint summary, the recent tail, and the next steps' tool results.
+ */
+const CURRENT_MESSAGE_THRESHOLD_SHARE = 0.5;
+
+/**
+ * Returns `message` cut to its newest part when it exceeds its share of the
+ * threshold, or `undefined` when it already fits. The cut-off head stays in
+ * the older region, so the summary still covers it.
+ */
+function fitCurrentMessage(
+  message: ModelMessage,
+  threshold: number,
+  estimateScale: number,
+): ModelMessage | undefined {
+  const content = message.content;
+  const budget = (threshold * CURRENT_MESSAGE_THRESHOLD_SHARE) / estimateScale;
+  if (typeof content !== "string" || estimateTokens([message]) <= budget) {
+    return undefined;
+  }
+
+  const note = (omitted: number) =>
+    `[eve: the first ${omitted} characters of this message were cut during context compaction to fit the context window. Only its newest part follows.]\n\n`;
+  let keptChars = Math.floor(budget * 4);
+  while (keptChars > 0) {
+    keptChars = Math.min(keptChars, content.length);
+    let start = content.length - keptChars;
+    const first = content.charCodeAt(start);
+    if (first >= 0xdc00 && first <= 0xdfff) {
+      start += 1;
+    }
+    const fitted = { ...message, content: `${note(start)}${content.slice(start)}` };
+    if (estimateTokens([fitted]) <= budget) {
+      return fitted as ModelMessage;
+    }
+    keptChars = Math.floor(keptChars * 0.9) - 1;
+  }
+  return { ...message, content: note(content.length) } as ModelMessage;
+}
+
+/**
  * Latest user message authored by the user rather than the framework.
  */
 function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
+  return conversation[findLastRealUserIndex(conversation)];
+}
+
+function findLastRealUserIndex(conversation: readonly ModelMessage[]): number {
   for (let index = conversation.length - 1; index >= 0; index -= 1) {
     const message = conversation[index];
     if (message?.role !== "user" || typeof message.content !== "string") {
@@ -365,10 +476,10 @@ function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMe
     if (isFrameworkUserMessage(message)) {
       continue;
     }
-    return message;
+    return index;
   }
 
-  return undefined;
+  return -1;
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
