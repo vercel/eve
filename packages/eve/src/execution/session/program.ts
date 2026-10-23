@@ -229,6 +229,7 @@ async function runSessionLoop(
   const sessionTimeout = boot.sessionTimeoutControl;
   // A prewarmed session's prewarm step, which runs beside the session's own steps.
   let prewarming: Promise<void> = Promise.resolve();
+  let prewarmSettled = true;
   // What it prepared is kept only while the owner still waits for its first input.
   let awaitingFirstInput = false;
 
@@ -244,16 +245,15 @@ async function runSessionLoop(
         queue,
       });
       if (next.kind === "prewarm") {
+        // A prewarm step still starting a sandbox keeps the session here: a
+        // successor could end the session and clean up before that start lands.
         if (
+          prewarmSettled &&
           progress.caller === undefined &&
           workingTasks(sessionTaskTable(cursor)).length === 0 &&
           queue.pendingCount === 0 &&
           !inbox.hasPending()
         ) {
-          // Moving the session must not wait for, or absorb, the prewarm step
-          // meanwhile; the successor reaches its sandbox through the upserting `start()`.
-          const wasAwaitingFirstInput = awaitingFirstInput;
-          awaitingFirstInput = false;
           const deadline = sessionTimeout?.getDeadline();
           const result = await handoff.tryPrewarmTransfer(
             transferState(),
@@ -261,7 +261,6 @@ async function runSessionLoop(
             deadline,
           );
           if (result.kind === "transferred") return result;
-          awaitingFirstInput = wasAwaitingFirstInput;
         }
         continue;
       }
@@ -367,6 +366,7 @@ async function runSessionLoop(
         // for it. Provider `start()` upserts by session id, so a turn that
         // opens the sandbox meanwhile reaches the one being prewarmed.
         awaitingFirstInput = true;
+        prewarmSettled = false;
         prewarming = cursor
           .advanceBeside(
             ({ serializedContext, sessionState }) =>
@@ -376,7 +376,10 @@ async function runSessionLoop(
           .then(
             () => undefined,
             () => undefined,
-          );
+          )
+          .finally(() => {
+            prewarmSettled = true;
+          });
         return await awaitPrewarmedAction();
       case "parked":
         return { action: { kind: "park" }, kind: "action" };

@@ -156,6 +156,60 @@ describe("session prewarmers", () => {
   });
 });
 
+describe("prewarm handoff while the prewarm step runs", () => {
+  it("keeps the session on its owner until the prewarm step has started the sandbox", async () => {
+    const started = Promise.withResolvers<void>();
+    const runtime = await createTestRuntime({
+      agent: { name: "prewarm-transfer-hold" },
+      beforeSandboxStart: () => started.promise,
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_a",
+          sessionTimeoutMs: false,
+          input: {},
+          serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_a",
+            channelKind: "http",
+          }),
+        },
+      ]);
+      const token = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+      const world = await getWorld();
+      try {
+        await vi.waitFor(() => expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]), {
+          timeout: 10_000,
+        });
+        await resumeHook(token, {
+          kind: "session-prewarm",
+          expectedOwnerRunId: run.runId,
+          targetDeploymentId: "dpl_b",
+        });
+        // Without the hold, the session moves within a few hundred milliseconds.
+        const until = Date.now() + 2_000;
+        while (Date.now() < until) {
+          expect((await waitForCommandHookOwner(token)).runId).toBe(run.runId);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        started.resolve();
+        await resumeHook(token, { kind: "reset" });
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+        expect(runtime.sandboxEvents).toEqual([
+          `definition:${run.runId}`,
+          `start:${run.runId}`,
+          `end:${run.runId}`,
+        ]);
+      } finally {
+        started.resolve();
+        if ((await world.runs.get(run.runId)).status === "running") await run.cancel();
+      }
+    });
+  });
+});
+
 describe("idle session prewarm handoff", () => {
   it("delivers a message exactly once when Send arrives while the successor starts", async () => {
     const output = captureConsoleOutput();
@@ -202,6 +256,8 @@ describe("idle session prewarm handoff", () => {
       });
       try {
         await waitForCommandHookOwner(token);
+        // A session moves only once its prewarm step has started the sandbox.
+        await waitForPrewarmStep(anchor.runId);
         await resumeHook(token, {
           kind: "session-prewarm",
           expectedOwnerRunId: anchor.runId,
@@ -273,6 +329,7 @@ describe("idle session prewarm handoff", () => {
             await stream.nextTurn();
             await waitForParkedTurnStep(anchor.runId);
           }
+          if (!conversation) await waitForPrewarmStep(anchor.runId);
           const originalDeadline = await deadline(anchor.runId);
           await resumeHook(token, {
             kind: "session-prewarm",

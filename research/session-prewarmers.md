@@ -54,8 +54,8 @@ has run. Otherwise it is dropped. Provider `start()` is a documented cross-proce
 turn that opens the sandbox meanwhile reaches the same one; the selector may run twice, which
 its existing idempotency rule covers. The step keeps context changes the selector makes, such
 as `defineState()` updates. Session end waits for the step, so cleanup finds whatever it
-started. A prewarm handoff drops the step's state rather than waiting; the successor reaches the
-same sandbox through the upsert.
+started. A prewarm handoff is skipped while the step runs, so a successor never ends the session and
+cleans up before a start the old owner still has in flight.
 
 ```mermaid
 flowchart LR
