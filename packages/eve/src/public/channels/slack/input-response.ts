@@ -3,6 +3,7 @@ import { buildSlackBinding } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import type {
   SlackChannelConfig,
+  SlackSessionTarget,
   SlackInputResponseContext,
   SlackInputResponseResult,
   SlackInputResponseSubmission,
@@ -12,7 +13,6 @@ import type { SlackTransportOptions } from "#public/channels/slack/transport.js"
 const log = createLogger("slack.interactions");
 
 export async function authorizeInputResponse(input: {
-  readonly channelId: string;
   readonly deps: {
     readonly api: SlackTransportOptions | undefined;
     readonly config: SlackChannelConfig;
@@ -20,22 +20,24 @@ export async function authorizeInputResponse(input: {
   };
   readonly installationTeamId: string | null | undefined;
   readonly submission: SlackInputResponseSubmission;
+  readonly target: SlackSessionTarget;
   readonly teamId: string | null | undefined;
-  readonly threadTs: string;
 }): Promise<SlackInputResponseResult> {
+  const { channelId, codeChannel, threadTs = "" } = input.target;
   const defaultAuth = buildSlackAuthContext({
-    channelId: input.channelId,
+    channelId,
     installationTeamId: input.installationTeamId,
     teamId: input.teamId,
-    threadTs: input.threadTs,
+    threadTs,
     userId: input.submission.user.id,
     userName: input.submission.user.username ?? input.submission.user.name,
   });
   const { thread, slack } = buildSlackBinding({
     api: input.deps.api,
     botToken: input.deps.config.credentials?.botToken,
-    channelId: input.channelId,
-    threadTs: input.threadTs,
+    channelId,
+    threadTs,
+    codeChannel,
     installationTeamId: input.installationTeamId ?? undefined,
     teamId: input.teamId ?? undefined,
   });

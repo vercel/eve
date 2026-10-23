@@ -2135,6 +2135,21 @@ describe("slackChannel() final reply delivery", () => {
       expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
     });
 
+    // A code channel session has no thread root for Slack to look up.
+    it("skips the check in a code channel", async () => {
+      rootLookup = () => ({ ok: false, error: "message_not_found" });
+      const adapter = withState(
+        getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+        { ...THREAD_STATE, codeChannel: true, threadTs: null },
+      );
+      const ctx = buildAdapterContext(adapter, stubAccessor());
+
+      await callCompletionHandler(adapter, finalReply("hello"), ctx);
+
+      expect(rootLookups).toEqual([]);
+      expect(urls()).toEqual(["https://slack.com/api/chat.postMessage"]);
+    });
+
     it("checks the root only until eve's first post in the thread", async () => {
       const { adapter, ctx } = adapterWith();
 
@@ -4018,6 +4033,20 @@ describe("slackChannel() generic Events API pipeline", () => {
       continuationToken: "C01:1700000000.000001",
       turnId: "turn_observed",
     });
+  });
+
+  it("cancels a code channel's session from onEvent", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.cancel({ target: { channelId: "C_CODE", codeChannel: true } });
+      },
+    });
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith({ continuationToken: "code:C_CODE" });
   });
 
   it("targets session operations from generic Slack events", async () => {
@@ -6286,5 +6315,513 @@ describe("Slack renderer chain", () => {
     expect(Object.keys(authored!).sort()).toEqual(["postDirectMessage", "postEphemeral", "state"]);
     expect(channel.thread.postEphemeral).toHaveBeenCalledWith("U777", "Sign in privately");
     expect(publicStatus).toHaveBeenCalledWith(challenge, channel, {});
+  });
+});
+
+describe("slackChannel() code channels", () => {
+  const BOT_AUTHORIZATIONS = [{ is_bot: true, user_id: "U_BOT" }];
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  // Each test uses its own channel ids: eve caches code channel detection per process.
+  function useCodeChannels(codeChannelIds: readonly string[]): void {
+    fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
+      if (!String(request).includes("conversations.info")) {
+        return Response.json({ ok: true, ts: "1700000001.000001" });
+      }
+      const { channel } = parseSlackRequestBody(init);
+      return Response.json({
+        ok: true,
+        channel: codeChannelIds.includes(String(channel))
+          ? {
+              is_private: false,
+              properties: { record_channel: { record_type: "agent_channel" } },
+            }
+          : { is_private: false },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  }
+
+  function channelMessage(input: {
+    readonly blocks?: readonly unknown[];
+    readonly channel: string;
+    readonly threadTs?: string;
+    readonly user: string;
+  }): string {
+    return buildEventBody(
+      {
+        blocks: input.blocks,
+        channel: input.channel,
+        channel_type: "channel",
+        text: "keep going",
+        thread_ts: input.threadTs,
+        ts: "1700000000.000300",
+        type: "message",
+        user: input.user,
+      },
+      { authorizations: BOT_AUTHORIZATIONS },
+    );
+  }
+
+  it("serves a mention as the channel's one session and replies top-level", async () => {
+    useCodeChannels(["C_CODE_MENTION"]);
+    let isCodeChannel: boolean | undefined;
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onAppMention(ctx) {
+        isCodeChannel = ctx.slack.codeChannel;
+        await ctx.thread.post("On it");
+        return { auth: null };
+      },
+    });
+    const mention = buildMentionBody({
+      channel: "C_CODE_MENTION",
+      ts: "1700000000.000200",
+      user: "U_ALICE",
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    expect(isCodeChannel).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![0]).toBe("code:C_CODE_MENTION");
+    expect(send.mock.calls[0]![1].state).toMatchObject({ codeChannel: true, threadTs: null });
+    const post = parseSlackRequestBody(slackCalls(fetchMock, "chat.postMessage")[0]![1]);
+    expect(post).toMatchObject({ channel: "C_CODE_MENTION", markdown_text: "On it" });
+    expect(post.thread_ts).toBeUndefined();
+    expect(slackCalls(fetchMock, "assistant.threads.setStatus")).toHaveLength(0);
+    expect(
+      slackCalls(fetchMock, "agents.sessions.setStatus").map(([, init]) =>
+        parseSlackRequestBody(init),
+      ),
+    ).toEqual([{ channel_id: "C_CODE_MENTION", status: "processing" }]);
+  });
+
+  it("answers un-mentioned messages from any member when codeChannels is set", async () => {
+    useCodeChannels(["C_CODE_UNMENTIONED"]);
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+
+    const threaded = await firePost(
+      channel,
+      buildSignedRequest({
+        body: channelMessage({
+          channel: "C_CODE_UNMENTIONED",
+          threadTs: "1700000000.000100",
+          user: "U_ALICE",
+        }),
+      }),
+    );
+    const topLevel = await firePost(
+      channel,
+      buildSignedRequest({
+        body: channelMessage({ channel: "C_CODE_UNMENTIONED", user: "U_BOB" }),
+      }),
+    );
+    const originContext = await firePost(
+      channel,
+      buildSignedRequest({
+        body: channelMessage({
+          blocks: [{ block_id: "agent_channel_origin_context", type: "context" }],
+          channel: "C_CODE_UNMENTIONED",
+          user: "U_ALICE",
+        }),
+      }),
+    );
+    const ordinary = await firePost(
+      channel,
+      buildSignedRequest({ body: channelMessage({ channel: "C_ORDINARY", user: "U_ALICE" }) }),
+    );
+
+    expect(threaded.send.mock.calls.map(([address]) => address)).toEqual([
+      "code:C_CODE_UNMENTIONED",
+    ]);
+    expect(topLevel.send.mock.calls.map(([address]) => address)).toEqual([
+      "code:C_CODE_UNMENTIONED",
+    ]);
+    // Replies follow the thread the person wrote in.
+    expect(threaded.send.mock.calls[0]![1].state).toMatchObject({
+      codeChannel: true,
+      replyThreadTs: "1700000000.000100",
+      threadTs: null,
+    });
+    expect(topLevel.send.mock.calls[0]![1].state).toMatchObject({ replyThreadTs: null });
+    // State and auth report no thread.
+    expect(topLevel.send.mock.calls[0]![1].auth.attributes).not.toHaveProperty("thread_ts");
+    expect(originContext.send).not.toHaveBeenCalled();
+    expect(ordinary.send).not.toHaveBeenCalled();
+  });
+
+  // An authored mention handler gates un-mentioned code channel messages, which don't mention the bot.
+  it("sends un-mentioned code channel messages to onAppMention without counting them as mentions", async () => {
+    useCodeChannels(["C_CODE_HOOK"]);
+    const calls: string[] = [];
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention(ctx, message) {
+        calls.push(`mention:${message.channelId}:${String(ctx.isBotMentioned())}`);
+        return { auth: null };
+      },
+    });
+
+    const unmentioned = await firePost(
+      channel,
+      buildSignedRequest({ body: channelMessage({ channel: "C_CODE_HOOK", user: "U_ALICE" }) }),
+    );
+    await firePost(
+      channel,
+      buildSignedRequest({
+        body: buildMentionBody({ channel: "C_CODE_HOOK", user: "U_ALICE" }).body,
+      }),
+    );
+    await firePost(
+      channel,
+      buildSignedRequest({ body: channelMessage({ channel: "C_ORDINARY_HOOK", user: "U_ALICE" }) }),
+    );
+
+    expect(calls).toEqual(["mention:C_CODE_HOOK:false", "mention:C_CODE_HOOK:true"]);
+    expect(unmentioned.send.mock.calls.map(([address]) => address)).toEqual(["code:C_CODE_HOOK"]);
+  });
+
+  it("leaves un-mentioned messages outside code channels to onEvent", async () => {
+    useCodeChannels(["C_CODE_ON_EVENT"]);
+    const mentions: string[] = [];
+    const events: string[] = [];
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention(_ctx, message) {
+        mentions.push(message.channelId);
+        return null;
+      },
+      onEvent(_ctx, event) {
+        events.push(String(event.channel));
+      },
+    });
+
+    for (const id of ["C_CODE_ON_EVENT", "C_ORDINARY_ON_EVENT"]) {
+      await firePost(
+        channel,
+        buildSignedRequest({ body: channelMessage({ channel: id, user: "U_ALICE" }) }),
+      );
+    }
+
+    expect(mentions).toEqual(["C_CODE_ON_EVENT"]);
+    expect(events).toEqual(["C_ORDINARY_ON_EVENT"]);
+  });
+
+  it("treats a code channel as an ordinary channel without codeChannels", async () => {
+    useCodeChannels(["C_CODE_OFF"]);
+    const isCodeChannel = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention(ctx) {
+        isCodeChannel(ctx.slack.codeChannel);
+        return null;
+      },
+    });
+    const mention = buildMentionBody({ channel: "C_CODE_OFF", ts: "1700000000.000200" });
+
+    await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    expect(isCodeChannel).toHaveBeenCalledWith(false);
+    expect(slackCalls(fetchMock, "conversations.info")).toHaveLength(0);
+  });
+
+  it("serves a channel whose lookup failed per thread and retries the lookup later", async () => {
+    fetchMock = vi.fn(async (request: string | URL | Request) =>
+      String(request).includes("conversations.info")
+        ? Response.json({ ok: false, error: "missing_scope" })
+        : Response.json({ ok: true, ts: "1700000001.000001" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const isCodeChannel = vi.fn();
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention(ctx) {
+        isCodeChannel(ctx.slack.codeChannel);
+        return null;
+      },
+    });
+
+    for (const ts of ["1700000000.000201", "1700000000.000202"]) {
+      const mention = buildMentionBody({ channel: "C_LOOKUP_FAILS", ts });
+      await firePost(channel, buildSignedRequest({ body: mention.body }));
+    }
+    expect(isCodeChannel.mock.calls).toEqual([[false], [false]]);
+    expect(slackCalls(fetchMock, "conversations.info")).toHaveLength(1);
+  });
+
+  it("gates un-mentioned messages with an authored onAppMention without touching the status", async () => {
+    useCodeChannels(["C_CODE_GATED"]);
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention: (_ctx, message) =>
+        message.author?.userId === "U_ALICE" ? { auth: null } : null,
+    });
+
+    const bob = await firePost(
+      channel,
+      buildSignedRequest({ body: channelMessage({ channel: "C_CODE_GATED", user: "U_BOB" }) }),
+    );
+    expect(bob.send).not.toHaveBeenCalled();
+    // Bob's dropped message may arrive mid-turn, so it leaves the session status alone.
+    expect(slackCalls(fetchMock, "agents.sessions.setStatus")).toHaveLength(0);
+
+    const alice = await firePost(
+      channel,
+      buildSignedRequest({ body: channelMessage({ channel: "C_CODE_GATED", user: "U_ALICE" }) }),
+    );
+    expect(alice.send.mock.calls.map(([address]) => address)).toEqual(["code:C_CODE_GATED"]);
+  });
+
+  it("addresses a custom interaction in a code channel to the channel's session", async () => {
+    useCodeChannels(["C_CODE_CARD"]);
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onInteraction(_action, ctx) {
+        await ctx.thread.post("Rerunning.");
+        await ctx.cancel({ turnId: "turn_observed" });
+      },
+    });
+
+    const { cancel } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C_CODE_CARD" },
+        message: { ts: "1700000000.000010", thread_ts: "1700000000.000001", blocks: [] },
+        actions: [{ action_id: "rerun", text: { type: "plain_text", text: "Rerun" } }],
+      }),
+    );
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalled());
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "code:C_CODE_CARD",
+      turnId: "turn_observed",
+    });
+    // The card sits in a thread, so the reply stays there.
+    expect(parseSlackRequestBody(slackCalls(fetchMock, "chat.postMessage")[0]![1])).toMatchObject({
+      channel: "C_CODE_CARD",
+      thread_ts: "1700000000.000001",
+    });
+  });
+
+  // A code channel card routes to the channel's session, which has no thread.
+  it("answers a code channel's approval card on the channel's session", async () => {
+    useCodeChannels(["C_CODE_HITL"]);
+    let codeChannel: boolean | undefined;
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onInputResponse(ctx) {
+        codeChannel = ctx.slack.codeChannel;
+        return { auth: ctx.defaultAuth };
+      },
+    });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada", team_id: "T01" },
+        channel: { id: "C_CODE_HITL" },
+        message: { ts: "1700000000.000010", blocks: [] },
+        actions: [
+          {
+            action_id: `${HITL_ACTION_PREFIX}code:C_CODE_HITL:tool-approval:approval_abc123:button:0`,
+            text: { type: "plain_text", text: "Approve" },
+            value: "approve",
+          },
+        ],
+      }),
+    );
+    await vi.waitFor(() => expect(send).toHaveBeenCalled());
+
+    expect(send.mock.calls[0]![0]).toBe("code:C_CODE_HITL");
+    expect(codeChannel).toBe(true);
+    expect(send.mock.calls[0]![1].auth.attributes).not.toHaveProperty("thread_ts");
+  });
+
+  it("cancels the session's turn when Slack stops the code channel session", async () => {
+    useCodeChannels([]);
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const body = buildEventBody({
+      channel: "C_CODE_STOP",
+      type: "agent_session_stopped",
+      user: "U1",
+    });
+
+    const { cancel, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith({ continuationToken: "code:C_CODE_STOP" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  // A turn that died without ending leaves `processing` up, which never times out.
+  it("resets the status to active when a stop finds no active turn", async () => {
+    useCodeChannels([]);
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const body = buildEventBody({
+      channel: "C_CODE_STUCK",
+      type: "agent_session_stopped",
+      user: "U1",
+    });
+
+    await firePost(channel, buildSignedRequest({ body }), {
+      cancel: async () => ({ status: "no_active_turn" }),
+    });
+
+    expect(
+      slackCalls(fetchMock, "agents.sessions.setStatus").map(([, init]) =>
+        parseSlackRequestBody(init),
+      ),
+    ).toEqual([{ channel_id: "C_CODE_STUCK", status: "active" }]);
+  });
+
+  it("leaves a stop to onEvent without codeChannels", async () => {
+    useCodeChannels([]);
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onEvent,
+    });
+    const body = buildEventBody({
+      channel: "C_STOP_OFF",
+      type: "agent_session_stopped",
+      user: "U1",
+    });
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    await vi.waitFor(() => expect(onEvent).toHaveBeenCalled());
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("cancels once for a stop in a code channel thread, even when Slack redelivers it", async () => {
+    useCodeChannels(["C_CODE_THREAD_STOP"]);
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const body = buildEventBody(
+      {
+        channel: "C_CODE_THREAD_STOP",
+        thread_ts: "1700000000.000100",
+        type: "agent_session_stopped",
+        user: "U1",
+      },
+      { eventId: "Ev_STOP_THREAD" },
+    );
+
+    const first = await firePost(channel, buildSignedRequest({ body }));
+    const redelivered = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(first.cancel).toHaveBeenCalledWith({ continuationToken: "code:C_CODE_THREAD_STOP" });
+    expect(redelivered.cancel).not.toHaveBeenCalled();
+  });
+
+  it("suspends the session status while a turn waits on input", async () => {
+    useCodeChannels([]);
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      { ...THREAD_STATE, codeChannel: true, threadTs: null },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(adapter, makeEvent("turn.started", { sequence: 0, turnId: "t1" }), ctx);
+    await callEvent(
+      adapter,
+      makeEvent("turn.waiting", { on: "input", sequence: 1, turnId: "t1" }),
+      ctx,
+    );
+    await callEvent(adapter, makeEvent("turn.completed", { sequence: 2, turnId: "t1" }), ctx);
+
+    expect(
+      slackCalls(fetchMock, "agents.sessions.setStatus").map(
+        ([, init]) => parseSlackRequestBody(init).status,
+      ),
+    ).toEqual(["processing", "suspended", "active"]);
+  });
+
+  it("replies in the thread of the message that started the turn", async () => {
+    useCodeChannels([]);
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      { ...THREAD_STATE, codeChannel: true, threadTs: null },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const reply = (turnId: string, sequence: number) =>
+      callEvent(
+        adapter,
+        makeEvent("message.completed", {
+          finishReason: "stop",
+          message: "Here's what I found.",
+          sequence,
+          stepIndex: 0,
+          turnId,
+        }),
+        ctx,
+      );
+
+    await adapter.deliver!(
+      { message: "Alice asks", state: { replyThreadTs: "1700000000.000100" } },
+      ctx,
+    );
+    await callEvent(adapter, makeEvent("turn.started", { sequence: 0, turnId: "t1" }), ctx);
+    // Bob writes in another thread while Alice's turn runs.
+    await adapter.deliver!(
+      { message: "Bob asks", state: { replyThreadTs: "1700000000.000200" } },
+      ctx,
+    );
+    await reply("t1", 1);
+    await callEvent(adapter, makeEvent("turn.started", { sequence: 2, turnId: "t2" }), ctx);
+    await reply("t2", 3);
+
+    expect(
+      slackCalls(fetchMock, "chat.postMessage").map(
+        ([, init]) => parseSlackRequestBody(init).thread_ts,
+      ),
+    ).toEqual(["1700000000.000100", "1700000000.000200"]);
+    expect(
+      slackCalls(fetchMock, "agents.sessions.setStatus").map(([, init]) =>
+        parseSlackRequestBody(init),
+      ),
+    ).toContainEqual({ channel_id: "C01", status: "processing" });
+    expect(slackCalls(fetchMock, "assistant.threads.setStatus")).toHaveLength(0);
+  });
+
+  it("sets the session back to active when a turn is cancelled", async () => {
+    useCodeChannels([]);
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      { ...THREAD_STATE, codeChannel: true, threadTs: null },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(adapter, makeEvent("turn.started", { sequence: 0, turnId: "t1" }), ctx);
+    await callEvent(adapter, makeEvent("turn.cancelled", { sequence: 1, turnId: "t1" }), ctx);
+
+    expect(
+      slackCalls(fetchMock, "agents.sessions.setStatus").map(
+        ([, init]) => parseSlackRequestBody(init).status,
+      ),
+    ).toEqual(["processing", "active"]);
   });
 });

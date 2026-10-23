@@ -279,7 +279,14 @@ const channelConformance = {
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY }],
-  "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
+  "slack-dm": [{ dm: true, driver: () => slackDriver("dm"), broken: SLACK_BROKEN }],
+  "slack-code-channel": [
+    {
+      driver: () => slackDriver("code-channel"),
+      broken: SLACK_BROKEN,
+      unsupported: SIGN_IN_SENT_PRIVATELY,
+    },
+  ],
   teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
   "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
   telegram: [{ driver: telegramDriver, broken: TELEGRAM_BROKEN }],

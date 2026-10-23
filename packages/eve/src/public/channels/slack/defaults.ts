@@ -8,6 +8,7 @@ import {
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
 import { actionLabel, visibleActions } from "#shared/action-label.js";
+import { slackSessionTargetOf } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -269,6 +270,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
     await showStatus(channel, "Thinking...", { force: true });
   },
 
+  // A code channel's session status never times out, so a cancelled turn must
+  // set it back to `active`. Slack's stop also expects this (the Chat SDK does the same).
+  async "turn.cancelled"(_event, channel, _ctx) {
+    await clearStatus(channel);
+  },
+
   // A reply clears the status, but a turn ended by an `endsTurn` tool posts
   // none, and Slack would otherwise show the status until it times out.
   async "turn.completed"(_event, channel, _ctx) {
@@ -354,6 +361,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "turn.failed"(event, channel, _ctx) {
+    // A thread's status clears when the error posts; a code channel's session stays `processing`.
+    if (channel.slack.codeChannel) await clearStatus(channel);
     if (event.terminal) return;
     const errorId = extractErrorId(event.details);
     const semanticSummary = extractSemanticErrorSummary(event);
@@ -439,11 +448,14 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // the shared thread.
     const instructions = event.authorization?.instructions;
     if (recipientUserId && (challengeUrl || instructions)) {
-      const { channelId, threadTs } = channel.state;
       // The turn's own sign-in holds it, so the prompt can cancel that turn.
+      const target = slackSessionTargetOf(channel.slack);
       const cancel =
-        event.candidateId === undefined && channelId && threadTs && event.turnId
-          ? { channelId, threadTs, turnId: event.turnId }
+        event.candidateId === undefined &&
+        target.channelId &&
+        (target.codeChannel || target.threadTs) &&
+        event.turnId
+          ? { ...target, turnId: event.turnId }
           : undefined;
       const prompt = {
         cancel,

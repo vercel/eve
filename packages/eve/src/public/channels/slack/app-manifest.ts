@@ -10,6 +10,8 @@ interface SlackAppManifestBuildDefinition {
 
 export function defineSlackAppManifest(input: {
   readonly botName?: string;
+  /** Adds the scopes, events, and feature flag Slack code channels need. */
+  readonly codeChannels?: boolean;
 }): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
@@ -33,7 +35,41 @@ export function defineSlackAppManifest(input: {
           token_rotation_enabled: false,
         },
       } satisfies AppsManifestCreateArguments["manifest"];
-      return manifest;
+      return input.codeChannels === true ? withCodeChannels(manifest) : manifest;
     },
   };
+}
+
+// @slack/web-api's manifest types predate code channels.
+function withCodeChannels(manifest: {
+  readonly features: object;
+  readonly oauth_config: { readonly scopes: { readonly bot: readonly string[] } };
+  readonly settings: { readonly event_subscriptions: { readonly bot_events: readonly string[] } };
+}): JsonObject {
+  return {
+    ...manifest,
+    features: { ...manifest.features, code_channels: { enabled: true } },
+    oauth_config: {
+      scopes: {
+        bot: [
+          ...manifest.oauth_config.scopes.bot,
+          "channels:history",
+          "channels:read",
+          "code_channels:manage",
+          "groups:history",
+          "groups:read",
+        ],
+      },
+    },
+    settings: {
+      ...manifest.settings,
+      event_subscriptions: {
+        bot_events: [
+          ...manifest.settings.event_subscriptions.bot_events,
+          "agent_session_stopped",
+          "message.session",
+        ],
+      },
+    },
+  } as JsonObject;
 }

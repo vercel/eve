@@ -15,6 +15,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import { slackThreadTsParam } from "#public/channels/slack/code-channel.js";
 import { truncateMessageText } from "#public/channels/slack/limits.js";
 import type { SlackTaskCard } from "#public/channels/slack/renderers.js";
 import { restoreStatus } from "#public/channels/slack/thread-status.js";
@@ -393,9 +394,13 @@ async function writeTaskCard(
   if (current === undefined) return;
   const audience = normalizeChannelAudience(channel.state.audience);
   const view = taskCardView(turnId, current.turn, { audience });
-  const { channelId, threadTs } = channel.state;
+  const { channelId } = channel.state;
+  // A code channel's card posts in the thread its turn answers, else top-level.
+  const { codeChannel } = channel.state;
+  const threadTs = (codeChannel ? channel.state.replyThreadTs : channel.state.threadTs) ?? "";
   const scheduled = contextStorage.getStore()?.get(ScheduleIdKey) !== undefined;
-  const thread = channelId && threadTs && !scheduled ? { channelId, threadTs } : undefined;
+  const thread =
+    channelId && (threadTs || codeChannel) && !scheduled ? { channelId, threadTs } : undefined;
   const card = thread === undefined ? null : renderCard(taskCard, view);
   if (thread !== undefined && card !== null) {
     const fingerprint = createHash("sha256").update(JSON.stringify(card)).digest("base64url");
@@ -469,7 +474,7 @@ async function writeCard(slack: SlackHandle, write: CardWrite): Promise<string> 
   }
   const posted = await slack.request("chat.postMessage", {
     ...message,
-    thread_ts: write.threadTs,
+    thread_ts: slackThreadTsParam(write.threadTs),
     unfurl_links: false,
     unfurl_media: false,
   });

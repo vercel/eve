@@ -33,4 +33,28 @@ describe("Slack app manifests", () => {
       features: { bot_user: { display_name: "x".repeat(35) } },
     });
   });
+
+  it("adds Slack code channel scopes, events, and feature flag", () => {
+    expect(defineSlackAppManifest({ codeChannels: true }).build("support")).toMatchObject({
+      features: { code_channels: { enabled: true } },
+      oauth_config: {
+        scopes: {
+          bot: [
+            "app_mentions:read",
+            "chat:write",
+            "channels:history",
+            "channels:read",
+            "code_channels:manage",
+            "groups:history",
+            "groups:read",
+          ],
+        },
+      },
+      settings: {
+        event_subscriptions: {
+          bot_events: ["app_mention", "agent_session_stopped", "message.session"],
+        },
+      },
+    });
+  });
 });

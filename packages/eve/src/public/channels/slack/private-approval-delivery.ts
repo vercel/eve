@@ -1,11 +1,11 @@
 import { createLogger, logError } from "#internal/logging.js";
-import type { SlackHandle } from "#public/channels/slack/api.js";
-import { renderInputRequestPostParts, type SlackHitlRoute } from "#public/channels/slack/hitl.js";
+import { slackSessionTargetOf, type SlackHandle } from "#public/channels/slack/api.js";
+import { renderInputRequestPostParts } from "#public/channels/slack/hitl.js";
 import type { SlackPendingApprovalCard } from "#public/channels/slack/slackChannel.js";
 import type { InputRequest } from "#shared/input.js";
 
 const log = createLogger("slack.private-approval-delivery");
-type PrivateApprovalSlack = Pick<SlackHandle, "channelId" | "request" | "threadTs">;
+type PrivateApprovalSlack = Pick<SlackHandle, "channelId" | "codeChannel" | "request" | "threadTs">;
 
 export async function deliverPrivateInputRequest(input: {
   readonly previewMessageTs: string;
@@ -20,11 +20,7 @@ export async function deliverPrivateInputRequest(input: {
     throw new Error(`Slack conversations.open failed: ${open.error ?? "unknown_error"}`);
   }
 
-  const route: SlackHitlRoute = {
-    channelId: input.slack.channelId,
-    threadTs: input.slack.threadTs,
-  };
-  const parts = renderInputRequestPostParts(input.request, route);
+  const parts = renderInputRequestPostParts(input.request, slackSessionTargetOf(input.slack));
   const postedMessageIds: string[] = [];
 
   try {
