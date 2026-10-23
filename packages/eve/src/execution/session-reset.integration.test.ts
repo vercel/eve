@@ -4,12 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
 import { waitForHook, startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
+import { defineSandboxProvider } from "#sandbox/provider.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
@@ -67,7 +67,7 @@ describe("session reset integration", () => {
     } finally {
       const status = await first.status;
       if (status === "pending" || status === "running") await first.cancel();
-      await shutdownActiveSandboxHandles();
+      await shutdownActiveSandboxConnections();
     }
   });
 });
@@ -80,26 +80,20 @@ function createSessionSandboxHarness() {
     name: "session-reset-test",
     environment: () => ({
       async onSessionEnd() {},
-      async resume(context) {
-        return createHandle(context.session.id);
-      },
       async start(context) {
         sessionKeys.push(context.session.id);
         sandboxCount += 1;
-        const sandbox = mockSandbox({ id: `sandbox-${sandboxCount}` });
-        return { handle: createHandle(context.session.id, sandbox), state: null };
+        return {
+          connection: mockSandbox({ id: `sandbox-${sandboxCount}` }).connection,
+          state: null,
+        };
+      },
+      async resume(context) {
+        return mockSandbox({ id: context.session.id }).connection;
       },
       prepare: async () => null,
     }),
   });
-  function createHandle(sessionId: string, value = mockSandbox({ id: sessionId })) {
-    return {
-      sandbox: value.session,
-      async onSandboxDelete() {},
-      async onSandboxStop() {},
-      async onRuntimeShutdown() {},
-    };
-  }
   const environment = provider.environment();
   const definition: ResolvedSandboxDefinition = {
     environment,

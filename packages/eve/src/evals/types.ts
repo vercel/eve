@@ -116,8 +116,9 @@ export interface EveEvalDerivedFacts {
    * Token usage from the latest `session.waiting`, `turn.waiting`, `session.failed`, or
    * `session.completed`: the
    * session's own model calls plus what the agents it delegated to spent, so on a turn it is the
-   * session's total so far. For an eval, each captured session counts once, by its latest usage,
-   * except sessions another captured session opened. Absent when a counted session reported none.
+   * session's total so far. For an eval, each captured session counts once, by its latest usage in
+   * time across captures, except sessions another captured session opened. Absent when a counted
+   * session reported none; `costUsd` is absent when a counted session reported no cost.
    */
   readonly usage?: TokenUsage;
   readonly failureCode?: string;
@@ -662,6 +663,8 @@ export type EveEvalVerdict = "passed" | "failed" | "scored" | "skipped";
  */
 export interface EveEvalResult {
   readonly id: string;
+  /** 1-based attempt number, present only when the run repeats evals. */
+  readonly attempt?: number;
   readonly result: EveEvalTaskResult;
   /** Every assertion recorded by the eval's `test(t)`, in record order. */
   readonly assertions: readonly AssertionResult[];
@@ -739,6 +742,12 @@ export interface EveEvalConfigInput<TContext = unknown> {
    * overrides it, and `eve eval --timeout` overrides both.
    */
   readonly timeoutMs?: number;
+  /**
+   * Number of times to run every eval, to measure repeatability. Must be a
+   * positive integer. `eve eval --repeat` overrides it; defaults to 1. Each
+   * attempt is a separate result tagged with its 1-based `attempt`.
+   */
+  readonly repeat?: number;
 }
 
 /**

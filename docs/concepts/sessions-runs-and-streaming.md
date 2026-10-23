@@ -16,6 +16,12 @@ event stream. A deployment or compaction handoff changes the executing run, not
 the session ID or stream. Stream namespaces belong to a run; eve does not support
 caller-assigned session IDs or globally addressed streams.
 
+Before handoff, eve validates that the saved session state has no pending work
+inside the workflow. The current owner keeps its inbox while the successor
+starts and validates the checkpoint. Once the successor takes over the session
+hooks, the original owner forwards messages it accepted during the move and
+parks on the stream anchor until the final owner reports the session result.
+
 Authored channels also have channel-local continuation tokens. A token addresses
 whichever session currently owns a platform conversation, such as a Slack thread.
 That identity stays behind the channel boundary and is never accepted or returned

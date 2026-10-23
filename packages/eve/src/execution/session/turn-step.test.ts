@@ -2252,7 +2252,13 @@ describe("turnStep", () => {
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle());
     const sandbox = mockSandbox({ id: "sbx_cancelled" });
-    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce(sandbox.access as never);
+    vi.mocked(ensureSandboxAccess).mockResolvedValueOnce({
+      ...sandbox.access,
+      end: async () => {},
+      release: async () => {},
+      resumeRecorded: () => {},
+      settle: async () => {},
+    });
     const controller = new AbortController();
     controller.abort(new TurnCancelledError());
 
@@ -3151,12 +3157,12 @@ describe("turnStep", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
     const lifecycleOrder: string[] = [];
     const originalClearVirtualContext = ContextContainer.prototype.clearVirtualContext;
-    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(
-      function (this: ContextContainer) {
-        lifecycleOrder.push("clear");
-        originalClearVirtualContext.call(this);
-      },
-    );
+    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(function (
+      this: ContextContainer,
+    ) {
+      lifecycleOrder.push("clear");
+      originalClearVirtualContext.call(this);
+    });
     const approval = stampDurableDynamicCallback(() => "not-applicable" as const, {
       callback: () => "not-applicable",
       closure: {},

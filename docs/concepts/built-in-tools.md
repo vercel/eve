@@ -81,7 +81,7 @@ export default disableTool();
 
 ### `read_file`
 
-`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths and paths beginning with `$HOME/`.
+`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `$HOME/`. Results and errors name the resolved absolute path.
 
 ```sh
 eve add tool/read_file
@@ -113,7 +113,7 @@ export default disableTool();
 
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`.
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`.
 
 ```sh
 eve add tool/write_file
@@ -131,10 +131,15 @@ import { writeFile } from "eve/tools/write_file";
 
 export default defineTool({
   ...writeFile,
-  description: "Write approved project files in the sandbox.",
+  description: "Write notes in the sandbox's notes directory.",
   async execute(input, ctx) {
-    if (!input.filePath.startsWith("/workspace/")) {
-      throw new Error("write_file is limited to /workspace");
+    const sandbox = await ctx.getSandbox();
+    const notes = `${sandbox.resolvePath("notes")}/`;
+    if (
+      input.filePath.startsWith("$HOME") ||
+      !sandbox.resolvePath(input.filePath).startsWith(notes)
+    ) {
+      throw new Error("write_file is limited to the notes directory");
     }
     return writeFile.execute(input, ctx);
   },
@@ -374,7 +379,7 @@ export default askQuestion();
 
 ### `glob`
 
-`glob` finds sandbox files by glob pattern. Add it:
+`glob` finds sandbox files by glob pattern. It searches the workspace root unless the model passes a directory, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/glob
@@ -400,7 +405,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `glob
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. Add it:
+`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file, which accepts the same paths as `read_file`. Add it:
 
 ```sh
 eve add tool/grep

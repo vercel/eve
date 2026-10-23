@@ -1,59 +1,30 @@
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
+import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 import {
-  createVercelSandbox,
-  createVercelSandboxProvider,
-  type VercelSandboxPreparedArtifact,
-  type VercelSandboxSessionState,
-} from "#execution/sandbox/bindings/vercel.js";
+  defineSandboxProvider,
+  type SandboxProvider,
+  type WithPrepareOption,
+} from "#public/sandbox/provider.js";
 import type {
   VercelSandboxCreateOptions,
   VercelSandboxRuntimeOptions,
 } from "#public/sandbox/vercel-sandbox.js";
-import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
 
-export type VercelSandboxEnvironmentOptions = VercelSandboxCreateOptions & {
-  readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
-};
+/** Vercel create options plus `prepare`, which receives a {@link VercelSandboxSession}. */
+export type VercelSandboxEnvironmentOptions = WithPrepareOption<
+  VercelSandboxCreateOptions,
+  VercelSandboxSession
+>;
 export type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
 
-const defaultProvider = defineSandboxProvider<
+// `| undefined` keeps the options one optional argument: the create options
+// are a union that would otherwise spread into one signature per member.
+export const VercelSandbox: SandboxProvider<
   VercelSandboxEnvironmentOptions | undefined,
   VercelSandboxRuntimeOptions,
-  VercelSandboxPreparedArtifact,
-  VercelSandboxSessionState,
   VercelSandboxSession
->({
+> = defineSandboxProvider({
   name: "vercel",
-  environment: (options) => {
-    const { prepare, ...createOptions } = options ?? {};
-    return createVercelSandbox({ createOptions, prepare, skipEmptyPreparation: true });
-  },
+  environment: (options: VercelSandboxCreateOptions) =>
+    createVercelSandbox({ createOptions: options }),
 });
-
-const provider = defineSandboxProvider<
-  VercelSandboxEnvironmentOptions | undefined,
-  VercelSandboxRuntimeOptions,
-  VercelSandboxPreparedArtifact,
-  VercelSandboxSessionState,
-  VercelSandboxSession
->({
-  name: "vercel",
-  environment: (options) => createVercelSandboxProvider(options),
-});
-
-export function createDefaultVercelEnvironment(
-  options?: VercelSandboxEnvironmentOptions,
-): SandboxEnvironment<VercelSandboxRuntimeOptions, VercelSandboxSession> {
-  return defaultProvider.environment(options);
-}
-
-export const VercelSandbox = {
-  name: "vercel",
-  environment(
-    options?: VercelSandboxEnvironmentOptions,
-  ): SandboxEnvironment<VercelSandboxRuntimeOptions, VercelSandboxSession> {
-    return provider.environment(options);
-  },
-};

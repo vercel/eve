@@ -210,8 +210,13 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, prepares sandbox artifacts, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure. Pass `--skip-sandbox-prewarm` when you only need compiled output, such as before a separate typecheck. Skipping preparation can produce output that cannot start its configured sandbox, so do not deploy that output.
 
 Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
-`-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
-keeps a channel's `server-only` imports on the same export used during compilation.
+`-C`, or `NODE_OPTIONS`, so compilation and the bundle resolve each package to the same export.
+For example, `NODE_OPTIONS="--conditions=react-server" eve build` selects the `react-server`
+export of packages that publish one.
+
+eve loads `server-only` and `client-only` imports as empty modules in every bundle it builds. Code
+shared with a Next.js app can keep these imports without a resolution condition, and your app does
+not need to depend on either package.
 
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
@@ -465,6 +470,7 @@ Without `--url`, `eve eval` starts its own local server on a free port with stat
 | `--list`                 | flag   | off     | Print evals selected by the tag filters, without running them |
 | `--timeout <ms>`         | number | none    | Per-eval timeout in milliseconds                              |
 | `--max-concurrency <n>`  | number | 8       | Max concurrent eval executions                                |
+| `--repeat <n>`           | number | 1       | Run every eval n times to measure repeatability               |
 | `--json`                 | flag   | off     | Output results as JSON                                        |
 | `--junit <path>`         | string | none    | Write JUnit XML results to a file                             |
 | `--skip-report`          | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)                 |

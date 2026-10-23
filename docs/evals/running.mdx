@@ -14,6 +14,7 @@ eve eval --exclude-tag slow    # skip evals carrying a tag
 eve eval --strict              # soft below-threshold assertions also fail the exit code
 eve eval --timeout 60000       # per-eval timeout in milliseconds
 eve eval --max-concurrency 4   # cap concurrent eval executions (default 8)
+eve eval --repeat 5            # run every eval 5 times to measure repeatability
 eve eval --junit .eve/junit.xml  # write JUnit XML
 eve eval --list                # print discovered evals without running
 eve eval --verbose             # stream per-eval logs and workflow run IDs
@@ -39,9 +40,25 @@ An eval that calls `t.skip(reason)` is reported as skipped, does not count as pa
 
 With `--verbose`, eve prefixes each line with its eval ID. It streams authored `t.log()` lines as they occur, then prints the workflow run ID for every captured primary and secondary session. Use those `wrun_...` IDs to find the corresponding runs in your workflow provider.
 
+## Repeat evals
+
+Model-backed evals can pass on one run and fail on the next. To measure how often an eval passes, pass `--repeat <n>` or set `repeat` in `evals.config.ts`, and eve runs every selected eval `n` times in one run. The CLI flag overrides the config value. The default is `1`, and output does not change at that value.
+
+```bash
+eve eval weather --repeat 5
+```
+
+With `n` greater than `1`, each attempt is a separate result with a 1-based `attempt` field:
+
+- The console and `--verbose` lines label each attempt `<id>#<attempt>`, and the summary adds a per-eval pass rate such as `3/5 passed`. The pass rate counts attempts that passed or failed their gates; scored and skipped attempts are left out.
+- `--json` results, JUnit test cases (named `<id>#<attempt>`), and [reporters](./reporters) receive one result per attempt.
+- Every attempt counts toward the run totals and the exit code, so one failed attempt fails the run.
+
+Attempts share the `--max-concurrency` pool with every other eval, so attempts of the same eval can run at the same time. If an eval depends on shared state or a rate-limited provider, lower `--max-concurrency` so contention does not show up as flakiness.
+
 ## Artifacts
 
-Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, start and completion times, captured event streams, and `t.log` lines under `evals/`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
+Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, start and completion times, captured event streams, and `t.log` lines under `evals/`. In a repeated run, each attempt's detail and event files get an `.attempt-<n>` suffix, such as `evals/weather.attempt-2.json`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
 
 ## CI
 

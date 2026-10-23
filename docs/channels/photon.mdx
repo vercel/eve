@@ -22,7 +22,7 @@ export default photonIMessageChannel({
 ```
 
 The default webhook route is `/eve/v1/photon`. The channel verifies forwarded
-webhooks with same-project Vercel OIDC by default, derives user auth from each
+webhooks with Vercel OIDC from the same project and environment by default, derives user auth from each
 message author, marks accepted messages as read, and continues the same eve
 session for every message in an iMessage conversation. A new accepted message
 steers the active turn. Steering can interrupt pending model generation before

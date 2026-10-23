@@ -552,6 +552,54 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     }
   });
 
+  it("applies a workspace package's sideEffects to modules it imports by relative path", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/probe.ts": [
+          'import { report } from "@repo/shared/report";',
+          "",
+          "export const result = report;",
+          "",
+        ].join("\n"),
+      },
+      name: "side-effect-free-relative-import",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-side-effect-free-package-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "shared");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({
+          exports: { "./*": "./src/*.ts" },
+          name: "@repo/shared",
+          sideEffects: false,
+          type: "module",
+        }),
+      );
+      await writeFile(
+        join(packageRoot, "src", "registry.ts"),
+        "globalThis.sharedRegistryLoaded = true;\nexport const registry = {};\n",
+      );
+      await writeFile(
+        join(packageRoot, "src", "report.ts"),
+        'import "./registry";\nexport const report = "weekly report";\n',
+      );
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(packageRoot, join(app.appRoot, "node_modules", "@repo", "shared"), "junction");
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "tools", "probe.ts"),
+      );
+
+      expect(code).toContain("weekly report");
+      expect(code).not.toContain("sharedRegistryLoaded");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not collide with authored modules that already declare __dirname", async () => {
     // Regression: the Node ESM compatibility banner used to unconditionally
     // prepend `const __dirname = ...` / `const __filename = ...` /

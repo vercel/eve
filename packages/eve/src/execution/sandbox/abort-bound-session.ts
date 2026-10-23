@@ -11,7 +11,6 @@ import type {
   SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-import { getSandboxWriteFiles, SANDBOX_WRITE_FILES } from "#shared/sandbox-write-files.js";
 
 /**
  * Returns a sandbox session that applies `abortSignal` to every operation.
@@ -42,16 +41,11 @@ export function bindSandboxAbortSignal<TSession extends SandboxSession>(
       session.writeBinaryFile({ ...options, abortSignal: compose(options.abortSignal) }),
     writeTextFile: (options: SandboxWriteTextFileOptions) =>
       session.writeTextFile({ ...options, abortSignal: compose(options.abortSignal) }),
+    writeFiles: (options: SandboxWriteFilesOptions) =>
+      session.writeFiles({ ...options, abortSignal: compose(options.abortSignal) }),
     removePath: (options: SandboxRemovePathOptions) =>
       session.removePath({ ...options, abortSignal: compose(options.abortSignal) }),
   } satisfies SandboxSession;
-  const writeFiles = getSandboxWriteFiles(session);
-  if (writeFiles !== undefined) {
-    Object.assign(bound, {
-      [SANDBOX_WRITE_FILES]: (options: SandboxWriteFilesOptions) =>
-        writeFiles({ ...options, abortSignal: compose(options.abortSignal) }),
-    });
-  }
 
   // The spread retains provider-specific lifecycle methods not declared on SandboxSession.
   return bound as TSession;

@@ -138,6 +138,64 @@ describe("SessionStateCursor", () => {
     await expect(slow).rejects.toThrow("Session state changed while a step ran");
     expect(cursor.sessionState.continuationToken).toBe("channel:fast");
   });
+
+  it.each([
+    { meanwhile: "nothing", adopted: true },
+    { meanwhile: "a completed step", adopted: false },
+    { meanwhile: "a running step", adopted: false },
+    { meanwhile: "losing interest", adopted: false },
+    { meanwhile: "a new session address in its delta", adopted: false },
+  ])(
+    "adopts a step run beside the others only after $meanwhile",
+    async ({ meanwhile, adopted }) => {
+      const claimSessionHooks = vi.fn(async () => {});
+      const cursor = new SessionStateCursor({
+        history: [],
+        inbox: { claimSessionHooks },
+        sessionWritable: new WritableStream<Uint8Array>(),
+        serializedContext: {},
+        sessionState: state("channel:initial"),
+      });
+      const beside = Promise.withResolvers<void>();
+      const step = Promise.withResolvers<void>();
+      let wanted = true;
+      const besideState =
+        meanwhile === "a new session address in its delta"
+          ? state("channel:beside")
+          : { ...state("channel:initial"), hasProxyInputRequests: true };
+      const result = cursor.advanceBeside(
+        (input) =>
+          withSessionStateDelta(input, async () => {
+            await beside.promise;
+            return { sessionState: besideState };
+          }),
+        () => wanted,
+      );
+      const ownStep = () =>
+        cursor.advance((input) =>
+          withSessionStateDelta(input, async () => {
+            await step.promise;
+            return { sessionState: state("channel:step") };
+          }),
+        );
+
+      let running: Promise<unknown> | undefined;
+      if (meanwhile === "a completed step") {
+        step.resolve();
+        await ownStep();
+      }
+      if (meanwhile === "a running step") running = ownStep();
+      if (meanwhile === "losing interest") wanted = false;
+      beside.resolve();
+
+      await expect(result).resolves.toBe(adopted);
+      step.resolve();
+      await running;
+      expect(cursor.sessionState.hasProxyInputRequests).toBe(adopted);
+      // Only the owner's own steps claim addresses.
+      if (meanwhile === "nothing") expect(claimSessionHooks).not.toHaveBeenCalled();
+    },
+  );
 });
 
 function state(continuationToken: string): DurableSessionState {

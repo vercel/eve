@@ -32,12 +32,6 @@ export interface WorkflowBundleBuilderOptions {
   /** Test-harness-only: also scans `src/internal/testing/`. */
   includeTestFixtures?: boolean;
 }
-const PSEUDO_PACKAGES = new Set([
-  "server-only",
-  "client-only",
-  "next/dist/compiled/server-only",
-  "next/dist/compiled/client-only",
-]);
 const NODE_BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
@@ -188,29 +182,6 @@ export function createWorkflowVirtualEntryPlugin(source: string): WorkflowRolldo
       return {
         code: source,
         moduleSideEffects: true,
-        moduleType: "js",
-      };
-    },
-  };
-}
-
-export function createWorkflowPseudoPackagePlugin(): WorkflowRolldownPlugin {
-  return {
-    name: "eve-workflow-pseudo-packages",
-    resolveId(source: string) {
-      if (!PSEUDO_PACKAGES.has(source)) {
-        return undefined;
-      }
-
-      return { id: `\0eve-workflow-pseudo-package:${source}` };
-    },
-    load(id: string) {
-      if (!id.startsWith("\0eve-workflow-pseudo-package:")) {
-        return undefined;
-      }
-
-      return {
-        code: "",
         moduleType: "js",
       };
     },

@@ -61,6 +61,29 @@ describe("eval artifacts", () => {
     });
   });
 
+  it("writes each repeated attempt to its own detail and event files", async () => {
+    const base = skippedSummary();
+    const [result] = base.results;
+    if (result === undefined) throw new Error("expected a result");
+    await writeArtifacts("/tmp/eve-evals", {
+      ...base,
+      results: [1, 2].map((attempt) => ({ ...result, attempt })),
+    });
+
+    expect(writtenJson("/tmp/eve-evals/summary.json")).toMatchObject({
+      evals: [{ attempt: 1 }, { attempt: 2 }],
+    });
+    for (const attempt of [1, 2]) {
+      expect(
+        writtenJson(`/tmp/eve-evals/evals/runtime/skipped.attempt-${attempt}.json`),
+      ).toMatchObject({ id: "runtime/skipped", attempt });
+      expect(fsMocks.writeFile).toHaveBeenCalledWith(
+        `/tmp/eve-evals/evals/runtime/skipped.attempt-${attempt}.events.ndjson`,
+        "\n",
+      );
+    }
+  });
+
   it("records each eval's start and completion time in every JSON artifact", async () => {
     await writeArtifacts("/tmp/eve-evals", skippedSummary());
 

@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
@@ -13,7 +15,6 @@ import type { SandboxSession } from "../src/shared/sandbox-session.js";
 // ---------------------------------------------------------------------------
 
 interface FakeAccessOptions {
-  readonly pathResolver?: (path: string) => string;
   /**
    * Exit code returned by the ripgrep capability probe that runs before
    * each glob call. Defaults to `0` (ripgrep is available) so tests
@@ -26,7 +27,7 @@ interface FakeAccessOptions {
 const PROBE_COMMAND =
   "command -v rg >/dev/null 2>&1 || exit 127; " +
   "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
-  "'__eve_ripgrep_probe_never_matches__' /workspace";
+  "'__eve_ripgrep_probe_never_matches__' /dev/null";
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
 function createFakeAccess(
@@ -39,6 +40,10 @@ function createFakeAccess(
       return { initialized: false, session: null };
     },
 
+    open() {
+      return this.get();
+    },
+    prepare() {},
     async stop() {},
 
     async get() {
@@ -58,7 +63,7 @@ function createFakeAccess(
         async setNetworkPolicy() {},
         async removePath() {},
         resolvePath(path: string) {
-          return options.pathResolver ? options.pathResolver(path) : path;
+          return posix.resolve("/workspace", path);
         },
         async run({ command }: { command: string }) {
           if (command === HOME_PROBE_COMMAND) {
@@ -74,6 +79,7 @@ function createFakeAccess(
         },
         async writeFile() {},
         async writeBinaryFile() {},
+        async writeFiles() {},
         async writeTextFile() {},
       };
     },
@@ -101,7 +107,7 @@ describe("executeGlobOnSandbox", () => {
   // Default behavior
   // ---------------------------------------------------------------------------
 
-  it("uses /workspace as default path when path omitted", async () => {
+  it("searches the workspace root when path is omitted", async () => {
     let capturedCommand = "";
     const result = (await runInContext(
       (cmd) => {
@@ -134,15 +140,6 @@ describe("executeGlobOnSandbox", () => {
   // ---------------------------------------------------------------------------
   // Path validation
   // ---------------------------------------------------------------------------
-
-  it("rejects relative paths", async () => {
-    await expect(
-      runInContext(
-        () => ({ exitCode: 0, stderr: "", stdout: "" }),
-        (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "*.ts", path: "src" }),
-      ),
-    ).rejects.toThrow("filePath must be an absolute path");
-  });
 
   it("expands a leading $HOME before searching", async () => {
     let capturedCommand = "";

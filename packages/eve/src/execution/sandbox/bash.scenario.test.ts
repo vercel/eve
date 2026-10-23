@@ -10,7 +10,7 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 import { executeBashOnSandbox } from "./bash.js";
-import { buildSandboxSession } from "./session.js";
+import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -95,11 +95,11 @@ async function createHostSandbox(): Promise<{
   const unsupported = async (): Promise<never> => {
     throw new Error("not used by the bash tool");
   };
-  const sandbox = buildSandboxSession({
+  const sandbox = createConnectionSession({
     readFile: unsupported,
     removePath: unsupported,
-    resolvePath: (path) => path,
-    writeFile: unsupported,
+    stop: unsupported,
+    writeFiles: unsupported,
     async spawn(options) {
       const child = spawn("bash", ["-lc", options.command], {
         cwd: home,

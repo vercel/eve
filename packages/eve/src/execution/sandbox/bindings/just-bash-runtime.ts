@@ -1,29 +1,22 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { IFileSystem } from "just-bash";
-
-import {
-  createFileBackedInternalSandboxSession,
-  pathExists,
-} from "#execution/sandbox/bindings/local-provider-utils.js";
+import { pathExists } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { buildSandboxSession, SANDBOX_AGENT_ENV } from "#execution/sandbox/session.js";
-import type { SandboxProviderHandle, SandboxProviderHost } from "#shared/sandbox-provider.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
-import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
+import { importOptionalEnginePackage } from "#internal/application/optional-package-import.js";
+import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
 import type {
-  SandboxProcess,
-  SandboxRemovePathOptions,
-  SandboxSpawnOptions,
-} from "#shared/sandbox-session.js";
+  JustBashFilesystem,
+  JustBashSandboxCreateOptions,
+} from "#public/sandbox/just-bash-sandbox.js";
+import { SANDBOX_AGENT_ENV, type SandboxConnection } from "#public/sandbox/provider.js";
+import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
+import { isObject } from "#shared/guards.js";
 
 const LOCAL_SANDBOX_METADATA_VERSION = 1;
 const LOCAL_SANDBOX_FILESYSTEM_DIRECTORY_NAME = "fs";
 const LOCAL_SANDBOX_METADATA_FILE_NAME = "metadata.json";
-const JUST_BASH_PACKAGE_NAME = "just-bash";
 
 type JustBashModule = typeof import("just-bash");
 
@@ -32,83 +25,72 @@ interface LocalSandboxMetadata {
   readonly version: typeof LOCAL_SANDBOX_METADATA_VERSION;
 }
 
-export interface JustBashSessionMetadata {
-  readonly rootPath: string;
+/** One just-bash interpreter over a session or template root. The root's files outlive it. */
+export interface BashSandbox extends SandboxConnection {
+  /** Records the interpreter's environment, so sessions created from this template start with it. */
+  captureState(): Promise<void>;
 }
-
-export interface BashSandbox {
-  captureState(): Promise<JustBashSessionMetadata>;
-  dispose(): Promise<void>;
-  readFileBytes(path: string): Promise<Buffer | null>;
-  removePath(options: SandboxRemovePathOptions): Promise<void>;
-  readonly rootPath: string;
-  readonly sessionKey: string;
-  spawn(options: SandboxSpawnOptions): Promise<SandboxProcess>;
-  writeFiles(files: ReadonlyArray<{ path: string; content: string | Uint8Array }>): Promise<void>;
-}
-
-let justBashModulePromise: Promise<JustBashModule> | undefined;
 
 /**
- * Loads `just-bash` from the application's own dependency tree. The
- * package is intentionally not bundled with eve — the provider is
- * opt-in — so when it is missing eve installs it into the project
- * during `eve dev` (unless `autoInstall: false`) and otherwise fails
- * with an actionable install error.
+ * The package is intentionally not bundled with eve — the provider is opt-in —
+ * so it loads from the application's own dependency tree.
  */
-async function loadJustBashModule(input: {
+const JUST_BASH_PACKAGE = {
+  importModule: async () => await import("just-bash"),
+  missingMessage:
+    "The just-bash sandbox provider requires the `just-bash` package, which is not bundled " +
+    "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
+    "DockerSandbox or DefaultSandbox instead.",
+  packageName: "just-bash",
+};
+
+/**
+ * Loads `just-bash` for template preparation, installing it into the project
+ * when it is missing during `eve dev` (unless `autoInstall` is false).
+ */
+export async function installJustBashModule(input: {
+  readonly appRoot: string;
   readonly autoInstall: boolean;
-  readonly host: SandboxProviderHost;
 }): Promise<JustBashModule> {
-  justBashModulePromise ??= input.host
-    .loadOptionalPackage<JustBashModule>({
-      autoInstall: input.autoInstall,
-      importModule: async () => await import("just-bash"),
-      missingMessage:
-        "The just-bash sandbox provider requires the `just-bash` package, which is not bundled " +
-        "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
-        "DockerSandbox or DefaultSandbox instead.",
-      packageName: JUST_BASH_PACKAGE_NAME,
-      ignoredOptionalDependencies: ["@mongodb-js/zstd", "node-liblzma"],
-    })
-    .catch((error: unknown) => {
-      justBashModulePromise = undefined;
-      throw error;
-    });
-  return await justBashModulePromise;
+  return await loadOptionalEnginePackage<JustBashModule>({
+    ...JUST_BASH_PACKAGE,
+    appRoot: input.appRoot,
+    autoInstall: input.autoInstall,
+    ignoredOptionalDependencies: ["@mongodb-js/zstd", "node-liblzma"],
+  });
+}
+
+/** Loads `just-bash` for a session without installing it. */
+export async function importJustBashModule(appRoot: string): Promise<JustBashModule> {
+  return await importOptionalEnginePackage<JustBashModule>({ ...JUST_BASH_PACKAGE, appRoot });
 }
 
 export async function createBashSandbox(input: {
-  readonly autoInstall: boolean;
-  readonly host: SandboxProviderHost;
   readonly customCommands?: JustBashSandboxCreateOptions["customCommands"];
   readonly filesystem?: JustBashSandboxCreateOptions["filesystem"];
+  readonly justBash: JustBashModule;
+  resolveProjectPath(path: string): string;
   readonly rootPath: string;
-  readonly sessionKey: string;
   readonly storagePath: string;
 }): Promise<BashSandbox> {
-  const justBash = await loadJustBashModule({
-    autoInstall: input.autoInstall,
-    host: input.host,
-  });
-  const { ReadWriteFs, Sandbox } = justBash;
+  const { justBash } = input;
   const filesystemRootPath = resolveLocalSandboxFilesystemRootPath(input.rootPath);
   const metadataPath = resolveLocalSandboxMetadataPath(input.rootPath);
   const metadata = await readLocalMetadata(metadataPath);
 
   await mkdir(filesystemRootPath, { recursive: true });
 
-  const defaultFilesystem = new ReadWriteFs({
+  const defaultFilesystem = new justBash.ReadWriteFs({
     allowSymlinks: true,
     maxFileReadSize: Number.MAX_SAFE_INTEGER,
     root: filesystemRootPath,
   });
-  let filesystem: IFileSystem = defaultFilesystem;
+  let filesystem: JustBashFilesystem = defaultFilesystem;
   if (input.filesystem !== undefined) {
     try {
       filesystem = await input.filesystem({
         defaultFilesystem,
-        resolveProjectPath: input.host.resolveProjectPath,
+        resolveProjectPath: (path) => input.resolveProjectPath(path),
         storagePath: input.storagePath,
         justBash,
       });
@@ -117,9 +99,9 @@ export async function createBashSandbox(input: {
     }
   }
 
-  await ensureLocalSandboxDirectories(filesystem);
+  await filesystem.mkdir(WORKSPACE_ROOT, { recursive: true });
 
-  const sandbox = await Sandbox.create({
+  const sandbox = await justBash.Sandbox.create({
     cwd: WORKSPACE_ROOT,
     customCommands: input.customCommands === undefined ? undefined : [...input.customCommands],
     env: metadata === null ? undefined : { ...metadata.env },
@@ -135,36 +117,29 @@ export async function createBashSandbox(input: {
         env: { ...sandbox.bashEnvInstance.getEnv() },
         version: LOCAL_SANDBOX_METADATA_VERSION,
       });
-      return { rootPath: input.rootPath };
     },
-    async dispose() {
-      await sandbox.stop();
-    },
-    async readFileBytes(path: string): Promise<Buffer | null> {
-      let bytes: Uint8Array;
+    async readFile({ path }) {
       try {
-        bytes = await filesystem.readFileBuffer(path);
-      } catch {
-        return null;
+        return await filesystem.readFileBuffer(path);
+      } catch (error) {
+        if (!(await filesystem.exists(path))) return null;
+        throw error;
       }
-      return Buffer.from(bytes);
     },
-    async removePath(options: SandboxRemovePathOptions): Promise<void> {
+    async removePath(options) {
       await filesystem.rm(options.path, {
         force: options.force,
         recursive: options.recursive,
       });
     },
-    rootPath: input.rootPath,
-    sessionKey: input.sessionKey,
-    async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
+    async spawn(options) {
       if (options.abortSignal?.aborted) {
         throw new DOMException("The operation was aborted.", "AbortError");
       }
-      const wrapped =
-        options.workingDirectory !== undefined
-          ? `( cd ${shellQuote(options.workingDirectory)} && ${options.command} )`
-          : options.command;
+      // The command sits on its own lines so a trailing `# comment` cannot
+      // swallow the closing brace. `cd X || exit` would lose cd's error in
+      // just-bash, so the braces keep `&&` applying to the whole command.
+      const wrapped = `( cd ${shellQuote(options.workingDirectory)} && {\n${options.command}\n} )`;
       // just-bash has no separate `bash` executable — it IS the bash
       // interpreter. The `eval` builtin re-parses its single string
       // argument as a shell line, which is the only way to feed an
@@ -174,6 +149,7 @@ export async function createBashSandbox(input: {
         args: [wrapped],
         cmd: "eval",
         detached: true,
+        // just-bash has no sandbox-level environment for `SANDBOX_AGENT_ENV`, so each command gets it.
         env: { ...SANDBOX_AGENT_ENV, ...options.env },
         signal: options.abortSignal,
       });
@@ -182,42 +158,14 @@ export async function createBashSandbox(input: {
         getOutput: (log) => log.type,
       });
     },
-    async writeFiles(files) {
+    async stop() {
+      await sandbox.stop();
+    },
+    async writeFiles({ files }) {
       for (const file of files) {
-        const dir = dirname(file.path);
-        await filesystem.mkdir(dir, { recursive: true });
-        // Preserve Buffer content byte-for-byte so binary assets (for
-        // example images under a skill's `assets/` directory) survive
-        // the write. `Buffer` is a `Uint8Array` subclass, which the
-        // just-bash filesystem accepts directly alongside strings.
+        await filesystem.mkdir(dirname(file.path), { recursive: true });
         await filesystem.writeFile(file.path, file.content);
       }
-    },
-  };
-}
-
-/**
- * The just-bash engine cannot honor a run-time network policy: just-bash takes
- * its `NetworkConfig` only at sandbox creation (no live update) and runs no
- * `git` or other binaries, so credential brokering has nothing to act on.
- * Throw rather than silently no-op so brokering code surfaces the gap instead
- * of leaking.
- */
-export function createJustBashHandle(sandbox: BashSandbox): SandboxProviderHandle<SandboxSession> {
-  const session = buildSandboxSession(createFileBackedInternalSandboxSession({ sandbox }));
-  return {
-    sandbox: session,
-    async onSandboxDelete() {
-      await sandbox.dispose();
-      await rm(sandbox.rootPath, { force: true, recursive: true });
-    },
-    async onSandboxStop() {
-      await sandbox.dispose();
-    },
-    // The interpreter lives in this process, so stopping it is all the
-    // shutdown a just-bash sandbox needs.
-    async onRuntimeShutdown() {
-      await sandbox.dispose();
     },
   };
 }
@@ -230,12 +178,6 @@ function resolveLocalSandboxMetadataPath(rootPath: string): string {
   return `${rootPath}/${LOCAL_SANDBOX_METADATA_FILE_NAME}`;
 }
 
-async function ensureLocalSandboxDirectories(filesystem: IFileSystem): Promise<void> {
-  await filesystem.mkdir(WORKSPACE_ROOT, {
-    recursive: true,
-  });
-}
-
 async function readLocalMetadata(metadataPath: string): Promise<LocalSandboxMetadata | null> {
   if (!(await pathExists(metadataPath))) {
     return null;
@@ -244,7 +186,7 @@ async function readLocalMetadata(metadataPath: string): Promise<LocalSandboxMeta
   const metadata: unknown = JSON.parse(await readFile(metadataPath, "utf8"));
 
   if (
-    !isRecord(metadata) ||
+    !isObject(metadata) ||
     metadata.version !== LOCAL_SANDBOX_METADATA_VERSION ||
     !isStringRecord(metadata.env)
   ) {
@@ -265,15 +207,6 @@ async function writeLocalMetadata(
   await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function isStringRecord(value: unknown): value is Readonly<Record<string, string>> {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.values(value).every((entry) => typeof entry === "string")
-  );
+  return isObject(value) && Object.values(value).every((entry) => typeof entry === "string");
 }

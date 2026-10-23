@@ -14,6 +14,7 @@ import {
 import { positionState } from "#internal/testing/session-machine.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { DefaultSandbox } from "#sandbox/providers/default.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 
 const deserializeContextMock = vi.fn();
@@ -34,7 +35,7 @@ vi.mock("#context/serialize.js", async (importOriginal) => ({
   ...(await importOriginal()),
   deserializeContext: (...args: unknown[]) => deserializeContextMock(...args),
 }));
-vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+vi.mock("#execution/durable-session-read.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: (...args: unknown[]) => readDurableSessionMock(...args),
 }));
@@ -108,6 +109,31 @@ describe("prepareSuccessorStep", () => {
       sandboxState: {
         initialized: true,
         session: { backendName: "vercel", sessionKey: "old", metadata: {} },
+      },
+    });
+
+    await expect(validate(createCheckpoint())).resolves.toEqual({ kind: "valid" });
+  });
+
+  it("accepts a sandbox record DefaultSandbox saved under the provider it picked", async () => {
+    const environment = DefaultSandbox.environment();
+    deserializeContextMock.mockResolvedValue({
+      require: () => ({
+        graph: {
+          root: {
+            sandboxRegistry: { sandbox: { definition: { environment, kind: "independent" } } },
+          },
+        },
+        nodeId: "__root__",
+      }),
+    });
+    readDurableSessionMock.mockReturnValue({
+      sandboxState: {
+        session: {
+          providerName: "vercel",
+          state: { sandboxName: "eve-sbx-vercel-old", version: 3 },
+          stateProtocolVersion: 1,
+        },
       },
     });
 

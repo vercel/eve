@@ -21,5 +21,5 @@ export const githubShellInputSchema = z.object({
     .min(1)
     .max(1_000)
     .optional()
-    .describe("sandbox workspace directory; defaults to /workspace"),
+    .describe("sandbox workspace directory; defaults to the workspace root"),
 });

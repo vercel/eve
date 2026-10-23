@@ -1,0 +1,798 @@
+{
+  "id": "agent-continuation-local",
+  "verdict": "passed",
+  "startedAt": "2026-10-05T23:37:05.534Z",
+  "completedAt": "2026-10-05T23:37:08.653Z",
+  "result": {
+    "derived": {
+      "usage": {
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "inputTokens": 6006,
+        "outputTokens": 178
+      }
+    },
+    "sessionId": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+    "runtimeIdentity": {
+      "eveVersion": "0.71.2"
+    },
+    "sessions": [
+      {
+        "sessionId": "wrun_01M476V5RJPATF4WMMJD3PAX09",
+        "events": [
+          {
+            "type": "turn.started",
+            "meta": {
+              "id": "evt_01M476V6228BYTWHV7MKWND209",
+              "at": "2026-10-05T23:37:05.858Z"
+            },
+            "data": {
+              "turnId": "turn_0"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V6233AEN19P97Z73SW8Y",
+              "at": "2026-10-05T23:37:05.859Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V62C7GS0XB8YSMBRD14H",
+              "at": "2026-10-05T23:37:05.868Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-remember",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V62FPZP28T46PNM7S065",
+              "at": "2026-10-05T23:37:05.871Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 0,
+              "usage": {
+                "inputTokens": 332,
+                "outputTokens": 27,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "task.started",
+            "meta": {
+              "id": "evt_01M476V63J65W3D9RW1NNBY17K",
+              "at": "2026-10-05T23:37:05.906Z"
+            },
+            "data": {
+              "taskId": "notebook-keeper-eqtna6",
+              "callId": "notebook-remember"
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476V641X0H8BK1KC4JV92AZ",
+              "at": "2026-10-05T23:37:05.921Z"
+            },
+            "data": {
+              "result": {
+                "callId": "notebook-remember"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V642AZR2058TEEM9X5EE",
+              "at": "2026-10-05T23:37:05.922Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 1
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V645XV19K4368X5VK1B6",
+              "at": "2026-10-05T23:37:05.925Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-remember-wait",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V646ZCXJ0YY0CE8DSFT3",
+              "at": "2026-10-05T23:37:05.926Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 1,
+              "usage": {
+                "inputTokens": 402,
+                "outputTokens": 1,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "agent.started",
+            "meta": {
+              "id": "evt_01M476V6898SRG54ZSBFDFWJZH",
+              "at": "2026-10-05T23:37:06.057Z"
+            },
+            "data": {
+              "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0"
+            }
+          },
+          {
+            "type": "task.settled",
+            "meta": {
+              "id": "evt_01M476V6A2Z1SG7X142798JF05",
+              "at": "2026-10-05T23:37:06.114Z"
+            },
+            "data": {
+              "taskId": "notebook-keeper-eqtna6",
+              "callId": "notebook-remember"
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476V6AF87ZGQAP6CT77QW5G",
+              "at": "2026-10-05T23:37:06.127Z"
+            },
+            "data": {
+              "result": {
+                "callId": "notebook-remember-wait"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V6AF87ZGQAP6CT77QW5H",
+              "at": "2026-10-05T23:37:06.127Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 2
+            }
+          },
+          {
+            "type": "message.appended",
+            "meta": {
+              "id": "evt_01M476V6AJFFZPR5418NZFPRTZ",
+              "at": "2026-10-05T23:37:06.130Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 2
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V6AJFFZPR5418NZFPRV1",
+              "at": "2026-10-05T23:37:06.130Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 2,
+              "usage": {
+                "inputTokens": 468,
+                "outputTokens": 8,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "stop"
+            }
+          },
+          {
+            "type": "turn.completed",
+            "meta": {
+              "id": "evt_01M476V6AN6BYGDG7F56X57112",
+              "at": "2026-10-05T23:37:06.133Z"
+            },
+            "data": {
+              "turnId": "turn_0"
+            }
+          },
+          {
+            "type": "turn.started",
+            "meta": {
+              "id": "evt_01M476V6C9MRXR1GD56EV73ZQF",
+              "at": "2026-10-05T23:37:06.185Z"
+            },
+            "data": {
+              "turnId": "turn_1"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V6C9MRXR1GD56EV73ZQH",
+              "at": "2026-10-05T23:37:06.185Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V6CC7A5R3Q13GNTS1WV3",
+              "at": "2026-10-05T23:37:06.188Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-review",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V6CC7A5R3Q13GNTS1WV4",
+              "at": "2026-10-05T23:37:06.188Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 0,
+              "usage": {
+                "inputTokens": 496,
+                "outputTokens": 32,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "task.started",
+            "meta": {
+              "id": "evt_01M476V6D7X4DPT801AKTD751Q",
+              "at": "2026-10-05T23:37:06.215Z"
+            },
+            "data": {
+              "taskId": "notebook-keeper-eqtna6",
+              "callId": "notebook-review"
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476V6DRHF4FYDKZ1NVPXHE3",
+              "at": "2026-10-05T23:37:06.232Z"
+            },
+            "data": {
+              "result": {
+                "callId": "notebook-review"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V6DSJ0SD80XPPPRQZZBH",
+              "at": "2026-10-05T23:37:06.233Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 1
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V6DV5APK6YK4ARJ56BAJ",
+              "at": "2026-10-05T23:37:06.235Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-review-wait",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V6DV5APK6YK4ARJ56BAK",
+              "at": "2026-10-05T23:37:06.235Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 1,
+              "usage": {
+                "inputTokens": 543,
+                "outputTokens": 5,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476V8E667SBF93W9HCSJ4VD",
+              "at": "2026-10-05T23:37:08.294Z"
+            },
+            "data": {
+              "result": {
+                "callId": "notebook-review-wait"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V8E7S6HBJVCYS5FSH3SW",
+              "at": "2026-10-05T23:37:08.295Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 2
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V8EAWVYYB5H2Q699KMG6",
+              "at": "2026-10-05T23:37:08.298Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-cancel",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V8EBTW72T7YGSZTNMA8T",
+              "at": "2026-10-05T23:37:08.299Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 2,
+              "usage": {
+                "inputTokens": 576,
+                "outputTokens": 9,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "task.settled",
+            "meta": {
+              "id": "evt_01M476V8F8Z1FX7TZSZ7ZHDJRX",
+              "at": "2026-10-05T23:37:08.328Z"
+            },
+            "data": {
+              "taskId": "notebook-keeper-eqtna6",
+              "callId": "notebook-review"
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476V8FTN14FSP3KYHVCYTRZ",
+              "at": "2026-10-05T23:37:08.346Z"
+            },
+            "data": {
+              "result": {
+                "callId": "notebook-cancel"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V8FTN14FSP3KYHVCYTS0",
+              "at": "2026-10-05T23:37:08.346Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 3
+            }
+          },
+          {
+            "type": "message.appended",
+            "meta": {
+              "id": "evt_01M476V8FXZHQQ4Y9YX9JK4MDH",
+              "at": "2026-10-05T23:37:08.349Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 3
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V8FXZHQQ4Y9YX9JK4MDK",
+              "at": "2026-10-05T23:37:08.349Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 3,
+              "usage": {
+                "inputTokens": 639,
+                "outputTokens": 42,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "stop"
+            }
+          },
+          {
+            "type": "turn.completed",
+            "meta": {
+              "id": "evt_01M476V8G10T9NCS0BYG14C6P5",
+              "at": "2026-10-05T23:37:08.353Z"
+            },
+            "data": {
+              "turnId": "turn_1"
+            }
+          },
+          {
+            "type": "turn.started",
+            "meta": {
+              "id": "evt_01M476V8K9NZ8YZ6QQKNAH92TD",
+              "at": "2026-10-05T23:37:08.457Z"
+            },
+            "data": {
+              "turnId": "turn_2"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V8KA3WS00AS63TKXAKKC",
+              "at": "2026-10-05T23:37:08.458Z"
+            },
+            "data": {
+              "turnId": "turn_2",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V8KCQ4RPNX1HD3Y1C7N8",
+              "at": "2026-10-05T23:37:08.460Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-recall",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V8KCQ4RPNX1HD3Y1C7N9",
+              "at": "2026-10-05T23:37:08.460Z"
+            },
+            "data": {
+              "turnId": "turn_2",
+              "stepIndex": 0,
+              "usage": {
+                "inputTokens": 695,
+                "outputTokens": 29,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "task.started",
+            "meta": {
+              "id": "evt_01M476V8M6Z762FW3TK0BPFPDC",
+              "at": "2026-10-05T23:37:08.486Z"
+            },
+            "data": {
+              "taskId": "notebook-keeper-eqtna6",
+              "callId": "notebook-recall"
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476V8MNP1SETGP49BVH3SB6",
+              "at": "2026-10-05T23:37:08.501Z"
+            },
+            "data": {
+              "result": {
+                "callId": "notebook-recall"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V8MPWG53PDJJX23ZGY1K",
+              "at": "2026-10-05T23:37:08.502Z"
+            },
+            "data": {
+              "turnId": "turn_2",
+              "stepIndex": 1
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V8MRFEP96D0MWRXSBG3S",
+              "at": "2026-10-05T23:37:08.504Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-recall-wait",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V8MRFEP96D0MWRXSBG3T",
+              "at": "2026-10-05T23:37:08.504Z"
+            },
+            "data": {
+              "turnId": "turn_2",
+              "stepIndex": 1,
+              "usage": {
+                "inputTokens": 742,
+                "outputTokens": 1,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "tool-calls"
+            }
+          },
+          {
+            "type": "task.settled",
+            "meta": {
+              "id": "evt_01M476V8RPXJGVVE5F24WJ79AF",
+              "at": "2026-10-05T23:37:08.630Z"
+            },
+            "data": {
+              "taskId": "notebook-keeper-eqtna6",
+              "callId": "notebook-recall"
+            }
+          },
+          {
+            "type": "action.result",
+            "meta": {
+              "id": "evt_01M476V8S10A6Z1Y50ERZCD2A9",
+              "at": "2026-10-05T23:37:08.641Z"
+            },
+            "data": {
+              "result": {
+                "callId": "notebook-recall-wait"
+              },
+              "status": "completed"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V8S2RMQRM83HM2NQ6N86",
+              "at": "2026-10-05T23:37:08.642Z"
+            },
+            "data": {
+              "turnId": "turn_2",
+              "stepIndex": 2
+            }
+          },
+          {
+            "type": "message.appended",
+            "meta": {
+              "id": "evt_01M476V8S3ZK1JPMHQEJ5WW503",
+              "at": "2026-10-05T23:37:08.643Z"
+            },
+            "data": {
+              "turnId": "turn_2",
+              "stepIndex": 2
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V8S40C4W83AANGJFAY23",
+              "at": "2026-10-05T23:37:08.644Z"
+            },
+            "data": {
+              "turnId": "turn_2",
+              "stepIndex": 2,
+              "usage": {
+                "inputTokens": 813,
+                "outputTokens": 12,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "stop"
+            }
+          },
+          {
+            "type": "turn.completed",
+            "meta": {
+              "id": "evt_01M476V8S8M483PXMJW7TCF6A5",
+              "at": "2026-10-05T23:37:08.648Z"
+            },
+            "data": {
+              "turnId": "turn_2"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0",
+        "events": [
+          {
+            "type": "turn.started",
+            "meta": {
+              "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAF",
+              "at": "2026-10-05T23:37:06.009Z"
+            },
+            "data": {
+              "turnId": "turn_0"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V66SMTJ5E0FTNQ3KTBAH",
+              "at": "2026-10-05T23:37:06.009Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "message.appended",
+            "meta": {
+              "id": "evt_01M476V66VDRJ4S2TSRXESVFGN",
+              "at": "2026-10-05T23:37:06.011Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "step.completed",
+            "meta": {
+              "id": "evt_01M476V66VDRJ4S2TSRXESVFGQ",
+              "at": "2026-10-05T23:37:06.011Z"
+            },
+            "data": {
+              "turnId": "turn_0",
+              "stepIndex": 0,
+              "usage": {
+                "inputTokens": 130,
+                "outputTokens": 4,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "finishReason": "stop"
+            }
+          },
+          {
+            "type": "turn.completed",
+            "meta": {
+              "id": "evt_01M476V671EP9FBHHQBZNAD0CT",
+              "at": "2026-10-05T23:37:06.017Z"
+            },
+            "data": {
+              "turnId": "turn_0"
+            }
+          }
+        ]
+      },
+      {
+        "sessionId": "wrun_01M476V658DK2JBTYGB4XWHDZ0",
+        "events": [
+          {
+            "type": "turn.started",
+            "meta": {
+              "id": "evt_01M476V6F9EBD55ZG238NQ1ZJW",
+              "at": "2026-10-05T23:37:06.281Z"
+            },
+            "data": {
+              "turnId": "turn_1"
+            }
+          },
+          {
+            "type": "step.started",
+            "meta": {
+              "id": "evt_01M476V6F9EBD55ZG238NQ1ZJY",
+              "at": "2026-10-05T23:37:06.281Z"
+            },
+            "data": {
+              "turnId": "turn_1",
+              "stepIndex": 0
+            }
+          },
+          {
+            "type": "actions.requested",
+            "meta": {
+              "id": "evt_01M476V6FBET7W3ABD5M66T5ZH",
+              "at": "2026-10-05T23:37:06.283Z"
+            },
+            "data": {
+              "actions": [
+                {
+                  "callId": "notebook-review-2",
+                  "kind": "tool-call"
+                }
+              ]
+            }
+          },
+          {
+            "type": "turn.cancelled",
+            "meta": {
+              "id": "evt_01M476V8HQR8KWGGH1VA5BHRGS",
+              "at": "2026-10-05T23:37:08.407Z"
+            },
+            "data": {
+              "turnId": "turn_1"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

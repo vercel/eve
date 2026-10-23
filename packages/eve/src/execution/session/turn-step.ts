@@ -6,6 +6,7 @@ import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
+import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep } from "#context/run-step.js";
 import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
 import {
@@ -541,6 +542,10 @@ async function runSessionStepBody(
         modelCallsPerStep,
         runStep: async ({ firstCall, session, stepInput }) => {
           const result = await runStep(ctx, session, async (enrichedSession) => {
+            // Races session resources against the model call; their users wait for what remains.
+            if (firstCall && input.input?.control === undefined) {
+              startSessionPrewarmers(ctx, "turn");
+            }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
             let schemaSession =

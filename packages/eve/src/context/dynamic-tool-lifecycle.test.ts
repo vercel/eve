@@ -49,6 +49,7 @@ import {
   clearDurableDynamicCallbacks,
   lookupDurableDynamicCallback,
   registerDurableDynamicCallback,
+  readDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
 } from "#tools/durable-callbacks.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
@@ -1547,7 +1548,33 @@ describe("dispatchDynamicToolEvent", () => {
     expect(buildDynamicTools(ctx)[0]?.endsTurn).toBe(true);
   });
 
-  it("rejects an endsTurn function, which durable dynamic metadata cannot hold", async () => {
+  it("replays an endsTurn function from its durable descriptor", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("open_case", ["session.started"], () => {
+      const entry = Object.assign(createReplayableTool(), { endsTurn: () => false });
+      stampDurableDynamicToolCallbacks(entry, {
+        ...readDurableDynamicToolCallbacks(entry),
+        endsTurn: {
+          callback: (closure, output) => (output as { status: string }).status === closure.status,
+          closure: { status: "awaiting_confirmation" },
+        },
+      });
+      return entry;
+    });
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    const endsTurn = buildDynamicTools(ctx)[0]?.endsTurn as (output: unknown) => boolean;
+    expect(endsTurn({ status: "awaiting_confirmation" })).toBe(true);
+    expect(endsTurn({ status: "redirected" })).toBe(false);
+  });
+
+  it("rejects an endsTurn function without a durable descriptor", async () => {
     const logs = captureLogRecords();
     const ctx = createCtx();
     const resolver = createResolver("react", ["session.started"], () =>
@@ -1563,7 +1590,7 @@ describe("dispatchDynamicToolEvent", () => {
 
     expect(buildDynamicTools(ctx)).toHaveLength(0);
     expect(JSON.stringify(logs.records)).toContain(
-      'Dynamic tool \\"react\\" sets endsTurn to a function, which dynamic tools do not support.',
+      'Dynamic tool \\"react\\" callback \\"endsTurn\\" does not have a durable descriptor.',
     );
   });
 

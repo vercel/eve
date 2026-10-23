@@ -69,7 +69,7 @@ export default withEve(config);
 import { defineSandboxProvider } from "eve/sandbox/provider";
 import { DockerSandbox } from "eve/sandbox/docker";
 import { JustBashSandbox } from "eve/sandbox/just-bash";
-import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
 const custom = defineSandboxProvider({
   name: "custom",
@@ -87,7 +87,6 @@ void custom.environment();
 export const environment = process.env.VERCEL === "1"
   ? VercelSandbox.environment({ resources: { vcpus: 2 } })
   : DefaultSandbox.environment({ docker: { image: "ghcr.io/vercel/eve:latest" } });
-void Drive;
 async function verifyMutableNetworkCapability() {
   const sandbox = await DockerSandbox.dockerfile().open({ networkPolicy: "deny-all" });
   await sandbox.setNetworkPolicy("allow-all");

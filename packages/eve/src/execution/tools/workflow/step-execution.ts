@@ -117,12 +117,13 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
 
 /**
  * The calling session's sandbox, opened on the step's first `ctx.getSandbox()`
- * under the key of the session that owns it, and let go of when the step
- * ends. Recorded state, when the call captured it, resumes the sandbox;
- * without it, or when that sandbox is gone, the provider's `start` upserts
- * it by that key with the owner's sandbox definition, so the session finds
- * the same sandbox and its session-end cleanup removes it. The step never owns the sandbox: the
- * session's turns may be using it, so the step can neither stop nor delete it.
+ * under the key of the session that owns it, and closed when the step ends.
+ * Recorded state, when the call captured it, resumes the sandbox; without
+ * it, or when that sandbox is gone, the provider's `start` upserts it by that
+ * key with the owner's sandbox definition, so the session finds the same
+ * sandbox and its session-end cleanup removes it. The step never owns the
+ * sandbox: the session's turns may be using it, so the step can neither stop
+ * nor delete it.
  * A step that never asks for it loads nothing.
  */
 function openStepSandbox(input: WorkflowStepContext) {
@@ -147,7 +148,7 @@ function openStepSandbox(input: WorkflowStepContext) {
       registry: node.sandboxRegistry,
       sessionId,
       state: state ?? null,
-      borrowed: true,
+      shutdownTracking: "none",
     });
   };
   const openOnce = (): Promise<EnsuredSandboxAccess> => {
@@ -176,7 +177,7 @@ function openStepSandbox(input: WorkflowStepContext) {
         stop: () =>
           unavailableInStep(
             "sandbox.stop()",
-            "The session's turns may be using the sandbox; eve lets go of the step's handle when the step ends.",
+            "The session's turns may be using the sandbox; eve closes the step's connection when the step ends.",
           ),
       };
     },
@@ -184,7 +185,7 @@ function openStepSandbox(input: WorkflowStepContext) {
       released = true;
       const access = await opening?.catch(() => undefined);
       try {
-        await access?.detach();
+        await access?.release();
       } catch (error) {
         logError(log, "failed to release a workflow step's sandbox", error, {
           sessionId,

@@ -3,6 +3,7 @@ import type { ComponentType, SVGProps } from "react";
 import {
   contentfulLogo,
   datadogLogo,
+  discordLogo,
   dbtLogo,
   githubLogo,
   linearLogo,
@@ -28,6 +29,7 @@ type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 export const integrationIcons: Record<TemplateIntegration, IconComponent> = {
   Contentful: contentfulLogo,
   Datadog: datadogLogo,
+  Discord: discordLogo,
   dbt: dbtLogo,
   GitHub: githubLogo,
   "HTTP API": BracesIcon,

@@ -221,19 +221,6 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   return typeof turnId === "string" ? { turnId } : {};
 }
 
-export async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {
-  let payload: unknown;
-  try {
-    payload = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
-  }
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
-    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
-  }
-  return payload as Record<string, unknown>;
-}
-
 export async function parseResetBody(
   req: Request,
 ): Promise<{ readonly reason?: string } | Response> {
