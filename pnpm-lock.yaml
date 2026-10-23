@@ -325,6 +325,9 @@ importers:
       '@vercel/analytics':
         specifier: 2.0.1
         version: 2.0.1(81a45996e726c352edb608aa8ed932c0)
+      '@vercel/firewall':
+        specifier: 1.2.6
+        version: 1.2.6
       '@vercel/geistdocs':
         specifier: 2.9.3
         version: 2.9.3(7eb82b335cccccda73811972c8fed49f)
@@ -7864,6 +7867,10 @@ packages:
   '@vercel/detect-agent@1.2.3':
     resolution: {integrity: sha512-VYNCgUc0nOmC4WJmWw9GkrKdfr8Zl4/rxhC5SvgacBgxiW9W/9NRttUoHHXV8xdII3MaRgkZZVX8Ikzc/Jmjag==}
     engines: {node: '>=14'}
+
+  '@vercel/firewall@1.2.6':
+    resolution: {integrity: sha512-89ybsa2rnVNdw6RI3jGOVvqUJaBj6Umm4IagC1o3PKtr/MXxBKOLek+yyUgF0csA0O5W+dzcpdIhKxVXhgVVtA==}
+    engines: {node: '>= 20'}
 
   '@vercel/functions@1.6.0':
     resolution: {integrity: sha512-R6FKQrYT5MZs5IE1SqeCJWxMuBdHawFcCZboKKw8p7s+6/mcd55Gx6tWmyKnQTyrSEA04NH73Tc9CbqpEle8RA==}
@@ -21712,6 +21719,8 @@ snapshots:
       eve: link:packages/eve
 
   '@vercel/detect-agent@1.2.3': {}
+
+  '@vercel/firewall@1.2.6': {}
 
   '@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.49)':
     optionalDependencies:
