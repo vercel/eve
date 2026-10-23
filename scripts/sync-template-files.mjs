@@ -55,6 +55,25 @@ const copies = [
       "vercel.ts",
     ],
   },
+  {
+    template: "eve-code-channels-template",
+    from: "eve-coding-agent-template",
+    files: [
+      ".gitignore",
+      ".vercelignore",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "pnpm-workspace.yaml",
+      "tsconfig.json",
+      "agent/agent.ts",
+      "agent/extensions/code.ts",
+      "agent/extensions/git.ts",
+      "agent/lib/github.ts",
+      "agent/sandbox.ts",
+      "agent/tools/agent.ts",
+      "agent/tools/write_file.ts",
+    ],
+  },
 ];
 
 const check = process.argv.includes("--check");
