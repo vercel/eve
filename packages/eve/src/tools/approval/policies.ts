@@ -92,9 +92,8 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
   return (context) => {
     const evaluation = approvalEvaluation(context as ApprovalContext);
     if (evaluation === undefined) return "user-approval";
-    const key = JSON.stringify(["once", evaluation.toolName]);
-    const { entry, pending } = evaluation.read(key);
+    const { entry, pending } = evaluation.read("once");
     // An approval still waiting on its own answer stays a separate question.
-    return entry?.outcome === "accepted" && !pending ? "approved" : evaluation.ask({ key });
+    return entry?.outcome === "accepted" && !pending ? "approved" : evaluation.ask({ key: "once" });
   };
 }

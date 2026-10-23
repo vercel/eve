@@ -24,10 +24,12 @@ export interface ApprovalMemory {
 
 const NO_MEMORY: ApprovalMemory = { pending: [], remembered: {} };
 
-/** The harness's evaluation of one call's approval policy, private to eve's own policies. */
+/**
+ * The harness's evaluation of one call's approval policy, private to eve's own policies. Keys are
+ * scoped to the tool the harness resolved: a policy can't read or record another tool's decisions,
+ * whatever key it names or however it renames its context.
+ */
 export interface ApprovalEvaluation {
-  /** The tool the harness resolved, which a policy's spread context can't rename. */
-  readonly toolName: string;
   readonly recheck: boolean;
   readonly read: (key: string) => {
     readonly entry?: RememberedApproval;
@@ -56,18 +58,18 @@ export async function evaluateApproval(
   const { memory = NO_MEMORY, recheck = false } = input;
   // Only the exact result `ask` issued remembers its settlement, not a discarded or copied one.
   const asked = new WeakMap<object, RememberRequest>();
+  const scoped = (key: string) => JSON.stringify([context.toolName, key]);
   const evaluation: ApprovalEvaluation = Object.freeze({
     ask: (remember: RememberRequest) => {
       const status = Object.freeze({ type: "user-approval" as const });
-      asked.set(status, remember);
+      asked.set(status, { ...remember, key: scoped(remember.key) });
       return status;
     },
     read: (key: string) => ({
-      entry: memory.remembered[key],
-      pending: memory.pending.includes(key),
+      entry: memory.remembered[scoped(key)],
+      pending: memory.pending.includes(scoped(key)),
     }),
     recheck,
-    toolName: context.toolName,
   });
   const evaluated: EvaluatedContext = { ...context, [evaluationKey]: evaluation };
   const status = await policy(evaluated);

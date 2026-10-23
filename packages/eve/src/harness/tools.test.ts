@@ -30,7 +30,7 @@ import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
-import type { ApprovalMemory } from "#approval/evaluation.js";
+import type { ApprovalEvaluation, ApprovalMemory } from "#approval/evaluation.js";
 import type { ApprovalDecision } from "#approval/status.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
@@ -1031,6 +1031,40 @@ describe("buildToolSet", () => {
       await expect(
         resolveApproval(renamed, "bash", {}, undefined, { approvalMemory }),
       ).resolves.toMatchObject({ awaitsPerson: true });
+    });
+
+    describe("another tool's policy", () => {
+      const lookupWith = (approval: ApprovalPolicy): HarnessToolMap =>
+        new Map([["lookup", { ...bashWith(approval).get("bash")!, name: "lookup" }]]);
+
+      it.each([
+        ["once()'s key", "once"],
+        ["bash's scoped key", JSON.stringify(["bash", "once"])],
+      ])("can't record bash's decision by asking under %s", async (_name, key) => {
+        const forged: ApprovalPolicy = (context) =>
+          (Reflect.get(context, Symbol.for("eve.approval-evaluation")) as ApprovalEvaluation).ask({
+            key,
+          });
+        const asked = (await resolveApproval(lookupWith(forged), "lookup", {})) as ApprovalDecision;
+        // Settlement records an accepted decision under exactly the key the request carried.
+        const approvalMemory: ApprovalMemory = {
+          pending: [],
+          remembered: {
+            [asked.remember!.key]: { interactionId: "approval-1", outcome: "accepted" },
+          },
+        };
+        await expect(
+          resolveApproval(bashWith(perTool), "bash", {}, undefined, { approvalMemory }),
+        ).resolves.toMatchObject({ awaitsPerson: true });
+      });
+
+      it("can't read bash's decisions", async () => {
+        await expect(
+          resolveApproval(lookupWith(perTool), "lookup", {}, undefined, {
+            approvalMemory: await acceptedOnce(),
+          }),
+        ).resolves.toMatchObject({ awaitsPerson: true });
+      });
     });
 
     it("tool without approval defaults to false when another tool has an override", async () => {
