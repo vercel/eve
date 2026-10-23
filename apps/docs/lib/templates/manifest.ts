@@ -251,6 +251,38 @@ export const templateManifest: TemplateManifestEntry[] = [
     ],
   },
   {
+    slug: "eve-slack-code-channels-template",
+    title: "Slack Code Channels",
+    setupPrompt:
+      "Set up the eve Slack code channels template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-code-channels-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Slack, GitHub, and Vercel setup steps.",
+    description:
+      "A coding agent that moves coding and triage requests from a Slack thread into a dedicated Slack code channel, with the repository, branch, pull request, tests, and diff shown in the channel as it works.",
+    sourceHref:
+      "https://github.com/vercel/eve/tree/main/apps/templates/eve-slack-code-channels-template",
+    category: "Collaboration",
+    model: "anthropic/claude-opus-5.5",
+    integrations: ["Slack", "GitHub", "Vercel"],
+    source: "Vercel Templates",
+    github: {
+      owner: "vercel",
+      repo: "eve",
+      ref: "main",
+      pathPrefix: "apps/templates/eve-slack-code-channels-template",
+    },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/extensions/code.ts",
+      "agent/extensions/git.ts",
+      "agent/instructions.md",
+      "agent/lib/code-channel.ts",
+      "agent/lib/github.ts",
+      "agent/sandbox.ts",
+      "agent/tools/open_code_channel.ts",
+      "agent/tools/update_code_channel_status.ts",
+    ],
+  },
+  {
     slug: "eve-data-analyst-template",
     title: "Data Analyst",
     setupPrompt:
