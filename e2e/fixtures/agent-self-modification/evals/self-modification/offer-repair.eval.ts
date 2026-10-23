@@ -37,6 +37,8 @@ export default defineEval({
           "Return reorderUnits as the target minus both on-hand and incoming stock, floored at zero.",
           "This action only calculates a recommendation; it must not place an order or contact external services.",
         ].join(" "),
+        undefined,
+        { allowContinuations: true },
       );
       await selfMod.assertOnlyChanged([TOOL_PATH]);
       await selfMod.apply();
@@ -74,6 +76,7 @@ export default defineEval({
       await selfMod.request(
         `Yes, please repair ${TOOL_PATH}. Keep this repair scoped to that file and verify it through tool calls without adding other files.`,
         authored.session,
+        { allowContinuations: true },
       );
       await selfMod.assertOnlyChanged([TOOL_PATH]);
       await selfMod.apply();

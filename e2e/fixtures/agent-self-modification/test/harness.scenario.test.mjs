@@ -48,11 +48,12 @@ function context(target, signal = new AbortController().signal) {
 
 /** Mirrors a recorded eval turn: idle turns end on session.waiting. */
 function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] } = {}) {
-  const call = { input, status: "completed" };
+  const call = { name: "self-modification__agent", input, status: "completed" };
   return {
     sessionId,
     events,
     inputRequests,
+    toolCalls: [call],
     status: "waiting",
     expectOk() {},
     calledSubagent() {},
@@ -463,4 +464,60 @@ test("cleanup failure retains a lock that identifies the source backup", async (
     await readFile(join(owner.backupRoot, "agent", "instructions.md"), "utf8"),
     "baseline",
   );
+});
+
+test("request accepts multiple calls continuing the same child task", async () => {
+  const message = "Verify the repaired tool.";
+  const events = [
+    ...agentCallEvents("child"),
+    {
+      type: "task.started",
+      data: { callId: "call-2", name: "self-modification__agent", taskId: "agent-1" },
+    },
+  ];
+  const parent = liveTurn("parent", events);
+  parent.result = async () => ({
+    ...completedTurn("parent", events),
+    toolCalls: [
+      {
+        name: "self-modification__agent",
+        status: "completed",
+        input: { message: "Create the tool." },
+      },
+      {
+        name: "self-modification__agent",
+        status: "completed",
+        input: { taskId: "agent-1", message },
+      },
+    ],
+  });
+  const child = liveTurn("child", [{ type: "message.received", data: { message } }]);
+  await withHarness(
+    async ({ harness }) => {
+      await assert.rejects(
+        harness.request("Create and verify.", { start: async () => parent }),
+        /exactly one delegation call/,
+      );
+      const result = await harness.request(
+        "Create and verify.",
+        { start: async () => parent },
+        { allowContinuations: true },
+      );
+      assert.deepEqual(result.child.events, child.events);
+    },
+    { turns: { child } },
+  );
+});
+
+test("request rejects delegating to multiple child tasks", async () => {
+  const events = [
+    ...agentCallEvents("child-1", "agent-1"),
+    ...agentCallEvents("child-2", "agent-2"),
+  ];
+  await withHarness(async ({ harness }) => {
+    await assert.rejects(
+      harness.request("Create a tool.", { start: async () => liveTurn("parent", events) }),
+      /exactly one child task/,
+    );
+  });
 });
